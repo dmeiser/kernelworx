@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers.list_unit_catalogs import list_unit_catalogs
+from src.handlers.list_unit_catalogs import _fetch_catalogs, list_unit_catalogs
+from src.utils.errors import AppError, ErrorCode
 
 
 class TestListUnitCatalogs:
@@ -89,6 +90,21 @@ class TestListUnitCatalogs:
                 "isActive": True,
             },
         }
+
+    @pytest.fixture(autouse=True)
+    def mock_dynamodb_resource(self, sample_catalogs: Dict[str, Dict[str, Any]]):
+        """Mock DynamoDB resource for BatchGetItem."""
+        mock_resource = MagicMock()
+
+        def batch_get_side_effect(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            table_name = next(iter(RequestItems.keys()))
+            keys = RequestItems[table_name].get("Keys", [])
+            items = [sample_catalogs[k["catalogId"]] for k in keys if k["catalogId"] in sample_catalogs]
+            return {"Responses": {table_name: items}, "UnprocessedKeys": {}}
+
+        mock_resource.batch_get_item.side_effect = batch_get_side_effect
+        with patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource):
+            yield mock_resource
 
     def test_list_unit_catalogs_success(
         self,
@@ -310,9 +326,9 @@ class TestListUnitCatalogs:
         event: Dict[str, Any],
         lambda_context: MagicMock,
         sample_profiles: list[Dict[str, Any]],
-        sample_catalogs: Dict[str, Dict[str, Any]],
+        mock_dynamodb_resource: MagicMock,
     ) -> None:
-        """Test graceful handling when catalog fetch fails."""
+        """Test error handling when catalog fetch fails."""
         # Create mock tables
         mock_profiles = MagicMock()
         mock_campaigns = MagicMock()
@@ -325,14 +341,7 @@ class TestListUnitCatalogs:
             ]
         }
 
-        # First catalog succeeds, second fails
-        def get_item_side_effect(**kwargs: Any) -> Dict[str, Any]:
-            catalog_id = kwargs["Key"]["catalogId"]
-            if catalog_id == "catalog-123":
-                return {"Item": sample_catalogs["catalog-123"]}
-            raise Exception("DynamoDB error")
-
-        mock_catalogs.get_item.side_effect = get_item_side_effect
+        mock_dynamodb_resource.batch_get_item.side_effect = Exception("DynamoDB error")
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
@@ -348,9 +357,9 @@ class TestListUnitCatalogs:
             # Act
             result = list_unit_catalogs(event, lambda_context)
 
-        # Assert - Should return the successful catalog despite the error
-        assert len(result) == 1
-        assert result[0]["catalogId"] == "catalog-123"
+        # Assert - Should return error response
+        assert result.get("__isError") is True
+        assert result.get("errorCode") == "INTERNAL_ERROR"
 
     def test_list_unit_catalogs_catalog_not_found(
         self,
@@ -543,6 +552,21 @@ class TestListUnitCampaignCatalogs:
             },
         }
 
+    @pytest.fixture(autouse=True)
+    def mock_dynamodb_resource(self, sample_catalogs: Dict[str, Dict[str, Any]]):
+        """Mock DynamoDB resource for BatchGetItem."""
+        mock_resource = MagicMock()
+
+        def batch_get_side_effect(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            table_name = next(iter(RequestItems.keys()))
+            keys = RequestItems[table_name].get("Keys", [])
+            items = [sample_catalogs[k["catalogId"]] for k in keys if k["catalogId"] in sample_catalogs]
+            return {"Responses": {table_name: items}, "UnprocessedKeys": {}}
+
+        mock_resource.batch_get_item.side_effect = batch_get_side_effect
+        with patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource):
+            yield mock_resource
+
     def test_list_unit_campaign_catalogs_success(
         self,
         event: Dict[str, Any],
@@ -725,9 +749,9 @@ class TestListUnitCampaignCatalogs:
         event: Dict[str, Any],
         lambda_context: MagicMock,
         sample_campaigns: list[Dict[str, Any]],
-        sample_catalogs: Dict[str, Dict[str, Any]],
+        mock_dynamodb_resource: MagicMock,
     ) -> None:
-        """Test graceful handling when catalog fetch fails."""
+        """Test error handling when catalog fetch fails."""
         from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
 
         # Create mock tables
@@ -735,14 +759,7 @@ class TestListUnitCampaignCatalogs:
         mock_catalogs = MagicMock()
         mock_campaigns.query.return_value = {"Items": sample_campaigns}
 
-        # First catalog succeeds, second fails
-        def get_item_side_effect(**kwargs: Any) -> Dict[str, Any]:
-            catalog_id = kwargs["Key"]["catalogId"]
-            if catalog_id == "catalog-123":
-                return {"Item": sample_catalogs["catalog-123"]}
-            raise Exception("DynamoDB error")
-
-        mock_catalogs.get_item.side_effect = get_item_side_effect
+        mock_dynamodb_resource.batch_get_item.side_effect = Exception("DynamoDB error")
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
@@ -757,9 +774,9 @@ class TestListUnitCampaignCatalogs:
             # Act
             result = list_unit_campaign_catalogs(event, lambda_context)
 
-        # Assert - Should return the successful catalog
-        assert len(result) == 1
-        assert result[0]["catalogId"] == "catalog-123"
+        # Assert - Should return error response
+        assert result.get("__isError") is True
+        assert result.get("errorCode") == "INTERNAL_ERROR"
 
     def test_list_unit_campaign_catalogs_error_handling(
         self,
@@ -821,6 +838,7 @@ class TestListUnitCampaignCatalogs:
         event: Dict[str, Any],
         lambda_context: MagicMock,
         sample_campaigns: list[Dict[str, Any]],
+        mock_dynamodb_resource: MagicMock,
     ) -> None:
         """Test handling when catalog doesn't exist in table."""
         from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs
@@ -830,7 +848,11 @@ class TestListUnitCampaignCatalogs:
         mock_catalogs = MagicMock()
         mock_campaigns.query.return_value = {"Items": sample_campaigns}
         # Catalog not found - empty response without Item key
-        mock_catalogs.get_item.return_value = {}
+        mock_dynamodb_resource.batch_get_item.side_effect = None
+        mock_dynamodb_resource.batch_get_item.return_value = {
+            "Responses": {"kernelworx-catalogs-ue1-dev": []},
+            "UnprocessedKeys": {},
+        }
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
@@ -847,3 +869,143 @@ class TestListUnitCampaignCatalogs:
 
         # Assert - No catalogs returned since none found
         assert result == []
+
+
+class TestFetchCatalogsBatching:
+    """Dedicated tests for chunked BatchGetItem in _fetch_catalogs (#450)."""
+
+    def test_fetch_catalogs_empty_set(self) -> None:
+        """Empty catalog_ids returns empty list with zero BatchGetItem calls."""
+        with patch("src.handlers.list_unit_catalogs.get_dynamodb_resource") as mock_resource:
+            result = _fetch_catalogs(set())
+            assert result == []
+            mock_resource.assert_not_called()
+
+    def test_fetch_catalogs_chunking_over_100(self) -> None:
+        """More than 100 catalog IDs are split into 100-key chunks."""
+        catalog_ids = {f"cat-{i:03d}" for i in range(150)}
+        mock_resource = MagicMock()
+
+        def batch_get_side_effect(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            table_name = next(iter(RequestItems.keys()))
+            keys = RequestItems[table_name]["Keys"]
+            items = [{"catalogId": k["catalogId"], "catalogName": f"Catalog {k['catalogId']}"} for k in keys]
+            return {"Responses": {table_name: items}, "UnprocessedKeys": {}}
+
+        mock_resource.batch_get_item.side_effect = batch_get_side_effect
+
+        with patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource):
+            result = _fetch_catalogs(catalog_ids)
+
+        assert len(result) == 150
+        assert mock_resource.batch_get_item.call_count == 2
+        call_keys_0 = mock_resource.batch_get_item.call_args_list[0][1]["RequestItems"]["kernelworx-catalogs-ue1-dev"][
+            "Keys"
+        ]
+        call_keys_1 = mock_resource.batch_get_item.call_args_list[1][1]["RequestItems"]["kernelworx-catalogs-ue1-dev"][
+            "Keys"
+        ]
+        assert len(call_keys_0) == 100
+        assert len(call_keys_1) == 50
+
+    def test_fetch_catalogs_retry_unprocessed_keys(self) -> None:
+        """Unprocessed keys are retried with backoff and successfully fetched."""
+        catalog_ids = {"cat-1", "cat-2"}
+        mock_resource = MagicMock()
+        attempts = [0]
+
+        def batch_get_side_effect(RequestItems: Dict[str, Any]) -> Dict[str, Any]:
+            table_name = next(iter(RequestItems.keys()))
+            attempts[0] += 1
+            if attempts[0] == 1:
+                return {
+                    "Responses": {table_name: [{"catalogId": "cat-1", "catalogName": "Cat 1"}]},
+                    "UnprocessedKeys": {table_name: {"Keys": [{"catalogId": "cat-2"}]}},
+                }
+            else:
+                return {
+                    "Responses": {table_name: [{"catalogId": "cat-2", "catalogName": "Cat 2"}]},
+                    "UnprocessedKeys": {},
+                }
+
+        mock_resource.batch_get_item.side_effect = batch_get_side_effect
+
+        with (
+            patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource),
+            patch("time.sleep") as mock_sleep,
+        ):
+            result = _fetch_catalogs(catalog_ids)
+
+        assert len(result) == 2
+        assert mock_resource.batch_get_item.call_count == 2
+        mock_sleep.assert_called_once_with(0.05)
+
+    def test_fetch_catalogs_unprocessed_keys_exhausted(self) -> None:
+        """AppError(INTERNAL_ERROR) is raised if keys remain unprocessed after 3 attempts."""
+        catalog_ids = {"cat-1"}
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {
+            "Responses": {"kernelworx-catalogs-ue1-dev": []},
+            "UnprocessedKeys": {"kernelworx-catalogs-ue1-dev": {"Keys": [{"catalogId": "cat-1"}]}},
+        }
+
+        with (
+            patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource),
+            patch("time.sleep"),
+            pytest.raises(AppError) as exc_info,
+        ):
+            _fetch_catalogs(catalog_ids)
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "DynamoDB BatchGetItem failed to return 1 keys after retries" in exc_info.value.message
+
+    def test_fetch_catalogs_throttling_error(self) -> None:
+        """ClientError with ThrottlingException raises AppError(RESOURCE_BUSY)."""
+        from botocore.exceptions import ClientError
+
+        mock_resource = MagicMock()
+        error_response = {"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}}
+        mock_resource.batch_get_item.side_effect = ClientError(error_response, "BatchGetItem")
+
+        with (
+            patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource),
+            pytest.raises(AppError) as exc_info,
+        ):
+            _fetch_catalogs({"cat-1"})
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+
+    def test_fetch_catalogs_generic_client_error(self) -> None:
+        """Generic ClientError raises AppError(INTERNAL_ERROR)."""
+        from botocore.exceptions import ClientError
+
+        mock_resource = MagicMock()
+        error_response = {"Error": {"Code": "ResourceNotFoundException", "Message": "Table not found"}}
+        mock_resource.batch_get_item.side_effect = ClientError(error_response, "BatchGetItem")
+
+        with (
+            patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource),
+            pytest.raises(AppError) as exc_info,
+        ):
+            _fetch_catalogs({"cat-1"})
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+    def test_fetch_catalogs_table_name_from_accessor(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Table name falls back to tables.catalogs.table_name when env var is absent."""
+        monkeypatch.delenv("CATALOGS_TABLE_NAME", raising=False)
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {
+            "Responses": {"custom-catalogs-table": []},
+            "UnprocessedKeys": {},
+        }
+
+        with (
+            patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
+            patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource),
+        ):
+            mock_tables.catalogs.table_name = "custom-catalogs-table"
+            _fetch_catalogs({"cat-1"})
+
+        call_request_items = mock_resource.batch_get_item.call_args[1]["RequestItems"]
+        assert "custom-catalogs-table" in call_request_items
