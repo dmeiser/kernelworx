@@ -232,9 +232,7 @@ class TestNativeMfaClaimResolution:
         absent. Any activated entry in the list is enrollment evidence.
         """
         with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
-            mock_cognito.admin_get_user.return_value = {
-                "UserMFASettingList": [SOFTWARE_TOKEN_MFA, WEB_AUTHN_MFA]
-            }
+            mock_cognito.admin_get_user.return_value = {"UserMFASettingList": [SOFTWARE_TOKEN_MFA, WEB_AUTHN_MFA]}
             result = lambda_handler(pre_token_event, lambda_context)
 
         details = _details(result)
@@ -483,3 +481,33 @@ class TestAmrNotWritten:
         details = _details(result)
         assert set(details["idTokenGeneration"]["claimsToAddOrOverride"]) == {MFA_CLAIM}
         assert set(details["accessTokenGeneration"]["claimsToAddOrOverride"]) == {MFA_CLAIM}
+
+
+class TestCognitoClientCreatedOnce:
+    """
+    Regression for issue #458: the Cognito IDP client is created once at module
+    scope and reused across warm Lambda invocations. Re-instantiating boto3.client
+    inside the handler would recreate the client, session, and TLS context on every
+    invocation, adding latency to every sign-in.
+    """
+
+    def test_successive_invocations_reuse_client_without_reinstantiating(
+        self, pre_token_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """Two successive handler invocations must not call boto3.client again; both
+        must go through the one module-level client instance."""
+        with (
+            patch("src.handlers.pre_token_generation.cognito") as mock_cognito,
+            patch("boto3.client") as mock_boto_client,
+        ):
+            mock_cognito.admin_get_user.return_value = {"PreferredMfaSetting": SOFTWARE_TOKEN_MFA}
+            first = lambda_handler(pre_token_event, lambda_context)
+            second = lambda_handler(pre_token_event, lambda_context)
+
+        # No client construction happens during handler execution: the client was
+        # built once at import time and is shared by every invocation.
+        mock_boto_client.assert_not_called()
+        # Both invocations used the same module-level client instance.
+        assert mock_cognito.admin_get_user.call_count == 2
+        assert _details(first)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
+        assert _details(second)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: True}
