@@ -11,7 +11,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "ruff>=0.14.10",
+    "ruff>=0.14.10,<0.16",  # 0.16 enables new default pyupgrade rules that flag ~1600 pre-existing findings; adopt in a dedicated pass
     "boto3-stubs[dynamodb,s3,lambda,sns,ses]>=1.41.5",
     "moto[dynamodb,s3,lambda,sns,ses]>=5.1.17",
     "mypy>=1.19.0",
