@@ -72,7 +72,7 @@ import {
 import { CatalogEditorDialog } from '../components/CatalogEditorDialog';
 import { MfaSetupRequiredState } from '../components/MfaSetupRequiredState';
 import { useAdminMfa } from '../hooks/useAdminMfa';
-import { isMfaRequiredError } from '../lib/mfaErrors';
+import { isMfaRequiredError, MFA_REQUIRED_ERROR_CODE } from '../lib/mfaErrors';
 import { formatDisplayDate } from '../lib/date-utils';
 import type { GqlCatalog, GqlAdminUser, GqlProductInput } from '../types/graphql-generated';
 import type {
@@ -627,7 +627,7 @@ export const AdminPage: React.FC = () => {
       if (isMfaRequiredError(error)) {
         window.dispatchEvent(
           new CustomEvent('mfa-required', {
-            detail: { message: 'MFA required' },
+            detail: { errorCode: MFA_REQUIRED_ERROR_CODE, message: 'MFA required' },
           }),
         );
       }
@@ -686,7 +686,7 @@ export const AdminPage: React.FC = () => {
       if (isMfaRequiredError(error)) {
         window.dispatchEvent(
           new CustomEvent('mfa-required', {
-            detail: { message: 'MFA required' },
+            detail: { errorCode: MFA_REQUIRED_ERROR_CODE, message: 'MFA required' },
           }),
         );
       }
