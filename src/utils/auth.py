@@ -479,17 +479,18 @@ def require_admin_mfa(event: Dict[str, Any]) -> None:
     Central gate for admin-only operations. Preserves the historical
     "Admin access required" denial for non-admins, and adds an "MFA
     required" denial for admins whose token lacks the injected mfa claim.
-    The denial message is exactly "MFA required" because the frontend
-    matches on that string.
+    The denial carries ErrorCode.MFA_REQUIRED so the frontend can key the
+    MFA setup UI off the stable code instead of the message string (#451);
+    the message remains matched only as a fallback.
 
     Args:
         event: Lambda event with identity.claims from AppSync
 
     Raises:
         AppError: FORBIDDEN "Admin access required" if not an admin.
-        AppError: FORBIDDEN "MFA required" if admin without MFA.
+        AppError: MFA_REQUIRED "MFA required" if admin without MFA.
     """
     if not is_admin(event):
         raise AppError(ErrorCode.FORBIDDEN, "Admin access required")
     if not has_mfa(event):
-        raise AppError(ErrorCode.FORBIDDEN, "MFA required")
+        raise AppError(ErrorCode.MFA_REQUIRED, "MFA required")
