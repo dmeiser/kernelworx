@@ -923,21 +923,41 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       });
       const catalogId = catalogData.createCatalog.catalogId;
 
-      // Create campaign without endDate
-      const { data: campaignData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: profileId,
-            campaignName: `${getTestPrefix()}-OpenCampaign`,
-            campaignYear: 2025,
-            startDate: '2025-01-01T00:00:00Z',
-            // No endDate specified
-            catalogId: catalogId,
-          },
+      // Create campaign without endDate. Poll createCampaign until the
+      // profileId-index GSI reflects the new profile (Bug #21 eventual
+      // consistency): createCampaign's verify_profile_write_access step
+      // queries that GSI and fails with NOT_FOUND "Profile not found" if it
+      // has not projected yet. A failed create wrote nothing, so retrying
+      // inside the poll is safe.
+      const campaigns = await waitForGSIConsistency(
+        async () => {
+          try {
+            const { data } = await ownerClient.mutate({
+              mutation: CREATE_CAMPAIGN,
+              variables: {
+                input: {
+                  profileId: profileId,
+                  campaignName: `${getTestPrefix()}-OpenCampaign`,
+                  campaignYear: 2025,
+                  startDate: '2025-01-01T00:00:00Z',
+                  // No endDate specified
+                  catalogId: catalogId,
+                },
+              },
+            });
+            return [data.createCampaign];
+          } catch (err: any) {
+            if (String(err?.message ?? err).includes('Profile not found')) {
+              return [];
+            }
+            throw err;
+          }
         },
-      });
-      const campaignId = campaignData.createCampaign.campaignId;
+        (items) => items.length > 0,
+        10,
+        1000
+      );
+      const campaignId = campaigns[0].campaignId;
 
       // Act
       const { data } = await ownerClient.query({
