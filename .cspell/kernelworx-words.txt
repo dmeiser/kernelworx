@@ -295,6 +295,7 @@ reqs
 reraises
 retireable
 returncode
+reinstantiating
 reusability
 rname
 rollup
