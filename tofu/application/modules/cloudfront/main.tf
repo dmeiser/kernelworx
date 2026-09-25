@@ -25,6 +25,16 @@ variable "static_bucket_regional_domain" {
   type        = string
 }
 
+variable "exports_bucket_name" {
+  description = "Name of the S3 exports bucket serving payment QR presigned URLs (CSP img-src allowlist)"
+  type        = string
+}
+
+variable "aws_region" {
+  description = "AWS region of the exports bucket (CSP img-src allowlist)"
+  type        = string
+}
+
 variable "certificate_validation" {
   description = "Certificate validation resource to ensure certificate is valid before use"
   type        = any
