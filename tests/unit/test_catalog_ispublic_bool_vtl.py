@@ -83,6 +83,25 @@ class _Util:
     def qr(self, _value: Any) -> str:
         return ""
 
+    def isString(self, value: Any) -> bool:
+        return isinstance(value, str)
+
+    def isNumber(self, value: Any) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+    def isList(self, value: Any) -> bool:
+        return isinstance(value, list)
+
+    def isNull(self, value: Any) -> bool:
+        return value is None
+
+    def isNullOrBlank(self, value: Any) -> bool:
+        if value is None:
+            return True
+        if not isinstance(value, str):
+            return False
+        return len(value.strip()) == 0
+
     def error(self, message: str, error_type: str) -> None:
         raise VtlAppError(message, error_type)
 
@@ -261,22 +280,47 @@ def _eval_value(expr: str, ctx: Dict[str, Any]) -> Any:
 
 def _eval_atom(atom: str, ctx: Dict[str, Any]) -> bool:
     atom = atom.strip()
+    if atom.startswith("(") and atom.endswith(")"):
+        return _eval_condition(_strip_parens(atom), ctx)
     negate = atom.startswith("!")
     if negate:
         atom = atom[1:].strip()
-    for operator in ("!=", "=="):
+        if atom.startswith("(") and atom.endswith(")"):
+            return not _eval_condition(_strip_parens(atom), ctx)
+    for operator in (">=", "<=", "!=", "==", ">", "<"):
         idx = _find_top_level(atom, operator)
         if idx != -1:
             left = _eval_value(atom[:idx], ctx)
             right = _eval_value(atom[idx + len(operator) :], ctx)
-            result = left == right
+            if operator == "==":
+                result = left == right
+            elif operator == "!=":
+                result = left != right
+            elif operator == ">=":
+                result = left >= right
+            elif operator == "<=":
+                result = left <= right
+            elif operator == ">":
+                result = left > right
+            elif operator == "<":
+                result = left < right
+            else:
+                raise AssertionError(f"unknown operator: {operator}")
             return not result if negate else result
     result = bool(_eval_value(atom, ctx))
     return not result if negate else result
 
 
 def _eval_condition(condition: str, ctx: Dict[str, Any]) -> bool:
-    return any(_eval_atom(atom, ctx) for atom in _split_top_level(condition, "|"))
+    # First handle top-level ||
+    or_parts = _split_top_level(condition, "|")
+    if len(or_parts) > 1:
+        return any(_eval_condition(part, ctx) for part in or_parts)
+    # Then handle top-level &&
+    and_parts = _split_top_level(condition, "&")
+    if len(and_parts) > 1:
+        return all(_eval_condition(part, ctx) for part in and_parts)
+    return _eval_atom(condition, ctx)
 
 
 def _strip_parens(text: str) -> str:
