@@ -71,7 +71,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
         );
     });
 
@@ -91,7 +91,47 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
+        );
+    });
+
+    it('rejects mixed valid and garbage permissions (#449)', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ', 'ADMIN'],
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
+        );
+    });
+
+    it('rejects garbage permission alongside valid non-string value (#449)', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['WRITE', 42],
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
         );
     });
 
@@ -111,7 +151,7 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
         );
     });
 
@@ -130,7 +170,126 @@ describe('create_invite_fn request', () => {
 
         assert.throws(
             () => request(ctx),
-            /INVALID_INPUT: permissions must contain at least one supported permission \(READ or WRITE\)/
+            /INVALID_INPUT: permissions must contain only supported permissions \(READ or WRITE\)/
+        );
+    });
+
+    it('accepts the maximum expiry of 14 days', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                    expiresInDays: 14,
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.attributeValues.expiresAt, 1705276800);
+    });
+
+    it('defaults to 14 days when expiresInDays is omitted', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.attributeValues.expiresAt, 1705276800);
+    });
+
+    it('rejects an expiry over 14 days', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                    expiresInDays: 15,
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: expiresInDays must be an integer between 1 and 14/
+        );
+    });
+
+    it('rejects a zero or negative expiry', () => {
+        const base = {
+            stash: { profile: { ownerAccountId: 'ACCOUNT#owner1' } },
+            identity: { sub: 'owner1' },
+        };
+
+        for (const expiresInDays of [0, -1]) {
+            assert.throws(
+                () => request({
+                    ...base,
+                    args: { input: { profileId: 'PROFILE#p1', permissions: ['READ'], expiresInDays } },
+                }),
+                /INVALID_INPUT: expiresInDays must be an integer between 1 and 14/
+            );
+        }
+    });
+
+    it('rejects a fractional expiry', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                    expiresInDays: 1.5,
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: expiresInDays must be an integer between 1 and 14/
+        );
+    });
+
+    it('rejects a non-numeric expiry', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                    expiresInDays: '7',
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: expiresInDays must be an integer between 1 and 14/
         );
     });
 

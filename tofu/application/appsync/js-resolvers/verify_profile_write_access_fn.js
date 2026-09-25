@@ -23,13 +23,14 @@ import { util } from '@aws-appsync/utils';
 // idempotent-delete detection: deleteOrder/deleteCampaign where the lookup step
 // already stashed a null item (item already gone = success).
 function isIdempotentDeleteSkip(ctx) {
-    const isDeletingOrder = ctx.info.fieldName === 'deleteOrder';
-    const isDeletingCampaign = ctx.info.fieldName === 'deleteCampaign';
+    const fieldName = ctx.info && ctx.info.fieldName;
+    const isDeletingOrder = fieldName === 'deleteOrder';
+    const isDeletingCampaign = fieldName === 'deleteCampaign';
     if (!isDeletingOrder && !isDeletingCampaign) {
         return false;
     }
-    return (isDeletingOrder && ctx.stash.order === null) ||
-        (isDeletingCampaign && ctx.stash.campaign === null);
+    return (isDeletingOrder && ctx.stash && ctx.stash.order === null) ||
+        (isDeletingCampaign && ctx.stash && ctx.stash.campaign === null);
 }
 
 // Resolve + normalize the profileId from input args or stash. Returns the
@@ -37,9 +38,9 @@ function isIdempotentDeleteSkip(ctx) {
 function resolveDbProfileId(ctx) {
     let profileId = null;
 
-    if (ctx.args.input && ctx.args.input.profileId) {
+    if (ctx.args && ctx.args.input && ctx.args.input.profileId) {
         profileId = ctx.args.input.profileId;
-    } else if (ctx.stash && ctx.stash.order) {
+    } else if (ctx.stash && ctx.stash.order && ctx.stash.order.profileId) {
         // Orders have profileId attribute - use it directly (not PK which is the campaign key)
         profileId = ctx.stash.order.profileId;
     } else if (ctx.stash && ctx.stash.campaign && ctx.stash.campaign.profileId) {
@@ -59,8 +60,10 @@ function resolveDbProfileId(ctx) {
 export function request(ctx) {
     // Idempotent delete: skip auth entirely (item already gone = success).
     // Set the flag in Step 1; honor it in Step 2 as well.
-    if (ctx.stash.skipAuth || isIdempotentDeleteSkip(ctx)) {
-        ctx.stash.skipAuth = true;
+    if ((ctx.stash && ctx.stash.skipAuth) || isIdempotentDeleteSkip(ctx)) {
+        if (ctx.stash) {
+            ctx.stash.skipAuth = true;
+        }
         return {
             operation: 'GetItem',
             key: util.dynamodb.toMapValues({ ownerAccountId: 'NOOP', profileId: 'NOOP' })
@@ -68,7 +71,7 @@ export function request(ctx) {
     }
 
     // Step 2 (owner confirmed in Step 1): no further read is needed.
-    if (ctx.stash.isOwner === true) {
+    if (ctx.stash && ctx.stash.isOwner === true) {
         return {
             operation: 'GetItem',
             key: util.dynamodb.toMapValues({ ownerAccountId: 'NOOP', profileId: 'NOOP' })
@@ -76,7 +79,7 @@ export function request(ctx) {
     }
 
     // Step 2 (non-owner confirmed in Step 1): fall back to the GSI query.
-    if (ctx.stash.isOwner === false) {
+    if (ctx.stash && ctx.stash.isOwner === false) {
         const dbProfileId = resolveDbProfileId(ctx);
         return {
             operation: 'Query',
@@ -92,17 +95,21 @@ export function request(ctx) {
     // to confirm ownership before any eventually-consistent GSI read (#438).
     const dbProfileId = resolveDbProfileId(ctx);
     if (!dbProfileId) {
-        util.error('Profile ID not found in request or stash - debugging: ' + JSON.stringify({
-            hasInput: !!ctx.args.input,
-            hasOrder: !!(ctx.stash && ctx.stash.order),
-            hasCampaign: !!(ctx.stash && ctx.stash.campaign),
-            orderKeys: ctx.stash && ctx.stash.order ? Object.keys(ctx.stash.order) : []
-        }), 'INVALID_INPUT');
+        console.error(
+            'Profile ID not found in request or stash: ' +
+                JSON.stringify({
+                    hasInput: !!(ctx.args && ctx.args.input),
+                    hasOrder: !!(ctx.stash && ctx.stash.order),
+                    hasCampaign: !!(ctx.stash && ctx.stash.campaign),
+                    orderKeys: ctx.stash && ctx.stash.order ? Object.keys(ctx.stash.order) : [],
+                })
+        );
+        util.error('Profile ID is required', 'INVALID_INPUT');
     }
 
-    const callerAccountId = ctx.identity.sub.startsWith('ACCOUNT#')
+    const callerAccountId = ctx.identity && ctx.identity.sub && ctx.identity.sub.startsWith('ACCOUNT#')
         ? ctx.identity.sub
-        : 'ACCOUNT#' + ctx.identity.sub;
+        : 'ACCOUNT#' + (ctx.identity && ctx.identity.sub ? ctx.identity.sub : '');
 
     return {
         operation: 'GetItem',
@@ -116,7 +123,7 @@ export function request(ctx) {
 
 export function response(ctx) {
     // Idempotent delete: auth was skipped.
-    if (ctx.stash.skipAuth) {
+    if (ctx.stash && ctx.stash.skipAuth) {
         return { authorized: true };
     }
 
@@ -128,7 +135,7 @@ export function response(ctx) {
     // partition key. Because ownership is encoded in that hash key, an item can
     // only be returned here if the caller owns the profile - so mere existence
     // is the authoritative, race-free ownership signal (no attribute compare).
-    if (ctx.stash.isOwner === undefined) {
+    if (ctx.stash && ctx.stash.isOwner === undefined) {
         const ownerProfile = ctx.result;
         if (ownerProfile) {
             ctx.stash.isOwner = true;
@@ -143,20 +150,22 @@ export function response(ctx) {
     }
 
     // Step 2 response for the owner path: pass the confirmed profile through.
-    if (ctx.stash.isOwner === true) {
+    if (ctx.stash && ctx.stash.isOwner === true) {
         return ctx.stash.profile;
     }
 
     // Step 2 response for the non-owner path: ctx.result is the GSI Query.
-    const profile = ctx.result.items && ctx.result.items[0];
+    const profile = ctx.result && ctx.result.items && ctx.result.items[0];
     if (!profile) {
         util.error('Profile not found', 'NOT_FOUND');
     }
 
     // Ownership was already ruled out by the consistent Step 1 read; the GSI
     // result is used only to hand the profile to the share-inspection step.
-    ctx.stash.isOwner = false;
-    ctx.stash.profile = profile;
-    ctx.stash.profileOwner = profile.ownerAccountId;
+    if (ctx.stash) {
+        ctx.stash.isOwner = false;
+        ctx.stash.profile = profile;
+        ctx.stash.profileOwner = profile.ownerAccountId;
+    }
     return profile;
 }

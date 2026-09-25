@@ -64,13 +64,54 @@ describe('verify_profile_write_access_fn request (step 1: owner GetItem)', () =>
         assert.strictEqual(result.key.profileId, 'PROFILE#cmp-prof');
     });
 
-    it('raises INVALID_INPUT when no profileId can be resolved', () => {
-        const ctx = baseCtx({ args: { input: {} }, stash: {} });
+    it('throws clean INVALID_INPUT error without leaking stash keys when profileId is missing', () => {
+        const errorLogs = [];
+        const originalConsoleError = console.error;
+        console.error = (...args) => {
+            errorLogs.push(args.join(' '));
+        };
 
-        assert.throws(
-            () => request(ctx),
-            /INVALID_INPUT: Profile ID not found in request or stash/
-        );
+        const ctx = {
+            identity: { sub: 'user-123' },
+            info: { fieldName: 'updateOrder' },
+            args: { input: {} },
+            stash: {
+                order: {
+                    campaignId: 'CAMPAIGN#c1',
+                    orderId: 'ORDER#o1',
+                },
+                campaign: {
+                    campaignId: 'CAMPAIGN#c1',
+                },
+            },
+        };
+
+        try {
+            assert.throws(
+                () => request(ctx),
+                (err) => {
+                    assert.strictEqual(err.message, 'INVALID_INPUT: Profile ID is required');
+                    // Must not leak internal stash keys or pipeline structure to the client-facing error
+                    assert.ok(!err.message.includes('orderKeys'), 'must not contain orderKeys');
+                    assert.ok(!err.message.includes('hasInput'), 'must not contain hasInput');
+                    assert.ok(!err.message.includes('hasOrder'), 'must not contain hasOrder');
+                    assert.ok(!err.message.includes('hasCampaign'), 'must not contain hasCampaign');
+                    assert.ok(!err.message.includes('debugging:'), 'must not contain debugging');
+                    assert.ok(!err.message.includes('{'), 'must not contain json structure');
+                    assert.ok(!err.message.includes('stash'), 'must not contain stash reference');
+                    return true;
+                }
+            );
+
+            // Verify diagnostic details were logged server-side only
+            assert.strictEqual(errorLogs.length, 1);
+            assert.ok(errorLogs[0].includes('Profile ID not found in request or stash'));
+            assert.ok(errorLogs[0].includes('hasInput'));
+            assert.ok(errorLogs[0].includes('hasOrder'));
+            assert.ok(errorLogs[0].includes('orderKeys'));
+        } finally {
+            console.error = originalConsoleError;
+        }
     });
 
     it('skips auth (no-op GetItem) for idempotent deleteOrder with a null stash.order', () => {

@@ -2,6 +2,7 @@
  * Hook for managing Admin MFA required degraded state
  */
 import { useState, useEffect, useCallback } from 'react';
+import { MFA_REQUIRED_ERROR_CODE } from '../lib/mfaErrors';
 
 export interface UseAdminMfaReturn {
   isMfaRequired: boolean;
@@ -29,7 +30,7 @@ export function useAdminMfa(): UseAdminMfaReturn {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('mfa-required', {
-          detail: { message: 'MFA required' },
+          detail: { errorCode: MFA_REQUIRED_ERROR_CODE, message: 'MFA required' },
         }),
       );
     }

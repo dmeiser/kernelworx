@@ -13,6 +13,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict
 
+from botocore.exceptions import ClientError
+
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.dynamodb import tables
@@ -115,9 +117,17 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "updatedAt": timestamp,
             }
 
-            tables.accounts.put_item(Item=account_item)
-
-            logger.info(f"Account created successfully: {account_id}, email={mask_email(email)}")
+            try:
+                tables.accounts.put_item(
+                    Item=account_item,
+                    ConditionExpression="attribute_not_exists(accountId)",
+                )
+                logger.info(f"Account created successfully: {account_id}, email={mask_email(email)}")
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                    logger.info(f"Account already exists (concurrent initialization): {account_id}")
+                else:
+                    raise
 
         # IMPORTANT: Must return the event for Cognito to continue
         return event

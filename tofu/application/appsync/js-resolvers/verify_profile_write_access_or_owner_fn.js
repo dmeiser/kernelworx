@@ -67,6 +67,10 @@ export function response(ctx) {
     
     // Not owner - check for WRITE permission via share
     ctx.stash.isOwner = false;
+    // Store the profile's current owner so check_write_permission_fn can reject
+    // stale shares (created before an ownership transfer) whose ownerAccountId
+    // no longer matches (#432). Mirrors verify_profile_write_access_fn.
+    ctx.stash.profileOwner = profile.ownerAccountId;
     
     // Only set profileId if it's valid, otherwise skip second function
     const profileIdArg = ctx.args.profileId;

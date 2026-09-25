@@ -505,12 +505,15 @@ def delete_payment_method(account_id: str, name: str) -> None:
         # Find and remove method
         new_methods, method_to_delete = _find_and_remove_method(existing_methods, name)
 
-        # Delete QR code from S3 if exists
-        _delete_qr_if_exists(logger, account_id, name, method_to_delete)
-
-        # Update account with remaining methods (or empty list)
+        # Update account with remaining methods (or empty list) BEFORE touching S3:
+        # a failed optimistic-lock write (concurrent write collision) must leave the
+        # QR code image intact, since the payment method would remain active.
         preferences["paymentMethods"] = new_methods
         _save_preferences(account_id_key, response, preferences)
+
+        # Only after the DynamoDB update succeeds, delete the QR code from S3
+        # (best-effort: a failure here is logged and does not block the deletion).
+        _delete_qr_if_exists(logger, account_id, name, method_to_delete)
 
         logger.info("Deleted payment method", account_id=account_id, name=name)
 
@@ -794,7 +797,7 @@ def delete_all_user_qr_codes(account_id: str, logger: Any = None) -> int:
                     deleted_count += len(delete_items)
                     log.info(f"Deleted {len(delete_items)} QR code versions from S3 under {prefix}")
         except Exception as e:
-            log.error(f"Error purging S3 payment QR codes under {prefix}: {str(e)}")
-            raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to purge payment QR codes from S3: {str(e)}") from e
+            log.error("Error purging S3 payment QR codes", account_id=account_id, error=str(e), exc_info=True)
+            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to purge payment QR codes from S3") from e
 
     return deleted_count

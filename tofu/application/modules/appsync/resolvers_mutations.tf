@@ -102,6 +102,9 @@ resource "aws_appsync_resolver" "redeem_profile_invite" {
   pipeline_config {
     functions = [
       aws_appsync_function.lookup_invite.function_id,
+      # #453: reject redemption when the profile was transferred away from the
+      # invite's creation-time owner before the share is stamped.
+      aws_appsync_function.verify_invite_owner_current.function_id,
       aws_appsync_function.check_existing_share.function_id,
       aws_appsync_function.create_share.function_id,
       aws_appsync_function.mark_invite_used.function_id,

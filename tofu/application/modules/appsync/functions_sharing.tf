@@ -13,6 +13,22 @@ resource "aws_appsync_function" "verify_profile_owner_for_invite" {
   code = file("${local.js_resolvers_dir}/verify_profile_owner_for_invite_fn.js")
 }
 
+# #453: confirms at redemption time that the profile is still owned by the
+# invite's creation-time ownerAccountId (transfer moves the item to the new
+# owner's partition, so a base-table GetItem under the old owner fails).
+resource "aws_appsync_function" "verify_invite_owner_current" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "VerifyInviteOwnerCurrentFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_invite_owner_current_fn.js")
+}
+
 resource "aws_appsync_function" "create_invite" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.invites.name
