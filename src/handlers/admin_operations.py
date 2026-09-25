@@ -76,8 +76,10 @@ def _get_cognito_client() -> Any:
 
 
 # DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
-# RESOURCE_BUSY error instead of silently incomplete admin data (#291).
-_THROTTLING_ERROR_CODES = frozenset({"ProvisionedThroughputExceededException", "ThrottlingException"})
+# RESOURCE_BUSY error instead of silently incomplete admin data (#291, #456).
+_THROTTLING_ERROR_CODES = frozenset(
+    {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
+)
 
 
 def _raise_batch_lookup_error(operation: str, logger: Any, error: Exception, **context: Any) -> NoReturn:
@@ -641,6 +643,10 @@ def _search_user_by_sub(cognito: Any, user_pool_id: str, sub: str, logger: Any) 
         users = response.get("Users", [])
         return users[0] if users else None
     except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in _THROTTLING_ERROR_CODES:
+            logger.warning("Cognito search by sub throttled", error=str(e), error_code=error_code, sub=sub)
+            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from e
         logger.warning("Cognito search by sub failed", error=str(e), sub=sub)
         return None
 
@@ -664,6 +670,10 @@ def _search_users_in_cognito_by_email_prefix(
         )
         return list(response.get("Users", []))
     except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in _THROTTLING_ERROR_CODES:
+            logger.warning("Cognito email prefix search throttled", error=str(e), error_code=error_code, query=query)
+            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from e
         logger.warning("Cognito email prefix search failed", error=str(e), query=query)
         return []
 
