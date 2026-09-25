@@ -107,6 +107,19 @@ resource "aws_appsync_function" "verify_profile_write_access" {
   code = file("${local.js_resolvers_dir}/verify_profile_write_access_fn.js")
 }
 
+resource "aws_appsync_function" "verify_profile_write_access_step2" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "VerifyProfileWriteAccessStep2Fn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_profile_write_access_fn.js")
+}
+
 resource "aws_appsync_function" "check_share_permissions" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.shares.name

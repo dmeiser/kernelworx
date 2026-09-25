@@ -132,6 +132,9 @@ resource "aws_appsync_resolver" "update_campaign" {
     functions = [
       aws_appsync_function.lookup_campaign.function_id,
       aws_appsync_function.verify_profile_write_access.function_id,
+      # Step 2 of the two-phase owner check (#438): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.update_campaign.function_id,
       # isActive can change which campaign is the latest active one;
@@ -160,6 +163,9 @@ resource "aws_appsync_resolver" "delete_campaign" {
     functions = [
       aws_appsync_function.lookup_campaign_for_delete.function_id,
       aws_appsync_function.verify_profile_write_access.function_id,
+      # Step 2 of the two-phase owner check (#438): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.delete_campaign_orders_lambda.function_id,
       aws_appsync_function.delete_campaign.function_id,
@@ -191,6 +197,9 @@ resource "aws_appsync_resolver" "create_campaign" {
   pipeline_config {
     functions = [
       aws_appsync_function.verify_profile_write_access.function_id,
+      # Step 2 of the two-phase owner check (#438): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.lookup_shared_campaign.function_id,
       aws_appsync_function.verify_shared_campaign_catalog.function_id,
@@ -223,6 +232,9 @@ resource "aws_appsync_resolver" "update_order" {
     functions = [
       aws_appsync_function.lookup_order.function_id,
       aws_appsync_function.verify_profile_write_access.function_id,
+      # Step 2 of the two-phase owner check (#438): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.validate_payment_method_appsync.function_id,
       aws_appsync_function.get_catalog_for_update_order.function_id,
@@ -250,6 +262,9 @@ resource "aws_appsync_resolver" "delete_order" {
     functions = [
       aws_appsync_function.lookup_order_for_delete.function_id,
       aws_appsync_function.verify_profile_write_access.function_id,
+      # Step 2 of the two-phase owner check (#438): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.delete_order.function_id,
       aws_appsync_function.verify_order_delete_propagation.function_id,
@@ -274,6 +289,9 @@ resource "aws_appsync_resolver" "create_order" {
   pipeline_config {
     functions = [
       aws_appsync_function.verify_profile_write_access.function_id,
+      # Step 2 of the two-phase owner check (#438): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.validate_payment_method_appsync.function_id,
       aws_appsync_function.get_campaign_for_order.function_id,
