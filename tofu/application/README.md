@@ -25,7 +25,7 @@ tofu/
 
 ## Prerequisites
 
-1. **OpenTofu 1.7+** installed
+1. **OpenTofu 1.8+** installed
 2. **AWS CLI** configured with appropriate credentials
 3. **jq** installed for JSON processing
 4. **TF_VAR_encryption_passphrase** set in root `.env` file

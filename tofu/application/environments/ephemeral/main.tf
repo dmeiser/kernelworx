@@ -3,7 +3,7 @@
 # Skips custom domains, ACM certificates, CloudFront, and Route53.
 
 terraform {
-  required_version = ">= 1.7.0"
+  required_version = ">= 1.8.0"
 
   # State encryption configuration
   encryption {

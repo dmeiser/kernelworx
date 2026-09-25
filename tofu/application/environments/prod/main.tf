@@ -1,7 +1,7 @@
 # OpenTofu Prod Environment Configuration
 
 terraform {
-  required_version = ">= 1.7.0"
+  required_version = ">= 1.8.0"
 
   # State encryption configuration
   encryption {

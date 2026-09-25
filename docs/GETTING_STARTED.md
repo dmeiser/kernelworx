@@ -7,7 +7,7 @@
 - **AWS CLI v2** configured with appropriate credentials
 - **AWS Account** with permissions for IAM, DynamoDB, S3, Cognito, AppSync, ACM, Route 53, CloudFront, Lambda, SNS, CloudFormation, and CloudWatch/Billing
 - **Git** for version control
-- **OpenTofu** >= 1.7.0
+- **OpenTofu** >= 1.8.0
 
 ## Initial Setup
 
