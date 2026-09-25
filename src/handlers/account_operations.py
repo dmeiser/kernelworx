@@ -86,6 +86,11 @@ def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
 
 def _lookup_cognito_user_with_retry(cognito: Any, user_pool_id: str, account_id: str, logger: Any) -> str | None:
     """Look up Cognito username by sub with retry for transient errors."""
+    # Validate before interpolating into the Cognito filter to prevent
+    # quote-injection / filter breakage (#124, #441).
+    from .admin_operations import _validate_sub_for_filter
+
+    _validate_sub_for_filter(account_id)
     attempt = 0
     max_retries = 3
     while True:
@@ -166,7 +171,9 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     """
     logger.info("delete_my_account handler invoked")
 
-    account_id = event["identity"]["sub"]
+    account_id = (event.get("identity") or {}).get("sub")
+    if not account_id:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
     logger.info(f"Deleting account for: {account_id}")
 
     user_pool_id = os.environ.get("USER_POOL_ID")
@@ -185,8 +192,8 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
             if not username:
                 logger.warning(f"User not found in Cognito with sub: {account_id}")
         except ClientError as e:
-            logger.error(f"Cognito lookup failed before deletion: {str(e)}")
-            raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to verify account in Cognito: {str(e)}")
+            logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(e), exc_info=True)
+            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
 
         _delete_all_user_data(account_id, context, logger)
         _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
@@ -194,5 +201,5 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         return True
 
     except ClientError as e:
-        logger.error(f"Cognito error during account deletion: {str(e)}")
-        raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to delete account from Cognito: {str(e)}")
+        logger.error("Cognito error during account deletion", account_id=account_id, error=str(e), exc_info=True)
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")

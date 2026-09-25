@@ -36,6 +36,9 @@ class ErrorCode:
     # Authorization errors
     FORBIDDEN = "FORBIDDEN"
     UNAUTHORIZED = "UNAUTHORIZED"
+    # Admin performed an action that requires MFA; the frontend keys the MFA
+    # setup UI off this code (#451), not the human-readable message.
+    MFA_REQUIRED = "MFA_REQUIRED"
 
     # Resource errors
     NOT_FOUND = "NOT_FOUND"

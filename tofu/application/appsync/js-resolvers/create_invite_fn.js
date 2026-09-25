@@ -2,14 +2,31 @@ import { util } from '@aws-appsync/utils';
 
 function validatePermissions(permissions) {
     if (!Array.isArray(permissions) || permissions.length === 0) {
-        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'INVALID_INPUT');
+        util.error('permissions must contain only supported permissions (READ or WRITE)', 'INVALID_INPUT');
     }
-    const hasSupportedPermission = permissions.some(permission =>
+    // #449: reject the whole input unless EVERY element is an allowed permission
+    // string - mixed valid+garbage arrays must not persist unknown values.
+    const allPermissionsValid = permissions.every(permission =>
         typeof permission === 'string' && ['READ', 'WRITE'].includes(permission.toUpperCase())
     );
-    if (!hasSupportedPermission) {
-        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'INVALID_INPUT');
+    if (!allPermissionsValid) {
+        util.error('permissions must contain only supported permissions (READ or WRITE)', 'INVALID_INPUT');
     }
+}
+
+const DEFAULT_EXPIRY_DAYS = 14;
+const MAX_EXPIRY_DAYS = 14;
+
+// #453: expiry must be a whole number of days within [1, MAX_EXPIRY_DAYS];
+// an unbounded expiry would allow years-long invite validity.
+function resolveExpiryDays(expiresInDays) {
+    if (expiresInDays === undefined || expiresInDays === null) {
+        return DEFAULT_EXPIRY_DAYS;
+    }
+    if (typeof expiresInDays !== 'number' || expiresInDays % 1 !== 0 || expiresInDays < 1 || expiresInDays > MAX_EXPIRY_DAYS) {
+        util.error(`expiresInDays must be an integer between 1 and ${MAX_EXPIRY_DAYS}`, 'INVALID_INPUT');
+    }
+    return expiresInDays;
 }
 
 export function request(ctx) {
@@ -26,8 +43,8 @@ export function request(ctx) {
     // Generate invite code (first 10 chars of UUID, uppercase)
     const inviteCode = util.autoId().substring(0, 10).toUpperCase();
     
-    // Calculate expiry (default 14 days, or custom expiresInDays if provided)
-    const daysUntilExpiry = input.expiresInDays || 14;
+    // Calculate expiry (default 14 days, or custom expiresInDays bounded to 14)
+    const daysUntilExpiry = resolveExpiryDays(input.expiresInDays);
     const expirySeconds = daysUntilExpiry * 24 * 60 * 60;
     const expiresAtEpoch = util.time.nowEpochSeconds() + expirySeconds;
     const now = util.time.nowISO8601();

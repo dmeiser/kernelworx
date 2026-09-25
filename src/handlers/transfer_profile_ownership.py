@@ -73,7 +73,7 @@ def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[s
             raise AppError(ErrorCode.FORBIDDEN, "Only the profile owner or an admin can transfer ownership")
         # An admin (not the owner) may transfer any profile, but only with MFA (#336).
         if not has_mfa(event):
-            raise AppError(ErrorCode.FORBIDDEN, "MFA required")
+            raise AppError(ErrorCode.MFA_REQUIRED, "MFA required")
 
     return profile
 
@@ -121,9 +121,16 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
             ]
         )
     except ClientError as e:
+        logger.error(
+            "Failed to transfer profile ownership in DynamoDB",
+            profile_id=db_profile_id,
+            new_owner_account_id=db_new_owner_id,
+            error=str(e),
+            exc_info=True,
+        )
         raise AppError(
             ErrorCode.INTERNAL_ERROR,
-            f"Failed to transfer profile ownership: {e}",
+            "Failed to transfer profile ownership",
         ) from e
 
     # Keep the returned profile dict in sync with the persisted record.

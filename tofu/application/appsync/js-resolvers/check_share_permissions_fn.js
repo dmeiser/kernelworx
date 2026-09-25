@@ -76,5 +76,10 @@ export function response(ctx) {
     }
     
     // Share exists but only has READ permission - access denied
-    util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only, permissions: ' + JSON.stringify(share.permissions) + ')', 'FORBIDDEN');
+    // Log share details server-side only; never serialize internal objects into client-facing errors
+    console.error(
+        'Share permission check failed (READ only): ' +
+            JSON.stringify({ profileId: share.profileId, permissions: share.permissions })
+    );
+    util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only)', 'FORBIDDEN');
 }

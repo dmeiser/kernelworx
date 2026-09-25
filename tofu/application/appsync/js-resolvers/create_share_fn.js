@@ -2,13 +2,15 @@ import { util } from '@aws-appsync/utils';
 
 function validatePermissions(permissions) {
     if (!Array.isArray(permissions) || permissions.length === 0) {
-        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'INVALID_INPUT');
+        util.error('permissions must contain only supported permissions (READ or WRITE)', 'INVALID_INPUT');
     }
-    const hasSupportedPermission = permissions.some(permission =>
+    // #449: reject the whole input unless EVERY element is an allowed permission
+    // string - mixed valid+garbage arrays must not persist unknown values.
+    const allPermissionsValid = permissions.every(permission =>
         typeof permission === 'string' && ['READ', 'WRITE'].includes(permission.toUpperCase())
     );
-    if (!hasSupportedPermission) {
-        util.error('permissions must contain at least one supported permission (READ or WRITE)', 'INVALID_INPUT');
+    if (!allPermissionsValid) {
+        util.error('permissions must contain only supported permissions (READ or WRITE)', 'INVALID_INPUT');
     }
 }
 
@@ -26,7 +28,7 @@ export function request(ctx) {
     validatePermissions(permissions);
 
     const now = util.time.nowISO8601();
-    
+
     // Get ownerAccountId from stash - check profile (shareProfileDirect) or invite (redeemProfileInvite)
     var ownerAccountId = null;
     if (ctx.stash && ctx.stash.profile && ctx.stash.profile.ownerAccountId) {
