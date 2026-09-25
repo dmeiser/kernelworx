@@ -721,7 +721,6 @@ data "aws_iam_policy_document" "appsync_dynamodb" {
       "dynamodb:UpdateItem",
       "dynamodb:DeleteItem",
       "dynamodb:Query",
-      "dynamodb:Scan",
       "dynamodb:BatchGetItem",
       "dynamodb:BatchWriteItem",
     ]
