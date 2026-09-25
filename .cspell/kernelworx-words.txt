@@ -328,6 +328,7 @@ Shelbyville
 Signin
 signout
 Signup
+signups
 singleline
 slowmo
 slugification

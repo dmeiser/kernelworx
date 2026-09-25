@@ -6,6 +6,8 @@
 #
 # Emails use the pattern <run-id>-owner@kernelworx.test so they are clearly
 # scoped to a single ephemeral run and never collide with dev/prod test users.
+# A dedicated smoke user (<run-id>-smoke@kernelworx.test) is pre-created and
+# confirmed so smoke suites can run without burning Cognito's daily email quota (#483).
 # The owner user is added to the ADMIN group, matching the deploy-shared.yml
 # smoke-test setup. The owner also gets a TOTP device (re-provisioned on every
 # run) because the #336 admin gate requires the amr 'mfa' claim; the secret is
@@ -33,6 +35,7 @@ TEST_DOMAIN="${EPHEMERAL_TEST_DOMAIN:-kernelworx.test}"
 OWNER_EMAIL="${RUN_ID}-owner@${TEST_DOMAIN}"
 CONTRIBUTOR_EMAIL="${RUN_ID}-contributor@${TEST_DOMAIN}"
 READONLY_EMAIL="${RUN_ID}-readonly@${TEST_DOMAIN}"
+SMOKE_EMAIL="${RUN_ID}-smoke@${TEST_DOMAIN}"
 
 # Generate a password satisfying Cognito's policy:
 # minimum 8, lowercase, uppercase, number, symbol.
@@ -45,6 +48,7 @@ generate_password() {
 OWNER_PASSWORD=$(generate_password)
 CONTRIBUTOR_PASSWORD=$(generate_password)
 READONLY_PASSWORD=$(generate_password)
+SMOKE_PASSWORD=$(generate_password)
 
 log "Creating ephemeral test users in pool: $USER_POOL_ID"
 log "  Region: $REGION"
@@ -86,6 +90,7 @@ create_or_update_user() {
 create_or_update_user "Owner" "$OWNER_EMAIL" "$OWNER_PASSWORD"
 create_or_update_user "Contributor" "$CONTRIBUTOR_EMAIL" "$CONTRIBUTOR_PASSWORD"
 create_or_update_user "Read-only" "$READONLY_EMAIL" "$READONLY_PASSWORD"
+create_or_update_user "Smoke" "$SMOKE_EMAIL" "$SMOKE_PASSWORD"
 
 # The owner must be in the ADMIN group for admin-only smoke tests to pass.
 log ""
@@ -117,3 +122,5 @@ echo "export TEST_CONTRIBUTOR_EMAIL=$CONTRIBUTOR_EMAIL"
 echo "export TEST_CONTRIBUTOR_PASSWORD=$CONTRIBUTOR_PASSWORD"
 echo "export TEST_READONLY_EMAIL=$READONLY_EMAIL"
 echo "export TEST_READONLY_PASSWORD=$READONLY_PASSWORD"
+echo "export TEST_SMOKE_EMAIL=$SMOKE_EMAIL"
+echo "export TEST_SMOKE_PASSWORD=$SMOKE_PASSWORD"

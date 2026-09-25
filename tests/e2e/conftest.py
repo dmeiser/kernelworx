@@ -102,9 +102,11 @@ def _run_typescript_cleanup() -> None:
 def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
     """Delete smoke+ Cognito users regardless of confirmation state.
 
-    Confirmed ``smoke+`` users are deleted too: the signup smoke tests
-    confirm users server-side, so leaving only-UNCONFIRMED filtering in
-    place would leak a CONFIRMED user (plus its Account row) per run.
+    Confirmed ``smoke+`` users are deleted too: throwaway signup users are
+    not reliably UNCONFIRMED (an opted-in native signup may be completed
+    out-of-band, and interrupted runs leave users behind), so leaving
+    only-UNCONFIRMED filtering in place would leak a CONFIRMED user (plus
+    its Account row) per run.
 
     Uses the AWS CLI instead of boto3 so credentials obtained via ``aws login``
     (e.g., AWS IAM Identity Center / SSO plugins) are picked up through the

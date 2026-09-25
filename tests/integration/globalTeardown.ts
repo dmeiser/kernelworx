@@ -120,6 +120,7 @@ const TEST_USER_EMAILS = [
   process.env.TEST_OWNER_EMAIL,
   process.env.TEST_CONTRIBUTOR_EMAIL,
   process.env.TEST_READONLY_EMAIL,
+  process.env.TEST_SMOKE_EMAIL,
 ].filter(Boolean) as string[];
 
 // Cache for test account IDs (populated on first use)
