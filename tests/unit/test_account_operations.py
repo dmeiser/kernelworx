@@ -10,8 +10,9 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
 
-from src.utils.errors import ErrorCode
+from src.utils.errors import AppError, ErrorCode
 
 
 class TestDeleteMyAccount:
@@ -562,6 +563,58 @@ class TestDeleteMyAccount:
         # Account should still be deleted from DynamoDB
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
 
+    def test_delete_account_missing_identity(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test deletion fails with UNAUTHORIZED if caller identity is missing entirely."""
+        from src.handlers.account_operations import delete_my_account
+
+        result = delete_my_account({}, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Caller identity is required" in result["message"]
+
+    def test_delete_account_null_identity(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test deletion fails with UNAUTHORIZED if identity is None."""
+        from src.handlers.account_operations import delete_my_account
+
+        result = delete_my_account({"identity": None}, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Caller identity is required" in result["message"]
+
+    def test_delete_account_missing_sub_claim(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test deletion fails with UNAUTHORIZED if identity lacks sub claim."""
+        from src.handlers.account_operations import delete_my_account
+
+        result = delete_my_account({"identity": {"username": "test-user"}}, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Caller identity is required" in result["message"]
+
+    def test_delete_account_empty_sub_claim(
+        self,
+        lambda_context: Any,
+    ) -> None:
+        """Test deletion fails with UNAUTHORIZED if identity sub claim is empty."""
+        from src.handlers.account_operations import delete_my_account
+
+        result = delete_my_account({"identity": {"sub": ""}}, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+        assert "Caller identity is required" in result["message"]
+
     def test_delete_account_missing_user_pool_id(
         self,
         dynamodb_table: Any,
@@ -595,6 +648,7 @@ class TestDeleteMyAccount:
         appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        capsys: Any,
     ) -> None:
         """Test deletion handles Cognito client errors."""
         from botocore.exceptions import ClientError
@@ -636,7 +690,15 @@ class TestDeleteMyAccount:
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-            assert "Failed to verify account in Cognito" in result["message"]
+            assert result["message"] == "Failed to delete account"
+            assert "AccessDenied" not in result["message"]
+            assert "ListUsers" not in result["message"]
+            assert "Cognito" not in result["message"]
+
+            captured = capsys.readouterr().out
+            assert "Cognito lookup failed before deletion" in captured
+            assert "AccessDenied" in captured
+            assert "ListUsers" in captured
         # Account should NOT be deleted from DynamoDB if pre-check fails
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is not None
 
@@ -647,6 +709,7 @@ class TestDeleteMyAccount:
         appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
+        capsys: Any,
     ) -> None:
         """Test deletion handles Cognito admin_delete_user errors (covers line 171)."""
         from botocore.exceptions import ClientError
@@ -694,12 +757,20 @@ class TestDeleteMyAccount:
                 "identity": {"sub": sample_account_id},
             }
 
-            # The AppError from line 171 is converted to an error payload by the decorator.
+            # The AppError is converted to an error payload by the decorator.
             result = delete_my_account(event, lambda_context)
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-            assert "Failed to delete account from Cognito" in result["message"]
+            assert result["message"] == "Failed to delete account"
+            assert "InternalError" not in result["message"]
+            assert "AdminDeleteUser" not in result["message"]
+            assert "Cognito" not in result["message"]
+
+            captured = capsys.readouterr().out
+            assert "Cognito error during account deletion" in captured
+            assert "InternalError" in captured
+            assert "AdminDeleteUser" in captured
 
     def test_delete_account_unexpected_exception(
         self,
@@ -901,6 +972,10 @@ class TestDeleteMyAccount:
 
                 assert result["__isError"] is True
                 assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+                assert result["message"] == "Failed to delete account"
+                assert "TooManyRequestsException" not in result["message"]
+                assert "AdminDeleteUser" not in result["message"]
+                assert "Cognito" not in result["message"]
                 assert mock_sleep.call_count == 2
                 assert mock_cognito.admin_delete_user.call_count == 3
 
@@ -1082,3 +1157,87 @@ class TestDeleteMyAccount:
                 count = _delete_user_s3_reports(sample_account_id, mock_logger)
                 assert count >= 3
                 mock_s3.delete_objects.assert_called()
+
+class TestCognitoFilterValidation:
+    """Tests for Cognito filter metacharacter validation on the self-service delete path (#124, #441)."""
+
+    @pytest.mark.parametrize(
+        "bad_sub", ['sub"quote', "sub\\backslash", "sub space"], ids=["quote", "backslash", "space"]
+    )
+    def test_delete_account_rejects_sub_with_filter_metachars(
+        self,
+        bad_sub: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A sub containing Cognito filter metacharacters is rejected before the ListUsers call."""
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+
+            event = {**appsync_event, "identity": {"sub": bad_sub}}
+
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+            mock_cognito.admin_delete_user.assert_not_called()
+
+    def test_delete_account_rejects_oversized_sub_before_filter(
+        self,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A sub longer than 256 chars is rejected by the validator before the ListUsers call (#124)."""
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+
+            event = {**appsync_event, "identity": {"sub": "a" * 257}}
+
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "bad_sub",
+        ['sub"quote', "sub\\backslash", "sub space", "a" * 257],
+        ids=["quote", "backslash", "space", "oversized"],
+    )
+    def test_lookup_rejects_metachars_before_cognito(self, bad_sub: str) -> None:
+        """_lookup_cognito_user_with_retry validates account_id before interpolating it into the filter."""
+        from src.handlers.account_operations import _lookup_cognito_user_with_retry
+
+        cognito = MagicMock()
+        with pytest.raises(AppError) as exc_info:
+            _lookup_cognito_user_with_retry(cognito, "us-east-1_test123", bad_sub, MagicMock())
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        cognito.list_users.assert_not_called()
+
+    def test_lookup_normal_sub_builds_filter(self, sample_account_id: str) -> None:
+        """A safe sub reaches Cognito and is interpolated into the ListUsers filter."""
+        from src.handlers.account_operations import _lookup_cognito_user_with_retry
+
+        cognito = MagicMock()
+        cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
+
+        result = _lookup_cognito_user_with_retry(cognito, "us-east-1_test123", sample_account_id, MagicMock())
+
+        assert result == "testuser@example.com"
+        cognito.list_users.assert_called_once_with(
+            UserPoolId="us-east-1_test123", Filter=f'sub = "{sample_account_id}"', Limit=1
+        )

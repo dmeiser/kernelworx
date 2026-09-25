@@ -16,10 +16,22 @@ variable "hsts_include_subdomains" {
 }
 
 locals {
-  # Mirrors the frontend <meta> CSP (frontend/index.html) during migration,
-  # plus frame-ancestors 'none' and base-uri 'self'. Tightening of
-  # connect-src to 'self' is a later phase, after same-origin is universal.
-  csp = "default-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://api.kernelworx.app https://api.dev.kernelworx.app https://login.dev.kernelworx.app https://login.kernelworx.app ws: wss:; frame-ancestors 'none'; base-uri 'self'"
+  # Mirrors the frontend <meta> CSP (frontend/index.html), plus
+  # frame-ancestors 'none' and base-uri 'self'. #440 tightened both policies:
+  # - img-src: the old trailing `https:` wildcard admitted arbitrary
+  #   third-party images (tracking/exfiltration surface). Enumerated real
+  #   image sources instead: 'self' (static assets), data: (MFA TOTP QR data
+  #   URLs), blob: (QR upload preview via URL.createObjectURL), and the
+  #   exact S3 virtual-hosted origins of the exports bucket that serves
+  #   payment QR presigned GET URLs. Both the regional
+  #   (<bucket>.s3.<region>.amazonaws.com) and legacy global
+  #   (<bucket>.s3.amazonaws.com) virtual-hosted styles are listed: the
+  #   pinned boto3/botocore in the Lambda layer defaults to the legacy
+  #   global endpoint for us-east-1 presigned URLs, so an allowlist of only
+  #   the regional host would block payment QR images in the browser.
+  # - connect-src: ws:/wss: removed; the app uses no WebSockets and an
+  #   allowed ws: scheme is a plaintext downgrade vector.
+  csp = "default-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob: https://${var.exports_bucket_name}.s3.${var.aws_region}.amazonaws.com https://${var.exports_bucket_name}.s3.amazonaws.com; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://api.kernelworx.app https://api.dev.kernelworx.app https://login.dev.kernelworx.app https://login.kernelworx.app; frame-ancestors 'none'; base-uri 'self'"
 }
 
 resource "aws_cloudfront_response_headers_policy" "security" {

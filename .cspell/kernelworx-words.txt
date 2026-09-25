@@ -204,6 +204,8 @@ md5
 meiser
 menuItem
 menuItems
+metacharacter
+metacharacters
 metachars
 middleware
 millis

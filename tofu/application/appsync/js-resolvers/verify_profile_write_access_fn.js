@@ -4,9 +4,10 @@ export function request(ctx) {
     // For idempotent delete operations ONLY, if item explicitly set to null by lookup function, skip auth
     // This preserves idempotent delete behavior (item already gone = success)
     // Check the correct field based on which operation
-    const isDeleteOperation = ctx.info.fieldName === 'deleteOrder' || ctx.info.fieldName === 'deleteCampaign' || ctx.info.fieldName === 'deleteCampaign';
-    const isDeletingOrder = ctx.info.fieldName === 'deleteOrder';
-    const isDeletingCampaign = ctx.info.fieldName === 'deleteCampaign' || ctx.info.fieldName === 'deleteCampaign';
+    const fieldName = ctx.info && ctx.info.fieldName;
+    const isDeletingOrder = fieldName === 'deleteOrder';
+    const isDeletingCampaign = fieldName === 'deleteCampaign';
+    const isDeleteOperation = isDeletingOrder || isDeletingCampaign;
     
     const itemNotFound = (isDeletingOrder && ctx.stash.order === null) || 
                      (isDeletingCampaign && ctx.stash.campaign === null);
@@ -25,7 +26,7 @@ export function request(ctx) {
     // For updateCampaign/deleteCampaign: use campaign.profileId from stash  
     let profileId = null;
     
-    if (ctx.args.input && ctx.args.input.profileId) {
+    if (ctx.args && ctx.args.input && ctx.args.input.profileId) {
         profileId = ctx.args.input.profileId;
     } else if (ctx.stash && ctx.stash.order) {
         // Orders have profileId attribute - use it directly (not PK which is the campaign key)
@@ -36,12 +37,16 @@ export function request(ctx) {
     }
     
     if (!profileId) {
-        util.error('Profile ID not found in request or stash - debugging: ' + JSON.stringify({
-        hasInput: !!ctx.args.input,
-        hasOrder: !!(ctx.stash && ctx.stash.order),
-        hasCampaign: !!(ctx.stash && ctx.stash.campaign),
-        orderKeys: ctx.stash && ctx.stash.order ? Object.keys(ctx.stash.order) : []
-        }), 'INVALID_INPUT');
+        console.error(
+            'Profile ID not found in request or stash: ' +
+                JSON.stringify({
+                    hasInput: !!(ctx.args && ctx.args.input),
+                    hasOrder: !!(ctx.stash && ctx.stash.order),
+                    hasCampaign: !!(ctx.stash && ctx.stash.campaign),
+                    orderKeys: ctx.stash && ctx.stash.order ? Object.keys(ctx.stash.order) : [],
+                })
+        );
+        util.error('Profile ID is required', 'INVALID_INPUT');
     }
     
     // Normalize profileId to DB format: ensure it starts with PROFILE#

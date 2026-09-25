@@ -1,7 +1,7 @@
 # KernelWorx Development - AWS Budgets & Cost Monitoring
 
 terraform {
-  required_version = ">= 1.8"
+  required_version = ">= 1.8.0"
 
   encryption {
     key_provider "pbkdf2" "main" {
