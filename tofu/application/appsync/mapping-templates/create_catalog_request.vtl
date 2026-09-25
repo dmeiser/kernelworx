@@ -49,7 +49,7 @@
         "catalogName": $util.dynamodb.toDynamoDBJson($ctx.args.input.catalogName),
         "catalogType": $util.dynamodb.toDynamoDBJson("USER_CREATED"),
         "ownerAccountId": $util.dynamodb.toDynamoDBJson("ACCOUNT#$ctx.identity.sub"),
-        "isPublic": $util.dynamodb.toDynamoDBJson($isPublicStr),
+        "isPublic": $util.dynamodb.toDynamoDBJson($ctx.args.input.isPublic),
         "isPublicStr": $util.dynamodb.toDynamoDBJson($isPublicStr),
         "products": $util.dynamodb.toDynamoDBJson($productsWithIds),
         "createdAt": $util.dynamodb.toDynamoDBJson($now),

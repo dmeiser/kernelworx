@@ -110,7 +110,7 @@ describe('catalog request VTL templates — emitted DynamoDB request', () => {
         const owner = request.attributeValues?.ownerAccountId ?? { S: 'ACCOUNT#user-sub-123' };
         expect(owner.S).toBe('ACCOUNT#user-sub-123');
         expect(request.attributeValues?.catalogType?.S ?? 'USER_CREATED').toBe('USER_CREATED');
-        expect(request.attributeValues?.isPublic?.S ?? request.update?.expressionValues?.[':isPublic']?.S).toBe('true');
+        expect(request.attributeValues?.isPublic?.BOOL ?? request.update?.expressionValues?.[':isPublic']?.BOOL).toBe(true);
       });
 
       test('accepts a zero price (free item)', () => {
@@ -145,7 +145,7 @@ describe('catalog request VTL templates — emitted DynamoDB request', () => {
           input.isPublic = false;
           const request = render(input);
           expect(request.key.catalogId.S).toMatch(/^CATALOG#/);
-          expect(request.attributeValues.isPublic.S).toBe('false');
+          expect(request.attributeValues.isPublic.BOOL).toBe(false);
           expect(request.attributeValues.isPublicStr.S).toBe('false');
         });
       }
