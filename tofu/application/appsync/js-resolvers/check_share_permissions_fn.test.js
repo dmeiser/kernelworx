@@ -103,6 +103,16 @@ describe('check_share_permissions_fn response', () => {
         assert.deepStrictEqual(result, { authorized: true });
     });
 
+    it('returns authorized: true when skipAuth is set', () => {
+        const ctx = {
+            stash: { skipAuth: true },
+        };
+
+        const result = response(ctx);
+
+        assert.deepStrictEqual(result, { authorized: true });
+    });
+
     it('propagates ctx.error', () => {
         const ctx = {
             stash: {},
@@ -115,7 +125,7 @@ describe('check_share_permissions_fn response', () => {
         );
     });
 
-    it('throws clean UNAUTHORIZED error without leaking share object when share has READ only', () => {
+    it('throws clean FORBIDDEN error without leaking share object when share has READ only', () => {
         const errorLogs = [];
         const originalConsoleError = console.error;
         console.error = (...args) => {
@@ -137,7 +147,7 @@ describe('check_share_permissions_fn response', () => {
                 (err) => {
                     assert.strictEqual(
                         err.message,
-                        'UNAUTHORIZED: Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only)'
+                        'FORBIDDEN: Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only)'
                     );
                     // Must not leak the internal share object shape to the client-facing error
                     assert.ok(!err.message.includes('{'), 'must not contain serialized object');
@@ -158,7 +168,7 @@ describe('check_share_permissions_fn response', () => {
         }
     });
 
-    it('throws UNAUTHORIZED when no share is found', () => {
+    it('throws FORBIDDEN when no share is found', () => {
         const ctx = {
             stash: {},
             result: null,
@@ -166,11 +176,11 @@ describe('check_share_permissions_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /UNAUTHORIZED: Forbidden: Only profile owner or users with WRITE permission can perform this action \(no share found\)/
+            /FORBIDDEN: Forbidden: Only profile owner or users with WRITE permission can perform this action \(no share found\)/
         );
     });
 
-    it('throws UNAUTHORIZED when share permissions field is invalid', () => {
+    it('throws FORBIDDEN when share permissions field is invalid', () => {
         const ctx = {
             stash: {},
             result: { profileId: 'PROFILE#p1', permissions: 'not-an-array' },
@@ -178,7 +188,7 @@ describe('check_share_permissions_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /UNAUTHORIZED: Forbidden: Share exists but permissions are invalid/
+            /FORBIDDEN: Forbidden: Share exists but permissions are invalid/
         );
     });
 
@@ -211,7 +221,7 @@ describe('check_share_permissions_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /UNAUTHORIZED: Forbidden: Only profile owner or users with WRITE permission can perform this action \(share is no longer valid\)/
+            /FORBIDDEN: Forbidden: Only profile owner or users with WRITE permission can perform this action \(share is no longer valid\)/
         );
     });
 });

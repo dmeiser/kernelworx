@@ -52,7 +52,7 @@ describe('verify_profile_owner_for_share_fn response', () => {
         assert.deepStrictEqual(ctx.stash.profile, profile);
     });
 
-    it('throws UNAUTHORIZED when profile is not found', () => {
+    it('throws FORBIDDEN when profile is not found', () => {
         const ctx = {
             stash: {},
             result: null
@@ -60,7 +60,7 @@ describe('verify_profile_owner_for_share_fn response', () => {
 
         assert.throws(
             () => response(ctx),
-            /UNAUTHORIZED: Forbidden: Only profile owner can share profiles/
+            /FORBIDDEN: Forbidden: Only profile owner can share profiles/
         );
     });
 

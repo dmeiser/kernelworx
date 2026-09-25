@@ -338,6 +338,16 @@ describe('isAuthError', () => {
       },
     ]);
     expect(isAuthError(error)).toBe(false);
+
+    const forbiddenResolverError = createApolloError('Forbidden', [
+      {
+        message: 'Forbidden: Only profile owner can create invites',
+        locations: [],
+        path: ['createProfileInvite'],
+        extensions: { errorType: 'FORBIDDEN' },
+      },
+    ]);
+    expect(isAuthError(forbiddenResolverError)).toBe(false);
   });
 });
 
@@ -352,6 +362,16 @@ describe('isForbiddenError', () => {
       },
     ]);
     expect(isForbiddenError(error)).toBe(true);
+
+    const forbiddenResolverError = createApolloError('Forbidden', [
+      {
+        message: 'Forbidden: Only profile owner can create invites',
+        locations: [],
+        path: ['createProfileInvite'],
+        extensions: { errorType: 'FORBIDDEN' },
+      },
+    ]);
+    expect(isForbiddenError(forbiddenResolverError)).toBe(true);
   });
 
   it('should return false for other errors', () => {

@@ -56,12 +56,12 @@ export function response(ctx) {
     
     // No share found - access denied
     if (!share || !share.profileId) {
-        util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (no share found)', 'UNAUTHORIZED');
+        util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (no share found)', 'FORBIDDEN');
     }
     
     // Share exists but doesn't have permissions field - deny
     if (!share.permissions || !Array.isArray(share.permissions)) {
-        util.error('Forbidden: Share exists but permissions are invalid', 'UNAUTHORIZED');
+        util.error('Forbidden: Share exists but permissions are invalid', 'FORBIDDEN');
     }
     
     // Check if caller has WRITE permission via share
@@ -69,7 +69,7 @@ export function response(ctx) {
         const profile = ctx.stash.profile;
         const currentOwner = profile && profile.ownerAccountId;
         if (share.ownerAccountId && currentOwner && share.ownerAccountId !== currentOwner) {
-            util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share is no longer valid)', 'UNAUTHORIZED');
+            util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share is no longer valid)', 'FORBIDDEN');
         }
         ctx.stash.share = share;
         return { authorized: true };
@@ -81,5 +81,5 @@ export function response(ctx) {
         'Share permission check failed (READ only): ' +
             JSON.stringify({ profileId: share.profileId, permissions: share.permissions })
     );
-    util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only)', 'UNAUTHORIZED');
+    util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only)', 'FORBIDDEN');
 }
