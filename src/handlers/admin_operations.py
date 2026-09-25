@@ -21,6 +21,7 @@ from botocore.exceptions import ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+from .account_operations import _delete_all_user_data
 from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_deleted
 
 # Handle both Lambda (absolute) and unit test (relative) imports
@@ -29,13 +30,11 @@ try:  # pragma: no cover
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
-    from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
-    from ..utils.payment_methods import delete_all_user_qr_codes
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -765,22 +764,6 @@ def _account_exists_in_dynamodb(account_id: str, logger: Any) -> bool:
         raise
 
 
-def _delete_account_from_dynamodb(account_id: str, logger: Any) -> None:
-    """Delete account from DynamoDB.
-
-    Non-existent items are silently successful (DynamoDB delete_item does not
-    raise for missing keys). Other ClientErrors are propagated so that Cognito
-    deletion is not attempted while account data remains.
-    """
-    db_account_id = _normalize_account_id(account_id)
-    try:
-        tables.accounts.delete_item(Key={"accountId": db_account_id})
-        logger.info("Deleted account from DynamoDB", account_id=db_account_id)
-    except ClientError as e:
-        logger.error("Failed to delete account from DynamoDB", error=str(e), account_id=db_account_id)
-        raise
-
-
 def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any) -> str:
     """Find username by email. Returns username."""
     # Validate before interpolating into the Cognito filter to prevent
@@ -905,14 +888,9 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     if not username and not account_exists:
         raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
 
-    # Delete DynamoDB data first so a partially-deleted Cognito state does not
-    # leave account records orphaned.
-    _delete_invites_for_owned_profiles(account_id, logger)
-    _delete_inbound_shares(account_id, logger)
-    _delete_account_from_dynamodb(account_id, logger)
-
-    # Delete payment method QR codes from S3 per captain decision
-    delete_all_user_qr_codes(account_id, logger)
+    # Delete all user data from DynamoDB and S3 using the shared cascade so
+    # a partially-deleted Cognito state does not leave records orphaned (#435).
+    _delete_all_user_data(account_id, context, logger)
 
     if username:
         _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)

@@ -12,6 +12,7 @@ Tests for:
 - createManagedCatalog
 """
 
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict
@@ -1678,6 +1679,224 @@ class TestAdminDeleteUser:
                 ExpressionAttributeValues={":tid": account_id_key},
             )
             assert len(inbound_response.get("Items", [])) == 0
+            assert (
+                profiles_table.get_item(Key={"ownerAccountId": account_id_key, "profileId": profile_id}).get("Item")
+                is None
+            )
+
+    def test_admin_delete_user_full_cascade(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        profiles_table: Any,
+        campaigns_table: Any,
+        catalogs_table: Any,
+        orders_table: Any,
+        shares_table: Any,
+        invites_table: Any,
+        s3_bucket: Any,
+    ) -> None:
+        """Test that admin_delete_user executes the full deletion cascade (issue #435)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+        monkeypatch.setenv("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-v2-ue1-dev")
+        monkeypatch.setenv("CATALOGS_TABLE_NAME", "kernelworx-catalogs-ue1-dev")
+        monkeypatch.setenv("ORDERS_TABLE_NAME", "kernelworx-orders-v2-ue1-dev")
+        monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
+        monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
+
+        target_account_id = "11111111-1111-1111-1111-111111111111"
+        account_id_key = f"ACCOUNT#{target_account_id}"
+        profile_id = "PROFILE#test-profile-123"
+        campaign_id = "CAMPAIGN#test-campaign-123"
+        catalog_id = "CATALOG#test-catalog-123"
+        order_id = "ORDER#test-order-123"
+        invite_code = "INVITE#test-invite-123"
+
+        # 0. Put payment QR code in S3
+        qr_key = f"payment-qr-codes/{target_account_id}/venmo.png"
+        s3_bucket.put_object(Bucket=os.environ["EXPORTS_BUCKET"], Key=qr_key, Body=b"fake-qr-code")
+
+        # 0b. Put report objects in S3 (both prefixed and unprefixed)
+        clean_profile_id = profile_id.replace("PROFILE#", "")
+        s3_bucket.put_object(
+            Bucket=os.environ["EXPORTS_BUCKET"],
+            Key=f"reports/{profile_id}/c1/report.xlsx",
+            Body=b"fake-report",
+        )
+        s3_bucket.put_object(
+            Bucket=os.environ["EXPORTS_BUCKET"],
+            Key=f"reports/{clean_profile_id}/c1/report.xlsx",
+            Body=b"fake-report",
+        )
+
+        # 1. Create account
+        accounts_table = get_accounts_table()
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "target@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # 2. Create profile (owned by test account)
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": account_id_key,
+                "profileId": profile_id,
+                "sellerName": "Test Scout",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # 3. Create campaign (linked to profile)
+        campaigns_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "campaignId": campaign_id,
+                "campaignName": "Fall 2025",
+                "catalogId": catalog_id,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # 4. Create CATALOG (owned by test account) - preserved per product design
+        catalogs_table.put_item(
+            Item={
+                "catalogId": catalog_id,
+                "ownerAccountId": account_id_key,
+                "catalogName": "Test Catalog",
+                "products": [{"productId": "PROD1", "name": "Popcorn", "price": Decimal("10.0")}],
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "isDeleted": False,
+            }
+        )
+
+        # 5. Create order (linked to campaign)
+        orders_table.put_item(
+            Item={
+                "campaignId": campaign_id,
+                "orderId": order_id,
+                "profileId": profile_id,
+                "customerName": "John Doe",
+                "totalAmount": Decimal("10.0"),
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # 6. Create share (profile shared with another user)
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": "ACCOUNT#other-user",
+                "permissions": ["READ", "WRITE"],
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # 7. Create invite for the owned profile
+        invites_table.put_item(
+            Item={
+                "inviteCode": invite_code,
+                "profileId": profile_id,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # 8. Create inbound share where the deleted account is the target
+        shares_table.put_item(
+            Item={
+                "profileId": "PROFILE#shared-with-me",
+                "targetAccountId": account_id_key,
+                "permissions": ["READ"],
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "cognito-username-123",
+                        "Attributes": [
+                            {"Name": "sub", "Value": target_account_id},
+                            {"Name": "email", "Value": "target@example.com"},
+                        ],
+                    }
+                ]
+            }
+            mock_cognito.admin_delete_user.return_value = {}
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_delete_user(event, lambda_context)
+
+            assert result is True
+
+            # Verify Cognito user was deleted
+            mock_cognito.admin_delete_user.assert_called_once_with(
+                UserPoolId="test-pool-id", Username="cognito-username-123"
+            )
+
+        # Verify EVERYTHING is deleted except catalogs
+        # 1. Account record should be gone
+        assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
+
+        # 2. Profile should be gone
+        assert (
+            profiles_table.get_item(Key={"ownerAccountId": account_id_key, "profileId": profile_id}).get("Item") is None
+        )
+
+        # 3. Campaign should be gone
+        assert campaigns_table.get_item(Key={"profileId": profile_id, "campaignId": campaign_id}).get("Item") is None
+
+        # 4. Orders should be gone
+        assert orders_table.get_item(Key={"campaignId": campaign_id, "orderId": order_id}).get("Item") is None
+
+        # 5. Outbound share should be gone
+        assert (
+            shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": "ACCOUNT#other-user"}).get("Item")
+            is None
+        )
+
+        # 6. Invite should be gone
+        assert invites_table.get_item(Key={"inviteCode": invite_code}).get("Item") is None
+
+        # 7. Inbound share should be gone
+        assert (
+            shares_table.get_item(Key={"profileId": "PROFILE#shared-with-me", "targetAccountId": account_id_key}).get(
+                "Item"
+            )
+            is None
+        )
+
+        # 8. Payment QR code in S3 should be gone
+        s3 = boto3.client("s3", region_name="us-east-1")
+        response = s3.list_objects_v2(
+            Bucket=os.environ["EXPORTS_BUCKET"], Prefix=f"payment-qr-codes/{target_account_id}/"
+        )
+        assert response.get("KeyCount", 0) == 0
+
+        # 9. Reports in S3 should be gone
+        response = s3.list_objects_v2(Bucket=os.environ["EXPORTS_BUCKET"], Prefix=f"reports/{profile_id}/")
+        assert response.get("KeyCount", 0) == 0
+        response = s3.list_objects_v2(Bucket=os.environ["EXPORTS_BUCKET"], Prefix=f"reports/{clean_profile_id}/")
+        assert response.get("KeyCount", 0) == 0
+
+        # 10. CATALOG MUST STILL EXIST (catalogs are preserved per product design)
+        catalog_item = catalogs_table.get_item(Key={"catalogId": catalog_id}).get("Item")
+        assert catalog_item is not None
+        assert catalog_item.get("isDeleted") is not True
 
     def test_dynamodb_deleted_before_cognito(
         self,
@@ -3800,52 +4019,6 @@ class TestAccountDeletionHelpers:
             )
             with pytest.raises(ClientError):
                 _account_exists_in_dynamodb("test-user", MagicMock())
-
-    def test_delete_account_from_dynamodb_unprefixed(self, dynamodb_table: Any) -> None:
-        """_delete_account_from_dynamodb deletes item using normalized key from unprefixed ID."""
-        from src.handlers.admin_operations import _delete_account_from_dynamodb
-
-        accounts_table = get_accounts_table()
-        target_account_id = "11111111-1111-1111-1111-111111111111"
-        accounts_table.put_item(
-            Item={
-                "accountId": f"ACCOUNT#{target_account_id}",
-                "email": "target@example.com",
-            }
-        )
-
-        _delete_account_from_dynamodb(target_account_id, MagicMock())
-        response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
-        assert "Item" not in response
-
-    def test_delete_account_from_dynamodb_prefixed(self, dynamodb_table: Any) -> None:
-        """_delete_account_from_dynamodb deletes item using normalized key from prefixed ID."""
-        from src.handlers.admin_operations import _delete_account_from_dynamodb
-
-        accounts_table = get_accounts_table()
-        target_account_id = "11111111-1111-1111-1111-111111111111"
-        accounts_table.put_item(
-            Item={
-                "accountId": f"ACCOUNT#{target_account_id}",
-                "email": "target@example.com",
-            }
-        )
-
-        _delete_account_from_dynamodb(f"ACCOUNT#{target_account_id}", MagicMock())
-        response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
-        assert "Item" not in response
-
-    def test_delete_account_from_dynamodb_client_error(self) -> None:
-        """_delete_account_from_dynamodb propagates ClientError."""
-        from src.handlers.admin_operations import _delete_account_from_dynamodb
-
-        with patch("src.handlers.admin_operations.tables.accounts.delete_item") as mock_delete:
-            mock_delete.side_effect = ClientError(
-                {"Error": {"Code": "ResourceNotFoundException", "Message": "Table not found"}},
-                "DeleteItem",
-            )
-            with pytest.raises(ClientError):
-                _delete_account_from_dynamodb("test-user", MagicMock())
 
 
 class TestGetCognitoClient:

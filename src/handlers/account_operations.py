@@ -57,7 +57,7 @@ def _delete_user_s3_reports(account_id: str, logger: Any) -> int:
     return total_deleted
 
 
-def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
+def _delete_all_user_data(account_id: str, context: Any = None, logger: Any = None) -> None:
     """Delete all user data from DynamoDB and S3 using shared deletion internals."""
     from .admin_operations import (
         _delete_inbound_shares,
@@ -66,22 +66,33 @@ def _delete_all_user_data(account_id: str, context: Any, logger: Any) -> None:
         _delete_user_orders,
         _delete_user_profiles,
         _delete_user_shares,
+        _normalize_account_id,
     )
 
-    _delete_user_orders(account_id, logger)
-    _delete_user_campaigns(account_id, logger)
-    _delete_user_shares(account_id, logger)
-    _delete_invites_for_owned_profiles(account_id, logger)
-    _delete_inbound_shares(account_id, logger)
-    _delete_user_s3_reports(account_id, logger)
-    _delete_user_profiles(account_id, logger)
+    log = logger or get_logger(__name__)
+
+    _delete_user_orders(account_id, log)
+    _delete_user_campaigns(account_id, log)
+    _delete_user_shares(account_id, log)
+    _delete_invites_for_owned_profiles(account_id, log)
+    _delete_inbound_shares(account_id, log)
+    _delete_user_s3_reports(account_id, log)
+    _delete_user_profiles(account_id, log)
     # Catalogs are preserved per product design and should never be deleted.
     # Delete payment method QR codes from S3 per captain decision
-    delete_all_user_qr_codes(account_id, logger)
+    delete_all_user_qr_codes(account_id, log)
 
-    account_id_key = f"ACCOUNT#{account_id}"
-    tables.accounts.delete_item(Key={"accountId": account_id_key})
-    logger.info("Deleted all user data from DynamoDB")
+    account_id_key = _normalize_account_id(account_id)
+    try:
+        tables.accounts.delete_item(Key={"accountId": account_id_key})
+        log.info("Deleted account from DynamoDB", account_id=account_id_key)
+    except ClientError as e:
+        log.error("Failed to delete account from DynamoDB", error=str(e), account_id=account_id_key)
+        raise
+    log.info("Deleted all user data from DynamoDB")
+
+
+delete_all_user_data = _delete_all_user_data
 
 
 def _lookup_cognito_user_with_retry(cognito: Any, user_pool_id: str, account_id: str, logger: Any) -> str | None:
