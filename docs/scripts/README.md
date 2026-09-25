@@ -242,11 +242,12 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 
 - **Complexity gate (xenon over radon)** — CI fails when the average cyclomatic
   complexity of `src/` exceeds Grade A (<=5) or any single block exceeds Grade B
-  (<=10): `uv run xenon --max-average A --max-absolute B src/`. Three files
-  (`src/handlers/admin_operations.py`, `src/utils/payment_methods.py`,
-  `src/utils/logging.py`) are excluded because they contain legacy Grade C blocks
-  (5 functions, CC 11-17); drop their exclusions as those functions are
-  refactored, then tighten `--max-absolute` to A once every function grades A.
+  (<=10): `uv run xenon --max-average A --max-absolute B --exclude
+  '*payment_methods.py,*logging.py' src/`. Two files
+  (`src/utils/payment_methods.py`, `src/utils/logging.py`) are excluded because
+  they contain legacy Grade C blocks; drop their exclusions as those functions
+  are refactored, then tighten `--max-absolute` to A once every function grades
+  A.
   Radon remains the analysis engine — run `uv run radon cc src/ -a -s` for
   per-function detail.
 - **`build-resolvers.mjs`** must be run (or triggered automatically by deploy scripts) before

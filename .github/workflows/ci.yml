@@ -54,7 +54,7 @@ jobs:
         # then tighten --max-absolute to A once every function grades A.
         run: |
           uv run xenon --max-average A --max-absolute B \
-            --exclude '*admin_operations.py,*payment_methods.py,*logging.py' \
+            --exclude '*payment_methods.py,*logging.py' \
             src/
 
       - name: Pytest (unit coverage)
