@@ -310,12 +310,12 @@ class TestListUnitCatalogsScope:
         # Only the owned profile's catalog is accessible.
         assert [catalog["catalogId"] for catalog in result] == [CATALOG_ID]
         # profiles GSI query + owned BatchGetItem + shares BatchGetItem (miss)
-        # + campaigns query + catalogs GetItem.
+        # + campaigns query + catalogs BatchGetItem (#450).
         assert ("Query", PROFILES_TABLE) in api_calls.dynamodb_calls
         assert ("BatchGetItem", PROFILES_TABLE) in api_calls.dynamodb_calls
         assert ("BatchGetItem", SHARES_TABLE) in api_calls.dynamodb_calls
         assert ("Query", CAMPAIGNS_TABLE) in api_calls.dynamodb_calls
-        assert ("GetItem", CATALOGS_TABLE) in api_calls.dynamodb_calls
+        assert ("BatchGetItem", CATALOGS_TABLE) in api_calls.dynamodb_calls
         assert_within_account_reporting_role_scope(api_calls)
 
     def test_owner_sees_unit_campaign_catalogs(
@@ -360,10 +360,10 @@ class TestListUnitCatalogsScope:
         assert [catalog["catalogId"] for catalog in result] == [CATALOG_ID]
         # campaigns unitCampaignKey-index query + owned BatchGetItem on
         # profiles (owned hit short-circuits the shares batch) + catalogs
-        # GetItem.
+        # BatchGetItem (#450).
         assert ("Query", CAMPAIGNS_TABLE) in api_calls.dynamodb_calls
         assert ("BatchGetItem", PROFILES_TABLE) in api_calls.dynamodb_calls
-        assert ("GetItem", CATALOGS_TABLE) in api_calls.dynamodb_calls
+        assert ("BatchGetItem", CATALOGS_TABLE) in api_calls.dynamodb_calls
         assert_within_account_reporting_role_scope(api_calls)
 
 

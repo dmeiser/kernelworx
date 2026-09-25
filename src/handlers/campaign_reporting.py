@@ -1,7 +1,8 @@
 """Lambda resolver for campaign-level reporting using campaign-based queries."""
 
+from concurrent.futures import ThreadPoolExecutor
 from decimal import ROUND_HALF_UP, Decimal
-from typing import TYPE_CHECKING, Any, Dict, List, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 from boto3.dynamodb.conditions import Key
 
@@ -65,21 +66,49 @@ def _group_campaigns_by_profile(campaigns: List[Dict[str, Any]]) -> Dict[str, Li
     return profile_campaigns
 
 
-def _get_accessible_profiles(profile_ids: list[str], caller_account_id: str) -> Dict[str, Dict[str, Any]]:
-    """Get profiles that caller has READ access to, using batched authorization."""
-    accessible_profiles: Dict[str, Dict[str, Any]] = {}
-    accessible_ids = batch_check_profile_access(caller_account_id, profile_ids, required_permission="READ")
+_PROFILE_BATCH_LIMIT = 100
 
-    for profile_id in accessible_ids:
-        profile_response = tables.profiles.query(
-            IndexName="profileId-index",
-            KeyConditionExpression="profileId = :profileId",
-            ExpressionAttributeValues={":profileId": ensure_profile_id(profile_id)},
-            Limit=1,
-        )
-        profile_items = profile_response.get("Items", [])
-        if profile_items:
-            accessible_profiles[profile_id] = profile_items[0]
+
+def _query_single_profile(profile_id: str) -> Optional[tuple[str, Dict[str, Any]]]:
+    """Query a single profile by profileId via profileId-index."""
+    profile_response = tables.profiles.query(
+        IndexName="profileId-index",
+        KeyConditionExpression="profileId = :profileId",
+        ExpressionAttributeValues={":profileId": ensure_profile_id(profile_id)},
+        Limit=1,
+    )
+    profile_items = profile_response.get("Items", [])
+    if profile_items:
+        return profile_id, profile_items[0]
+    return None
+
+
+def _batch_query_profiles_chunk(chunk_ids: list[str]) -> list[tuple[str, Dict[str, Any]]]:
+    """Query a chunk of profiles in parallel using ThreadPoolExecutor."""
+    max_workers = min(10, len(chunk_ids))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(_query_single_profile, chunk_ids))
+    return [r for r in results if r is not None]
+
+
+def _get_accessible_profiles(profile_ids: list[str], caller_account_id: str) -> Dict[str, Dict[str, Any]]:
+    """Get profiles that caller has READ access to, using batched authorization and parallel chunked queries."""
+    if not profile_ids:
+        return {}
+
+    accessible_ids = batch_check_profile_access(caller_account_id, profile_ids, required_permission="READ")
+    if not accessible_ids:
+        return {}
+
+    sorted_accessible = sorted(accessible_ids)
+    accessible_profiles: Dict[str, Dict[str, Any]] = {}
+
+    for i in range(0, len(sorted_accessible), _PROFILE_BATCH_LIMIT):
+        chunk = sorted_accessible[i : i + _PROFILE_BATCH_LIMIT]
+        chunk_results = _batch_query_profiles_chunk(chunk)
+        for profile_id, profile_item in chunk_results:
+            accessible_profiles[profile_id] = profile_item
+
     return accessible_profiles
 
 

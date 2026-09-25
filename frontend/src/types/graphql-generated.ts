@@ -281,7 +281,7 @@ export type GqlCreateOrderInput = {
 
 /** Input for createProfileInvite. Creates a redeemable invite to join a profile (owner only). */
 export type GqlCreateProfileInviteInput = {
-  /** How many days until the invite expires; defaults to 14 if omitted. */
+  /** How many days until the invite expires; defaults to 14 if omitted. Must be an integer between 1 and 14. */
   expiresInDays?: InputMaybe<Scalars['Int']['input']>;
   /** The permissions the invite grants once redeemed (READ and/or WRITE). */
   permissions: Array<GqlPermissionType>;

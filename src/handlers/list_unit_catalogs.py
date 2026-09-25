@@ -1,18 +1,23 @@
 """Lambda resolver for listing catalogs used in a unit."""
 
-from typing import TYPE_CHECKING, Any, Dict, List, Set
+import os
+import time
+from typing import TYPE_CHECKING, Any, Dict, List, Set, cast
 
 from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import batch_check_profile_access
-    from utils.dynamodb import tables
+    from utils.dynamodb import get_dynamodb_resource, tables
+    from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import batch_check_profile_access
-    from ..utils.dynamodb import tables
+    from ..utils.dynamodb import get_dynamodb_resource, tables
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
 
@@ -58,16 +63,93 @@ def _collect_catalog_ids(profiles: List[Dict[str, Any]], campaign_name: str, cam
     return catalog_ids
 
 
+_CATALOG_BATCH_GET_LIMIT = 100
+_THROTTLING_ERROR_CODES = {
+    "ProvisionedThroughputExceededException",
+    "ThrottlingException",
+    "RequestLimitExceeded",
+}
+
+
+def _get_catalogs_table_name() -> str:
+    """Get the catalogs table name from env or tables accessor."""
+    return cast(
+        str,
+        os.environ.get("CATALOGS_TABLE_NAME") or getattr(tables.catalogs, "table_name", "kernelworx-catalogs-ue1-dev"),
+    )
+
+
+def _batch_get_unprocessed_keys(response: Dict[str, Any], table_name: str) -> list[Dict[str, Any]]:
+    """Extract the unprocessed keys DynamoDB reports for a table in a BatchGetItem response."""
+    return cast(list[Dict[str, Any]], response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", []))
+
+
+def _fetch_catalog_batch_attempt(
+    keys_to_fetch: list[Dict[str, str]],
+    catalogs_table_name: str,
+    catalog_map: Dict[str, Dict[str, Any]],
+    attempt: int,
+) -> list[Dict[str, Any]]:
+    """Run one BatchGetItem attempt; store returned items and return unprocessed keys."""
+    try:
+        response = get_dynamodb_resource().batch_get_item(RequestItems={catalogs_table_name: {"Keys": keys_to_fetch}})
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in _THROTTLING_ERROR_CODES:
+            logger.warning("Catalog batch lookup throttled", error=str(e), error_code=error_code)
+            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from e
+        logger.error("Catalog batch lookup failed", error=str(e), error_code=error_code)
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to load catalogs") from e
+    except Exception as e:
+        logger.error("Catalog batch lookup failed unexpectedly", error=str(e))
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to load catalogs") from e
+
+    for item in response.get("Responses", {}).get(catalogs_table_name, []):
+        catalog_map[item["catalogId"]] = item
+
+    unprocessed = _batch_get_unprocessed_keys(response, catalogs_table_name)
+    if unprocessed and attempt < 2:
+        logger.warning(
+            "Unprocessed catalog keys, retrying",
+            attempt=attempt + 1,
+            count=len(unprocessed),
+        )
+        time.sleep(0.05 * (2**attempt))
+    return unprocessed
+
+
+def _fetch_catalog_keys_with_retry(
+    keys: list[Dict[str, str]], catalogs_table_name: str, catalog_map: Dict[str, Dict[str, Any]]
+) -> list[Dict[str, Any]]:
+    """Fetch one 100-key chunk, retrying unprocessed keys for up to 3 attempts."""
+    keys_to_fetch = keys
+    for attempt in range(3):
+        if not keys_to_fetch:
+            break
+        keys_to_fetch = _fetch_catalog_batch_attempt(keys_to_fetch, catalogs_table_name, catalog_map, attempt)
+    return keys_to_fetch
+
+
 def _fetch_catalogs(catalog_ids: Set[str]) -> List[Dict[str, Any]]:
-    """Fetch catalog details for given catalog IDs."""
-    catalogs: List[Dict[str, Any]] = []
-    for catalog_id in catalog_ids:
-        try:
-            catalog_response = tables.catalogs.get_item(Key={"catalogId": catalog_id})
-            if "Item" in catalog_response:
-                catalogs.append(catalog_response["Item"])
-        except Exception as e:
-            logger.warning(f"Failed to fetch catalog {catalog_id}: {str(e)}")
+    """Fetch catalog details for given catalog IDs using chunked BatchGetItem."""
+    if not catalog_ids:
+        return []
+
+    sorted_ids = sorted(catalog_ids)
+    catalogs_table_name = _get_catalogs_table_name()
+    catalog_map: Dict[str, Dict[str, Any]] = {}
+
+    for i in range(0, len(sorted_ids), _CATALOG_BATCH_GET_LIMIT):
+        chunk = sorted_ids[i : i + _CATALOG_BATCH_GET_LIMIT]
+        batch = [{"catalogId": cid} for cid in chunk]
+        keys_unprocessed = _fetch_catalog_keys_with_retry(batch, catalogs_table_name, catalog_map)
+        if keys_unprocessed:
+            raise AppError(
+                ErrorCode.INTERNAL_ERROR,
+                f"DynamoDB BatchGetItem failed to return {len(keys_unprocessed)} keys after retries",
+            )
+
+    catalogs = list(catalog_map.values())
     catalogs.sort(key=lambda c: c.get("catalogName", ""))
     return catalogs
 
