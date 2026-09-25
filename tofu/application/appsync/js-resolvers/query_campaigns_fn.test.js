@@ -41,6 +41,17 @@ describe('query_campaigns_fn request', () => {
         assert.strictEqual(result.nextToken, 'tok-1');
     });
 
+    it('clamps an over-limit page size to MAX_PAGE_LIMIT', () => {
+        const ctx = {
+            stash: { authorized: true },
+            args: { profileId: 'p1', limit: 500 },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.limit, 100);
+    });
+
     it('ignores a non-positive limit', () => {
         const ctx = {
             stash: { authorized: true },
@@ -52,8 +63,29 @@ describe('query_campaigns_fn request', () => {
         assert.strictEqual(result.limit, undefined);
     });
 
+    it('ignores a null limit', () => {
+        const ctx = {
+            stash: { authorized: true },
+            args: { profileId: 'p1', limit: null },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.limit, undefined);
+    });
+
     it('returns a no-op query when not authorized or profile not found', () => {
         const ctx = { stash: {}, args: { profileId: 'p1' } };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, 'Query');
+        assert.strictEqual(result.query.expressionValues[':profileId'], 'NOOP');
+        assert.strictEqual(result.limit, 1);
+    });
+
+    it('returns a no-op query when profile is not found even if authorized', () => {
+        const ctx = { stash: { authorized: true, profileNotFound: true }, args: { profileId: 'p1' } };
 
         const result = request(ctx);
 
@@ -104,5 +136,22 @@ describe('query_campaigns_fn response', () => {
         const result = response(ctx);
 
         assert.deepStrictEqual(result, { campaigns: [], nextToken: null });
+    });
+
+    it('returns an empty connection when profile not found even if authorized', () => {
+        const ctx = { stash: { authorized: true, profileNotFound: true }, result: { items: [{ campaignId: 'c1' }] } };
+
+        const result = response(ctx);
+
+        assert.deepStrictEqual(result, { campaigns: [], nextToken: null });
+    });
+
+    it('throws error when ctx.error is present', () => {
+        const ctx = {
+            error: { message: 'DynamoDB error', type: 'InternalServerError' },
+            stash: { authorized: true },
+        };
+
+        assert.throws(() => response(ctx), /InternalServerError: DynamoDB error/);
     });
 });

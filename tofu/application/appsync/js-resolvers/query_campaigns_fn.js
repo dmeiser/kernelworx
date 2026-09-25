@@ -1,5 +1,7 @@
 import { util } from '@aws-appsync/utils';
 
+const MAX_PAGE_LIMIT = 100;
+
 export function request(ctx) {
     // If not authorized or profile not found, return no-op
     if (!ctx.stash.authorized || ctx.stash.profileNotFound) {
@@ -27,7 +29,7 @@ export function request(ctx) {
 
     const limit = ctx.args.limit;
     if (typeof limit === 'number' && limit > 0) {
-        request.limit = limit;
+        request.limit = Math.min(limit, MAX_PAGE_LIMIT);
     }
     if (ctx.args.nextToken) {
         request.nextToken = ctx.args.nextToken;
