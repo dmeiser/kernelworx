@@ -855,10 +855,13 @@ def _check_not_self_deletion(caller_id: str, account_id: str) -> None:
 @with_error_handling(error_message="Failed to delete user")
 def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     """
-    Delete user from Cognito and DynamoDB (admin only).
+    Delete a user and all their data from Cognito, DynamoDB, and S3 (admin only).
 
     AppSync Lambda resolver for adminDeleteUser mutation.
-    Deletes user from Cognito User Pool and removes Account record from DynamoDB.
+    Deletes all user data (orders, campaigns, shares, invites, inbound shares,
+    S3 reports, profiles, payment method QR codes, and the Account record;
+    catalogs are preserved) via the shared _delete_all_user_data cascade, then
+    deletes the user from the Cognito User Pool.
 
     Args:
         event: AppSync event with identity and arguments
