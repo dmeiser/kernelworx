@@ -28,7 +28,7 @@ export function request(ctx) {
     validatePermissions(permissions);
 
     const now = util.time.nowISO8601();
-    
+
     // Get ownerAccountId from stash - check profile (shareProfileDirect) or invite (redeemProfileInvite)
     var ownerAccountId = null;
     if (ctx.stash && ctx.stash.profile && ctx.stash.profile.ownerAccountId) {
