@@ -40,8 +40,13 @@ export function request(ctx) {
     // Get ownerAccountId from profile in stash (for BatchGetItem on profiles table)
     const ownerAccountId = ctx.stash.profile ? ctx.stash.profile.ownerAccountId : null;
     
-    // Generate invite code (first 10 chars of UUID, uppercase)
-    const inviteCode = util.autoId().substring(0, 10).toUpperCase();
+    // Generate invite code (16-character alphanumeric string, 64 bits of entropy:
+    // 12 random hex chars from one UUIDv4 plus 4 from a second, since a single v4 UUID
+    // embeds a fixed version nibble within any 16-char window)
+    const inviteCode = (
+        util.autoId().split('-').join('').substring(0, 12) +
+        util.autoId().split('-').join('').substring(0, 4)
+    ).toUpperCase();
     
     // Calculate expiry (default 14 days, or custom expiresInDays bounded to 14)
     const daysUntilExpiry = resolveExpiryDays(input.expiresInDays);

@@ -1,8 +1,24 @@
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
+import { util } from '@aws-appsync/utils';
 import { request, response } from './create_invite_fn.js';
 
 describe('create_invite_fn request', () => {
+    const originalAutoId = util.autoId;
+    let autoIdCalls;
+    beforeEach(() => {
+        autoIdCalls = 0;
+        util.autoId = () => {
+            autoIdCalls += 1;
+            return autoIdCalls === 1
+                ? 'c73bcdcc-2669-4bf6-81d3-e4ae73fb11fd'
+                : '9f1c2ab3-7e54-4d8f-9a3b-1c2d3e4f5a6b';
+        };
+    });
+    afterEach(() => {
+        util.autoId = originalAutoId;
+    });
+
     it('builds PutItem request with normalized values', () => {
         const ctx = {
             args: {
@@ -26,8 +42,11 @@ describe('create_invite_fn request', () => {
         assert.deepStrictEqual(result.attributeValues.permissions, ['READ']);
         assert.strictEqual(result.attributeValues.createdBy, 'owner1');
         assert.strictEqual(result.attributeValues.used, false);
-        assert.strictEqual(result.attributeValues.inviteCode.length, 10);
+        assert.strictEqual(result.attributeValues.inviteCode.length, 16);
         assert.strictEqual(result.attributeValues.inviteCode, result.attributeValues.inviteCode.toUpperCase());
+        assert.match(result.attributeValues.inviteCode, /^[A-Z0-9]{16}$/);
+        assert.strictEqual(autoIdCalls, 2);
+        assert.strictEqual(result.attributeValues.inviteCode, 'C73BCDCC26699F1C');
         assert.strictEqual(result.attributeValues.expiresAt, 1704672000);
         assert.strictEqual(result.condition.expression, 'attribute_not_exists(inviteCode)');
         assert.strictEqual(ctx.stash.inviteCode, result.attributeValues.inviteCode);

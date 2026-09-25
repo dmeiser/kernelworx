@@ -242,7 +242,7 @@ describe('Profile Sharing Integration Tests', () => {
       });
 
       // Assert
-      expect(data.createProfileInvite.inviteCode).toMatch(/^[A-Z0-9-]{8,12}$/); // Accept UUIDs or random codes
+      expect(data.createProfileInvite.inviteCode).toMatch(/^[A-Z0-9]{16}$/);
       expect(data.createProfileInvite.profileId).toBe(testProfileId);
       expect(data.createProfileInvite.permissions).toEqual(['READ']);
       expect(data.createProfileInvite.expiresAt).toBeDefined();
@@ -444,8 +444,8 @@ describe('Profile Sharing Integration Tests', () => {
 
       // Assert: Verify all metadata fields present
       expect(inviteData.createProfileInvite.inviteCode).toBeDefined();
-      // Note: inviteCode is substring(0, 10) of UUID, may contain hyphens
-      expect(inviteData.createProfileInvite.inviteCode).toMatch(/^[A-Z0-9-]{10}$/);
+      // Note: inviteCode is 16-character alphanumeric string (64 bits of entropy)
+      expect(inviteData.createProfileInvite.inviteCode).toMatch(/^[A-Z0-9]{16}$/);
       expect(inviteData.createProfileInvite.profileId).toBe(profileId);
       expect(inviteData.createProfileInvite.permissions).toEqual(['READ', 'WRITE']);
       expect(inviteData.createProfileInvite.expiresAt).toBeDefined();
@@ -495,7 +495,7 @@ describe('Profile Sharing Integration Tests', () => {
       expect(invite2.createProfileInvite.permissions).toEqual(['READ', 'WRITE']);
     });
 
-    it('invite code is exactly 10 alphanumeric characters', async () => {
+    it('invite code is exactly 16 alphanumeric characters', async () => {
       // Arrange: Create profile
       const { data: profileData } = await ownerClient.mutate({
         mutation: CREATE_PROFILE,
@@ -517,9 +517,9 @@ describe('Profile Sharing Integration Tests', () => {
 
       // Assert: Code format validation
       const inviteCode = inviteData.createProfileInvite.inviteCode;
-      // Note: inviteCode is substring(0, 10) of UUID, may contain hyphens
-      expect(inviteCode).toMatch(/^[A-Z0-9-]{10}$/);
-      expect(inviteCode.length).toBe(10);
+      // Note: inviteCode is 16-character alphanumeric string (64 bits of entropy)
+      expect(inviteCode).toMatch(/^[A-Z0-9]{16}$/);
+      expect(inviteCode.length).toBe(16);
       expect(inviteCode).toBe(inviteCode.toUpperCase()); // All uppercase
     });
 
@@ -592,7 +592,7 @@ describe('Profile Sharing Integration Tests', () => {
       
       // All codes should be valid format
       for (const code of inviteCodes) {
-        expect(code).toMatch(/^[A-Z0-9-]{10}$/);
+        expect(code).toMatch(/^[A-Z0-9]{16}$/);
       }
     });
   });
