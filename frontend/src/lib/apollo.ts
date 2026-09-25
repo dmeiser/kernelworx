@@ -18,7 +18,7 @@ import { ErrorLink } from '@apollo/client/link/error';
 import { CombinedGraphQLErrors } from '@apollo/client/errors';
 import type { GraphQLFormattedError } from 'graphql';
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { isMfaRequiredError } from './mfaErrors';
+import { isMfaRequiredError, MFA_REQUIRED_ERROR_CODE } from './mfaErrors';
 
 /**
  * HTTP link to AppSync endpoint
@@ -79,6 +79,7 @@ const dispatchMfaRequiredEvent = (operationName: string | undefined): void => {
     window.dispatchEvent(
       new CustomEvent('mfa-required', {
         detail: {
+          errorCode: MFA_REQUIRED_ERROR_CODE,
           message: 'MFA required',
           operation: operationName,
         },
@@ -170,6 +171,7 @@ const errorLink = new ErrorLink(handleApolloError);
  */
 export function mapErrorCodeToMessage(errorCode: string | undefined, defaultMessage: string): string {
   if (defaultMessage === 'MFA required') return 'MFA required';
+  if (errorCode === MFA_REQUIRED_ERROR_CODE) return 'MFA required';
   if (!errorCode) return defaultMessage;
 
   const errorMessages: Record<string, string> = {
