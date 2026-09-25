@@ -73,7 +73,7 @@ def _get_and_verify_profile(db_profile_id: str, db_caller_id: str, event: Dict[s
             raise AppError(ErrorCode.FORBIDDEN, "Only the profile owner or an admin can transfer ownership")
         # An admin (not the owner) may transfer any profile, but only with MFA (#336).
         if not has_mfa(event):
-            raise AppError(ErrorCode.FORBIDDEN, "MFA required")
+            raise AppError(ErrorCode.MFA_REQUIRED, "MFA required")
 
     return profile
 

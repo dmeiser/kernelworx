@@ -1388,7 +1388,7 @@ class TestAdminMfaRequired:
         result = admin_reset_user_password(event, lambda_context)
 
         assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["errorCode"] == ErrorCode.MFA_REQUIRED
         assert result["message"] == "MFA required"
 
     def test_admin_with_amr_pwd_only_forbidden(
@@ -1418,7 +1418,7 @@ class TestAdminMfaRequired:
         result = admin_reset_user_password(event, lambda_context)
 
         assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["errorCode"] == ErrorCode.MFA_REQUIRED
         assert result["message"] == "MFA required"
 
     def test_admin_with_mfa_false_and_amr_mfa_forbidden(
@@ -1449,7 +1449,7 @@ class TestAdminMfaRequired:
         result = admin_reset_user_password(event, lambda_context)
 
         assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["errorCode"] == ErrorCode.MFA_REQUIRED
         assert result["message"] == "MFA required"
 
     def test_admin_with_federated_amr_and_mfa_false_forbidden(
@@ -1480,7 +1480,7 @@ class TestAdminMfaRequired:
         result = admin_reset_user_password(event, lambda_context)
 
         assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["errorCode"] == ErrorCode.MFA_REQUIRED
         assert result["message"] == "MFA required"
 
     def test_admin_with_webauthn_amr_and_no_mfa_forbidden(
@@ -1510,7 +1510,7 @@ class TestAdminMfaRequired:
         result = admin_reset_user_password(event, lambda_context)
 
         assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        assert result["errorCode"] == ErrorCode.MFA_REQUIRED
         assert result["message"] == "MFA required"
 
     def test_non_admin_without_mfa_gets_admin_access_required(

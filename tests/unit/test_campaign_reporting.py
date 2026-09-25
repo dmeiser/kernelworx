@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers.campaign_reporting import get_unit_report
+from src.handlers.campaign_reporting import _get_accessible_profiles, get_unit_report
 
 
 class TestGetUnitReport:
@@ -845,3 +845,75 @@ class TestGetUnitReport:
             assert result["sellers"][0]["totalSales"] == 0.90
             assert result["totalSales"] == 0.90
             assert result["totalOrders"] == 2
+
+
+class TestGetAccessibleProfilesBatching:
+    """Dedicated tests for parallel batch profile querying in _get_accessible_profiles (#450)."""
+
+    def test_get_accessible_profiles_empty_input(self) -> None:
+        """Empty profile_ids returns empty dict with zero calls."""
+        with patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_auth:
+            result = _get_accessible_profiles([], "ACCOUNT#caller")
+            assert result == {}
+            mock_auth.assert_not_called()
+
+    def test_get_accessible_profiles_no_accessible_ids(self) -> None:
+        """When batch_check_profile_access returns empty set, returns empty dict without querying."""
+        with (
+            patch("src.handlers.campaign_reporting.batch_check_profile_access", return_value=set()) as mock_auth,
+            patch("src.handlers.campaign_reporting.tables") as mock_tables,
+        ):
+            result = _get_accessible_profiles(["PROFILE#1"], "ACCOUNT#caller")
+            assert result == {}
+            mock_auth.assert_called_once()
+            mock_tables.profiles.query.assert_not_called()
+
+    def test_get_accessible_profiles_chunking_over_100(self) -> None:
+        """More than 100 accessible profiles are chunked and queried in parallel batches."""
+        profile_ids = [f"PROFILE#{i:03d}" for i in range(150)]
+        mock_profiles_table = MagicMock()
+
+        def query_side_effect(**kwargs: Any) -> Dict[str, Any]:
+            pid = kwargs["ExpressionAttributeValues"][":profileId"]
+            return {"Items": [{"profileId": pid, "sellerName": f"Seller {pid}"}]}
+
+        mock_profiles_table.query.side_effect = query_side_effect
+
+        with (
+            patch("src.handlers.campaign_reporting.batch_check_profile_access", return_value=set(profile_ids)),
+            patch("src.handlers.campaign_reporting.tables") as mock_tables,
+        ):
+            mock_tables.profiles = mock_profiles_table
+            result = _get_accessible_profiles(profile_ids, "ACCOUNT#caller")
+
+        assert len(result) == 150
+        assert mock_profiles_table.query.call_count == 150
+        for pid in profile_ids:
+            assert pid in result
+            assert result[pid]["sellerName"] == f"Seller {pid}"
+
+    def test_get_accessible_profiles_profile_missing_in_gsi(self) -> None:
+        """Profiles not found in GSI are omitted from returned dict."""
+        mock_profiles_table = MagicMock()
+
+        def query_side_effect(**kwargs: Any) -> Dict[str, Any]:
+            pid = kwargs["ExpressionAttributeValues"][":profileId"]
+            if pid == "PROFILE#exists":
+                return {"Items": [{"profileId": pid, "sellerName": "Found"}]}
+            return {"Items": []}
+
+        mock_profiles_table.query.side_effect = query_side_effect
+
+        with (
+            patch(
+                "src.handlers.campaign_reporting.batch_check_profile_access",
+                return_value={"PROFILE#exists", "PROFILE#missing"},
+            ),
+            patch("src.handlers.campaign_reporting.tables") as mock_tables,
+        ):
+            mock_tables.profiles = mock_profiles_table
+            result = _get_accessible_profiles(["PROFILE#exists", "PROFILE#missing"], "ACCOUNT#caller")
+
+        assert len(result) == 1
+        assert "PROFILE#exists" in result
+        assert "PROFILE#missing" not in result
