@@ -10,8 +10,9 @@ from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import boto3
+import pytest
 
-from src.utils.errors import ErrorCode
+from src.utils.errors import AppError, ErrorCode
 
 
 class TestDeleteMyAccount:
@@ -1156,3 +1157,87 @@ class TestDeleteMyAccount:
                 count = _delete_user_s3_reports(sample_account_id, mock_logger)
                 assert count >= 3
                 mock_s3.delete_objects.assert_called()
+
+class TestCognitoFilterValidation:
+    """Tests for Cognito filter metacharacter validation on the self-service delete path (#124, #441)."""
+
+    @pytest.mark.parametrize(
+        "bad_sub", ['sub"quote', "sub\\backslash", "sub space"], ids=["quote", "backslash", "space"]
+    )
+    def test_delete_account_rejects_sub_with_filter_metachars(
+        self,
+        bad_sub: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A sub containing Cognito filter metacharacters is rejected before the ListUsers call."""
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+
+            event = {**appsync_event, "identity": {"sub": bad_sub}}
+
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+            mock_cognito.admin_delete_user.assert_not_called()
+
+    def test_delete_account_rejects_oversized_sub_before_filter(
+        self,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A sub longer than 256 chars is rejected by the validator before the ListUsers call (#124)."""
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+
+            event = {**appsync_event, "identity": {"sub": "a" * 257}}
+
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INVALID_INPUT
+            mock_cognito.list_users.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "bad_sub",
+        ['sub"quote', "sub\\backslash", "sub space", "a" * 257],
+        ids=["quote", "backslash", "space", "oversized"],
+    )
+    def test_lookup_rejects_metachars_before_cognito(self, bad_sub: str) -> None:
+        """_lookup_cognito_user_with_retry validates account_id before interpolating it into the filter."""
+        from src.handlers.account_operations import _lookup_cognito_user_with_retry
+
+        cognito = MagicMock()
+        with pytest.raises(AppError) as exc_info:
+            _lookup_cognito_user_with_retry(cognito, "us-east-1_test123", bad_sub, MagicMock())
+
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        cognito.list_users.assert_not_called()
+
+    def test_lookup_normal_sub_builds_filter(self, sample_account_id: str) -> None:
+        """A safe sub reaches Cognito and is interpolated into the ListUsers filter."""
+        from src.handlers.account_operations import _lookup_cognito_user_with_retry
+
+        cognito = MagicMock()
+        cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
+
+        result = _lookup_cognito_user_with_retry(cognito, "us-east-1_test123", sample_account_id, MagicMock())
+
+        assert result == "testuser@example.com"
+        cognito.list_users.assert_called_once_with(
+            UserPoolId="us-east-1_test123", Filter=f'sub = "{sample_account_id}"', Limit=1
+        )
