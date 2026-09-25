@@ -2,7 +2,7 @@ import '../setup.ts';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
-import { getTestPrefix, deleteTestAccounts, TABLE_NAMES } from '../setup/testData';
+import { getTestPrefix, deleteTestAccounts, TABLE_NAMES, waitForGSIConsistency } from '../setup/testData';
 
 
 // GraphQL Mutations
@@ -17,6 +17,35 @@ const CREATE_PROFILE = gql`
     }
   }
 `;
+
+/**
+ * Wait until a freshly created profile is visible through the eventually
+ * consistent profileId-index GSI (Bug #21). createCampaign/createOrder
+ * authorize via verify_profile_write_access, which queries that GSI and
+ * fails with NOT_FOUND "Profile not found" if it has not projected the
+ * new profile row yet.
+ */
+async function waitForProfileGsiConsistency(
+  client: ApolloClient<any>,
+  profileId: string
+): Promise<void> {
+  await waitForGSIConsistency(
+    async () => {
+      try {
+        const { data } = await client.query({
+          query: GET_PROFILE,
+          variables: { profileId },
+          fetchPolicy: 'network-only',
+        });
+        return data?.getProfile ? [data.getProfile] : [];
+      } catch {
+        // GSI has not projected the profile yet; keep polling
+        return [];
+      }
+    },
+    (items: any[]) => items.some((p: any) => p.profileId === profileId),
+  );
+}
 
 const UPDATE_PROFILE = gql`
   mutation UpdateSellerProfile($input: UpdateSellerProfileInput!) {
@@ -1381,6 +1410,7 @@ describe('Profile Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       const profileId = profileData.createSellerProfile.profileId;
+      await waitForProfileGsiConsistency(ownerClient, profileId);
 
       // Create catalog for campaign
       const CREATE_CATALOG = gql`
@@ -1528,6 +1558,7 @@ describe('Profile Operations Integration Tests', () => {
         variables: { input: { sellerName: profileName } },
       });
       const profileId = profileData.createSellerProfile.profileId;
+      await waitForProfileGsiConsistency(ownerClient, profileId);
 
       // Create catalog
       const CREATE_CATALOG = gql`

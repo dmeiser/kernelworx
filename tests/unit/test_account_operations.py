@@ -1158,6 +1158,7 @@ class TestDeleteMyAccount:
                 assert count >= 3
                 mock_s3.delete_objects.assert_called()
 
+
 class TestCognitoFilterValidation:
     """Tests for Cognito filter metacharacter validation on the self-service delete path (#124, #441)."""
 
@@ -1241,3 +1242,39 @@ class TestCognitoFilterValidation:
         cognito.list_users.assert_called_once_with(
             UserPoolId="us-east-1_test123", Filter=f'sub = "{sample_account_id}"', Limit=1
         )
+
+
+class TestDeleteAllUserData:
+    """Tests for _delete_all_user_data helper."""
+
+    def test_delete_all_user_data_prefixed(self, dynamodb_table: Any, s3_bucket: Any) -> None:
+        """_delete_all_user_data normalizes ACCOUNT#-prefixed account ID."""
+        from src.handlers.account_operations import _delete_all_user_data
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        target_account_id = "11111111-1111-1111-1111-111111111111"
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+            }
+        )
+
+        _delete_all_user_data(f"ACCOUNT#{target_account_id}")
+        response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+        assert "Item" not in response
+
+    def test_delete_all_user_data_client_error(self, dynamodb_table: Any, s3_bucket: Any) -> None:
+        """_delete_all_user_data propagates ClientError on account delete."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import _delete_all_user_data
+
+        with patch("src.handlers.account_operations.tables.accounts.delete_item") as mock_delete:
+            mock_delete.side_effect = ClientError(
+                {"Error": {"Code": "ResourceNotFoundException", "Message": "Table not found"}},
+                "DeleteItem",
+            )
+            with pytest.raises(ClientError):
+                _delete_all_user_data("test-user")

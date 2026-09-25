@@ -1125,7 +1125,7 @@ type Mutation {
     """The user's email address."""
     email: AWSEmail!
   ): Boolean!
-  """Delete a user from Cognito and DynamoDB (admin only). The caller cannot delete their own account. Returns true on success."""
+  """Delete a user and all their data from Cognito, DynamoDB, and S3 via the full deletion cascade (admin only). The caller cannot delete their own account. Returns true on success."""
   adminDeleteUser(
     """The account ID to delete."""
     accountId: ID!
