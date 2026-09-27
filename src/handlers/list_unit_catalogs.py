@@ -1,6 +1,5 @@
 """Lambda resolver for listing catalogs used in a unit."""
 
-import os
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Set, cast
 
@@ -72,11 +71,8 @@ _THROTTLING_ERROR_CODES = {
 
 
 def _get_catalogs_table_name() -> str:
-    """Get the catalogs table name from env or tables accessor."""
-    return cast(
-        str,
-        os.environ.get("CATALOGS_TABLE_NAME") or getattr(tables.catalogs, "table_name", "kernelworx-catalogs-ue1-dev"),
-    )
+    """Get the catalogs table name from the shared tables accessor (fails loud if the env var is missing)."""
+    return cast(str, tables.catalogs.table_name)
 
 
 def _batch_get_unprocessed_keys(response: Dict[str, Any], table_name: str) -> list[Dict[str, Any]]:

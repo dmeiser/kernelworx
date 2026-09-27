@@ -104,6 +104,14 @@ Each table property returns a boto3 `Table` resource. Table names are read from 
 `ACCOUNTS_TABLE_NAME`, `PROFILES_TABLE_NAME`, etc. environment variables. For tests,
 use `override_table()` to inject mock tables.
 
+Resolution is fail-loud: `get_required_env` raises `ValueError` naming the variable when it
+is unset, so a missing table env var surfaces as a Lambda error instead of a plausible but
+wrong read. Keep it that way — never give a handler its own `os.environ` lookup with a
+hard-coded fallback table name, and never hard-code an environment-specific table name in
+`src/`; a fallback silently reads the wrong environment's table and returns a normal-looking
+result. When a handler needs the name for a raw call (e.g. `BatchGetItem` on the resource),
+read it from the accessor: `tables.catalogs.table_name`.
+
 #### ID Generation (`src/utils/ids.py`)
 
 Use centralized ID normalization helpers for consistent prefixed IDs:

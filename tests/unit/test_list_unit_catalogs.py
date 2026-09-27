@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers.list_unit_catalogs import _fetch_catalogs, list_unit_catalogs
+from src.handlers.list_unit_catalogs import _fetch_catalogs, _get_catalogs_table_name, list_unit_catalogs
 from src.utils.errors import AppError, ErrorCode
 
 
@@ -992,7 +992,7 @@ class TestFetchCatalogsBatching:
         assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
 
     def test_fetch_catalogs_table_name_from_accessor(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Table name falls back to tables.catalogs.table_name when env var is absent."""
+        """Table name comes from the tables.catalogs accessor; the env var is not consulted directly."""
         monkeypatch.delenv("CATALOGS_TABLE_NAME", raising=False)
         mock_resource = MagicMock()
         mock_resource.batch_get_item.return_value = {
@@ -1009,3 +1009,24 @@ class TestFetchCatalogsBatching:
 
         call_request_items = mock_resource.batch_get_item.call_args[1]["RequestItems"]
         assert "custom-catalogs-table" in call_request_items
+
+
+class TestGetCatalogsTableName:
+    """Contract tests for _get_catalogs_table_name resolution (#561)."""
+
+    def test_table_name_comes_from_accessor_not_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The shared tables accessor is the sole resolution path; a differing env var is ignored."""
+        monkeypatch.setenv("CATALOGS_TABLE_NAME", "env-provided-table")
+
+        with patch("src.handlers.list_unit_catalogs.tables") as mock_tables:
+            mock_tables.catalogs.table_name = "accessor-provided-table"
+            result = _get_catalogs_table_name()
+
+        assert result == "accessor-provided-table"
+
+    def test_missing_env_var_fails_loud(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A missing CATALOGS_TABLE_NAME raises ValueError naming the variable (no silent fallback)."""
+        monkeypatch.delenv("CATALOGS_TABLE_NAME", raising=False)
+
+        with pytest.raises(ValueError, match="Required environment variable 'CATALOGS_TABLE_NAME' is not set"):
+            _get_catalogs_table_name()
