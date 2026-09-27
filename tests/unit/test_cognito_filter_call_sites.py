@@ -9,7 +9,7 @@ all, from any of the six.
 """
 
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -80,13 +80,25 @@ def _cognito_stub() -> MagicMock:
     return cognito
 
 
+def _kwargs(site: Callable[..., Any], value_param: str, value: str) -> Dict[str, Any]:
+    """Build the call kwargs for a filter call site, honouring its actual signature.
+
+    Not every call site still takes a logger: #580 dropped the parameter as dead,
+    so passing one unconditionally is a TypeError on the ones that shed it.
+    """
+    params = inspect.signature(site).parameters
+    assert value_param in params, f"{site.__name__} has no {value_param!r} parameter"
+    kwargs: Dict[str, Any] = {"cognito": _cognito_stub(), "user_pool_id": POOL, value_param: value}
+    if "logger" in params:
+        kwargs["logger"] = MagicMock()
+    return kwargs
+
+
 def _call(site: Callable[..., Any], value_param: str, value: str) -> MagicMock:
     """Invoke a filter call site with a stubbed Cognito client, returning the stub."""
-    params = list(inspect.signature(site).parameters)
-    assert value_param in params, f"{site.__name__} has no {value_param!r} parameter"
-    cognito = _cognito_stub()
-    site(**{"cognito": cognito, "user_pool_id": POOL, "logger": MagicMock(), value_param: value})
-    return cognito
+    kwargs = _kwargs(site, value_param, value)
+    site(**kwargs)
+    return cast(MagicMock, kwargs["cognito"])
 
 
 @pytest.mark.parametrize(("_label", "site", "value_param", "safe_value", "expected"), FILTER_SITES, ids=IDS)
@@ -104,12 +116,11 @@ def test_call_site_sends_the_exact_expected_filter(
 def test_call_site_rejects_a_metacharacter_before_querying(
     _label: str, site: Callable[..., Any], value_param: str, safe_value: str, expected: str, unsafe: str
 ) -> None:
-    params = list(inspect.signature(site).parameters)
-    assert value_param in params
-    cognito = _cognito_stub()
+    kwargs = _kwargs(site, value_param, unsafe)
+    cognito = cast(MagicMock, kwargs["cognito"])
 
     with pytest.raises(AppError) as exc_info:
-        site(**{"cognito": cognito, "user_pool_id": POOL, "logger": MagicMock(), value_param: unsafe})
+        site(**kwargs)
 
     assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
     cognito.list_users.assert_not_called()
@@ -119,12 +130,11 @@ def test_call_site_rejects_a_metacharacter_before_querying(
 def test_call_site_rejects_whitespace_before_querying(
     _label: str, site: Callable[..., Any], value_param: str, safe_value: str, expected: str
 ) -> None:
-    params = list(inspect.signature(site).parameters)
-    assert value_param in params
-    cognito = _cognito_stub()
+    kwargs = _kwargs(site, value_param, "a b")
+    cognito = cast(MagicMock, kwargs["cognito"])
 
     with pytest.raises(AppError):
-        site(**{"cognito": cognito, "user_pool_id": POOL, "logger": MagicMock(), value_param: "a b"})
+        site(**kwargs)
 
     cognito.list_users.assert_not_called()
 

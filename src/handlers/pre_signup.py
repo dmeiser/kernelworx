@@ -241,4 +241,4 @@ def _process_federated_signup(
         _handle_existing_user(cognito, user_pool_id, str(email), username, existing_users[0])
 
     except Exception as e:
-        return _handle_signup_exception(e, email)
+        return _handle_signup_exception(e, str(email))
