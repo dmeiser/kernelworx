@@ -913,7 +913,7 @@ def _parse_product_price(price: Any) -> Decimal:
 
     try:
         price_decimal = Decimal(str(price))
-    except InvalidOperation, ValueError, TypeError:
+    except (InvalidOperation, ValueError, TypeError):
         raise AppError(ErrorCode.INVALID_INPUT, "Product price must be a valid number")
 
     if price_decimal < 0:
