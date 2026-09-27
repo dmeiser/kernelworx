@@ -10,14 +10,14 @@ from boto3.dynamodb.conditions import Key
 try:  # pragma: no cover
     from utils.auth import batch_check_profile_access
     from utils.dynamodb import tables
-    from utils.ids import ensure_catalog_id, ensure_profile_id
+    from utils.ids import build_unit_campaign_key, ensure_catalog_id, ensure_profile_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items, query_all_items_iter
     from utils.report_limits import MAX_UNIT_REPORT_GRAPH_BYTES, OrderGraphBudget
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import batch_check_profile_access
     from ..utils.dynamodb import tables
-    from ..utils.ids import ensure_catalog_id, ensure_profile_id
+    from ..utils.ids import build_unit_campaign_key, ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items, query_all_items_iter
     from ..utils.report_limits import MAX_UNIT_REPORT_GRAPH_BYTES, OrderGraphBudget
@@ -35,13 +35,6 @@ else:  # pragma: no cover
 
 
 logger = get_logger(__name__)
-
-
-def _build_unit_campaign_key(
-    unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: int
-) -> str:
-    """Build the unitCampaignKey for unit+campaign queries."""
-    return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
 
 
 def _empty_report(unit_type: str, unit_number: int, campaign_name: str, campaign_year: int) -> Dict[str, Any]:
@@ -239,7 +232,7 @@ def get_unit_report(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     )
 
     # Step 1: Query campaigns by unit+campaign key
-    unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
+    unit_campaign_key = build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
     unit_campaigns = query_all_items(
         tables.campaigns,
         {

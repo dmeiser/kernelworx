@@ -1,6 +1,7 @@
 """Tests for src/utils/ids.py - ID normalization utilities."""
 
 from src.utils.ids import (
+    build_unit_campaign_key,
     ensure_account_id,
     ensure_campaign_id,
     ensure_catalog_id,
@@ -209,3 +210,50 @@ class TestEnsureProductId:
     def test_returns_none_for_none(self) -> None:
         """Test None input returns None."""
         assert ensure_product_id(None) is None
+
+
+class TestBuildUnitCampaignKey:
+    """Tests for the shared unitCampaignKey builder (#575).
+
+    The key format is the partition-key contract for the unitCampaignKey-index
+    GSI; these tests guard the single definition both unit-query handlers
+    must share.
+    """
+
+    def test_builds_hash_separated_key(self) -> None:
+        """Test the key layout matches the unitCampaignKey-index contract."""
+        result = build_unit_campaign_key("Pack", 158, "Springfield", "IL", "Fall", 2024)
+        assert result == "Pack#158#Springfield#IL#Fall#2024"
+
+    def test_builds_key_for_troop_unit(self) -> None:
+        """Test key construction for a different unit type."""
+        result = build_unit_campaign_key("Troop", 42, "Austin", "TX", "Spring", 2025)
+        assert result == "Troop#42#Austin#TX#Spring#2025"
+
+    def test_numeric_fields_are_stringified_in_order(self) -> None:
+        """Test unit number and campaign year are interpolated positionally."""
+        result = build_unit_campaign_key("Crew", 7, "Town", "CA", "Winter", 1999)
+        assert result.split("#") == ["Crew", "7", "Town", "CA", "Winter", "1999"]
+
+
+class TestUnitCampaignKeySingleDefinition:
+    """Regression tests for #575: one shared key builder, no per-handler copies.
+
+    Both unit-report and unit-catalog handlers query the same
+    unitCampaignKey-index GSI; a divergent copy in either handler would make
+    one query silently return nothing while the other still works.
+    """
+
+    def test_neither_handler_defines_its_own_copy(self) -> None:
+        """Neither unit-campaign handler may carry a private key builder."""
+        from src.handlers import campaign_reporting, list_unit_catalogs
+
+        assert not hasattr(campaign_reporting, "_build_unit_campaign_key")
+        assert not hasattr(list_unit_catalogs, "_build_unit_campaign_key")
+
+    def test_both_handlers_share_the_ids_helper(self) -> None:
+        """Both handlers route key construction through utils.ids."""
+        from src.handlers import campaign_reporting, list_unit_catalogs
+
+        assert campaign_reporting.build_unit_campaign_key is build_unit_campaign_key
+        assert list_unit_catalogs.build_unit_campaign_key is build_unit_campaign_key

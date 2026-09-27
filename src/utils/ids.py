@@ -86,3 +86,17 @@ def ensure_account_id(id_value: Optional[str]) -> Optional[str]:
 def ensure_product_id(id_value: Optional[str]) -> Optional[str]:
     """Normalize product ID with PRODUCT# prefix."""
     return ensure_prefix("PRODUCT", id_value)
+
+
+def build_unit_campaign_key(
+    unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: int
+) -> str:
+    """Build the unitCampaignKey for unit+campaign queries.
+
+    This format is the partition-key contract for the unitCampaignKey-index
+    GSI. Unit reporting and unit catalog listing both query the same index
+    with this exact key layout, so it must have a single definition: the
+    format must not change without a data migration, and new code that reads
+    or writes the index must call this helper rather than rebuild the key.
+    """
+    return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
