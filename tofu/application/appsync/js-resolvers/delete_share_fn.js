@@ -30,7 +30,10 @@ export function request(ctx) {
 export function response(ctx) {
     if (ctx.error) {
         if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-            util.error('Not authorized to revoke this share or share not found', 'UNAUTHORIZED');
+            // The caller is authenticated and merely not the share's owner, so this is a
+            // permission failure. UNAUTHORIZED is reserved for "session invalid, sign in
+            // again" (frontend isAuthError) and would mislead the user.
+            util.error('Not authorized to revoke this share or share not found', 'FORBIDDEN');
         }
         util.error(ctx.error.message, ctx.error.type);
     }
