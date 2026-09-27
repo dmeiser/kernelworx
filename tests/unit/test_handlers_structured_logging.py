@@ -4,7 +4,7 @@ Issue #565: the three Cognito triggers (pre_signup, post_authentication,
 pre_token_generation) configured the root logger at module scope and emitted
 unstructured f-string messages, so their log lines — the most security-relevant
 events in the system — were invisible to ``grep '"correlationId"'`` in
-CloudWatch and unqueryable by field.
+CloudWatch and could not be filtered by field.
 
 These tests exercise the public ``lambda_handler`` of each trigger and assert
 the emitted log records are JSON objects carrying ``correlationId``, ``level``,
