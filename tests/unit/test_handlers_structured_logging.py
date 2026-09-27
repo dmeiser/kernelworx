@@ -1,90 +1,148 @@
-"""Regression guard: handler modules must use the project structured logger (#565).
+"""Behavioral regression tests: the Cognito triggers must emit structured logs (#565).
 
-The three Cognito triggers (pre_signup, post_authentication, pre_token_generation)
-used to configure the ROOT logger at module scope and emit unstructured f-string
-messages, so their log lines were invisible to ``grep '"correlationId"'`` in
-CloudWatch despite being the most security-relevant events in the system. The
-failure is invisible until an incident, so this guard statically parses every
-module under ``src/handlers/`` and fails on any ``logging.getLogger()`` call
-without a name argument, and on any module that does not obtain its logger from
-``utils.logging.get_logger``.
+Issue #565: the three Cognito triggers (pre_signup, post_authentication,
+pre_token_generation) configured the root logger at module scope and emitted
+unstructured f-string messages, so their log lines — the most security-relevant
+events in the system — were invisible to ``grep '"correlationId"'`` in
+CloudWatch and unqueryable by field.
+
+These tests exercise the public ``lambda_handler`` of each trigger and assert
+the emitted log records are JSON objects carrying ``correlationId``, ``level``,
+``message`` and ``timestamp`` fields. They fail against the pre-fix
+root-logger code (plain-text records on stderr, nothing structured on stdout)
+and pass after the fix.
 """
 
-import ast
-from pathlib import Path
-from typing import List
+import json
+from typing import Any, Dict, List
+from unittest.mock import MagicMock, patch
 
-HANDLERS_DIR = Path(__file__).resolve().parents[2] / "src" / "handlers"
-
-
-def _handler_modules() -> List[Path]:
-    """All handler modules except the package __init__."""
-    return sorted(path for path in HANDLERS_DIR.glob("*.py") if path.name != "__init__.py")
+from src.handlers import post_authentication, pre_signup, pre_token_generation
+from src.utils.logging import StructuredLogger
 
 
-def _root_logger_get_call_lines(tree: ast.Module) -> List[int]:
-    """Line numbers of ``logging.getLogger()`` calls with no arguments.
-
-    Catches both the ``logging.getLogger()`` attribute form and the
-    ``from logging import getLogger`` name form; either returns the root
-    logger and reconfigures global logging state for the whole process.
-    """
-    imported_getters = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "logging":
-            for alias in node.names:
-                if alias.name == "getLogger":
-                    imported_getters.add(alias.asname or alias.name)
-
-    lines: List[int] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or node.args:
-            continue
-        func = node.func
-        is_attribute_form = (
-            isinstance(func, ast.Attribute)
-            and func.attr == "getLogger"
-            and isinstance(func.value, ast.Name)
-            and func.value.id == "logging"
-        )
-        is_name_form = isinstance(func, ast.Name) and func.id in imported_getters
-        if is_attribute_form or is_name_form:
-            lines.append(node.lineno)
-    return lines
+def _structured_records(capsys: Any) -> List[Dict[str, Any]]:
+    """Parse every captured stdout line as a JSON structured log record."""
+    records: List[Dict[str, Any]] = []
+    for line in capsys.readouterr().out.splitlines():
+        if line.strip():
+            records.append(json.loads(line))
+    return records
 
 
-def _imports_structured_logger(tree: ast.Module) -> bool:
-    """Whether the module imports get_logger from utils.logging."""
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "utils.logging":
-            if any(alias.name == "get_logger" for alias in node.names):
-                return True
-    return False
+def _assert_structured_records(records: List[Dict[str, Any]]) -> None:
+    """Every emitted record must be a structured JSON log entry."""
+    assert records, "no log records emitted"
+    for record in records:
+        assert record["correlationId"], "record missing correlationId"
+        assert record["level"] in {"INFO", "WARNING", "ERROR", "DEBUG"}
+        assert record["message"], "record missing message"
+        assert "timestamp" in record
 
 
-def test_no_handler_module_configures_root_logger() -> None:
-    """No module under src/handlers/ may call logging.getLogger() unnamed."""
-    modules = _handler_modules()
-    assert modules, f"no handler modules found under {HANDLERS_DIR}"
+def test_trigger_loggers_are_structured_loggers() -> None:
+    """Each trigger module's logger is a StructuredLogger, not the root logger."""
+    assert isinstance(pre_signup.logger, StructuredLogger)
+    assert isinstance(post_authentication.logger, StructuredLogger)
+    assert isinstance(pre_token_generation.logger, StructuredLogger)
 
-    offenders = {
-        path.name: _root_logger_get_call_lines(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
-        for path in modules
+
+def test_pre_signup_emits_structured_json_records(capsys: Any) -> None:
+    """Pre-signup log lines are structured JSON with a correlationId."""
+    event: Dict[str, Any] = {
+        "version": "1",
+        "triggerSource": "PreSignUp_SignUp",
+        "userPoolId": "us-east-1_TEST123",
+        "userName": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "request": {"userAttributes": {"email": "user@example.com"}},
+        "response": {},
     }
-    offenders = {name: lines for name, lines in offenders.items() if lines}
 
-    assert offenders == {}, f"modules configuring the root logger: {offenders}"
+    result = pre_signup.lambda_handler(event, MagicMock())
+
+    assert result is event
+    records = _structured_records(capsys)
+    _assert_structured_records(records)
+    assert any(record["message"] == "Pre-signup trigger invoked" for record in records)
 
 
-def test_every_handler_module_uses_structured_logger() -> None:
-    """Every handler module obtains its logger via utils.logging.get_logger."""
-    modules = _handler_modules()
-    assert modules, f"no handler modules found under {HANDLERS_DIR}"
+def test_post_authentication_emits_structured_json_records(capsys: Any, dynamodb_table: Any) -> None:
+    """Account-bootstrap log lines are structured JSON with a correlationId."""
+    event: Dict[str, Any] = {
+        "version": "1",
+        "triggerSource": "PostAuthentication_Authentication",
+        "userPoolId": "us-east-1_TEST123",
+        "userName": "google_123456789",
+        "request": {
+            "userAttributes": {
+                "sub": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "email": "user@example.com",
+            },
+        },
+        "response": {},
+    }
 
-    missing = [
-        path.name
-        for path in modules
-        if not _imports_structured_logger(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
+    result = post_authentication.lambda_handler(event, MagicMock())
+
+    assert result == event
+    records = _structured_records(capsys)
+    _assert_structured_records(records)
+    assert any(record["message"] == "Account bootstrap trigger invoked" for record in records)
+
+
+def test_pre_token_generation_emits_structured_json_records(capsys: Any) -> None:
+    """Pre-token-generation log lines are structured JSON with a correlationId."""
+    event: Dict[str, Any] = {
+        "version": "2",
+        "triggerSource": "TokenGeneration_Authentication",
+        "userPoolId": "us-east-1_TEST123",
+        "userName": "Google_1234567890",
+        "request": {
+            "userAttributes": {
+                "sub": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                "identities": ('[{"providerName":"Google","providerType":"Google","userId":"1234567890"}]'),
+            },
+        },
+        "response": {},
+    }
+
+    with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
+        pre_token_generation.lambda_handler(event, MagicMock())
+
+    mock_cognito.admin_get_user.assert_not_called()
+    records = _structured_records(capsys)
+    _assert_structured_records(records)
+    assert any(record["message"] == "pre-token-generation: federated identity -> mfa=false" for record in records)
+
+
+def test_pre_token_generation_emits_structured_traceback_on_lookup_failure(capsys: Any) -> None:
+    """The fail-closed AdminGetUser warning is structured JSON carrying a traceback."""
+    event: Dict[str, Any] = {
+        "version": "2",
+        "triggerSource": "TokenGeneration_Authentication",
+        "userPoolId": "us-east-1_TEST123",
+        "userName": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "request": {
+            "userAttributes": {
+                "sub": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            },
+        },
+        "response": {},
+    }
+
+    with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
+        mock_cognito.admin_get_user.side_effect = Exception("cognito down")
+        result = pre_token_generation.lambda_handler(event, MagicMock())
+
+    assert result == event
+
+    records = _structured_records(capsys)
+    _assert_structured_records(records)
+    failures = [
+        record
+        for record in records
+        if record["message"] == "pre-token-generation: AdminGetUser failed; setting mfa=false (fail-closed)"
     ]
-
-    assert missing == [], f"modules not using the structured logger: {missing}"
+    assert failures, "fail-closed AdminGetUser warning not emitted"
+    assert "traceback" in failures[0]
+    assert "cognito down" in failures[0]["traceback"]
