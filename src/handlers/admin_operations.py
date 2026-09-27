@@ -27,12 +27,12 @@ from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_de
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
-    from utils.dynamodb import get_dynamodb_resource, tables
+    from utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
-    from ..utils.dynamodb import get_dynamodb_resource, tables
+    from ..utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
 
@@ -475,41 +475,64 @@ _ACCOUNTS_SCAN_SAFETY_LIMIT = 1000
 # instead of returning a truncated arbitrary subset (#576).
 _ACCOUNT_SEARCH_MIN_QUERY_LENGTH = 3
 
+# Accounts GSI for email prefix search: constant HASH key + email RANGE key, so
+# begins_with(email, :prefix) is a legal key condition (#586). Declared in
+# tofu/application/modules/dynamodb/main.tf; the index is sparse, so an account
+# is only searchable once it carries the constant emailSearchKey attribute.
+_EMAIL_SEARCH_INDEX = "emailSearchIndex"
+_EMAIL_PREFIX_KEY_CONDITION = "emailSearchKey = :searchKey AND begins_with(email, :prefix)"
 
-def _looks_like_full_email(query: str) -> bool:
-    """Check whether the query is a full email (local@domain.tld)."""
-    return "@" in query and bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", query))
 
+def _looks_like_email_query(query: str) -> bool:
+    """Check whether the query is an email fragment (it contains the local/domain separator).
 
-def _try_email_index_gsi(query: str, query_lower: str, max_results: int, logger: Any) -> list[Dict[str, Any]] | None:
-    """Look a full email up via the email-index GSI.
-
-    This is the only index-backed lookup in the account search. `email` is the
-    email-index GSI's partition key, so it can only be matched with equality;
-    there is no index-backed prefix search (#576).
-
-    Returns the matching items (capped at max_results), or None when the
-    query is not a full email or the GSI lookup fails or returns nothing,
-    in which case the caller falls back to a scan.
+    Only email-shaped queries are answered by the prefix index; a bare name
+    fragment (which ``_is_valid_email_prefix`` also accepts) is a substring
+    search, and no prefix index can answer that.
     """
-    if not _looks_like_full_email(query):
-        return None
+    return "@" in query
+
+
+def _query_email_search_index(
+    query: str, query_lower: str, max_results: int, logger: Any
+) -> list[Dict[str, Any]] | None:
+    """Answer an email prefix query with one Query against the emailSearchIndex GSI.
+
+    That index is a constant HASH key (``emailSearchKey``) plus ``email`` as the
+    RANGE key, which is what makes ``begins_with(email, :prefix)`` a legal key
+    condition; the exact-lookup ``email-index`` is HASH-only and so can only be
+    matched with equality and cannot answer a partial email (#576).
+
+    Returns the matching items (capped at ``max_results``), or None when the
+    index cannot answer the query -- index unavailable, or nothing indexed --
+    in which case the caller falls back to the scan. The scan fallback is what
+    keeps accounts that predate the index (and so carry no ``emailSearchKey``)
+    findable until the backfill has covered every row.
+    """
     try:
-        gsi_response = tables.accounts.query(
-            IndexName="email-index",
-            KeyConditionExpression="email = :email",
-            ExpressionAttributeValues={":email": query_lower},
+        response = tables.accounts.query(
+            IndexName=_EMAIL_SEARCH_INDEX,
+            KeyConditionExpression=_EMAIL_PREFIX_KEY_CONDITION,
+            ExpressionAttributeValues={":searchKey": EMAIL_SEARCH_KEY, ":prefix": query_lower},
+            Limit=max_results,
         )
-        gsi_items = cast(list[Dict[str, Any]], gsi_response.get("Items", []))
-        if gsi_items:
-            return gsi_items[:max_results]
     except ClientError as e:
         logger.warning(
-            "DynamoDB email-index query failed, falling back to scan",
+            "DynamoDB email prefix query failed, falling back to scan",
             error=str(e),
             query=mask_email(query),
         )
-    return None
+        return None
+    index_items = cast(list[Dict[str, Any]], response.get("Items", []))
+    if not index_items:
+        return None
+    if response.get("LastEvaluatedKey"):
+        logger.warning(
+            "DynamoDB email prefix search hit the result limit; results may be truncated",
+            query=mask_email(query),
+            max_results=max_results,
+        )
+    return index_items[:max_results]
 
 
 def _scan_accounts_page_into(
@@ -552,23 +575,24 @@ def _scan_accounts_matches(query: str, query_lower: str, max_results: int, logge
 def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]]:
     """Search the accounts table for accounts matching a partial query.
 
-    Searches email, givenName, and familyName fields. A complete email is
-    answered by the email-index GSI (`email = :email`), the only index-backed
-    lookup available. Every other query - a partial email, a first name, a last
-    name - is served by a full scan of the accounts table, bounded by the
-    `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety limit and truncated at
-    `_ACCOUNT_SEARCH_MAX_RESULTS` matches. There is no index-backed prefix
-    search: `email` is the email-index GSI's only key, so DynamoDB accepts
-    equality on it but not `begins_with` (#576, see issue #586).
+    Searches email, givenName, and familyName fields. An email fragment is
+    answered by the emailSearchIndex GSI, whose constant HASH key plus ``email``
+    RANGE key make a ``begins_with`` key condition legal: one index query, no
+    table scan (#586). A name fragment is a substring search that no prefix
+    index can answer, so it is still served by a full scan of the accounts
+    table, bounded by the `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety limit and
+    truncated at `_ACCOUNT_SEARCH_MAX_RESULTS` matches. Either path falls back
+    to the scan when the index has no answer.
 
     Returns all matching accounts (up to max_results limit).
     """
     query_lower = query.lower()
 
     try:
-        gsi_items = _try_email_index_gsi(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
-        if gsi_items is not None:
-            return gsi_items
+        if _looks_like_email_query(query):
+            index_items = _query_email_search_index(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
+            if index_items is not None:
+                return index_items
         return _scan_accounts_matches(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
     except ClientError as e:
         logger.warning("DynamoDB search failed", error=str(e), query=mask_email(query))

@@ -17,7 +17,10 @@ def create_accounts_table_schema() -> dict[str, Any]:
     Schema for accounts table.
 
     Key structure: PK=accountId
-    GSI: email-index (for account lookup by email)
+    GSI:
+    - email-index (for account lookup by email)
+    - emailSearchIndex (emailSearchKey HASH + email RANGE) for email prefix
+      search; the RANGE key is what makes ``begins_with(email, :prefix)`` legal
     """
     return {
         "TableName": "kernelworx-accounts-ue1-dev",
@@ -27,12 +30,21 @@ def create_accounts_table_schema() -> dict[str, Any]:
         "AttributeDefinitions": [
             {"AttributeName": "accountId", "AttributeType": "S"},
             {"AttributeName": "email", "AttributeType": "S"},
+            {"AttributeName": "emailSearchKey", "AttributeType": "S"},
         ],
         "GlobalSecondaryIndexes": [
             {
                 "IndexName": "email-index",
                 "KeySchema": [
                     {"AttributeName": "email", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "emailSearchIndex",
+                "KeySchema": [
+                    {"AttributeName": "emailSearchKey", "KeyType": "HASH"},
+                    {"AttributeName": "email", "KeyType": "RANGE"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
             },

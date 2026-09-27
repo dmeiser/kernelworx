@@ -52,7 +52,22 @@ locals {
 # ============================================================================
 # Accounts Table
 # PK: accountId
-# GSI: email-index (email)
+# GSI: email-index (email)                      -- exact email lookup
+# GSI: emailSearchIndex (emailSearchKey, email)  -- email prefix search
+#
+# emailSearchIndex is a prefix-segment index: a constant HASH key plus `email`
+# as the RANGE key, which is what makes `begins_with(email, :prefix)` a legal
+# key condition (email-index is HASH-only, so a Query key condition there must
+# be an equality and cannot answer a partial email).
+#
+# The index is SPARSE: an account item is only searchable once it carries
+# `emailSearchKey`. Deployment order for this index is therefore:
+#   1. deploy the account write path (post_authentication sets `emailSearchKey`),
+#   2. run the backfill for pre-existing rows
+#      (scripts/backfill_email_search_key.py, then --verify to confirm zero
+#      remaining rows), and only then
+#   3. apply this table change.
+# Skipping step 2 makes existing accounts invisible to prefix search.
 # ============================================================================
 resource "aws_dynamodb_table" "accounts" {
   name                        = "${var.name_prefix}-accounts${local.table_suffix}"
@@ -70,6 +85,11 @@ resource "aws_dynamodb_table" "accounts" {
     type = "S"
   }
 
+  attribute {
+    name = "emailSearchKey"
+    type = "S"
+  }
+
   global_secondary_index {
     name            = "email-index"
     projection_type = "ALL"
@@ -77,6 +97,21 @@ resource "aws_dynamodb_table" "accounts" {
     key_schema {
       attribute_name = "email"
       key_type       = "HASH"
+    }
+  }
+
+  global_secondary_index {
+    name            = "emailSearchIndex"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "emailSearchKey"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "email"
+      key_type       = "RANGE"
     }
   }
 
