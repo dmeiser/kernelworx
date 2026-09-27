@@ -18,9 +18,11 @@
  * same active check, so a stale pointer degrades to the field-resolver path
  * instead of returning wrong data.
  */
-// Loaded via Terraform templatefile() (functions_profiles.tf): every dollar-brace
-// sequence here is Terraform-interpolated, not JS — enforced by
-// tests/unit/check_templatefile_escaping.test.ts (#570).
+// Loaded via Terraform templatefile() (functions_profiles.tf): a dollar-brace
+// sequence here is Terraform-interpolated, not JS. In a template/string literal
+// that aborts every plan/apply with "Invalid expression"; ordinary comments are
+// stripped by the esbuild bundle, but are banned too as defense-in-depth.
+// Enforced by tests/unit/check_templatefile_escaping.test.ts (#570).
 import { util, runtime } from '@aws-appsync/utils';
 
 const tableName = '${campaigns_table_name}';
