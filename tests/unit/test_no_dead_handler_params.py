@@ -34,11 +34,7 @@ def _parameter_names(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
 
 def _loaded_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
     """Return the set of names loaded (read) anywhere in the function node."""
-    return {
-        n.id
-        for n in ast.walk(node)
-        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)
-    }
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
 
 
 def _dead_params(path: Path, source: str) -> list[str]:
