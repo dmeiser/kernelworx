@@ -318,8 +318,11 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
     AppSync Lambda resolver for adminSearchUser query.
     Search strategy:
     1. If query looks like UUID or ACCOUNT#UUID, search Cognito by sub directly (single result)
-    2. Otherwise:
-       a. Search DynamoDB Accounts table with fuzzy matching (logged-in users)
+    2. Otherwise (minimum `_ACCOUNT_SEARCH_MIN_QUERY_LENGTH` characters):
+       a. Search DynamoDB Accounts table: a complete email uses the email-index
+          GSI, and every partial query (partial email, first name, last name)
+          scans the table, bounded by the `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety
+          limit - there is no index-backed prefix search (#576, see #586)
        b. Search Cognito with prefix matching (all users, including those who haven't logged in)
        c. Merge results, deduplicate by accountId
 
@@ -466,9 +469,10 @@ def _scan_accounts_page(paginator_params: Dict[str, Any]) -> tuple[list[Dict[str
 _ACCOUNT_SEARCH_MAX_RESULTS = 50
 # Safety limit on how many account items a search scan may read.
 _ACCOUNTS_SCAN_SAFETY_LIMIT = 1000
-# Shortest query that is worth matching. Below this neither the email-index
-# prefix query nor the scan fallback can give an admin a useful answer, so the
-# scan is skipped entirely (#576).
+# Shortest query an admin may search for. The only way to match a partial query
+# is a full accounts-table scan, and a one or two character query can match
+# most of the table while telling the admin nothing, so it is rejected outright
+# instead of returning a truncated arbitrary subset (#576).
 _ACCOUNT_SEARCH_MIN_QUERY_LENGTH = 3
 
 
@@ -480,12 +484,16 @@ def _looks_like_full_email(query: str) -> bool:
 def _try_email_index_gsi(query: str, query_lower: str, max_results: int, logger: Any) -> list[Dict[str, Any]] | None:
     """Look a full email up via the email-index GSI.
 
-    The caller only reaches this for a full email (see `_looks_like_full_email`).
+    This is the only index-backed lookup in the account search. `email` is the
+    email-index GSI's partition key, so it can only be matched with equality;
+    there is no index-backed prefix search (#576).
 
-    Returns the matching items (capped at max_results), or None when the GSI
-    lookup fails or returns nothing, in which case the caller falls back to a
-    scan.
+    Returns the matching items (capped at max_results), or None when the
+    query is not a full email or the GSI lookup fails or returns nothing,
+    in which case the caller falls back to a scan.
     """
+    if not _looks_like_full_email(query):
+        return None
     try:
         gsi_response = tables.accounts.query(
             IndexName="email-index",
@@ -500,39 +508,6 @@ def _try_email_index_gsi(query: str, query_lower: str, max_results: int, logger:
             "DynamoDB email-index query failed, falling back to scan",
             error=str(e),
             query=mask_email(query),
-        )
-    return None
-
-
-def _try_email_prefix_gsi(query_lower: str, max_results: int, logger: Any) -> list[Dict[str, Any]] | None:
-    """Prefix-match a partial query against the email-index GSI.
-
-    A prefix match is a GSI query, so the common "partial email" case no
-    longer needs a full table scan (#576). The scan remains the last resort for
-    genuine substring queries (`ann` matching `Anna` mid-string), which no
-    index can answer.
-
-    Returns the matching items (capped at max_results), or None when the query
-    is shorter than `_ACCOUNT_SEARCH_MIN_QUERY_LENGTH` or the GSI lookup fails
-    or returns nothing, in which case the caller falls back to a scan.
-    """
-    if len(query_lower) < _ACCOUNT_SEARCH_MIN_QUERY_LENGTH:
-        return None
-    try:
-        gsi_response = tables.accounts.query(
-            IndexName="email-index",
-            KeyConditionExpression="begins_with(email, :prefix)",
-            ExpressionAttributeValues={":prefix": query_lower},
-            Limit=max_results,
-        )
-        gsi_items = cast(list[Dict[str, Any]], gsi_response.get("Items", []))
-        if gsi_items:
-            return gsi_items[:max_results]
-    except ClientError as e:
-        logger.warning(
-            "DynamoDB email-index prefix query failed, falling back to scan",
-            error=str(e),
-            query=mask_email(query_lower),
         )
     return None
 
@@ -575,30 +550,25 @@ def _scan_accounts_matches(query: str, query_lower: str, max_results: int, logge
 
 
 def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]]:
-    """
-    Searches email, givenName, and familyName fields.
-    For exact email queries, utilizes the email-index GSI for fast O(1) lookup.
-    For partial queries, prefix-matches the email-index GSI first and only scans
-    the table when that misses, so the scan is reached for substring matches
-    only (#576).
+    """Search the accounts table for accounts matching a partial query.
+
+    Searches email, givenName, and familyName fields. A complete email is
+    answered by the email-index GSI (`email = :email`), the only index-backed
+    lookup available. Every other query - a partial email, a first name, a last
+    name - is served by a full scan of the accounts table, bounded by the
+    `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety limit and truncated at
+    `_ACCOUNT_SEARCH_MAX_RESULTS` matches. There is no index-backed prefix
+    search: `email` is the email-index GSI's only key, so DynamoDB accepts
+    equality on it but not `begins_with` (#576, see issue #586).
+
     Returns all matching accounts (up to max_results limit).
     """
     query_lower = query.lower()
 
     try:
-        if _looks_like_full_email(query):
-            gsi_items = _try_email_index_gsi(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
-        else:
-            gsi_items = _try_email_prefix_gsi(query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
+        gsi_items = _try_email_index_gsi(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
         if gsi_items is not None:
             return gsi_items
-        if len(query_lower) < _ACCOUNT_SEARCH_MIN_QUERY_LENGTH:
-            logger.info(
-                "Skipping accounts search scan; query is too short to match, type more characters",
-                query=mask_email(query),
-                min_query_length=_ACCOUNT_SEARCH_MIN_QUERY_LENGTH,
-            )
-            return []
         return _scan_accounts_matches(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
     except ClientError as e:
         logger.warning("DynamoDB search failed", error=str(e), query=mask_email(query))
@@ -664,13 +634,23 @@ def _validate_sub_for_filter(sub: str) -> None:
 
 
 def _validate_search_query(query: str) -> None:
-    """Validate that the admin search query is a safe UUID, email prefix, or ACCOUNT#UUID."""
+    """Validate that the admin search query is a safe UUID, email prefix, or ACCOUNT#UUID.
+
+    A non-UUID query is served by a full accounts-table scan, so a query below
+    `_ACCOUNT_SEARCH_MIN_QUERY_LENGTH` is rejected rather than scanning the
+    table for a result that cannot narrow anything down (#576).
+    """
     if query.startswith("ACCOUNT#"):
         if _looks_like_uuid(query[8:]):
             return
     elif _looks_like_uuid(query):
         return
     elif _is_valid_email_prefix(query):
+        if len(query) < _ACCOUNT_SEARCH_MIN_QUERY_LENGTH:
+            raise AppError(
+                ErrorCode.INVALID_INPUT,
+                f"Search query must be at least {_ACCOUNT_SEARCH_MIN_QUERY_LENGTH} characters",
+            )
         return
 
     raise AppError(
