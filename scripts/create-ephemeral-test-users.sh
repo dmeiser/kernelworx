@@ -30,10 +30,9 @@ RUN_ID="$1"
 USER_POOL_ID="$2"
 CLIENT_ID="$3"
 
-# The run-id is caller-supplied (the same pr_number workflow inputs the
-# state-touching ephemeral entry points take) and is interpolated into the
-# test-user emails, so reject anything outside [A-Za-z0-9._-] before the first
-# Cognito call. Same rule as validate_run_id in ephemeral-recover-common.sh.
+# The run-id is caller-supplied (it comes from the pr_number workflow inputs)
+# and is interpolated into the test-user emails, so reject anything outside
+# [A-Za-z0-9._-] before the first Cognito call.
 if ! [[ "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
   log "❌ Invalid run-id: must match [A-Za-z0-9._-]+"
   exit 1
