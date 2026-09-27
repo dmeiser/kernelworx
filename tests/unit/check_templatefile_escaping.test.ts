@@ -98,7 +98,8 @@ describe('templatefile()-loaded resolvers only interpolate declared placeholders
         const name = use.sourceFile.slice(ROOT_DIR.length + 1);
         it(`${use.tfFile} keeps ${name} free of unescaped \${...}`, () => {
             const offenders = unescapedInterpolations(readFileSync(use.sourceFile, 'utf8')).filter(
-                (offender) => !use.allowedPlaceholders.includes(offender.slice(offender.indexOf('${') + 2, -1)),
+                (offender) =>
+                    !use.allowedPlaceholders.includes(offender.slice(offender.indexOf('${') + 2, -1).trim()),
             );
             expect(
                 offenders,
