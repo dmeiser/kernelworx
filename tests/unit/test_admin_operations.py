@@ -3501,7 +3501,7 @@ class TestAdminDeleteUserCampaigns:
     ) -> None:
         """Test that a profile with no campaigns skips the delete and reports zero.
 
-        Covers the empty ``campaign_keys`` guard: the behaviour tests always
+        Covers the empty ``campaign_keys`` guard: the behavior tests always
         return items, so without this the False branch is never exercised and a
         profile that simply has no campaigns is untested.
         """
@@ -3611,7 +3611,7 @@ class TestAdminDeleteUserShares:
     ) -> None:
         """Test that a profile with no shares skips the delete and reports zero.
 
-        Covers the empty ``share_keys`` guard: the behaviour tests always return
+        Covers the empty ``share_keys`` guard: the behavior tests always return
         items, so without this the False branch is never exercised and a profile
         that simply has no shares is untested.
         """

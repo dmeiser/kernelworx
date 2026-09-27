@@ -100,7 +100,7 @@ def _raise_delete_error(table_name: str, exc: Exception, log: Any = None) -> Non
     ) from exc
 
 
-def _dedupe_delete_keys(keys: List[Dict[str, Any]], primary_keys: Optional[List[str]]) -> List[Dict[str, Any]]:
+def _drop_duplicate_delete_keys(keys: List[Dict[str, Any]], primary_keys: Optional[List[str]]) -> List[Dict[str, Any]]:
     """Drop duplicate deletes by primary key, keeping the last occurrence.
 
     Replaces boto3's ``overwrite_by_pkeys`` buffer dedup, which only ever saw
@@ -112,16 +112,16 @@ def _dedupe_delete_keys(keys: List[Dict[str, Any]], primary_keys: Optional[List[
         return list(keys)
 
     positions: Dict[Any, int] = {}
-    deduped: List[Dict[str, Any]] = []
+    unique: List[Dict[str, Any]] = []
     for key in keys:
         identity = tuple(str(key.get(name)) for name in primary_keys)
         existing = positions.get(identity)
         if existing is None:
-            positions[identity] = len(deduped)
-            deduped.append(key)
+            positions[identity] = len(unique)
+            unique.append(key)
         else:
-            deduped[existing] = key
-    return deduped
+            unique[existing] = key
+    return unique
 
 
 def _flush_delete_requests(client: Any, table_name: str, requests: List[Dict[str, Any]], log: Any) -> None:
@@ -177,11 +177,11 @@ def batch_delete_keys(
 
     log = logger if logger is not None else _default_logger
     table_name = getattr(table, "name", str(table))
-    deduped = _dedupe_delete_keys(keys, primary_keys)
+    unique = _drop_duplicate_delete_keys(keys, primary_keys)
     deleted_count = 0
 
-    for i in range(0, len(deduped), BATCH_SIZE):
-        batch = deduped[i : i + BATCH_SIZE]
+    for i in range(0, len(unique), BATCH_SIZE):
+        batch = unique[i : i + BATCH_SIZE]
         requests = [{"DeleteRequest": {"Key": key}} for key in batch]
         try:
             _flush_delete_requests(table.meta.client, table_name, requests, log)
