@@ -168,7 +168,7 @@ class TestConfirmQRUpload:
         # Upload a file to S3
         s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         # Create event
         event = {
@@ -196,8 +196,8 @@ class TestConfirmQRUpload:
         old_s3_key = f"payment-qr-codes/{sample_account_id}/{'a' * 32}.png"
         new_s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=b"old-qr-data")
-        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=b"new-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=PNG_BYTES)
+        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=PNG_BYTES)
 
         account_id_key = f"ACCOUNT#{sample_account_id}"
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
@@ -244,8 +244,8 @@ class TestConfirmQRUpload:
         old_s3_key = f"payment-qr-codes/{sample_account_id}/{'a' * 32}.png"
         new_s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=b"old-qr-data")
-        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=b"new-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=PNG_BYTES)
+        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=PNG_BYTES)
 
         account_id_key = f"ACCOUNT#{sample_account_id}"
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
@@ -293,8 +293,8 @@ class TestConfirmQRUpload:
         old_s3_key = f"payment-qr-codes/{sample_account_id}/{'a' * 32}.png"
         new_s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=b"old-qr-data")
-        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=b"new-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=PNG_BYTES)
+        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=PNG_BYTES)
 
         account_id_key = f"ACCOUNT#{sample_account_id}"
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
@@ -342,7 +342,7 @@ class TestConfirmQRUpload:
         create_payment_method(sample_account_id, "Venmo")
         s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         mock_table = MagicMock()
         tables_dict = dynamodb_tables
@@ -376,7 +376,7 @@ class TestConfirmQRUpload:
         create_payment_method(sample_account_id, "PayPal")
         s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         mock_table = MagicMock()
         tables_dict = dynamodb_tables
@@ -416,8 +416,8 @@ class TestConfirmQRUpload:
         old_s3_key = f"payment-qr-codes/{sample_account_id}/{'a' * 32}.png"
         new_s3_key = f"payment-qr-codes/{sample_account_id}/{'b' * 32}.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=b"old-qr-data")
-        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=b"new-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=old_s3_key, Body=PNG_BYTES)
+        s3_bucket.put_object(Bucket=bucket_name, Key=new_s3_key, Body=PNG_BYTES)
 
         account_id_key = f"ACCOUNT#{sample_account_id}"
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
@@ -464,7 +464,7 @@ class TestConfirmQRUpload:
 
         s3_key = f"payment-qr-codes/{sample_account_id}/{'c' * 32}.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         account_id_key = f"ACCOUNT#{sample_account_id}"
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
@@ -634,7 +634,7 @@ class TestConfirmQRUpload:
         # Upload a file to S3
         s3_key = f"payment-qr-codes/{sample_account_id}/zelle.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         # Create event
         event = {
@@ -655,7 +655,7 @@ class TestConfirmQRUpload:
         fake_account_id = "nonexistent-account"
         s3_key = f"payment-qr-codes/{fake_account_id}/venmo.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         # Create event
         event = {
@@ -723,7 +723,7 @@ class TestConfirmQRUpload:
         create_payment_method(sample_account_id, "Venmo")
         s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         mock_table = MagicMock()
         tables_dict = dynamodb_tables
@@ -764,7 +764,7 @@ class TestDeleteQRCode:
         # Upload QR code
         s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         # Update payment method with QR
         from src.utils.dynamodb import tables
@@ -883,7 +883,7 @@ class TestDeleteQRCode:
 
         s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         account_id_key = f"ACCOUNT#{sample_account_id}"
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
@@ -1015,7 +1015,7 @@ class TestExceptionHandling:
         # Simulate QR exists in S3
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
         s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         # Update method with QR
         account_id_key = f"ACCOUNT#{sample_account_id}"
@@ -1058,7 +1058,7 @@ class TestExceptionHandling:
         # Create S3 object
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
         s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=PNG_BYTES)
 
         # Try to confirm upload for non-existent method
         event = {
@@ -1101,7 +1101,7 @@ class TestExceptionHandling:
 
         # Create S3 object for Venmo
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key_venmo, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key_venmo, Body=PNG_BYTES)
 
         # Delete QR from Venmo - this will iterate over both Venmo and PayPal
         # Venmo matches the if condition, PayPal doesn't (exercises else branch)

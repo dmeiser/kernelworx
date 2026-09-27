@@ -111,6 +111,10 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     bucket_name = get_required_env("EXPORTS_BUCKET")
     s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
+    # The pre-signed POST only accepts image/png and always issues a .png key,
+    # so the confirm step's magic-number check only ever admits PNG for it
+    # (#559). The other extensions validate_qr_s3_key permits stay valid for
+    # keys an account already stored.
     presigned_post = s3_client.generate_presigned_post(
         Bucket=bucket_name,
         Key=s3_key,
@@ -133,14 +137,75 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def _validate_s3_object_exists(bucket_name: str, s3_key: str) -> None:
-    """Validate that S3 object exists at the specified key."""
+    """Validate that the S3 object exists and holds a permitted image format.
+
+    S3 validates only the Content-Type form field of the pre-signed POST, not
+    the object's bytes, so any body up to the size cap can be stored under the
+    QR prefix (#559). The magic numbers of the format the key's extension
+    permits are checked here, and a non-matching object is purged before the
+    error is raised.
+
+    Raises:
+        AppError: NOT_FOUND if the object is missing, INVALID_INPUT if it does
+            not hold a permitted image.
+    """
     s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
     try:
-        s3_client.head_object(Bucket=bucket_name, Key=s3_key)
+        head = s3_client.head_object(Bucket=bucket_name, Key=s3_key)
     except ClientError as e:
         if e.response.get("Error", {}).get("Code") == "404":
             raise AppError(ErrorCode.NOT_FOUND, "Upload not found. Please upload the file first.")
         raise
+
+    if not _object_is_permitted_image(s3_client, bucket_name, s3_key, int(head.get("ContentLength", 0))):
+        # Purge first so the bad object cannot linger in the first-party bucket.
+        s3_client.delete_object(Bucket=bucket_name, Key=s3_key)
+        raise AppError(ErrorCode.INVALID_INPUT, "Uploaded file is not a valid image")
+
+
+def _object_is_permitted_image(s3_client: Any, bucket_name: str, s3_key: str, content_length: int) -> bool:
+    """Check the object's leading bytes against the format its key permits.
+
+    Only the first 12 bytes are read (the WEBP form type sits at offset 8), so
+    the check stays a fixed-cost peek regardless of object size.
+    """
+    if content_length == 0:
+        return False
+    response = s3_client.get_object(Bucket=bucket_name, Key=s3_key, Range="bytes=0-11")
+    return _has_image_magic(response["Body"].read(), s3_key)
+
+
+def _is_png(body: bytes) -> bool:
+    """Return True for a PNG signature."""
+    return body.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def _is_jpeg(body: bytes) -> bool:
+    """Return True for a JPEG SOI marker."""
+    return body.startswith(b"\xff\xd8\xff")
+
+
+def _is_webp(body: bytes) -> bool:
+    """Return True for a RIFF container whose form type is WEBP."""
+    return body.startswith(b"RIFF") and body[8:12] == b"WEBP"
+
+
+# The formats validate_qr_s3_key admits a key extension for. The bytes must
+# match the key's own extension, so a JPEG cannot be stored - and served under
+# the image/png type the pre-signed POST declares - as a .png key (#559).
+_QR_IMAGE_VALIDATORS_BY_EXTENSION: Dict[str, Any] = {
+    "png": _is_png,
+    "jpg": _is_jpeg,
+    "jpeg": _is_jpeg,
+    "webp": _is_webp,
+}
+
+
+def _has_image_magic(body: bytes, s3_key: str) -> bool:
+    """Return True when the body carries the magic numbers of the key's format."""
+    extension = s3_key.rsplit("/", 1)[-1].rpartition(".")[2]
+    validator = _QR_IMAGE_VALIDATORS_BY_EXTENSION.get(extension)
+    return validator is not None and validator(body)
 
 
 def _validate_qr_upload_inputs(payment_method_name: str, s3_key: str, caller_id: str) -> None:
