@@ -319,10 +319,11 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
     Search strategy:
     1. If query looks like UUID or ACCOUNT#UUID, search Cognito by sub directly (single result)
     2. Otherwise (minimum `_ACCOUNT_SEARCH_MIN_QUERY_LENGTH` characters):
-       a. Search DynamoDB Accounts table: a complete email uses the email-index
-          GSI, and every partial query (partial email, first name, last name)
-          scans the table, bounded by the `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety
-          limit - there is no index-backed prefix search (#576, see #586)
+       a. Search DynamoDB Accounts table: an email fragment uses the
+          emailSearchIndex GSI (prefix query); every other query (a name
+          fragment) scans the table, bounded by the
+          `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety limit. Both cover logged-in
+          users.
        b. Search Cognito with prefix matching (all users, including those who haven't logged in)
        c. Merge results, deduplicate by accountId
 
