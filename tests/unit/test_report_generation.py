@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from io import BytesIO
 from typing import Any, Dict
+from unittest.mock import patch
 
 import boto3
 import openpyxl
@@ -636,3 +637,64 @@ class TestSanitizeReportValue:
         assert ws.cell(row=2, column=1).value == "'=cmd|'/C calc'!A0"
         assert ws.cell(row=2, column=2).value == "'+1234567890"
         assert ws.cell(row=2, column=3).value == "'@SUM(A:A)"
+
+
+class TestCampaignReportOrderCeiling:
+    """Tests for the shared order ceiling on the campaign report path (#533, #577).
+
+    The report writes one row per order and builds the whole workbook in memory,
+    so a campaign with a very large order history would exhaust the Lambda's
+    budget instead of returning a report. Both report paths share one ceiling.
+    """
+
+    def test_campaign_over_the_ceiling_returns_resource_busy(
+        self,
+        dynamodb_table: Any,
+        s3_bucket: Any,
+        sample_profile: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
+        sample_orders: list[Dict[str, Any]],
+        sample_campaign_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """A campaign with more orders than the ceiling fails with a typed RESOURCE_BUSY error."""
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
+        }
+
+        with patch("src.handlers.report_generation.MAX_REPORT_ORDERS", len(sample_orders) - 1):
+            result = request_campaign_report(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+        assert "too large" in result["message"]
+
+        # Nothing is uploaded when the ceiling is hit.
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name)["KeyCount"] == 0
+
+    def test_campaign_at_the_ceiling_still_generates_the_report(
+        self,
+        dynamodb_table: Any,
+        s3_bucket: Any,
+        sample_profile: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
+        sample_orders: list[Dict[str, Any]],
+        sample_campaign_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """A campaign at exactly the ceiling still generates its report."""
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "csv"}},
+        }
+
+        with patch("src.handlers.report_generation.MAX_REPORT_ORDERS", len(sample_orders)):
+            result = request_campaign_report(event, lambda_context)
+
+        assert result["status"] == "COMPLETED"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name)["KeyCount"] == 1

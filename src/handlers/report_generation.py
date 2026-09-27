@@ -24,6 +24,7 @@ try:  # pragma: no cover
     from utils.ids import ensure_campaign_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items
+    from utils.report_limits import MAX_REPORT_ORDERS, report_too_large_error
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.dynamodb import get_required_env, tables
@@ -31,6 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.ids import ensure_campaign_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
+    from ..utils.report_limits import MAX_REPORT_ORDERS, report_too_large_error
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -46,6 +48,8 @@ else:  # pragma: no cover
 
 # Report pre-signed URL lifetime in seconds (3 hours)
 REPORT_URL_EXPIRATION_SECONDS = 3 * 60 * 60
+
+logger = get_logger(__name__)
 
 # Module-level proxy that tests can monkeypatch
 s3_client: "S3Client | None" = None
@@ -182,10 +186,17 @@ def _get_campaign(table: Any, campaign_id: str) -> Dict[str, Any] | None:
 
 
 def _get_campaign_orders(table: Any, campaign_id: str) -> list[Dict[str, Any]]:
-    """Get all orders for a campaign (V2: Direct PK query since PK=campaignId)."""
+    """Get all orders for a campaign (V2: Direct PK query since PK=campaignId).
+
+    The report writes one row per order - and for XLSX builds the whole workbook
+    in memory - so a campaign with a very large order history would exhaust the
+    Lambda's budget instead of returning a report. The shared report ceiling
+    bounds the read, and one order past it is enough to prove the ceiling was
+    reached (#533, #577).
+    """
     # V2 schema: Orders table has PK=campaignId, SK=orderId
     # No GSI needed - direct query on the partition key
-    return cast(
+    orders = cast(
         List[Dict[str, Any]],
         query_all_items(
             table,
@@ -195,8 +206,19 @@ def _get_campaign_orders(table: Any, campaign_id: str) -> list[Dict[str, Any]]:
                     ":campaign_id": campaign_id,
                 },
             },
+            max_items=MAX_REPORT_ORDERS + 1,
         ),
     )
+
+    if len(orders) > MAX_REPORT_ORDERS:
+        logger.warning(
+            "Campaign report order ceiling reached",
+            campaign_id=campaign_id,
+            max_orders=MAX_REPORT_ORDERS,
+        )
+        raise report_too_large_error("This campaign's")
+
+    return orders
 
 
 def _format_city_state_zip(address: Dict[str, Any]) -> str:
