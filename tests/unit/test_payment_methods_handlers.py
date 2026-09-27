@@ -23,6 +23,12 @@ from src.utils.errors import AppError, ErrorCode
 from src.utils.payment_methods import create_payment_method
 from tests.unit.table_schemas import create_all_tables
 
+# Minimal bodies whose leading bytes carry the magic numbers of the image
+# formats the QR upload path permits.
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"qr-image-bytes"
+JPEG_BYTES = b"\xff\xd8\xff" + b"qr-image-bytes"
+WEBP_BYTES = b"RIFF\x24\x00\x00\x00WEBP" + b"qr-image-bytes"
+
 
 @pytest.fixture
 def aws_credentials() -> None:
@@ -503,6 +509,123 @@ class TestConfirmQRUpload:
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.NOT_FOUND
         assert "upload not found" in result["message"].lower()
+
+    def test_confirm_upload_rejects_non_image_bytes_and_purges_object(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """Non-image content uploaded as image/png is rejected and purged (#559).
+
+        S3 validates only the client-declared Content-Type form field of the
+        pre-signed POST, so an arbitrary body can be stored under the QR
+        prefix. The confirm step must inspect the object's bytes.
+        """
+        from src.utils.dynamodb import tables
+
+        create_payment_method(sample_account_id, "Venmo")
+
+        s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(
+            Bucket=bucket_name,
+            Key=s3_key,
+            Body=b"<html><script>alert(1)</script></html>",
+            ContentType="image/png",
+        )
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
+        }
+
+        result = confirm_qr_upload(event, None)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "not a valid image" in result["message"]
+        # Purged, so the bad object cannot linger in the first-party bucket.
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name, Prefix="payment-qr-codes/").get("KeyCount", 0) == 0
+        # The payment method is left without a QR key.
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        response = tables.accounts.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        assert all(m.get("qrCodeUrl") is None for m in methods if m["name"] == "Venmo")
+
+    def test_confirm_upload_rejects_empty_object(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """An empty body (no magic numbers) is rejected and purged (#559)."""
+        s3_key = f"payment-qr-codes/{sample_account_id}/empty.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"")
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
+        }
+        create_payment_method(sample_account_id, "Venmo")
+
+        result = confirm_qr_upload(event, None)
+
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "not a valid image" in result["message"]
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name, Prefix="payment-qr-codes/").get("KeyCount", 0) == 0
+
+    def test_confirm_upload_accepts_permitted_image_formats(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """JPEG and WEBP bodies pass for the .jpg/.webp keys validate_qr_s3_key permits."""
+        create_payment_method(sample_account_id, "Venmo")
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+
+        for extension, body in ((".jpg", JPEG_BYTES), (".webp", WEBP_BYTES)):
+            s3_key = f"payment-qr-codes/{sample_account_id}/{extension.lstrip('.')}-qr{extension}"
+            s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=body)
+            event = {
+                "identity": {"sub": sample_account_id},
+                "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
+            }
+
+            result = confirm_qr_upload(event, None)
+
+            assert result["qrCodeUrl"] == s3_key
+
+    def test_confirm_upload_rejects_body_mismatching_key_format(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """A JPEG body is not accepted for a .png key, and vice versa (#559)."""
+        create_payment_method(sample_account_id, "Venmo")
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_key = f"payment-qr-codes/{sample_account_id}/mismatch.png"
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=JPEG_BYTES)
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
+        }
+
+        result = confirm_qr_upload(event, None)
+
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name, Prefix="payment-qr-codes/").get("KeyCount", 0) == 0
+
+    def test_confirm_upload_rejects_truncated_webp(
+        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """A RIFF header without the WEBP form type is rejected (#559)."""
+        create_payment_method(sample_account_id, "Venmo")
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_key = f"payment-qr-codes/{sample_account_id}/truncated.webp"
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"RIFF\x24\x00\x00\x00")
+
+        event = {
+            "identity": {"sub": sample_account_id},
+            "arguments": {"paymentMethodName": "Venmo", "s3Key": s3_key},
+        }
+
+        result = confirm_qr_upload(event, None)
+
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name, Prefix="payment-qr-codes/").get("KeyCount", 0) == 0
 
     def test_confirm_upload_nonexistent_method(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
