@@ -917,3 +917,177 @@ class TestGetAccessibleProfilesBatching:
         assert len(result) == 1
         assert "PROFILE#exists" in result
         assert "PROFILE#missing" not in result
+
+
+class TestUnitReportOrderCeiling:
+    """Tests for the unit-wide order ceiling on get_unit_report (#577).
+
+    The handler used to materialise every order and every line item for the whole
+    unit, so the largest units - the ones the report exists for - exhausted the
+    Lambda's memory and surfaced as a generic INTERNAL_ERROR. The ceiling turns
+    that into a typed RESOURCE_BUSY error before the report is built.
+    """
+
+    @pytest.fixture
+    def event(self) -> Dict[str, Any]:
+        """AppSync event for a single-campaign unit."""
+        return {
+            "arguments": {
+                "unitType": "Pack",
+                "unitNumber": 158,
+                "city": "Springfield",
+                "state": "IL",
+                "campaignName": "Fall",
+                "campaignYear": 2024,
+                "catalogId": "CATALOG#catalog-123",
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+    def _campaign(self, index: int = 1) -> Dict[str, Any]:
+        """Build a campaign belonging to profile1."""
+        return {
+            "campaignId": f"CAMPAIGN#campaign{index}",
+            "profileId": "PROFILE#profile1",
+            "campaignName": "Fall",
+            "campaignYear": 2024,
+            "catalogId": "CATALOG#catalog-123",
+            "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
+        }
+
+    def _order(self, campaign_index: int, order_index: int) -> Dict[str, Any]:
+        """Build an order with one expanded line item."""
+        return {
+            "orderId": f"ORDER#order{order_index}",
+            "campaignId": f"CAMPAIGN#campaign{campaign_index}",
+            "customerName": f"Customer {order_index}",
+            "orderDate": "2024-10-01T12:00:00Z",
+            "totalAmount": Decimal("10.00"),
+            "lineItems": [
+                {
+                    "productId": "PROD#1",
+                    "productName": "Caramel Corn",
+                    "quantity": 1,
+                    "pricePerUnit": Decimal("10.00"),
+                    "subtotal": Decimal("10.00"),
+                }
+            ],
+        }
+
+    def _run(
+        self,
+        event: Dict[str, Any],
+        campaigns: list[Dict[str, Any]],
+        orders_by_campaign: Dict[str, list[Dict[str, Any]]],
+        lambda_context: Any,
+    ) -> Dict[str, Any]:
+        """Run get_unit_report with the given campaigns and per-campaign orders."""
+        profiles_table = MagicMock()
+        campaigns_table = MagicMock()
+        orders_table = MagicMock()
+        campaigns_table.query.return_value = {"Items": campaigns}
+        profiles_table.query.side_effect = lambda **kwargs: {
+            "Items": [
+                {
+                    "profileId": kwargs["ExpressionAttributeValues"][":profileId"],
+                    "ownerAccountId": "test-account-123",
+                    "sellerName": "Scout 1",
+                }
+            ]
+        }
+        # Orders are queried one campaign at a time, in campaign order.
+        orders_table.query.side_effect = [
+            {"Items": orders_by_campaign.get(campaign["campaignId"], [])} for campaign in campaigns
+        ]
+
+        with (
+            patch("src.handlers.campaign_reporting.tables") as mock_tables,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
+        ):
+            mock_tables.profiles = profiles_table
+            mock_tables.campaigns = campaigns_table
+            mock_tables.orders = orders_table
+            mock_check_access.return_value = {c["profileId"] for c in campaigns}
+            return get_unit_report(event, lambda_context)
+
+    def test_unit_report_rejects_units_over_the_order_ceiling(
+        self, event: Dict[str, Any], lambda_context: Any
+    ) -> None:
+        """A unit with more orders than the ceiling fails with a typed RESOURCE_BUSY error."""
+        orders = [self._order(1, i) for i in range(3)]
+
+        with patch("src.handlers.campaign_reporting.MAX_REPORT_ORDERS", 2):
+            result = self._run(event, [self._campaign()], {"CAMPAIGN#campaign1": orders}, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == "RESOURCE_BUSY"
+        assert "too large" in result["message"]
+        # No partial report is returned when the ceiling is hit.
+        assert "sellers" not in result
+
+    def test_unit_report_returns_orders_up_to_the_ceiling(
+        self, event: Dict[str, Any], lambda_context: Any
+    ) -> None:
+        """A unit at exactly the ceiling still returns its full report."""
+        orders = [self._order(1, i) for i in range(2)]
+
+        with patch("src.handlers.campaign_reporting.MAX_REPORT_ORDERS", 2):
+            result = self._run(event, [self._campaign()], {"CAMPAIGN#campaign1": orders}, lambda_context)
+
+        assert result["totalOrders"] == 2
+        assert result["totalSales"] == 20.0
+        assert len(result["sellers"][0]["orders"]) == 2
+
+    def test_unit_report_ceiling_spans_the_whole_unit(
+        self, event: Dict[str, Any], lambda_context: Any
+    ) -> None:
+        """The ceiling is unit-wide: orders across several sellers accumulate against it."""
+        campaigns = [
+            self._campaign(1),
+            {**self._campaign(2), "profileId": "PROFILE#profile2"},
+        ]
+        orders_by_campaign = {
+            "CAMPAIGN#campaign1": [self._order(1, 0), self._order(1, 1)],
+            "CAMPAIGN#campaign2": [self._order(2, 2)],
+        }
+
+        with patch("src.handlers.campaign_reporting.MAX_REPORT_ORDERS", 2):
+            result = self._run(event, campaigns, orders_by_campaign, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == "RESOURCE_BUSY"
+
+    def test_unit_report_bounds_each_order_query(
+        self, event: Dict[str, Any], lambda_context: Any
+    ) -> None:
+        """Each order query is bounded by the remaining budget, so pages stop early."""
+        orders_table = MagicMock()
+        campaigns_table = MagicMock()
+        profiles_table = MagicMock()
+        campaigns_table.query.return_value = {"Items": [self._campaign(1), self._campaign(2)]}
+        profiles_table.query.side_effect = lambda **kwargs: {
+            "Items": [
+                {
+                    "profileId": kwargs["ExpressionAttributeValues"][":profileId"],
+                    "sellerName": "Scout 1",
+                }
+            ]
+        }
+        orders_table.query.return_value = {"Items": [self._order(1, 0)]}
+
+        with (
+            patch("src.handlers.campaign_reporting.tables") as mock_tables,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.MAX_REPORT_ORDERS", 5),
+        ):
+            mock_tables.profiles = profiles_table
+            mock_tables.campaigns = campaigns_table
+            mock_tables.orders = orders_table
+            mock_check_access.return_value = {"PROFILE#profile1"}
+            result = get_unit_report(event, lambda_context)
+
+        assert result["totalOrders"] == 2
+        # The ceiling is shared across campaigns, so the second query asks for the
+        # remaining budget plus the one over-limit probe order, never the whole table.
+        budgets = [call.kwargs["max_items"] for call in orders_table.query.call_args_list]
+        assert budgets == [6, 5]
