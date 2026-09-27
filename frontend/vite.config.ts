@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import fs from 'fs'
 import { execSync } from 'child_process'
+import { fileURLToPath } from 'url'
 
 // Get build info
 const getBuildInfo = () => {
@@ -46,6 +47,19 @@ const httpsConfig = resolveHttpsConfig()
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      // AppSync JS resolvers live in the tofu tree and are executed in tests
+      // against the shared runtime mock (same one the node --test resolver
+      // suite uses via register-loader.mjs).
+      '@aws-appsync/utils': fileURLToPath(
+        new URL(
+          '../tofu/application/appsync/js-resolvers/__mocks__/@aws-appsync/utils.js',
+          import.meta.url,
+        ),
+      ),
+    },
+  },
   optimizeDeps: {
     include: ['react-router', 'react-router-dom'],
   },
