@@ -24,8 +24,11 @@ USERNAME = "owner@example.com"
 POOL_ID = "us-east-1_ExamplePool"
 CLIENT_ID = "1example23client45id6789"
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
+# The credential is baked into the fake aws CLI below so the mock can scan
+# /proc for it without inheriting it through the environment.
+assert "'" not in PASSWORD, "the mock embeds the credential in a single-quoted shell string"
 
-MOCK_AWS = """\
+MOCK_AWS_TEMPLATE = """\
 #!/bin/bash
 # Record every argument exactly as the process received it, and snapshot the
 # contents/mode of any file:// parameter file while it still exists.
@@ -43,6 +46,26 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+# #569: no command line in this process's ancestry may carry the credential -
+# in particular this script's own argv, which is still alive as our parent.
+# (The secret stays in this shell's memory: it is never exported and never
+# passed on a command line, so the scan below cannot itself leak it.)
+CREDENTIAL='__CREDENTIAL__'
+scan_pid=$$
+while [ "$scan_pid" -gt 1 ]; do
+  if tr '\\0' '\\n' < "/proc/$scan_pid/cmdline" 2>/dev/null | grep -qF "$CREDENTIAL"; then
+    printf '%s\\n' "$scan_pid" >> "$MOCK_AWS_CMDLINE_LEAKS"
+  fi
+  # Field 4 of /proc/<pid>/stat is ppid; strip past the comm field first.
+  scan_pid=$(sed -e 's/^.*) //' -e 's/ .*//' "/proc/$scan_pid/stat" 2>/dev/null) || break
+  [ -n "$scan_pid" ] || break
+done
+# The script unsets the variable, so the credential must not be inherited into
+# this process's environment either.
+if tr '\\0' '\\n' < /proc/self/environ 2>/dev/null | grep -qF "$CREDENTIAL"; then
+  printf 'environ\\n' >> "$MOCK_AWS_ENV_LEAKS"
+fi
 
 sub="$1 $2"
 case "$sub" in
@@ -69,6 +92,8 @@ case "$sub" in
 esac
 """
 
+MOCK_AWS = MOCK_AWS_TEMPLATE.replace("__CREDENTIAL__", PASSWORD)
+
 
 @pytest.fixture
 def repo_root() -> Path:
@@ -81,7 +106,15 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     logs = {
-        name: tmp_path / f"{name}.log" for name in ("aws_argv", "aws_modes", "aws_param_files", "aws_param_contents")
+        name: tmp_path / f"{name}.log"
+        for name in (
+            "aws_argv",
+            "aws_modes",
+            "aws_param_files",
+            "aws_param_contents",
+            "aws_cmdline_leaks",
+            "aws_env_leaks",
+        )
     }
     for path in logs.values():
         path.touch()
@@ -101,12 +134,17 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object
     monkeypatch.setenv("MOCK_AWS_MODES", str(logs["aws_modes"]))
     monkeypatch.setenv("MOCK_AWS_PARAM_FILES", str(logs["aws_param_files"]))
     monkeypatch.setenv("MOCK_AWS_PARAM_CONTENTS", str(logs["aws_param_contents"]))
+    monkeypatch.setenv("MOCK_AWS_CMDLINE_LEAKS", str(logs["aws_cmdline_leaks"]))
+    monkeypatch.setenv("MOCK_AWS_ENV_LEAKS", str(logs["aws_env_leaks"]))
     monkeypatch.setenv("MOCK_TOTP_SECRET", TOTP_SECRET)
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     return {"bin_dir": bin_dir, "logs": logs}
 
 
-def run_script(harness: dict[str, object], repo_root: Path) -> subprocess.CompletedProcess[str]:
+def run_script(
+    harness: dict[str, object], repo_root: Path, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run the script the way its callers do: three arguments, secret by env."""
     return subprocess.run(
         [
             "bash",
@@ -114,12 +152,16 @@ def run_script(harness: dict[str, object], repo_root: Path) -> subprocess.Comple
             POOL_ID,
             CLIENT_ID,
             USERNAME,
-            PASSWORD,
         ],
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "PATH": f"{harness['bin_dir']}{os.pathsep}{os.environ['PATH']}"},
+        env={
+            **os.environ,
+            "PATH": f"{harness['bin_dir']}{os.pathsep}{os.environ['PATH']}",
+            "PROVISION_USER_TOTP_PASSWORD": PASSWORD,
+            **(env or {}),
+        },
     )
 
 
@@ -229,6 +271,37 @@ class TestAuthParametersFile:
         assert files
         for path in files:
             assert not path.exists(), f"parameter file survived a failed run: {path}"
+
+
+class TestScriptOwnArgv:
+    """#569: the credential must not be a positional argument either."""
+
+    def test_no_process_command_line_carries_the_credential_while_running(
+        self, harness: dict[str, object], repo_root: Path
+    ) -> None:
+        """Scans the process ancestry from inside the run, covering the script's own argv."""
+        result = run_script(harness, repo_root)
+        assert result.returncode == 0, result.stderr
+
+        assert aws_invocations(harness), "the fake aws CLI was never invoked, so nothing was scanned"
+        leaks = logs(harness)["aws_cmdline_leaks"].read_text().split()
+        assert not leaks, f"the credential appeared in the command line of pid(s): {leaks}"
+
+    def test_credential_is_not_inherited_by_child_processes(self, harness: dict[str, object], repo_root: Path) -> None:
+        result = run_script(harness, repo_root)
+        assert result.returncode == 0, result.stderr
+
+        assert aws_invocations(harness)
+        assert not logs(harness)["aws_env_leaks"].read_text().split()
+
+    def test_missing_environment_variable_fails_fast(self, harness: dict[str, object], repo_root: Path) -> None:
+        """No silent positional fallback: without the variable, nothing runs."""
+        result = run_script(harness, repo_root, env={"PROVISION_USER_TOTP_PASSWORD": ""})
+
+        assert result.returncode != 0
+        assert "PROVISION_USER_TOTP_PASSWORD" in result.stderr
+        assert PASSWORD not in result.stderr
+        assert not aws_invocations(harness), "the script called aws despite having no credential"
 
 
 def test_still_prints_the_totp_secret(harness: dict[str, object], repo_root: Path) -> None:
