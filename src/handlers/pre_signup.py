@@ -204,7 +204,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     logger.info(
         "Pre-signup trigger invoked",
         trigger_source=trigger_source,
-        username=username,
+        username=mask_email(username),
         email=mask_email(email),
     )
 

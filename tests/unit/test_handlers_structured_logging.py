@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
 from src.handlers import post_authentication, pre_signup, pre_token_generation
+from src.utils.logging import mask_email
 
 
 def _structured_records(capsys: Any) -> List[Dict[str, Any]]:
@@ -60,6 +61,39 @@ def test_pre_signup_emits_structured_json_records(capsys: Any) -> None:
     records = _structured_records(capsys)
     _assert_structured_records(records)
     assert any(record["message"] == "Pre-signup trigger invoked" for record in records)
+
+
+def test_pre_signup_native_signup_log_record_has_no_clear_text_email(capsys: Any) -> None:
+    """Native sign-up records must not leak the clear-text email in any field.
+
+    The pool sets username_attributes = ["email"], so on a native
+    PreSignUp_SignUp event Cognito's userName IS the user's email address.
+    Every field of every record emitted for that event must be free of the
+    clear-text address, while correlationId and level keep working.
+    """
+    email = "victim@example.com"
+    event: Dict[str, Any] = {
+        "version": "1",
+        "triggerSource": "PreSignUp_SignUp",
+        "userPoolId": "us-east-1_TEST123",
+        "userName": email,
+        "request": {"userAttributes": {"email": email}},
+        "response": {},
+    }
+
+    result = pre_signup.lambda_handler(event, MagicMock())
+
+    assert result is event
+    records = _structured_records(capsys)
+    invoked = [record for record in records if record["message"] == "Pre-signup trigger invoked"]
+    assert invoked, "invocation record not emitted"
+    assert invoked[0]["username"] == mask_email(email)
+    for record in records:
+        assert record["correlationId"], "record missing correlationId"
+        assert record["level"] == "INFO"
+        for key, value in record.items():
+            if isinstance(value, str):
+                assert email not in value, f"clear-text email leaked in field {key}"
 
 
 def test_post_authentication_emits_structured_json_records(capsys: Any, dynamodb_table: Any) -> None:
