@@ -1224,7 +1224,7 @@ class TestCognitoFilterValidation:
 
         cognito = MagicMock()
         with pytest.raises(AppError) as exc_info:
-            _lookup_cognito_user_with_retry(cognito, "us-east-1_test123", bad_sub, MagicMock())
+            _lookup_cognito_user_with_retry(cognito, "us-east-1_test123", bad_sub)
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
         cognito.list_users.assert_not_called()
@@ -1236,7 +1236,7 @@ class TestCognitoFilterValidation:
         cognito = MagicMock()
         cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
 
-        result = _lookup_cognito_user_with_retry(cognito, "us-east-1_test123", sample_account_id, MagicMock())
+        result = _lookup_cognito_user_with_retry(cognito, "us-east-1_test123", sample_account_id)
 
         assert result == "testuser@example.com"
         cognito.list_users.assert_called_once_with(

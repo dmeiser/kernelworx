@@ -27,24 +27,21 @@ def test_pre_signup_handle_signup_exception():
 
     from src.handlers import pre_signup
 
-    event = {"response": {}}
-
     # Unexpected errors are re-raised to prevent duplicate account creation.
     with pytest.raises(Exception, match="unexpected"):
-        pre_signup._handle_signup_exception(Exception("unexpected"), "user@example.com", event)
+        pre_signup._handle_signup_exception(Exception("unexpected"), "user@example.com")
 
     client_error = ClientError(
         {"Error": {"Code": "InvalidParameterException", "Message": "Link already exists"}},
         "AdminLinkProviderForUser",
     )
     with pytest.raises(pre_signup.FederatedIdentityLinkedException):
-        pre_signup._handle_signup_exception(client_error, "user@example.com", event)
+        pre_signup._handle_signup_exception(client_error, "user@example.com")
 
     with pytest.raises(pre_signup.FederatedIdentityLinkedException):
         pre_signup._handle_signup_exception(
             pre_signup.FederatedIdentityLinkedException("Cannot link federated identity: invalid username format"),
             "user@example.com",
-            event,
         )
 
 

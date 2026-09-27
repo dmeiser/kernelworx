@@ -15,11 +15,13 @@ try:  # pragma: no cover
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
+    from utils.pagination import retry_on_transient_cognito_errors
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
+    from ..utils.pagination import retry_on_transient_cognito_errors
     from ..utils.payment_methods import delete_all_user_qr_codes
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -46,7 +48,7 @@ def _delete_user_s3_reports(account_id: str, logger: Any) -> int:
     from .delete_profile_cascade import _delete_s3_reports
 
     db_account_id = _normalize_account_id(account_id)
-    profiles = _get_user_profiles(db_account_id, logger)
+    profiles = _get_user_profiles(db_account_id)
     total_deleted = 0
     for profile in profiles:
         profile_id = profile.get("profileId")
@@ -57,7 +59,7 @@ def _delete_user_s3_reports(account_id: str, logger: Any) -> int:
     return total_deleted
 
 
-def _delete_all_user_data(account_id: str, context: Any = None, logger: Any = None) -> None:
+def _delete_all_user_data(account_id: str, logger: Any = None) -> None:
     """Delete all user data from DynamoDB and S3 using shared deletion internals."""
     from .admin_operations import (
         _delete_inbound_shares,
@@ -92,35 +94,20 @@ def _delete_all_user_data(account_id: str, context: Any = None, logger: Any = No
     log.info("Deleted all user data from DynamoDB")
 
 
-def _lookup_cognito_user_with_retry(cognito: Any, user_pool_id: str, account_id: str, logger: Any) -> str | None:
+def _lookup_cognito_user_with_retry(cognito: Any, user_pool_id: str, account_id: str) -> str | None:
     """Look up Cognito username by sub with retry for transient errors."""
     # Validate before interpolating into the Cognito filter to prevent
     # quote-injection / filter breakage (#124, #441).
     from .admin_operations import _validate_sub_for_filter
 
     _validate_sub_for_filter(account_id)
-    attempt = 0
-    max_retries = 3
-    while True:
-        try:
-            users_response = cognito.list_users(UserPoolId=user_pool_id, Filter=f'sub = "{account_id}"', Limit=1)
-            users = users_response.get("Users", [])
-            if users:
-                return str(users[0]["Username"])
-            return None
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code")
-            if attempt < max_retries - 1 and error_code in (
-                "TooManyRequestsException",
-                "InternalErrorException",
-                "ProvisionedThroughputExceededException",
-            ):
-                import time
-
-                time.sleep(0.1 * (2**attempt))
-                attempt += 1
-                continue
-            raise
+    users_response = retry_on_transient_cognito_errors(
+        cognito.list_users, UserPoolId=user_pool_id, Filter=f'sub = "{account_id}"', Limit=1
+    )
+    users = users_response.get("Users", [])
+    if users:
+        return str(users[0]["Username"])
+    return None
 
 
 def _delete_user_from_cognito(
@@ -128,33 +115,19 @@ def _delete_user_from_cognito(
 ) -> None:
     """Delete user from Cognito User Pool with retry for transient errors."""
     if not username:
-        username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id, logger)
+        username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id)
     if not username:
         logger.warning(f"User not found in Cognito with sub: {account_id}")
         return
 
-    attempt = 0
-    max_retries = 3
-    while True:
-        try:
-            cognito.admin_delete_user(UserPoolId=user_pool_id, Username=username)
-            logger.info(f"Deleted user from Cognito: {username}")
+    try:
+        retry_on_transient_cognito_errors(cognito.admin_delete_user, UserPoolId=user_pool_id, Username=username)
+    except ClientError as e:
+        # A user that no longer exists is a successful deletion, not an error.
+        if e.response.get("Error", {}).get("Code") == "UserNotFoundException":
             return
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code")
-            if error_code == "UserNotFoundException":
-                return
-            if attempt < max_retries - 1 and error_code in (
-                "TooManyRequestsException",
-                "InternalErrorException",
-                "ProvisionedThroughputExceededException",
-            ):
-                import time
-
-                time.sleep(0.1 * (2**attempt))
-                attempt += 1
-                continue
-            raise
+        raise
+    logger.info(f"Deleted user from Cognito: {username}")
 
 
 @with_error_handling(error_message="Failed to delete account")
@@ -196,14 +169,14 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     try:
         # Pre-check Cognito lookup to fail early on authorization/network/config issues
         try:
-            username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id, logger)
+            username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id)
             if not username:
                 logger.warning(f"User not found in Cognito with sub: {account_id}")
         except ClientError as e:
             logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(e), exc_info=True)
             raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
 
-        _delete_all_user_data(account_id, context, logger)
+        _delete_all_user_data(account_id, logger)
         _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
         logger.info("Account deletion completed successfully")
         return True

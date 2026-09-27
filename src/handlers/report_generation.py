@@ -59,14 +59,12 @@ def _get_s3_client() -> "S3Client":
     return boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
 
-def _generate_report_content(
-    campaign: Dict[str, Any], orders: list[Dict[str, Any]], report_format: str
-) -> tuple[bytes, str, str]:
+def _generate_report_content(orders: list[Dict[str, Any]], report_format: str) -> tuple[bytes, str, str]:
     """Generate report content based on format."""
     if report_format.lower() == "csv":
-        return _generate_csv_report(campaign, orders), "text/csv", "csv"
+        return _generate_csv_report(orders), "text/csv", "csv"
     return (
-        _generate_excel_report(campaign, orders),
+        _generate_excel_report(orders),
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "xlsx",
     )
@@ -122,7 +120,7 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         orders = _get_campaign_orders(tables.orders, campaign_id)
 
         # Generate report
-        report_content, content_type, file_extension = _generate_report_content(campaign, orders, report_format)
+        report_content, content_type, file_extension = _generate_report_content(orders, report_format)
 
         # Upload to S3
         report_id = f"REPORT#{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}#{uuid.uuid4().hex[:8]}"
@@ -252,7 +250,7 @@ def _get_product_quantities(order: Dict[str, Any]) -> dict[str, int]:
     return quantities
 
 
-def _generate_csv_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
+def _generate_csv_report(orders: list[Dict[str, Any]]) -> bytes:
     """Generate CSV report with product columns."""
     import csv
     from io import StringIO
@@ -316,7 +314,7 @@ def _autosize_excel_columns(ws: Any) -> None:
         ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
 
 
-def _generate_excel_report(campaign: Dict[str, Any], orders: list[Dict[str, Any]]) -> bytes:
+def _generate_excel_report(orders: list[Dict[str, Any]]) -> bytes:
     """Generate Excel report with product columns."""
     from openpyxl import Workbook
 

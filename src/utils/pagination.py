@@ -9,13 +9,10 @@ generator variants are available to bound memory growth on large result sets.
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
 
+from botocore.exceptions import ClientError
+
 if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_dynamodb.service_resource import Table
-
-try:  # pragma: no cover
-    from botocore.exceptions import ClientError
-except ModuleNotFoundError:  # pragma: no cover
-    ClientError = Exception  # type: ignore[misc, assignment]
 
 try:  # pragma: no cover
     from utils.logging import get_logger
@@ -69,6 +66,49 @@ def _call_with_retry(
 def _reached_limit(yielded: int, max_items: Optional[int]) -> bool:
     """Return True if the requested item limit has been reached."""
     return max_items is not None and yielded >= max_items
+
+
+_RETRYABLE_COGNITO_CODES: frozenset[str] = frozenset(
+    {"TooManyRequestsException", "InternalErrorException", "ProvisionedThroughputExceededException"}
+)
+_RETRY_MAX_ATTEMPTS: int = 3
+_RETRY_BASE_BACKOFF_SECONDS: float = 0.1
+
+
+def retry_on_transient_cognito_errors(method: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Invoke a Cognito client method, retrying transient throttling faults with exponential backoff.
+
+    The callable is invoked up to ``_RETRY_MAX_ATTEMPTS`` times. A ``ClientError`` whose
+    ``response["Error"]["Code"]`` is one of the transient codes (``TooManyRequestsException``,
+    ``InternalErrorException``, ``ProvisionedThroughputExceededException``) on any attempt before
+    the final one is absorbed: the call sleeps for ``_RETRY_BASE_BACKOFF_SECONDS * (2 ** attempt)``
+    seconds (after attempts 0 and 1) and retries. Any other ``ClientError``, or a transient error
+    on the final attempt, propagates unchanged, so callers keep their own handling of terminal
+    codes such as ``UserNotFoundException``.
+
+    Args:
+        method: Bound Cognito client method to invoke.
+        *args: Positional arguments forwarded to ``method``.
+        **kwargs: Keyword arguments forwarded to ``method``.
+
+    Returns:
+        Whatever ``method`` returns on a successful attempt.
+
+    Raises:
+        ClientError: The original error, unmodified, when it is not retryable or retries are
+            exhausted. No other exception type is ever translated by this helper.
+    """
+    attempt = 0
+    while True:
+        try:
+            return method(*args, **kwargs)
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code")
+            if attempt < _RETRY_MAX_ATTEMPTS - 1 and error_code in _RETRYABLE_COGNITO_CODES:
+                time.sleep(_RETRY_BASE_BACKOFF_SECONDS * (2**attempt))
+                attempt += 1
+                continue
+            raise
 
 
 def _paginated(
