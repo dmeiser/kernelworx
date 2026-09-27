@@ -11,7 +11,9 @@ from src.handlers.campaign_operations import (
     _query_order_keys_for_campaign,
     _verify_campaign_deleted,
     _verify_order_keys_deleted,
+    batch_delete_keys,
     delete_campaign_orders,
+    delete_orders_for_campaign,
 )
 from src.utils.errors import AppError, ErrorCode
 
@@ -294,6 +296,37 @@ class TestDeleteCampaignOrders:
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
             assert "Failed to delete campaign orders" in result["message"]
 
+    def test_delete_campaign_orders_throttled_raises_resource_busy(
+        self,
+        orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """Test that throttling during delete_campaign_orders returns RESOURCE_BUSY."""
+        from botocore.exceptions import ClientError
+
+        campaign_id = "CAMPAIGN#throttled"
+        profile_id = "PROFILE#throttled"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
+        orders_table.put_item(
+            Item={
+                "campaignId": campaign_id,
+                "orderId": "ORDER#1",
+                "customerName": "Customer 1",
+                "totalAmount": Decimal("10.0"),
+            }
+        )
+
+        with patch("src.handlers.campaign_operations.tables.orders.batch_writer") as mock_bw:
+            error_response = {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}}
+            mock_bw.side_effect = ClientError(error_response, "BatchWriteItem")
+
+            result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+
     def test_delete_campaign_orders_verifies_order_id_gsi(
         self,
         orders_table: Any,
@@ -442,3 +475,91 @@ class TestDeleteOrderKeys:
 
         assert count == 3
         assert mock_writer.delete_item.call_count == 3
+
+
+class TestBatchDeleteKeys:
+    """Tests for batch_delete_keys helper."""
+
+    def test_empty_keys_returns_zero(self) -> None:
+        """Test that empty keys list returns 0 without calling batch_writer."""
+        mock_table = MagicMock()
+        count = batch_delete_keys(mock_table, [])
+        assert count == 0
+        mock_table.batch_writer.assert_not_called()
+
+    def test_throttling_raises_resource_busy(self) -> None:
+        """Test that persistent throttling raises AppError with RESOURCE_BUSY."""
+        from botocore.exceptions import ClientError
+
+        mock_table = MagicMock()
+        mock_table.name = "test-table"
+        mock_table.batch_writer.side_effect = ClientError(
+            {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}},
+            "BatchWriteItem",
+        )
+        keys = [{"id": "1"}]
+        with pytest.raises(AppError) as exc_info:
+            batch_delete_keys(mock_table, keys)
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+
+    def test_non_throttling_client_error_raises_internal_error(self) -> None:
+        """Test that non-throttling ClientError raises AppError with INTERNAL_ERROR."""
+        from botocore.exceptions import ClientError
+
+        mock_table = MagicMock()
+        mock_table.name = "test-table"
+        mock_table.batch_writer.side_effect = ClientError(
+            {"Error": {"Code": "ResourceNotFoundException", "Message": "Not found"}},
+            "BatchWriteItem",
+        )
+        keys = [{"id": "1"}]
+        with pytest.raises(AppError) as exc_info:
+            batch_delete_keys(mock_table, keys)
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+    def test_unexpected_exception_raises_internal_error(self) -> None:
+        """Test that unexpected non-ClientError raises AppError with INTERNAL_ERROR."""
+        mock_table = MagicMock()
+        mock_table.batch_writer.side_effect = RuntimeError("network crash")
+        keys = [{"id": "1"}]
+        with pytest.raises(AppError) as exc_info:
+            batch_delete_keys(mock_table, keys)
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+    def test_custom_logger_used(self) -> None:
+        """Test that a custom logger is invoked during deletion."""
+        mock_table = MagicMock()
+        mock_writer = MagicMock()
+        mock_table.batch_writer.return_value.__enter__ = MagicMock(return_value=mock_writer)
+        mock_table.batch_writer.return_value.__exit__ = MagicMock(return_value=False)
+        mock_logger = MagicMock()
+
+        keys = [{"id": "1"}, {"id": "2"}]
+        count = batch_delete_keys(mock_table, keys, logger=mock_logger)
+        assert count == 2
+        mock_logger.info.assert_called_once()
+
+
+class TestDeleteOrdersForCampaign:
+    """Tests for delete_orders_for_campaign helper."""
+
+    def test_empty_orders_returns_zero(self) -> None:
+        """Test that a campaign with no orders returns 0."""
+        with patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=[]):
+            count = delete_orders_for_campaign("CAMPAIGN#empty")
+            assert count == 0
+
+    def test_deletes_and_verifies_orders(self) -> None:
+        """Test that orders are queried, batch-deleted, and verified."""
+        orders = [{"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"}]
+        mock_logger = MagicMock()
+        with (
+            patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=orders),
+            patch("src.handlers.campaign_operations.batch_delete_keys", return_value=1) as mock_delete,
+            patch("src.handlers.campaign_operations._verify_order_keys_deleted") as mock_verify,
+        ):
+            count = delete_orders_for_campaign("CAMPAIGN#c1", logger=mock_logger)
+            assert count == 1
+            mock_delete.assert_called_once()
+            mock_verify.assert_called_once_with(orders)
+            mock_logger.info.assert_called_once()

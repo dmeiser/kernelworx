@@ -738,6 +738,44 @@ class TestDeleteProfileCascade:
             result = lambda_handler(event, None)
 
             assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+
+            mock_tables.profiles.delete_item.assert_not_called()
+
+    def test_batch_write_non_throttling_client_error_returns_internal_error(
+        self,
+        profiles_table: Any,
+    ) -> None:
+        """Test that a non-throttling ClientError from batch_writer is surfaced as INTERNAL_ERROR."""
+        owner_id = "owner-123"
+        profile_id = "PROFILE#batch-client-error-internal"
+        _create_profile(profiles_table, owner_id, profile_id)
+
+        error_response = {
+            "Error": {"Code": "ResourceNotFoundException", "Message": "Table not found"},
+            "ResponseMetadata": {"HTTPStatusCode": 400},
+        }
+
+        with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
+            mock_tables.profiles.get_item.return_value = {
+                "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
+            }
+            mock_tables.profiles.delete_item.return_value = {}
+            mock_tables.shares.query.return_value = {
+                "Items": [{"profileId": profile_id, "targetAccountId": "ACCOUNT#user-1"}]
+            }
+            mock_tables.shares.batch_writer.side_effect = ClientError(error_response, "BatchWriteItem")
+            mock_tables.invites.query.return_value = {"Items": []}
+            mock_tables.campaigns.query.return_value = {"Items": []}
+            mock_tables.orders.query.return_value = {"Items": []}
+
+            event = {
+                "arguments": {"profileId": profile_id},
+                "identity": {"sub": owner_id},
+            }
+            result = lambda_handler(event, None)
+
+            assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
             mock_tables.profiles.delete_item.assert_not_called()
