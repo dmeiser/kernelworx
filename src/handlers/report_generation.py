@@ -24,7 +24,7 @@ try:  # pragma: no cover
     from utils.ids import ensure_campaign_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items_iter
-    from utils.report_limits import OrderGraphBudget
+    from utils.report_limits import MAX_CAMPAIGN_REPORT_GRAPH_BYTES, OrderGraphBudget
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.dynamodb import get_required_env, tables
@@ -32,7 +32,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.ids import ensure_campaign_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items_iter
-    from ..utils.report_limits import OrderGraphBudget
+    from ..utils.report_limits import MAX_CAMPAIGN_REPORT_GRAPH_BYTES, OrderGraphBudget
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -190,13 +190,13 @@ def _get_campaign_orders(table: Any, campaign_id: str) -> list[Dict[str, Any]]:
 
     The report writes one row per order - and for XLSX builds the whole workbook
     in memory - so a campaign with a very large order graph would exhaust the
-    Lambda's budget instead of returning a report. Orders are streamed and
-    charged to the shared order-graph budget before they are collected, so the
-    order that would cross it is never read into the report (#533, #577).
+    Lambda's budget instead of returning a report. Orders are streamed and each
+    one is charged to the shared order-graph ceiling as it is read, so the order
+    that would cross it is never collected into the report (#533, #577).
     """
     # V2 schema: Orders table has PK=campaignId, SK=orderId
     # No GSI needed - direct query on the partition key
-    budget = OrderGraphBudget("This campaign's")
+    budget = OrderGraphBudget("This campaign's", MAX_CAMPAIGN_REPORT_GRAPH_BYTES)
     orders: list[Dict[str, Any]] = []
 
     for order in query_all_items_iter(

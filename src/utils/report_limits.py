@@ -2,18 +2,28 @@
 
 Both report paths materialise one in-memory record per order, with its line
 items: the unit report returns every order and every line item for the whole
-unit in a single response (#577), and the campaign report builds the entire
-CSV/Excel output in memory (#533). Neither path is bounded, so the largest
-units and campaigns - exactly the case the reports exist for - run out of the
-Lambda's memory and time budget and surface as a generic internal error.
+unit in a single resolver response (#577), and the campaign report holds every
+order of one campaign and builds the whole CSV/Excel output from them in memory
+(#533). Neither path is bounded, so the largest units and campaigns - exactly
+the case the reports exist for - run out of the Lambda's memory and time budget
+and surface as a generic internal error.
 
-The ceiling is therefore measured in the bytes an order graph serialises to,
-not in order count: what drives the size of a report is the graph (orders *and*
-line items per order), and a plain count cannot express that - a few hundred
-wide orders and a few thousand narrow ones occupy the same budget and are very
-different amounts of work. Both handlers charge the same measurement against the
-same budget and refuse the order that would cross it, so the two report paths
-cannot drift apart and neither ever materialises more than the budget allows.
+The ceiling is measured in the bytes an order graph serialises to, not in order
+count: what drives the size of a report is the graph (orders *and* line items
+per order), and a plain count cannot express that - a few hundred wide orders
+and a few thousand narrow ones occupy the same budget and are very different
+amounts of work. Both handlers charge the same measurement, through the same
+budget, against the record they are about to accumulate, so the two report paths
+cannot drift apart and neither ever holds more than its ceiling allows.
+
+One measurement, one budget and one error shape, but not one number: the two
+paths are bounded by different resources and no single value serves both. The
+unit report's whole order graph *is* its resolver response, so its ceiling comes
+out of the AppSync response quota. The campaign export is not a resolver
+response at all - it returns a report URL and puts the file in S3 - so its
+ceiling comes out of the memory of the Lambda it materialises in. Each ceiling
+below is derived from the resource that actually bounds its own path, and each
+is sized so the order count #577 approved for a report still passes on both.
 """
 
 import json
@@ -28,43 +38,70 @@ except ModuleNotFoundError:  # pragma: no cover
 
 logger = get_logger(__name__)
 
-# AppSync truncates a single Lambda resolver response at 5 MB, and the unit
-# report returns the whole order graph in that one response. A fifth of the
-# limit is the ceiling: the measurement below already charges the full stored
-# order rather than only the fields a report returns, so it is an upper bound
-# on the response, and the rest of the limit covers the response envelope and
-# GraphQL transport overhead.
+# The external anchor: the AWS AppSync service quotas list "Resolvers, functions,
+# and handlers response size - 5 Megabytes". It is a service limit, not a
+# product decision, and nothing here may exceed it.
 APPSYNC_RESPONSE_LIMIT_BYTES = 5_000_000
-MAX_REPORT_GRAPH_BYTES = APPSYNC_RESPONSE_LIMIT_BYTES // 5
+
+# Both report handlers run at 512 MB / 60 s, per the ``request-report`` and
+# ``unit-reporting`` entries in tofu/application/modules/lambda/main.tf.
+REPORT_LAMBDA_MEMORY_BYTES = 512 * 1024 * 1024
+
+# Unit report: ``get_unit_report`` returns the whole order graph of the unit in
+# one resolver response, so the response quota is the ceiling. The graph gets two
+# fifths of it, because the response is not only the order details - it also
+# carries a wrapper per seller and the GraphQL envelope, and those have to fit in
+# what is left. Two fifths is also the order contract: the 5,000 orders #577
+# called "a few thousand", generous for a scout unit, at the 381 B a realistic
+# one-line-item order detail measures (the shape
+# tests/unit/test_report_limits.py pins) is 1.9 MB, so 5,000 orders report and
+# the order after them is refused.
+MAX_UNIT_REPORT_GRAPH_BYTES = (2 * APPSYNC_RESPONSE_LIMIT_BYTES) // 5
+
+# Campaign report: ``request_campaign_report`` returns only reportId, reportUrl,
+# status and expiresAt, and writes the CSV/XLSX to S3, so no part of that order
+# graph is ever a resolver response and the quota above does not apply. What
+# bounds it is the memory of the function it runs in, which holds every order of
+# the campaign at once and, for XLSX, the whole openpyxl workbook beside them.
+# A materialised order set costs roughly 2.3-3.3x its serialised size in live
+# Python objects (boto3 hands back dicts of dicts and lists), so an eighth of
+# the function is the most order graph that reliably leaves room for the
+# interpreter and the workbook next to it. That is ~80,000 realistic
+# one-line-item orders, so every campaign the 5,000-order contract approved
+# still exports at any realistic line-item width. The 60 s timeout is a separate
+# bound this ceiling does not measure.
+MAX_CAMPAIGN_REPORT_GRAPH_BYTES = REPORT_LAMBDA_MEMORY_BYTES // 8
 
 
-def order_graph_bytes(order: Mapping[str, Any]) -> int:
-    """Return the serialised size in bytes of one stored order and its line items.
+def order_graph_bytes(record: Mapping[str, Any]) -> int:
+    """Return the serialised size in bytes of one order graph.
 
     Measured, not estimated: what a report costs is the bytes its order graph
     serialises to, and a per-field estimate of that would silently undercharge
-    the moment the order gained a field, which is how a ceiling quietly becomes
-    fiction. Measuring the order itself cannot drift from the shape of the data
-    the handlers actually read.
+    the moment the graph gained a field, which is how a ceiling quietly becomes
+    fiction. Measuring the record itself cannot drift from the shape of the data
+    the handlers actually hold.
 
-    The measurement is taken over the stored order rather than over the shape a
-    particular report projects from it, so it bounds both report paths: the
-    campaign report materialises the stored order itself, and the unit report
-    materialises a subset of these fields. Values DynamoDB returns that JSON
-    cannot represent natively (``Decimal``, sets) serialise as their string
-    form, which is never shorter than the number the response carries, and
-    non-ASCII is escaped, so neither can make the charge read low.
+    Callers charge the record they are about to materialise, which differs by
+    path and is what makes one measurement correct for both: the campaign export
+    materialises the stored order, and the unit report materialises the detail
+    ``_build_order_detail`` projects from it - a subset of the stored fields,
+    which is why charging the stored order there would overcharge by ~2.2x.
+    Values DynamoDB returns that JSON cannot represent natively (``Decimal``,
+    sets) serialise as their string form, which is never shorter than the number
+    the response carries, and non-ASCII is escaped, so neither can make the
+    charge read low.
     """
-    return len(json.dumps(order, default=str).encode("utf-8"))
+    return len(json.dumps(record, default=str).encode("utf-8"))
 
 
-def report_too_large_error(subject: str, max_bytes: int = MAX_REPORT_GRAPH_BYTES) -> AppError:
-    """Return the typed error raised when a report exceeds its order-graph budget.
+def report_too_large_error(subject: str, max_bytes: int) -> AppError:
+    """Return the typed error raised when a report exceeds its order-graph ceiling.
 
     Args:
         subject: Human-readable owner of the report, e.g. ``"This unit's"``.
-        max_bytes: The budget that was crossed, reported in the message so it
-            matches the ceiling actually enforced.
+        max_bytes: The ceiling that was crossed, reported in the message so it
+            matches the budget actually enforced.
 
     Returns:
         An ``AppError`` carrying the ``RESOURCE_BUSY`` code the issue specifies
@@ -78,23 +115,23 @@ def report_too_large_error(subject: str, max_bytes: int = MAX_REPORT_GRAPH_BYTES
 
 
 class OrderGraphBudget:
-    """Byte budget for the order graph a single report may materialise.
+    """Byte ceiling for the order graph a single report may materialise.
 
-    Callers charge each order *before* expanding it, so a report that is going
-    to be refused never pays for the work it cannot return.
+    Callers charge each record *before* accumulating it, so a report that is
+    going to be refused never pays for keeping what it cannot return.
     """
 
-    def __init__(self, subject: str, max_bytes: int = MAX_REPORT_GRAPH_BYTES) -> None:
+    def __init__(self, subject: str, max_bytes: int) -> None:
         self._subject = subject
         self._max_bytes = max_bytes
         self._spent = 0
 
-    def admit(self, order: Mapping[str, Any]) -> None:
-        """Charge one order, refusing the order that would cross the budget."""
-        self._spent += order_graph_bytes(order)
+    def admit(self, record: Mapping[str, Any]) -> None:
+        """Charge one record, refusing the record that would cross the ceiling."""
+        self._spent += order_graph_bytes(record)
         if self._spent > self._max_bytes:
             logger.warning(
-                "Report order-graph budget exhausted",
+                "Report order-graph ceiling reached",
                 subject=self._subject,
                 spentBytes=self._spent,
                 maxBytes=self._max_bytes,
