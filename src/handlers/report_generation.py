@@ -49,8 +49,6 @@ else:  # pragma: no cover
 # Report pre-signed URL lifetime in seconds (3 hours)
 REPORT_URL_EXPIRATION_SECONDS = 3 * 60 * 60
 
-logger = get_logger(__name__)
-
 # Module-level proxy that tests can monkeypatch
 s3_client: "S3Client | None" = None
 

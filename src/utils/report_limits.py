@@ -63,13 +63,24 @@ MAX_UNIT_REPORT_GRAPH_BYTES = (2 * APPSYNC_RESPONSE_LIMIT_BYTES) // 5
 # graph is ever a resolver response and the quota above does not apply. What
 # bounds it is the memory of the function it runs in, which holds every order of
 # the campaign at once and, for XLSX, the whole openpyxl workbook beside them.
-# A materialised order set costs roughly 2.3-3.3x its serialised size in live
-# Python objects (boto3 hands back dicts of dicts and lists), so an eighth of
-# the function is the most order graph that reliably leaves room for the
-# interpreter and the workbook next to it. That is ~80,000 realistic
-# one-line-item orders, so every campaign the 5,000-order contract approved
-# still exports at any realistic line-item width. The 60 s timeout is a separate
-# bound this ceiling does not measure.
+# Measured on the order shapes tests/unit/test_report_limits.py pins, a
+# materialised order costs 4.0x its serialised size at one line item, 3.4x at
+# five and 2.9x at twenty (recursive sys.getsizeof), and the workbook adds about
+# 1.3 kB per order row at five columns or 2.9 kB at twelve (tracemalloc; a row
+# is three fixed columns plus one per distinct product in the campaign, plus the
+# total), beside a ~40 MB interpreter baseline.
+#
+# That arithmetic is what the approved contract is sized against: 5,000 orders,
+# "a few thousand", are 4 MB serialised at one line item and 22 MB at twenty, so
+# ~20-67 MB of live orders plus a ~6 MB workbook - comfortably inside the
+# function, and comfortably inside the ceiling this is derived from.
+#
+# It is not a bound on the widest thing the ceiling admits, and that difference
+# matters: at the narrow end it admits ~80,000 orders, which is ~271 MB of live
+# orders plus ~100 MB of workbook, and a campaign that size spanning a dozen
+# products does not fit in 512 MB. So this is a contract on report volume, not a
+# promise that the export always completes. The 60 s timeout is a separate bound
+# this ceiling does not measure either.
 MAX_CAMPAIGN_REPORT_GRAPH_BYTES = REPORT_LAMBDA_MEMORY_BYTES // 8
 
 
