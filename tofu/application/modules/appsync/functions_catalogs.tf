@@ -55,9 +55,12 @@ resource "aws_appsync_function" "batch_get_catalogs" {
     runtime_version = "1.0.0"
   }
 
-  # WARNING: templatefile() interpolates every `${...}` in the source; see the
-  # header comment in batch_get_catalogs_fn.js. Do not add JS template
-  # literals to that file.
+  # templatefile() reads the esbuild bundle in appsync/dist/, which strips
+  # ordinary comments, so a dollar-brace sequence that survives bundling is
+  # interpolated as a Terraform expression: in a string literal it aborts every
+  # plan/apply with "Invalid expression". `${table_name}` is the only intended
+  # placeholder; escape a literal as `$${...}` or load the resolver with file()
+  # instead. Enforced by tests/unit/check_templatefile_escaping.test.ts (#570).
   code = templatefile("${local.js_resolvers_dir}/batch_get_catalogs_fn.js", {
     table_name = var.dynamodb_table_names.catalogs
   })
