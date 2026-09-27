@@ -132,7 +132,7 @@ def _handle_existing_user(
     _link_federated_identity(cognito, user_pool_id, existing_username, username)
 
 
-def _handle_signup_exception(e: Exception, email: str, event: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_signup_exception(e: Exception, email: str) -> Dict[str, Any]:
     """Handle exceptions during federated signup processing.
 
     Unexpected errors are re-raised so that Cognito does not proceed with a
@@ -234,4 +234,4 @@ def _process_federated_signup(event: Dict[str, Any], user_pool_id: str, username
         _handle_existing_user(cognito, user_pool_id, email, username, existing_users[0])
 
     except Exception as e:
-        return _handle_signup_exception(e, email, event)
+        return _handle_signup_exception(e, email)

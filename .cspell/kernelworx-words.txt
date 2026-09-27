@@ -185,6 +185,7 @@ keyId
 keyout
 keypair
 keyProvider
+kwonlyargs
 labelId
 Landing
 largeMail
@@ -265,6 +266,7 @@ pkeys
 playwright
 popstate
 ppid
+posonlyargs
 Pool
 poolsms
 Popover
@@ -427,6 +429,7 @@ userPoolClientId
 useState
 uuidv
 valuetext
+vararg
 venmo
 venmotom
 venv

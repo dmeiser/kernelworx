@@ -138,6 +138,21 @@ raise AppError(ErrorCode.NOT_FOUND, "Campaign not found")
 raise AppError(ErrorCode.UNAUTHORIZED, "Not authorized to view this profile")
 ```
 
+#### Cognito Retries (`src/utils/cognito.py`)
+
+Do not hand-roll a backoff loop for Cognito User Pool calls; wrap the client method:
+
+```python
+from utils.cognito import retry_on_transient_errors
+
+users = retry_on_transient_errors(cognito.list_users, UserPoolId=pool_id, Filter=f'sub = "{sub}"')
+```
+
+`retry_on_transient_errors` retries up to 3 attempts on `TooManyRequestsException`,
+`InternalErrorException`, and `ProvisionedThroughputExceededException` (0.1s/0.2s backoff) and
+re-raises everything else unchanged, so callers keep their own handling of terminal codes
+(e.g. `UserNotFoundException`).
+
 ### Frontend TypeScript Patterns
 
 #### Form State Hook (`frontend/src/hooks/useFormState.ts`)
