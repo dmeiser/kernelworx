@@ -113,9 +113,7 @@ def accounts_table(dynamodb_ops: List[Tuple[str, Dict[str, Any]]]) -> Any:
 def search(accounts_table: Any, monkeypatch: Any) -> Any:
     """Call the real `admin_search_user` with only Cognito mocked."""
     monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
-    cognito_users = [
-        _cognito_user(item["accountId"].removeprefix("ACCOUNT#"), item["email"]) for item in ACCOUNT_ITEMS
-    ]
+    cognito_users = [_cognito_user(item["accountId"].removeprefix("ACCOUNT#"), item["email"]) for item in ACCOUNT_ITEMS]
     cognito = _FakeCognito(cognito_users)
 
     monkeypatch.setattr("src.handlers.admin_operations.tables", SimpleNamespace(accounts=accounts_table))

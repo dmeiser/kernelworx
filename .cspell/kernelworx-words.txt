@@ -18,9 +18,11 @@ Aero
 affordances
 aioboto
 aiobotocore
+Alina
 America
 Amplify
 anomalymonitor
+Anderson
 anytown
 AppSync
 appworx
@@ -239,6 +241,7 @@ noto
 octokit
 officedocument
 oklch
+Okonkwo
 OLDCODE
 onboarding
 openpyxl
