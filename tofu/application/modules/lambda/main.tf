@@ -82,6 +82,11 @@ locals {
     SHARES_TABLE_NAME           = var.table_names.shares
     INVITES_TABLE_NAME          = var.table_names.invites
     SHARED_CAMPAIGNS_TABLE_NAME = var.table_names.shared_campaigns
+    # Region declared explicitly rather than left to the Lambda runtime's
+    # ambient AWS_REGION: boto3.client() resolves the region at construction
+    # time and an unset region raises NoRegionError (issue #578). Read from the
+    # provider so the module interface is unchanged.
+    AWS_REGION = data.aws_region.current.name
   }
 
   # Lambda functions configuration
@@ -225,6 +230,10 @@ locals {
 
 # Note: Lambda layer and functions would be created here
 # For now, we're importing existing functions
+
+# Deployment region, declared on the functions as AWS_REGION so boto3 clients
+# never depend on the runtime's ambient region (issue #578).
+data "aws_region" "current" {}
 
 # Archive the Lambda source code
 data "archive_file" "lambda_payload" {

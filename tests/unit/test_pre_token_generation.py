@@ -14,6 +14,7 @@ import copy
 import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -574,3 +575,20 @@ class TestLazyClientConstruction:
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
         assert _details(result)["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
         assert any("fail-closed" in str(call.args[0]) for call in mock_log_warning.call_args_list)
+
+
+class TestRegionDeclaredInLambdaEnvironment:
+    """
+    Regression for issue #578 (IaC half): the trigger's boto3 client must not
+    depend on the Lambda runtime's ambient AWS_REGION, so the region is declared
+    explicitly on the functions through the module's common environment.
+    """
+
+    def test_common_env_declares_aws_region(self) -> None:
+        """The lambda module's common_env (applied to functions and triggers) must
+        set AWS_REGION from the provider's region, not leave it ambient."""
+        module_tf = Path(__file__).resolve().parents[2] / "tofu/application/modules/lambda/main.tf"
+        content = module_tf.read_text()
+
+        assert 'data "aws_region" "current" {}' in content
+        assert "AWS_REGION = data.aws_region.current.name" in content
