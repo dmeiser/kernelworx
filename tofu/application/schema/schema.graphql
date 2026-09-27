@@ -903,7 +903,7 @@ type Query {
   ): AdminUserConnection!
   """Search users by email, name, or accountId (admin only)."""
   adminSearchUser(
-    """The text to search for (matches email, display name, or account ID)."""
+    """The text to search for (matches email, display name, or account ID; at least 3 characters)."""
     query: String!
   ): [AdminUser!]!
   """List all seller profiles owned by the given account (admin only)."""
