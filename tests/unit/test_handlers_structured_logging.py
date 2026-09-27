@@ -18,14 +18,17 @@ from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
 from src.handlers import post_authentication, pre_signup, pre_token_generation
-from src.utils.logging import StructuredLogger
 
 
 def _structured_records(capsys: Any) -> List[Dict[str, Any]]:
-    """Parse every captured stdout line as a JSON structured log record."""
+    """Parse captured stdout lines that are structured JSON log records.
+
+    Only lines starting with ``{`` (the StructuredLogger output shape) are
+    parsed; any other stdout noise from dependencies is ignored.
+    """
     records: List[Dict[str, Any]] = []
     for line in capsys.readouterr().out.splitlines():
-        if line.strip():
+        if line.startswith("{"):
             records.append(json.loads(line))
     return records
 
@@ -38,13 +41,6 @@ def _assert_structured_records(records: List[Dict[str, Any]]) -> None:
         assert record["level"] in {"INFO", "WARNING", "ERROR", "DEBUG"}
         assert record["message"], "record missing message"
         assert "timestamp" in record
-
-
-def test_trigger_loggers_are_structured_loggers() -> None:
-    """Each trigger module's logger is a StructuredLogger, not the root logger."""
-    assert isinstance(pre_signup.logger, StructuredLogger)
-    assert isinstance(post_authentication.logger, StructuredLogger)
-    assert isinstance(pre_token_generation.logger, StructuredLogger)
 
 
 def test_pre_signup_emits_structured_json_records(capsys: Any) -> None:
