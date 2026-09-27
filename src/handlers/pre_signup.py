@@ -20,7 +20,6 @@ How it works:
 6. The user is then signed in with the existing account
 """
 
-import logging
 import re
 from typing import Any, Dict, NoReturn, Optional
 
@@ -29,13 +28,11 @@ from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.logging import mask_email
+    from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.logging import mask_email
+    from ..utils.logging import get_logger, mask_email
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 # Conservative email pattern used to validate provider-supplied email before it is
 # interpolated into a Cognito ListUsers filter string. This rejects characters that
@@ -77,7 +74,7 @@ def _validate_email(email: object) -> Optional[str]:
 def _link_federated_identity(cognito: Any, user_pool_id: str, existing_username: str, username: str) -> NoReturn:
     """Link federated identity to existing user."""
     if "_" not in username:
-        logger.error(f"Unexpected federated username format: {username}")
+        logger.error("Unexpected federated username format", username=username)
         raise FederatedIdentityLinkedException("Cannot link federated identity: invalid username format")
     provider_name, provider_user_id = username.split("_", 1)
     cognito.admin_link_provider_for_user(
@@ -89,7 +86,11 @@ def _link_federated_identity(cognito: Any, user_pool_id: str, existing_username:
             "ProviderAttributeValue": provider_user_id,
         },
     )
-    logger.info(f"Successfully linked {provider_name} identity to user {mask_email(existing_username)}")
+    logger.info(
+        "Successfully linked identity to existing user",
+        provider_name=provider_name,
+        username=mask_email(existing_username),
+    )
     raise FederatedIdentityLinkedException(
         f"Account with email already exists. Your {provider_name} account has been linked. Please sign in again."
     )
@@ -115,20 +116,22 @@ def _handle_existing_user(
     existing_username = existing_user["Username"]
 
     if existing_user.get("UserStatus") != "CONFIRMED":
-        logger.warning(f"Refusing to link: existing user {mask_email(existing_username)} is not confirmed")
+        logger.warning("Refusing to link: existing user is not confirmed", username=mask_email(existing_username))
         raise FederatedIdentityLinkedException(
             "An account with this email already exists but is not fully set up. "
             "Please resolve the existing account before signing in."
         )
 
     if not _existing_user_email_verified(existing_user):
-        logger.warning(f"Refusing to link: existing user {mask_email(existing_username)} has an unverified email")
+        logger.warning(
+            "Refusing to link: existing user has an unverified email", username=mask_email(existing_username)
+        )
         raise FederatedIdentityLinkedException(
             "An account with this email already exists but its email is not verified. "
             "Please resolve the existing account before signing in."
         )
 
-    logger.info(f"Found existing user {mask_email(existing_username)} for email {mask_email(email)}, linking identity")
+    logger.info("Found existing user for linking", username=mask_email(existing_username), email=mask_email(email))
     _link_federated_identity(cognito, user_pool_id, existing_username, username)
 
 
@@ -142,11 +145,11 @@ def _handle_signup_exception(e: Exception, email: str) -> Dict[str, Any]:
     if isinstance(e, FederatedIdentityLinkedException):
         raise e
     if isinstance(e, ClientError) and e.response.get("Error", {}).get("Code") == "InvalidParameterException":
-        logger.warning(f"Link may already exist: {e}")
+        logger.warning("Link may already exist", error=str(e))
         raise FederatedIdentityLinkedException(
             f"Account with email {mask_email(email)} already exists. Please sign in again."
         )
-    logger.exception(f"Error in pre-signup trigger: {str(e)}")
+    logger.error("Error in pre-signup trigger", error=str(e), exc_info=True)
     raise e
 
 
@@ -198,7 +201,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     user_attributes = event.get("request", {}).get("userAttributes", {})
     email = user_attributes.get("email", "")
 
-    logger.info(f"Pre-signup trigger: source={trigger_source}, username={username}, email={mask_email(email)}")
+    logger.info(
+        "Pre-signup trigger invoked",
+        trigger_source=trigger_source,
+        username=username,
+        email=mask_email(email),
+    )
 
     # Only process federated sign-ups (external providers)
     if trigger_source != "PreSignUp_ExternalProvider":
@@ -228,7 +236,7 @@ def _process_federated_signup(event: Dict[str, Any], user_pool_id: str, username
         existing_users = response.get("Users", [])
 
         if not existing_users:
-            logger.info(f"No existing user for {mask_email(email)}, allowing federated sign-up")
+            logger.info("No existing user, allowing federated sign-up", email=mask_email(email))
             return _auto_confirm_event(event)
 
         _handle_existing_user(cognito, user_pool_id, email, username, existing_users[0])
