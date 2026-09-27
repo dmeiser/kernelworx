@@ -1010,9 +1010,7 @@ class TestUnitReportOrderCeiling:
             mock_check_access.return_value = {c["profileId"] for c in campaigns}
             return get_unit_report(event, lambda_context)
 
-    def test_unit_report_rejects_units_over_the_order_ceiling(
-        self, event: Dict[str, Any], lambda_context: Any
-    ) -> None:
+    def test_unit_report_rejects_units_over_the_order_ceiling(self, event: Dict[str, Any], lambda_context: Any) -> None:
         """A unit with more orders than the ceiling fails with a typed RESOURCE_BUSY error."""
         orders = [self._order(1, i) for i in range(3)]
 
@@ -1025,9 +1023,7 @@ class TestUnitReportOrderCeiling:
         # No partial report is returned when the ceiling is hit.
         assert "sellers" not in result
 
-    def test_unit_report_returns_orders_up_to_the_ceiling(
-        self, event: Dict[str, Any], lambda_context: Any
-    ) -> None:
+    def test_unit_report_returns_orders_up_to_the_ceiling(self, event: Dict[str, Any], lambda_context: Any) -> None:
         """A unit at exactly the ceiling still returns its full report."""
         orders = [self._order(1, i) for i in range(2)]
 
@@ -1038,9 +1034,7 @@ class TestUnitReportOrderCeiling:
         assert result["totalSales"] == 20.0
         assert len(result["sellers"][0]["orders"]) == 2
 
-    def test_unit_report_ceiling_spans_the_whole_unit(
-        self, event: Dict[str, Any], lambda_context: Any
-    ) -> None:
+    def test_unit_report_ceiling_spans_the_whole_unit(self, event: Dict[str, Any], lambda_context: Any) -> None:
         """The ceiling is unit-wide: orders across several sellers accumulate against it."""
         campaigns = [
             self._campaign(1),
@@ -1057,14 +1051,14 @@ class TestUnitReportOrderCeiling:
         assert result["__isError"] is True
         assert result["errorCode"] == "RESOURCE_BUSY"
 
-    def test_unit_report_bounds_each_order_query(
+    def test_unit_report_stops_paging_once_the_ceiling_is_reached(
         self, event: Dict[str, Any], lambda_context: Any
     ) -> None:
-        """Each order query is bounded by the remaining budget, so pages stop early."""
-        orders_table = MagicMock()
+        """The order query is bounded by the ceiling, so paging stops instead of reading the table."""
         campaigns_table = MagicMock()
         profiles_table = MagicMock()
-        campaigns_table.query.return_value = {"Items": [self._campaign(1), self._campaign(2)]}
+        orders_table = MagicMock()
+        campaigns_table.query.return_value = {"Items": [self._campaign(1)]}
         profiles_table.query.side_effect = lambda **kwargs: {
             "Items": [
                 {
@@ -1073,7 +1067,18 @@ class TestUnitReportOrderCeiling:
                 }
             ]
         }
-        orders_table.query.return_value = {"Items": [self._order(1, 0)]}
+        pages = {"count": 0}
+
+        def order_page(**kwargs: Any) -> Dict[str, Any]:
+            pages["count"] += 1
+            if pages["count"] > 50:  # pragma: no cover - guard against an unbounded read hanging
+                raise AssertionError("orders query paged past the report ceiling")
+            return {
+                "Items": [self._order(1, i) for i in range(pages["count"] * 10, pages["count"] * 10 + 10)],
+                "LastEvaluatedKey": {"orderId": f"ORDER#page{pages['count']}"},
+            }
+
+        orders_table.query.side_effect = order_page
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
@@ -1086,8 +1091,8 @@ class TestUnitReportOrderCeiling:
             mock_check_access.return_value = {"PROFILE#profile1"}
             result = get_unit_report(event, lambda_context)
 
-        assert result["totalOrders"] == 2
-        # The ceiling is shared across campaigns, so the second query asks for the
-        # remaining budget plus the one over-limit probe order, never the whole table.
-        budgets = [call.kwargs["max_items"] for call in orders_table.query.call_args_list]
-        assert budgets == [6, 5]
+        assert result["__isError"] is True
+        assert result["errorCode"] == "RESOURCE_BUSY"
+        # A single page is enough to prove the ceiling was reached; the handler does
+        # not keep following LastEvaluatedKey through the rest of the table.
+        assert orders_table.query.call_count == 1

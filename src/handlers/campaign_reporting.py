@@ -13,12 +13,14 @@ try:  # pragma: no cover
     from utils.ids import ensure_catalog_id, ensure_profile_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items
+    from utils.report_limits import MAX_REPORT_ORDERS, report_too_large_error
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import batch_check_profile_access
     from ..utils.dynamodb import tables
     from ..utils.ids import ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
+    from ..utils.report_limits import MAX_REPORT_ORDERS, report_too_large_error
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -137,18 +139,39 @@ def _build_order_detail(order: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _get_seller_data(profile_id: str, profile: Dict[str, Any], campaigns: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Get seller data including orders from all campaigns."""
+def _get_seller_data(
+    profile_id: str, profile: Dict[str, Any], campaigns: List[Dict[str, Any]], max_orders: int
+) -> Dict[str, Any]:
+    """Get seller data including orders from all campaigns.
+
+    ``max_orders`` is the unit's remaining order budget: every order is expanded
+    into a detail dict with its line items, so a unit with a very large order
+    history would otherwise exhaust the Lambda's memory and time budget and
+    surface as a generic internal error instead of a report (#577). One order
+    past the budget is read to prove the ceiling was reached, which keeps the
+    pages read bounded.
+    """
     seller_name = profile.get("sellerName", "Unknown")
     seller_orders: List[Dict[str, Any]] = []
     seller_total_sales = Decimal("0")
 
     for campaign in campaigns:
         campaign_id = campaign["campaignId"]
+        remaining = max_orders - len(seller_orders)
         orders = query_all_items(
             tables.orders,
             {"KeyConditionExpression": Key("campaignId").eq(campaign_id)},
+            max_items=remaining + 1,
         )
+
+        if len(orders) > remaining:
+            logger.warning(
+                "Unit report order ceiling reached",
+                profileId=profile_id,
+                campaignId=campaign_id,
+                maxOrders=max_orders,
+            )
+            raise report_too_large_error("This unit's")
 
         for order in orders:
             order_detail = _build_order_detail(order)
@@ -180,13 +203,15 @@ def _extract_unit_report_params(event: Dict[str, Any]) -> tuple[str, int, str, s
 def _aggregate_seller_data(
     accessible_profiles: Dict[str, Dict[str, Any]], profile_campaigns: Dict[str, List[Dict[str, Any]]]
 ) -> tuple[List[Dict[str, Any]], Decimal, int]:
-    """Aggregate seller data from accessible profiles."""
+    """Aggregate seller data from accessible profiles, bounded by the shared order ceiling."""
     sellers: List[Dict[str, Any]] = []
     total_unit_sales = Decimal("0")
     total_unit_orders = 0
+    remaining_orders = MAX_REPORT_ORDERS
 
     for profile_id, profile in accessible_profiles.items():
-        seller_data = _get_seller_data(profile_id, profile, profile_campaigns[profile_id])
+        seller_data = _get_seller_data(profile_id, profile, profile_campaigns[profile_id], remaining_orders)
+        remaining_orders -= int(cast(int, seller_data["orderCount"]))
         if seller_data["orders"] or seller_data["totalSales"] > 0:
             sellers.append(seller_data)
             total_unit_sales += seller_data["totalSales"]
