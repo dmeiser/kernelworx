@@ -12,16 +12,16 @@ from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.cognito import retry_on_transient_errors
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
-    from utils.pagination import retry_on_transient_cognito_errors
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.cognito import retry_on_transient_errors
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
-    from ..utils.pagination import retry_on_transient_cognito_errors
     from ..utils.payment_methods import delete_all_user_qr_codes
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -101,7 +101,7 @@ def _lookup_cognito_user_with_retry(cognito: Any, user_pool_id: str, account_id:
     from .admin_operations import _validate_sub_for_filter
 
     _validate_sub_for_filter(account_id)
-    users_response = retry_on_transient_cognito_errors(
+    users_response = retry_on_transient_errors(
         cognito.list_users, UserPoolId=user_pool_id, Filter=f'sub = "{account_id}"', Limit=1
     )
     users = users_response.get("Users", [])
@@ -121,7 +121,7 @@ def _delete_user_from_cognito(
         return
 
     try:
-        retry_on_transient_cognito_errors(cognito.admin_delete_user, UserPoolId=user_pool_id, Username=username)
+        retry_on_transient_errors(cognito.admin_delete_user, UserPoolId=user_pool_id, Username=username)
     except ClientError as e:
         # A user that no longer exists is a successful deletion, not an error.
         if e.response.get("Error", {}).get("Code") == "UserNotFoundException":
