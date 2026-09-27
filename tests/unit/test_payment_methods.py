@@ -699,6 +699,34 @@ class TestDeletePaymentMethod:
         assert "reserved" in str(exc_info.value.message).lower()
 
 
+class TestMutatePaymentMethods:
+    """Test _mutate_payment_methods helper."""
+
+    def test_in_place_mutation_does_not_stale_optimistic_lock(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """A callback that mutates the list in place must not stale the optimistic-lock condition.
+
+        Regression test for #563: the read-modify-write sequence was duplicated across
+        five sites; the helper owns the deepcopy so a mutating callback can never
+        mutate the snapshot _save_preferences conditions on.
+        """
+        payment_methods.create_payment_method(sample_account_id, "Venmo")
+        new_key = f"payment-qr-codes/{sample_account_id}/{'e' * 32}.png"
+
+        def _apply(methods: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+            for method in methods:
+                if method["name"] == "Venmo":
+                    method["qrCodeUrl"] = new_key
+            return methods
+
+        payment_methods._mutate_payment_methods(sample_account_id, _apply)
+
+        stored = payment_methods.get_payment_methods(sample_account_id)
+        venmo = next(m for m in stored if m["name"] == "Venmo")
+        assert venmo["qrCodeUrl"] == new_key
+
+
 class TestValidateQRFile:
     """Test validate_qr_file function."""
 
