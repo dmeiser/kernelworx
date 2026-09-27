@@ -2,6 +2,11 @@
   "extends": "./tsconfig.app.json",
   "compilerOptions": {
     "types": ["vite/client", "node", "vitest/globals", "@testing-library/jest-dom"],
+    // AppSync JS pipeline functions under tofu/ are executed verbatim by the
+    // vitest suite (the same source the node --test resolver suite loads), so
+    // typecheck them from their real declarations instead of a hand-written
+    // .d.ts that could drift from the resolver.
+    "allowJs": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo"
   },
   "include": ["src", "tests"],

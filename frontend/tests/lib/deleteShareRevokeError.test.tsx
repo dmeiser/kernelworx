@@ -51,6 +51,11 @@ const renderedToastText = async (error: GraphQLError): Promise<string> => {
     handleApolloError({
       operation: { operationName: 'DeleteShare' } as never,
       error: new CombinedGraphQLErrors({ errors: [error] }) as never,
+      // The error link contract requires forward; this handler only reports the
+      // error, so reaching for it would be a bug worth surfacing loudly.
+      forward: () => {
+        throw new Error('handleApolloError must not forward a failed operation');
+      },
     });
   });
   const alert = await screen.findByRole('alert');
