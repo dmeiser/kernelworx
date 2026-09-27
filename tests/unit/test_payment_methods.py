@@ -726,6 +726,17 @@ class TestMutatePaymentMethods:
         venmo = next(m for m in stored if m["name"] == "Venmo")
         assert venmo["qrCodeUrl"] == new_key
 
+    def test_none_return_leaves_payment_methods_unchanged(
+        self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
+    ) -> None:
+        """A callback returning None leaves the stored payment methods unchanged."""
+        payment_methods.create_payment_method(sample_account_id, "Venmo")
+
+        payment_methods._mutate_payment_methods(sample_account_id, lambda methods: None)
+
+        stored = payment_methods.get_payment_methods(sample_account_id)
+        assert [m["name"] for m in stored] == ["Venmo"]
+
 
 class TestValidateQRFile:
     """Test validate_qr_file function."""
