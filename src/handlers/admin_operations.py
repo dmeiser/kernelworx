@@ -1191,7 +1191,7 @@ def _delete_user_profiles(account_id: str, logger: Any) -> int:
     """Delete all profiles owned by a user. Returns count deleted."""
     db_account_id = _normalize_account_id(account_id)
 
-    profiles = _get_user_profiles(db_account_id, logger)
+    profiles = _get_user_profiles(db_account_id)
     profile_keys = [
         {"ownerAccountId": db_account_id, "profileId": profile["profileId"]}
         for profile in profiles
