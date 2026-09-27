@@ -931,7 +931,7 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
 
     # Delete all user data from DynamoDB and S3 using the shared cascade so
     # a partially-deleted Cognito state does not leave records orphaned (#435).
-    _delete_all_user_data(account_id, context, logger)
+    _delete_all_user_data(account_id, logger)
 
     if username:
         _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
@@ -1085,7 +1085,7 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
     return catalog_item
 
 
-def _delete_orders_for_campaign(campaign_id: str, logger: Any) -> int:
+def _delete_orders_for_campaign(campaign_id: str) -> int:
     """Delete all orders for a campaign and verify deletion. Returns count deleted."""
     orders = query_all_items(
         tables.orders,
@@ -1119,7 +1119,7 @@ def _delete_user_orders(account_id: str, logger: Any) -> int:
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
-    profiles = _get_user_profiles(db_account_id, logger)
+    profiles = _get_user_profiles(db_account_id)
     for profile in profiles:
         profile_id = profile["profileId"]
         campaigns = query_all_items(
@@ -1130,7 +1130,7 @@ def _delete_user_orders(account_id: str, logger: Any) -> int:
             },
         )
         for campaign in campaigns:
-            deleted_count += _delete_orders_for_campaign(campaign["campaignId"], logger)
+            deleted_count += _delete_orders_for_campaign(campaign["campaignId"])
 
     logger.info("Deleted user orders", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1149,7 +1149,7 @@ def _delete_user_campaigns(account_id: str, logger: Any) -> int:
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
-    profiles = _get_user_profiles(db_account_id, logger)
+    profiles = _get_user_profiles(db_account_id)
     for profile in profiles:
         profile_id = profile["profileId"]
         campaigns = query_all_items(
@@ -1174,7 +1174,7 @@ def _delete_user_shares(account_id: str, logger: Any) -> int:
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
-    profiles = _get_user_profiles(db_account_id, logger)
+    profiles = _get_user_profiles(db_account_id)
     for profile in profiles:
         profile_id = profile["profileId"]
         shares = query_all_items(
@@ -1197,7 +1197,7 @@ def _delete_user_profiles(account_id: str, logger: Any) -> int:
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
-    profiles = _get_user_profiles(db_account_id, logger)
+    profiles = _get_user_profiles(db_account_id)
     for profile in profiles:
         tables.profiles.delete_item(Key={"ownerAccountId": db_account_id, "profileId": profile["profileId"]})
         deleted_count += 1
@@ -1269,7 +1269,7 @@ def _delete_invites_for_owned_profiles(account_id: str, logger: Any) -> int:
     db_account_id = _normalize_account_id(account_id)
     deleted_count = 0
 
-    profiles = _get_user_profiles(db_account_id, logger)
+    profiles = _get_user_profiles(db_account_id)
     for profile in profiles:
         profile_id = profile["profileId"]
         invites = query_all_items(
@@ -1420,7 +1420,7 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
     return catalogs
 
 
-def _get_user_profiles(db_account_id: str, logger: Any) -> list[Dict[str, Any]]:
+def _get_user_profiles(db_account_id: str) -> list[Dict[str, Any]]:
     """Get all profiles owned by an account."""
     return query_all_items(
         tables.profiles,
@@ -1581,7 +1581,7 @@ def admin_get_user_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[s
     db_account_id = _normalize_account_id(account_id)
 
     # First, get all profiles owned by this account
-    profiles = _get_user_profiles(db_account_id, logger)
+    profiles = _get_user_profiles(db_account_id)
     logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
 
     # Now query campaigns for each profile

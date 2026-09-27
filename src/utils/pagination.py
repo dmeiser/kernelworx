@@ -9,13 +9,10 @@ generator variants are available to bound memory growth on large result sets.
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
 
+from botocore.exceptions import ClientError
+
 if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_dynamodb.service_resource import Table
-
-try:  # pragma: no cover
-    from botocore.exceptions import ClientError
-except ModuleNotFoundError:  # pragma: no cover
-    ClientError = Exception  # type: ignore[misc, assignment]
 
 try:  # pragma: no cover
     from utils.logging import get_logger

@@ -578,7 +578,6 @@ class TestSanitizeReportValue:
         """CSV writer naturally quotes values containing quotes; sanity check via report generation."""
         from src.handlers.report_generation import _generate_csv_report
 
-        campaign = {"campaignId": "CAMPAIGN#c1", "campaignName": "Fall"}
         orders = [
             {
                 "orderId": "ORDER#1",
@@ -590,7 +589,7 @@ class TestSanitizeReportValue:
                 "lineItems": [],
             }
         ]
-        csv_bytes = _generate_csv_report(campaign, orders)
+        csv_bytes = _generate_csv_report(orders)
         csv_content = csv_bytes.decode("utf-8")
         # csv.writer doubles embedded quotes and wraps the cell
         assert '"Bob"""' in csv_content or '"Robert ""Bob"" Smith"' in csv_content
@@ -599,7 +598,6 @@ class TestSanitizeReportValue:
         """Formula-like customer data is prefixed with apostrophe in CSV output."""
         from src.handlers.report_generation import _generate_csv_report
 
-        campaign = {"campaignId": "CAMPAIGN#c1", "campaignName": "Fall"}
         orders = [
             {
                 "orderId": "ORDER#1",
@@ -611,7 +609,7 @@ class TestSanitizeReportValue:
                 "lineItems": [],
             }
         ]
-        csv_bytes = _generate_csv_report(campaign, orders)
+        csv_bytes = _generate_csv_report(orders)
         csv_content = csv_bytes.decode("utf-8")
         assert "'=cmd|'/C calc'!A0" in csv_content
         assert "'+1234567890" in csv_content
@@ -621,7 +619,6 @@ class TestSanitizeReportValue:
         """Formula-like customer data is prefixed with apostrophe in XLSX output."""
         from src.handlers.report_generation import _generate_excel_report
 
-        campaign = {"campaignId": "CAMPAIGN#c1", "campaignName": "Fall"}
         orders = [
             {
                 "orderId": "ORDER#1",
@@ -633,7 +630,7 @@ class TestSanitizeReportValue:
                 "lineItems": [],
             }
         ]
-        xlsx_bytes = _generate_excel_report(campaign, orders)
+        xlsx_bytes = _generate_excel_report(orders)
         wb = openpyxl.load_workbook(BytesIO(xlsx_bytes))
         ws = wb.active
         assert ws.cell(row=2, column=1).value == "'=cmd|'/C calc'!A0"
