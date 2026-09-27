@@ -224,12 +224,13 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # Delete the replaced QR object BEFORE pointing the record at the new
     # key. The previous order (update first, delete second) meant a failed
-    # delete silently orphaned the old object (#303). The delete is best-effort
-    # via the shared _delete_qr_if_exists helper: a failure is logged and the
-    # new key is still stored.
+    # delete silently orphaned the old object (#303). Either failure now
+    # surfaces as an AppError instead of being swallowed.
     previous_qr_key = _get_payment_method_qr_key(caller_id, payment_method_name)
     if previous_qr_key and previous_qr_key != s3_key:
-        _delete_qr_if_exists(logger, caller_id, payment_method_name, {"qrCodeUrl": previous_qr_key})
+        _delete_qr_if_exists(
+            logger, caller_id, payment_method_name, {"qrCodeUrl": previous_qr_key}, raise_on_error=True
+        )
 
     # Store the new key only after the old object is gone. If this put
     # fails, the payment method is left without a QR image; the error
@@ -292,7 +293,11 @@ def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:
 
     target = _verify_payment_method_exists(caller_id, payment_method_name)
 
-    _delete_qr_if_exists(logger, caller_id, payment_method_name, target)
+    # A failed S3 delete must not clear qrCodeUrl, otherwise the only handle on the
+    # still-present object is lost (#303). The deletePaymentMethod pipeline's
+    # purge step reads the __isError payload and continues, so the method is still
+    # removed there (#433).
+    _delete_qr_if_exists(logger, caller_id, payment_method_name, target, raise_on_error=True)
     if not purge_s3_only:
         _clear_qr_url_in_payment_method(caller_id, payment_method_name)
 

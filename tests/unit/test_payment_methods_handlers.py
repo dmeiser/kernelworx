@@ -227,12 +227,11 @@ class TestConfirmQRUpload:
         venmo = next(m for m in methods if m["name"] == "Venmo")
         assert venmo["qrCodeUrl"] == new_s3_key
 
-    def test_confirm_upload_old_delete_failure_is_logged_and_confirm_proceeds(
+    def test_confirm_upload_old_delete_failure_surfaces_error(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test that a failure deleting the old QR object is logged and does not block
-        confirming the new key (#563: the handler shares the best-effort
-        _delete_qr_if_exists helper with the utils layer)."""
+        """A failure deleting the replaced QR object surfaces an error and the stored
+        key still points at the object that remains in S3 (#303)."""
         from src.utils.dynamodb import tables
 
         create_payment_method(sample_account_id, "Venmo")
@@ -264,15 +263,15 @@ class TestConfirmQRUpload:
 
         with patch("src.utils.payment_methods.delete_qr_by_key", side_effect=Exception("S3 delete failed")):
             result = confirm_qr_upload(event, None)
-            assert result["qrCodeUrl"] == new_s3_key
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
-        # The new key is stored even though the old object could not be deleted
+        # The record still points at the old key, which is the only handle on the
+        # object still present in S3, so the user can retry the confirm.
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
         methods = response["Item"]["preferences"]["paymentMethods"]
         venmo = next(m for m in methods if m["name"] == "Venmo")
-        assert venmo["qrCodeUrl"] == new_s3_key
-
-        # The old object is left orphaned in S3, but the upload still confirmed
+        assert venmo["qrCodeUrl"] == old_s3_key
         s3_bucket.head_object(Bucket=bucket_name, Key=old_s3_key)
 
     def test_confirm_upload_put_failure_after_old_deleted(
@@ -443,7 +442,7 @@ class TestConfirmQRUpload:
 
             assert result["qrCodeUrl"] == new_s3_key
             assert manager.mock_calls == [
-                call.delete_old(ANY, sample_account_id, "Venmo", {"qrCodeUrl": old_s3_key}),
+                call.delete_old(ANY, sample_account_id, "Venmo", {"qrCodeUrl": old_s3_key}, raise_on_error=True),
                 call.put_new(sample_account_id, "Venmo", new_s3_key),
             ]
 
@@ -1040,12 +1039,11 @@ class TestExceptionHandling:
         assert venmo.get("qrCodeUrl") is None
         assert paypal.get("qrCodeUrl") is None
 
-    def test_delete_qr_s3_delete_failure_is_logged_and_qr_still_cleared(
+    def test_delete_qr_s3_delete_failure_surfaces_error(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test delete_qr_code logs S3 delete failures and still clears qrCodeUrl
-        (#563: the handler shares the best-effort _delete_qr_if_exists helper with
-        the utils layer)."""
+        """delete_qr_code surfaces an S3 delete failure and leaves qrCodeUrl pointing at
+        the object that is still in S3, so the user can retry (#303)."""
         from unittest.mock import patch
 
         from src.handlers.payment_methods_handlers import delete_qr_code
@@ -1077,14 +1075,15 @@ class TestExceptionHandling:
                 "identity": {"sub": sample_account_id},
                 "arguments": {"paymentMethodName": "Venmo"},
             }
-            # Failure is logged, not surfaced; the record is still cleared
+            # Failure surfaces as a typed error payload instead of being swallowed
             result = delete_qr_code(event, None)
-            assert result is True
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
         methods = response["Item"]["preferences"]["paymentMethods"]
         venmo = next(m for m in methods if m["name"] == "Venmo")
-        assert venmo.get("qrCodeUrl") is None
+        assert venmo.get("qrCodeUrl") == s3_key
 
     def test_delete_qr_legacy_http_url(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
@@ -1126,12 +1125,11 @@ class TestExceptionHandling:
             # Verify legacy delete was called
             mock_delete.assert_called_once_with(sample_account_id, "Venmo")
 
-    def test_delete_qr_legacy_s3_failure_is_logged_and_qr_still_cleared(
+    def test_delete_qr_legacy_s3_failure_surfaces_error(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test delete_qr_code logs legacy-path S3 delete failures and still clears
-        qrCodeUrl (#563: the handler shares the best-effort _delete_qr_if_exists
-        helper with the utils layer)."""
+        """delete_qr_code surfaces legacy-path S3 delete failures and keeps the stored
+        legacy URL so the user can retry (#303)."""
         from unittest.mock import patch
 
         from src.handlers.payment_methods_handlers import delete_qr_code
@@ -1158,18 +1156,17 @@ class TestExceptionHandling:
         )
 
         # Mock delete_qr_from_s3 to raise an exception
-        with patch(
-            "src.utils.payment_methods.delete_qr_from_s3", side_effect=Exception("S3 delete failed")
-        ):
+        with patch("src.utils.payment_methods.delete_qr_from_s3", side_effect=Exception("S3 delete failed")):
             event = {
                 "identity": {"sub": sample_account_id},
                 "arguments": {"paymentMethodName": "Venmo"},
             }
-            # Failure is logged, not surfaced; the record is still cleared
+            # Failure surfaces as a typed error payload instead of being swallowed
             result = delete_qr_code(event, None)
-            assert result is True
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
         methods = response["Item"]["preferences"]["paymentMethods"]
         venmo = next(m for m in methods if m["name"] == "Venmo")
-        assert venmo.get("qrCodeUrl") is None
+        assert venmo.get("qrCodeUrl") == "https://dev.kernelworx.app/payment-qr-codes/acc-123/venmo.png"

@@ -230,7 +230,9 @@ def _save_preferences(
         raise
 
 
-def _mutate_payment_methods(account_id: str, fn: Callable[[List[Dict[str, Any]]], Optional[List[Dict[str, Any]]]]) -> None:
+def _mutate_payment_methods(
+    account_id: str, fn: Callable[[List[Dict[str, Any]]], Optional[List[Dict[str, Any]]]]
+) -> None:
     """Snapshot-read preferences.paymentMethods, apply fn, and save under the optimistic lock.
 
     fn receives the list and returns the replacement list, or None to leave it unchanged.
@@ -317,7 +319,7 @@ def get_payment_methods(account_id: str) -> List[Dict[str, Any]]:
             return []
 
         # Payment methods are stored in preferences.paymentMethods
-        preferences = copy.deepcopy(response["Item"].get("preferences", {}))
+        preferences = response["Item"].get("preferences", {})
         methods: List[Dict[str, Any]] = preferences.get("paymentMethods", [])
         return methods
 
@@ -455,8 +457,20 @@ def _find_and_remove_method(
     return new_methods, method_to_delete
 
 
-def _delete_qr_if_exists(logger: Any, account_id: str, name: str, method_to_delete: Dict[str, Any]) -> None:
-    """Delete QR code from S3 if it exists."""
+def _delete_qr_if_exists(
+    logger: Any,
+    account_id: str,
+    name: str,
+    method_to_delete: Dict[str, Any],
+    raise_on_error: bool = False,
+) -> None:
+    """Delete QR code from S3 if it exists.
+
+    With raise_on_error the caller treats a failed delete as fatal, so the stored
+    qrCodeUrl must keep pointing at the object that is still in S3 and the caller can
+    retry; the default swallows the failure for callers that are deleting the whole
+    method anyway.
+    """
     stored_qr_key = method_to_delete.get("qrCodeUrl")
     if not stored_qr_key:
         return
@@ -469,6 +483,8 @@ def _delete_qr_if_exists(logger: Any, account_id: str, name: str, method_to_dele
             # Legacy slug-based key or URL value
             delete_qr_from_s3(account_id, name)
     except Exception as e:
+        if raise_on_error:
+            raise
         logger.warning("Failed to delete QR code, continuing with method deletion", error=str(e))
 
 
