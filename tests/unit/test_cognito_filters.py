@@ -104,7 +104,7 @@ class TestEmailPrefixFilter:
     def test_returns_starts_with_expression(self, query: str, expected: str) -> None:
         assert cognito_user_filter("email_prefix", query) == expected
 
-    @pytest.mark.parametrize("query", ["user name", 'user" OR 1=1', "user\\", "user@exa mple", ""])
+    @pytest.mark.parametrize("query", ["user name", "user\tname", 'user" OR 1=1', "user\\", ""])
     def test_rejects_unsafe_prefixes(self, query: str) -> None:
         with pytest.raises(AppError) as exc_info:
             cognito_user_filter("email_prefix", query)
