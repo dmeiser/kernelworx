@@ -1043,6 +1043,64 @@ class TestDeleteAllUserQRCodes:
             assert "S3 error" not in exc_info.value.message
             mock_logger.error.assert_called()
 
+    def test_delete_all_user_qr_codes_transient_error_then_success(self, monkeypatch: Any, sample_account_id: str) -> None:
+        """Regression (#564): a transient throttle during account-deletion QR purge is retried."""
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+        sleep_mock = MagicMock()
+        monkeypatch.setattr("src.utils.s3.time.sleep", sleep_mock)
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        throttled = ClientError({"Error": {"Code": "Throttling", "Message": "rate limited"}}, "ListObjectVersions")
+        mock_paginator.paginate.side_effect = [
+            throttled,
+            [{"Versions": [{"Key": f"payment-qr-codes/{sample_account_id}/qr.png", "VersionId": "v1"}]}],
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+        mock_logger = MagicMock()
+
+        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
+            deleted = payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
+
+        assert deleted == 1
+        assert mock_paginator.paginate.call_count == 2
+        sleep_mock.assert_called_once()
+        mock_s3.delete_objects.assert_called_once()
+
+    def test_delete_all_user_qr_codes_transient_error_exhausts_retries(self, monkeypatch: Any, sample_account_id: str) -> None:
+        """A persistent transient error still surfaces as AppError after bounded retries."""
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+        sleep_mock = MagicMock()
+        monkeypatch.setattr("src.utils.s3.time.sleep", sleep_mock)
+        mock_s3 = MagicMock()
+        throttled = ClientError({"Error": {"Code": "Throttling", "Message": "rate limited"}}, "ListObjectVersions")
+        mock_s3.get_paginator.side_effect = throttled
+        mock_logger = MagicMock()
+
+        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
+            with pytest.raises(AppError) as exc_info:
+                payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert mock_s3.get_paginator.call_count == 3
+        assert sleep_mock.call_count == 2
+
+    def test_delete_all_user_qr_codes_non_transient_error_fails_fast(self, monkeypatch: Any, sample_account_id: str) -> None:
+        """A non-transient client error raises AppError without retrying."""
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
+        sleep_mock = MagicMock()
+        monkeypatch.setattr("src.utils.s3.time.sleep", sleep_mock)
+        mock_s3 = MagicMock()
+        denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "denied"}}, "ListObjectVersions")
+        mock_s3.get_paginator.side_effect = denied
+        mock_logger = MagicMock()
+
+        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
+            with pytest.raises(AppError):
+                payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
+
+        mock_s3.get_paginator.assert_called_once()
+        sleep_mock.assert_not_called()
+
 
 class TestEdgeCases:
     """Test edge cases and error handling."""
