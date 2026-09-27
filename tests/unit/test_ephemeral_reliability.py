@@ -154,9 +154,7 @@ class TestCreateEphemeralTestUsersRunIdValidation:
         )
 
     @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
-    def test_invalid_run_id_rejected_before_any_aws_call(
-        self, repo_root: Path, tmp_env: Path, run_id: str
-    ) -> None:
+    def test_invalid_run_id_rejected_before_any_aws_call(self, repo_root: Path, tmp_env: Path, run_id: str) -> None:
         result = self._run(repo_root, tmp_env, run_id)
         assert result.returncode != 0, result.stderr
         recorded = tmp_env / "aws_calls.txt"
