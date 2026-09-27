@@ -946,24 +946,31 @@ class TestExceptionHandling:
         assert result["errorCode"] == ErrorCode.NOT_FOUND
         assert "not found" in result["message"]
 
-    def test_delete_qr_method_not_found_in_loop(
+    def test_delete_qr_clears_qr_and_keeps_other_methods(
         self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
     ) -> None:
-        """Test delete_qr_code with multiple methods (exercises else branch of name match)."""
-        # Create TWO payment methods: one with QR that we'll delete, one without
-        create_payment_method(sample_account_id, "Venmo")
-        create_payment_method(sample_account_id, "PayPal")
+        """delete_qr_code clears only the requested method's QR when it is last in the list.
 
-        # Add QR to Venmo only
+        The callback iterates past the non-matching method before matching, and the
+        other method's stored key and S3 object must both survive.
+        """
+        from src.handlers.payment_methods_handlers import delete_qr_code
         from src.utils.dynamodb import tables
+
+        # PayPal is created first so the match is preceded by a non-matching entry
+        create_payment_method(sample_account_id, "PayPal")
+        create_payment_method(sample_account_id, "Venmo")
 
         account_id_key = f"ACCOUNT#{sample_account_id}"
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
         methods = response["Item"]["preferences"]["paymentMethods"]
-        s3_key_venmo = f"payment-qr-codes/{sample_account_id}/venmo.png"
+        paypal_key = f"payment-qr-codes/{sample_account_id}/paypal.png"
+        venmo_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
         for m in methods:
             if m["name"] == "Venmo":
-                m["qrCodeUrl"] = s3_key_venmo
+                m["qrCodeUrl"] = venmo_key
+            else:
+                m["qrCodeUrl"] = paypal_key
 
         # Store preferences properly
         preferences = response["Item"].get("preferences", {})
@@ -974,12 +981,11 @@ class TestExceptionHandling:
             ExpressionAttributeValues={":prefs": preferences},
         )
 
-        # Create S3 object for Venmo
+        # Create S3 objects for both methods
         bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key_venmo, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=venmo_key, Body=b"fake-qr-data")
+        s3_bucket.put_object(Bucket=bucket_name, Key=paypal_key, Body=b"fake-qr-data")
 
-        # Delete QR from Venmo - this will iterate over both Venmo and PayPal
-        # Venmo matches the if condition, PayPal doesn't (exercises else branch)
         event = {
             "identity": {"sub": sample_account_id},
             "arguments": {"paymentMethodName": "Venmo"},
@@ -988,56 +994,16 @@ class TestExceptionHandling:
         result = delete_qr_code(event, None)
         assert result is True
 
-        # Verify Venmo's QR was cleared
-        response = tables.accounts.get_item(Key={"accountId": account_id_key})
-        methods = response["Item"]["preferences"]["paymentMethods"]
-        venmo = next(m for m in methods if m["name"] == "Venmo")
-        assert venmo.get("qrCodeUrl") is None
-
-    def test_delete_qr_clears_method_not_first_in_list(
-        self, dynamodb_tables: Dict[str, Any], s3_bucket: Any, sample_account: Dict[str, Any], sample_account_id: str
-    ) -> None:
-        """Test clearing the QR of a method that is not first in the list (loop must skip non-matching methods)."""
-        from src.handlers.payment_methods_handlers import delete_qr_code
-        from src.utils.dynamodb import tables
-
-        create_payment_method(sample_account_id, "PayPal")
-        create_payment_method(sample_account_id, "Venmo")
-
-        account_id_key = f"ACCOUNT#{sample_account_id}"
-        response = tables.accounts.get_item(Key={"accountId": account_id_key})
-        methods = response["Item"]["preferences"]["paymentMethods"]
-        s3_key = f"payment-qr-codes/{sample_account_id}/venmo.png"
-        for m in methods:
-            if m["name"] == "Venmo":
-                m["qrCodeUrl"] = s3_key
-
-        preferences = response["Item"].get("preferences", {})
-        preferences["paymentMethods"] = methods
-        tables.accounts.update_item(
-            Key={"accountId": account_id_key},
-            UpdateExpression="SET preferences = :prefs",
-            ExpressionAttributeValues={":prefs": preferences},
-        )
-
-        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
-        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
-
-        event = {
-            "identity": {"sub": sample_account_id},
-            "arguments": {"paymentMethodName": "Venmo"},
-        }
-
-        result = delete_qr_code(event, None)
-
-        assert result is True
+        with pytest.raises(ClientError):
+            s3_bucket.head_object(Bucket=bucket_name, Key=venmo_key)
+        s3_bucket.head_object(Bucket=bucket_name, Key=paypal_key)
 
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
         methods = response["Item"]["preferences"]["paymentMethods"]
         venmo = next(m for m in methods if m["name"] == "Venmo")
         paypal = next(m for m in methods if m["name"] == "PayPal")
         assert venmo.get("qrCodeUrl") is None
-        assert paypal.get("qrCodeUrl") is None
+        assert paypal.get("qrCodeUrl") == paypal_key
 
     def test_delete_qr_s3_delete_failure_surfaces_error(
         self, dynamodb_tables: Dict[str, Any], sample_account: Dict[str, Any], sample_account_id: str
