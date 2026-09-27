@@ -54,8 +54,8 @@ REPORT_LAMBDA_MEMORY_BYTES = 512 * 1024 * 1024
 # what is left. Two fifths is also the order contract: the 5,000 orders #577
 # called "a few thousand", generous for a scout unit, at the 381 B a realistic
 # one-line-item order detail measures (the shape
-# tests/unit/test_report_limits.py pins) is 1.9 MB, so 5,000 orders report and
-# the order after them is refused.
+# tests/unit/test_report_limits.py pins) is 1.9 MB, so all 5,000 report, and the
+# ceiling is not reached until roughly the 5,250th order of that width.
 MAX_UNIT_REPORT_GRAPH_BYTES = (2 * APPSYNC_RESPONSE_LIMIT_BYTES) // 5
 
 # Campaign report: ``request_campaign_report`` returns only reportId, reportUrl,
