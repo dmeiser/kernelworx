@@ -23,6 +23,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from src.handlers.admin_operations import (
+    _ACCOUNT_SEARCH_MAX_RESULTS,
     _batch_get_campaign_catalogs,
     _batch_get_display_names,
     _batch_get_user_groups,
@@ -7452,7 +7453,6 @@ class TestAdminOperationExceptionHandlers:
                     if item["email"].startswith(kwargs["ExpressionAttributeValues"][":prefix"])
                 ]
             }
-            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {"Items": account_items, "LastEvaluatedKey": None}
 
             mock_cognito_user = {
@@ -7477,6 +7477,7 @@ class TestAdminOperationExceptionHandlers:
                 IndexName="email-index",
                 KeyConditionExpression="begins_with(email, :prefix)",
                 ExpressionAttributeValues={":prefix": "alice"},
+                Limit=_ACCOUNT_SEARCH_MAX_RESULTS,
             )
             mock_tables.accounts.scan.assert_not_called()
 
@@ -7514,7 +7515,6 @@ class TestAdminOperationExceptionHandlers:
                     if item["email"].startswith(kwargs["ExpressionAttributeValues"][":prefix"])
                 ]
             }
-            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {"Items": account_items, "LastEvaluatedKey": None}
 
             mock_cognito_user = {
@@ -7568,7 +7568,6 @@ class TestAdminOperationExceptionHandlers:
                 {"Error": {"Code": "ValidationException", "Message": "Index not found"}},
                 "Query",
             )
-            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [{"accountId": "ACCOUNT#sub-1", "email": "alice@example.com"}],
                 "LastEvaluatedKey": None,

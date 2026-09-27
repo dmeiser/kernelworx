@@ -523,6 +523,7 @@ def _try_email_prefix_gsi(query_lower: str, max_results: int, logger: Any) -> li
             IndexName="email-index",
             KeyConditionExpression="begins_with(email, :prefix)",
             ExpressionAttributeValues={":prefix": query_lower},
+            Limit=max_results,
         )
         gsi_items = cast(list[Dict[str, Any]], gsi_response.get("Items", []))
         if gsi_items:
