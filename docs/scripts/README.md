@@ -131,6 +131,23 @@ prefix. Dev-only script.
 **Key flags/arguments:** None. Requires `SHARES_TABLE_NAME` environment variable (or set
 via `.env`). Run with: `uv run python scripts/migrate_shares_prefix.py`.
 
+### `scripts/backfill_email_search_key.py`
+
+**One-off backfill: index existing accounts for admin email prefix search.** The accounts
+table's `emailSearchIndex` GSI (constant `emailSearchKey` + `email` range key) is sparse,
+so an account written before the index existed carries no `emailSearchKey` and would be
+invisible to `adminSearchUser` email search. This script conditionally sets the attribute
+on every account that is missing it, so re-running it while sign-ins keep writing is safe.
+
+**Deployment order (required):** deploy the account write path (the Cognito bootstrap
+trigger sets `emailSearchKey`) → run this script and then `--verify` until it reports zero
+remaining accounts → only then apply the table change that creates the index.
+
+**Key flags/arguments:** `--verify` reports accounts still missing the attribute, writes
+nothing, and exits non-zero while any remain (use it to gate the index rollout). Requires
+the `ACCOUNTS_TABLE_NAME` environment variable (or set via `.env`). Run with:
+`uv run python scripts/backfill_email_search_key.py [--verify]`.
+
 ### `scripts/contrast_check.py`
 
 **WCAG contrast checker for KernelWorx brand colors.** Audits all text/background
@@ -232,6 +249,7 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 | Delete the Alex Kernel Cognito user (preserving data)       | `scripts/delete-screenshot-user.sh`        |
 | Delete test user catalogs                                   | `scripts/delete-test-catalogs.py`          |
 | Run shares table migration (dev only)                       | `scripts/migrate_shares_prefix.py`         |
+| Backfill accounts email prefix-search key                  | `scripts/backfill_email_search_key.py`     |
 | Check WCAG contrast of brand colors                         | `scripts/contrast_check.py`                |
 | Sync Route53 DNS to CloudFlare                              | `scripts/sync-to-cloudflare.sh`            |
 | Generate integration test env config from tofu outputs      | `scripts/generate_integration_env.py`      |
