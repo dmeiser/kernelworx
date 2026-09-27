@@ -1,12 +1,15 @@
 """Unit tests for campaign reporting Lambda handler (unitCampaignKey-index-based implementation)."""
 
+import json
 from decimal import Decimal
+from functools import partial
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from src.handlers.campaign_reporting import _get_accessible_profiles, get_unit_report
+from src.utils.report_limits import MAX_REPORT_GRAPH_BYTES, OrderGraphBudget, order_graph_bytes
 
 
 class TestGetUnitReport:
@@ -919,13 +922,15 @@ class TestGetAccessibleProfilesBatching:
         assert "PROFILE#missing" not in result
 
 
-class TestUnitReportOrderCeiling:
-    """Tests for the unit-wide order ceiling on get_unit_report (#577).
+class TestUnitReportOrderGraphBudget:
+    """Tests for the unit-wide order-graph budget on get_unit_report (#577).
 
     The handler used to materialise every order and every line item for the whole
     unit, so the largest units - the ones the report exists for - exhausted the
-    Lambda's memory and surfaced as a generic INTERNAL_ERROR. The ceiling turns
-    that into a typed RESOURCE_BUSY error before the report is built.
+    Lambda's memory and returned a response AppSync truncates, surfacing as a
+    generic INTERNAL_ERROR. The shared budget is measured in the bytes those
+    order details serialise to, is charged before an order is expanded, and
+    turns an over-budget unit into a typed RESOURCE_BUSY error.
     """
 
     @pytest.fixture
@@ -955,22 +960,23 @@ class TestUnitReportOrderCeiling:
             "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
         }
 
-    def _order(self, campaign_index: int, order_index: int) -> Dict[str, Any]:
-        """Build an order with one expanded line item."""
+    def _order(self, campaign_index: int, order_index: int, line_items: int = 1) -> Dict[str, Any]:
+        """Build an order whose line items are as wide as a real bulk popcorn order."""
         return {
-            "orderId": f"ORDER#order{order_index}",
+            "orderId": f"ORDER#2f1c9d4a-8b3e-4a21-9c77-1f0d5e6a7b8c-{order_index}",
             "campaignId": f"CAMPAIGN#campaign{campaign_index}",
-            "customerName": f"Customer {order_index}",
-            "orderDate": "2024-10-01T12:00:00Z",
-            "totalAmount": Decimal("10.00"),
+            "customerName": "Alexandra Montgomery-Whitfield",
+            "orderDate": "2024-10-01T12:00:00.000Z",
+            "totalAmount": Decimal("12345.67"),
             "lineItems": [
                 {
-                    "productId": "PROD#1",
-                    "productName": "Caramel Corn",
-                    "quantity": 1,
-                    "pricePerUnit": Decimal("10.00"),
-                    "subtotal": Decimal("10.00"),
+                    "productId": f"PRODUCT#7d9a1c2e-4b3a-4c8d-9e0f-1a2b3c4d5e6f-{item}",
+                    "productName": "White Chocolate Caramel Popcorn (16oz Bucket)",
+                    "quantity": 12,
+                    "pricePerUnit": Decimal("12.50"),
+                    "subtotal": Decimal("150.00"),
                 }
+                for item in range(line_items)
             ],
         }
 
@@ -980,6 +986,7 @@ class TestUnitReportOrderCeiling:
         campaigns: list[Dict[str, Any]],
         orders_by_campaign: Dict[str, list[Dict[str, Any]]],
         lambda_context: Any,
+        max_graph_bytes: int | None = None,
     ) -> Dict[str, Any]:
         """Run get_unit_report with the given campaigns and per-campaign orders."""
         profiles_table = MagicMock()
@@ -1000,9 +1007,11 @@ class TestUnitReportOrderCeiling:
             {"Items": orders_by_campaign.get(campaign["campaignId"], [])} for campaign in campaigns
         ]
 
+        budget = OrderGraphBudget if max_graph_bytes is None else partial(OrderGraphBudget, max_bytes=max_graph_bytes)
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
             patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
+            patch("src.handlers.campaign_reporting.OrderGraphBudget", budget),
         ):
             mock_tables.profiles = profiles_table
             mock_tables.campaigns = campaigns_table
@@ -1010,32 +1019,51 @@ class TestUnitReportOrderCeiling:
             mock_check_access.return_value = {c["profileId"] for c in campaigns}
             return get_unit_report(event, lambda_context)
 
-    def test_unit_report_rejects_units_over_the_order_ceiling(self, event: Dict[str, Any], lambda_context: Any) -> None:
-        """A unit with more orders than the ceiling fails with a typed RESOURCE_BUSY error."""
+    def test_unit_report_refuses_order_graph_over_the_budget(self, event: Dict[str, Any], lambda_context: Any) -> None:
+        """A unit whose order details exceed the budget fails with a typed RESOURCE_BUSY error."""
         orders = [self._order(1, i) for i in range(3)]
 
-        with patch("src.handlers.campaign_reporting.MAX_REPORT_ORDERS", 2):
-            result = self._run(event, [self._campaign()], {"CAMPAIGN#campaign1": orders}, lambda_context)
+        result = self._run(
+            event,
+            [self._campaign()],
+            {"CAMPAIGN#campaign1": orders},
+            lambda_context,
+            sum(order_graph_bytes(order) for order in orders) - 1,
+        )
 
         assert result["__isError"] is True
         assert result["errorCode"] == "RESOURCE_BUSY"
         assert "too large" in result["message"]
-        # No partial report is returned when the ceiling is hit.
+        # No partial report is returned when the budget is exhausted.
         assert "sellers" not in result
 
-    def test_unit_report_returns_orders_up_to_the_ceiling(self, event: Dict[str, Any], lambda_context: Any) -> None:
-        """A unit at exactly the ceiling still returns its full report."""
+    def test_unit_report_returns_orders_within_the_budget(self, event: Dict[str, Any], lambda_context: Any) -> None:
+        """A unit whose order details fit the budget still returns its full report."""
         orders = [self._order(1, i) for i in range(2)]
 
-        with patch("src.handlers.campaign_reporting.MAX_REPORT_ORDERS", 2):
-            result = self._run(event, [self._campaign()], {"CAMPAIGN#campaign1": orders}, lambda_context)
-
+        result = self._run(
+            event, [self._campaign()], {"CAMPAIGN#campaign1": orders}, lambda_context, 2 * order_graph_bytes(orders[0])
+        )
         assert result["totalOrders"] == 2
-        assert result["totalSales"] == 20.0
+        assert result["totalSales"] == 24691.34
         assert len(result["sellers"][0]["orders"]) == 2
+        assert result["sellers"][0]["orders"][0]["lineItems"][0]["subtotal"] == 150.0
 
-    def test_unit_report_ceiling_spans_the_whole_unit(self, event: Dict[str, Any], lambda_context: Any) -> None:
-        """The ceiling is unit-wide: orders across several sellers accumulate against it."""
+    def test_budget_counts_line_items_not_just_orders(self, event: Dict[str, Any], lambda_context: Any) -> None:
+        """The same budget admits narrow orders and refuses wide ones of the same count."""
+        narrow = [self._order(1, i) for i in range(3)]
+        wide = [self._order(1, i, line_items=20) for i in range(3)]
+        budget_bytes = sum(order_graph_bytes(order) for order in narrow)
+
+        admitted = self._run(event, [self._campaign()], {"CAMPAIGN#campaign1": narrow}, lambda_context, budget_bytes)
+        refused = self._run(event, [self._campaign()], {"CAMPAIGN#campaign1": wide}, lambda_context, budget_bytes)
+
+        assert admitted["totalOrders"] == 3
+        assert refused["__isError"] is True
+        assert refused["errorCode"] == "RESOURCE_BUSY"
+
+    def test_budget_spans_the_whole_unit(self, event: Dict[str, Any], lambda_context: Any) -> None:
+        """The budget is unit-wide: order details across several sellers accumulate against it."""
         campaigns = [
             self._campaign(1),
             {**self._campaign(2), "profileId": "PROFILE#profile2"},
@@ -1044,17 +1072,44 @@ class TestUnitReportOrderCeiling:
             "CAMPAIGN#campaign1": [self._order(1, 0), self._order(1, 1)],
             "CAMPAIGN#campaign2": [self._order(2, 2)],
         }
+        budget_bytes = sum(order_graph_bytes(order) for orders in orders_by_campaign.values() for order in orders) - 1
 
-        with patch("src.handlers.campaign_reporting.MAX_REPORT_ORDERS", 2):
-            result = self._run(event, campaigns, orders_by_campaign, lambda_context)
+        result = self._run(event, campaigns, orders_by_campaign, lambda_context, budget_bytes)
 
         assert result["__isError"] is True
         assert result["errorCode"] == "RESOURCE_BUSY"
 
-    def test_unit_report_stops_paging_once_the_ceiling_is_reached(
+    def test_worst_case_unit_report_fits_the_response_budget(self, event: Dict[str, Any], lambda_context: Any) -> None:
+        """A realistic worst-case unit that the budget admits serialises within the budget.
+
+        200 orders of 20 line items is a wide, long-season unit report: the real
+        response is measured against the same ceiling the handler enforces, so a
+        change to the query or detail shape that makes the charge fiction fails
+        here instead of reaching AppSync's 5 MB response limit.
+        """
+        orders = [self._order(1, i, line_items=20) for i in range(200)]
+
+        result = self._run(event, [self._campaign()], {"CAMPAIGN#campaign1": orders}, lambda_context)
+
+        assert result["totalOrders"] == 200
+        assert len(json.dumps(result, default=float).encode("utf-8")) <= MAX_REPORT_GRAPH_BYTES
+        assert sum(len(order["lineItems"]) for order in result["sellers"][0]["orders"]) == 4000
+
+    def test_worst_case_unit_report_beyond_the_budget_is_refused(
         self, event: Dict[str, Any], lambda_context: Any
     ) -> None:
-        """The order query is bounded by the ceiling, so paging stops instead of reading the table."""
+        """One order past the realistic worst case is refused rather than truncated."""
+        orders = [self._order(1, i, line_items=20) for i in range(300)]
+
+        result = self._run(event, [self._campaign()], {"CAMPAIGN#campaign1": orders}, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == "RESOURCE_BUSY"
+
+    def test_unit_report_stops_reading_once_the_budget_is_exhausted(
+        self, event: Dict[str, Any], lambda_context: Any
+    ) -> None:
+        """Orders are streamed, so the refusal happens without paging the rest of the table."""
         campaigns_table = MagicMock()
         profiles_table = MagicMock()
         orders_table = MagicMock()
@@ -1072,7 +1127,7 @@ class TestUnitReportOrderCeiling:
         def order_page(**kwargs: Any) -> Dict[str, Any]:
             pages["count"] += 1
             if pages["count"] > 50:  # pragma: no cover - guard against an unbounded read hanging
-                raise AssertionError("orders query paged past the report ceiling")
+                raise AssertionError("orders query paged past the report budget")
             return {
                 "Items": [self._order(1, i) for i in range(pages["count"] * 10, pages["count"] * 10 + 10)],
                 "LastEvaluatedKey": {"orderId": f"ORDER#page{pages['count']}"},
@@ -1080,10 +1135,16 @@ class TestUnitReportOrderCeiling:
 
         orders_table.query.side_effect = order_page
 
+        # Sized so the tenth order of the first page is the one that crosses.
+        first_page_bytes = max(order_graph_bytes(self._order(1, index)) for index in range(10))
+
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
             patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
-            patch("src.handlers.campaign_reporting.MAX_REPORT_ORDERS", 5),
+            patch(
+                "src.handlers.campaign_reporting.OrderGraphBudget",
+                partial(OrderGraphBudget, max_bytes=9 * first_page_bytes),
+            ),
         ):
             mock_tables.profiles = profiles_table
             mock_tables.campaigns = campaigns_table
@@ -1093,6 +1154,6 @@ class TestUnitReportOrderCeiling:
 
         assert result["__isError"] is True
         assert result["errorCode"] == "RESOURCE_BUSY"
-        # A single page is enough to prove the ceiling was reached; the handler does
-        # not keep following LastEvaluatedKey through the rest of the table.
+        # One page is enough to exhaust the budget; the handler does not keep
+        # following LastEvaluatedKey through the rest of the table.
         assert orders_table.query.call_count == 1
