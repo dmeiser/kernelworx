@@ -100,9 +100,7 @@ class TestRunIdValidation:
         assert not recorded.exists(), f"validation must precede any AWS/tofu call: {recorded.read_text()}"
 
     @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
-    def test_recover_deploy_rejects_invalid_run_id(
-        self, repo_root: Path, tmp_env: Path, run_id: str
-    ) -> None:
+    def test_recover_deploy_rejects_invalid_run_id(self, repo_root: Path, tmp_env: Path, run_id: str) -> None:
         recorded = tmp_env / "aws_calls.txt"
         write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
         write_mock(tmp_env, "tofu", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
@@ -112,9 +110,7 @@ class TestRunIdValidation:
         assert not recorded.exists(), f"validation must precede any AWS/tofu call: {recorded.read_text()}"
 
     @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
-    def test_recover_destroy_rejects_invalid_run_id(
-        self, repo_root: Path, tmp_env: Path, run_id: str
-    ) -> None:
+    def test_recover_destroy_rejects_invalid_run_id(self, repo_root: Path, tmp_env: Path, run_id: str) -> None:
         recorded = tmp_env / "aws_calls.txt"
         write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
         write_mock(tmp_env, "tofu", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
@@ -124,8 +120,8 @@ class TestRunIdValidation:
         assert not recorded.exists(), f"validation must precede any AWS/tofu call: {recorded.read_text()}"
 
     def test_valid_run_id_is_accepted(self, repo_root: Path, tmp_env: Path, tmp_path: Path) -> None:
-        write_mock(tmp_env, "aws", '#!/bin/bash\nexit 0')
-        write_mock(tmp_env, "tofu", '#!/bin/bash\nexit 0')
+        write_mock(tmp_env, "aws", "#!/bin/bash\nexit 0")
+        write_mock(tmp_env, "tofu", "#!/bin/bash\nexit 0")
         build_dir = tmp_path / "lambda-layer"
         script = f"""
             set -e
