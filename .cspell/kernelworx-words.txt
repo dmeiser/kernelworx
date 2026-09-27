@@ -59,6 +59,7 @@ checkpointed
 chipProps
 cityState
 clsx
+cmdline
 codegen
 Cognito
 cognitoonly
@@ -215,6 +216,7 @@ mockqrcode
 monkeypatching
 monorepo
 moto
+mktemp
 MUI
 multiline
 mutex

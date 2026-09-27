@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-PASSWORD = "Sup3rSecret-Passw0rd,with#delimiters"
+PASSWORD = "Sup3rSecret-Pa55word,with#delimiters"
 USERNAME = "owner@example.com"
 POOL_ID = "us-east-1_ExamplePool"
 CLIENT_ID = "1example23client45id6789"
@@ -80,8 +80,9 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object
     """Run provision-user-totp.sh against a recording fake `aws` CLI."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    logs = {name: tmp_path / f"{name}.log" for name in
-            ("aws_argv", "aws_modes", "aws_param_files", "aws_param_contents")}
+    logs = {
+        name: tmp_path / f"{name}.log" for name in ("aws_argv", "aws_modes", "aws_param_files", "aws_param_contents")
+    }
     for path in logs.values():
         path.touch()
 
@@ -136,7 +137,7 @@ def aws_invocations(harness: dict[str, object]) -> list[list[str]]:
 def param_files(harness: dict[str, object]) -> list[Path]:
     """Every `file://` path the fake `aws` was pointed at."""
     text = logs(harness)["aws_param_files"].read_text()
-    return [Path(line[len("file://"):]) for line in text.splitlines() if line.startswith("file://")]
+    return [Path(line[len("file://") :]) for line in text.splitlines() if line.startswith("file://")]
 
 
 def param_file_contents(harness: dict[str, object]) -> list[dict]:
@@ -214,7 +215,7 @@ class TestAuthParametersFile:
         broken.write_text(
             "#!/bin/bash\n"
             'printf \'%s\\0\' "$@" >> "$MOCK_AWS_LOG"\n'
-            'printf \'\\0\' >> "$MOCK_AWS_LOG"\n'
+            "printf '\\0' >> \"$MOCK_AWS_LOG\"\n"
             'for arg in "$@"; do case "$arg" in file://*) '
             'printf \'%s\\n\' "$arg" >> "$MOCK_AWS_PARAM_FILES";; esac; done\n'
             "exit 1\n"
@@ -231,7 +232,7 @@ class TestAuthParametersFile:
 
 
 def test_still_prints_the_totp_secret(harness: dict[str, object], repo_root: Path) -> None:
-    """The behaviour the callers depend on is unchanged by #569."""
+    """The behavior the callers depend on is unchanged by #569."""
     result = run_script(harness, repo_root)
 
     assert result.returncode == 0, result.stderr
