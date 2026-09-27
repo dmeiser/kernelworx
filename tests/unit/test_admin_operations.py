@@ -4093,6 +4093,8 @@ class TestAdminSearchUser:
             mock_get_client.return_value = mock_client
 
             # DynamoDB scan returns matching account
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [
                     {
@@ -4192,6 +4194,8 @@ class TestAdminSearchUser:
             mock_get_client.return_value = mock_client
 
             # DynamoDB scan returns multiple matching accounts
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [
                     {
@@ -4270,6 +4274,8 @@ class TestAdminSearchUser:
             mock_get_client.return_value = mock_client
 
             # DynamoDB scan returns matching account (lowercase name matches uppercase query)
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [
                     {
@@ -4418,6 +4424,8 @@ class TestAdminSearchUser:
                 mock_get_client.return_value = mock_client
 
                 # DynamoDB scan returns no matches
+                # The email-index prefix query misses, so the scan fallback runs.
+                mock_tables.accounts.query.return_value = {"Items": []}
                 mock_tables.accounts.scan.return_value = {"Items": []}
 
                 result = admin_search_user(event, lambda_context)
@@ -4541,6 +4549,8 @@ class TestAdminSearchUser:
             mock_get_client.return_value = mock_client
 
             # DynamoDB scan returns the account
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [
                     {
@@ -4600,6 +4610,8 @@ class TestAdminSearchUser:
             mock_get_client.return_value = mock_client
 
             # DynamoDB scan returns the account
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [
                     {
@@ -4700,6 +4712,8 @@ class TestAdminSearchUser:
                 mock_get_client.return_value = mock_client
 
                 # DynamoDB has orphaned account (Cognito user deleted)
+                # The email-index prefix query misses, so the scan fallback runs.
+                mock_tables.accounts.query.return_value = {"Items": []}
                 mock_tables.accounts.scan.return_value = {
                     "Items": [
                         {
@@ -4753,6 +4767,8 @@ class TestAdminSearchUser:
             mock_get_client.return_value = mock_client
 
             # DynamoDB has the account
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [
                     {
@@ -4811,6 +4827,8 @@ class TestAdminSearchUser:
             mock_get_client.return_value = mock_client
 
             # DynamoDB has NO matching accounts
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {"Items": []}
 
             # Cognito email prefix search returns user (not found in DynamoDB)
@@ -4847,6 +4865,8 @@ class TestAdminSearchUser:
                 mock_get_client.return_value = mock_client
 
                 # DynamoDB returns account without ACCOUNT# prefix (malformed data)
+                # The email-index prefix query misses, so the scan fallback runs.
+                mock_tables.accounts.query.return_value = {"Items": []}
                 mock_tables.accounts.scan.return_value = {
                     "Items": [
                         {
@@ -4900,6 +4920,8 @@ class TestAdminSearchUser:
             mock_get_client.return_value = mock_client
 
             # DynamoDB scan returns with pagination (LastEvaluatedKey)
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.side_effect = [
                 {
                     "Items": [{"accountId": "ACCOUNT#multi-sub", "email": "multi@example.com"}],
@@ -5025,6 +5047,8 @@ class TestAdminSearchUser:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [{"accountId": "ACCOUNT#test-sub-123", "email": "test@example.com"}]
             }
@@ -5062,6 +5086,8 @@ class TestAdminSearchUser:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
 
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {"Items": []}
 
             mock_client.list_users.side_effect = ClientError(
@@ -6878,6 +6904,8 @@ class TestAdminOperationExceptionHandlers:
             mock_get_client.return_value = mock_client
 
             # DynamoDB scan returns account
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [{"accountId": "ACCOUNT#noname-sub", "email": "noname@example.com"}]
             }
@@ -6932,6 +6960,8 @@ class TestAdminOperationExceptionHandlers:
             mock_get_client.return_value = mock_client
 
             # DynamoDB scan returns account
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [{"accountId": "ACCOUNT#getfail-sub", "email": "getfail@example.com"}]
             }
@@ -6973,6 +7003,8 @@ class TestAdminOperationExceptionHandlers:
                 mock_get_client.return_value = mock_client
 
                 # DynamoDB returns account with sub
+                # The email-index prefix query misses, so the scan fallback runs.
+                mock_tables.accounts.query.return_value = {"Items": []}
                 mock_tables.accounts.scan.return_value = {
                     "Items": [{"accountId": "ACCOUNT#test-sub-123", "email": "test@example.com"}]
                 }
@@ -7010,6 +7042,8 @@ class TestAdminOperationExceptionHandlers:
                 mock_get_client.return_value = mock_client
 
                 # DynamoDB returns no accounts
+                # The email-index prefix query misses, so the scan fallback runs.
+                mock_tables.accounts.query.return_value = {"Items": []}
                 mock_tables.accounts.scan.return_value = {"Items": []}
 
                 # Cognito email prefix search fails with ClientError
@@ -7047,6 +7081,8 @@ class TestAdminOperationExceptionHandlers:
             mock_get_client.return_value = mock_client
 
             # DynamoDB returns items where only some match
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": [
                     {"accountId": "ACCOUNT#no-match-1", "email": "other@example.com"},  # No match
@@ -7101,6 +7137,8 @@ class TestAdminOperationExceptionHandlers:
                 mock_get_client.return_value = mock_client
 
                 # DynamoDB scan fails with ClientError
+                # The email-index prefix query misses, so the scan fallback runs.
+                mock_tables.accounts.query.return_value = {"Items": []}
                 mock_tables.accounts.scan.side_effect = ClientError(
                     {"Error": {"Code": "InternalErrorException", "Message": "Service error"}},
                     "Scan",
@@ -7141,6 +7179,8 @@ class TestAdminOperationExceptionHandlers:
             mock_get_client.return_value = mock_client
 
             # DynamoDB returns all items in one batch (simulating reaching limit)
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": large_items_batch,
                 "LastEvaluatedKey": {"accountId": "ACCOUNT#sub-1000"},  # More pages exist
@@ -7374,6 +7414,221 @@ class TestAdminOperationExceptionHandlers:
             assert result[0]["email"] == "user@example.com"
             mock_tables.accounts.scan.assert_called_once()
 
+    def test_search_user_dynamodb_email_prefix_index_avoids_scan(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A prefix query is a GSI query, so no table scan is issued (#576)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "alice"},
+        }
+
+        account_items = [
+            {"accountId": "ACCOUNT#sub-1", "email": "alice@example.com"},
+            {"accountId": "ACCOUNT#sub-2", "email": "bob@example.com"},
+        ]
+
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            # Mirror DynamoDB semantics: the prefix query only returns emails
+            # that start with the query.
+            mock_tables.accounts.query.side_effect = lambda **kwargs: {
+                "Items": [
+                    item
+                    for item in account_items
+                    if item["email"].startswith(kwargs["ExpressionAttributeValues"][":prefix"])
+                ]
+            }
+            mock_tables.accounts.query.return_value = {"Items": []}
+            mock_tables.accounts.scan.return_value = {"Items": account_items, "LastEvaluatedKey": None}
+
+            mock_cognito_user = {
+                "Username": "alice@example.com",
+                "Attributes": [
+                    {"Name": "sub", "Value": "sub-1"},
+                    {"Name": "email", "Value": "alice@example.com"},
+                ],
+                "Enabled": True,
+                "UserStatus": "CONFIRMED",
+                "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+            }
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
+            mock_batch_names.return_value = {"sub-1": "Alice Example"}
+            mock_batch_groups.return_value = {"alice@example.com": []}
+
+            result = admin_search_user(event, lambda_context)
+
+            assert len(result) == 1
+            assert result[0]["email"] == "alice@example.com"
+            mock_tables.accounts.query.assert_called_once_with(
+                IndexName="email-index",
+                KeyConditionExpression="begins_with(email, :prefix)",
+                ExpressionAttributeValues={":prefix": "alice"},
+            )
+            mock_tables.accounts.scan.assert_not_called()
+
+    def test_search_user_dynamodb_email_prefix_index_substring_falls_back_to_scan(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test mid-string match is still found by the scan fallback."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "ice"},
+        }
+
+        account_items = [{"accountId": "ACCOUNT#sub-1", "email": "alice@example.com"}]
+
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            # The prefix query misses; only the scan can answer a mid-string match.
+            mock_tables.accounts.query.side_effect = lambda **kwargs: {
+                "Items": [
+                    item
+                    for item in account_items
+                    if item["email"].startswith(kwargs["ExpressionAttributeValues"][":prefix"])
+                ]
+            }
+            mock_tables.accounts.query.return_value = {"Items": []}
+            mock_tables.accounts.scan.return_value = {"Items": account_items, "LastEvaluatedKey": None}
+
+            mock_cognito_user = {
+                "Username": "alice@example.com",
+                "Attributes": [
+                    {"Name": "sub", "Value": "sub-1"},
+                    {"Name": "email", "Value": "alice@example.com"},
+                ],
+                "Enabled": True,
+                "UserStatus": "CONFIRMED",
+                "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+            }
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
+            mock_batch_names.return_value = {"sub-1": "Alice Example"}
+            mock_batch_groups.return_value = {"alice@example.com": []}
+
+            result = admin_search_user(event, lambda_context)
+
+            assert len(result) == 1
+            assert result[0]["email"] == "alice@example.com"
+            mock_tables.accounts.query.assert_called_once()
+            mock_tables.accounts.scan.assert_called_once()
+
+    def test_search_user_dynamodb_email_prefix_index_client_error_falls_back_to_scan(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test prefix search falls back to scan if the GSI query raises ClientError."""
+        from botocore.exceptions import ClientError
+
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "alice"},
+        }
+
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            mock_tables.accounts.query.side_effect = ClientError(
+                {"Error": {"Code": "ValidationException", "Message": "Index not found"}},
+                "Query",
+            )
+            mock_tables.accounts.query.return_value = {"Items": []}
+            mock_tables.accounts.scan.return_value = {
+                "Items": [{"accountId": "ACCOUNT#sub-1", "email": "alice@example.com"}],
+                "LastEvaluatedKey": None,
+            }
+
+            mock_cognito_user = {
+                "Username": "alice@example.com",
+                "Attributes": [
+                    {"Name": "sub", "Value": "sub-1"},
+                    {"Name": "email", "Value": "alice@example.com"},
+                ],
+                "Enabled": True,
+                "UserStatus": "CONFIRMED",
+                "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+            }
+            mock_client.list_users.return_value = {"Users": [mock_cognito_user]}
+            mock_batch_names.return_value = {"sub-1": "Alice Example"}
+            mock_batch_groups.return_value = {"alice@example.com": []}
+
+            result = admin_search_user(event, lambda_context)
+
+            assert len(result) == 1
+            assert result[0]["email"] == "alice@example.com"
+            mock_tables.accounts.scan.assert_called_once()
+
+    def test_search_user_short_query_skips_scan(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A query under the minimum length issues no GSI query and no scan."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "al"},
+        }
+
+        with (
+            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+            mock_client.list_users.return_value = {"Users": []}
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
+            mock_tables.accounts.query.return_value = {"Items": []}
+            mock_tables.accounts.scan.return_value = {"Items": [], "LastEvaluatedKey": None}
+
+            result = admin_search_user(event, lambda_context)
+
+            assert result == []
+            mock_tables.accounts.query.assert_not_called()
+            mock_tables.accounts.scan.assert_not_called()
+
     def test_search_user_max_results_reached_early(
         self,
         admin_appsync_event: Dict[str, Any],
@@ -7405,6 +7660,8 @@ class TestAdminOperationExceptionHandlers:
             mock_get_client.return_value = mock_client
 
             # DynamoDB returns all items
+            # The email-index prefix query misses, so the scan fallback runs.
+            mock_tables.accounts.query.return_value = {"Items": []}
             mock_tables.accounts.scan.return_value = {
                 "Items": matching_items,
                 "LastEvaluatedKey": {"accountId": "ACCOUNT#sub-59"},
