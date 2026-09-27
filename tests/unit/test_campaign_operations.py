@@ -7,15 +7,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.handlers.campaign_operations import (
-    _delete_order_keys,
     _query_order_keys_for_campaign,
     _verify_campaign_deleted,
     _verify_order_keys_deleted,
     batch_delete_keys,
     delete_campaign_orders,
+    delete_order_keys,
     delete_orders_for_campaign,
 )
 from src.utils.errors import AppError, ErrorCode
+from tests.unit.fixtures import batch_delete_table, unprocessed_batches
 
 
 class TestDeleteCampaignOrders:
@@ -287,7 +288,7 @@ class TestDeleteCampaignOrders:
         profile_id = "PROFILE#any"
         self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
 
-        with patch("src.handlers.campaign_operations._delete_orders_for_campaign") as mock_delete:
+        with patch("src.handlers.campaign_operations.delete_orders_for_campaign") as mock_delete:
             mock_delete.side_effect = RuntimeError("unexpected failure")
 
             result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
@@ -318,7 +319,7 @@ class TestDeleteCampaignOrders:
             }
         )
 
-        with patch("src.handlers.campaign_operations.tables.orders.batch_writer") as mock_bw:
+        with patch("src.handlers.campaign_operations.tables.orders.meta.client.batch_write_item") as mock_bw:
             error_response = {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}}
             mock_bw.side_effect = ClientError(error_response, "BatchWriteItem")
 
@@ -458,42 +459,84 @@ class TestQueryOrderKeysForCampaign:
 
 
 class TestDeleteOrderKeys:
-    """Tests for the order batch delete helper."""
+    """Tests for the shared order batch delete helper."""
 
     def test_deletes_orders_in_batches(self) -> None:
-        """Test that _delete_order_keys deletes orders using the batch writer."""
-        mock_table = MagicMock()
-        mock_writer = MagicMock()
-        mock_table.batch_writer.return_value.__enter__ = MagicMock(return_value=mock_writer)
-        mock_table.batch_writer.return_value.__exit__ = MagicMock(return_value=False)
+        """Test that delete_order_keys issues one BatchWriteItem per batch."""
+        mock_table = batch_delete_table("orders-table")
 
         orders = [{"campaignId": "CAMPAIGN#batch", "orderId": f"ORDER#{i}"} for i in range(3)]
 
         with patch("src.handlers.campaign_operations.tables") as mock_tables:
             mock_tables.orders = mock_table
-            count = _delete_order_keys(orders)
+            count = delete_order_keys(orders)
 
         assert count == 3
-        assert mock_writer.delete_item.call_count == 3
+        sent = mock_table.meta.client.batch_write_item.call_args.kwargs["RequestItems"]
+        assert len(sent["orders-table"]) == 3
+        assert sent["orders-table"][0] == {
+            "DeleteRequest": {"Key": {"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#0"}}
+        }
 
 
 class TestBatchDeleteKeys:
     """Tests for batch_delete_keys helper."""
 
     def test_empty_keys_returns_zero(self) -> None:
-        """Test that empty keys list returns 0 without calling batch_writer."""
-        mock_table = MagicMock()
+        """Test that an empty keys list returns 0 without calling BatchWriteItem."""
+        mock_table = batch_delete_table()
         count = batch_delete_keys(mock_table, [])
         assert count == 0
-        mock_table.batch_writer.assert_not_called()
+        mock_table.meta.client.batch_write_item.assert_not_called()
+
+    def test_duplicate_keys_are_deleted_once(self) -> None:
+        """Test that duplicate keys collapse to a single DeleteRequest."""
+        mock_table = batch_delete_table()
+        keys = [{"pk": "1", "sk": "a"}, {"pk": "1", "sk": "b"}, {"pk": "1", "sk": "a"}]
+
+        count = batch_delete_keys(mock_table, keys, ["pk", "sk"])
+
+        assert count == 2
+        sent = mock_table.meta.client.batch_write_item.call_args.kwargs["RequestItems"]["test-table"]
+        assert [request["DeleteRequest"]["Key"] for request in sent] == [{"pk": "1", "sk": "a"}, {"pk": "1", "sk": "b"}]
+
+    def test_unprocessed_items_are_retried_until_they_clear(self) -> None:
+        """Test that UnprocessedItems drive a bounded retry that eventually succeeds."""
+        mock_table = batch_delete_table()
+        keys = [{"id": "1"}]
+        requests = [{"DeleteRequest": {"Key": {"id": "1"}}}]
+        unprocessed_batches(mock_table, requests, attempts=2)
+
+        with patch("src.handlers.campaign_operations.time.sleep") as mock_sleep:
+            count = batch_delete_keys(mock_table, keys)
+
+        assert count == 1
+        assert mock_table.meta.client.batch_write_item.call_count == 3
+        assert [call.args[0] for call in mock_sleep.call_args_list] == [0.05, 0.1]
+
+    def test_unprocessed_items_at_the_attempt_cap_raise_resource_busy(self) -> None:
+        """Test that items still unprocessed at the cap surface as RESOURCE_BUSY, not a spin."""
+        from src.handlers.campaign_operations import MAX_BATCH_WRITE_ATTEMPTS
+
+        mock_table = batch_delete_table()
+        keys = [{"id": "1"}]
+        requests = [{"DeleteRequest": {"Key": {"id": "1"}}}]
+        unprocessed_batches(mock_table, requests, attempts=MAX_BATCH_WRITE_ATTEMPTS)
+
+        with patch("src.handlers.campaign_operations.time.sleep") as mock_sleep:
+            with pytest.raises(AppError) as exc_info:
+                batch_delete_keys(mock_table, keys)
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert mock_table.meta.client.batch_write_item.call_count == MAX_BATCH_WRITE_ATTEMPTS
+        assert mock_sleep.call_count == MAX_BATCH_WRITE_ATTEMPTS - 1
 
     def test_throttling_raises_resource_busy(self) -> None:
         """Test that persistent throttling raises AppError with RESOURCE_BUSY."""
         from botocore.exceptions import ClientError
 
-        mock_table = MagicMock()
-        mock_table.name = "test-table"
-        mock_table.batch_writer.side_effect = ClientError(
+        mock_table = batch_delete_table()
+        mock_table.meta.client.batch_write_item.side_effect = ClientError(
             {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}},
             "BatchWriteItem",
         )
@@ -506,9 +549,8 @@ class TestBatchDeleteKeys:
         """Test that non-throttling ClientError raises AppError with INTERNAL_ERROR."""
         from botocore.exceptions import ClientError
 
-        mock_table = MagicMock()
-        mock_table.name = "test-table"
-        mock_table.batch_writer.side_effect = ClientError(
+        mock_table = batch_delete_table()
+        mock_table.meta.client.batch_write_item.side_effect = ClientError(
             {"Error": {"Code": "ResourceNotFoundException", "Message": "Not found"}},
             "BatchWriteItem",
         )
@@ -519,8 +561,8 @@ class TestBatchDeleteKeys:
 
     def test_unexpected_exception_raises_internal_error(self) -> None:
         """Test that unexpected non-ClientError raises AppError with INTERNAL_ERROR."""
-        mock_table = MagicMock()
-        mock_table.batch_writer.side_effect = RuntimeError("network crash")
+        mock_table = batch_delete_table()
+        mock_table.meta.client.batch_write_item.side_effect = RuntimeError("network crash")
         keys = [{"id": "1"}]
         with pytest.raises(AppError) as exc_info:
             batch_delete_keys(mock_table, keys)
@@ -528,10 +570,7 @@ class TestBatchDeleteKeys:
 
     def test_custom_logger_used(self) -> None:
         """Test that a custom logger is invoked during deletion."""
-        mock_table = MagicMock()
-        mock_writer = MagicMock()
-        mock_table.batch_writer.return_value.__enter__ = MagicMock(return_value=mock_writer)
-        mock_table.batch_writer.return_value.__exit__ = MagicMock(return_value=False)
+        mock_table = batch_delete_table()
         mock_logger = MagicMock()
 
         keys = [{"id": "1"}, {"id": "2"}]

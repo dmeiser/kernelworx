@@ -15,7 +15,7 @@ Tests for:
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict
+from typing import Any, Dict, List
 from unittest.mock import MagicMock, call, patch
 
 import boto3
@@ -37,6 +37,17 @@ from src.handlers.admin_operations import (
     lambda_handler,
 )
 from src.utils.errors import AppError, ErrorCode
+from tests.unit.fixtures import accept_batch_deletes
+
+
+def _assert_delete_requests(table: Any, expected_count: int) -> None:
+    """Assert the DeleteRequests sent to this table total ``expected_count`` items."""
+    requests: List[Dict[str, Any]] = []
+    for call_obj in table.meta.client.batch_write_item.call_args_list:
+        sent = call_obj.kwargs["RequestItems"]
+        requests.extend(request for batch in sent.values() for request in batch)
+    assert all("DeleteRequest" in request for request in requests)
+    assert len(requests) == expected_count
 
 
 def get_accounts_table() -> Any:
@@ -3165,10 +3176,8 @@ class TestAdminDeleteUserOrders:
             mock_campaign_tables.orders.query.side_effect = orders_side_effect
             mock_tables.orders.query.side_effect = orders_side_effect
 
-            # Mock batch_writer on campaign_operations.tables.orders
-            mock_writer = MagicMock()
-            mock_campaign_tables.orders.batch_writer.return_value.__enter__.return_value = mock_writer
-            mock_campaign_tables.orders.batch_writer.return_value.__exit__.return_value = False
+            # BatchWriteItem on campaign_operations.tables.orders
+            accept_batch_deletes(mock_campaign_tables.orders)
 
             # Delete verification helpers use campaign_operations.tables
             mock_campaign_tables.orders.get_item.return_value = {}
@@ -3177,8 +3186,8 @@ class TestAdminDeleteUserOrders:
             result = admin_delete_user_orders(event, lambda_context)
 
             assert result == 3  # 3 orders deleted
-            assert mock_campaign_tables.orders.batch_writer.call_count == 2
-            assert mock_writer.delete_item.call_count == 3
+            assert mock_campaign_tables.orders.meta.client.batch_write_item.call_count == 2
+            _assert_delete_requests(mock_campaign_tables.orders, 3)
 
     def test_success_with_campaign_having_no_orders(
         self,
@@ -3229,9 +3238,7 @@ class TestAdminDeleteUserOrders:
             mock_campaign_tables.orders.query.side_effect = orders_side_effect
             mock_tables.orders.query.side_effect = orders_side_effect
 
-            mock_writer = MagicMock()
-            mock_campaign_tables.orders.batch_writer.return_value.__enter__.return_value = mock_writer
-            mock_campaign_tables.orders.batch_writer.return_value.__exit__.return_value = False
+            accept_batch_deletes(mock_campaign_tables.orders)
 
             # Delete verification helpers use campaign_operations.tables
             mock_campaign_tables.orders.get_item.return_value = {}
@@ -3240,8 +3247,8 @@ class TestAdminDeleteUserOrders:
             result = admin_delete_user_orders(event, lambda_context)
 
             assert result == 1  # Only 1 order deleted
-            assert mock_campaign_tables.orders.batch_writer.call_count == 1
-            assert mock_writer.delete_item.call_count == 1
+            assert mock_campaign_tables.orders.meta.client.batch_write_item.call_count == 1
+            _assert_delete_requests(mock_campaign_tables.orders, 1)
 
     def test_throttled_returns_resource_busy(
         self,
@@ -3281,7 +3288,9 @@ class TestAdminDeleteUserOrders:
                 "Items": [{"orderId": "order-1", "campaignId": "campaign-1"}]
             }
             error_response = {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}}
-            mock_campaign_tables.orders.batch_writer.side_effect = ClientError(error_response, "BatchWriteItem")
+            mock_campaign_tables.orders.meta.client.batch_write_item.side_effect = ClientError(
+                error_response, "BatchWriteItem"
+            )
 
             result = admin_delete_user_orders(event, lambda_context)
 
@@ -3398,15 +3407,13 @@ class TestAdminDeleteUserCampaigns:
             # Delete verification helpers use campaign_operations.tables
             mock_campaign_tables.campaigns.get_item.return_value = {}
 
-            mock_writer = MagicMock()
-            mock_tables.campaigns.batch_writer.return_value.__enter__.return_value = mock_writer
-            mock_tables.campaigns.batch_writer.return_value.__exit__.return_value = False
+            accept_batch_deletes(mock_tables.campaigns)
 
             result = admin_delete_user_campaigns(event, lambda_context)
 
             assert result == 2  # 2 campaigns deleted
-            assert mock_tables.campaigns.batch_writer.call_count == 1
-            assert mock_writer.delete_item.call_count == 2
+            assert mock_tables.campaigns.meta.client.batch_write_item.call_count == 1
+            _assert_delete_requests(mock_tables.campaigns, 2)
 
     def test_throttled_returns_resource_busy(
         self,
@@ -3439,7 +3446,9 @@ class TestAdminDeleteUserCampaigns:
                 "Items": [{"campaignId": "campaign-1", "profileId": "profile-1"}]
             }
             error_response = {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}}
-            mock_tables.campaigns.batch_writer.side_effect = ClientError(error_response, "BatchWriteItem")
+            mock_tables.campaigns.meta.client.batch_write_item.side_effect = ClientError(
+                error_response, "BatchWriteItem"
+            )
 
             result = admin_delete_user_campaigns(event, lambda_context)
 
@@ -3483,6 +3492,42 @@ class TestAdminDeleteUserCampaigns:
 
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INVALID_INPUT
+
+    def test_profile_with_no_campaigns_deletes_nothing(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that a profile with no campaigns skips the delete and reports zero.
+
+        Covers the empty ``campaign_keys`` guard: the behaviour tests always
+        return items, so without this the False branch is never exercised and a
+        profile that simply has no campaigns is untested.
+        """
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+
+        from src.handlers.admin_operations import admin_delete_user_campaigns
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "target-user-123"},
+        }
+
+        with (
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
+        ):
+            mock_tables.profiles.query.return_value = {
+                "Items": [{"profileId": "profile-1", "ownerAccountId": "ACCOUNT#target-user-123"}]
+            }
+            mock_tables.campaigns.query.return_value = {"Items": []}
+            accept_batch_deletes(mock_tables.campaigns, mock_campaign_tables.campaigns)
+
+            result = admin_delete_user_campaigns(event, lambda_context)
+
+            assert result == 0
+            mock_tables.campaigns.meta.client.batch_write_item.assert_not_called()
 
     def test_unexpected_error_handled(
         self,
@@ -3550,15 +3595,46 @@ class TestAdminDeleteUserShares:
                 ]
             }
 
-            mock_writer = MagicMock()
-            mock_tables.shares.batch_writer.return_value.__enter__.return_value = mock_writer
-            mock_tables.shares.batch_writer.return_value.__exit__.return_value = False
+            accept_batch_deletes(mock_tables.shares)
 
             result = admin_delete_user_shares(event, lambda_context)
 
             assert result == 2  # 2 shares deleted
-            assert mock_tables.shares.batch_writer.call_count == 1
-            assert mock_writer.delete_item.call_count == 2
+            assert mock_tables.shares.meta.client.batch_write_item.call_count == 1
+            _assert_delete_requests(mock_tables.shares, 2)
+
+    def test_profile_with_no_shares_deletes_nothing(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that a profile with no shares skips the delete and reports zero.
+
+        Covers the empty ``share_keys`` guard: the behaviour tests always return
+        items, so without this the False branch is never exercised and a profile
+        that simply has no shares is untested.
+        """
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+
+        from src.handlers.admin_operations import admin_delete_user_shares
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "target-user-123"},
+        }
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.profiles.query.return_value = {
+                "Items": [{"profileId": "profile-1", "ownerAccountId": "ACCOUNT#target-user-123"}]
+            }
+            mock_tables.shares.query.return_value = {"Items": []}
+            accept_batch_deletes(mock_tables.shares)
+
+            result = admin_delete_user_shares(event, lambda_context)
+
+            assert result == 0
+            mock_tables.shares.meta.client.batch_write_item.assert_not_called()
 
     def test_non_admin_forbidden(
         self,
@@ -3657,15 +3733,13 @@ class TestAdminDeleteUserProfiles:
                 ]
             }
 
-            mock_writer = MagicMock()
-            mock_tables.profiles.batch_writer.return_value.__enter__.return_value = mock_writer
-            mock_tables.profiles.batch_writer.return_value.__exit__.return_value = False
+            accept_batch_deletes(mock_tables.profiles)
 
             result = admin_delete_user_profiles(event, lambda_context)
 
             assert result == 3  # 3 profiles deleted
-            assert mock_tables.profiles.batch_writer.call_count == 1
-            assert mock_writer.delete_item.call_count == 3
+            assert mock_tables.profiles.meta.client.batch_write_item.call_count == 1
+            _assert_delete_requests(mock_tables.profiles, 3)
 
     def test_non_admin_forbidden(
         self,

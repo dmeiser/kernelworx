@@ -1089,9 +1089,6 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
     return catalog_item
 
 
-_delete_orders_for_campaign = delete_orders_for_campaign
-
-
 def _delete_user_orders(account_id: str, logger: Any) -> int:
     """Delete all orders for all campaigns of all profiles owned by a user.
 

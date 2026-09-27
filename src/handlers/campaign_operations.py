@@ -1,5 +1,6 @@
 """Lambda resolver for campaign order operations and deletion verification helpers."""
 
+import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from botocore.exceptions import ClientError
@@ -36,7 +37,14 @@ logger = get_logger(__name__)
 _default_logger = logger
 
 BATCH_SIZE = 25
-BATCH_DELETE_SIZE = BATCH_SIZE
+
+# DynamoDB signals BatchWriteItem throttling primarily as UnprocessedItems in an
+# HTTP 200 response, not as an exception, so the retry has to be bounded here.
+# boto3's BatchWriter.__exit__ is `while self._items_buffer: self._flush()` and
+# _flush re-appends UnprocessedItems with no cap and no sleep, which turns a
+# throttled delete into a Lambda timeout instead of a retryable error.
+MAX_BATCH_WRITE_ATTEMPTS = 5
+BATCH_WRITE_BACKOFF_SECONDS = 0.05
 
 _THROTTLING_ERROR_CODES = frozenset(
     {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
@@ -92,6 +100,55 @@ def _raise_delete_error(table_name: str, exc: Exception, log: Any = None) -> Non
     ) from exc
 
 
+def _dedupe_delete_keys(keys: List[Dict[str, Any]], primary_keys: Optional[List[str]]) -> List[Dict[str, Any]]:
+    """Drop duplicate deletes by primary key, keeping the last occurrence.
+
+    Replaces boto3's ``overwrite_by_pkeys`` buffer dedup, which only ever saw
+    the current flush chunk and so could not collapse a duplicate that straddled
+    two chunks. For identical DeleteRequests the retained copy is equivalent;
+    doing it up front also keeps the delete count honest.
+    """
+    if not primary_keys:
+        return list(keys)
+
+    positions: Dict[Any, int] = {}
+    deduped: List[Dict[str, Any]] = []
+    for key in keys:
+        identity = tuple(str(key.get(name)) for name in primary_keys)
+        existing = positions.get(identity)
+        if existing is None:
+            positions[identity] = len(deduped)
+            deduped.append(key)
+        else:
+            deduped[existing] = key
+    return deduped
+
+
+def _flush_delete_requests(client: Any, table_name: str, requests: List[Dict[str, Any]], log: Any) -> None:
+    """Send DeleteRequests, retrying unprocessed items with bounded backoff.
+
+    Raises:
+        AppError: RESOURCE_BUSY when items are still unprocessed after
+            MAX_BATCH_WRITE_ATTEMPTS attempts, so a throttled delete surfaces as
+            a retryable error rather than spinning until the Lambda times out.
+    """
+    pending = requests
+    for attempt in range(1, MAX_BATCH_WRITE_ATTEMPTS + 1):
+        response = client.batch_write_item(RequestItems={table_name: pending})
+        pending = (response.get("UnprocessedItems") or {}).get(table_name) or []
+        if not pending:
+            return
+        if attempt < MAX_BATCH_WRITE_ATTEMPTS:
+            time.sleep(BATCH_WRITE_BACKOFF_SECONDS * attempt)
+
+    log.warning(
+        f"Batch delete from {table_name} left items unprocessed",
+        pending_count=len(pending),
+        attempts=MAX_BATCH_WRITE_ATTEMPTS,
+    )
+    raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to delete data. Please retry.")
+
+
 def batch_delete_keys(
     table: Any,
     keys: List[Dict[str, Any]],
@@ -111,37 +168,46 @@ def batch_delete_keys(
         Number of items deleted.
 
     Raises:
-        AppError: RESOURCE_BUSY on throttling, INTERNAL_ERROR on other failures.
+        AppError: RESOURCE_BUSY on throttling (as an exception or as
+            UnprocessedItems that survive the retry cap), INTERNAL_ERROR on
+            other failures.
     """
     if not keys:
         return 0
 
     log = logger if logger is not None else _default_logger
     table_name = getattr(table, "name", str(table))
+    deduped = _dedupe_delete_keys(keys, primary_keys)
     deleted_count = 0
 
-    kwargs: Dict[str, Any] = {}
-    if primary_keys is not None:
-        kwargs["overwrite_by_pkeys"] = primary_keys
-
-    for i in range(0, len(keys), BATCH_SIZE):
-        batch = keys[i : i + BATCH_SIZE]
+    for i in range(0, len(deduped), BATCH_SIZE):
+        batch = deduped[i : i + BATCH_SIZE]
+        requests = [{"DeleteRequest": {"Key": key}} for key in batch]
         try:
-            with table.batch_writer(**kwargs) as writer:
-                for key in batch:
-                    writer.delete_item(Key=key)
-            deleted_count += len(batch)
-            log.info(f"Deleted batch of {len(batch)} items from {table_name}")
+            _flush_delete_requests(table.meta.client, table_name, requests, log)
+        except AppError:
+            raise
         except Exception as e:
             _raise_delete_error(table_name, e, log)
+        deleted_count += len(batch)
+        log.info(f"Deleted batch of {len(batch)} items from {table_name}")
 
     return deleted_count
 
 
-def _delete_order_keys(orders: List[Dict[str, Any]]) -> int:
-    """Delete a list of order keys in batches, returning the count deleted."""
+def delete_order_keys(orders: List[Dict[str, Any]], *, logger: Any = None) -> int:
+    """Delete the given order items by primary key, returning the count deleted.
+
+    The single shared path for deleting orders by key: every caller builds keys
+    through this so the key shape (and its string coercion) lives in one place.
+    """
     order_keys = [{"campaignId": str(order["campaignId"]), "orderId": str(order["orderId"])} for order in orders]
-    return batch_delete_keys(tables.orders, order_keys, primary_keys=["campaignId", "orderId"])
+    return batch_delete_keys(
+        tables.orders,
+        order_keys,
+        primary_keys=["campaignId", "orderId"],
+        logger=logger,
+    )
 
 
 def _verify_order_keys_deleted(order_keys: List[Dict[str, Any]]) -> None:
@@ -205,20 +271,11 @@ def delete_orders_for_campaign(campaign_id: str, *, logger: Any = None) -> int:
         return 0
 
     log = logger if logger is not None else _default_logger
-    order_keys = [{"campaignId": str(order["campaignId"]), "orderId": str(order["orderId"])} for order in orders]
-    deleted_count = batch_delete_keys(
-        tables.orders,
-        order_keys,
-        primary_keys=["campaignId", "orderId"],
-        logger=log,
-    )
+    deleted_count = delete_order_keys(orders, logger=log)
     _verify_order_keys_deleted(orders)
 
     log.info("Deleted orders for campaign", campaign_id=campaign_id, count=deleted_count)
     return deleted_count
-
-
-_delete_orders_for_campaign = delete_orders_for_campaign
 
 
 @with_error_handling(error_message="Failed to delete campaign orders")
@@ -256,5 +313,5 @@ def delete_campaign_orders(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
     require_profile_access(caller_account_id, profile_id, "WRITE")
 
-    deleted_count = _delete_orders_for_campaign(db_campaign_id)
+    deleted_count = delete_orders_for_campaign(db_campaign_id)
     return {"deletedCount": deleted_count}

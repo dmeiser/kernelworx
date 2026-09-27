@@ -79,9 +79,6 @@ def _get_s3_client() -> Any:
     return boto3.client("s3")
 
 
-_batch_delete_keys = batch_delete_keys
-
-
 def _get_profile_owner_id(profile_id: str, owner_account_id: str) -> str:
     """Verify the expected owner owns the profile via a strongly consistent base-table read.
 
