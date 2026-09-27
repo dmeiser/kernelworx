@@ -40,6 +40,7 @@ method and can never admit a TOTP-less admin. A bare passkey used as a first
 (passwordless) factor, with no MFA method enabled, mints mfa=false.
 """
 
+from functools import lru_cache
 from typing import Any, Dict
 
 import boto3
@@ -71,9 +72,23 @@ MFA_PREFERENCES = frozenset({SOFTWARE_TOKEN_MFA, SMS_MFA, WEB_AUTHN_MFA})
 # (backend) guards both read it from the ID token.
 MFA_CLAIM = "mfa"
 
-# Cognito IDP client initialized at module scope so connection pools and TLS
-# sessions are reused across warm Lambda executions (issue #458).
-cognito = boto3.client("cognito-idp")
+
+@lru_cache(maxsize=1)
+def _cognito_client() -> Any:
+    """
+    Return the process-wide Cognito IDP client, building it on first use.
+
+    The client is cached so connection pools and TLS sessions are reused across
+    warm Lambda executions (issue #458), but construction is deferred to the
+    first invocation instead of module import (issue #578): `boto3.client()`
+    resolves the region and credential provider chain at construction time, and
+    an unset region raises `botocore.exceptions.NoRegionError`. Building at
+    import time would fail the module's initialization (a Lambda `InitError`
+    that fails every sign-in) before the handler's fail-closed guard can run.
+    Deferring construction puts that failure inside `_resolve_mfa`'s `try`, so
+    the trigger still fails closed with `mfa=false` and a logged reason.
+    """
+    return boto3.client("cognito-idp")
 
 
 def _is_federated(user_attributes: Dict[str, Any]) -> bool:
@@ -130,7 +145,7 @@ def _resolve_mfa(event: Dict[str, Any]) -> bool:
         logger.warning("pre-token-generation: missing userPoolId or sub; setting mfa=false")
         return False
     try:
-        response = cognito.admin_get_user(UserPoolId=user_pool_id, Username=username)
+        response = _cognito_client().admin_get_user(UserPoolId=user_pool_id, Username=username)
     except Exception:
         logger.warning(
             "pre-token-generation: AdminGetUser failed; setting mfa=false (fail-closed)",
