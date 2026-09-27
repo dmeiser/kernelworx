@@ -20,6 +20,16 @@
 # wait, the first browser login right after provisioning would resubmit the
 # same code and fail its MFA step.
 #
+# The password must never be placed on a command line. The argv of a running
+# process is world-readable on Linux via /proc/<pid>/cmdline and shows up in
+# `ps` output for the duration of the call, so any process on the runner (a
+# wrapper, a diagnostic `ps`, a crash reporter) can read the credential while
+# the aws CLI runs. Both initiate-auth variants therefore read the auth
+# parameters from a private mktemp file passed with --cli-input-json
+# file://..., and the file is removed on every exit path by an EXIT trap so a
+# failed or retried run cannot leave the password on disk. Do not "simplify"
+# this back to --auth-parameters.
+#
 # Requires: aws CLI, python3 (stdlib only), and IAM permissions for
 # cognito-idp associate-software-token / verify-software-token /
 # admin-set-user-mfa-preference / admin-get-user. The access token comes
@@ -60,17 +70,40 @@ if aws cognito-idp admin-get-user \
     --region "$REGION" >/dev/null
 fi
 
+AUTH_PARAMS_FILE=$(mktemp)
+chmod 600 "$AUTH_PARAMS_FILE"
+trap 'rm -f "$AUTH_PARAMS_FILE"' EXIT
+
+# Build the JSON with python3 (already required above) so a password
+# containing commas, quotes, or other JSON metacharacters is escaped
+# correctly, and so the password travels via the environment rather than
+# this process's argv.
+TOTP_AUTH_USERNAME="$USERNAME" TOTP_AUTH_PASSWORD="$PASSWORD" python3 - "$AUTH_PARAMS_FILE" <<'PY'
+import json, os, sys
+
+with open(sys.argv[1], "w") as handle:
+    json.dump(
+        {
+            "AuthParameters": {
+                "USERNAME": os.environ["TOTP_AUTH_USERNAME"],
+                "PASSWORD": os.environ["TOTP_AUTH_PASSWORD"],
+            }
+        },
+        handle,
+    )
+PY
+
 ACCESS_TOKEN=$(aws cognito-idp initiate-auth \
   --client-id "$CLIENT_ID" \
   --auth-flow USER_PASSWORD_AUTH \
-  --auth-parameters "USERNAME=${USERNAME},PASSWORD=${PASSWORD}" \
+  --cli-input-json "file://$AUTH_PARAMS_FILE" \
   --region "$REGION" \
   --query 'AuthenticationResult.AccessToken' --output text 2>/dev/null) || \
 ACCESS_TOKEN=$(aws cognito-idp admin-initiate-auth \
   --user-pool-id "$USER_POOL_ID" \
   --client-id "$CLIENT_ID" \
   --auth-flow ADMIN_NO_SRP_AUTH \
-  --auth-parameters "USERNAME=${USERNAME},PASSWORD=${PASSWORD}" \
+  --cli-input-json "file://$AUTH_PARAMS_FILE" \
   --region "$REGION" \
   --query 'AuthenticationResult.AccessToken' --output text)
 

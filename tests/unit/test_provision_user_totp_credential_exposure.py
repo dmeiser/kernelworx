@@ -1,4 +1,4 @@
-"""Regression tests for #569: the test user's password must not appear on argv.
+"""Regression tests for #569: the user credential must not appear on argv.
 
 `scripts/provision-user-totp.sh` used to pass the password inline in
 `--auth-parameters`, which puts it in the argv of the `aws` CLI process. argv of
@@ -27,14 +27,26 @@ TOTP_SECRET = "JBSWY3DPEHPK3PXP"
 
 MOCK_AWS = """\
 #!/bin/bash
-# Record every argument exactly as the process received it.
+# Record every argument exactly as the process received it, and snapshot the
+# contents/mode of any file:// parameter file while it still exists.
 printf '%s\\0' "$@" >> "$MOCK_AWS_LOG"
 printf '\\0' >> "$MOCK_AWS_LOG"
+for arg in "$@"; do
+  case "$arg" in
+    file://*)
+      path="${arg#file://}"
+      stat -c '%a' "$path" >> "$MOCK_AWS_MODES"
+      printf '%s\\n' "$arg" >> "$MOCK_AWS_PARAM_FILES"
+      cat "$path" >> "$MOCK_AWS_PARAM_CONTENTS"
+      printf '\\036' >> "$MOCK_AWS_PARAM_CONTENTS"
+      ;;
+  esac
+done
 
 sub="$1 $2"
 case "$sub" in
   "cognito-idp admin-get-user")
-    # No existing TOTP device.
+    # No TOTP device from an earlier provisioning.
     echo "None"
     ;;
   "cognito-idp initiate-auth")
@@ -58,12 +70,19 @@ esac
 
 
 @pytest.fixture
-def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture
+def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     """Run provision-user-totp.sh against a recording fake `aws` CLI."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    log_file = tmp_path / "aws-argv.log"
-    log_file.touch()
+    logs = {name: tmp_path / f"{name}.log" for name in
+            ("aws_argv", "aws_modes", "aws_param_files", "aws_param_contents")}
+    for path in logs.values():
+        path.touch()
 
     def write_mock_bin(name: str, script: str) -> None:
         path = bin_dir / name
@@ -71,18 +90,21 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
         path.chmod(0o755)
 
     write_mock_bin("aws", MOCK_AWS)
-    # The script sleeps for the TOTP window to roll over; skip that wait.
+    # The script waits for the TOTP window to roll over; skip that wait.
     write_mock_bin("sleep", "#!/bin/bash\nexit 0\n")
     write_mock_bin("date", "#!/bin/bash\necho 0\n")
 
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
-    monkeypatch.setenv("MOCK_AWS_LOG", str(log_file))
+    monkeypatch.setenv("MOCK_AWS_LOG", str(logs["aws_argv"]))
+    monkeypatch.setenv("MOCK_AWS_MODES", str(logs["aws_modes"]))
+    monkeypatch.setenv("MOCK_AWS_PARAM_FILES", str(logs["aws_param_files"]))
+    monkeypatch.setenv("MOCK_AWS_PARAM_CONTENTS", str(logs["aws_param_contents"]))
     monkeypatch.setenv("MOCK_TOTP_SECRET", TOTP_SECRET)
     monkeypatch.setenv("AWS_REGION", "us-east-1")
-    return {"bin_dir": bin_dir, "log_file": log_file}
+    return {"bin_dir": bin_dir, "logs": logs}
 
 
-def run_script(harness: dict[str, Path], repo_root: Path) -> subprocess.CompletedProcess[str]:
+def run_script(harness: dict[str, object], repo_root: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             "bash",
@@ -99,32 +121,32 @@ def run_script(harness: dict[str, Path], repo_root: Path) -> subprocess.Complete
     )
 
 
-def aws_invocations(harness: dict[str, Path]) -> list[list[str]]:
-    raw = harness["log_file"].read_bytes()
+def logs(harness: dict[str, object]) -> dict[str, Path]:
+    return harness["logs"]  # type: ignore[return-value]
+
+
+def aws_invocations(harness: dict[str, object]) -> list[list[str]]:
+    raw = logs(harness)["aws_argv"].read_bytes()
     if not raw:
         return []
     return [chunk.decode().split("\0")[:-1] for chunk in raw.split(b"\0\0") if chunk]
 
 
-def params_files(harness: dict[str, Path]) -> list[Path]:
+def param_files(harness: dict[str, object]) -> list[Path]:
     """Every `file://` path the fake `aws` was pointed at."""
-    paths = []
-    for invocation in aws_invocations(harness):
-        for arg in invocation:
-            if arg.startswith("file://"):
-                paths.append(Path(arg[len("file://") :]))
-    return paths
+    text = logs(harness)["aws_param_files"].read_text()
+    return [Path(line[len("file://"):]) for line in text.splitlines() if line.startswith("file://")]
 
 
-@pytest.fixture
-def repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+def param_file_contents(harness: dict[str, object]) -> list[dict]:
+    raw = logs(harness)["aws_param_contents"].read_text()
+    return [json.loads(chunk) for chunk in raw.split("\x1e") if chunk.strip()]
 
 
-class TestPasswordNeverOnArgv:
+class TestCredentialNeverOnArgv:
     """#569: the password must not reach any process's command line."""
 
-    def test_password_absent_from_every_aws_argv(self, harness: dict[str, Path], repo_root: Path) -> None:
+    def test_password_absent_from_every_aws_argv(self, harness: dict[str, object], repo_root: Path) -> None:
         result = run_script(harness, repo_root)
 
         assert result.returncode == 0, result.stderr
@@ -132,18 +154,19 @@ class TestPasswordNeverOnArgv:
         assert invocations, "the fake aws CLI was never invoked"
         for invocation in invocations:
             for arg in invocation:
-                assert PASSWORD not in arg, f"password leaked on argv: {invocation}"
+                assert PASSWORD not in arg, f"credential leaked on argv: {invocation}"
 
-    def test_no_inline_auth_parameters_argument(self, harness: dict[str, Path], repo_root: Path) -> None:
-        """The old `--auth-parameters USERNAME=..,PASSWORD=..` shape is gone."""
-        run_script(harness, repo_root)
+    def test_no_inline_auth_parameters_argument(self, harness: dict[str, object], repo_root: Path) -> None:
+        """The old inline `--auth-parameters USERNAME=..,PASSWORD=..` shape is gone."""
+        result = run_script(harness, repo_root)
+        assert result.returncode == 0, result.stderr
 
         for invocation in aws_invocations(harness):
             assert "--auth-parameters" not in invocation
-            assert "PASSWORD" not in " ".join(invocation)
+            assert not any("PASSWORD=" in arg for arg in invocation)
 
     def test_password_absent_from_admin_fallback_argv(
-        self, harness: dict[str, Path], repo_root: Path, monkeypatch: pytest.MonkeyPatch
+        self, harness: dict[str, object], repo_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The ADMIN_NO_SRP_AUTH fallback is the second exposure window (#569)."""
         monkeypatch.setenv("FAIL_USER_PASSWORD_AUTH", "1")
@@ -154,88 +177,59 @@ class TestPasswordNeverOnArgv:
         assert "ADMIN_NO_SRP_AUTH" in flows
         for invocation in aws_invocations(harness):
             for arg in invocation:
-                assert PASSWORD not in arg, f"password leaked on argv: {invocation}"
+                assert PASSWORD not in arg, f"credential leaked on argv: {invocation}"
 
 
 class TestAuthParametersFile:
-    def test_parameters_passed_through_a_private_file(
-        self, harness: dict[str, Path], repo_root: Path
-    ) -> None:
+    def test_parameters_passed_through_a_file(self, harness: dict[str, object], repo_root: Path) -> None:
         result = run_script(harness, repo_root)
         assert result.returncode == 0, result.stderr
 
-        files = params_files(harness)
-        assert files, "no --cli-input-json file:// parameter file was used"
-        for path in files:
-            # Written by the script before the call, so it is inspectable here
-            # only because the fake aws CLI does not delete it.
-            assert json.loads(path.read_text())["AuthParameters"] == {
-                "USERNAME": USERNAME,
-                "PASSWORD": PASSWORD,
-            }
+        assert param_files(harness), "no --cli-input-json file:// parameter file was used"
+        for contents in param_file_contents(harness):
+            assert contents["AuthParameters"] == {"USERNAME": USERNAME, "PASSWORD": PASSWORD}
 
-    def test_parameter_file_is_owner_only_readable(self, harness: dict[str, Path], repo_root: Path) -> None:
+    def test_parameter_file_is_owner_only_readable(self, harness: dict[str, object], repo_root: Path) -> None:
         """mktemp already creates 0600; the script must not widen it."""
-        recording_aws = harness["bin_dir"] / "aws"
-        original = recording_aws.read_text()
-        recording_aws.write_text(
-            original.replace(
-                'printf \'%s\\0\' "$@" >> "$MOCK_AWS_LOG"',
-                'printf \'%s\\0\' "$@" >> "$MOCK_AWS_LOG"\n'
-                'for a in "$@"; do case "$a" in file://*) '
-                'stat -c "%a %n" "${a#file://}" >> "$MOCK_AWS_MODES";; esac; done',
-            )
-        )
-        harness["log_file"].touch()
-        modes_file = harness["log_file"].with_name("modes.log")
-        modes_file.touch()
-        os.environ["MOCK_AWS_MODES"] = str(modes_file)
-        try:
-            result = run_script(harness, repo_root)
-        finally:
-            os.environ.pop("MOCK_AWS_MODES", None)
-
-        assert result.returncode == 0, result.stderr
-        recorded = modes_file.read_text().strip().splitlines()
-        assert recorded, "the parameter file mode was not recorded"
-        modes = {line.split()[0] for line in recorded}
-        assert modes == {oct(stat.S_IRUSR | stat.S_IWUSR)[2:]}
-
-    def test_parameter_file_removed_on_success(self, harness: dict[str, Path], repo_root: Path) -> None:
         result = run_script(harness, repo_root)
         assert result.returncode == 0, result.stderr
 
-        files = params_files(harness)
+        modes = logs(harness)["aws_modes"].read_text().split()
+        assert modes, "the parameter file mode was not recorded"
+        assert set(modes) == {oct(stat.S_IRUSR | stat.S_IWUSR)[2:]}
+
+    def test_parameter_file_removed_on_success(self, harness: dict[str, object], repo_root: Path) -> None:
+        result = run_script(harness, repo_root)
+        assert result.returncode == 0, result.stderr
+
+        files = param_files(harness)
         assert files
         for path in files:
             assert not path.exists(), f"parameter file outlived the script: {path}"
 
-    def test_parameter_file_removed_on_failure(self, harness: dict[str, Path], repo_root: Path) -> None:
-        """A failed run must not leave the password on disk (trap on EXIT)."""
-        broken = harness["bin_dir"] / "aws"
-        broken.write_text("#!/bin/bash\nexit 1\n")
-        broken.chmod(0o755)
-        harness["log_file"].unlink()
-        harness["log_file"].touch()
-        os.environ["MOCK_AWS_LOG"] = str(harness["log_file"])
-        # Record the file path even though the call itself "fails".
+    def test_parameter_file_removed_on_failure(self, harness: dict[str, object], repo_root: Path) -> None:
+        """A failed run must not leave the credential on disk (trap on EXIT)."""
+        broken = harness["bin_dir"] / "aws"  # type: ignore[index]
         broken.write_text(
             "#!/bin/bash\n"
             'printf \'%s\\0\' "$@" >> "$MOCK_AWS_LOG"\n'
             'printf \'\\0\' >> "$MOCK_AWS_LOG"\n'
+            'for arg in "$@"; do case "$arg" in file://*) '
+            'printf \'%s\\n\' "$arg" >> "$MOCK_AWS_PARAM_FILES";; esac; done\n'
             "exit 1\n"
         )
+        broken.chmod(0o755)
 
         result = run_script(harness, repo_root)
 
         assert result.returncode != 0
-        files = params_files(harness)
+        files = param_files(harness)
         assert files
         for path in files:
             assert not path.exists(), f"parameter file survived a failed run: {path}"
 
 
-def test_still_prints_the_totp_secret(harness: dict[str, Path], repo_root: Path) -> None:
+def test_still_prints_the_totp_secret(harness: dict[str, object], repo_root: Path) -> None:
     """The behaviour the callers depend on is unchanged by #569."""
     result = run_script(harness, repo_root)
 
