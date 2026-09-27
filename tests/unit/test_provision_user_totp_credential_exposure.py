@@ -35,7 +35,8 @@ for arg in "$@"; do
   case "$arg" in
     file://*)
       path="${arg#file://}"
-      stat -c '%a' "$path" >> "$MOCK_AWS_MODES"
+      python3 -c 'import os,stat,sys;print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:])' \\
+        "$path" >> "$MOCK_AWS_MODES"
       printf '%s\\n' "$arg" >> "$MOCK_AWS_PARAM_FILES"
       cat "$path" >> "$MOCK_AWS_PARAM_CONTENTS"
       printf '\\036' >> "$MOCK_AWS_PARAM_CONTENTS"
