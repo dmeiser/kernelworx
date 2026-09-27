@@ -326,9 +326,9 @@ class TestListUnitCatalogsScope:
         lambda_context: Any,
         api_calls: ApiCallRecorder,
     ) -> None:
-        from src.handlers.list_unit_catalogs import _build_unit_campaign_key
+        from src.utils.ids import build_unit_campaign_key
 
-        unit_campaign_key = _build_unit_campaign_key("Pack", 158, "Springfield", "IL", "Fall", 2024)
+        unit_campaign_key = build_unit_campaign_key("Pack", 158, "Springfield", "IL", "Fall", 2024)
         seed_profile(profiles_table, OWNER_SUB, PROFILE_ID)
         seed_campaign(
             campaigns_table,

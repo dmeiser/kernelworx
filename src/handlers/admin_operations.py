@@ -7,7 +7,6 @@ Provides:
 - createManagedCatalog: Create an ADMIN_MANAGED global catalog
 """
 
-import os
 import re
 import time
 import uuid
@@ -16,7 +15,6 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Callable, Dict, NoReturn, Optional, cast
 
-import boto3
 from botocore.exceptions import ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
@@ -31,14 +29,16 @@ from .campaign_operations import (
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
+    from utils.boto import get_cognito_client
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import get_dynamodb_resource, tables
+    from utils.dynamodb import get_dynamodb_resource, get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
+    from ..utils.boto import get_cognito_client
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import get_dynamodb_resource, tables
+    from ..utils.dynamodb import get_dynamodb_resource, get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
 
@@ -62,22 +62,6 @@ else:  # pragma: no cover
         from utils.pagination import query_all_items
     except ModuleNotFoundError:
         from ..utils.pagination import query_all_items
-
-
-def _get_required_env(name: str) -> str:
-    """Get required environment variable or raise error."""
-    value = os.environ.get(name)
-    if not value:
-        raise AppError(ErrorCode.INTERNAL_ERROR, f"Missing required environment variable: {name}")
-    return value
-
-
-def _get_cognito_client() -> Any:
-    """Get Cognito IDP client, supporting localstack endpoint."""
-    endpoint_url = os.environ.get("COGNITO_ENDPOINT")
-    if endpoint_url:
-        return boto3.client("cognito-idp", endpoint_url=endpoint_url)
-    return boto3.client("cognito-idp")
 
 
 # DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
@@ -232,7 +216,7 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
     if not keys:
         return display_names
 
-    accounts_table_name = _get_required_env("ACCOUNTS_TABLE_NAME")
+    accounts_table_name = get_required_env("ACCOUNTS_TABLE_NAME")
 
     try:
         for i in range(0, len(keys), _ACCOUNTS_BATCH_GET_LIMIT):
@@ -289,8 +273,8 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     limit = max(1, min(raw_limit or 20, 60))
     next_token = arguments.get("nextToken")
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     cognito_users, pagination_token = _list_cognito_users(cognito, user_pool_id, limit, next_token, logger)
 
@@ -352,8 +336,8 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
 
     _validate_search_query(query)
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     # Determine search strategy based on query format.
     # The map values are Cognito user dicts so we can batch enrich them.
@@ -829,8 +813,8 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
     if not email:
         raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     # Find user and initiate reset
     username = _find_user_by_email(cognito, user_pool_id, email, logger)
@@ -880,8 +864,8 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     caller_id = identity.get("sub")
     _check_not_self_deletion(str(caller_id), account_id)
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
     account_exists = _account_exists_in_dynamodb(account_id, logger)
@@ -1497,7 +1481,7 @@ def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_
     if not catalog_ids:
         return
 
-    catalogs_table_name = _get_required_env("CATALOGS_TABLE_NAME")
+    catalogs_table_name = get_required_env("CATALOGS_TABLE_NAME")
     try:
         catalog_map = _batch_get_catalog_items(catalog_ids, catalogs_table_name, logger)
     except AppError:

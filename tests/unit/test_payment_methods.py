@@ -899,9 +899,12 @@ class TestDeleteQRByKey:
         error_response = {"Error": {"Code": "NoSuchKey", "Message": "Key does not exist"}}
         mock_s3.delete_object.side_effect = ClientError(error_response, "DeleteObject")
 
-        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
-            # Should not raise - NoSuchKey is silently ignored for idempotent delete
-            payment_methods.delete_qr_by_key(s3_key)
+        payment_methods.s3_client = mock_s3
+
+        # Should not raise - NoSuchKey is silently ignored for idempotent delete
+        payment_methods.delete_qr_by_key(s3_key)
+
+        payment_methods.s3_client = None
 
     def test_delete_qr_by_key_s3_error(self, sample_account_id: str) -> None:
         """Test S3 error during delete (non-404 error)."""
@@ -912,10 +915,13 @@ class TestDeleteQRByKey:
         error_response = {"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}
         mock_s3.delete_object.side_effect = ClientError(error_response, "DeleteObject")
 
-        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
-            with pytest.raises(AppError) as exc_info:
-                payment_methods.delete_qr_by_key(s3_key)
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        payment_methods.s3_client = mock_s3
+
+        with pytest.raises(AppError) as exc_info:
+            payment_methods.delete_qr_by_key(s3_key)
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+        payment_methods.s3_client = None
 
     def test_delete_qr_by_key_generic_exception(self, sample_account_id: str) -> None:
         """Test generic Exception during delete (non-ClientError)."""
@@ -925,10 +931,13 @@ class TestDeleteQRByKey:
         mock_s3 = MagicMock()
         mock_s3.delete_object.side_effect = Exception("Unexpected error")
 
-        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
-            with pytest.raises(AppError) as exc_info:
-                payment_methods.delete_qr_by_key(s3_key)
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        payment_methods.s3_client = mock_s3
+
+        with pytest.raises(AppError) as exc_info:
+            payment_methods.delete_qr_by_key(s3_key)
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+
+        payment_methods.s3_client = None
 
 
 class TestGeneratePresignedGetURL:
@@ -1061,11 +1070,14 @@ class TestDeleteAllUserQRCodes:
         mock_s3.get_paginator.return_value = mock_paginator
         mock_logger = MagicMock()
 
-        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
-            deleted = payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
-            assert deleted == 2
-            mock_s3.delete_objects.assert_called_once()
-            mock_logger.info.assert_called_once()
+        payment_methods.s3_client = mock_s3
+
+        deleted = payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
+        assert deleted == 2
+        mock_s3.delete_objects.assert_called_once()
+        mock_logger.info.assert_called_once()
+
+        payment_methods.s3_client = None
 
     def test_delete_all_user_qr_codes_error_raises_app_error(self, monkeypatch: Any, sample_account_id: str) -> None:
         """Test delete_all_user_qr_codes surfaces S3 failures as AppError."""
@@ -1074,13 +1086,16 @@ class TestDeleteAllUserQRCodes:
         mock_s3.get_paginator.side_effect = Exception("S3 error")
         mock_logger = MagicMock()
 
-        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
-            with pytest.raises(AppError) as exc_info:
-                payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert exc_info.value.message == "Failed to purge payment QR codes from S3"
-            assert "S3 error" not in exc_info.value.message
-            mock_logger.error.assert_called()
+        payment_methods.s3_client = mock_s3
+
+        with pytest.raises(AppError) as exc_info:
+            payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert exc_info.value.message == "Failed to purge payment QR codes from S3"
+        assert "S3 error" not in exc_info.value.message
+        mock_logger.error.assert_called()
+
+        payment_methods.s3_client = None
 
     def test_delete_all_user_qr_codes_transient_error_then_success(self, monkeypatch: Any, sample_account_id: str) -> None:
         """Regression (#564): a transient throttle during account-deletion QR purge is retried."""
@@ -1547,7 +1562,7 @@ class TestErrorHandling:
         """Test delete_qr_from_s3 handles outer exception path."""
 
         mock_s3 = MagicMock()
-        # Raise an exception during _get_s3_client or before entering the loop
+        # Raise an exception during S3 deletion or before entering the loop
         mock_s3.delete_object.side_effect = Exception("Unexpected error")
 
         payment_methods.s3_client = mock_s3

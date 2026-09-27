@@ -2,8 +2,6 @@ import os
 import time
 from typing import TYPE_CHECKING, Any, Dict, List
 
-import boto3
-
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
 from .campaign_operations import (
@@ -14,12 +12,14 @@ from .campaign_operations import (
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.boto import get_s3_client
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
     from utils.logging import get_logger
     from utils.s3 import purge_s3_prefix
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.boto import get_s3_client
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
@@ -52,14 +52,6 @@ _PROFILE_LOOKUP_RETRIES = 3
 _PROFILE_LOOKUP_BASE_DELAY_SECONDS = 0.2
 
 s3_client: Any = None
-
-
-def _get_s3_client() -> Any:
-    """Return S3 client, supporting module-level mock for testing."""
-    global s3_client
-    if s3_client is not None:
-        return s3_client
-    return boto3.client("s3")
 
 
 def _get_profile_owner_id(profile_id: str, owner_account_id: str) -> str:
@@ -153,7 +145,7 @@ def _delete_s3_reports(profile_id: str) -> int:
     if not bucket_name:
         return 0
 
-    s3 = _get_s3_client()
+    s3 = get_s3_client(s3_client)
     deleted_count = 0
     prefixes = [f"reports/{profile_id}/"]
     clean_id = profile_id.replace("PROFILE#", "")
