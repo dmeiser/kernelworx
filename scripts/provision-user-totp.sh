@@ -64,8 +64,10 @@ if [ -z "$PASSWORD" ]; then
   log "PROVISION_USER_TOTP_PASSWORD is not set; refusing to pass the password on the command line"
   exit 1
 fi
-# Keep the credential out of the environment of every child process (aws,
-# python3), so only this process ever holds it.
+# Unset the variable in this shell now that it has been copied, so none of the
+# long-lived children below (every aws call, and the window wait) ever carry
+# it; the single short-lived python3 helper that writes the parameter file
+# receives the value by assignment instead.
 unset PROVISION_USER_TOTP_PASSWORD
 
 log "Provisioning TOTP device for: $USERNAME"
