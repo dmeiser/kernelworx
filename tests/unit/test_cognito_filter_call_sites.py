@@ -18,7 +18,15 @@ from src.handlers import account_operations, admin_operations, pre_signup
 from src.utils.errors import AppError, ErrorCode
 
 POOL = "us-east-1_TEST123"
-UNSAFE = 'x" OR 1=1 --'
+# Values that must never reach ``list_users``. The benign-prefixed rows matter as much
+# as the leading-metacharacter one: they fail a guard that only inspects part of the
+# value, which is the shape a validate/interpolate drift takes.
+UNSAFE = [
+    'x" OR 1=1 --',
+    'aaaaaaaaaaaa" OR 1=1 --',
+    "safe-prefix-then-backslash" + "\\",
+    "safe-prefix-then space",
+]
 UUID = "2b0e7f1a-9c3d-4f5e-8a7b-1d2c3b4a5e6f"
 
 # (label, call site, name of the parameter carrying the filtered value,
@@ -92,15 +100,16 @@ def test_call_site_sends_the_exact_expected_filter(
 
 
 @pytest.mark.parametrize(("_label", "site", "value_param", "safe_value", "expected"), FILTER_SITES, ids=IDS)
+@pytest.mark.parametrize("unsafe", UNSAFE, ids=[f"unsafe{i}" for i in range(len(UNSAFE))])
 def test_call_site_rejects_a_metacharacter_before_querying(
-    _label: str, site: Callable[..., Any], value_param: str, safe_value: str, expected: str
+    _label: str, site: Callable[..., Any], value_param: str, safe_value: str, expected: str, unsafe: str
 ) -> None:
     params = list(inspect.signature(site).parameters)
     assert value_param in params
     cognito = _cognito_stub()
 
     with pytest.raises(AppError) as exc_info:
-        site(**{"cognito": cognito, "user_pool_id": POOL, "logger": MagicMock(), value_param: UNSAFE})
+        site(**{"cognito": cognito, "user_pool_id": POOL, "logger": MagicMock(), value_param: unsafe})
 
     assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
     cognito.list_users.assert_not_called()
