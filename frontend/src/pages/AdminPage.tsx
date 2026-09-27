@@ -243,7 +243,7 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
         <TextField
           fullWidth
           label="Search User"
-          placeholder="Search by email, name, or account ID"
+          placeholder="Search by email, name, or account ID (3+ characters)"
           value={searchQuery}
           onChange={(e) => onSearchQueryChange(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -267,8 +267,8 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
 
       {!hasSearched && !error && (
         <Alert severity="info">
-          Search for a user by email, name, or account ID. Partial matches are supported (e.g., &quot;john&quot; finds
-          &quot;john.doe@example.com&quot;).
+          Search for a user by email, name, or account ID. Queries must be at least 3 characters. Partial matches are
+          supported (e.g., &quot;john&quot; finds &quot;john.doe@example.com&quot;).
         </Alert>
       )}
 
