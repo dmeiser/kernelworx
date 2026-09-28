@@ -281,9 +281,7 @@ class TestAccessTokenNeverOnArgv:
         for invocation in software_token_calls:
             assert "--access-token" not in invocation, f"access token passed by flag: {invocation}"
 
-    def test_access_token_passed_through_a_private_file(
-        self, harness: dict[str, object], repo_root: Path
-    ) -> None:
+    def test_access_token_passed_through_a_private_file(self, harness: dict[str, object], repo_root: Path) -> None:
         result = run_script(harness, repo_root)
         assert result.returncode == 0, result.stderr
 
@@ -320,9 +318,7 @@ class TestAccessTokenNeverOnArgv:
         assert not leaks, f"the access token appeared in the command line of pid(s): {leaks}"
         assert not logs(harness)["aws_token_env_leaks"].read_text().split()
 
-    def test_token_file_removed_when_a_later_step_fails(
-        self, harness: dict[str, object], repo_root: Path
-    ) -> None:
+    def test_token_file_removed_when_a_later_step_fails(self, harness: dict[str, object], repo_root: Path) -> None:
         """A failure after the token file exists must not leave the token on disk."""
         broken = harness["bin_dir"] / "aws"  # type: ignore[index]
         broken.write_text(
