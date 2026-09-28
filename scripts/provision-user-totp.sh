@@ -34,6 +34,8 @@
 # The environment is mode-0400 per process and readable only by same-uid
 # processes, which is the narrowest channel available to a shell script. Do not
 # "simplify" any of this back to a positional argument or --auth-parameters.
+# That rule covers the password only: the pool access token is still passed on
+# argv to associate-software-token and verify-software-token, tracked in #597.
 #
 # Requires: aws CLI, python3 (stdlib only), and IAM permissions for
 # cognito-idp associate-software-token / verify-software-token /
@@ -64,8 +66,10 @@ if [ -z "$PASSWORD" ]; then
   log "PROVISION_USER_TOTP_PASSWORD is not set; refusing to pass the password on the command line"
   exit 1
 fi
-# Keep the credential out of the environment of every child process (aws,
-# python3), so only this process ever holds it.
+# Unset the variable in this shell now that it has been copied, so none of the
+# long-lived children below (every aws call, and the window wait) ever carry
+# it; the single short-lived python3 helper that writes the parameter file
+# receives the value by assignment instead.
 unset PROVISION_USER_TOTP_PASSWORD
 
 log "Provisioning TOTP device for: $USERNAME"

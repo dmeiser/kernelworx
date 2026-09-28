@@ -11,12 +11,13 @@ import { util, runtime } from '@aws-appsync/utils';
  *     stored ownerAccountId against the prefixed caller sub
  *   - permissions come from the share item, unitType/unitNumber from the profile
  *
- * WARNING: this file is loaded via Terraform templatefile() (see
- * modules/appsync/functions_sharing.tf), so every `${...}` below is
- * Terraform-interpolated, not a JS template literal. `${table_name}` is
- * the only intended placeholder; do NOT add other `${...}` sequences here —
- * Terraform will try to substitute them and the plan will fail or substitute
- * the wrong value. Use string concatenation instead of JS template literals.
+ * WARNING: loaded via Terraform templatefile() (functions_sharing.tf), so a
+ * dollar-brace sequence here is Terraform-interpolated, not JS. In a
+ * template/string literal that aborts every plan/apply with "Invalid
+ * expression"; ordinary comments are stripped by the esbuild bundle, but are
+ * banned too as defense-in-depth. Use string concatenation rather than JS
+ * template literals. Enforced by tests/unit/check_templatefile_escaping.test.ts
+ * (#570).
  *
  * AppSync JS runtime restrictions (APPSYNC_JS 1.0.0): no `continue`
  * statement, so the loops below use inclusive if-blocks instead.

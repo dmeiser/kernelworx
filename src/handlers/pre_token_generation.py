@@ -40,14 +40,17 @@ method and can never admit a TOTP-less admin. A bare passkey used as a first
 (passwordless) factor, with no MFA method enabled, mints mfa=false.
 """
 
-import logging
 from typing import Any, Dict
 
 import boto3
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# Handle both Lambda (absolute) and unit test (relative) imports
+try:  # pragma: no cover
+    from utils.logging import get_logger
+except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 # Cognito MFA method identifiers (AdminGetUser PreferredMfaSetting /
 # UserMFASettingList) that denote an enabled MFA factor. The captain uses
@@ -130,7 +133,8 @@ def _resolve_mfa(event: Dict[str, Any]) -> bool:
         response = cognito.admin_get_user(UserPoolId=user_pool_id, Username=username)
     except Exception:
         logger.warning(
-            f"pre-token-generation: AdminGetUser failed for sub={sub}; setting mfa=false (fail-closed)",
+            "pre-token-generation: AdminGetUser failed; setting mfa=false (fail-closed)",
+            sub=sub,
             exc_info=True,
         )
         return False

@@ -22,16 +22,22 @@ from botocore.exceptions import ClientError
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
 from .account_operations import _delete_all_user_data
-from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_deleted
+from .campaign_operations import (
+    _verify_campaign_deleted,
+    batch_delete_keys,
+    delete_orders_for_campaign,
+)
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
+    from utils.cognito_filters import cognito_user_filter
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
+    from ..utils.cognito_filters import cognito_user_filter
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
@@ -584,53 +590,11 @@ def _looks_like_uuid(value: str) -> bool:
 
 def _is_valid_email_prefix(value: str) -> bool:
     """Check if a string is a valid email prefix (local part or local@partial-domain)."""
-    email_prefix_pattern = r"^[a-zA-Z0-9._%+-]+(?:@[a-zA-Z0-9.-]*)?$"
-    return bool(re.match(email_prefix_pattern, value)) and len(value) <= 254
-
-
-_COGNITO_FILTER_METACHARS = frozenset('"\\')
-
-
-def _reject_cognito_filter_metachars(value: str, field_label: str) -> None:
-    """Reject characters that can break a Cognito ListUsers filter literal.
-
-    Cognito filters are double-quoted and use backslash as the escape
-    character for inner double quotes. A value containing a quote or a
-    trailing backslash can escape the terminating quote and break the
-    filter. Reject double quotes, backslashes, and whitespace consistently
-    for any value that will be interpolated into a filter.
-    """
-    if any(ch in _COGNITO_FILTER_METACHARS for ch in value):
-        raise AppError(ErrorCode.INVALID_INPUT, f"Invalid {field_label}")
-    if any(ch.isspace() for ch in value):
-        raise AppError(ErrorCode.INVALID_INPUT, f"Invalid {field_label}")
-
-
-def _validate_email_for_filter(email: str) -> None:
-    """Validate an email before interpolating it into a Cognito ListUsers filter.
-
-    Reject Cognito filter metacharacters (double quotes, backslashes,
-    whitespace) and require a basic local@domain shape. See issue #124.
-    """
-    if not email or len(email) > 254:
-        raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
-    _reject_cognito_filter_metachars(email, "email")
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-        raise AppError(ErrorCode.INVALID_INPUT, "Invalid email")
-
-
-def _validate_sub_for_filter(sub: str) -> None:
-    """Validate a sub/account ID before interpolating it into a Cognito filter.
-
-    Reject Cognito filter metacharacters (double quotes, backslashes,
-    whitespace) and oversized values so malformed values surface as
-    INVALID_INPUT instead of a Cognito parse error. See issue #124.
-    Non-UUID account IDs are allowed through so that deletion requests for
-    non-existent users resolve to NOT_FOUND rather than INVALID_INPUT.
-    """
-    if not sub or len(sub) > 256:
-        raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
-    _reject_cognito_filter_metachars(sub, "account ID")
+    try:
+        cognito_user_filter("email_prefix", value)
+    except AppError:
+        return False
+    return True
 
 
 def _validate_search_query(query: str) -> None:
@@ -664,7 +628,7 @@ def _search_user_by_sub(cognito: Any, user_pool_id: str, sub: str, logger: Any) 
     try:
         response = cognito.list_users(
             UserPoolId=user_pool_id,
-            Filter=f'sub = "{sub}"',
+            Filter=cognito_user_filter("sub", sub),
             Limit=1,
         )
         users = response.get("Users", [])
@@ -692,7 +656,7 @@ def _search_users_in_cognito_by_email_prefix(
     try:
         response = cognito.list_users(
             UserPoolId=user_pool_id,
-            Filter=f'email ^= "{query}"',  # Prefix match on email
+            Filter=cognito_user_filter("email_prefix", query),  # Prefix match on email
             Limit=50,  # Reasonable limit for search results
         )
         return list(response.get("Users", []))
@@ -752,13 +716,11 @@ def _find_cognito_user_by_sub(
     the Cognito user still exists.
     """
     raw_sub = account_id[8:] if account_id.startswith("ACCOUNT#") else account_id
-    # Validate before interpolating into the Cognito filter to prevent
-    # quote-injection / filter breakage (#124).
-    _validate_sub_for_filter(raw_sub)
     try:
         users_response = cognito.list_users(
             UserPoolId=user_pool_id,
-            Filter=f'sub = "{raw_sub}"',
+            # Built in one step so the value that was checked is the value sent (#124, #560).
+            Filter=cognito_user_filter("sub", raw_sub),
             Limit=1,
         )
         users = users_response.get("Users", [])
@@ -804,13 +766,11 @@ def _account_exists_in_dynamodb(account_id: str, logger: Any) -> bool:
 
 def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any) -> str:
     """Find username by email. Returns username."""
-    # Validate before interpolating into the Cognito filter to prevent
-    # quote-injection / filter breakage (#124).
-    _validate_email_for_filter(email)
     try:
         response = cognito.list_users(
             UserPoolId=user_pool_id,
-            Filter=f'email = "{email}"',
+            # Built in one step so the value that was checked is the value sent (#124, #560).
+            Filter=cognito_user_filter("email", email),
             Limit=1,
         )
     except ClientError as e:
@@ -1085,27 +1045,6 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
     return catalog_item
 
 
-def _delete_orders_for_campaign(campaign_id: str) -> int:
-    """Delete all orders for a campaign and verify deletion. Returns count deleted."""
-    orders = query_all_items(
-        tables.orders,
-        {
-            "KeyConditionExpression": "campaignId = :cid",
-            "ExpressionAttributeValues": {":cid": campaign_id},
-        },
-    )
-
-    deleted_count = 0
-    for order in orders:
-        tables.orders.delete_item(Key={"campaignId": campaign_id, "orderId": order["orderId"]})
-        deleted_count += 1
-
-    if orders:
-        _verify_order_keys_deleted(orders)
-
-    return deleted_count
-
-
 def _delete_user_orders(account_id: str, logger: Any) -> int:
     """Delete all orders for all campaigns of all profiles owned by a user.
 
@@ -1130,7 +1069,7 @@ def _delete_user_orders(account_id: str, logger: Any) -> int:
             },
         )
         for campaign in campaigns:
-            deleted_count += _delete_orders_for_campaign(campaign["campaignId"])
+            deleted_count += delete_orders_for_campaign(campaign["campaignId"], logger=logger)
 
     logger.info("Deleted user orders", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1159,11 +1098,17 @@ def _delete_user_campaigns(account_id: str, logger: Any) -> int:
                 "ExpressionAttributeValues": {":pid": profile_id},
             },
         )
-        for campaign in campaigns:
-            campaign_id = campaign["campaignId"]
-            tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign_id})
-            _verify_campaign_deleted(profile_id, campaign_id)
-            deleted_count += 1
+        campaign_keys = [
+            {"profileId": profile_id, "campaignId": campaign["campaignId"]}
+            for campaign in campaigns
+            if campaign.get("campaignId")
+        ]
+        if campaign_keys:
+            deleted_count += batch_delete_keys(
+                tables.campaigns, campaign_keys, ["profileId", "campaignId"], logger=logger
+            )
+            for campaign in campaigns:
+                _verify_campaign_deleted(profile_id, campaign["campaignId"])
 
     logger.info("Deleted user campaigns", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1184,9 +1129,15 @@ def _delete_user_shares(account_id: str, logger: Any) -> int:
                 "ExpressionAttributeValues": {":pid": profile_id},
             },
         )
-        for share in shares:
-            tables.shares.delete_item(Key={"profileId": profile_id, "targetAccountId": share["targetAccountId"]})
-            deleted_count += 1
+        share_keys = [
+            {"profileId": profile_id, "targetAccountId": share["targetAccountId"]}
+            for share in shares
+            if share.get("targetAccountId")
+        ]
+        if share_keys:
+            deleted_count += batch_delete_keys(
+                tables.shares, share_keys, ["profileId", "targetAccountId"], logger=logger
+            )
 
     logger.info("Deleted user shares", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1195,12 +1146,18 @@ def _delete_user_shares(account_id: str, logger: Any) -> int:
 def _delete_user_profiles(account_id: str, logger: Any) -> int:
     """Delete all profiles owned by a user. Returns count deleted."""
     db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
 
     profiles = _get_user_profiles(db_account_id)
-    for profile in profiles:
-        tables.profiles.delete_item(Key={"ownerAccountId": db_account_id, "profileId": profile["profileId"]})
-        deleted_count += 1
+    profile_keys = [
+        {"ownerAccountId": db_account_id, "profileId": profile["profileId"]}
+        for profile in profiles
+        if profile.get("profileId")
+    ]
+    deleted_count = (
+        batch_delete_keys(tables.profiles, profile_keys, ["ownerAccountId", "profileId"], logger=logger)
+        if profile_keys
+        else 0
+    )
 
     logger.info("Deleted user profiles", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1280,9 +1237,9 @@ def _delete_invites_for_owned_profiles(account_id: str, logger: Any) -> int:
                 "IndexName": "profileId-index",
             },
         )
-        for invite in invites:
-            tables.invites.delete_item(Key={"inviteCode": invite["inviteCode"]})
-            deleted_count += 1
+        invite_keys = [{"inviteCode": invite["inviteCode"]} for invite in invites if invite.get("inviteCode")]
+        if invite_keys:
+            deleted_count += batch_delete_keys(tables.invites, invite_keys, ["inviteCode"], logger=logger)
 
     logger.info("Deleted invites for owned profiles", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1291,7 +1248,6 @@ def _delete_invites_for_owned_profiles(account_id: str, logger: Any) -> int:
 def _delete_inbound_shares(account_id: str, logger: Any) -> int:
     """Delete all inbound shares where the account is the target."""
     db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
 
     shares = query_all_items(
         tables.shares,
@@ -1301,14 +1257,16 @@ def _delete_inbound_shares(account_id: str, logger: Any) -> int:
             "IndexName": "targetAccountId-index",
         },
     )
-    for share in shares:
-        tables.shares.delete_item(
-            Key={
-                "profileId": share["profileId"],
-                "targetAccountId": share["targetAccountId"],
-            }
-        )
-        deleted_count += 1
+    share_keys = [
+        {"profileId": share["profileId"], "targetAccountId": share["targetAccountId"]}
+        for share in shares
+        if share.get("profileId") and share.get("targetAccountId")
+    ]
+    deleted_count = (
+        batch_delete_keys(tables.shares, share_keys, ["profileId", "targetAccountId"], logger=logger)
+        if share_keys
+        else 0
+    )
 
     logger.info("Deleted inbound shares", account_id=account_id, count=deleted_count)
     return deleted_count

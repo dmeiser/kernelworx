@@ -86,8 +86,10 @@ email quota (#483); its credentials are exported as `TEST_SMOKE_EMAIL`/`TEST_SMO
 
 **Key flags/arguments:**
 
-- `<run-id>` — Required run identifier.
+- `<run-id>` — Required run identifier; must match `[A-Za-z0-9._-]+` or the script
+  exits before any Cognito call.
 - `<user-pool-id>` — Required Cognito User Pool ID.
+- `<client-id>` — Required App Client ID.
 
 ### `scripts/create-screenshot-user.sh`
 
@@ -133,6 +135,25 @@ prefix. Dev-only script.
 
 **Key flags/arguments:** None. Requires `SHARES_TABLE_NAME` environment variable (or set
 via `.env`). Run with: `uv run python scripts/migrate_shares_prefix.py`.
+
+### `scripts/provision-user-totp.sh`
+
+**Provision (or re-provision) a Cognito TOTP device for a user and print the base32
+secret on stdout.** Re-provisioning always issues a fresh secret, and the script waits out
+the current 30-second TOTP window so the next sign-in does not resubmit a consumed code.
+Invoked by `create-test-users.sh`, `create-ephemeral-test-users.sh`, and the deploy
+smoke's TOTP step — normally you do not call it directly.
+
+**Key flags/arguments:**
+
+- `<user-pool-id>` — Cognito user pool that owns the user.
+- `<client-id>` — Pool client; must allow `USER_PASSWORD_AUTH` (see the `KernelWorx-Web`
+  client note in `AGENTS.md`).
+- `<username>` — User to provision the device for.
+- `PROVISION_USER_TOTP_PASSWORD` — **Required** in the environment. Since #569 the
+  password is no longer accepted as a fourth positional argument: process argv is
+  world-readable via `/proc/<pid>/cmdline` and `ps`, and the script refuses to start
+  without the variable rather than falling back to argv.
 
 ### `scripts/contrast_check.py`
 
@@ -243,6 +264,7 @@ environment's state.
 | Delete the Alex Kernel Cognito user (preserving data)       | `scripts/delete-screenshot-user.sh`        |
 | Delete test user catalogs                                   | `scripts/delete-test-catalogs.py`          |
 | Run shares table migration (dev only)                       | `scripts/migrate_shares_prefix.py`         |
+| Provision a TOTP device for a test user                     | `scripts/provision-user-totp.sh`           |
 | Check WCAG contrast of brand colors                         | `scripts/contrast_check.py`                |
 | Sync Route53 DNS to CloudFlare                              | `scripts/sync-to-cloudflare.sh`            |
 | Generate integration test env config from tofu outputs      | `scripts/generate_integration_env.py`      |
