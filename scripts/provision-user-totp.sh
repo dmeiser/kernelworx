@@ -3,7 +3,8 @@
 # base32 TOTP secret on stdout.
 #
 # Usage:
-#   provision-user-totp.sh <user-pool-id> <client-id> <username> <password>
+#   PROVISION_USER_TOTP_PASSWORD=<password> provision-user-totp.sh \
+#     <user-pool-id> <client-id> <username>
 #
 # The #336 admin gate requires the JWT amr claim to contain "mfa", so every
 # user that exercises admin-gated API paths in tests (the owner test user)
@@ -20,6 +21,20 @@
 # wait, the first browser login right after provisioning would resubmit the
 # same code and fail its MFA step.
 #
+# The password must never be placed on a command line - neither this script's
+# own argv nor any aws CLI argv. The argv of a running process is
+# world-readable on Linux via /proc/<pid>/cmdline and shows up in `ps` output
+# for as long as the process lives, so any process on the runner (a wrapper, a
+# diagnostic `ps`, a crash reporter) can read the credential there. That is
+# why the password is a required PROVISION_USER_TOTP_PASSWORD environment
+# variable rather than a positional argument, and why both initiate-auth
+# variants read the auth parameters from a private mktemp file passed with
+# --cli-input-json file://... (the file is removed on every exit path by an
+# EXIT trap, so a failed or retried run cannot leave the password on disk).
+# The environment is mode-0400 per process and readable only by same-uid
+# processes, which is the narrowest channel available to a shell script. Do not
+# "simplify" any of this back to a positional argument or --auth-parameters.
+#
 # Requires: aws CLI, python3 (stdlib only), and IAM permissions for
 # cognito-idp associate-software-token / verify-software-token /
 # admin-set-user-mfa-preference / admin-get-user. The access token comes
@@ -32,16 +47,26 @@ log() {
   echo "$@" >&2
 }
 
-if [ $# -lt 4 ]; then
-  log "Usage: $0 <user-pool-id> <client-id> <username> <password>"
+if [ $# -lt 3 ]; then
+  log "Usage: PROVISION_USER_TOTP_PASSWORD=<password> $0 <user-pool-id> <client-id> <username>"
   exit 1
 fi
 
 USER_POOL_ID="$1"
 CLIENT_ID="$2"
 USERNAME="$3"
-PASSWORD="$4"
 REGION="${AWS_REGION:-us-east-1}"
+
+# Fail fast rather than falling back to a positional password argument: a
+# silent fallback would leave the argv exposure in place.
+PASSWORD="${PROVISION_USER_TOTP_PASSWORD:-}"
+if [ -z "$PASSWORD" ]; then
+  log "PROVISION_USER_TOTP_PASSWORD is not set; refusing to pass the password on the command line"
+  exit 1
+fi
+# Keep the credential out of the environment of every child process (aws,
+# python3), so only this process ever holds it.
+unset PROVISION_USER_TOTP_PASSWORD
 
 log "Provisioning TOTP device for: $USERNAME"
 
@@ -60,17 +85,40 @@ if aws cognito-idp admin-get-user \
     --region "$REGION" >/dev/null
 fi
 
+AUTH_PARAMS_FILE=$(mktemp)
+chmod 600 "$AUTH_PARAMS_FILE"
+trap 'rm -f "$AUTH_PARAMS_FILE"' EXIT
+
+# Build the JSON with python3 (already required above) so a password
+# containing commas, quotes, or other JSON metacharacters is escaped
+# correctly, and so the password travels via the environment rather than
+# this process's argv.
+TOTP_AUTH_USERNAME="$USERNAME" TOTP_AUTH_PASSWORD="$PASSWORD" python3 - "$AUTH_PARAMS_FILE" <<'PY'
+import json, os, sys
+
+with open(sys.argv[1], "w") as handle:
+    json.dump(
+        {
+            "AuthParameters": {
+                "USERNAME": os.environ["TOTP_AUTH_USERNAME"],
+                "PASSWORD": os.environ["TOTP_AUTH_PASSWORD"],
+            }
+        },
+        handle,
+    )
+PY
+
 ACCESS_TOKEN=$(aws cognito-idp initiate-auth \
   --client-id "$CLIENT_ID" \
   --auth-flow USER_PASSWORD_AUTH \
-  --auth-parameters "USERNAME=${USERNAME},PASSWORD=${PASSWORD}" \
+  --cli-input-json "file://$AUTH_PARAMS_FILE" \
   --region "$REGION" \
   --query 'AuthenticationResult.AccessToken' --output text 2>/dev/null) || \
 ACCESS_TOKEN=$(aws cognito-idp admin-initiate-auth \
   --user-pool-id "$USER_POOL_ID" \
   --client-id "$CLIENT_ID" \
   --auth-flow ADMIN_NO_SRP_AUTH \
-  --auth-parameters "USERNAME=${USERNAME},PASSWORD=${PASSWORD}" \
+  --cli-input-json "file://$AUTH_PARAMS_FILE" \
   --region "$REGION" \
   --query 'AuthenticationResult.AccessToken' --output text)
 

@@ -61,6 +61,7 @@ checkpointed
 chipProps
 cityState
 clsx
+cmdline
 codegen
 Cognito
 cognitoonly
@@ -218,6 +219,7 @@ mockqrcode
 monkeypatching
 monorepo
 moto
+mktemp
 MUI
 multiline
 mutex
@@ -263,6 +265,7 @@ pipefail
 pkeys
 playwright
 popstate
+ppid
 posonlyargs
 Pool
 poolsms
@@ -403,6 +406,7 @@ unoptimized
 unpadded
 unparsed
 unregister
+unsets
 unshare
 unshift
 unstub
