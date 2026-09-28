@@ -56,13 +56,11 @@ def test_payment_methods_delete_qr_uuid_fallback(monkeypatch):
     # First 3 calls (slug-based) raise NoSuchKey, next 3 (UUID) succeed
     no_such_key = ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "DeleteObject")
     mock_s3.delete_object.side_effect = [no_such_key, no_such_key, no_such_key, None, None, None]
-    payment_methods.s3_client = mock_s3
+    monkeypatch.setattr(payment_methods, "get_s3_client", lambda _override=None: mock_s3)
 
     # UUID fallback success path
     payment_methods.delete_qr_from_s3("ACCOUNT#test", "test-method")
     assert mock_s3.delete_object.call_count == 6
-
-    payment_methods.s3_client = None
 
 
 def test_payment_methods_delete_qr_uuid_fallback_error(monkeypatch):
@@ -79,7 +77,7 @@ def test_payment_methods_delete_qr_uuid_fallback_error(monkeypatch):
     # Slug deletes: NoSuchKey, NoSuchKey, NoSuchKey
     # UUID deletes: NoSuchKey, AccessDenied
     mock_s3.delete_object.side_effect = [no_such_key, no_such_key, no_such_key, no_such_key, access_denied]
-    payment_methods.s3_client = mock_s3
+    monkeypatch.setattr(payment_methods, "get_s3_client", lambda _override=None: mock_s3)
 
     # UUID fallback with non-NoSuchKey error surfaces a typed AppError
     from src.utils.errors import AppError, ErrorCode
@@ -88,8 +86,6 @@ def test_payment_methods_delete_qr_uuid_fallback_error(monkeypatch):
         payment_methods.delete_qr_from_s3("ACCOUNT#test", "test-method")
     assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
     assert mock_s3.delete_object.call_count == 5
-
-    payment_methods.s3_client = None
 
 
 def test_report_generation_uses_shared_s3_factory():

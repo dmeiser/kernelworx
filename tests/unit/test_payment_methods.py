@@ -1112,7 +1112,7 @@ class TestDeleteAllUserQRCodes:
         mock_s3.get_paginator.return_value = mock_paginator
         mock_logger = MagicMock()
 
-        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
+        with patch.object(payment_methods, "get_s3_client", return_value=mock_s3):
             deleted = payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
 
         assert deleted == 1
@@ -1130,7 +1130,7 @@ class TestDeleteAllUserQRCodes:
         mock_s3.get_paginator.side_effect = throttled
         mock_logger = MagicMock()
 
-        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
+        with patch.object(payment_methods, "get_s3_client", return_value=mock_s3):
             with pytest.raises(AppError) as exc_info:
                 payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
 
@@ -1148,7 +1148,7 @@ class TestDeleteAllUserQRCodes:
         mock_s3.get_paginator.side_effect = denied
         mock_logger = MagicMock()
 
-        with patch.object(payment_methods, "_get_s3_client", return_value=mock_s3):
+        with patch.object(payment_methods, "get_s3_client", return_value=mock_s3):
             with pytest.raises(AppError):
                 payment_methods.delete_all_user_qr_codes(sample_account_id, logger=mock_logger)
 

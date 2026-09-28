@@ -117,7 +117,7 @@ def search(accounts_table: Any, monkeypatch: Any) -> Any:
     cognito = _FakeCognito(cognito_users)
 
     monkeypatch.setattr("src.handlers.admin_operations.tables", SimpleNamespace(accounts=accounts_table))
-    monkeypatch.setattr("src.handlers.admin_operations._get_cognito_client", lambda: cognito)
+    monkeypatch.setattr("src.handlers.admin_operations.get_cognito_client", lambda: cognito)
     monkeypatch.setattr(
         "src.handlers.admin_operations._batch_get_display_names",
         lambda account_ids, logger: {i: "Alice Anderson" for i in account_ids},

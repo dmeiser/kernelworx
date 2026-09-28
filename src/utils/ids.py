@@ -5,7 +5,7 @@ Provides consistent handling of entity ID prefixes (PROFILE#, CAMPAIGN#, etc.)
 across all Lambda handlers and utilities.
 """
 
-from typing import Optional
+from typing import Optional, Union
 
 
 def ensure_prefix(prefix: str, id_value: Optional[str]) -> Optional[str]:
@@ -89,14 +89,18 @@ def ensure_product_id(id_value: Optional[str]) -> Optional[str]:
 
 
 def build_unit_campaign_key(
-    unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: int
+    unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: Union[int, str]
 ) -> str:
     """Build the unitCampaignKey for unit+campaign queries.
 
     This format is the partition-key contract for the unitCampaignKey-index
-    GSI. Unit reporting and unit catalog listing both query the same index
-    with this exact key layout, so it must have a single definition: the
-    format must not change without a data migration, and new code that reads
-    or writes the index must call this helper rather than rebuild the key.
+    GSI. Unit reporting, unit catalog listing, and campaign creation all read
+    or write the same index with this exact key layout, so it must have a
+    single definition: the format must not change without a data migration,
+    and new code must call this helper rather than rebuild the key.
+
+    ``campaign_year`` is an int on every query path; the campaign write path
+    passes an empty string when no year is set yet, which is the same key
+    layout with an empty trailing component.
     """
     return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
