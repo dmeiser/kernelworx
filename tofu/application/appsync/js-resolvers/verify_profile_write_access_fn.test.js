@@ -327,10 +327,7 @@ describe('verify_profile_write_access_fn for the share/invite query resolvers (#
         });
     });
 
-    it('does not authorize a former owner whose stale GSI still projects them: step 1 consistent read is the sole owner signal', () => {
-        // After transferProfileOwnership, the base-table GetItem under the caller's
-        // partition key returns nothing even though the eventually-consistent GSI
-        // may still project the previous owner. Ownership must come from step 1 only.
+    it('step 1 turns a consistent GetItem miss into a non-owner verdict', () => {
         const ctx = queryCtx();
         request(ctx); // step 1
         const out = response({ ...ctx, result: null }); // consistent GetItem found nothing
@@ -338,33 +335,60 @@ describe('verify_profile_write_access_fn for the share/invite query resolvers (#
         assert.strictEqual(out, null);
     });
 
-    // A profile that does not exist (or is not yet projected on the GSI) must keep
-    // answering with an empty list, as these queries did before #547, instead of a
-    // NOT_FOUND GraphQL error on two non-nullable list fields.
-    function runQueryPipeline(verifierCtx, finalField) {
+    // Drives the whole read pipeline: verifier step 1 (consistent ownership GetItem) ->
+    // verifier step 2 (GSI locator) -> check_write_permission -> the list step.
+    function runQueryPipeline(verifierCtx, finalField, step2Result, finalResult) {
         const final = finalField === 'listInvitesByProfile' ? queryInvites : queryShares;
         const stash = verifierCtx.stash;
 
-        // Step 1: consistent ownership GetItem misses.
         request(verifierCtx);
         response({ ...verifierCtx, result: null });
-        // Step 2: GSI locator finds nothing.
         request(verifierCtx);
-        response({ ...verifierCtx, result: { items: [] } });
-        // check_write_permission + the list step.
+        response({ ...verifierCtx, result: step2Result });
         checkWritePermission.request({ ...verifierCtx, stash });
         checkWritePermission.response({ ...verifierCtx, stash, result: null });
         final.request({ ...verifierCtx, stash });
-        return final.response({ ...verifierCtx, stash, result: { items: [] } });
+        return final.response({ ...verifierCtx, stash, result: finalResult });
     }
 
+    // A profile that does not exist (or is not yet projected on the GSI) must keep
+    // answering with an empty list, as these queries did before #547, instead of a
+    // NOT_FOUND GraphQL error on two non-nullable list fields.
     for (const fieldName of ['listSharesByProfile', 'listInvitesByProfile']) {
         it(`${fieldName} answers with an empty list when the profile does not exist`, () => {
             const ctx = queryCtx({ info: { fieldName, parentTypeName: 'Query' } });
 
-            assert.deepStrictEqual(runQueryPipeline(ctx, fieldName), []);
+            assert.deepStrictEqual(runQueryPipeline(ctx, fieldName, { items: [] }, { items: [] }), []);
         });
     }
+
+    // The reported #547 sequence: transferProfileOwnership moves the profile item into
+    // the new owner's partition, so the caller's strongly consistent base-table GetItem
+    // misses, while the eventually-consistent profileId-index GSI can still project the
+    // caller as owner. The pre-#547 verifier decided ownership from that GSI item's
+    // ownerAccountId, which let a former owner read the new owner's owner-only invite
+    // codes. Ownership comes from the step 1 read alone, so the GSI row must not flip it.
+    it('a stale GSI row still naming the caller as owner does not restore ownership', () => {
+        const ctx = queryCtx({ info: { fieldName: 'listInvitesByProfile', parentTypeName: 'Query' } });
+        const unexpiredInvite = {
+            inviteCode: 'abc123',
+            profileId: 'PROFILE#prof-456',
+            permissions: ['WRITE'],
+            expiresAt: 1704067200 + 3600,
+            createdBy: 'ACCOUNT#new-owner'
+        };
+
+        const invites = runQueryPipeline(
+            ctx,
+            'listInvitesByProfile',
+            { items: [{ profileId: 'PROFILE#prof-456', ownerAccountId: 'ACCOUNT#user-123' }] },
+            { items: [unexpiredInvite] }
+        );
+
+        assert.strictEqual(ctx.stash.isOwner, false, 'the GSI item must not make the caller the owner');
+        assert.strictEqual(ctx.stash.profileOwner, 'ACCOUNT#user-123');
+        assert.deepStrictEqual(invites, [], 'a former owner must not read the new owner invites');
+    });
 
     it('keeps NOT_FOUND on the write path, where the profile must exist to mutate it', () => {
         const ctx = {
