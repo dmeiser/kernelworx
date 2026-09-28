@@ -32,17 +32,12 @@ CLIENT_ID="$3"
 
 # The run-id is caller-supplied (it comes from the pr_number workflow inputs)
 # and is interpolated into the test-user emails, so reject anything outside
-# [A-Za-z0-9._-] before the first Cognito call.
-#
-# PROVISIONAL: this inline check duplicates the rule #568 (PR #584) is landing
-# for the state-touching ephemeral scripts. On the rebase onto #568 this
-# becomes a call to that work's shared validate_run_id helper; until then the
-# duplication is deliberate, not design. Firstmate owns that sequencing, so
-# this branch must not merge before PR #584 does.
-if ! [[ "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  log "❌ Invalid run-id: must match [A-Za-z0-9._-]+"
-  exit 1
-fi
+# [A-Za-z0-9._-] before the first Cognito call. #568 (PR #584) owns the rule;
+# this script reuses its shared validate_run_id helper rather than repeating it.
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "$0")" && pwd)/ephemeral-recover-common.sh"
+
+validate_run_id "$RUN_ID" || exit 1
 
 REGION="${AWS_REGION:-us-east-1}"
 TEST_DOMAIN="${EPHEMERAL_TEST_DOMAIN:-kernelworx.test}"
