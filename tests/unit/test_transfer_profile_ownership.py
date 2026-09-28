@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from typing import Any, Dict
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
@@ -276,13 +276,48 @@ class TestTransferProfileOwnership:
             )
             assert tp_share["Item"]["ownerAccountId"] == f"ACCOUNT#{new_owner_id}"
 
-    def test_share_query_failure_does_not_block_transfer(
+    def test_share_query_client_error_surfaces_retryable_resource_busy(
         self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Failure while querying shares table logs error but allows transfer to complete."""
+        """A throttled share query leaves every share pointing at the deleted old owner,
+        so the transfer must report a retryable RESOURCE_BUSY instead of success (#549)."""
         owner_id = "owner-1"
         new_owner_id = "new-owner"
         profile_id = "profile-query-fail"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+        _seed_share(shares_table, profile_id, new_owner_id, owner_id)
+
+        def mock_query_all_items(*args, **kwargs):
+            raise ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "slow down"}},
+                "Query",
+            )
+
+        monkeypatch.setattr(transfer_profile_ownership, "query_all_items", mock_query_all_items)
+
+        event = {
+            "identity": {"sub": owner_id},
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_id,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+
+    def test_share_query_unexpected_error_is_not_swallowed(
+        self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A non-DynamoDB failure is a bug, not throttling, and must not be reported as a
+        retryable transfer failure (#549)."""
+        owner_id = "owner-1"
+        new_owner_id = "new-owner"
+        profile_id = "profile-query-bug"
 
         _seed_profile(profiles_table, owner_id, profile_id)
         _seed_share(shares_table, profile_id, new_owner_id, owner_id)
@@ -303,12 +338,15 @@ class TestTransferProfileOwnership:
         }
 
         result = lambda_handler(event, None)
-        assert result["ownerAccountId"] == f"ACCOUNT#{new_owner_id}"
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
-    def test_share_update_and_delete_failure_does_not_block_transfer(
+    def test_share_update_failure_surfaces_retryable_resource_busy(
         self, profiles_table: Any, shares_table: Any
     ) -> None:
-        """Failure in delete_item or update_item logs error but does not fail transfer."""
+        """A throttled share update leaves a third-party share recording the deleted old
+        owner, so the transfer must report RESOURCE_BUSY while still repairing the rest
+        of the shares (#549)."""
         from src.utils import dynamodb as db_module
 
         owner_id = "owner-1"
@@ -320,11 +358,21 @@ class TestTransferProfileOwnership:
         _seed_share(shares_table, profile_id, new_owner_id, owner_id)
         _seed_share(shares_table, profile_id, third_party, owner_id)
 
+        real_update = shares_table.update_item
+
+        def flaky_update(*args: Any, **kwargs: Any) -> Any:
+            if kwargs["Key"]["targetAccountId"] == f"ACCOUNT#{third_party}":
+                raise ClientError(
+                    {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "slow down"}},
+                    "UpdateItem",
+                )
+            return real_update(*args, **kwargs)
+
         mock_shares = MagicMock(wraps=shares_table)
         mock_shares.get_item = shares_table.get_item
         mock_shares.query = shares_table.query
-        mock_shares.delete_item.side_effect = RuntimeError("Delete failed")
-        mock_shares.update_item.side_effect = RuntimeError("Update failed")
+        mock_shares.delete_item = shares_table.delete_item
+        mock_shares.update_item.side_effect = flaky_update
 
         db_module._table_overrides["shares"] = mock_shares
 
@@ -339,7 +387,59 @@ class TestTransferProfileOwnership:
         }
 
         result = lambda_handler(event, None)
-        assert result["ownerAccountId"] == f"ACCOUNT#{new_owner_id}"
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+
+        # The new owner's share is still removed, and the failed share is left visibly
+        # stale (the old owner's record is gone, so the collaborator is locked out).
+        new_owner_share = shares_table.get_item(
+            Key={"profileId": f"PROFILE#{profile_id}", "targetAccountId": f"ACCOUNT#{new_owner_id}"}
+        )
+        assert "Item" not in new_owner_share
+        stale_share = shares_table.get_item(
+            Key={"profileId": f"PROFILE#{profile_id}", "targetAccountId": f"ACCOUNT#{third_party}"}
+        )
+        assert stale_share["Item"]["ownerAccountId"] == f"ACCOUNT#{owner_id}"
+
+    def test_update_shares_reports_failure_count_and_is_idempotent(self, shares_table: Any) -> None:
+        """_update_shares_after_transfer returns the number of shares it could not repair
+        and repairs the remainder, so a retry of the step converges (#549)."""
+        owner_id = "owner-1"
+        new_owner_id = "new-owner"
+        third_party = "tp-user"
+        profile_id = "profile-idempotent"
+
+        _seed_share(shares_table, profile_id, new_owner_id, owner_id)
+        _seed_share(shares_table, profile_id, third_party, owner_id)
+
+        db_profile_id = f"PROFILE#{profile_id}"
+        db_new_owner_id = f"ACCOUNT#{new_owner_id}"
+
+        real_update = shares_table.update_item
+
+        def flaky_update(*args: Any, **kwargs: Any) -> Any:
+            if kwargs["Key"]["targetAccountId"] == f"ACCOUNT#{third_party}":
+                raise ClientError(
+                    {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "slow down"}},
+                    "UpdateItem",
+                )
+            return real_update(*args, **kwargs)
+
+        with patch.object(shares_table, "update_item", side_effect=flaky_update):
+            failed = transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id)
+        assert failed == 1
+
+        # Re-running the step (client retry) repairs the remaining share and reports 0.
+        assert transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id) == 0
+
+        share = shares_table.get_item(
+            Key={"profileId": db_profile_id, "targetAccountId": f"ACCOUNT#{third_party}"}
+        )
+        assert share["Item"]["ownerAccountId"] == db_new_owner_id
+        assert (
+            "Item"
+            not in shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
+        )
 
     def test_corrupt_share_without_target_account_id_skipped(
         self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
