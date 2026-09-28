@@ -111,8 +111,11 @@ aws cognito-idp admin-add-user-to-group \
 
 log ""
 log "🔐 Provisioning TOTP MFA for the owner admin user (#336)..."
-OWNER_TOTP_SECRET=$("$SCRIPT_DIR/provision-user-totp.sh" \
-  "$USER_POOL_ID" "$CLIENT_ID" "$OWNER_EMAIL" "$OWNER_PASSWORD")
+# The password is passed through the environment, not argv: process argv is
+# world-readable via /proc/<pid>/cmdline and shows up in `ps` (#569).
+OWNER_TOTP_SECRET=$(PROVISION_USER_TOTP_PASSWORD="$OWNER_PASSWORD" \
+  "$SCRIPT_DIR/provision-user-totp.sh" \
+  "$USER_POOL_ID" "$CLIENT_ID" "$OWNER_EMAIL")
 
 log ""
 echo "export TEST_OWNER_EMAIL=$OWNER_EMAIL"

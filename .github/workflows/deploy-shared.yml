@@ -471,8 +471,11 @@ jobs:
               --query 'UserPoolClients[0].ClientId' --output text)
           fi
 
-          TOTP_SECRET=$(scripts/provision-user-totp.sh \
-            "$TEST_USER_POOL_ID" "$CLIENT_ID" "$TEST_OWNER_EMAIL" "$TEST_OWNER_PASSWORD")
+          # The password goes through the environment, never a positional
+          # argument: process argv is world-readable (#569).
+          TOTP_SECRET=$(PROVISION_USER_TOTP_PASSWORD="$TEST_OWNER_PASSWORD" \
+            scripts/provision-user-totp.sh \
+            "$TEST_USER_POOL_ID" "$CLIENT_ID" "$TEST_OWNER_EMAIL")
 
           echo "TEST_OWNER_TOTP_SECRET=$TOTP_SECRET" >> "$GITHUB_ENV"
 

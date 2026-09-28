@@ -77,8 +77,11 @@ fi
 
 echo ""
 echo "🔐 Provisioning TOTP MFA for the owner admin user (#336)..."
-OWNER_TOTP_SECRET=$("$SCRIPT_DIR/provision-user-totp.sh" \
-  "$TEST_USER_POOL_ID" "$TEST_USER_POOL_CLIENT_ID" "$TEST_OWNER_EMAIL" "$TEST_OWNER_PASSWORD")
+# The password is passed through the environment, not argv: process argv is
+# world-readable via /proc/<pid>/cmdline and shows up in `ps` (#569).
+OWNER_TOTP_SECRET=$(PROVISION_USER_TOTP_PASSWORD="$TEST_OWNER_PASSWORD" \
+  "$SCRIPT_DIR/provision-user-totp.sh" \
+  "$TEST_USER_POOL_ID" "$TEST_USER_POOL_CLIENT_ID" "$TEST_OWNER_EMAIL")
 
 # Persist the fresh secret in .env so integration and e2e test harnesses can
 # answer the owner's SOFTWARE_TOKEN_MFA challenge.
