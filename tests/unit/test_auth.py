@@ -1017,14 +1017,22 @@ class TestBatchCheckProfileAccess:
 
         assert result == set()
 
+    @pytest.mark.parametrize("required_permission", ["READ", "WRITE"])
     def test_batch_stale_share_after_ownership_transfer_is_dropped(
         self,
         dynamodb_table: Any,
         shares_table: Any,
         sample_account_id: str,
         another_account_id: str,
+        required_permission: str,
     ) -> None:
-        """A share that outlived the ownership transfer leaves the profile inaccessible."""
+        """A share that outlived the ownership transfer leaves the profile inaccessible.
+
+        Parametrized over the required permission because a stale share under a
+        WRITE request is a permission shortfall candidate: it must still be
+        dropped rather than raising FORBIDDEN, because the shortfall check runs
+        only on shares that still validate against their profile's current owner.
+        """
         profile_id = "PROFILE#batch-transfer-profile"
         original_owner = sample_account_id
         dynamodb_table.put_item(
@@ -1056,7 +1064,7 @@ class TestBatchCheckProfileAccess:
         # The share grants READ, but it no longer matches the profile's owner, so it
         # is not a permission shortfall against a live share: the profile is simply
         # absent, exactly as it was before the transfer.
-        assert batch_check_profile_access(another_account_id, [profile_id]) == set()
+        assert batch_check_profile_access(another_account_id, [profile_id], required_permission) == set()
 
     def test_batch_uses_extra_profile_read_to_validate_shares(
         self,
