@@ -87,6 +87,12 @@ def _cognito_client() -> Any:
     that fails every sign-in) before the handler's fail-closed guard can run.
     Deferring construction puts that failure inside `_resolve_mfa`'s `try`, so
     the trigger still fails closed with `mfa=false` and a logged reason.
+
+    The region is resolved by botocore from the ambient Lambda execution
+    environment, which the runtime always provides; no `region_name` is passed
+    here on purpose. `AWS_REGION` is a Lambda reserved environment variable and
+    the service rejects any function configuration that sets it, so the region
+    must never be injected through the module's `common_env` (issue #578).
     """
     return boto3.client("cognito-idp")
 

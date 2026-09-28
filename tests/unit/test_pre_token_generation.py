@@ -561,74 +561,104 @@ class TestLazyClientConstruction:
     def test_client_construction_failure_fails_closed(
         self, pre_token_event: dict[str, Any], lambda_context: MagicMock
     ) -> None:
-        """A NoRegionError raised while building the client on first use is caught
-        by the handler and mints mfa=false instead of raising."""
+        """A NoRegionError raised while building the real client on first use is
+        caught by the handler and mints mfa=false instead of raising."""
+        _cognito_client.cache_clear()
         with (
-            patch(
-                "src.handlers.pre_token_generation._cognito_client",
-                side_effect=NoRegionError(),
-            ),
+            patch("src.handlers.pre_token_generation.boto3.client", side_effect=NoRegionError()),
             patch("src.handlers.pre_token_generation.logger.warning") as mock_log_warning,
         ):
             result = lambda_handler(pre_token_event, lambda_context)
 
+        _cognito_client.cache_clear()
         assert _details(result)["idTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
         assert _details(result)["accessTokenGeneration"]["claimsToAddOrOverride"] == {MFA_CLAIM: False}
         assert any("fail-closed" in str(call.args[0]) for call in mock_log_warning.call_args_list)
 
 
-class TestRegionDeclaredInLambdaEnvironment:
+class TestRegionComesFromTheRuntimeEnvironment:
     """
-    Regression for issue #578 (IaC half): the trigger's boto3 client must not
-    depend on the Lambda runtime's ambient AWS_REGION, so the region is declared
-    explicitly on the functions through the module's common environment.
+    Regression for issue #578 (region half). The Cognito client is built with no
+    explicit ``region_name``, so botocore resolves the region from the ambient
+    Lambda execution environment, which the runtime always provides. Declaring
+    the region in the function configuration is not an option: ``AWS_REGION``
+    is a Lambda reserved environment variable and the service rejects
+    CreateFunction/UpdateFunctionConfiguration when it appears in a function's
+    environment ("...contains reserved keys that are currently not supported
+    for modification. Reserved keys used in this request: AWS_REGION"), so
+    injecting it would fail the next apply in every environment.
 
-    The lambda module is parsed into a semantic model (python-hcl2) and the
-    contract is asserted on that model: the declared common environment resolves
-    AWS_REGION from a real `aws_region` data source, every aws_lambda_function
-    resource applies that common environment, and no per-function override can
-    shadow the region.
+    The lambda module is parsed into a semantic model (python-hcl2) to assert
+    that no reserved key is ever injected, and the client is built for real in a
+    subprocess to assert it picks up the ambient runtime region.
     """
 
-    def test_common_env_declares_aws_region_from_a_declared_data_source(self) -> None:
-        """The lambda module's common_env sets AWS_REGION from the provider's region."""
-        doc = load_hcl(TF_APP / "modules" / "lambda" / "main.tf")
-
-        region_data_sources = {
-            label
-            for entry in doc.get("data", [])
-            for dtype, bodies in entry.items()
-            if dtype == "aws_region"
-            for label in bodies
+    RESERVED_LAMBDA_ENV_KEYS = frozenset(
+        {
+            "AWS_REGION",
+            "AWS_EXECUTION_ENV",
+            "AWS_LAMBDA_FUNCTION_NAME",
+            "AWS_LAMBDA_FUNCTION_VERSION",
+            "AWS_LAMBDA_LOG_GROUP_NAME",
+            "AWS_LAMBDA_RUNTIME_API",
+            "LAMBDA_TASK_ROOT",
+            "LAMBDA_RUNTIME_DIR",
         }
-        assert "current" in region_data_sources, "aws_region.current data source is missing"
+    )
 
-        common_env = doc["locals"][0]["common_env"]
-        assert common_env.get("AWS_REGION") == "${data.aws_region.current.name}"
-
-    def test_every_lambda_function_applies_the_common_environment(self) -> None:
-        """Both function resources expose common_env to the runtime, so the declared
-        region reaches the pre-token-generation trigger."""
+    def test_no_reserved_lambda_key_is_injected_into_any_function_environment(self) -> None:
+        """Neither the shared common environment nor any per-function override may
+        set a key Lambda reserves: the service would reject the function update."""
         doc = load_hcl(TF_APP / "modules" / "lambda" / "main.tf")
+        locals_ = doc["locals"][0]
 
+        # Both function resources build their environment from common_env (the
+        # triggers verbatim, the app functions merged with per-function
+        # extra_env), so those two sources are the complete set of keys the
+        # module injects; the assertions below prove that wiring first.
         for label in ("functions", "trigger_functions"):
             body = first_resource(doc, "aws_lambda_function", label)
             environment = block(body.get("environment"))
             assert environment, f"aws_lambda_function.{label} declares no environment block"
             assert "local.common_env" in str(environment.get("variables")), (
-                f"aws_lambda_function.{label} does not apply local.common_env to its environment"
+                f"aws_lambda_function.{label} does not build its environment from local.common_env"
             )
 
-    def test_no_function_overrides_the_declared_region(self) -> None:
-        """A per-function extra_env must not shadow AWS_REGION, which would
-        reintroduce the undeclared-region dependency the common env removes."""
-        doc = load_hcl(TF_APP / "modules" / "lambda" / "main.tf")
-        locals_ = doc["locals"][0]
+        injected = set(locals_["common_env"])
+        for collection in ("functions", "trigger_functions"):
+            for spec in locals_.get(collection, {}).values():
+                injected |= set(spec.get("extra_env") or {})
 
-        offenders = [
-            f"{collection}.{name}"
-            for collection in ("functions", "trigger_functions")
-            for name, spec in locals_.get(collection, {}).items()
-            if "AWS_REGION" in (spec.get("extra_env") or {})
-        ]
-        assert offenders == []
+        assert injected.isdisjoint(self.RESERVED_LAMBDA_ENV_KEYS), (
+            f"Lambda reserved environment keys injected into functions: "
+            f"{sorted(injected & self.RESERVED_LAMBDA_ENV_KEYS)}"
+        )
+
+    def test_client_resolves_the_ambient_runtime_region(self) -> None:
+        """Building the client with no explicit region must use the region the
+        execution environment provides (Lambda exports it as AWS_REGION and
+        AWS_DEFAULT_REGION), not a hardcoded or injected value."""
+        script = "import src.handlers.pre_token_generation as m; print(m._cognito_client().meta.region_name)"
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": os.environ.get("HOME", ""),
+            "PYTHONPATH": os.getcwd(),
+            # The region the Lambda runtime exports into the execution environment.
+            "AWS_REGION": "us-west-2",
+            "AWS_DEFAULT_REGION": "us-west-2",
+            # Deny every other region/credentials source so the ambient variables
+            # are the only thing the client can resolve from.
+            "AWS_CONFIG_FILE": os.devnull,
+            "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
+            "AWS_EC2_METADATA_DISABLED": "true",
+        }
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout.strip() == "us-west-2"
