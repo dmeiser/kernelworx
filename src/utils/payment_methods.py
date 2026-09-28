@@ -22,10 +22,12 @@ try:  # pragma: no cover
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
+    from utils.s3 import purge_s3_prefix
 except ModuleNotFoundError:  # pragma: no cover
     from .dynamodb import get_required_env, tables
     from .errors import AppError, ErrorCode
     from .logging import get_logger
+    from .s3 import purge_s3_prefix
 
 
 # Module-level S3 client proxy for testing
@@ -771,7 +773,8 @@ def delete_all_user_qr_codes(account_id: str, logger: Any = None) -> int:
     """Delete all S3 payment QR codes and versions for this account.
 
     Purges all object versions and delete markers under the account's QR code
-    prefixes to completely clean up storage upon account deletion.
+    prefixes to completely clean up storage upon account deletion. Transient
+    S3 errors are retried with exponential backoff via the shared helper.
     """
     bucket_name = os.environ.get("EXPORTS_BUCKET")
     if not bucket_name:
@@ -787,23 +790,7 @@ def delete_all_user_qr_codes(account_id: str, logger: Any = None) -> int:
     deleted_count = 0
     for prefix in set(prefixes):
         try:
-            paginator: Any = s3.get_paginator("list_object_versions")
-            for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-                delete_items: list[Any] = []
-                for version in page.get("Versions", []):
-                    k = version.get("Key")
-                    vid = version.get("VersionId")
-                    if k and vid:
-                        delete_items.append({"Key": k, "VersionId": vid})
-                for marker in page.get("DeleteMarkers", []):
-                    k = marker.get("Key")
-                    vid = marker.get("VersionId")
-                    if k and vid:
-                        delete_items.append({"Key": k, "VersionId": vid})
-                if delete_items:
-                    s3.delete_objects(Bucket=bucket_name, Delete={"Objects": delete_items})
-                    deleted_count += len(delete_items)
-                    log.info(f"Deleted {len(delete_items)} QR code versions from S3 under {prefix}")
+            deleted_count += purge_s3_prefix(s3, bucket_name, prefix, logger=log)
         except Exception as e:
             log.error("Error purging S3 payment QR codes", account_id=account_id, error=str(e), exc_info=True)
             raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to purge payment QR codes from S3") from e

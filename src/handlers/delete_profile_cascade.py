@@ -3,8 +3,6 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List
 
 import boto3
-from botocore.exceptions import ClientError
-from botocore.exceptions import ConnectionError as BotoConnectionError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
@@ -20,11 +18,13 @@ try:  # pragma: no cover
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
     from utils.logging import get_logger
+    from utils.s3 import purge_s3_prefix
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
     from ..utils.logging import get_logger
+    from ..utils.s3 import purge_s3_prefix
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..utils.pagination import query_all_items
@@ -50,23 +50,6 @@ logger = get_logger(__name__)
 
 _PROFILE_LOOKUP_RETRIES = 3
 _PROFILE_LOOKUP_BASE_DELAY_SECONDS = 0.2
-
-# S3 report cleanup retries: bounded attempts with exponential backoff for
-# transient errors only (throttling, timeouts, 5xx). Non-transient failures
-# (AccessDenied, NoSuchBucket, validation) fail immediately.
-_S3_MAX_ATTEMPTS = 3
-_S3_RETRY_BASE_DELAY_SECONDS = 0.5
-_S3_TRANSIENT_ERROR_CODES = frozenset(
-    {
-        "Throttling",
-        "ThrottlingException",
-        "RequestTimeout",
-        "RequestTimeoutException",
-        "SlowDown",
-        "InternalError",
-        "ServiceUnavailable",
-    }
-)
 
 s3_client: Any = None
 
@@ -160,66 +143,6 @@ def _delete_invites(invites: List[Dict[str, Any]]) -> int:
     return batch_delete_keys(tables.invites, keys, ["inviteCode"], logger=logger)
 
 
-def _is_transient_s3_error(exc: Exception) -> bool:
-    """Classify S3 errors: throttling, timeouts, and 5xx responses are transient."""
-    if isinstance(exc, ClientError):
-        code = str(exc.response.get("Error", {}).get("Code", ""))
-        if code in _S3_TRANSIENT_ERROR_CODES:
-            return True
-        http_status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-        return isinstance(http_status, int) and http_status >= 500
-    return isinstance(exc, BotoConnectionError)
-
-
-def _delete_s3_prefix(s3: Any, bucket_name: str, prefix: str) -> int:
-    """Delete all object versions and delete markers under one prefix."""
-    deleted_count = 0
-    paginator = s3.get_paginator("list_object_versions")
-    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-        delete_items: list[dict[str, str]] = []
-        for version in page.get("Versions", []):
-            k = version.get("Key")
-            vid = version.get("VersionId")
-            if k and vid:
-                delete_items.append({"Key": k, "VersionId": vid})
-        for marker in page.get("DeleteMarkers", []):
-            k = marker.get("Key")
-            vid = marker.get("VersionId")
-            if k and vid:
-                delete_items.append({"Key": k, "VersionId": vid})
-        if delete_items:
-            s3.delete_objects(Bucket=bucket_name, Delete={"Objects": delete_items})
-            deleted_count += len(delete_items)
-            logger.info(f"Deleted {len(delete_items)} report versions from S3 under {prefix}")
-    return deleted_count
-
-
-def _delete_s3_prefix_with_retry(s3: Any, bucket_name: str, prefix: str) -> int:
-    """Delete all objects under one prefix, retrying transient errors with backoff.
-
-    A retry restarts the prefix listing; already-deleted versions no longer
-    appear, so the scan is idempotent.
-    """
-    for attempt in range(1, _S3_MAX_ATTEMPTS + 1):
-        try:
-            return _delete_s3_prefix(s3, bucket_name, prefix)
-        except Exception as e:
-            if not _is_transient_s3_error(e):
-                raise
-            if attempt >= _S3_MAX_ATTEMPTS:
-                logger.error(
-                    f"Transient S3 error deleting reports under {prefix} persisted after {attempt} attempts: {str(e)}"
-                )
-                raise
-            delay = _S3_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
-            logger.warning(
-                f"Transient S3 error deleting reports under {prefix} "
-                f"(attempt {attempt}/{_S3_MAX_ATTEMPTS}): {str(e)}. Retrying in {delay:.1f}s"
-            )
-            time.sleep(delay)
-    return 0  # pragma: no cover - the loop always returns or raises
-
-
 def _delete_s3_reports(profile_id: str) -> int:
     """Delete all S3 report objects and versions for this profile.
 
@@ -239,7 +162,7 @@ def _delete_s3_reports(profile_id: str) -> int:
 
     for prefix in set(prefixes):
         try:
-            deleted_count += _delete_s3_prefix_with_retry(s3, bucket_name, prefix)
+            deleted_count += purge_s3_prefix(s3, bucket_name, prefix)
         except Exception as e:
             logger.error(f"Error cleaning up S3 reports under {prefix}: {str(e)}")
             raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to delete S3 reports under {prefix}") from e
