@@ -159,9 +159,11 @@ def batch_get_chunked(
         logger: Structured logger to use; falls back to this module's logger.
 
     Raises:
-        AppError: RESOURCE_BUSY when a throttle survives the retries (throttling
-            ClientError, or keys still unprocessed after the final attempt), so
-            the caller gets a retryable signal; INTERNAL_ERROR otherwise.
+        AppError: RESOURCE_BUSY, the retryable signal, in two cases: a throttling
+            ClientError is translated and raised on the attempt that hit it
+            immediately, and keys still unprocessed after a chunk's final
+            attempt are also reported as RESOURCE_BUSY. Any other BatchGetItem
+            failure is translated to INTERNAL_ERROR.
     """
     if not keys:
         return
