@@ -9,7 +9,6 @@ This ensures that getMyAccount always has data to return, including for
 first-time social sign-ins where trigger timing can differ.
 """
 
-import logging
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -19,15 +18,13 @@ from botocore.exceptions import ClientError
 try:  # pragma: no cover
     from utils.dynamodb import EMAIL_SEARCH_KEY, tables
     from utils.ids import ensure_account_id
-    from utils.logging import mask_email
+    from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import EMAIL_SEARCH_KEY, tables
     from ..utils.ids import ensure_account_id
-    from ..utils.logging import mask_email
+    from ..utils.logging import get_logger, mask_email
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -63,7 +60,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         event: Must return the event unmodified for Cognito to continue
     """
     try:
-        logger.info(f"Account bootstrap trigger invoked: {event.get('triggerSource')}")
+        logger.info("Account bootstrap trigger invoked", trigger_source=event.get("triggerSource"))
 
         # Extract user attributes
         user_attributes = event.get("request", {}).get("userAttributes", {})
@@ -86,7 +83,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Update existing account timestamp; preserve stored email when the trigger
             # omits it (e.g. phone-only or social sign-in), otherwise update it
             # Note: isAdmin is NOT stored in DynamoDB - it comes from JWT cognito:groups claim
-            logger.info(f"Updating existing account: {account_id}")
+            logger.info("Updating existing account", account_id=account_id)
             update_expression = "SET updatedAt = :updated"
             expression_values = {":updated": timestamp}
             if email:
@@ -103,7 +100,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         else:
             # Create new Account record (multi-table design: simpler schema)
             # Note: isAdmin is NOT stored in DynamoDB - it comes from JWT cognito:groups claim
-            logger.info(f"Creating new account: {account_id}")
+            logger.info("Creating new account", account_id=account_id)
 
             account_item = {
                 "accountId": account_id_key,  # PK: ACCOUNT#uuid
@@ -126,10 +123,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     Item=account_item,
                     ConditionExpression="attribute_not_exists(accountId)",
                 )
-                logger.info(f"Account created successfully: {account_id}, email={mask_email(email)}")
+                logger.info("Account created successfully", account_id=account_id, email=mask_email(email))
             except ClientError as e:
                 if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
-                    logger.info(f"Account already exists (concurrent initialization): {account_id}")
+                    logger.info("Account already exists (concurrent initialization)", account_id=account_id)
                 else:
                     raise
 
@@ -137,7 +134,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         return event
 
     except Exception as e:
-        logger.exception(f"Error in post-authentication trigger: {str(e)}")
+        logger.error("Error in post-authentication trigger", error=str(e), exc_info=True)
         # IMPORTANT: Still return event to allow authentication to succeed
         # Don't fail auth because of DynamoDB issues
         return event

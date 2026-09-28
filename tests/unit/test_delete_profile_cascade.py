@@ -17,6 +17,7 @@ from src.handlers.delete_profile_cascade import (
 )
 from src.utils.dynamodb import clear_all_overrides
 from src.utils.errors import AppError, ErrorCode
+from tests.unit.fixtures import accept_batch_deletes
 
 
 @pytest.fixture(autouse=True)
@@ -103,14 +104,6 @@ def _create_order(orders_table: Any, profile_id: str, campaign_id: str, order_id
             "createdAt": datetime.now(timezone.utc).isoformat(),
         }
     )
-
-
-def _make_mock_batch_writer() -> MagicMock:
-    """Create a mock batch_writer context manager."""
-    mock_writer = MagicMock()
-    mock_writer.__enter__ = MagicMock(return_value=mock_writer)
-    mock_writer.__exit__ = MagicMock(return_value=False)
-    return mock_writer
 
 
 class TestDeleteProfileCascade:
@@ -628,8 +621,7 @@ class TestDeleteProfileCascade:
                 ]
             },
         ]
-        mock_writer = _make_mock_batch_writer()
-        mock_table.batch_writer.return_value = mock_writer
+        accept_batch_deletes(mock_table)
 
         with (
             patch("src.handlers.delete_profile_cascade.tables") as mock_tables,
@@ -643,10 +635,17 @@ class TestDeleteProfileCascade:
             mock_tables.invites.query.return_value = {"Items": []}
             mock_tables.campaigns.query.return_value = {"Items": [{"profileId": profile_id, "campaignId": campaign_id}]}
             mock_tables.orders = mock_table
+            accept_batch_deletes(
+                mock_tables.profiles,
+                mock_tables.shares,
+                mock_tables.invites,
+                mock_tables.campaigns,
+            )
 
             # Delete verification helpers use campaign_operations.tables
             mock_campaign_tables.orders.get_item.return_value = {}
             mock_campaign_tables.campaigns.get_item.return_value = {}
+            accept_batch_deletes(mock_campaign_tables.orders, mock_campaign_tables.campaigns)
 
             event = {
                 "arguments": {"profileId": profile_id},
@@ -669,16 +668,6 @@ class TestDeleteProfileCascade:
         profile_id = "PROFILE#batch-error"
         _create_profile(profiles_table, owner_id, profile_id)
 
-        class FailingBatchWriter:
-            def __enter__(self) -> Any:
-                return self
-
-            def __exit__(self, *args: Any) -> None:
-                return None
-
-            def delete_item(self, **kwargs: Any) -> None:
-                raise Exception("Batch write failed")
-
         with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
             mock_tables.profiles.get_item.return_value = {
                 "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
@@ -687,7 +676,8 @@ class TestDeleteProfileCascade:
             mock_tables.shares.query.return_value = {
                 "Items": [{"profileId": profile_id, "targetAccountId": "ACCOUNT#user-1"}]
             }
-            mock_tables.shares.batch_writer.return_value = FailingBatchWriter()
+            accept_batch_deletes(mock_tables.profiles, mock_tables.shares)
+            mock_tables.shares.meta.client.batch_write_item.side_effect = Exception("Batch write failed")
             mock_tables.invites.query.return_value = {"Items": []}
             mock_tables.campaigns.query.return_value = {"Items": []}
             mock_tables.orders.query.return_value = {"Items": []}
@@ -726,7 +716,45 @@ class TestDeleteProfileCascade:
             mock_tables.shares.query.return_value = {
                 "Items": [{"profileId": profile_id, "targetAccountId": "ACCOUNT#user-1"}]
             }
-            mock_tables.shares.batch_writer.side_effect = ClientError(error_response, "BatchWriteItem")
+            mock_tables.shares.meta.client.batch_write_item.side_effect = ClientError(error_response, "BatchWriteItem")
+            mock_tables.invites.query.return_value = {"Items": []}
+            mock_tables.campaigns.query.return_value = {"Items": []}
+            mock_tables.orders.query.return_value = {"Items": []}
+
+            event = {
+                "arguments": {"profileId": profile_id},
+                "identity": {"sub": owner_id},
+            }
+            result = lambda_handler(event, None)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+
+            mock_tables.profiles.delete_item.assert_not_called()
+
+    def test_batch_write_non_throttling_client_error_returns_internal_error(
+        self,
+        profiles_table: Any,
+    ) -> None:
+        """Test that a non-throttling ClientError from batch_writer is surfaced as INTERNAL_ERROR."""
+        owner_id = "owner-123"
+        profile_id = "PROFILE#batch-client-error-internal"
+        _create_profile(profiles_table, owner_id, profile_id)
+
+        error_response = {
+            "Error": {"Code": "ResourceNotFoundException", "Message": "Table not found"},
+            "ResponseMetadata": {"HTTPStatusCode": 400},
+        }
+
+        with patch("src.handlers.delete_profile_cascade.tables") as mock_tables:
+            mock_tables.profiles.get_item.return_value = {
+                "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
+            }
+            mock_tables.profiles.delete_item.return_value = {}
+            mock_tables.shares.query.return_value = {
+                "Items": [{"profileId": profile_id, "targetAccountId": "ACCOUNT#user-1"}]
+            }
+            mock_tables.shares.meta.client.batch_write_item.side_effect = ClientError(error_response, "BatchWriteItem")
             mock_tables.invites.query.return_value = {"Items": []}
             mock_tables.campaigns.query.return_value = {"Items": []}
             mock_tables.orders.query.return_value = {"Items": []}

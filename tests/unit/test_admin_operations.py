@@ -15,7 +15,7 @@ Tests for:
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict
+from typing import Any, Dict, List
 from unittest.mock import MagicMock, call, patch
 
 import boto3
@@ -37,6 +37,17 @@ from src.handlers.admin_operations import (
     lambda_handler,
 )
 from src.utils.errors import AppError, ErrorCode
+from tests.unit.fixtures import accept_batch_deletes
+
+
+def _assert_delete_requests(table: Any, expected_count: int) -> None:
+    """Assert the DeleteRequests sent to this table total ``expected_count`` items."""
+    requests: List[Dict[str, Any]] = []
+    for call_obj in table.meta.client.batch_write_item.call_args_list:
+        sent = call_obj.kwargs["RequestItems"]
+        requests.extend(request for batch in sent.values() for request in batch)
+    assert all("DeleteRequest" in request for request in requests)
+    assert len(requests) == expected_count
 
 
 def get_accounts_table() -> Any:
@@ -1315,12 +1326,12 @@ class TestAdminResetUserPassword:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """An email longer than 254 chars is rejected by the validator (#124)."""
-        from src.handlers.admin_operations import _validate_email_for_filter
+        """An email longer than 254 chars is rejected by the filter formatter (#124)."""
+        from src.utils.cognito_filters import cognito_user_filter
 
         long_email = "a" * 250 + "@b.co"
         with pytest.raises(AppError) as exc_info:
-            _validate_email_for_filter(long_email)
+            cognito_user_filter("email", long_email)
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
@@ -2247,12 +2258,12 @@ class TestAdminDeleteUser:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """A sub longer than 256 chars is rejected by the validator (#124)."""
-        from src.handlers.admin_operations import _validate_sub_for_filter
+        """A sub longer than 256 chars is rejected by the filter formatter (#124)."""
+        from src.utils.cognito_filters import cognito_user_filter
 
         long_sub = "a" * 257
         with pytest.raises(AppError) as exc_info:
-            _validate_sub_for_filter(long_sub)
+            cognito_user_filter("sub", long_sub)
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
@@ -3152,8 +3163,8 @@ class TestAdminDeleteUserOrders:
                 {"Items": [{"campaignId": "campaign-2", "profileId": "profile-2"}]},
             ]
 
-            # Mock orders query - orders for each campaign
-            mock_tables.orders.query.side_effect = [
+            # Mock orders query in campaign_operations (where delete_orders_for_campaign lives)
+            orders_side_effect = [
                 {"Items": [{"orderId": "order-1", "campaignId": "campaign-1"}]},
                 {
                     "Items": [
@@ -3162,6 +3173,11 @@ class TestAdminDeleteUserOrders:
                     ]
                 },
             ]
+            mock_campaign_tables.orders.query.side_effect = orders_side_effect
+            mock_tables.orders.query.side_effect = orders_side_effect
+
+            # BatchWriteItem on campaign_operations.tables.orders
+            accept_batch_deletes(mock_campaign_tables.orders)
 
             # Delete verification helpers use campaign_operations.tables
             mock_campaign_tables.orders.get_item.return_value = {}
@@ -3170,7 +3186,8 @@ class TestAdminDeleteUserOrders:
             result = admin_delete_user_orders(event, lambda_context)
 
             assert result == 3  # 3 orders deleted
-            assert mock_tables.orders.delete_item.call_count == 3
+            assert mock_campaign_tables.orders.meta.client.batch_write_item.call_count == 2
+            _assert_delete_requests(mock_campaign_tables.orders, 3)
 
     def test_success_with_campaign_having_no_orders(
         self,
@@ -3214,10 +3231,14 @@ class TestAdminDeleteUserOrders:
             }
 
             # Mock orders query - first campaign has one order, second has none
-            mock_tables.orders.query.side_effect = [
+            orders_side_effect = [
                 {"Items": [{"orderId": "order-1", "campaignId": "campaign-1"}]},
                 {"Items": []},
             ]
+            mock_campaign_tables.orders.query.side_effect = orders_side_effect
+            mock_tables.orders.query.side_effect = orders_side_effect
+
+            accept_batch_deletes(mock_campaign_tables.orders)
 
             # Delete verification helpers use campaign_operations.tables
             mock_campaign_tables.orders.get_item.return_value = {}
@@ -3226,7 +3247,55 @@ class TestAdminDeleteUserOrders:
             result = admin_delete_user_orders(event, lambda_context)
 
             assert result == 1  # Only 1 order deleted
-            assert mock_tables.orders.delete_item.call_count == 1
+            assert mock_campaign_tables.orders.meta.client.batch_write_item.call_count == 1
+            _assert_delete_requests(mock_campaign_tables.orders, 1)
+
+    def test_throttled_returns_resource_busy(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that throttling during order deletion surfaces as RESOURCE_BUSY."""
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+        monkeypatch.setenv("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-ue1-dev")
+        monkeypatch.setenv("ORDERS_TABLE_NAME", "kernelworx-orders-ue1-dev")
+
+        from botocore.exceptions import ClientError
+
+        from src.handlers.admin_operations import admin_delete_user_orders
+
+        target_account_id = "target-user-123"
+        db_account_id = f"ACCOUNT#{target_account_id}"
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with (
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
+        ):
+            mock_tables.profiles.query.return_value = {
+                "Items": [{"profileId": "profile-1", "ownerAccountId": db_account_id}]
+            }
+            mock_tables.campaigns.query.return_value = {
+                "Items": [{"campaignId": "campaign-1", "profileId": "profile-1"}]
+            }
+            mock_campaign_tables.orders.query.return_value = {
+                "Items": [{"orderId": "order-1", "campaignId": "campaign-1"}]
+            }
+            error_response = {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}}
+            mock_campaign_tables.orders.meta.client.batch_write_item.side_effect = ClientError(
+                error_response, "BatchWriteItem"
+            )
+
+            result = admin_delete_user_orders(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
 
     def test_non_admin_forbidden(
         self,
@@ -3338,10 +3407,53 @@ class TestAdminDeleteUserCampaigns:
             # Delete verification helpers use campaign_operations.tables
             mock_campaign_tables.campaigns.get_item.return_value = {}
 
+            accept_batch_deletes(mock_tables.campaigns)
+
             result = admin_delete_user_campaigns(event, lambda_context)
 
             assert result == 2  # 2 campaigns deleted
-            assert mock_tables.campaigns.delete_item.call_count == 2
+            assert mock_tables.campaigns.meta.client.batch_write_item.call_count == 1
+            _assert_delete_requests(mock_tables.campaigns, 2)
+
+    def test_throttled_returns_resource_busy(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that throttling during campaign deletion surfaces as RESOURCE_BUSY."""
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+        monkeypatch.setenv("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-ue1-dev")
+
+        from botocore.exceptions import ClientError
+
+        from src.handlers.admin_operations import admin_delete_user_campaigns
+
+        target_account_id = "target-user-123"
+        db_account_id = f"ACCOUNT#{target_account_id}"
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.profiles.query.return_value = {
+                "Items": [{"profileId": "profile-1", "ownerAccountId": db_account_id}]
+            }
+            mock_tables.campaigns.query.return_value = {
+                "Items": [{"campaignId": "campaign-1", "profileId": "profile-1"}]
+            }
+            error_response = {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}}
+            mock_tables.campaigns.meta.client.batch_write_item.side_effect = ClientError(
+                error_response, "BatchWriteItem"
+            )
+
+            result = admin_delete_user_campaigns(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
 
     def test_non_admin_forbidden(
         self,
@@ -3380,6 +3492,42 @@ class TestAdminDeleteUserCampaigns:
 
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INVALID_INPUT
+
+    def test_profile_with_no_campaigns_deletes_nothing(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that a profile with no campaigns skips the delete and reports zero.
+
+        Covers the empty ``campaign_keys`` guard: the behavior tests always
+        return items, so without this the False branch is never exercised and a
+        profile that simply has no campaigns is untested.
+        """
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+
+        from src.handlers.admin_operations import admin_delete_user_campaigns
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "target-user-123"},
+        }
+
+        with (
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
+        ):
+            mock_tables.profiles.query.return_value = {
+                "Items": [{"profileId": "profile-1", "ownerAccountId": "ACCOUNT#target-user-123"}]
+            }
+            mock_tables.campaigns.query.return_value = {"Items": []}
+            accept_batch_deletes(mock_tables.campaigns, mock_campaign_tables.campaigns)
+
+            result = admin_delete_user_campaigns(event, lambda_context)
+
+            assert result == 0
+            mock_tables.campaigns.meta.client.batch_write_item.assert_not_called()
 
     def test_unexpected_error_handled(
         self,
@@ -3447,10 +3595,46 @@ class TestAdminDeleteUserShares:
                 ]
             }
 
+            accept_batch_deletes(mock_tables.shares)
+
             result = admin_delete_user_shares(event, lambda_context)
 
             assert result == 2  # 2 shares deleted
-            assert mock_tables.shares.delete_item.call_count == 2
+            assert mock_tables.shares.meta.client.batch_write_item.call_count == 1
+            _assert_delete_requests(mock_tables.shares, 2)
+
+    def test_profile_with_no_shares_deletes_nothing(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that a profile with no shares skips the delete and reports zero.
+
+        Covers the empty ``share_keys`` guard: the behavior tests always return
+        items, so without this the False branch is never exercised and a profile
+        that simply has no shares is untested.
+        """
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+
+        from src.handlers.admin_operations import admin_delete_user_shares
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": "target-user-123"},
+        }
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.profiles.query.return_value = {
+                "Items": [{"profileId": "profile-1", "ownerAccountId": "ACCOUNT#target-user-123"}]
+            }
+            mock_tables.shares.query.return_value = {"Items": []}
+            accept_batch_deletes(mock_tables.shares)
+
+            result = admin_delete_user_shares(event, lambda_context)
+
+            assert result == 0
+            mock_tables.shares.meta.client.batch_write_item.assert_not_called()
 
     def test_non_admin_forbidden(
         self,
@@ -3549,10 +3733,13 @@ class TestAdminDeleteUserProfiles:
                 ]
             }
 
+            accept_batch_deletes(mock_tables.profiles)
+
             result = admin_delete_user_profiles(event, lambda_context)
 
             assert result == 3  # 3 profiles deleted
-            assert mock_tables.profiles.delete_item.call_count == 3
+            assert mock_tables.profiles.meta.client.batch_write_item.call_count == 1
+            _assert_delete_requests(mock_tables.profiles, 3)
 
     def test_non_admin_forbidden(
         self,
@@ -3824,6 +4011,34 @@ class TestAccountDeletionHelpers:
 
         assert count == 1
         assert invites_table.get_item(Key={"inviteCode": invite_code}).get("Item") is None
+
+    def test_delete_invites_for_owned_profiles_with_no_invites(
+        self,
+        dynamodb_table: Any,
+        profiles_table: Any,
+        invites_table: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """No invites are deleted when the profile has zero invites."""
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+        monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
+
+        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+
+        account_id = "owner-account-no-invites"
+        account_id_key = f"ACCOUNT#{account_id}"
+        profile_id = "PROFILE#no-invites"
+
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": account_id_key,
+                "profileId": profile_id,
+                "sellerName": "Test Scout",
+            }
+        )
+
+        count = _delete_invites_for_owned_profiles(account_id, MagicMock())
+        assert count == 0
 
     def test_delete_invites_for_owned_profiles_no_profiles(
         self,
