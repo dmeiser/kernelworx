@@ -60,6 +60,8 @@ checkmarx
 checkpointed
 chipProps
 cityState
+clickjackable
+clickjacking
 clsx
 cmdline
 codegen
