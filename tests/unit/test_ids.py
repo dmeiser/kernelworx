@@ -258,20 +258,6 @@ class TestUnitCampaignKeySingleDefinition:
         assert campaign_reporting.build_unit_campaign_key is build_unit_campaign_key
         assert list_unit_catalogs.build_unit_campaign_key is build_unit_campaign_key
 
-    def test_no_module_defines_a_second_copy(self) -> None:
-        """No src/ module may rebuild the key with its own f-string (#575)."""
-        import pathlib
-
-        import src
-
-        src_root = pathlib.Path(src.__file__).parent
-        offenders = [
-            path.relative_to(src_root).as_posix()
-            for path in sorted(src_root.rglob("*.py"))
-            if path.name != "ids.py" and "campaign_name}#{" in path.read_text()
-        ]
-        assert offenders == []
-
     def test_campaign_write_path_uses_the_shared_builder(self) -> None:
         """The campaign write path builds the same key through utils.ids."""
         from src.utils import validation

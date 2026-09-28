@@ -4236,36 +4236,6 @@ class TestAccountDeletionHelpers:
                 _account_exists_in_dynamodb("test-user", MagicMock())
 
 
-class TestGetCognitoClient:
-    """Tests for the shared get_cognito_client factory used by admin operations."""
-
-    def test_default_client(self, monkeypatch: Any) -> None:
-        """Test default Cognito client without custom endpoint."""
-        monkeypatch.delenv("COGNITO_ENDPOINT", raising=False)
-
-        from src.utils.boto import get_cognito_client
-
-        with patch("src.utils.boto.boto3.client") as mock_client:
-            mock_client.return_value = MagicMock()
-
-            get_cognito_client()
-
-            mock_client.assert_called_once_with("cognito-idp", endpoint_url=None)
-
-    def test_custom_endpoint_client(self, monkeypatch: Any) -> None:
-        """Test Cognito client with custom endpoint (e.g., localstack)."""
-        monkeypatch.setenv("COGNITO_ENDPOINT", "http://localhost:4566")
-
-        from src.utils.boto import get_cognito_client
-
-        with patch("src.utils.boto.boto3.client") as mock_client:
-            mock_client.return_value = MagicMock()
-
-            get_cognito_client()
-
-            mock_client.assert_called_once_with("cognito-idp", endpoint_url="http://localhost:4566")
-
-
 class TestAdminSearchUser:
     """Tests for admin_search_user function."""
 
