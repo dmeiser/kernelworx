@@ -1,6 +1,7 @@
 """Catalogs page object — list, create, edit, and delete product catalogs."""
 
 import re
+import time
 import urllib.parse
 import uuid
 
@@ -39,6 +40,9 @@ class CatalogsPage(BasePage):
     # Table columns / actions
     _VIEW_BTN: str = "View"
     _CATALOG_NAME_HEADER: str = "Catalog Name"
+
+    #: Per-poll row wait before re-issuing the eventually-consistent list query.
+    _ROW_POLL_MS: int = 2_000
 
     # Preview page
     _PREVIEW_CATALOG_NAME_SEL: str = "h5"
@@ -180,16 +184,33 @@ class CatalogsPage(BasePage):
     def has_catalog(self, name: str, timeout: int = 10_000) -> bool:
         """Return ``True`` when a row with the exact catalog name is visible.
 
+        The *My Catalogs* tab is served by ``listMyCatalogs``, which queries the
+        eventually-consistent ``ownerAccountId-index`` GSI. The refetch the page
+        fires straight after a write can therefore return a list that predates
+        the mutation, and waiting on the row alone can never recover from that:
+        nothing re-issues the query while the page sits idle. Each poll is
+        therefore short and followed by a reload, so every attempt is a fresh
+        read against the same budget. A reload returns the page to its default
+        *My Catalogs* tab, which is the only tab this helper is used on.
+
         Args:
             name: Catalog name text to search for.
-            timeout: Maximum wait in milliseconds. Defaults to 10 000.
+            timeout: Maximum total wait in milliseconds. Defaults to 10 000.
         """
         row = self._catalog_row(name)
-        try:
-            row.first.wait_for(state="visible", timeout=timeout)
-        except PlaywrightTimeoutError:
-            return False
-        return True
+        deadline = time.monotonic() + timeout / 1000
+        while True:
+            remaining_ms = int((deadline - time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                return False
+            try:
+                row.first.wait_for(state="visible", timeout=min(remaining_ms, self._ROW_POLL_MS))
+                return True
+            except PlaywrightTimeoutError:
+                if (deadline - time.monotonic()) * 1000 <= self._ROW_POLL_MS:
+                    return False
+                self.page.reload()
+                self.wait_for_loading()
 
     def has_any_catalogs(self) -> bool:
         """Return ``True`` when the current tab lists at least one catalog.
