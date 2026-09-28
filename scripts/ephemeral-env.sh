@@ -149,6 +149,8 @@ case "$ACTION" in
       -t module.appsync.aws_appsync_resolver.create_campaign \
       -t module.appsync.aws_appsync_resolver.update_my_account \
       -t module.appsync.aws_appsync_resolver.list_my_shares \
+      -t module.appsync.aws_appsync_resolver.list_shares_by_profile \
+      -t module.appsync.aws_appsync_resolver.list_invites_by_profile \
       -- -var="environment=$RUN_ID"
 
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"

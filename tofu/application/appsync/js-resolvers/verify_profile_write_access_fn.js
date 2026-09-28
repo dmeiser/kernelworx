@@ -2,8 +2,9 @@ import { util } from '@aws-appsync/utils';
 
 // This code backs TWO aws_appsync_function resources (verify_profile_write_access
 // and verify_profile_write_access_step2 in functions_sharing.tf) that run
-// back-to-back in each write-mutation pipeline so it can perform a two-phase
-// authorization:
+// back-to-back in the six write-mutation pipelines and in the two profile
+// read-list queries (listSharesByProfile / listInvitesByProfile), so it can
+// perform a two-phase authorization:
 //
 //   Step 1: a strongly consistent base-table GetItem keyed
 //           {ownerAccountId: <caller>, profileId}. An item can only live under
@@ -169,6 +170,20 @@ export function response(ctx) {
     // Step 2 response for the non-owner path: ctx.result is the GSI Query.
     const profile = ctx.result && ctx.result.items && ctx.result.items[0];
     if (!profile) {
+        // Read path (#547): listSharesByProfile / listInvitesByProfile answer
+        // with an empty list for a profile that does not exist (or is not yet
+        // projected on the GSI) - never an error, and never a NOT_FOUND
+        // existence oracle. Deny silently so the downstream check_write_permission
+        // and query_shares / query_invites steps fall through to their empty
+        // result, which is the contract these queries had before #547.
+        if (ctx.info && ctx.info.parentTypeName === 'Query') {
+            ctx.stash.isOwner = false;
+            ctx.stash.hasWritePermission = false;
+            ctx.stash.skipGetItem = true;
+            return null;
+        }
+        // Write path: the profile must exist to be mutated, so a missing profile
+        // is a client error rather than a silent skip.
         util.error('Profile not found', 'NOT_FOUND');
     }
 

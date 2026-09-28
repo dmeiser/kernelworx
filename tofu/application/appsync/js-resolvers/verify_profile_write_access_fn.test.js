@@ -1,6 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { request, response } from './verify_profile_write_access_fn.js';
+import * as checkWritePermission from './check_write_permission_fn.js';
+import * as queryShares from './query_shares_fn.js';
+import * as queryInvites from './query_invites_fn.js';
 
 // Shared ctx helpers. Step 1 has stash.isOwner === undefined; step 2 has it
 // set to true/false by the step-1 response.
@@ -281,7 +284,7 @@ describe('verify_profile_write_access_fn for the share/invite query resolvers (#
     function queryCtx(extra = {}) {
         return {
             identity: { sub: 'user-123' },
-            info: { fieldName: 'listSharesByProfile' },
+            info: { fieldName: 'listSharesByProfile', parentTypeName: 'Query' },
             args: { profileId: 'prof-456' },
             stash: {},
             ...extra
@@ -333,5 +336,45 @@ describe('verify_profile_write_access_fn for the share/invite query resolvers (#
         const out = response({ ...ctx, result: null }); // consistent GetItem found nothing
         assert.strictEqual(ctx.stash.isOwner, false);
         assert.strictEqual(out, null);
+    });
+
+    // A profile that does not exist (or is not yet projected on the GSI) must keep
+    // answering with an empty list, as these queries did before #547, instead of a
+    // NOT_FOUND GraphQL error on two non-nullable list fields.
+    function runQueryPipeline(verifierCtx, finalField) {
+        const final = finalField === 'listInvitesByProfile' ? queryInvites : queryShares;
+        const stash = verifierCtx.stash;
+
+        // Step 1: consistent ownership GetItem misses.
+        request(verifierCtx);
+        response({ ...verifierCtx, result: null });
+        // Step 2: GSI locator finds nothing.
+        request(verifierCtx);
+        response({ ...verifierCtx, result: { items: [] } });
+        // check_write_permission + the list step.
+        checkWritePermission.request({ ...verifierCtx, stash });
+        checkWritePermission.response({ ...verifierCtx, stash, result: null });
+        final.request({ ...verifierCtx, stash });
+        return final.response({ ...verifierCtx, stash, result: { items: [] } });
+    }
+
+    for (const fieldName of ['listSharesByProfile', 'listInvitesByProfile']) {
+        it(`${fieldName} answers with an empty list when the profile does not exist`, () => {
+            const ctx = queryCtx({ info: { fieldName, parentTypeName: 'Query' } });
+
+            assert.deepStrictEqual(runQueryPipeline(ctx, fieldName), []);
+        });
+    }
+
+    it('keeps NOT_FOUND on the write path, where the profile must exist to mutate it', () => {
+        const ctx = {
+            identity: { sub: 'user-123' },
+            info: { fieldName: 'updateOrder', parentTypeName: 'Mutation' },
+            args: { input: { profileId: 'prof-456' } },
+            stash: { isOwner: false },
+            result: { items: [] }
+        };
+
+        assert.throws(() => response(ctx), /NOT_FOUND: Profile not found/);
     });
 });
