@@ -71,6 +71,71 @@ class TestBashSyntax:
             assert result.returncode == 0, f"{script.name} failed bash syntax check: {result.stderr}"
 
 
+class TestRunIdValidation:
+    """RUN_ID reaches S3 state keys and -var values, so all three entry
+    points reject anything outside [A-Za-z0-9._-] before any AWS call."""
+
+    INVALID_RUN_IDS = ["../prod", "pr-1/x", "pr 1", "pr-1;rm", ""]
+
+    @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
+    def test_ephemeral_env_rejects_invalid_run_id(
+        self, repo_root: Path, tmp_env: Path, tmp_path: Path, run_id: str
+    ) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        write_mock(tmp_env, "tofu", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        build_dir = tmp_path / "lambda-layer"
+        script = f"""
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
+            scripts/ephemeral-env.sh down {shlex.quote(run_id)}
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode != 0, result.stderr
+        # The empty case is caught by the pre-existing non-empty check.
+        assert "Invalid run-id" in result.stderr or run_id == "", result.stderr
+        assert not recorded.exists(), f"validation must precede any AWS/tofu call: {recorded.read_text()}"
+
+    @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
+    def test_recover_deploy_rejects_invalid_run_id(self, repo_root: Path, tmp_env: Path, run_id: str) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        write_mock(tmp_env, "tofu", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        result = run_bash(repo_root, f"scripts/recover-deploy.sh {shlex.quote(run_id)}")
+        assert result.returncode != 0, result.stderr
+        assert "Invalid run-id" in result.stderr
+        assert not recorded.exists(), f"validation must precede any AWS/tofu call: {recorded.read_text()}"
+
+    @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
+    def test_recover_destroy_rejects_invalid_run_id(self, repo_root: Path, tmp_env: Path, run_id: str) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        write_mock(tmp_env, "tofu", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        result = run_bash(repo_root, f"scripts/recover-destroy.sh {shlex.quote(run_id)}")
+        assert result.returncode != 0, result.stderr
+        assert "Invalid run-id" in result.stderr
+        assert not recorded.exists(), f"validation must precede any AWS/tofu call: {recorded.read_text()}"
+
+    def test_valid_run_id_is_accepted(self, repo_root: Path, tmp_env: Path, tmp_path: Path) -> None:
+        write_mock(tmp_env, "aws", "#!/bin/bash\nexit 0")
+        write_mock(tmp_env, "tofu", "#!/bin/bash\nexit 0")
+        build_dir = tmp_path / "lambda-layer"
+        script = f"""
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
+            scripts/ephemeral-env.sh down pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        assert "Invalid run-id" not in result.stderr
+
+
 class TestCleanupStaleLock:
     def _source_and_call(
         self,
