@@ -12,6 +12,7 @@ Tests for:
 - createManagedCatalog
 """
 
+import contextlib
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -37,6 +38,7 @@ from src.handlers.admin_operations import (
     lambda_handler,
 )
 from src.utils.errors import AppError, ErrorCode
+from src.utils.logging import mask_email
 from tests.unit.fixtures import accept_batch_deletes
 
 
@@ -5366,14 +5368,14 @@ class TestAdminSearchUserThrottling:
         mock_logger = MagicMock()
 
         with pytest.raises(AppError) as exc_info:
-            _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
+            _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "alice@exa", mock_logger)
 
         assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
         assert exc_info.value.message == "Temporarily unable to load data. Please retry."
         mock_logger.warning.assert_called_once()
         log_kwargs = mock_logger.warning.call_args[1]
         assert log_kwargs["error_code"] == error_code
-        assert log_kwargs["query"] == "user@"
+        assert log_kwargs["query"] == "a***@exa"
 
     def test_search_users_in_cognito_by_email_prefix_non_throttling_client_error_returns_empty(self) -> None:
         """Non-throttling ClientError in _search_users_in_cognito_by_email_prefix logs warning and returns []."""
@@ -5384,9 +5386,40 @@ class TestAdminSearchUserThrottling:
         )
         mock_logger = MagicMock()
 
-        result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
+        result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "alice@exa", mock_logger)
         assert result == []
         mock_logger.warning.assert_called_once()
+        log_kwargs = mock_logger.warning.call_args[1]
+        assert log_kwargs["query"] == "a***@exa"
+
+    def test_email_prefix_search_failure_never_logs_the_raw_query(self) -> None:
+        """A partial real email reaching the error path is masked in the log record (#548).
+
+        ``_validate_search_query`` admits a partial-but-real email local part
+        (e.g. ``alice@exa``), so the ``query=`` field of these two error-path
+        warnings carries genuine PII into the ``admin-operations`` log group
+        unless it goes through ``mask_email``.
+        """
+        mock_logger = MagicMock()
+
+        for error_code, raises in (
+            ("TooManyRequestsException", True),
+            ("InternalErrorException", False),
+        ):
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.side_effect = ClientError(
+                {"Error": {"Code": error_code, "Message": "boom"}},
+                "ListUsers",
+            )
+            mock_logger.reset_mock()
+
+            with pytest.raises(AppError) if raises else contextlib.nullcontext():
+                _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "alice@exa", mock_logger)
+
+            mock_logger.warning.assert_called_once()
+            logged = mock_logger.warning.call_args[1]["query"]
+            assert logged == mask_email("alice@exa") == "a***@exa"
+            assert "alice" not in str(logged)
         assert "Cognito email prefix search failed" in mock_logger.warning.call_args[0][0]
 
     def test_search_users_in_cognito_by_email_prefix_genuine_not_found_returns_empty(self) -> None:
