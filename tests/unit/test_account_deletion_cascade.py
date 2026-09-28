@@ -1,4 +1,4 @@
-"""Behavioural checks for the shared account-deletion cascade (#554).
+"""Behavioral checks for the shared account-deletion cascade (#554).
 
 The cascade used to re-paginate the whole profiles table once per sub-cascade
 (six sweeps for one account deletion) because the sub-cascades lived in
@@ -164,7 +164,7 @@ class TestDeleteAllUserDataProfileSweep:
         self, dynamodb_table: Any, recorder: DynamoDbCallRecorder
     ) -> None:
         """Two profiles with orders, shares, and invites still delete, from one profiles Query."""
-        from src.handlers.account_operations import _delete_all_user_data as delete_all_user_data
+        from src.handlers.deletion_cascade import delete_all_user_data
 
         _seed_user_data()
         _seed_s3_data()
@@ -178,11 +178,9 @@ class TestDeleteAllUserDataProfileSweep:
         )
         _assert_everything_deleted()
 
-    def test_delete_all_user_data_preserves_catalogs(
-        self, dynamodb_table: Any, recorder: DynamoDbCallRecorder
-    ) -> None:
+    def test_delete_all_user_data_preserves_catalogs(self, dynamodb_table: Any, recorder: DynamoDbCallRecorder) -> None:
         """Catalogs are preserved per product design and are not swept or deleted."""
-        from src.handlers.account_operations import _delete_all_user_data as delete_all_user_data
+        from src.handlers.deletion_cascade import delete_all_user_data
 
         _seed_user_data()
         _seed_s3_data()
@@ -197,7 +195,7 @@ class TestDeleteAllUserDataProfileSweep:
         self, dynamodb_table: Any, recorder: DynamoDbCallRecorder
     ) -> None:
         """S3 report objects and payment QR codes are purged for every owned profile."""
-        from src.handlers.account_operations import _delete_all_user_data as delete_all_user_data
+        from src.handlers.deletion_cascade import delete_all_user_data
 
         _seed_user_data()
         _seed_s3_data()
@@ -219,10 +217,7 @@ class TestCascadeModuleGraph:
         A cycle would surface here as an ``ImportError`` for a name that is not
         yet defined while the partially initialized module is being executed.
         """
-        script = (
-            f"import {entry_module} as m; "
-            "print(m.__name__)"
-        )
+        script = f"import {entry_module} as m; print(m.__name__)"
         result = subprocess.run(
             [sys.executable, "-c", script],
             capture_output=True,
@@ -236,10 +231,7 @@ class TestCascadeModuleGraph:
 
     def test_deletion_cascade_does_not_import_admin_operations(self) -> None:
         """The cascade must be importable without pulling in the admin handler module."""
-        script = (
-            "import sys, src.handlers.deletion_cascade; "
-            "print('admin_operations' in sys.modules)"
-        )
+        script = "import sys, src.handlers.deletion_cascade; print('admin_operations' in sys.modules)"
         result = subprocess.run(
             [sys.executable, "-c", script],
             capture_output=True,
@@ -254,7 +246,4 @@ class TestCascadeModuleGraph:
 
 def _s3_keys() -> List[str]:
     s3 = boto3.client("s3", region_name="us-east-1")
-    return [
-        obj["Key"]
-        for obj in s3.list_objects_v2(Bucket=os.environ["EXPORTS_BUCKET"]).get("Contents", [])
-    ]
+    return [obj["Key"] for obj in s3.list_objects_v2(Bucket=os.environ["EXPORTS_BUCKET"]).get("Contents", [])]
