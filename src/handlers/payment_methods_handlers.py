@@ -207,7 +207,8 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         PaymentMethod with name and qrCodeUrl (S3 key)
 
     Raises:
-        AppError: If S3 object doesn't exist or update fails
+        AppError: If S3 object doesn't exist, deletion of the replaced QR
+            object fails, or the update fails
     """
     logger = get_logger(__name__)
 
