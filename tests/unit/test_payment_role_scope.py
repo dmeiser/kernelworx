@@ -51,10 +51,11 @@ UPDATE_TABLES = {ACCOUNTS_TABLE}
 ALLOWED_DYNAMODB_ACTIONS = {"GetItem", "Query", "UpdateItem"}
 
 # S3 API operations the #353 role permits, and the only object prefix the role
-# allows. HeadObject is authorized by the s3:GetObject IAM action; PutObject is
+# allows. HeadObject and the ranged GetObject (#559's magic-number check on the
+# uploaded QR bytes) are authorized by the s3:GetObject IAM action; PutObject is
 # also granted (for pre-signed POST uploads) but no handler issues it directly,
 # so it is never recorded here.
-ALLOWED_S3_OPERATIONS = {"HeadObject", "DeleteObject"}
+ALLOWED_S3_OPERATIONS = {"HeadObject", "GetObject", "DeleteObject"}
 ALLOWED_S3_PREFIX = "payment-qr-codes/"
 
 OWNER_SUB = "owner-sub-001"
@@ -63,6 +64,9 @@ PROFILE_ID = "PROFILE#profile-123"
 METHOD_NAME = "Venmo"
 OLD_QR_KEY = f"{ALLOWED_S3_PREFIX}{OWNER_SUB}/old-qr.png"
 NEW_QR_KEY = f"{ALLOWED_S3_PREFIX}{OWNER_SUB}/new-qr.png"
+
+# QR objects must carry the magic numbers of their key's extension (#559).
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"qr-image-bytes"
 
 
 class ApiCallRecorder:
@@ -229,8 +233,8 @@ class TestConfirmQrUploadScope:
     ) -> None:
         seed_account_with_payment_method(accounts_table, qr_code_url=OLD_QR_KEY)
         s3 = exports_bucket()
-        s3.put_object(Bucket=EXPORTS_BUCKET, Key=OLD_QR_KEY, Body=b"old-qr")
-        s3.put_object(Bucket=EXPORTS_BUCKET, Key=NEW_QR_KEY, Body=b"new-qr")
+        s3.put_object(Bucket=EXPORTS_BUCKET, Key=OLD_QR_KEY, Body=PNG_BYTES)
+        s3.put_object(Bucket=EXPORTS_BUCKET, Key=NEW_QR_KEY, Body=PNG_BYTES)
         api_calls.attach()
 
         result = confirm_qr_upload(
@@ -242,8 +246,10 @@ class TestConfirmQrUploadScope:
         )
 
         assert result == {"name": METHOD_NAME, "qrCodeUrl": NEW_QR_KEY}
-        # HeadObject on the new key + DeleteObject on the replaced key.
+        # HeadObject + ranged GetObject on the new key, DeleteObject on the
+        # replaced key.
         assert ("HeadObject", NEW_QR_KEY) in api_calls.s3_calls
+        assert ("GetObject", NEW_QR_KEY) in api_calls.s3_calls
         assert ("DeleteObject", OLD_QR_KEY) in api_calls.s3_calls
         assert ("UpdateItem", ACCOUNTS_TABLE) in api_calls.dynamodb_calls
         assert_within_payment_role_scope(api_calls)
@@ -261,7 +267,7 @@ class TestDeleteQrCodeScope:
     ) -> None:
         seed_account_with_payment_method(accounts_table, qr_code_url=OLD_QR_KEY)
         s3 = exports_bucket()
-        s3.put_object(Bucket=EXPORTS_BUCKET, Key=OLD_QR_KEY, Body=b"old-qr")
+        s3.put_object(Bucket=EXPORTS_BUCKET, Key=OLD_QR_KEY, Body=PNG_BYTES)
         api_calls.attach()
 
         result = delete_qr_code(
@@ -370,7 +376,7 @@ class TestGenerateQrCodePresignedUrlScope:
     ) -> None:
         s3 = exports_bucket()
         slug_key = f"{ALLOWED_S3_PREFIX}{OWNER_SUB}/venmo.png"
-        s3.put_object(Bucket=EXPORTS_BUCKET, Key=slug_key, Body=b"qr")
+        s3.put_object(Bucket=EXPORTS_BUCKET, Key=slug_key, Body=PNG_BYTES)
         api_calls.attach()
 
         result = generate_qr_code_presigned_url(

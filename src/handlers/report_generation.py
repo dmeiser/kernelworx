@@ -9,7 +9,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, Dict, List, cast
+from typing import TYPE_CHECKING, Any, Dict
 
 import boto3
 
@@ -23,14 +23,16 @@ try:  # pragma: no cover
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_campaign_id
     from utils.logging import get_logger
-    from utils.pagination import query_all_items
+    from utils.pagination import query_all_items_iter
+    from utils.report_limits import MAX_CAMPAIGN_REPORT_GRAPH_BYTES, OrderGraphBudget
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
     from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_campaign_id
     from ..utils.logging import get_logger
-    from ..utils.pagination import query_all_items
+    from ..utils.pagination import query_all_items_iter
+    from ..utils.report_limits import MAX_CAMPAIGN_REPORT_GRAPH_BYTES, OrderGraphBudget
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -182,21 +184,32 @@ def _get_campaign(table: Any, campaign_id: str) -> Dict[str, Any] | None:
 
 
 def _get_campaign_orders(table: Any, campaign_id: str) -> list[Dict[str, Any]]:
-    """Get all orders for a campaign (V2: Direct PK query since PK=campaignId)."""
+    """Get all orders for a campaign (V2: Direct PK query since PK=campaignId).
+
+    The report writes one row per order - and for XLSX builds the whole workbook
+    in memory - so a campaign with a very large order graph would exhaust the
+    Lambda's budget instead of returning a report. Orders are streamed and each
+    one is charged to the shared order-graph ceiling as it is read, so the order
+    that would cross it is never collected into the report (#533, #577).
+    """
     # V2 schema: Orders table has PK=campaignId, SK=orderId
     # No GSI needed - direct query on the partition key
-    return cast(
-        List[Dict[str, Any]],
-        query_all_items(
-            table,
-            {
-                "KeyConditionExpression": "campaignId = :campaign_id",
-                "ExpressionAttributeValues": {
-                    ":campaign_id": campaign_id,
-                },
+    budget = OrderGraphBudget("This campaign's", MAX_CAMPAIGN_REPORT_GRAPH_BYTES)
+    orders: list[Dict[str, Any]] = []
+
+    for order in query_all_items_iter(
+        table,
+        {
+            "KeyConditionExpression": "campaignId = :campaign_id",
+            "ExpressionAttributeValues": {
+                ":campaign_id": campaign_id,
             },
-        ),
-    )
+        },
+    ):
+        budget.admit(order)
+        orders.append(order)
+
+    return orders
 
 
 def _format_city_state_zip(address: Dict[str, Any]) -> str:

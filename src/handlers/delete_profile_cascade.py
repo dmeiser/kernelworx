@@ -5,12 +5,13 @@ from typing import TYPE_CHECKING, Any, Dict, List
 import boto3
 from botocore.exceptions import ClientError
 
-if TYPE_CHECKING:  # pragma: no cover
-    from mypy_boto3_dynamodb.service_resource import Table
-
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
-from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_deleted
+from .campaign_operations import (
+    _verify_campaign_deleted,
+    _verify_order_keys_deleted,
+    batch_delete_keys,
+)
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -48,7 +49,6 @@ else:  # pragma: no cover
 
 logger = get_logger(__name__)
 
-BATCH_SIZE = 25
 _PROFILE_LOOKUP_RETRIES = 3
 _PROFILE_LOOKUP_BASE_DELAY_SECONDS = 0.2
 
@@ -61,42 +61,6 @@ def _get_s3_client() -> Any:
     if s3_client is not None:
         return s3_client
     return boto3.client("s3")
-
-
-def _raise_delete_error(table_name: str, exc: Exception) -> None:
-    """Log and re-raise a batch deletion failure as an AppError."""
-    label = "Error" if isinstance(exc, ClientError) else "Unexpected error"
-    logger.error(f"{label} deleting batch from {table_name}: {str(exc)}")
-    raise AppError(
-        ErrorCode.INTERNAL_ERROR,
-        f"Failed to delete batch from {table_name}",
-    ) from exc
-
-
-def _batch_delete_keys(table: "Table", keys: List[Dict[str, Any]], primary_keys: List[str]) -> int:
-    """Delete a list of keys in batches of 25, returning the number deleted.
-
-    Raises:
-        AppError: If any batch cannot be deleted.
-    """
-    if not keys:
-        return 0
-
-    table_name = table.name
-    deleted_count = 0
-
-    for i in range(0, len(keys), BATCH_SIZE):
-        batch = keys[i : i + BATCH_SIZE]
-        try:
-            with table.batch_writer(overwrite_by_pkeys=primary_keys) as batch_writer:
-                for key in batch:
-                    batch_writer.delete_item(Key=key)
-            deleted_count += len(batch)
-            logger.info(f"Deleted batch of {len(batch)} items from {table_name}")
-        except Exception as e:
-            _raise_delete_error(table_name, e)
-
-    return deleted_count
 
 
 def _get_profile_owner_id(profile_id: str, owner_account_id: str) -> str:
@@ -151,7 +115,7 @@ def _collect_order_keys(campaigns: List[Dict[str, Any]]) -> List[Dict[str, str]]
 
 def _delete_orders(order_keys: List[Dict[str, str]]) -> int:
     """Delete all orders for a profile."""
-    return _batch_delete_keys(tables.orders, order_keys, ["campaignId", "orderId"])
+    return batch_delete_keys(tables.orders, order_keys, ["campaignId", "orderId"], logger=logger)
 
 
 def _delete_campaigns(profile_id: str, campaigns: List[Dict[str, Any]]) -> int:
@@ -161,7 +125,7 @@ def _delete_campaigns(profile_id: str, campaigns: List[Dict[str, Any]]) -> int:
         for campaign in campaigns
         if campaign.get("campaignId")
     ]
-    return _batch_delete_keys(tables.campaigns, keys, ["profileId", "campaignId"])
+    return batch_delete_keys(tables.campaigns, keys, ["profileId", "campaignId"], logger=logger)
 
 
 def _delete_shares(profile_id: str, shares: List[Dict[str, Any]]) -> int:
@@ -171,13 +135,13 @@ def _delete_shares(profile_id: str, shares: List[Dict[str, Any]]) -> int:
         for share in shares
         if share.get("targetAccountId")
     ]
-    return _batch_delete_keys(tables.shares, keys, ["profileId", "targetAccountId"])
+    return batch_delete_keys(tables.shares, keys, ["profileId", "targetAccountId"], logger=logger)
 
 
 def _delete_invites(invites: List[Dict[str, Any]]) -> int:
     """Delete all invites for a profile."""
     keys = [{"inviteCode": str(invite["inviteCode"])} for invite in invites if invite.get("inviteCode")]
-    return _batch_delete_keys(tables.invites, keys, ["inviteCode"])
+    return batch_delete_keys(tables.invites, keys, ["inviteCode"], logger=logger)
 
 
 def _delete_s3_reports(profile_id: str) -> int:
