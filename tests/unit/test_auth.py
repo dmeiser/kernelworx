@@ -15,6 +15,7 @@ from src.utils.auth import (
     require_admin_mfa,
     require_profile_access,
 )
+from src.utils.dynamodb import tables
 from src.utils.errors import AppError, ErrorCode
 
 
@@ -1251,6 +1252,112 @@ class TestBatchCheckProfileAccess:
         )
         assert share_request[shares_table_name].get("ConsistentRead") is True
         assert validation_request[profiles_table_name].get("ConsistentRead") is True
+
+    def test_batch_default_drops_missing_profile_while_single_check_raises(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+    ) -> None:
+        """Without raise_on_missing the batch check silently drops a deleted profile.
+
+        This documents the difference from ``check_profile_access``, which raises
+        NOT_FOUND for the very same id; the batch contract only reports existence
+        when the caller opts in with ``raise_on_missing=True``.
+        """
+        missing_profile_id = "PROFILE#batch-dropped-profile"
+
+        with pytest.raises(AppError) as exc_info:
+            check_profile_access(sample_account_id, missing_profile_id)
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+
+        assert batch_check_profile_access(sample_account_id, [missing_profile_id]) == set()
+
+    def test_batch_raise_on_missing_raises_not_found(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+    ) -> None:
+        """raise_on_missing reports profiles that no longer exist, and only those."""
+        other_account_id = "other-account-456"
+        existing_profile_id = "PROFILE#existing-not-shared"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{other_account_id}",
+                "profileId": existing_profile_id,
+                "sellerName": "Not Shared",
+            }
+        )
+        missing_profile_id = "PROFILE#gone-profile"
+
+        with pytest.raises(AppError) as exc_info:
+            batch_check_profile_access(
+                sample_account_id,
+                [sample_profile_id, existing_profile_id, missing_profile_id],
+                raise_on_missing=True,
+            )
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+        assert missing_profile_id in str(exc_info.value)
+        assert existing_profile_id not in str(exc_info.value)
+        assert sample_profile_id not in str(exc_info.value)
+
+    def test_batch_raise_on_missing_keeps_read_share_for_write_request(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        another_account_id: str,
+    ) -> None:
+        """A READ-only share is not a missing profile: it stays absent without raising."""
+        profile_id = "PROFILE#read-only-share"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": profile_id,
+                "sellerName": "Read Only Share",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                "permissions": ["READ"],
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+            }
+        )
+
+        result = batch_check_profile_access(sample_account_id, [profile_id], "WRITE", raise_on_missing=True)
+
+        assert result == set()
+
+    def test_batch_raise_on_missing_skips_existence_check_when_all_accessible(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """No profileId-index lookups happen when every requested profile is accessible."""
+        table = tables.profiles
+        original_query = table.query
+        queries: list[Dict[str, Any]] = []
+
+        def wrapped_query(**kwargs: Any) -> Dict[str, Any]:
+            queries.append(kwargs)
+            return original_query(**kwargs)
+
+        monkeypatch.setattr(table, "query", wrapped_query)
+
+        result = batch_check_profile_access(
+            sample_account_id, [sample_profile_id], raise_on_missing=True
+        )
+
+        assert result == {sample_profile_id}
+        assert queries == []
 
 
 class TestRequireProfileAccess:
