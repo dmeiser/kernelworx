@@ -18,19 +18,24 @@ Returns: [ID!]! (list of catalog IDs)
 """
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Set, Tuple, cast
+from typing import TYPE_CHECKING, Any, Dict, List, Set, Tuple, cast
 
 import aioboto3
-from botocore.exceptions import ClientError
+
+# Sibling handler modules use a same-package relative import, which resolves both
+# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+# admin_operations owns the transient/permanent lookup-error classification (its
+# `_THROTTLING_ERROR_CODES` is the canonical set), so it is imported here rather
+# than redeclared and the two copies cannot drift. One-way: admin_operations does
+# not import this module.
+from .admin_operations import _raise_gather_failures
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.dynamodb import get_required_env
-    from utils.errors import AppError, ErrorCode
     from utils.logging import get_correlation_id, get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import get_required_env
-    from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_correlation_id, get_logger
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -46,49 +51,6 @@ else:  # pragma: no cover
 
 
 logger = get_logger(__name__)
-
-# DynamoDB throttling codes: a per-profile lookup that hits one of them is
-# retryable, so the request is refused with RESOURCE_BUSY instead of a partial
-# answer (#556). Same vocabulary as admin_operations._THROTTLING_ERROR_CODES.
-_THROTTLING_ERROR_CODES = frozenset(
-    {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
-)
-
-
-def _raise_profile_query_error(failures: List[BaseException], total: int, request_logger: Any) -> NoReturn:
-    """Refuse a partial "in use" answer when a per-profile query failed (#556).
-
-    A throttling condition is transient, so it becomes a retryable
-    RESOURCE_BUSY; any other ClientError or unexpected exception is permanent
-    and becomes INTERNAL_ERROR. Never returns: always raises.
-    """
-    context = {"failed": len(failures), "total": total}
-    for failure in failures:
-        if not isinstance(failure, ClientError):
-            continue
-        error_code = failure.response.get("Error", {}).get("Code", "")
-        if error_code not in _THROTTLING_ERROR_CODES:
-            continue
-        request_logger.warning(
-            "listCatalogsInUse: profile campaign query throttled; refusing a partial answer",
-            error=str(failure),
-            error_code=error_code,
-            exc_info=failure,
-            **context,
-        )
-        raise AppError(
-            ErrorCode.RESOURCE_BUSY,
-            "Temporarily unable to list catalogs in use. Please retry.",
-        ) from failure
-
-    first_failure = failures[0]
-    request_logger.error(
-        "listCatalogsInUse: profile campaign query failed; refusing a partial answer",
-        error=str(first_failure),
-        exc_info=first_failure,
-        **context,
-    )
-    raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list catalogs in use") from first_failure
 
 
 async def _extract_field_values(items: list[Dict[str, Any]], field_name: str) -> List[str]:
@@ -186,9 +148,10 @@ async def _async_get_shared_campaign_catalog_ids(
 ) -> Set[str]:
     """Async: Query campaigns for all profiles in parallel.
 
-    A per-profile query failure is raised (see `_raise_profile_query_error`)
-    instead of being logged and discarded, so the caller never treats a
-    silently truncated set as the authoritative "in use" answer.
+    A per-profile query failure is raised (see
+    `admin_operations._raise_gather_failures`) instead of being logged and
+    discarded, so the caller never treats a silently truncated set as the
+    authoritative "in use" answer.
     """
     if not profile_ids:
         return set()
@@ -203,7 +166,14 @@ async def _async_get_shared_campaign_catalog_ids(
     # whole request instead of returning a truncated set (#556).
     failures = [result for result in results if isinstance(result, BaseException)]
     if failures:
-        _raise_profile_query_error(failures, len(results), request_logger)
+        _raise_gather_failures(
+            "list catalogs in use",
+            request_logger,
+            failures,
+            busy_message="Temporarily unable to list catalogs in use. Please retry.",
+            failed=len(failures),
+            total=len(results),
+        )
 
     catalog_ids: Set[str] = set()
     for result in results:

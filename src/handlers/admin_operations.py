@@ -82,27 +82,80 @@ def _get_cognito_client() -> Any:
 
 # DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
 # RESOURCE_BUSY error instead of silently incomplete admin data (#291, #456).
+# This is the canonical transient/permanent split for these lookups: sibling
+# handlers import it (see _raise_gather_failures, used by #556) rather than
+# redeclaring their own copy. Only redeclare a local set when the caller's AWS
+# surface genuinely differs (e.g. the DynamoDB BatchGetItem throttle code).
 _THROTTLING_ERROR_CODES = frozenset(
     {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
 )
 
 
-def _raise_batch_lookup_error(operation: str, logger: Any, error: Exception, **context: Any) -> NoReturn:
+def _throttling_error_code(error: BaseException) -> str:
+    """Return the AWS error code of a ClientError, or "" for anything else.
+
+    The single place the transient/permanent decision is read: a non-ClientError
+    and a ClientError with an unrecognized code both return a value outside
+    `_THROTTLING_ERROR_CODES`, i.e. permanent.
+    """
+    if not isinstance(error, ClientError):
+        return ""
+    return error.response.get("Error", {}).get("Code", "")
+
+
+def _raise_batch_lookup_error(
+    operation: str,
+    logger: Any,
+    error: BaseException,
+    *,
+    throttling_codes: frozenset[str] = _THROTTLING_ERROR_CODES,
+    busy_message: str = "Temporarily unable to load data. Please retry.",
+    **context: Any,
+) -> NoReturn:
     """Translate a failed batch lookup into a typed AppError (#291).
 
     Throttling conditions become a retryable RESOURCE_BUSY so the admin UI can
     show a retry prompt; any other ClientError or unexpected exception becomes
     an INTERNAL_ERROR after an error-level log. Never returns: always raises.
+
+    `throttling_codes` and `busy_message` let a caller reuse the classification
+    with a service-specific code set or user-facing wording.
     """
     if isinstance(error, ClientError):
-        error_code = error.response.get("Error", {}).get("Code", "")
-        if error_code in _THROTTLING_ERROR_CODES:
+        error_code = _throttling_error_code(error)
+        if error_code in throttling_codes:
             logger.warning(f"{operation} throttled", error=str(error), error_code=error_code, **context)
-            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from error
+            raise AppError(ErrorCode.RESOURCE_BUSY, busy_message) from error
         logger.error(f"{operation} failed", error=str(error), error_code=error_code, **context)
         raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to {operation}") from error
     logger.error(f"{operation} failed unexpectedly", error=str(error), **context)
     raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to {operation}") from error
+
+
+def _raise_gather_failures(
+    operation: str,
+    logger: Any,
+    failures: list[BaseException],
+    *,
+    throttling_codes: frozenset[str] = _THROTTLING_ERROR_CODES,
+    busy_message: str = "Temporarily unable to load data. Please retry.",
+    **context: Any,
+) -> NoReturn:
+    """Refuse a partial answer when a parallel gather collected any failure.
+
+    For N per-item lookups run concurrently, where returning the survivors would
+    be an authoritative-looking but incomplete answer (#556). A single transient
+    failure keeps the whole request retryable; otherwise the first failure is
+    reported as permanent. Never returns: always raises.
+    """
+    for failure in failures:
+        if _throttling_error_code(failure) in throttling_codes:
+            _raise_batch_lookup_error(
+                operation, logger, failure, throttling_codes=throttling_codes, busy_message=busy_message, **context
+            )
+    _raise_batch_lookup_error(
+        operation, logger, failures[0], throttling_codes=throttling_codes, busy_message=busy_message, **context
+    )
 
 
 def _batch_get_unprocessed_keys(response: Dict[str, Any], table_name: str) -> list[Dict[str, Any]]:
