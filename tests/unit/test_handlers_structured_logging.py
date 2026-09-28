@@ -14,6 +14,11 @@ and pass after the fix.
 """
 
 import json
+import logging
+import os
+import pathlib
+import subprocess
+import sys
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
@@ -22,14 +27,10 @@ from src.utils.logging import mask_email
 
 
 def _structured_records(capsys: Any) -> List[Dict[str, Any]]:
-    """Parse captured stdout lines that are structured JSON log records.
-
-    Only lines starting with ``{`` (the StructuredLogger output shape) are
-    parsed; any other stdout noise from dependencies is ignored.
-    """
+    """Parse every captured stdout JSON object line as a structured log record."""
     records: List[Dict[str, Any]] = []
     for line in capsys.readouterr().out.splitlines():
-        if line.startswith("{"):
+        if line.strip().startswith("{"):
             records.append(json.loads(line))
     return records
 
@@ -42,6 +43,50 @@ def _assert_structured_records(records: List[Dict[str, Any]]) -> None:
         assert record["level"] in {"INFO", "WARNING", "ERROR", "DEBUG"}
         assert record["message"], "record missing message"
         assert "timestamp" in record
+
+
+# Imports the three triggers in a *fresh* interpreter and reports the root
+# logger's level and handler count afterwards, so the module-scope side effect
+# of importing them is what gets measured (not a level some earlier test left).
+_ROOT_LOGGER_PROBE = """
+import logging
+
+for module in (
+    "src.handlers.pre_signup",
+    "src.handlers.post_authentication",
+    "src.handlers.pre_token_generation",
+):
+    __import__(module)
+
+root = logging.getLogger()
+print(root.level, len(root.handlers))
+"""
+
+
+def test_trigger_imports_leave_the_root_logger_untouched() -> None:
+    """Importing the triggers must not configure the shared root logger.
+
+    Before the fix each trigger module ran ``logging.getLogger().setLevel(INFO)``
+    at import time, silently re-configuring the root logger that every other
+    Lambda function in the project shares. A fresh interpreter starts with the
+    root logger at WARNING and no handlers; importing the triggers must not
+    change that.
+    """
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    env = dict(os.environ, PYTHONPATH=str(repo_root), AWS_DEFAULT_REGION="us-east-1")
+
+    result = subprocess.run(
+        [sys.executable, "-c", _ROOT_LOGGER_PROBE],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+        env=env,
+        check=True,
+    )
+    level, handler_count = result.stdout.strip().split()
+
+    assert int(level) == logging.WARNING, f"importing the triggers reconfigured the root logger to level {level}"
+    assert int(handler_count) == 0, "importing the triggers attached handlers to the root logger"
 
 
 def test_pre_signup_emits_structured_json_records(capsys: Any) -> None:
@@ -94,6 +139,33 @@ def test_pre_signup_native_signup_log_record_has_no_clear_text_email(capsys: Any
         for key, value in record.items():
             if isinstance(value, str):
                 assert email not in value, f"clear-text email leaked in field {key}"
+
+
+def test_pre_signup_invocation_log_never_emits_a_clear_text_email(capsys: Any) -> None:
+    """No field of the native sign-up invocation record may hold the address.
+
+    The user pool uses ``username_attributes = [email]``, so Cognito sets the
+    event's ``userName`` to the sign-up email address; both it and the
+    ``email`` attribute must be masked before they reach CloudWatch.
+    """
+    address = "signer@example.com"
+    event: Dict[str, Any] = {
+        "version": "1",
+        "triggerSource": "PreSignUp_SignUp",
+        "userPoolId": "us-east-1_TEST123",
+        "userName": address,
+        "request": {"userAttributes": {"email": address}},
+        "response": {},
+    }
+
+    assert pre_signup.lambda_handler(event, MagicMock()) is event
+
+    invoked = [r for r in _structured_records(capsys) if r["message"] == "Pre-signup trigger invoked"]
+    assert invoked, "invocation record not emitted"
+    record = invoked[0]
+    assert address not in json.dumps(record), f"clear-text email leaked into log record: {record}"
+    assert record["level"] == "INFO"
+    assert record["correlationId"]
 
 
 def test_post_authentication_emits_structured_json_records(capsys: Any, dynamodb_table: Any) -> None:
