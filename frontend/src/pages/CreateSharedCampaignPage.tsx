@@ -31,6 +31,7 @@ import {
   CREATE_SHARED_CAMPAIGN,
   LIST_MY_SHARED_CAMPAIGNS,
 } from '../lib/graphql';
+import { CampaignYearField } from '../components/CampaignYearField';
 import { StateAutocomplete } from '../components/StateAutocomplete';
 import { PageHeader } from '../components/PageHeader';
 import type { GqlCatalog, GqlSharedCampaign } from '../types';
@@ -182,14 +183,11 @@ const CampaignInfoSection: React.FC<CampaignInfoSectionProps> = ({
           required
           fullWidth
         />
-        <TextField
+        <CampaignYearField
           label="Campaign Year"
-          type="number"
           value={campaignYear}
-          onChange={(e) => onCampaignYearChange(parseInt(e.target.value, 10) || 0)}
-          required
+          onChange={(year) => onCampaignYearChange(year || 0)}
           sx={{ minWidth: { xs: '100%', sm: 150 } }}
-          inputProps={{ min: 2020, max: 2100 }}
         />
       </Stack>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>

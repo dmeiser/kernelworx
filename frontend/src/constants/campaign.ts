@@ -63,3 +63,12 @@ export const US_STATES = [
 ];
 
 export const CAMPAIGN_OPTIONS = ['Fall', 'Spring', 'Summer', 'Winter'];
+
+/**
+ * Bounds for the campaign-year field. The campaign year may not be in the past
+ * before 2020, and not more than five years beyond the current year.
+ */
+export const CAMPAIGN_YEAR_MIN = 2020;
+
+/** Upper bound for the campaign year: five years beyond the current year. */
+export const getCampaignYearMax = (): number => new Date().getFullYear() + 5;
