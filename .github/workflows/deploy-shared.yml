@@ -456,13 +456,12 @@ jobs:
           # recovered from Cognito), and the new secret is exported for the
           # smoke tests below. Local runs refresh it via
           # scripts/create-test-users.sh.
-          # The client must be the tofu-managed KernelWorx-Web app client
-          # (module.cognito.client_id): a `list-user-pool-clients
-          # --max-results 1` fallback returns the first client in pool order,
-          # a separately created one that lacks ALLOW_USER_PASSWORD_AUTH and
-          # fails provisioning with a confusing USER_PASSWORD_AUTH error. When
-          # neither the deploy output nor the name lookup resolves, stop here
-          # instead of guessing (#567).
+          #
+          # Must be the tofu-managed KernelWorx-Web app client
+          # (module.cognito.client_id). Never fall back to
+          # `list-user-pool-clients --max-results 1`: it returns the first
+          # client in pool order and breaks provisioning (#567; see AGENTS.md).
+          # Stop here rather than guessing.
           CLIENT_ID="${{ needs.deploy.outputs.client_id }}"
           if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" = "None" ]; then
             CLIENT_ID=$(aws cognito-idp list-user-pool-clients \

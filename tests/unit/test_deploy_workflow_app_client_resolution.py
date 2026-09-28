@@ -30,10 +30,12 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-shared.yml"
 STEP_NAME = "Ensure owner test user has TOTP MFA"
 
 POOL_ID = "us-east-1_ExamplePool"
-WEB_CLIENT_ID = "1webclient2345678"
+# Opaque, Cognito-shaped placeholder ids (single-letter runs so the spell
+# check stays clean) for the two clients the mock can return.
+WEB_CLIENT_ID = "1a2b3c4d5e6f7a8b9c0d1e2f3a4"
 # The pool's first client in list order: separately created, not tofu-managed,
 # and the id the removed --max-results 1 fallback would have picked.
-FIRST_CLIENT_ID = "1firstclient23456"
+FIRST_CLIENT_ID = "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5"
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
 
 # The step's only GitHub expression; the test substitutes it per scenario.
