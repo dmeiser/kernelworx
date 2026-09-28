@@ -14,7 +14,6 @@ import copy
 import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -30,6 +29,7 @@ from src.handlers.pre_token_generation import (
     _is_federated,
     lambda_handler,
 )
+from tests.unit.test_edge_security import TF_APP, block, first_resource, load_hcl
 
 
 @pytest.fixture
@@ -582,13 +582,53 @@ class TestRegionDeclaredInLambdaEnvironment:
     Regression for issue #578 (IaC half): the trigger's boto3 client must not
     depend on the Lambda runtime's ambient AWS_REGION, so the region is declared
     explicitly on the functions through the module's common environment.
+
+    The lambda module is parsed into a semantic model (python-hcl2) and the
+    contract is asserted on that model: the declared common environment resolves
+    AWS_REGION from a real `aws_region` data source, every aws_lambda_function
+    resource applies that common environment, and no per-function override can
+    shadow the region.
     """
 
-    def test_common_env_declares_aws_region(self) -> None:
-        """The lambda module's common_env (applied to functions and triggers) must
-        set AWS_REGION from the provider's region, not leave it ambient."""
-        module_tf = Path(__file__).resolve().parents[2] / "tofu/application/modules/lambda/main.tf"
-        content = module_tf.read_text()
+    def test_common_env_declares_aws_region_from_a_declared_data_source(self) -> None:
+        """The lambda module's common_env sets AWS_REGION from the provider's region."""
+        doc = load_hcl(TF_APP / "modules" / "lambda" / "main.tf")
 
-        assert 'data "aws_region" "current" {}' in content
-        assert "AWS_REGION = data.aws_region.current.name" in content
+        region_data_sources = {
+            label
+            for entry in doc.get("data", [])
+            for dtype, bodies in entry.items()
+            if dtype == "aws_region"
+            for label in bodies
+        }
+        assert "current" in region_data_sources, "aws_region.current data source is missing"
+
+        common_env = doc["locals"][0]["common_env"]
+        assert common_env.get("AWS_REGION") == "${data.aws_region.current.name}"
+
+    def test_every_lambda_function_applies_the_common_environment(self) -> None:
+        """Both function resources expose common_env to the runtime, so the declared
+        region reaches the pre-token-generation trigger."""
+        doc = load_hcl(TF_APP / "modules" / "lambda" / "main.tf")
+
+        for label in ("functions", "trigger_functions"):
+            body = first_resource(doc, "aws_lambda_function", label)
+            environment = block(body.get("environment"))
+            assert environment, f"aws_lambda_function.{label} declares no environment block"
+            assert "local.common_env" in str(environment.get("variables")), (
+                f"aws_lambda_function.{label} does not apply local.common_env to its environment"
+            )
+
+    def test_no_function_overrides_the_declared_region(self) -> None:
+        """A per-function extra_env must not shadow AWS_REGION, which would
+        reintroduce the undeclared-region dependency the common env removes."""
+        doc = load_hcl(TF_APP / "modules" / "lambda" / "main.tf")
+        locals_ = doc["locals"][0]
+
+        offenders = [
+            f"{collection}.{name}"
+            for collection in ("functions", "trigger_functions")
+            for name, spec in locals_.get(collection, {}).items()
+            if "AWS_REGION" in (spec.get("extra_env") or {})
+        ]
+        assert offenders == []
