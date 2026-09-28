@@ -13,12 +13,14 @@ from botocore.exceptions import ClientError
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.cognito import retry_on_transient_errors
+    from utils.cognito_filters import cognito_user_filter
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.cognito import retry_on_transient_errors
+    from ..utils.cognito_filters import cognito_user_filter
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
@@ -96,13 +98,12 @@ def _delete_all_user_data(account_id: str, logger: Any = None) -> None:
 
 def _lookup_cognito_user_with_retry(cognito: Any, user_pool_id: str, account_id: str) -> str | None:
     """Look up Cognito username by sub with retry for transient errors."""
-    # Validate before interpolating into the Cognito filter to prevent
-    # quote-injection / filter breakage (#124, #441).
-    from .admin_operations import _validate_sub_for_filter
-
-    _validate_sub_for_filter(account_id)
+    # Building the filter validates and quotes the value in one step, so the value that
+    # was checked is the value sent (#124, #441, #560). The transient-fault backoff stays
+    # with the shared retry helper landed in #580.
+    filter_expression = cognito_user_filter("sub", account_id)
     users_response = retry_on_transient_errors(
-        cognito.list_users, UserPoolId=user_pool_id, Filter=f'sub = "{account_id}"', Limit=1
+        cognito.list_users, UserPoolId=user_pool_id, Filter=filter_expression, Limit=1
     )
     users = users_response.get("Users", [])
     if users:
