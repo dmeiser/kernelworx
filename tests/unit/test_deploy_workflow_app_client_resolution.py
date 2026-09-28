@@ -18,9 +18,8 @@ annotation naming the pool.
 from __future__ import annotations
 
 import os
-
 import subprocess
-
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -46,7 +45,7 @@ def _step_run_script() -> str:
     steps = [s for job in workflow["jobs"].values() for s in job["steps"]]
     matches = [s for s in steps if s.get("name") == STEP_NAME]
     assert len(matches) == 1, f"expected exactly one '{STEP_NAME}' step, found {len(matches)}"
-    return matches[0]["run"]
+    return str(matches[0]["run"])
 
 
 # The mock records the exact query each call sent so a test can assert which
@@ -76,8 +75,17 @@ echo "$STUB_TOTP_SECRET"
 """
 
 
+@dataclass(frozen=True)
+class Step:
+    """The workflow step, materialized as a runnable script in a temp dir."""
+
+    script: str
+    bin_dir: Path
+    logs: dict[str, Path]
+
+
 @pytest.fixture
-def step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+def step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Step:
     """Materialize the workflow step as a runnable script in a temp dir."""
     scripts_dir = tmp_path / "scripts"
     scripts_dir.mkdir()
@@ -99,11 +107,11 @@ def step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     monkeypatch.setenv("MOCK_PROVISION_LOG", str(logs["provision"]))
     monkeypatch.setenv("STUB_TOTP_SECRET", TOTP_SECRET)
     monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "github_env"))
-    return {"script": _step_run_script(), "bin_dir": bin_dir, "logs": logs}
+    return Step(script=_step_run_script(), bin_dir=bin_dir, logs=logs)
 
 
-def run_step(step: dict[str, object], tmp_path: Path, client_id: str, **env: str) -> subprocess.CompletedProcess[str]:
-    script = str(step["script"]).replace(CLIENT_ID_EXPRESSION, client_id)  # type: ignore[union-attr]
+def run_step(step: Step, tmp_path: Path, client_id: str, **env: str) -> subprocess.CompletedProcess[str]:
+    script = step.script.replace(CLIENT_ID_EXPRESSION, client_id)
     assert CLIENT_ID_EXPRESSION not in script
     return subprocess.run(
         ["bash", "-c", script],
@@ -113,7 +121,7 @@ def run_step(step: dict[str, object], tmp_path: Path, client_id: str, **env: str
         cwd=tmp_path,
         env={
             **os.environ,
-            "PATH": f"{step['bin_dir']}{os.pathsep}{os.environ['PATH']}",  # type: ignore[operator]
+            "PATH": f"{step.bin_dir}{os.pathsep}{os.environ['PATH']}",
             "TEST_OWNER_EMAIL": "owner@example.com",
             "TEST_OWNER_PASSWORD": "Sup3rSecret-Pa55word",
             "TEST_USER_POOL_ID": POOL_ID,
@@ -123,14 +131,14 @@ def run_step(step: dict[str, object], tmp_path: Path, client_id: str, **env: str
     )
 
 
-def invocations(step: dict[str, object], which: str = "aws") -> list[list[str]]:
-    raw = step["logs"][which].read_bytes()  # type: ignore[index]
+def invocations(step: Step, which: str = "aws") -> list[list[str]]:
+    raw = step.logs[which].read_bytes()
     if not raw:
         return []
-    return [chunk.decode().split("\0")[:-1] for chunk in raw.split(b"\0\0") if chunk]  # type: ignore[union-attr]
+    return [chunk.decode().split("\0")[:-1] for chunk in raw.split(b"\0\0") if chunk]
 
 
-def provisioned_client_id(step: dict[str, object]) -> str:
+def provisioned_client_id(step: Step) -> str:
     """The client id the step handed to provision-user-totp.sh ($2)."""
     calls = invocations(step, "provision")
     assert len(calls) == 1, f"expected one provisioning call, got {calls}"
@@ -138,23 +146,21 @@ def provisioned_client_id(step: dict[str, object]) -> str:
 
 
 class TestClientResolution:
-    def test_deploy_output_is_used_without_any_lookup(self, step: dict[str, object], tmp_path: Path) -> None:
+    def test_deploy_output_is_used_without_any_lookup(self, step: Step, tmp_path: Path) -> None:
         result = run_step(step, tmp_path, WEB_CLIENT_ID)
 
         assert result.returncode == 0, result.stderr
         assert provisioned_client_id(step) == WEB_CLIENT_ID
         assert invocations(step) == [], "the deploy output was available; no lookup was needed"
 
-    def test_name_lookup_resolves_the_web_client(self, step: dict[str, object], tmp_path: Path) -> None:
+    def test_name_lookup_resolves_the_web_client(self, step: Step, tmp_path: Path) -> None:
         result = run_step(step, tmp_path, "")
 
         assert result.returncode == 0, result.stderr
         assert provisioned_client_id(step) == WEB_CLIENT_ID
         assert len(invocations(step)) == 1
 
-    def test_empty_string_deploy_output_falls_back_to_the_name_lookup(
-        self, step: dict[str, object], tmp_path: Path
-    ) -> None:
+    def test_empty_string_deploy_output_falls_back_to_the_name_lookup(self, step: Step, tmp_path: Path) -> None:
         assert run_step(step, tmp_path, "None").returncode == 0
 
         assert provisioned_client_id(step) == WEB_CLIENT_ID
@@ -163,7 +169,7 @@ class TestClientResolution:
 class TestUnresolvableClientFailsLoudly:
     """#567: an unresolvable client must stop the step, never guess one."""
 
-    def test_step_fails_when_no_web_client_exists(self, step: dict[str, object], tmp_path: Path) -> None:
+    def test_step_fails_when_no_web_client_exists(self, step: Step, tmp_path: Path) -> None:
         result = run_step(step, tmp_path, "", WEB_CLIENT_PRESENT="0")
 
         assert result.returncode != 0
@@ -171,7 +177,7 @@ class TestUnresolvableClientFailsLoudly:
         assert POOL_ID in result.stderr
         assert not invocations(step, "provision"), "the step provisioned against an arbitrary client"
 
-    def test_arbitrary_first_client_is_never_probed(self, step: dict[str, object], tmp_path: Path) -> None:
+    def test_arbitrary_first_client_is_never_probed(self, step: Step, tmp_path: Path) -> None:
         """The mock answers the --max-results 1 query with a usable-looking id."""
         result = run_step(step, tmp_path, "", WEB_CLIENT_PRESENT="0")
 
@@ -180,7 +186,7 @@ class TestUnresolvableClientFailsLoudly:
             assert "--max-results" not in invocation, f"the removed guess is back: {invocation}"
             assert "UserPoolClients[0].ClientId" not in " ".join(invocation)
 
-    def test_github_error_annotation_is_emitted(self, step: dict[str, object], tmp_path: Path) -> None:
+    def test_github_error_annotation_is_emitted(self, step: Step, tmp_path: Path) -> None:
         result = run_step(step, tmp_path, "", WEB_CLIENT_PRESENT="0")
 
         assert result.returncode != 0
@@ -188,7 +194,12 @@ class TestUnresolvableClientFailsLoudly:
 
 
 def test_removed_fallback_is_absent_from_the_workflow() -> None:
-    """Static guard so the guessing path cannot reappear unnoticed."""
-    body = _step_run_script()
+    """Static guard so the guessing path cannot reappear unnoticed.
+
+    Comments are excluded: the step explains in prose why the fallback must
+    not come back, and that explanation must not satisfy the guard.
+    """
+    code = [line for line in _step_run_script().splitlines() if not line.lstrip().startswith("#")]
+    body = "\n".join(code)
     assert "--max-results" not in body
     assert "UserPoolClients[0].ClientId" not in body
