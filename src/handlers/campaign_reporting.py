@@ -181,9 +181,10 @@ def _fetch_orders_for_campaigns(campaign_ids: List[str], budget: OrderGraphBudge
     """Read every campaign's order details, running at most ``_ORDER_QUERY_CONCURRENCY`` queries at once.
 
     Campaign ids are fetched in chunks no larger than the concurrency cap, which
-    bounds both the threads and the order details held at once to a single
-    chunk; ``executor.map`` yields each chunk's results in campaign order, so the
-    report is identical to the serial read this replaces.
+    keeps at most that many worker threads alive; ``executor.map`` yields each
+    chunk's results in campaign order, so the report is identical to the serial
+    read this replaces. Every chunk's details are accumulated, so the ceiling on
+    the order graph held for the call is ``budget``, not the chunking.
     """
 
     def fetch(campaign_id: str) -> List[Dict[str, Any]]:

@@ -627,10 +627,7 @@ class TestGetUnitReport:
 
         mock_profiles_table.get_item.side_effect = get_item_side_effect
 
-        mock_orders_table.query.side_effect = [
-            {"Items": sample_orders["CAMPAIGN#campaign1"]},
-            {"Items": sample_orders["CAMPAIGN#campaign2"]},
-        ]
+        mock_orders_table.query.side_effect = _orders_by_campaign_query(sample_orders)
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
