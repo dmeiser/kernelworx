@@ -15,7 +15,7 @@ so stale shares are automatically rejected by subsequent authorization checks.
 """
 
 import os
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -25,14 +25,14 @@ from botocore.exceptions import ClientError
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import has_mfa, is_admin
-    from utils.dynamodb import tables
+    from utils.dynamodb import is_transient_client_error, tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import has_mfa, is_admin
-    from ..utils.dynamodb import tables
+    from ..utils.dynamodb import is_transient_client_error, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
     from ..utils.logging import get_logger
@@ -159,7 +159,25 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
     profile["ownerAccountId"] = db_new_owner_id
 
 
-def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> int:
+class _ShareRepairFailures(NamedTuple):
+    """Counts of shares the repair step could not fix, split by whether a retry helps.
+
+    ``transient`` is an AWS condition that may clear on its own (throttling), so
+    a retry is meaningful. ``permanent`` is a condition that will fail
+    identically forever (a failed ``ConditionExpression`` on a share revoked
+    mid-transfer, a missing table, a denied permission), so the caller must not
+    be invited to retry (#549).
+    """
+
+    transient: int
+    permanent: int
+
+
+_SHARE_REPAIR_RETRYABLE = "Temporarily unable to update profile shares. Please retry."
+_SHARE_REPAIR_PERMANENT = "Failed to update profile shares. Please contact support."
+
+
+def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> _ShareRepairFailures:
     """Update or clean up shares after profile ownership transfer.
 
     - Deletes the share for the new owner (they now own the profile).
@@ -174,12 +192,14 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> i
     (#549) instead of being logged and forgotten.
 
     Returns:
-        The number of shares that could not be updated.
+        The shares that could not be updated, split into transient failures
+        (retrying may help) and permanent ones (retrying cannot help).
 
     Raises:
-        AppError: RESOURCE_BUSY when the share query itself fails, since without
-            it no share can be repaired. Only DynamoDB client errors (throttling,
-            capacity) are translated; anything else is a bug and propagates.
+        AppError: when the share query itself fails, since without it no share can
+            be repaired. A throttled query is a retryable RESOURCE_BUSY; any other
+            client error is INTERNAL_ERROR, and anything that is not a client
+            error at all is a bug and propagates.
     """
     try:
         shares = query_all_items(
@@ -187,15 +207,24 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> i
             {"KeyConditionExpression": Key("profileId").eq(db_profile_id)},
         )
     except ClientError as e:
+        if is_transient_client_error(e):
+            logger.warning(
+                "Share query after ownership transfer throttled",
+                profile_id=db_profile_id,
+                error=str(e),
+                exc_info=True,
+            )
+            raise AppError(ErrorCode.RESOURCE_BUSY, _SHARE_REPAIR_RETRYABLE) from e
         logger.error(
             "Failed to query shares after ownership transfer",
             profile_id=db_profile_id,
             error=str(e),
             exc_info=True,
         )
-        raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to update profile shares. Please retry.") from e
+        raise AppError(ErrorCode.INTERNAL_ERROR, _SHARE_REPAIR_PERMANENT) from e
 
-    failed = 0
+    transient_failures = 0
+    permanent_failures = 0
     for share in shares:
         target_account_id = share.get("targetAccountId")
         if not target_account_id:
@@ -211,15 +240,20 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> i
                     ConditionExpression="attribute_exists(profileId) AND attribute_exists(targetAccountId)",
                 )
         except ClientError as e:
-            failed += 1
+            transient = is_transient_client_error(e)
+            if transient:
+                transient_failures += 1
+            else:
+                permanent_failures += 1
             logger.error(
                 "Failed to update share after ownership transfer",
                 profile_id=db_profile_id,
                 target_account_id=target_account_id,
+                transient=transient,
                 error=str(e),
                 exc_info=True,
             )
-    return failed
+    return _ShareRepairFailures(transient=transient_failures, permanent=permanent_failures)
 
 
 @with_error_handling(error_message="Failed to transfer profile ownership")
@@ -240,17 +274,21 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     _verify_new_owner_has_share(db_profile_id, db_new_owner_id, caller_is_admin)
     _transfer_ownership(profile, db_profile_id, db_new_owner_id)
 
-    failed_shares = _update_shares_after_transfer(db_profile_id, db_new_owner_id)
-    if failed_shares:
+    failures = _update_shares_after_transfer(db_profile_id, db_new_owner_id)
+    if failures.transient or failures.permanent:
         # The transfer itself is already durable and re-running the share repair
-        # is idempotent, so surfacing a retryable error beats returning success
-        # over a share graph that silently locked every collaborator out (#549).
+        # is idempotent, so a surfaced failure beats returning success over a
+        # share graph that silently locked every collaborator out (#549). A
+        # permanent failure is never invited to retry: it would fail identically.
         logger.error(
             "Ownership transfer completed with failed share repairs",
             profile_id=db_profile_id,
             new_owner_account_id=db_new_owner_id,
-            failed_share_count=failed_shares,
+            transient_failure_count=failures.transient,
+            permanent_failure_count=failures.permanent,
         )
-        raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to update profile shares. Please retry.")
+        if failures.transient:
+            raise AppError(ErrorCode.RESOURCE_BUSY, _SHARE_REPAIR_RETRYABLE)
+        raise AppError(ErrorCode.INTERNAL_ERROR, _SHARE_REPAIR_PERMANENT)
 
     return profile

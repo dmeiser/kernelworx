@@ -341,12 +341,47 @@ class TestTransferProfileOwnership:
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
+    def test_permanent_share_query_failure_is_not_reported_as_retryable(
+        self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A denied share query will fail identically forever, so it is reported as a
+        permanent failure rather than the retryable code (#549)."""
+        owner_id = "owner-1"
+        new_owner_id = "new-owner"
+        profile_id = "profile-query-denied"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+        _seed_share(shares_table, profile_id, new_owner_id, owner_id)
+
+        def mock_query_all_items(*args, **kwargs):
+            raise ClientError(
+                {"Error": {"Code": "AccessDeniedException", "Message": "not authorized to perform dynamodb:Query"}},
+                "Query",
+            )
+
+        monkeypatch.setattr(transfer_profile_ownership, "query_all_items", mock_query_all_items)
+
+        event = {
+            "identity": {"sub": owner_id},
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_id,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        assert "retry" not in result["message"].lower()
+
     def test_share_update_failure_surfaces_retryable_resource_busy(
         self, profiles_table: Any, shares_table: Any
     ) -> None:
         """A throttled share update leaves a third-party share recording the deleted old
-        owner, so the transfer must report RESOURCE_BUSY while still repairing the rest
-        of the shares (#549)."""
+        owner, so the transfer must report the retryable RESOURCE_BUSY while still
+        repairing the rest of the shares (#549)."""
         from src.utils import dynamodb as db_module
 
         owner_id = "owner-1"
@@ -389,6 +424,7 @@ class TestTransferProfileOwnership:
         result = lambda_handler(event, None)
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+        assert "retry" in result["message"].lower()
 
         # The new owner's share is still removed, and the failed share is left visibly
         # stale (the old owner's record is gone, so the collaborator is locked out).
@@ -401,9 +437,61 @@ class TestTransferProfileOwnership:
         )
         assert stale_share["Item"]["ownerAccountId"] == f"ACCOUNT#{owner_id}"
 
+    def test_revoked_share_condition_failure_is_not_reported_as_retryable(
+        self, profiles_table: Any, shares_table: Any
+    ) -> None:
+        """A share revoked mid-transfer trips the update's ConditionExpression.
+
+        That condition can never become true again, so the failure is permanent: it
+        must not be reported with the retryable code, whose message would send the
+        client into a pointless retry loop (#549).
+        """
+        from src.utils import dynamodb as db_module
+
+        owner_id = "owner-1"
+        new_owner_id = "new-owner"
+        third_party = "tp-user"
+        profile_id = "profile-revoked-share"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+        _seed_share(shares_table, profile_id, new_owner_id, owner_id)
+        _seed_share(shares_table, profile_id, third_party, owner_id)
+
+        real_update = shares_table.update_item
+        revoked_key = {"profileId": f"PROFILE#{profile_id}", "targetAccountId": f"ACCOUNT#{third_party}"}
+
+        def revoke_then_update(*args: Any, **kwargs: Any) -> Any:
+            if kwargs["Key"] == revoked_key:
+                # The collaborator's share is revoked between the query and the update.
+                shares_table.delete_item(Key=revoked_key)
+            return real_update(*args, **kwargs)
+
+        mock_shares = MagicMock(wraps=shares_table)
+        mock_shares.get_item = shares_table.get_item
+        mock_shares.query = shares_table.query
+        mock_shares.delete_item = shares_table.delete_item
+        mock_shares.update_item.side_effect = revoke_then_update
+
+        db_module._table_overrides["shares"] = mock_shares
+
+        event = {
+            "identity": {"sub": owner_id},
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_id,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        assert "retry" not in result["message"].lower()
+
     def test_update_shares_reports_failure_count_and_is_idempotent(self, shares_table: Any) -> None:
-        """_update_shares_after_transfer returns the number of shares it could not repair
-        and repairs the remainder, so a retry of the step converges (#549)."""
+        """_update_shares_after_transfer reports the shares it could not repair and
+        repairs the remainder, so a retry of the step converges (#549)."""
         from src.utils import dynamodb as db_module
 
         owner_id = "owner-1"
@@ -433,12 +521,13 @@ class TestTransferProfileOwnership:
         mock_shares.update_item.side_effect = flaky_update
         db_module._table_overrides["shares"] = mock_shares
 
-        failed = transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id)
-        assert failed == 1
+        failures = transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id)
+        assert failures.transient == 1
+        assert failures.permanent == 0
 
         # Re-running the step (client retry) repairs the remaining share and reports 0.
         mock_shares.update_item.side_effect = real_update
-        assert transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id) == 0
+        assert transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id) == (0, 0)
 
         share = shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": f"ACCOUNT#{third_party}"})
         assert share["Item"]["ownerAccountId"] == db_new_owner_id

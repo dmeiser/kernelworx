@@ -9,6 +9,7 @@ import os
 from typing import TYPE_CHECKING, Optional
 
 import boto3
+from botocore.exceptions import ClientError
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb import DynamoDBServiceResource
@@ -21,6 +22,20 @@ if TYPE_CHECKING:
 # and are only reachable through a table scan. Written by the Cognito account
 # bootstrap trigger and by the one-off backfill (scripts/backfill_email_search_key.py).
 EMAIL_SEARCH_KEY = "EMAIL"
+
+# AWS conditions that mean the same call may well succeed a moment later. Every
+# other condition (a failed ``ConditionExpression``, a missing table, a denied
+# permission) is permanent: retrying it produces the identical failure, so it
+# must not be reported to the caller as retryable (#549).
+TRANSIENT_ERROR_CODES = frozenset(
+    {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
+)
+
+
+def is_transient_client_error(error: ClientError) -> bool:
+    """Return True when ``error`` is a retryable DynamoDB condition (throttling)."""
+    return error.response.get("Error", {}).get("Code", "") in TRANSIENT_ERROR_CODES
+
 
 # Module-level cache for test overrides
 _table_overrides: dict[str, Optional["Table"]] = {}

@@ -32,13 +32,13 @@ from .campaign_operations import (
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, tables
+    from utils.dynamodb import EMAIL_SEARCH_KEY, TRANSIENT_ERROR_CODES, get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, tables
+    from ..utils.dynamodb import EMAIL_SEARCH_KEY, TRANSIENT_ERROR_CODES, get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
 
@@ -82,9 +82,9 @@ def _get_cognito_client() -> Any:
 
 # DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
 # RESOURCE_BUSY error instead of silently incomplete admin data (#291, #456).
-_THROTTLING_ERROR_CODES = frozenset(
-    {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
-)
+# The set itself is owned by utils.dynamodb, shared with the ownership-transfer
+# share repair (#549).
+_THROTTLING_ERROR_CODES = TRANSIENT_ERROR_CODES
 
 
 def _raise_batch_lookup_error(operation: str, logger: Any, error: Exception, **context: Any) -> NoReturn:
