@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from io import BytesIO
 from typing import Any, Dict
+from unittest.mock import patch
 
 import boto3
 import openpyxl
@@ -15,12 +16,64 @@ import pytest
 
 from src.handlers.report_generation import request_campaign_report
 from src.utils.errors import ErrorCode
+from src.utils.report_limits import OrderGraphBudget, order_graph_bytes
 
 
 def get_orders_table() -> Any:
     """Get orders table for testing."""
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
     return dynamodb.Table("kernelworx-orders-v2-ue1-dev")
+
+
+def _wide_orders(campaign_id: str, count: int, profile_id: str = "PROFILE#test-profile") -> list[Dict[str, Any]]:
+    """Build a run of realistically wide bulk-popcorn orders."""
+    return [
+        {
+            "orderId": f"ORDER#2f1c9d4a-8b3e-4a21-9c77-1f0d5e6a7b8c-{index}",
+            "campaignId": campaign_id,
+            "profileId": profile_id,
+            "customerName": "Alexandra Montgomery-Whitfield",
+            "customerPhone": "+1 (217) 555-0142",
+            "customerAddress": {
+                "street": "1234 Old Country Road Apt 12B",
+                "city": "Springfield",
+                "state": "IL",
+                "zipCode": "62704",
+            },
+            "paymentMethod": "VENMO",
+            "totalAmount": Decimal("3000.00"),
+            "lineItems": [
+                {
+                    "productId": f"PRODUCT#7d9a1c2e-4b3a-4c8d-9e0f-1a2b3c4d5e6f-{item}",
+                    "productName": "White Chocolate Caramel Popcorn (16oz Bucket)",
+                    "quantity": 12,
+                    "pricePerUnit": Decimal("12.50"),
+                    "subtotal": Decimal("150.00"),
+                }
+                for item in range(20)
+            ],
+            "createdAt": "2025-09-15T10:00:00+00:00",
+        }
+        for index in range(count)
+    ]
+
+
+def _ceiling_override(max_bytes: int) -> Any:
+    """Return an ``OrderGraphBudget`` stand-in that enforces a test-sized ceiling."""
+
+    def factory(subject: str, _max_bytes: int) -> OrderGraphBudget:
+        return OrderGraphBudget(subject, max_bytes)
+
+    return factory
+
+
+def _stored_orders(campaign_id: str) -> list[Dict[str, Any]]:
+    """Return a campaign's orders exactly as the handler reads them back from DynamoDB."""
+    response = get_orders_table().query(
+        KeyConditionExpression="campaignId = :campaign_id",
+        ExpressionAttributeValues={":campaign_id": campaign_id},
+    )
+    return list(response["Items"])
 
 
 @pytest.fixture
@@ -636,3 +689,104 @@ class TestSanitizeReportValue:
         assert ws.cell(row=2, column=1).value == "'=cmd|'/C calc'!A0"
         assert ws.cell(row=2, column=2).value == "'+1234567890"
         assert ws.cell(row=2, column=3).value == "'@SUM(A:A)"
+
+
+class TestCampaignReportOrderGraphCeiling:
+    """Tests for the order-graph ceiling on the campaign report path (#533, #577).
+
+    The report holds every order of a campaign at once and builds the whole
+    workbook in memory, so a campaign with a very large order graph would
+    exhaust the Lambda's budget instead of returning a report. The ceiling is
+    measured in the bytes an order serialises to, charged on each order as it is
+    read, and is sized from the memory of the function it runs in rather than
+    from the response quota the unit report is bound by.
+    """
+
+    def test_campaign_over_the_budget_returns_resource_busy(
+        self,
+        dynamodb_table: Any,
+        s3_bucket: Any,
+        sample_profile: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
+        sample_orders: list[Dict[str, Any]],
+        sample_campaign_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """A campaign whose orders exceed the budget fails with a typed RESOURCE_BUSY error."""
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
+        }
+        budget_bytes = sum(order_graph_bytes(order) for order in _stored_orders(sample_campaign_id)) - 1
+
+        with patch("src.handlers.report_generation.OrderGraphBudget", _ceiling_override(budget_bytes)):
+            result = request_campaign_report(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+        assert "too large" in result["message"]
+
+        # Nothing is uploaded when the ceiling is reached.
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name)["KeyCount"] == 0
+
+    def test_campaign_within_the_budget_still_generates_the_report(
+        self,
+        dynamodb_table: Any,
+        s3_bucket: Any,
+        sample_profile: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
+        sample_orders: list[Dict[str, Any]],
+        sample_campaign_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """A campaign whose orders fit the budget still generates its report."""
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "csv"}},
+        }
+        budget_bytes = sum(order_graph_bytes(order) for order in _stored_orders(sample_campaign_id))
+
+        with patch("src.handlers.report_generation.OrderGraphBudget", _ceiling_override(budget_bytes)):
+            result = request_campaign_report(event, lambda_context)
+
+        assert result["status"] == "COMPLETED"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name)["KeyCount"] == 1
+
+    def test_a_realistic_season_exports_under_the_default_ceiling(
+        self,
+        dynamodb_table: Any,
+        s3_bucket: Any,
+        sample_profile: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
+        sample_orders: list[Dict[str, Any]],
+        sample_campaign_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """A realistic full season of wide orders exports with the real ceiling in force.
+
+        150 orders of 20 line items is a large but ordinary season for one
+        campaign, run through the handler with no budget injected, so this is the
+        export that a ceiling sized for the memory it runs in must not break.
+        """
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
+        }
+        self._seed_wide_orders(sample_campaign_id, sample_orders[0]["profileId"], 150)
+
+        result = request_campaign_report(event, lambda_context)
+
+        assert result["status"] == "COMPLETED"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name)["KeyCount"] == 1
+
+    def _seed_wide_orders(self, campaign_id: str, profile_id: str, count: int) -> None:
+        """Insert a run of realistic bulk-popcorn orders into the orders table."""
+        orders_table = get_orders_table()
+        for order in _wide_orders(campaign_id, count, profile_id):
+            orders_table.put_item(Item=order)
