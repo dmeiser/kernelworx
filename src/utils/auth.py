@@ -234,6 +234,39 @@ def _batch_check_owned_profiles(db_profile_ids: list[str], db_caller_id: str) ->
     return owned_db_ids
 
 
+def _validate_share_candidates(candidates: list[tuple[str, Optional[str]]]) -> set[str]:
+    """Return the db_profile_ids whose share still matches the profile's current owner.
+
+    Shares that record their owner are validated against the profile base table
+    with a strongly consistent read. Shares without ``ownerAccountId`` are
+    accepted only after verifying the profile still exists via the eventually
+    consistent GSI; production shares always include this attribute.
+    """
+    profile_keys: list[Dict[str, str]] = []
+    backward_compat_ids: list[str] = []
+    for db_pid, share_owner in candidates:
+        if not share_owner:
+            backward_compat_ids.append(db_pid)
+        else:
+            profile_keys.append({"ownerAccountId": share_owner, "profileId": db_pid})
+
+    valid_db_ids: set[str] = set()
+
+    def _on_profile_item(item: Dict[str, Any]) -> None:
+        db_pid = item.get("profileId")
+        if db_pid:
+            valid_db_ids.add(cast(str, db_pid))
+
+    if profile_keys:
+        _batch_get_all_items(tables.profiles.table_name, profile_keys, _on_profile_item)
+
+    for db_pid in backward_compat_ids:
+        if _profile_exists(tables.profiles, db_pid):
+            valid_db_ids.add(db_pid)
+
+    return valid_db_ids
+
+
 def _batch_check_shared_profiles(remaining_ids: list[str], db_caller_id: str, required_permission: str) -> set[str]:
     """Return the set of db_profile_ids shared with the caller with required permission.
 
@@ -243,99 +276,46 @@ def _batch_check_shared_profiles(remaining_ids: list[str], db_caller_id: str, re
     owner's record no longer exists. Shares without ``ownerAccountId`` are
     accepted only when the profile still exists (verified via the eventually
     consistent GSI); production shares always include this attribute.
+
+    A share that grants less than ``required_permission`` (READ when WRITE was
+    requested) is a permission shortfall rather than an absent profile, so once
+    that share is confirmed to still match its profile the caller gets
+    AppError(FORBIDDEN) naming the profile and the missing permission. A profile
+    the caller is not shared with at all, and a share that no longer validates,
+    stay dropped exactly as before.
     """
-    candidate_shares: list[tuple[str, Optional[str]]] = []
+    granted_shares: list[tuple[str, Optional[str]]] = []
+    insufficient_shares: list[tuple[str, Optional[str]]] = []
     share_keys = [{"profileId": pid, "targetAccountId": db_caller_id} for pid in remaining_ids]
 
     def _on_share_item(share: Dict[str, Any]) -> None:
-        permissions = _normalize_permissions(share.get("permissions", []))
-        if not _has_required_permission(permissions, required_permission):
-            return
         db_pid = share.get("profileId")
-        if db_pid:
-            candidate_shares.append((cast(str, db_pid), share.get("ownerAccountId")))
+        if not db_pid:
+            return
+        candidate = (cast(str, db_pid), share.get("ownerAccountId"))
+        permissions = _normalize_permissions(share.get("permissions", []))
+        if _has_required_permission(permissions, required_permission):
+            granted_shares.append(candidate)
+        else:
+            insufficient_shares.append(candidate)
 
     _batch_get_all_items(tables.shares.table_name, share_keys, _on_share_item)
 
-    if not candidate_shares:
+    if not granted_shares and not insufficient_shares:
         return set()
 
-    # Shares that record their owner are validated against the profile base
-    # table. Shares without ownerAccountId are accepted only after verifying
-    # the profile still exists via the GSI.
-    profile_keys: list[Dict[str, str]] = []
-    valid_shared_db_ids: set[str] = set()
-    backward_compat_ids: list[str] = []
-    for db_pid, share_owner in candidate_shares:
-        if not share_owner:
-            backward_compat_ids.append(db_pid)
-        else:
-            profile_keys.append({"ownerAccountId": share_owner, "profileId": db_pid})
+    valid_db_ids = _validate_share_candidates(granted_shares + insufficient_shares)
 
-    def _on_profile_item(item: Dict[str, Any]) -> None:
-        db_pid = item.get("profileId")
-        if db_pid:
-            valid_shared_db_ids.add(cast(str, db_pid))
-
-    if profile_keys:
-        _batch_get_all_items(tables.profiles.table_name, profile_keys, _on_profile_item)
-
-    for db_pid in backward_compat_ids:
-        if _profile_exists(tables.profiles, db_pid):
-            valid_shared_db_ids.add(db_pid)
-
-    return valid_shared_db_ids
-
-
-def _resolve_existing_profiles(db_profile_ids: list[str]) -> set[str]:
-    """Return the subset of db_profile_ids that still exist.
-
-    Existence by ``profileId`` is only reachable through the ``profileId-index``
-    GSI: the base table is keyed by ``ownerAccountId`` + ``profileId`` and
-    BatchGetItem cannot target a GSI, so an id the caller neither owns nor holds
-    a share for has no key to batch on. This costs one eventually consistent
-    query per id and runs only for ids the caller could not access.
-    """
-    return {db_pid for db_pid in db_profile_ids if _profile_exists(tables.profiles, db_pid)}
-
-
-def _raise_for_insufficient_permission(
-    profile_id_map: Dict[str, str], db_profile_ids: list[str], accessible_db_ids: set[str], required_permission: str
-) -> None:
-    """Raise FORBIDDEN when a requested profile exists but the caller lacks the permission.
-
-    Requested profiles that no longer exist are dropped, never raised: a profile
-    deleted after the caller built its id list must not fail the whole request.
-    Every requested profile that exists yet is not accessible to the caller --
-    not shared, shared with a lesser permission than requested, or held through
-    a share that no longer matches the profile's owner -- is collected into a
-    single FORBIDDEN so a permission shortfall is never indistinguishable from a
-    deleted profile.
-    """
-    unresolved = [db_pid for db_pid in db_profile_ids if db_pid not in accessible_db_ids]
-    if not unresolved:
-        return
-
-    existing = _resolve_existing_profiles(unresolved)
-    denied = [profile_id_map[db_pid] for db_pid in unresolved if db_pid in existing]
-    if denied:
+    # A share that grants less than the required permission is a permission
+    # shortfall, not an absent profile: report it instead of dropping it.
+    denied_db_ids = valid_db_ids.intersection(db_pid for db_pid, _ in insufficient_shares)
+    if denied_db_ids:
         raise AppError(
             ErrorCode.FORBIDDEN,
-            f"You do not have {required_permission} access to these profiles: {', '.join(denied)}",
+            f"You do not have {required_permission} access to {', '.join(sorted(denied_db_ids))}",
         )
 
-
-def _batch_collect_accessible_profiles(
-    db_caller_id: str, db_profile_ids: list[str], required_permission: str
-) -> set[str]:
-    """Return the set of db_profile_ids the caller may access, via batched owner and share lookups."""
-    accessible_db_ids = _batch_check_owned_profiles(db_profile_ids, db_caller_id)
-
-    remaining_ids = list(set(db_profile_ids) - accessible_db_ids)
-    if remaining_ids:
-        accessible_db_ids.update(_batch_check_shared_profiles(remaining_ids, db_caller_id, required_permission))
-
-    return accessible_db_ids
+    return valid_db_ids.intersection(db_pid for db_pid, _ in granted_shares)
 
 
 def batch_check_profile_access(
@@ -353,15 +333,12 @@ def batch_check_profile_access(
     instead of failing the whole request. This is the deliberate difference from
     ``check_profile_access``, which raises NOT_FOUND for a profile that is gone.
 
-    A requested profile that exists but the caller cannot access -- not shared,
-    shared with a lesser permission than ``required_permission``, or reached
-    through a share that no longer matches the profile's owner -- raises
-    FORBIDDEN naming every such profile, so a permission shortfall is never
-    silently reported as an absent profile.
-
-    Telling those two outcomes apart costs one eventually consistent
-    ``profileId-index`` query per id the caller could not access, and no
-    queries at all when every requested profile is accessible.
+    A profile the caller is not shared with at all is likewise absent from the
+    result, so a resolver can report on the subset of a unit the caller can read
+    instead of failing on the rest of the unit. A share that exists but grants
+    less than ``required_permission`` is the one case that is not silent: it
+    raises FORBIDDEN naming the profile and the missing permission, so a
+    permission shortfall is never indistinguishable from a deleted profile.
     """
     required_permission = required_permission.upper()
     db_caller_id = ensure_account_id(caller_account_id)
@@ -372,8 +349,11 @@ def batch_check_profile_access(
         return set()
 
     db_profile_ids = list(profile_id_map.keys())
-    accessible_db_ids = _batch_collect_accessible_profiles(db_caller_id, db_profile_ids, required_permission)
-    _raise_for_insufficient_permission(profile_id_map, db_profile_ids, accessible_db_ids, required_permission)
+    accessible_db_ids = _batch_check_owned_profiles(db_profile_ids, db_caller_id)
+
+    remaining_ids = list(profile_id_map.keys() - accessible_db_ids)
+    if remaining_ids:
+        accessible_db_ids.update(_batch_check_shared_profiles(remaining_ids, db_caller_id, required_permission))
 
     return {profile_id_map[db_pid] for db_pid in (accessible_db_ids & profile_id_map.keys())}
 

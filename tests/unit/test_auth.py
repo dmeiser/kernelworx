@@ -1017,7 +1017,7 @@ class TestBatchCheckProfileAccess:
 
         assert result == set()
 
-    def test_batch_stale_share_after_ownership_transfer_denied(
+    def test_batch_stale_share_after_ownership_transfer_is_dropped(
         self,
         dynamodb_table: Any,
         shares_table: Any,
@@ -1053,11 +1053,10 @@ class TestBatchCheckProfileAccess:
             }
         )
 
-        with pytest.raises(AppError) as exc_info:
-            batch_check_profile_access(another_account_id, [profile_id])
-
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
-        assert profile_id in str(exc_info.value)
+        # The share grants READ, but it no longer matches the profile's owner, so it
+        # is not a permission shortfall against a live share: the profile is simply
+        # absent, exactly as it was before the transfer.
+        assert batch_check_profile_access(another_account_id, [profile_id]) == set()
 
     def test_batch_uses_extra_profile_read_to_validate_shares(
         self,
@@ -1278,7 +1277,7 @@ class TestBatchCheckProfileAccess:
 
         assert result == {sample_profile_id}
 
-    def test_batch_raises_forbidden_for_existing_unshared_profiles(
+    def test_batch_drops_existing_profiles_the_caller_is_not_shared_with(
         self,
         dynamodb_table: Any,
         sample_profile: Any,
@@ -1286,7 +1285,12 @@ class TestBatchCheckProfileAccess:
         sample_account_id: str,
         another_account_id: str,
     ) -> None:
-        """An existing profile the caller cannot read is reported, not silently omitted."""
+        """Another seller's profile is absent, leaving the caller's own profiles readable.
+
+        A profile that exists but is not shared with the caller is deliberately
+        not an error: the unit-reporting callers list a whole unit, and one seller
+        in it must not make the caller's own sellers unreadable.
+        """
         unshared_profile_id = "PROFILE#existing-not-shared"
         dynamodb_table.put_item(
             Item={
@@ -1296,12 +1300,9 @@ class TestBatchCheckProfileAccess:
             }
         )
 
-        with pytest.raises(AppError) as exc_info:
-            batch_check_profile_access(sample_account_id, [sample_profile_id, unshared_profile_id])
+        result = batch_check_profile_access(sample_account_id, [sample_profile_id, unshared_profile_id])
 
-        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
-        assert unshared_profile_id in str(exc_info.value)
-        assert sample_profile_id not in str(exc_info.value)
+        assert result == {sample_profile_id}
 
     def test_batch_raises_forbidden_for_read_share_when_write_requested(
         self,
