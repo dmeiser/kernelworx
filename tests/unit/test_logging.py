@@ -1,8 +1,9 @@
 """Tests for logging utilities."""
 
 import json
+import logging
 from decimal import Decimal
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from src.utils.logging import StructuredLogger, get_correlation_id, mask_email
 
@@ -185,6 +186,34 @@ class TestStructuredLogger:
 
         assert log_entry["level"] == "CUSTOM"
         assert log_entry["message"] == "Custom level message"
+
+    def test_output_reaches_handlers_on_logging_chain(self) -> None:
+        """Test that log records flow through the logging handler chain.
+
+        Regression test: the emitter used to bypass ``logging`` entirely, so
+        handlers added by the platform or other libraries never saw the lines.
+        """
+        logger = StructuredLogger("chain-test", "test-id")
+
+        received: List[logging.LogRecord] = []
+
+        class CaptureHandler(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                received.append(record)
+
+        capture = CaptureHandler()
+        root_logger = logging.getLogger()
+        root_logger.addHandler(capture)
+        try:
+            logger.info("Handler chain message")
+        finally:
+            root_logger.removeHandler(capture)
+
+        assert len(received) == 1
+        assert received[0].levelno == logging.INFO
+        log_entry = json.loads(received[0].getMessage())
+        assert log_entry["message"] == "Handler chain message"
+        assert log_entry["correlationId"] == "test-id"
 
 
 class TestGetCorrelationId:
