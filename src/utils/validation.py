@@ -51,7 +51,7 @@ def validate_unit_number(value: Any, required: bool = False) -> Optional[int]:
         if number < 1:
             raise AppError(ErrorCode.INVALID_INPUT, "unitNumber must be a positive integer")
         return number
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         raise AppError(ErrorCode.INVALID_INPUT, "unitNumber must be a valid integer")
 
 
@@ -266,7 +266,7 @@ def parse_iso_date(date_str: Any) -> datetime:
 
     try:
         dt = datetime.fromisoformat(cleaned)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         raise AppError(ErrorCode.INVALID_INPUT, "Invalid date format for startDate or endDate")
 
     if dt.tzinfo is None:
@@ -469,7 +469,7 @@ class CreateCampaignInput:
             if not val.is_integer():
                 raise ValueError
             return int(val)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             raise AppError(ErrorCode.INVALID_INPUT, "campaign_year must be a valid integer")
 
     def _validate_dates(self) -> None:
@@ -596,7 +596,7 @@ class UpdateCampaignInput:
                 if not val.is_integer():
                     raise ValueError
                 self.campaign_year = int(val)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 raise AppError(ErrorCode.INVALID_INPUT, "campaign_year must be a valid integer")
 
         if self.catalog_id is not None:
