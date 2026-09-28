@@ -3,6 +3,14 @@ GraphQL response builders for Lambda resolvers.
 
 Provides consistent response structures and entity builders for
 AppSync GraphQL resolvers.
+
+The multi-type handlers in this module (e.g. ``except ValueError, TypeError:``)
+are PEP 758 syntax, valid on the pinned Python 3.14 floor. They are a tuple of
+exception types, NOT Python 2's ``except Exception, name:`` catch-and-bind
+form, and do not bind anything. This is also the spelling ``ruff format``
+produces at that target version, so do not add parentheses: the formatter
+strips them, and the file cannot be parsed at all by a 3.13-or-earlier tool.
+See tests/unit/test_except_syntax.py.
 """
 
 from typing import Any, Dict, List, Optional, TypedDict, cast
