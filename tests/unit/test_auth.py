@@ -1352,9 +1352,7 @@ class TestBatchCheckProfileAccess:
 
         monkeypatch.setattr(table, "query", wrapped_query)
 
-        result = batch_check_profile_access(
-            sample_account_id, [sample_profile_id], raise_on_missing=True
-        )
+        result = batch_check_profile_access(sample_account_id, [sample_profile_id], raise_on_missing=True)
 
         assert result == {sample_profile_id}
         assert queries == []

@@ -287,8 +287,60 @@ def _batch_check_shared_profiles(remaining_ids: list[str], db_caller_id: str, re
     return valid_shared_db_ids
 
 
+def _resolve_existing_profiles(db_profile_ids: list[str]) -> set[str]:
+    """Return the subset of db_profile_ids that still exist.
+
+    Existence by ``profileId`` is only reachable through the ``profileId-index``
+    GSI: the base table is keyed by ``ownerAccountId`` + ``profileId`` and
+    BatchGetItem cannot target a GSI, so an id the caller neither owns nor holds
+    a share for has no key to batch on. This costs one eventually consistent
+    query per id and runs only for ids the caller could not access, and only
+    when the caller asked for missing-profile detection.
+    """
+    return {db_pid for db_pid in db_profile_ids if _profile_exists(tables.profiles, db_pid)}
+
+
+def _raise_for_missing_profiles(
+    profile_id_map: Dict[str, str], db_profile_ids: list[str], accessible_db_ids: set[str]
+) -> None:
+    """Raise NOT_FOUND when a requested profile no longer exists.
+
+    Only ids the caller could not access are checked, so this never reveals
+    whether an existing profile is shared with the caller: a profile that exists
+    but is not accessible (for example one shared with READ when WRITE was
+    requested) is left out of the error, exactly as it is left out of the
+    returned set.
+    """
+    unresolved = [db_pid for db_pid in db_profile_ids if db_pid not in accessible_db_ids]
+    if not unresolved:
+        return
+
+    missing = [db_pid for db_pid in unresolved if db_pid not in _resolve_existing_profiles(unresolved)]
+    if missing:
+        raise AppError(
+            ErrorCode.NOT_FOUND,
+            f"Profile not found: {', '.join(profile_id_map[db_pid] for db_pid in missing)}",
+        )
+
+
+def _batch_collect_accessible_profiles(
+    db_caller_id: str, db_profile_ids: list[str], required_permission: str
+) -> set[str]:
+    """Return the set of db_profile_ids the caller may access, via batched owner and share lookups."""
+    accessible_db_ids = _batch_check_owned_profiles(db_profile_ids, db_caller_id)
+
+    remaining_ids = list(set(db_profile_ids) - accessible_db_ids)
+    if remaining_ids:
+        accessible_db_ids.update(_batch_check_shared_profiles(remaining_ids, db_caller_id, required_permission))
+
+    return accessible_db_ids
+
+
 def batch_check_profile_access(
-    caller_account_id: str, profile_ids: list[str], required_permission: str = "READ"
+    caller_account_id: str,
+    profile_ids: list[str],
+    required_permission: str = "READ",
+    raise_on_missing: bool = False,
 ) -> set[str]:
     """
     Check access for multiple profiles using up to three BatchGetItem calls.
@@ -296,6 +348,21 @@ def batch_check_profile_access(
     Returns the set of original profile IDs the caller is allowed to access.
     Owner checks and share checks are batched so a unit with N scouts no longer
     triggers up to 3*N individual DynamoDB reads.
+
+    Unlike ``check_profile_access``, this function cannot tell "does not exist"
+    from "you cannot see it" from the batched owner/share lookups alone: a
+    nonexistent profile, a profile the caller does not own, and a profile shared
+    without the required permission are all simply absent from the returned set.
+    That is the default contract, and it is deliberate for the report paths
+    that resolve a whole unit at once.
+
+    Callers holding a list of profile ids that is expected to resolve (a
+    campaign's or unit campaign's denormalized ``profileId``, for example) can
+    pass ``raise_on_missing=True`` to get the same NOT_FOUND contract as
+    ``check_profile_access``: every requested id that does not exist is reported
+    in one AppError. This costs existence lookups for the ids the caller could
+    not access only, and raises no error for ids that exist but are not
+    accessible to the caller.
     """
     required_permission = required_permission.upper()
     db_caller_id = ensure_account_id(caller_account_id)
@@ -306,11 +373,10 @@ def batch_check_profile_access(
         return set()
 
     db_profile_ids = list(profile_id_map.keys())
-    accessible_db_ids = _batch_check_owned_profiles(db_profile_ids, db_caller_id)
+    accessible_db_ids = _batch_collect_accessible_profiles(db_caller_id, db_profile_ids, required_permission)
 
-    remaining_ids = list(profile_id_map.keys() - accessible_db_ids)
-    if remaining_ids:
-        accessible_db_ids.update(_batch_check_shared_profiles(remaining_ids, db_caller_id, required_permission))
+    if raise_on_missing:
+        _raise_for_missing_profiles(profile_id_map, db_profile_ids, accessible_db_ids)
 
     return {profile_id_map[db_pid] for db_pid in (accessible_db_ids & profile_id_map.keys())}
 
