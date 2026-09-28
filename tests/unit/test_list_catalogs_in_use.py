@@ -504,19 +504,31 @@ class TestAsyncGetSharedCampaignCatalogIds:
         assert result == {"CATALOG#cat1", "CATALOG#cat2", "CATALOG#cat3"}
 
     @pytest.mark.asyncio
-    async def test_handles_query_errors_gracefully(self) -> None:
-        """Should continue processing if one profile query fails."""
+    async def test_raises_resource_busy_when_a_profile_query_fails(self) -> None:
+        """A single failed per-profile query must not be swallowed (#556).
+
+        Regression test for #556: previously a per-profile DynamoDB failure was
+        logged and discarded, so the caller returned the surviving catalogs as
+        the authoritative "in use" answer. Now any failure raises a retryable
+        RESOURCE_BUSY so the request is retried instead of answered incompletely.
+        """
+        import botocore.exceptions
+
         from src.handlers.list_catalogs_in_use import _async_get_shared_campaign_catalog_ids
+        from src.utils.errors import AppError, ErrorCode
 
         call_count = 0
 
         async def mock_query(**kwargs: object) -> Dict[str, List[Dict[str, str]]]:
             nonlocal call_count
             call_count += 1
-            # First call succeeds, second raises an exception
+            # First profile's query succeeds, second profile's query is throttled
             if call_count == 1:
                 return {"Items": [{"catalogId": "CATALOG#cat1"}]}
-            raise Exception("DynamoDB error")
+            raise botocore.exceptions.ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "throttled"}},
+                "Query",
+            )
 
         mock_table = AsyncMock()
         mock_table.query.side_effect = mock_query
@@ -524,12 +536,38 @@ class TestAsyncGetSharedCampaignCatalogIds:
         mock_dynamodb = AsyncMock()
         mock_dynamodb.Table.return_value = mock_table
 
-        result = await _async_get_shared_campaign_catalog_ids(
-            mock_dynamodb, "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2"]
-        )
+        with pytest.raises(AppError) as exc_info:
+            await _async_get_shared_campaign_catalog_ids(
+                mock_dynamodb, "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2"]
+            )
 
-        # Should return results from successful query
-        assert result == {"CATALOG#cat1"}
+        # Refuses the partial answer with the retryable code, preserving the cause
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert "retry" in exc_info.value.message.lower()
+        assert isinstance(exc_info.value.__cause__, botocore.exceptions.ClientError)
+
+    @pytest.mark.asyncio
+    async def test_raises_resource_busy_when_multiple_profile_queries_fail(self) -> None:
+        """Multiple concurrent failures also refuse a partial answer with one AppError."""
+        from src.handlers.list_catalogs_in_use import _async_get_shared_campaign_catalog_ids
+        from src.utils.errors import AppError, ErrorCode
+
+        async def mock_query(**kwargs: object) -> Dict[str, List[Dict[str, str]]]:
+            raise RuntimeError("network blip")
+
+        mock_table = AsyncMock()
+        mock_table.query.side_effect = mock_query
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        with pytest.raises(AppError) as exc_info:
+            await _async_get_shared_campaign_catalog_ids(
+                mock_dynamodb, "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2", "PROFILE#prof3"]
+            )
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
 
     @pytest.mark.asyncio
     async def test_ignores_non_set_non_exception_results(self) -> None:

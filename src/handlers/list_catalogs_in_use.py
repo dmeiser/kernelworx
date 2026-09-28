@@ -25,9 +25,11 @@ import aioboto3
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.dynamodb import get_required_env
+    from utils.errors import AppError, ErrorCode
     from utils.logging import get_correlation_id, get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import get_required_env
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_correlation_id, get_logger
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -138,7 +140,12 @@ async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, t
 async def _async_get_shared_campaign_catalog_ids(
     dynamodb: Any, campaigns_table_name: str, profile_ids: List[str], request_logger: Any = logger
 ) -> Set[str]:
-    """Async: Query campaigns for all profiles in parallel."""
+    """Async: Query campaigns for all profiles in parallel.
+
+    A per-profile query failure is surfaced as a retryable RESOURCE_BUSY
+    AppError (#556) instead of being logged and discarded, so the caller never
+    treats a silently truncated set as the authoritative "in use" answer.
+    """
     if not profile_ids:
         return set()
 
@@ -148,13 +155,26 @@ async def _async_get_shared_campaign_catalog_ids(
     # Run all queries concurrently and collect results
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Combine results, logging any exceptions without failing the overall operation
+    # If any profile query failed we cannot answer authoritatively; fail the
+    # whole request instead of returning a truncated set (#556).
+    failures = [result for result in results if isinstance(result, BaseException)]
+    if failures:
+        request_logger.warning(
+            "listCatalogsInUse: profile campaign query failed; refusing a partial answer",
+            failed=len(failures),
+            total=len(results),
+            exc_info=failures[0],
+        )
+        raise AppError(
+            ErrorCode.RESOURCE_BUSY,
+            "Temporarily unable to list catalogs in use. Please retry.",
+        ) from failures[0]
+
+    # Combine the surviving catalog ID sets
     catalog_ids: Set[str] = set()
     for result in results:
         if isinstance(result, set):
             catalog_ids.update(result)
-        elif isinstance(result, BaseException):
-            request_logger.error("Failed to query campaign catalogs", error=str(result), exc_info=result)
 
     return catalog_ids
 
