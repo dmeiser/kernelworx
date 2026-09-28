@@ -1087,7 +1087,9 @@ class TestDeleteAllUserQRCodes:
         assert "S3 error" not in exc_info.value.message
         mock_logger.error.assert_called()
 
-    def test_delete_all_user_qr_codes_transient_error_then_success(self, monkeypatch: Any, sample_account_id: str) -> None:
+    def test_delete_all_user_qr_codes_transient_error_then_success(
+        self, monkeypatch: Any, sample_account_id: str
+    ) -> None:
         """Regression (#564): a transient throttle during account-deletion QR purge is retried."""
         monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
         sleep_mock = MagicMock()
@@ -1110,7 +1112,9 @@ class TestDeleteAllUserQRCodes:
         sleep_mock.assert_called_once()
         mock_s3.delete_objects.assert_called_once()
 
-    def test_delete_all_user_qr_codes_transient_error_exhausts_retries(self, monkeypatch: Any, sample_account_id: str) -> None:
+    def test_delete_all_user_qr_codes_transient_error_exhausts_retries(
+        self, monkeypatch: Any, sample_account_id: str
+    ) -> None:
         """A persistent transient error still surfaces as AppError after bounded retries."""
         monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
         sleep_mock = MagicMock()
@@ -1128,7 +1132,9 @@ class TestDeleteAllUserQRCodes:
         assert mock_s3.get_paginator.call_count == 3
         assert sleep_mock.call_count == 2
 
-    def test_delete_all_user_qr_codes_non_transient_error_fails_fast(self, monkeypatch: Any, sample_account_id: str) -> None:
+    def test_delete_all_user_qr_codes_non_transient_error_fails_fast(
+        self, monkeypatch: Any, sample_account_id: str
+    ) -> None:
         """A non-transient client error raises AppError without retrying."""
         monkeypatch.setenv("EXPORTS_BUCKET", "test-exports-bucket")
         sleep_mock = MagicMock()
