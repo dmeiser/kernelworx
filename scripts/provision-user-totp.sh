@@ -34,6 +34,8 @@
 # The environment is mode-0400 per process and readable only by same-uid
 # processes, which is the narrowest channel available to a shell script. Do not
 # "simplify" any of this back to a positional argument or --auth-parameters.
+# That rule covers the password only: the pool access token is still passed on
+# argv to associate-software-token and verify-software-token, tracked in #597.
 #
 # Requires: aws CLI, python3 (stdlib only), and IAM permissions for
 # cognito-idp associate-software-token / verify-software-token /
