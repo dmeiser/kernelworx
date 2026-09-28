@@ -342,7 +342,11 @@ def test_transfer_profile_ownership_admin_transfer():
 
 @mock_aws
 def test_transfer_profile_ownership_share_delete_fails():
-    """Test that share deletion failure is handled gracefully."""
+    """An unexpected (non-DynamoDB) failure repairing shares is not swallowed.
+
+    Only client errors are translated into the retryable RESOURCE_BUSY path; a bug
+    raises and surfaces as INTERNAL_ERROR, so the two are distinguishable (#549).
+    """
     from unittest.mock import MagicMock
 
     os.environ["AWS_REGION"] = "us-east-1"
@@ -420,9 +424,9 @@ def test_transfer_profile_ownership_share_delete_fails():
     db_module._table_overrides["shares"] = mock_shares
 
     try:
-        # Should succeed despite share deletion failure
-        updated_profile = transfer_module.lambda_handler(event, None)
-        assert updated_profile["ownerAccountId"] == "ACCOUNT#new456"
+        result = transfer_module.lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == "INTERNAL_ERROR"
     finally:
         # Clean up override
         db_module._table_overrides.pop("shares", None)

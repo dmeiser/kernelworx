@@ -246,7 +246,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # is idempotent, so surfacing a retryable error beats returning success
         # over a share graph that silently locked every collaborator out (#549).
         logger.error(
-            "Ownership transfer completed with unrepaired shares",
+            "Ownership transfer completed with failed share repairs",
             profile_id=db_profile_id,
             new_owner_account_id=db_new_owner_id,
             failed_share_count=failed_shares,
