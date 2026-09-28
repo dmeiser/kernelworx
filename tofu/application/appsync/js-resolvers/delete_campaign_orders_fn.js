@@ -1,11 +1,10 @@
 import { util, runtime } from '@aws-appsync/utils';
 
-// WARNING: this file is loaded via Terraform templatefile() (see
-// modules/appsync/functions_campaigns.tf), so every `${...}` below is
-// Terraform-interpolated, not a JS template literal. `${table_name}` is the
-// only intended placeholder; do NOT add other `${...}` sequences here —
-// Terraform will try to substitute them and the plan will fail or substitute
-// the wrong value. (Switching to file() is deferred per #284.)
+// Loaded via Terraform templatefile() (functions_campaigns.tf): a dollar-brace
+// sequence here is Terraform-interpolated, not JS. In a template/string literal
+// that aborts every plan/apply with "Invalid expression"; ordinary comments are
+// stripped by the esbuild bundle, but are banned too as defense-in-depth.
+// Enforced by tests/unit/check_templatefile_escaping.test.ts (#570).
 const tableName = '${table_name}';
 
 export function request(ctx) {

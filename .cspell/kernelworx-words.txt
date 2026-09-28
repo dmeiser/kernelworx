@@ -131,6 +131,7 @@ fullname
 fromisoformat
 fullWidth
 getfail
+getsizeof
 getters
 GEZDGNBVGY
 giftcard
@@ -202,8 +203,13 @@ localStorage
 lockup
 lookup
 mailto
+Maïs
 manageScout
 marketing
+materialise
+materialised
+materialises
+materialisation
 maxLength
 md5
 meiser
@@ -242,6 +248,7 @@ noreferrer
 nosniff
 nosuchkey
 noto
+Ñuñez
 octokit
 officedocument
 oklch
@@ -326,6 +333,9 @@ segoe
 Seller
 sendgrid
 serializers
+serialise
+serialised
+serialises
 serverless
 setState
 shareable
@@ -339,6 +349,7 @@ Signin
 signout
 Signup
 signups
+Škoda
 singleline
 slowmo
 slugification
@@ -406,6 +417,7 @@ unmount
 unoptimized
 unpadded
 unparsed
+unqueryable
 unregister
 unsets
 unshare
