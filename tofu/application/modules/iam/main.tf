@@ -315,13 +315,12 @@ resource "aws_iam_role_policy" "lambda_campaign_dynamodb" {
 # Second scoped per-domain execution role, reusing the wiring pattern #351
 # established (the lambda module's lambda_domain_role_arns map). Assigned to
 # the profile/sharing-domain handlers:
-#   - list-my-shares       (handlers/profile_sharing.py)
 #   - transfer-ownership   (handlers/transfer_profile_ownership.py)
 #   - delete-profile-cascade (handlers/delete_profile_cascade.py)
+# list-my-shares was removed in #371; listMyShares is served by the
+# batch_get_shared_profiles AppSync JS pipeline.
 #
 # DynamoDB scope was verified against the handler source:
-#   - list-my-shares:  Query on shares targetAccountId-index, BatchGetItem on
-#     profiles. Read-only.
 #   - transfer-ownership: Query on profiles profileId-index; TransactWriteItems
 #     (Delete+Put) on profiles; GetItem/Query/UpdateItem/DeleteItem on shares.
 #     is_admin() reads only the JWT claims, not DynamoDB.
@@ -333,8 +332,8 @@ resource "aws_iam_role_policy" "lambda_campaign_dynamodb" {
 #
 # S3 scope: delete-profile-cascade purges report exports under
 # reports/<profileId>/ in the exports bucket (ListBucketVersions +
-# DeleteObject/DeleteObjectVersion on that prefix only). The other two
-# handlers do not touch S3. No CloudFront or Cognito permissions.
+# DeleteObject/DeleteObjectVersion on that prefix only). The other handler
+# does not touch S3. No CloudFront or Cognito permissions.
 # The monolithic shared role was retired in #355 (chunk 5), the final chunk of
 # the #326 split.
 
@@ -841,7 +840,7 @@ output "lambda_payment_execution_role_arn" {
 }
 
 output "lambda_profile_sharing_execution_role_arn" {
-  description = "ARN of the scoped Lambda execution role for the profile/sharing domain (list-my-shares, transfer-ownership, delete-profile-cascade). Chunk 2 of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
+  description = "ARN of the scoped Lambda execution role for the profile/sharing domain (transfer-ownership, delete-profile-cascade). Chunk 2 of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
   value       = aws_iam_role.lambda_profile_sharing_execution.arn
 }
 
