@@ -3,7 +3,6 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List
 
 import boto3
-from botocore.exceptions import ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
