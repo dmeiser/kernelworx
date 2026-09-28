@@ -88,6 +88,20 @@ validate_unit_fields(unit_type, unit_number, city, state)
 
 All validation functions raise `AppError` with `ErrorCode.INVALID_INPUT` on failure.
 
+#### Cognito user filters (`src/utils/cognito_filters.py`)
+
+Cognito's `ListUsers` `Filter` is a string-interpolated query language, so never hand-write one. Build every user filter with the shared formatter, which validates the value and returns the finished expression:
+
+```python
+from utils.cognito_filters import cognito_user_filter
+
+cognito.list_users(UserPoolId=pool_id, Filter=cognito_user_filter("sub", account_id), Limit=1)
+cognito.list_users(UserPoolId=pool_id, Filter=cognito_user_filter("email_prefix", query), Limit=50)
+cognito.list_users(UserPoolId=pool_id, Filter=cognito_user_filter("email", email, email_shape="strict"), Limit=1)
+```
+
+Fields are `sub`, `email`, and `email_prefix` (`email ^=`, starts-with); `email_shape` is `loose` (default) or `strict` and only applies to `email`. See the module docstring for the rules and `tests/unit/test_cognito_filter_call_sites.py` for the call-site table.
+
 #### DynamoDB Utilities (`src/utils/dynamodb.py`)
 
 Use the centralized `tables` singleton for table access:

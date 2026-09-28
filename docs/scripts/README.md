@@ -86,8 +86,10 @@ email quota (#483); its credentials are exported as `TEST_SMOKE_EMAIL`/`TEST_SMO
 
 **Key flags/arguments:**
 
-- `<run-id>` — Required run identifier.
+- `<run-id>` — Required run identifier; must match `[A-Za-z0-9._-]+` or the script
+  exits before any Cognito call.
 - `<user-pool-id>` — Required Cognito User Pool ID.
+- `<client-id>` — Required App Client ID.
 
 ### `scripts/create-screenshot-user.sh`
 

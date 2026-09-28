@@ -136,6 +136,38 @@ class TestRunIdValidation:
         assert "Invalid run-id" not in result.stderr
 
 
+class TestCreateEphemeralTestUsersRunIdValidation:
+    """The test-user script takes the run-id from the same workflow inputs as
+    the state-touching ephemeral entry points, so it rejects anything outside
+    [A-Za-z0-9._-] before the first Cognito call (#583)."""
+
+    INVALID_RUN_IDS = ["pr-1/../x", "../prod", "pr 1", "pr-1;rm", "owner@evil.test", ""]
+
+    def _run(self, repo_root: Path, tmp_env: Path, run_id: str) -> subprocess.CompletedProcess[str]:
+        recorded = tmp_env / "aws_calls.txt"
+        write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        # provision-user-totp.sh waits for the next TOTP window; skip the wait.
+        write_mock(tmp_env, "sleep", "#!/bin/bash\nexit 0")
+        return run_bash(
+            repo_root,
+            f"scripts/create-ephemeral-test-users.sh {shlex.quote(run_id)} pool-123 client-456",
+        )
+
+    @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
+    def test_invalid_run_id_rejected_before_any_aws_call(self, repo_root: Path, tmp_env: Path, run_id: str) -> None:
+        result = self._run(repo_root, tmp_env, run_id)
+        assert result.returncode != 0, result.stderr
+        recorded = tmp_env / "aws_calls.txt"
+        assert not recorded.exists(), f"validation must precede any Cognito call: {recorded.read_text()}"
+
+    def test_valid_run_id_creates_scoped_test_users(self, repo_root: Path, tmp_env: Path) -> None:
+        result = self._run(repo_root, tmp_env, "pr-999")
+        assert result.returncode == 0, result.stderr
+        calls = (tmp_env / "aws_calls.txt").read_text()
+        for suffix in ("owner", "contributor", "readonly", "smoke"):
+            assert f"pr-999-{suffix}@kernelworx.test" in calls
+
+
 class TestCleanupStaleLock:
     def _source_and_call(
         self,
