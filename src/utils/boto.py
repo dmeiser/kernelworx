@@ -1,10 +1,17 @@
 """
 Centralized boto3 client factories with endpoint-override validation (#523, #575).
 
-Single construction path for AWS service clients so retry/botocore config
-or endpoint handling changes once, in one reviewed place. Endpoint
-overrides (S3_ENDPOINT, COGNITO_ENDPOINT) are validated here rather than
-at each call site: a set value must be an http(s) URL with a host.
+The single construction path for the S3 and admin-Cognito clients that #575
+consolidated, so retry/botocore config or endpoint handling changes once, in
+one reviewed place. Endpoint overrides (S3_ENDPOINT, COGNITO_ENDPOINT) are
+validated here rather than at each call site: a set value must be an http(s)
+URL with a host.
+
+The pre-token-generation trigger builds its Cognito client once at module scope
+on purpose (warm-start connection reuse, #458), and the account-deletion and
+pre-signup handlers construct their own per-call Cognito clients, so those
+three sites are not routed through here. The DYNAMODB_ENDPOINT override
+remains unvalidated (#523).
 """
 
 import os

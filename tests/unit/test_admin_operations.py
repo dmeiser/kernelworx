@@ -736,6 +736,11 @@ class TestAdminListUsers:
 
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        # #575: USER_POOL_ID is read through the canonical
+        # utils.dynamodb.get_required_env, which raises ValueError; the
+        # decorator maps that to the generic admin-operation message, and the
+        # variable name reaches the Lambda log rather than the client.
+        assert "USER_POOL_ID" not in result["message"]
 
     def test_cognito_list_users_error(
         self,
