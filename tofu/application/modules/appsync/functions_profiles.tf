@@ -185,12 +185,13 @@ resource "aws_appsync_function" "batch_latest_campaigns" {
     runtime_version = "1.0.0"
   }
 
-  # WARNING: templatefile() interpolates every `${...}` sequence in the source as a
-  # Terraform variable reference. The bundled source keeps only the intended
-  # `${campaigns_table_name}` placeholder; any JS template literal added to the
-  # source will either fail the plan or be silently substituted. Do not add
-  # `${...}` to the source without also switching this to file() (#284 defers
-  # that switch).
+  # templatefile() reads the esbuild bundle in appsync/dist/, which strips
+  # ordinary comments, so a dollar-brace sequence that survives bundling is
+  # interpolated as a Terraform expression: in a string literal it aborts every
+  # plan/apply with "Invalid expression". `${campaigns_table_name}` is the only
+  # intended placeholder; escape a literal as `$${...}` or switch this to file()
+  # (#284 defers that switch). Enforced by
+  # tests/unit/check_templatefile_escaping.test.ts (#570).
   code = templatefile("${local.js_resolvers_dir}/batch_latest_campaigns_fn.js", {
     campaigns_table_name = var.dynamodb_table_names.campaigns
   })
