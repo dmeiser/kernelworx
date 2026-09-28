@@ -18,9 +18,10 @@ Returns: [ID!]! (list of catalog IDs)
 """
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Dict, List, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Set, Tuple, cast
 
 import aioboto3
+from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -45,6 +46,49 @@ else:  # pragma: no cover
 
 
 logger = get_logger(__name__)
+
+# DynamoDB throttling codes: a per-profile lookup that hits one of them is
+# retryable, so the request is refused with RESOURCE_BUSY instead of a partial
+# answer (#556). Same vocabulary as admin_operations._THROTTLING_ERROR_CODES.
+_THROTTLING_ERROR_CODES = frozenset(
+    {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
+)
+
+
+def _raise_profile_query_error(failures: List[BaseException], total: int, request_logger: Any) -> NoReturn:
+    """Refuse a partial "in use" answer when a per-profile query failed (#556).
+
+    A throttling condition is transient, so it becomes a retryable
+    RESOURCE_BUSY; any other ClientError or unexpected exception is permanent
+    and becomes INTERNAL_ERROR. Never returns: always raises.
+    """
+    context = {"failed": len(failures), "total": total}
+    for failure in failures:
+        if not isinstance(failure, ClientError):
+            continue
+        error_code = failure.response.get("Error", {}).get("Code", "")
+        if error_code not in _THROTTLING_ERROR_CODES:
+            continue
+        request_logger.warning(
+            "listCatalogsInUse: profile campaign query throttled; refusing a partial answer",
+            error=str(failure),
+            error_code=error_code,
+            exc_info=failure,
+            **context,
+        )
+        raise AppError(
+            ErrorCode.RESOURCE_BUSY,
+            "Temporarily unable to list catalogs in use. Please retry.",
+        ) from failure
+
+    first_failure = failures[0]
+    request_logger.error(
+        "listCatalogsInUse: profile campaign query failed; refusing a partial answer",
+        error=str(first_failure),
+        exc_info=first_failure,
+        **context,
+    )
+    raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list catalogs in use") from first_failure
 
 
 async def _extract_field_values(items: list[Dict[str, Any]], field_name: str) -> List[str]:
@@ -159,22 +203,11 @@ async def _async_get_shared_campaign_catalog_ids(
     # whole request instead of returning a truncated set (#556).
     failures = [result for result in results if isinstance(result, BaseException)]
     if failures:
-        request_logger.warning(
-            "listCatalogsInUse: profile campaign query failed; refusing a partial answer",
-            failed=len(failures),
-            total=len(results),
-            exc_info=failures[0],
-        )
-        raise AppError(
-            ErrorCode.RESOURCE_BUSY,
-            "Temporarily unable to list catalogs in use. Please retry.",
-        ) from failures[0]
+        _raise_profile_query_error(failures, len(results), request_logger)
 
-    # Combine the surviving catalog ID sets
     catalog_ids: Set[str] = set()
     for result in results:
-        if isinstance(result, set):
-            catalog_ids.update(result)
+        catalog_ids.update(cast(Set[str], result))
 
     return catalog_ids
 
