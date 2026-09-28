@@ -371,7 +371,6 @@ class TestGenerateQrCodePresignedUrl:
         mock_check_access.assert_called_once_with(former_owner, "transferred-profile", "WRITE")
 
 
-
 class TestBatchGenerateQrCodePresignedUrls:
     """Test the batch payload (s3Keys list) used by the batch_qr_urls pipeline function (#330)."""
 
@@ -542,4 +541,3 @@ class TestBatchGenerateQrCodePresignedUrls:
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.FORBIDDEN
         mock_check_access.assert_called_once_with(former_owner, "transferred-profile", "WRITE")
-

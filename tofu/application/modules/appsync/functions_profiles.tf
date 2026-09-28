@@ -57,7 +57,6 @@ resource "aws_appsync_function" "fetch_profile_step2" {
   code = file("${local.js_resolvers_dir}/fetch_profile_fn.js")
 }
 
-
 resource "aws_appsync_function" "check_profile_read_auth" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.shares.name

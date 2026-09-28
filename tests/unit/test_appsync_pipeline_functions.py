@@ -126,4 +126,3 @@ def test_two_phase_fetch_profile_check_uses_distinct_functions() -> None:
         assert pipeline.index(step1) < pipeline.index(step2), (
             f"{query} must run the ownership read before the share-path lookup"
         )
-
