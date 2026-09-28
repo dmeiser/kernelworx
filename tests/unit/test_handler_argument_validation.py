@@ -81,6 +81,16 @@ class TestListUnitCatalogsArgumentValidation:
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
+    def test_non_numeric_campaign_year_is_invalid_input(self, ctx: MagicMock) -> None:
+        result = list_unit_catalogs(_event({**_VALID_UNIT_CATALOGS, "campaignYear": "next spring"}), ctx)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+
+    def test_non_integer_campaign_year_is_invalid_input(self, ctx: MagicMock) -> None:
+        result = list_unit_catalogs(_event({**_VALID_UNIT_CATALOGS, "campaignYear": ["2024"]}), ctx)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+
     def test_missing_identity_is_unauthorized(self, ctx: MagicMock) -> None:
         event = _event(_VALID_UNIT_CATALOGS)
         del event["identity"]
@@ -185,6 +195,13 @@ class TestTransferProfileOwnershipArgumentValidation:
         result = transfer_profile_ownership(_event({}), ctx)
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INVALID_INPUT
+
+    def test_missing_identity_is_unauthorized(self, ctx: MagicMock) -> None:
+        event = _event({"input": {"profileId": "PROFILE#p1", "newOwnerAccountId": "ACCOUNT#a"}})
+        del event["identity"]
+        result = transfer_profile_ownership(event, ctx)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
 
 class TestRequestCampaignReportArgumentValidation:

@@ -8,12 +8,14 @@ from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import require_int, require_str, require_unit_number
     from utils.auth import batch_check_profile_access
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import require_int, require_str, require_unit_number
     from ..utils.auth import batch_check_profile_access
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
@@ -166,11 +168,14 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
     Returns:
         List of Catalog objects
     """
-    unit_type = event["arguments"]["unitType"]
-    unit_number = int(event["arguments"]["unitNumber"])
-    campaign_name = event["arguments"]["campaignName"]
-    campaign_year = int(event["arguments"]["campaignYear"])
-    caller_account_id = event["identity"]["sub"]
+    arguments = event.get("arguments", {})
+    unit_type = require_str(arguments, "unitType")
+    unit_number = require_unit_number(arguments, "unitNumber")
+    campaign_name = require_str(arguments, "campaignName")
+    campaign_year = require_int(arguments, "campaignYear")
+    caller_account_id = event.get("identity", {}).get("sub")
+    if not caller_account_id:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 
     logger.info(f"Listing catalogs for {unit_type} {unit_number}, campaign {campaign_name} {campaign_year}")
 
@@ -255,13 +260,16 @@ def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dic
     Returns:
         List of Catalog objects
     """
-    unit_type = event["arguments"]["unitType"]
-    unit_number = int(event["arguments"]["unitNumber"])
-    city = event["arguments"]["city"]
-    state = event["arguments"]["state"]
-    campaign_name = event["arguments"]["campaignName"]
-    campaign_year = int(event["arguments"]["campaignYear"])
-    caller_account_id = event["identity"]["sub"]
+    arguments = event.get("arguments", {})
+    unit_type = require_str(arguments, "unitType")
+    unit_number = require_unit_number(arguments, "unitNumber")
+    city = require_str(arguments, "city")
+    state = require_str(arguments, "state")
+    campaign_name = require_str(arguments, "campaignName")
+    campaign_year = require_int(arguments, "campaignYear")
+    caller_account_id = event.get("identity", {}).get("sub")
+    if not caller_account_id:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 
     logger.info(f"Listing catalogs for {unit_type} {unit_number} in {city}, {state}, campaign {campaign_name}")
 
