@@ -15,6 +15,13 @@ if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
 
 
+# Constant partition key of the accounts table's ``emailSearchIndex`` GSI.
+# Every account item that carries this value (plus its ``email``) is searchable
+# by an email prefix with a Query; items without it are invisible to that index
+# and are only reachable through a table scan. Written by the Cognito account
+# bootstrap trigger and by the one-off backfill (scripts/backfill_email_search_key.py).
+EMAIL_SEARCH_KEY = "EMAIL"
+
 # Module-level cache for test overrides
 _table_overrides: dict[str, Optional["Table"]] = {}
 
