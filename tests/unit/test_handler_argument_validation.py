@@ -5,7 +5,7 @@ campaign_reporting.get_unit_report, transfer_profile_ownership, and report_gener
 request_campaign_report) used to index the raw event with brackets. A missing key or a
 non-numeric int() operand then raised KeyError/ValueError, which the ``lambda_handler``
 decorator (#329) collapsed into a generic INTERNAL_ERROR — indistinguishable by the client
-from a real server fault. These tests pin the correct behaviour: every such malformed or
+from a real server fault. These tests pin the correct behavior: every such malformed or
 missing input returns ``INVALID_INPUT`` (or ``UNAUTHORIZED`` for a missing identity), and the
 unit-number bound is enforced instead of flowing into the GSI key condition.
 """
