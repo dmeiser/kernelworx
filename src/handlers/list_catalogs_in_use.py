@@ -186,9 +186,9 @@ async def _async_get_shared_campaign_catalog_ids(
 ) -> Set[str]:
     """Async: Query campaigns for all profiles in parallel.
 
-    A per-profile query failure is surfaced as a retryable RESOURCE_BUSY
-    AppError (#556) instead of being logged and discarded, so the caller never
-    treats a silently truncated set as the authoritative "in use" answer.
+    A per-profile query failure is raised (see `_raise_profile_query_error`)
+    instead of being logged and discarded, so the caller never treats a
+    silently truncated set as the authoritative "in use" answer.
     """
     if not profile_ids:
         return set()
