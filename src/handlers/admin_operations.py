@@ -881,10 +881,10 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     Delete a user and all their data from Cognito, DynamoDB, and S3 (admin only).
 
     AppSync Lambda resolver for adminDeleteUser mutation.
-    Deletes all user data (orders, campaigns, shares, invites, inbound shares,
+    Deletes the user from the Cognito User Pool first (the commit point), then
+    deletes all user data (orders, campaigns, shares, invites, inbound shares,
     S3 reports, profiles, payment method QR codes, and the Account record;
-    catalogs are preserved) via the shared _delete_all_user_data cascade, then
-    deletes the user from the Cognito User Pool.
+    catalogs are preserved) via the shared _delete_all_user_data cascade.
 
     Args:
         event: AppSync event with identity and arguments
@@ -914,14 +914,28 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     if not username and not account_exists:
         raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
 
-    # Delete all user data from DynamoDB and S3 using the shared cascade so
-    # a partially-deleted Cognito state does not leave records orphaned (#435).
-    _delete_all_user_data(account_id, logger)
-
+    # Delete the Cognito user FIRST so the Cognito call is the commit point (#551).
+    # A data-phase failure afterwards leaves records the user can no longer reach
+    # (no sign-in, so no post_authentication re-bootstrap) and a re-run of the
+    # data phase is safe; a Cognito failure leaves every record intact. Deleting
+    # data first would leave a sign-in-capable Cognito user whose records are
+    # gone, silently re-bootstrapped as an empty account on next sign-in.
     if username:
         _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
     else:
-        logger.info("Cognito user already absent; DynamoDB cleanup completed", account_id=account_id)
+        logger.info("Cognito user already absent; proceeding with DynamoDB cleanup", account_id=account_id)
+
+    try:
+        _delete_all_user_data(account_id, logger)
+    except Exception as e:
+        logger.error(
+            "Cognito user already deleted but user data cleanup failed; "
+            "leftover records are inert because the user can no longer sign in",
+            account_id=account_id,
+            error=str(e),
+            error_code=ErrorCode.INTERNAL_ERROR,
+        )
+        raise
 
     logger.info("User deleted successfully", account_id=account_id, email=mask_email(email))
     return True

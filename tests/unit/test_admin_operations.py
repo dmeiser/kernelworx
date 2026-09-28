@@ -1911,7 +1911,7 @@ class TestAdminDeleteUser:
         assert catalog_item is not None
         assert catalog_item.get("isDeleted") is not True
 
-    def test_dynamodb_deleted_before_cognito(
+    def test_cognito_deleted_before_dynamodb(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
@@ -1919,7 +1919,11 @@ class TestAdminDeleteUser:
         monkeypatch: Any,
         s3_bucket: Any,
     ) -> None:
-        """Test that DynamoDB account is deleted before Cognito user."""
+        """Test that the Cognito user is deleted before the data cascade (#551).
+
+        The Cognito call is the commit point: a data-phase failure afterwards
+        leaves inert records, while a Cognito failure leaves all data intact.
+        """
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1971,7 +1975,7 @@ class TestAdminDeleteUser:
                 result = admin_delete_user(event, lambda_context)
 
             assert result is True
-            assert call_order == ["dynamodb", "cognito"]
+            assert call_order == ["cognito", "dynamodb"]
 
     def test_success_with_account_prefix(
         self,
@@ -2469,6 +2473,127 @@ class TestAdminDeleteUser:
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
+    def test_cognito_failure_leaves_user_data_intact(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        s3_bucket: Any,
+    ) -> None:
+        """A Cognito delete failure must not destroy user data (#551).
+
+        The Cognito call is the commit point: if it fails, the data cascade must
+        never run, so the half-deleted state (Cognito user alive, records gone)
+        that lets post_authentication re-bootstrap an empty account cannot occur.
+        """
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "11111111-1111-1111-1111-111111111111"
+
+        accounts_table = get_accounts_table()
+        accounts_table.put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "cognito-username-456",
+                        "Attributes": [
+                            {"Name": "sub", "Value": target_account_id},
+                            {"Name": "email", "Value": "target@example.com"},
+                        ],
+                    }
+                ]
+            }
+            mock_cognito.admin_delete_user.side_effect = ClientError(
+                {"Error": {"Code": "InternalError", "Message": "Internal error"}},
+                "AdminDeleteUser",
+            )
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_delete_user(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+
+        # The data cascade must not have run: the account record survives so the
+        # admin retry converges instead of leaving a sign-in-capable user with
+        # destroyed data.
+        response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+        assert "Item" in response
+
+    def test_data_failure_after_cognito_commit(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A data-phase failure after the Cognito commit is logged loudly (#551).
+
+        The Cognito user is already gone, so leftover records are inert and a
+        re-run of the data phase is safe; the partial delete must be detectable in
+        post-incident review via the error_code-tagged log.
+        """
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "11111111-1111-1111-1111-111111111111"
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id},
+        }
+
+        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "cognito-username-456",
+                        "Attributes": [
+                            {"Name": "sub", "Value": target_account_id},
+                            {"Name": "email", "Value": "target@example.com"},
+                        ],
+                    }
+                ]
+            }
+            mock_get_client.return_value = mock_cognito
+
+            with patch(
+                "src.handlers.admin_operations._delete_all_user_data",
+                side_effect=ClientError(
+                    {"Error": {"Code": "InternalServerError", "Message": "DynamoDB exploded"}},
+                    "DeleteItem",
+                ),
+            ):
+                result = admin_delete_user(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            # The commit point was reached: the Cognito user is gone.
+            mock_cognito.admin_delete_user.assert_called_once_with(
+                UserPoolId="test-pool-id", Username="cognito-username-456"
+            )
+            captured = capsys.readouterr().out
+            assert "data cleanup failed" in captured
+            assert "INTERNAL_ERROR" in captured
+
     def test_self_deletion_prevented_via_lambda_handler(
         self,
         dynamodb_table: Any,
@@ -2491,14 +2616,18 @@ class TestAdminDeleteUser:
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INVALID_INPUT
 
-    def test_dynamodb_delete_error_prevents_cognito_delete(
+    def test_dynamodb_delete_error_after_cognito_commit(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test that DynamoDB delete errors stop deletion before Cognito is touched."""
+        """Test that a DynamoDB delete error surfaces after the Cognito commit (#551).
+
+        The Cognito user is already gone when the data phase fails, so the
+        leftover records are inert and a re-run of the data phase is safe.
+        """
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -2550,7 +2679,10 @@ class TestAdminDeleteUser:
 
                 assert result["__isError"] is True
                 assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-                mock_cognito.admin_delete_user.assert_not_called()
+                # The commit point was reached before the data phase failed.
+                mock_cognito.admin_delete_user.assert_called_once_with(
+                    UserPoolId="test-pool-id", Username="11111111-1111-1111-1111-111111111111"
+                )
 
     def test_cognito_lookup_error_aborts_deletion(
         self,

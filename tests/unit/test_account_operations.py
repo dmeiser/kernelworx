@@ -772,6 +772,75 @@ class TestDeleteMyAccount:
             assert "InternalError" in captured
             assert "AdminDeleteUser" in captured
 
+        # The data cascade must not have run: the account record survives so a
+        # retry converges (#551).
+        assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is not None
+
+    def test_delete_account_data_failure_after_cognito_commit(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A data-phase failure after the Cognito commit is logged loudly (#551).
+
+        The Cognito user is already gone, so leftover records are inert and a
+        re-run of the data phase is safe; the partial delete must be detectable in
+        post-incident review via the error_code-tagged log.
+        """
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {
+                "Users": [{"Username": "test-user", "Attributes": [{"Name": "sub", "Value": sample_account_id}]}]
+            }
+
+            with patch(
+                "src.handlers.account_operations._delete_all_user_data",
+                side_effect=ClientError(
+                    {"Error": {"Code": "InternalServerError", "Message": "DynamoDB exploded"}},
+                    "DeleteItem",
+                ),
+            ):
+                event = {
+                    **appsync_event,
+                    "identity": {"sub": sample_account_id},
+                }
+
+                result = delete_my_account(event, lambda_context)
+
+                assert result["__isError"] is True
+                assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+                # The commit point was reached: the Cognito user is gone.
+                mock_cognito.admin_delete_user.assert_called_once_with(
+                    UserPoolId="us-east-1_test123", Username="test-user"
+                )
+                captured = capsys.readouterr().out
+                assert "data cleanup failed" in captured
+                assert "INTERNAL_ERROR" in captured
+
     def test_delete_account_unexpected_exception(
         self,
         dynamodb_table: Any,

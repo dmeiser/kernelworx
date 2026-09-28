@@ -137,9 +137,9 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     Delete the authenticated user's account and all associated data.
 
     This is a self-service account deletion that:
-    1. Verifies Cognito credentials and connectivity before deleting DynamoDB data
-    2. Deletes all user data from DynamoDB (profiles, campaigns, orders, shares, invites; catalogs are preserved)
-    3. Deletes the user from Cognito User Pool with retry on transient errors
+    1. Verifies Cognito credentials and connectivity before deleting data
+    2. Deletes the user from Cognito User Pool with retry on transient errors (the commit point)
+    3. Deletes all user data from DynamoDB (profiles, campaigns, orders, shares, invites; catalogs are preserved)
 
     Args:
         event: AppSync event with identity
@@ -177,8 +177,26 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
             logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(e), exc_info=True)
             raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
 
-        _delete_all_user_data(account_id, logger)
+        # Delete the Cognito user FIRST so the Cognito call is the commit point
+        # (#551): a data-phase failure afterwards leaves records the user can no
+        # longer reach (no sign-in, so no post_authentication re-bootstrap) and a
+        # re-run of the data phase is safe; a Cognito failure leaves every record
+        # intact. Deleting data first would leave a sign-in-capable Cognito user
+        # whose records are gone, silently re-bootstrapped on next sign-in.
         _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
+
+        try:
+            _delete_all_user_data(account_id, logger)
+        except Exception as e:
+            logger.error(
+                "Cognito user already deleted but user data cleanup failed; "
+                "leftover records are inert because the user can no longer sign in",
+                account_id=account_id,
+                error=str(e),
+                error_code=ErrorCode.INTERNAL_ERROR,
+            )
+            raise
+
         logger.info("Account deletion completed successfully")
         return True
 
