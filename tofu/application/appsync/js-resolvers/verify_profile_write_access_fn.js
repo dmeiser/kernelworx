@@ -40,6 +40,10 @@ function resolveDbProfileId(ctx) {
 
     if (ctx.args && ctx.args.input && ctx.args.input.profileId) {
         profileId = ctx.args.input.profileId;
+    } else if (ctx.args && ctx.args.profileId) {
+        // Query resolvers (listSharesByProfile / listInvitesByProfile, #547) pass
+        // the id as a top-level argument rather than under input.
+        profileId = ctx.args.profileId;
     } else if (ctx.stash && ctx.stash.order && ctx.stash.order.profileId) {
         // Orders have profileId attribute - use it directly (not PK which is the campaign key)
         profileId = ctx.stash.order.profileId;
@@ -105,6 +109,14 @@ export function request(ctx) {
                 })
         );
         util.error('Profile ID is required', 'INVALID_INPUT');
+    }
+
+    // Expose the normalized id on the stash for downstream pipeline steps. #547:
+    // check_write_permission (listSharesByProfile / listInvitesByProfile) reads
+    // ctx.stash.profileId; the mutation steps keep resolving their own id, so
+    // storing the same value here is inert for them.
+    if (ctx.stash) {
+        ctx.stash.profileId = dbProfileId;
     }
 
     const callerAccountId = ctx.identity && ctx.identity.sub && ctx.identity.sub.startsWith('ACCOUNT#')

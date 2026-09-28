@@ -272,3 +272,66 @@ describe('verify_profile_write_access_fn response (cross-cutting)', () => {
         );
     });
 });
+
+// #547: listSharesByProfile / listInvitesByProfile run this two-phase pair but
+// pass profileId as a top-level argument (ctx.args.profileId), not under
+// ctx.args.input, and their downstream check_write_permission step reads the
+// normalized id off ctx.stash.profileId.
+describe('verify_profile_write_access_fn for the share/invite query resolvers (#547)', () => {
+    function queryCtx(extra = {}) {
+        return {
+            identity: { sub: 'user-123' },
+            info: { fieldName: 'listSharesByProfile' },
+            args: { profileId: 'prof-456' },
+            stash: {},
+            ...extra
+        };
+    }
+
+    it('step 1 decides ownership with the strongly consistent GetItem off the top-level profileId', () => {
+        const result = request(queryCtx());
+
+        assert.strictEqual(result.operation, 'GetItem');
+        assert.strictEqual(result.consistentRead, true);
+        assert.deepStrictEqual(result.key, {
+            ownerAccountId: 'ACCOUNT#user-123',
+            profileId: 'PROFILE#prof-456'
+        });
+    });
+
+    it('step 1 stashes the normalized profileId for the downstream check_write_permission step', () => {
+        const ctx = queryCtx();
+        request(ctx);
+
+        assert.strictEqual(ctx.stash.profileId, 'PROFILE#prof-456');
+    });
+
+    it('step 1 preserves an already-prefixed top-level profileId', () => {
+        const result = request(queryCtx({ args: { profileId: 'PROFILE#prof-456' } }));
+
+        assert.strictEqual(result.key.profileId, 'PROFILE#prof-456');
+    });
+
+    it('step 2 locates the profile via the GSI for a non-owner, using the top-level profileId', () => {
+        const ctx = queryCtx({ stash: { isOwner: false } });
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, 'Query');
+        assert.strictEqual(result.index, 'profileId-index');
+        assert.deepStrictEqual(result.query, {
+            expression: 'profileId = :profileId',
+            expressionValues: { ':profileId': 'PROFILE#prof-456' }
+        });
+    });
+
+    it('does not authorize a former owner whose stale GSI still projects them: step 1 consistent read is the sole owner signal', () => {
+        // After transferProfileOwnership, the base-table GetItem under the caller's
+        // partition key returns nothing even though the eventually-consistent GSI
+        // may still project the previous owner. Ownership must come from step 1 only.
+        const ctx = queryCtx();
+        request(ctx); // step 1
+        const out = response({ ...ctx, result: null }); // consistent GetItem found nothing
+        assert.strictEqual(ctx.stash.isOwner, false);
+        assert.strictEqual(out, null);
+    });
+});
