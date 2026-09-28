@@ -24,7 +24,8 @@ the script's actual `--help` output or usage text.
 **Key flags/arguments:**
 
 - `<up|env|down>` — Required action
-- `<run-id>` — Required run identifier string
+- `<run-id>` — Required run identifier; must match `[A-Za-z0-9._-]+` (see
+  `validate_run_id` under `ephemeral-recover-common.sh`)
 - The script sources `./.env` for `TF_VAR_encryption_passphrase` and AWS credentials.
 
 ### `scripts/recover-deploy.sh`
@@ -35,7 +36,8 @@ state file is missing.
 
 **Key flags/arguments:**
 
-- `<run-id>` — Required run identifier.
+- `<run-id>` — Required run identifier; must match `[A-Za-z0-9._-]+` (see
+  `validate_run_id` under `ephemeral-recover-common.sh`)
 
 ### `scripts/recover-destroy.sh`
 
@@ -45,7 +47,8 @@ destroy orphaned resources for a run-id.** Imports whatever still exists, then r
 
 **Key flags/arguments:**
 
-- `<run-id>` — Required run identifier.
+- `<run-id>` — Required run identifier; must match `[A-Za-z0-9._-]+` (see
+  `validate_run_id` under `ephemeral-recover-common.sh`)
 
 ### `scripts/appsync-ensure-resolver-order.sh`
 
@@ -179,8 +182,16 @@ credentials and only runs `tofu init` (ephemeral backend selection) and
 
 **Common helpers for ephemeral environment recovery workflows.** Not intended to be run
 directly; sourced by `ephemeral-env.sh`, `recover-deploy.sh`, and `recover-destroy.sh`.
-Provides functions for env loading, backend initialization, S3 bucket emptying, stale
-lock cleanup, state recovery, resource importing, and CloudWatch log group cleanup.
+Provides functions for env loading, run-id validation, backend initialization, S3 bucket
+emptying, stale lock cleanup, state recovery, resource importing, and CloudWatch log
+group cleanup.
+
+`validate_run_id` is the single owner of the run-id rule: a run-id must match
+`[A-Za-z0-9._-]+` (the same rule as `scripts/generate_integration_env.py`), because the
+value is interpolated into an S3 state key and a `-var` value. `ephemeral-env.sh`,
+`recover-deploy.sh`, and `recover-destroy.sh` each call it before any AWS call, so a
+traversal-shaped id such as `../prod` or `pr-1/x` fails instead of touching another
+environment's state.
 
 **Key flags/arguments:** None (sourced library).
 

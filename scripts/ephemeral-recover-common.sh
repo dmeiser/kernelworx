@@ -12,6 +12,17 @@ log() {
   echo "$@" >&2
 }
 
+# Reject run-ids that are not plain [A-Za-z0-9._-] before they reach an S3
+# state key or a -var value. Same rule as scripts/generate_integration_env.py.
+validate_run_id() {
+  local run_id="$1"
+  if ! [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    log "❌ Invalid run-id: must match [A-Za-z0-9._-]+"
+    return 1
+  fi
+  return 0
+}
+
 load_env() {
   if [ -f "$ROOT_DIR/.env" ]; then
     set -a
