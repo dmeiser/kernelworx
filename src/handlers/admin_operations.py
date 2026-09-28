@@ -9,7 +9,6 @@ Provides:
 
 import os
 import re
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -32,13 +31,13 @@ from .campaign_operations import (
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, tables
+    from utils.dynamodb import EMAIL_SEARCH_KEY, batch_get_chunked, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, tables
+    from ..utils.dynamodb import EMAIL_SEARCH_KEY, batch_get_chunked, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
 
@@ -105,11 +104,6 @@ def _raise_batch_lookup_error(operation: str, logger: Any, error: Exception, **c
     raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to {operation}") from error
 
 
-def _batch_get_unprocessed_keys(response: Dict[str, Any], table_name: str) -> list[Dict[str, Any]]:
-    """Extract the unprocessed keys DynamoDB reports for a table in a BatchGetItem response."""
-    return cast(list[Dict[str, Any]], response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", []))
-
-
 def _get_user_groups(cognito: Any, user_pool_id: str, username: str, logger: Any) -> list[str]:
     """Get the groups a user belongs to; failures raise a typed AppError (#291)."""
     try:
@@ -160,10 +154,6 @@ def _collect_parallel_keyed_results(
     return results
 
 
-# DynamoDB caps BatchGetItem at 100 keys per request.
-_ACCOUNTS_BATCH_GET_LIMIT = 100
-
-
 def _dedup_account_keys(account_ids: list[str]) -> list[Dict[str, str]]:
     """Build the de-duplicated BatchGetItem keys for the Accounts table."""
     seen: set[str] = set()
@@ -187,40 +177,6 @@ def _apply_display_name_item(item: Dict[str, Any], display_names: dict[str, str]
         display_names[key] = f"{given_name} {family_name}".strip()
 
 
-def _fetch_display_name_attempt(
-    keys_to_fetch: list[Dict[str, str]],
-    accounts_table_name: str,
-    display_names: dict[str, str],
-    attempt: int,
-    logger: Any,
-) -> list[Dict[str, Any]]:
-    """Run one BatchGetItem attempt; store returned names and return unprocessed keys."""
-    response = get_dynamodb_resource().batch_get_item(RequestItems={accounts_table_name: {"Keys": keys_to_fetch}})
-    for item in response.get("Responses", {}).get(accounts_table_name, []):
-        _apply_display_name_item(item, display_names)
-
-    unprocessed = _batch_get_unprocessed_keys(response, accounts_table_name)
-    if unprocessed and attempt < 2:
-        logger.warning(
-            "Unprocessed display-name keys, retrying",
-            attempt=attempt + 1,
-            count=len(unprocessed),
-        )
-        time.sleep(0.05 * (2**attempt))
-    return unprocessed
-
-
-def _fetch_display_names_chunk(
-    keys: list[Dict[str, str]], accounts_table_name: str, display_names: dict[str, str], logger: Any
-) -> None:
-    """Fetch one 100-key chunk, retrying unprocessed keys for up to 3 attempts."""
-    keys_to_fetch = keys
-    for attempt in range(3):
-        if not keys_to_fetch:
-            break
-        keys_to_fetch = _fetch_display_name_attempt(keys_to_fetch, accounts_table_name, display_names, attempt, logger)
-
-
 def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, str]:
     """Batch fetch display names from the Accounts table using BatchGetItem.
 
@@ -234,14 +190,16 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
 
     accounts_table_name = _get_required_env("ACCOUNTS_TABLE_NAME")
 
-    try:
-        for i in range(0, len(keys), _ACCOUNTS_BATCH_GET_LIMIT):
-            _fetch_display_names_chunk(
-                keys[i : i + _ACCOUNTS_BATCH_GET_LIMIT], accounts_table_name, display_names, logger
-            )
-    except Exception as e:
-        _raise_batch_lookup_error("load display names", logger, e)
+    def _store_display_name(item: Dict[str, Any]) -> None:
+        _apply_display_name_item(item, display_names)
 
+    batch_get_chunked(
+        accounts_table_name,
+        keys,
+        _store_display_name,
+        consistent_read=False,
+        logger=logger,
+    )
     return display_names
 
 
@@ -1414,10 +1372,6 @@ def _get_user_profiles(db_account_id: str) -> list[Dict[str, Any]]:
     )
 
 
-# DynamoDB caps BatchGetItem at 100 keys per request.
-_CATALOG_BATCH_GET_LIMIT = 100
-
-
 def _extract_unique_catalog_ids(campaigns: list[Dict[str, Any]]) -> list[str]:
     """Extract the de-duplicated catalogIds from a campaign array, preserving first-seen order."""
     catalog_ids: list[str] = []
@@ -1430,57 +1384,25 @@ def _extract_unique_catalog_ids(campaigns: list[Dict[str, Any]]) -> list[str]:
     return catalog_ids
 
 
-def _fetch_catalog_batch_attempt(
-    keys_to_fetch: list[Dict[str, str]],
-    catalogs_table_name: str,
-    catalog_map: Dict[str, Dict[str, Any]],
-    attempt: int,
-    logger: Any,
-) -> list[Dict[str, Any]]:
-    """Run one BatchGetItem attempt; store returned items and return unprocessed keys."""
-    response = get_dynamodb_resource().batch_get_item(RequestItems={catalogs_table_name: {"Keys": keys_to_fetch}})
-    for item in response.get("Responses", {}).get(catalogs_table_name, []):
-        catalog_map[item["catalogId"]] = item
-
-    unprocessed = _batch_get_unprocessed_keys(response, catalogs_table_name)
-    if unprocessed and attempt < 2:
-        logger.warning(
-            "Unprocessed catalog keys, retrying",
-            attempt=attempt + 1,
-            count=len(unprocessed),
-        )
-        time.sleep(0.05 * (2**attempt))
-    return unprocessed
-
-
-def _fetch_catalog_keys_with_retry(
-    keys: list[Dict[str, str]], catalogs_table_name: str, catalog_map: Dict[str, Dict[str, Any]], logger: Any
-) -> list[Dict[str, Any]]:
-    """Fetch one 100-key chunk, retrying unprocessed keys for up to 3 attempts.
-
-    Returns the keys still unprocessed after the final attempt.
-    """
-    keys_to_fetch = keys
-    for attempt in range(3):
-        if not keys_to_fetch:
-            break
-        keys_to_fetch = _fetch_catalog_batch_attempt(keys_to_fetch, catalogs_table_name, catalog_map, attempt, logger)
-    return keys_to_fetch
-
-
 def _batch_get_catalog_items(
     catalog_ids: list[str], catalogs_table_name: str, logger: Any
 ) -> Dict[str, Dict[str, Any]]:
-    """Chunked BatchGetItem over catalog ids; raises AppError if keys stay unprocessed."""
+    """Batch-get the catalogs by id; the shared helper owns the 100-key chunking.
+
+    Raises AppError if keys stay unprocessed after the retries (#557).
+    """
     catalog_map: Dict[str, Dict[str, Any]] = {}
-    for i in range(0, len(catalog_ids), _CATALOG_BATCH_GET_LIMIT):
-        batch = [{"catalogId": catalog_id} for catalog_id in catalog_ids[i : i + _CATALOG_BATCH_GET_LIMIT]]
-        keys_to_fetch = _fetch_catalog_keys_with_retry(batch, catalogs_table_name, catalog_map, logger)
-        if keys_to_fetch:
-            raise AppError(
-                ErrorCode.INTERNAL_ERROR,
-                f"DynamoDB BatchGetItem failed to return {len(keys_to_fetch)} keys after retries",
-            )
+
+    def _store_catalog(item: Dict[str, Any]) -> None:
+        catalog_map[item["catalogId"]] = item
+
+    batch_get_chunked(
+        catalogs_table_name,
+        [{"catalogId": catalog_id} for catalog_id in catalog_ids],
+        _store_catalog,
+        consistent_read=False,
+        logger=logger,
+    )
     return catalog_map
 
 
@@ -1523,12 +1445,10 @@ def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_
         return
 
     catalogs_table_name = _get_required_env("CATALOGS_TABLE_NAME")
-    try:
-        catalog_map = _batch_get_catalog_items(catalog_ids, catalogs_table_name, logger)
-    except AppError:
-        raise
-    except Exception as e:
-        _raise_batch_lookup_error("load campaign catalogs", logger, e)
+    # batch_get_chunked already translates every lookup failure (retryable
+    # RESOURCE_BUSY on a throttle, INTERNAL_ERROR otherwise), so the typed
+    # AppError propagates unchanged (#557).
+    catalog_map = _batch_get_catalog_items(catalog_ids, catalogs_table_name, logger)
 
     _attach_campaign_catalogs(campaigns, catalog_map, treat_deleted_as_null)
 

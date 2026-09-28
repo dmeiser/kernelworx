@@ -4,13 +4,12 @@ Authorization utilities for checking profile and resource access.
 Implements owner-based and share-based authorization model.
 """
 
-import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, cast
+from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
 
-from .dynamodb import get_dynamodb_resource, tables
+from .dynamodb import batch_get_chunked, tables
 from .errors import AppError, ErrorCode
 from .ids import ensure_account_id, ensure_profile_id
 from .logging import get_logger
@@ -110,66 +109,6 @@ def _check_share_permissions(
     return _has_required_permission(permissions, required_permission)
 
 
-def _maybe_warn_and_sleep(keys_to_fetch: list[Dict[str, str]], attempt: int, table_name: str) -> None:
-    """Log a warning and back off when BatchGetItem returns unprocessed keys."""
-    if keys_to_fetch and attempt < 2:
-        logger.warning(
-            "Unprocessed keys, retrying",
-            table_name=table_name,
-            attempt=attempt + 1,
-            count=len(keys_to_fetch),
-        )
-        time.sleep(0.05 * (2**attempt))
-
-
-def _fetch_batch(
-    table_name: str,
-    keys_to_fetch: list[Dict[str, str]],
-    on_item: Callable[[Dict[str, Any]], None],
-) -> list[Dict[str, str]]:
-    """Fetch one batch of keys with strongly consistent reads, retrying UnprocessedKeys.
-
-    Returns any keys still unprocessed after retries.
-    """
-    for attempt in range(3):
-        if not keys_to_fetch:
-            break
-        response = cast(
-            Dict[str, Any],
-            get_dynamodb_resource().batch_get_item(
-                RequestItems={table_name: {"Keys": keys_to_fetch, "ConsistentRead": True}}
-            ),
-        )
-        for item in response.get("Responses", {}).get(table_name, []):
-            on_item(item)
-
-        unprocessed = response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", [])
-        keys_to_fetch = cast(list[Dict[str, str]], unprocessed)
-        _maybe_warn_and_sleep(keys_to_fetch, attempt, table_name)
-
-    return keys_to_fetch
-
-
-def _batch_get_all_items(
-    table_name: str,
-    keys: list[Dict[str, str]],
-    on_item: Callable[[Dict[str, Any]], None],
-) -> None:
-    """Batch-get keys in 100-item chunks, retrying UnprocessedKeys.
-
-    Calls on_item for every returned item. Raises AppError(INTERNAL_ERROR)
-    if any keys are still unprocessed after retries.
-    """
-    for i in range(0, len(keys), 100):
-        batch = keys[i : i + 100]
-        remaining = _fetch_batch(table_name, batch, on_item)
-        if remaining:
-            raise AppError(
-                ErrorCode.INTERNAL_ERROR,
-                f"DynamoDB BatchGetItem failed to return {len(remaining)} keys after retries",
-            )
-
-
 def check_profile_access(caller_account_id: str, profile_id: str, required_permission: str = "READ") -> bool:
     """
     Check if caller has access to profile.
@@ -230,7 +169,7 @@ def _batch_check_owned_profiles(db_profile_ids: list[str], db_caller_id: str) ->
         if db_pid:
             owned_db_ids.add(cast(str, db_pid))
 
-    _batch_get_all_items(tables.profiles.table_name, profile_keys, _on_owned_item)
+    batch_get_chunked(tables.profiles.table_name, profile_keys, _on_owned_item)
     return owned_db_ids
 
 
@@ -255,7 +194,7 @@ def _batch_check_shared_profiles(remaining_ids: list[str], db_caller_id: str, re
         if db_pid:
             candidate_shares.append((cast(str, db_pid), share.get("ownerAccountId")))
 
-    _batch_get_all_items(tables.shares.table_name, share_keys, _on_share_item)
+    batch_get_chunked(tables.shares.table_name, share_keys, _on_share_item)
 
     if not candidate_shares:
         return set()
@@ -278,7 +217,7 @@ def _batch_check_shared_profiles(remaining_ids: list[str], db_caller_id: str, re
             valid_shared_db_ids.add(cast(str, db_pid))
 
     if profile_keys:
-        _batch_get_all_items(tables.profiles.table_name, profile_keys, _on_profile_item)
+        batch_get_chunked(tables.profiles.table_name, profile_keys, _on_profile_item)
 
     for db_pid in backward_compat_ids:
         if _profile_exists(tables.profiles, db_pid):
