@@ -16,6 +16,8 @@ RUN_ID="$1"
 # shellcheck source=/dev/null
 source "$(cd "$(dirname "$0")" && pwd)/ephemeral-recover-common.sh"
 
+validate_run_id "$RUN_ID" || exit 1
+
 load_env
 recover_state_if_missing "$RUN_ID"
 cleanup_stale_lock "$RUN_ID"

@@ -24,6 +24,12 @@ USERNAME = "owner@example.com"
 POOL_ID = "us-east-1_ExamplePool"
 CLIENT_ID = "1example23client45id6789"
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
+# The mock's credential scan reads /proc/<pid>/cmdline and /proc/<pid>/stat;
+# where /proc is absent the scan records nothing and would pass vacuously.
+requires_proc = pytest.mark.skipif(
+    not Path("/proc/self/cmdline").exists(),
+    reason="the argv/environ credential scan requires /proc (Linux only)",
+)
 # The credential is baked into the fake aws CLI below so the mock can scan
 # /proc for it without inheriting it through the environment.
 assert "'" not in PASSWORD, "the mock embeds the credential in a single-quoted shell string"
@@ -276,6 +282,7 @@ class TestAuthParametersFile:
 class TestScriptOwnArgv:
     """#569: the credential must not be a positional argument either."""
 
+    @requires_proc
     def test_no_process_command_line_carries_the_credential_while_running(
         self, harness: dict[str, object], repo_root: Path
     ) -> None:
@@ -287,6 +294,7 @@ class TestScriptOwnArgv:
         leaks = logs(harness)["aws_cmdline_leaks"].read_text().split()
         assert not leaks, f"the credential appeared in the command line of pid(s): {leaks}"
 
+    @requires_proc
     def test_credential_is_not_inherited_by_child_processes(self, harness: dict[str, object], repo_root: Path) -> None:
         result = run_script(harness, repo_root)
         assert result.returncode == 0, result.stderr

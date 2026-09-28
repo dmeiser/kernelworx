@@ -9,7 +9,7 @@ import copy
 import os
 import re
 import uuid
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -22,10 +22,12 @@ try:  # pragma: no cover
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
+    from utils.s3 import purge_s3_prefix
 except ModuleNotFoundError:  # pragma: no cover
     from .dynamodb import get_required_env, tables
     from .errors import AppError, ErrorCode
     from .logging import get_logger
+    from .s3 import purge_s3_prefix
 
 
 # Module-level S3 client proxy for testing
@@ -230,6 +232,30 @@ def _save_preferences(
         raise
 
 
+def _mutate_payment_methods(
+    account_id: str, fn: Callable[[List[Dict[str, Any]]], Optional[List[Dict[str, Any]]]]
+) -> None:
+    """Snapshot-read preferences.paymentMethods, apply fn, and save under the optimistic lock.
+
+    fn receives the list and returns the replacement list, or None to leave it unchanged.
+    """
+    account_id_key = f"ACCOUNT#{account_id}"
+    response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
+
+    preferences: Dict[str, Any] = {}
+    if "Item" in response:
+        # Deep-copy so mutating preferences doesn't alter the response used by
+        # _save_preferences for its optimistic-lock condition.
+        preferences = copy.deepcopy(response["Item"].get("preferences", {}))
+
+    updated_methods = fn(list(preferences.get("paymentMethods", [])))
+    if updated_methods is None:
+        return
+
+    preferences["paymentMethods"] = updated_methods
+    _save_preferences(account_id_key, response, preferences)
+
+
 def _check_duplicate_name(existing_methods: list[Dict[str, Any]], name: str, exclude_current: Optional[str]) -> None:
     """Check for duplicate payment method names (case-insensitive)."""
     name_lower = name.lower()
@@ -342,28 +368,11 @@ def create_payment_method(account_id: str, name: str) -> Dict[str, Any]:
     # Check uniqueness
     validate_name_unique(account_id, name)
 
+    # Create new method
+    new_method: Dict[str, Any] = {"name": name, "qrCodeUrl": None}
+
     try:
-        # Get existing account and methods
-        account_id_key = f"ACCOUNT#{account_id}"
-        response = tables.accounts.get_item(Key={"accountId": account_id_key})
-
-        existing_methods: list[Dict[str, Any]] = []
-        preferences: Dict[str, Any] = {}
-        if "Item" in response:
-            # Deep-copy so mutating preferences doesn't alter the response used by
-            # _save_preferences for its optimistic-lock condition.
-            preferences = copy.deepcopy(response["Item"].get("preferences", {}))
-            existing_methods = list(preferences.get("paymentMethods", []))
-
-        # Create new method
-        new_method: Dict[str, Any] = {"name": name, "qrCodeUrl": None}
-
-        # Append to list
-        existing_methods.append(new_method)
-
-        # Update account with new methods
-        preferences["paymentMethods"] = existing_methods
-        _save_preferences(account_id_key, response, preferences)
+        _mutate_payment_methods(account_id, lambda methods: [*methods, new_method])
 
         logger.info("Created payment method", account_id=account_id, name=name)
 
@@ -409,23 +418,16 @@ def update_payment_method(account_id: str, old_name: str, new_name: str) -> Dict
     # Check uniqueness (exclude current method)
     validate_name_unique(account_id, new_name, exclude_current=old_name)
 
+    updated_method: Dict[str, Any] = {}
+
     try:
-        # Get existing account and methods
-        account_id_key = f"ACCOUNT#{account_id}"
-        response = tables.accounts.get_item(Key={"accountId": account_id_key})
 
-        if "Item" not in response:
-            raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{old_name}' not found")
+        def _apply(methods: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            nonlocal updated_method
+            updated_method = _find_and_update_method(methods, old_name, new_name)
+            return methods
 
-        preferences = copy.deepcopy(response["Item"].get("preferences", {}))
-        existing_methods = list(preferences.get("paymentMethods", []))
-
-        # Find and update method
-        updated_method = _find_and_update_method(existing_methods, old_name, new_name)
-
-        # Update account with modified methods
-        preferences["paymentMethods"] = existing_methods
-        _save_preferences(account_id_key, response, preferences)
+        _mutate_payment_methods(account_id, _apply)
 
         logger.info("Updated payment method", account_id=account_id, old_name=old_name, new_name=new_name)
 
@@ -457,8 +459,20 @@ def _find_and_remove_method(
     return new_methods, method_to_delete
 
 
-def _delete_qr_if_exists(logger: Any, account_id: str, name: str, method_to_delete: Dict[str, Any]) -> None:
-    """Delete QR code from S3 if it exists."""
+def _delete_qr_if_exists(
+    logger: Any,
+    account_id: str,
+    name: str,
+    method_to_delete: Dict[str, Any],
+    raise_on_error: bool = False,
+) -> None:
+    """Delete QR code from S3 if it exists.
+
+    With raise_on_error the caller treats a failed delete as fatal, so the stored
+    qrCodeUrl must keep pointing at the object that is still in S3 and the caller can
+    retry; the default swallows the failure for callers that are deleting the whole
+    method anyway.
+    """
     stored_qr_key = method_to_delete.get("qrCodeUrl")
     if not stored_qr_key:
         return
@@ -471,6 +485,8 @@ def _delete_qr_if_exists(logger: Any, account_id: str, name: str, method_to_dele
             # Legacy slug-based key or URL value
             delete_qr_from_s3(account_id, name)
     except Exception as e:
+        if raise_on_error:
+            raise
         logger.warning("Failed to delete QR code, continuing with method deletion", error=str(e))
 
 
@@ -491,29 +507,23 @@ def delete_payment_method(account_id: str, name: str) -> None:
     if is_reserved_name(name):
         raise AppError(ErrorCode.INVALID_INPUT, f"Cannot delete reserved payment method '{name}'")
 
+    deleted_method: Dict[str, Any] = {}
+
     try:
-        # Get existing account and methods
-        account_id_key = f"ACCOUNT#{account_id}"
-        response = tables.accounts.get_item(Key={"accountId": account_id_key})
 
-        if "Item" not in response:
-            raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{name}' not found")
+        def _apply(methods: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            nonlocal deleted_method
+            remaining_methods, deleted_method = _find_and_remove_method(methods, name)
+            return remaining_methods
 
-        preferences = copy.deepcopy(response["Item"].get("preferences", {}))
-        existing_methods = list(preferences.get("paymentMethods", []))
-
-        # Find and remove method
-        new_methods, method_to_delete = _find_and_remove_method(existing_methods, name)
-
-        # Update account with remaining methods (or empty list) BEFORE touching S3:
-        # a failed optimistic-lock write (concurrent write collision) must leave the
-        # QR code image intact, since the payment method would remain active.
-        preferences["paymentMethods"] = new_methods
-        _save_preferences(account_id_key, response, preferences)
+        # Save the remaining methods (or empty list) BEFORE touching S3: a failed
+        # optimistic-lock write (concurrent write collision) must leave the QR code
+        # image intact, since the payment method would remain active.
+        _mutate_payment_methods(account_id, _apply)
 
         # Only after the DynamoDB update succeeds, delete the QR code from S3
         # (best-effort: a failure here is logged and does not block the deletion).
-        _delete_qr_if_exists(logger, account_id, name, method_to_delete)
+        _delete_qr_if_exists(logger, account_id, name, deleted_method)
 
         logger.info("Deleted payment method", account_id=account_id, name=name)
 
@@ -763,7 +773,8 @@ def delete_all_user_qr_codes(account_id: str, logger: Any = None) -> int:
     """Delete all S3 payment QR codes and versions for this account.
 
     Purges all object versions and delete markers under the account's QR code
-    prefixes to completely clean up storage upon account deletion.
+    prefixes to completely clean up storage upon account deletion. Transient
+    S3 errors are retried with exponential backoff via the shared helper.
     """
     bucket_name = os.environ.get("EXPORTS_BUCKET")
     if not bucket_name:
@@ -779,23 +790,7 @@ def delete_all_user_qr_codes(account_id: str, logger: Any = None) -> int:
     deleted_count = 0
     for prefix in set(prefixes):
         try:
-            paginator: Any = s3.get_paginator("list_object_versions")
-            for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-                delete_items: list[Any] = []
-                for version in page.get("Versions", []):
-                    k = version.get("Key")
-                    vid = version.get("VersionId")
-                    if k and vid:
-                        delete_items.append({"Key": k, "VersionId": vid})
-                for marker in page.get("DeleteMarkers", []):
-                    k = marker.get("Key")
-                    vid = marker.get("VersionId")
-                    if k and vid:
-                        delete_items.append({"Key": k, "VersionId": vid})
-                if delete_items:
-                    s3.delete_objects(Bucket=bucket_name, Delete={"Objects": delete_items})
-                    deleted_count += len(delete_items)
-                    log.info(f"Deleted {len(delete_items)} QR code versions from S3 under {prefix}")
+            deleted_count += purge_s3_prefix(s3, bucket_name, prefix, logger=log)
         except Exception as e:
             log.error("Error purging S3 payment QR codes", account_id=account_id, error=str(e), exc_info=True)
             raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to purge payment QR codes from S3") from e

@@ -12,13 +12,15 @@ try:  # pragma: no cover
     from utils.dynamodb import tables
     from utils.ids import ensure_catalog_id, ensure_profile_id
     from utils.logging import get_logger
-    from utils.pagination import query_all_items
+    from utils.pagination import query_all_items, query_all_items_iter
+    from utils.report_limits import MAX_UNIT_REPORT_GRAPH_BYTES, OrderGraphBudget
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import batch_check_profile_access
     from ..utils.dynamodb import tables
     from ..utils.ids import ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
-    from ..utils.pagination import query_all_items
+    from ..utils.pagination import query_all_items, query_all_items_iter
+    from ..utils.report_limits import MAX_UNIT_REPORT_GRAPH_BYTES, OrderGraphBudget
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -137,21 +139,28 @@ def _build_order_detail(order: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _get_seller_data(profile_id: str, profile: Dict[str, Any], campaigns: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Get seller data including orders from all campaigns."""
+def _get_seller_data(
+    profile_id: str, profile: Dict[str, Any], campaigns: List[Dict[str, Any]], budget: OrderGraphBudget
+) -> Dict[str, Any]:
+    """Get seller data including orders from all campaigns.
+
+    Orders are streamed, and each order detail is charged to the unit-wide
+    ``budget`` as it is built and before it is accumulated, so a unit with an
+    order graph too large to return exhausts neither the Lambda's memory and
+    time budget nor AppSync's resolver-response size limit: the detail that
+    would cross the ceiling is never kept (#577).
+    """
     seller_name = profile.get("sellerName", "Unknown")
     seller_orders: List[Dict[str, Any]] = []
     seller_total_sales = Decimal("0")
 
     for campaign in campaigns:
         campaign_id = campaign["campaignId"]
-        orders = query_all_items(
-            tables.orders,
-            {"KeyConditionExpression": Key("campaignId").eq(campaign_id)},
-        )
+        orders = query_all_items_iter(tables.orders, {"KeyConditionExpression": Key("campaignId").eq(campaign_id)})
 
         for order in orders:
             order_detail = _build_order_detail(order)
+            budget.admit(order_detail)
             seller_orders.append(order_detail)
             seller_total_sales += order_detail["totalAmount"]
 
@@ -180,13 +189,14 @@ def _extract_unit_report_params(event: Dict[str, Any]) -> tuple[str, int, str, s
 def _aggregate_seller_data(
     accessible_profiles: Dict[str, Dict[str, Any]], profile_campaigns: Dict[str, List[Dict[str, Any]]]
 ) -> tuple[List[Dict[str, Any]], Decimal, int]:
-    """Aggregate seller data from accessible profiles."""
+    """Aggregate seller data from accessible profiles, bounded by the shared order-graph ceiling."""
     sellers: List[Dict[str, Any]] = []
     total_unit_sales = Decimal("0")
     total_unit_orders = 0
+    budget = OrderGraphBudget("This unit's", MAX_UNIT_REPORT_GRAPH_BYTES)
 
     for profile_id, profile in accessible_profiles.items():
-        seller_data = _get_seller_data(profile_id, profile, profile_campaigns[profile_id])
+        seller_data = _get_seller_data(profile_id, profile, profile_campaigns[profile_id], budget)
         if seller_data["orders"] or seller_data["totalSales"] > 0:
             sellers.append(seller_data)
             total_unit_sales += seller_data["totalSales"]

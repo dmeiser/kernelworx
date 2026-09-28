@@ -5,9 +5,8 @@ These handlers provide S3 pre-signed URL generation for QR code uploads
 and confirmations. They integrate with AppSync pipeline resolvers.
 """
 
-import copy
 import os
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
@@ -18,9 +17,8 @@ try:  # pragma: no cover
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.payment_methods import (
-        _save_preferences,
-        delete_qr_by_key,
-        delete_qr_from_s3,
+        _delete_qr_if_exists,
+        _mutate_payment_methods,
         generate_qr_code_s3_key,
         get_payment_methods,
         is_reserved_name,
@@ -31,9 +29,8 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
     from ..utils.payment_methods import (
-        _save_preferences,
-        delete_qr_by_key,
-        delete_qr_from_s3,
+        _delete_qr_if_exists,
+        _mutate_payment_methods,
         generate_qr_code_s3_key,
         get_payment_methods,
         is_reserved_name,
@@ -111,6 +108,10 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     bucket_name = get_required_env("EXPORTS_BUCKET")
     s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
+    # The pre-signed POST only accepts image/png and always issues a .png key,
+    # so the confirm step's magic-number check only ever admits PNG for it
+    # (#559). The other extensions validate_qr_s3_key permits stay valid for
+    # keys an account already stored.
     presigned_post = s3_client.generate_presigned_post(
         Bucket=bucket_name,
         Key=s3_key,
@@ -133,14 +134,75 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
 
 def _validate_s3_object_exists(bucket_name: str, s3_key: str) -> None:
-    """Validate that S3 object exists at the specified key."""
+    """Validate that the S3 object exists and holds a permitted image format.
+
+    S3 validates only the Content-Type form field of the pre-signed POST, not
+    the object's bytes, so any body up to the size cap can be stored under the
+    QR prefix (#559). The magic numbers of the format the key's extension
+    permits are checked here, and a non-matching object is purged before the
+    error is raised.
+
+    Raises:
+        AppError: NOT_FOUND if the object is missing, INVALID_INPUT if it does
+            not hold a permitted image.
+    """
     s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
     try:
-        s3_client.head_object(Bucket=bucket_name, Key=s3_key)
+        head = s3_client.head_object(Bucket=bucket_name, Key=s3_key)
     except ClientError as e:
         if e.response.get("Error", {}).get("Code") == "404":
             raise AppError(ErrorCode.NOT_FOUND, "Upload not found. Please upload the file first.")
         raise
+
+    if not _object_is_permitted_image(s3_client, bucket_name, s3_key, int(head.get("ContentLength", 0))):
+        # Purge first so the bad object cannot linger in the first-party bucket.
+        s3_client.delete_object(Bucket=bucket_name, Key=s3_key)
+        raise AppError(ErrorCode.INVALID_INPUT, "Uploaded file is not a valid image")
+
+
+def _object_is_permitted_image(s3_client: Any, bucket_name: str, s3_key: str, content_length: int) -> bool:
+    """Check the object's leading bytes against the format its key permits.
+
+    Only the first 12 bytes are read (the WEBP form type sits at offset 8), so
+    the check stays a fixed-cost peek regardless of object size.
+    """
+    if content_length == 0:
+        return False
+    response = s3_client.get_object(Bucket=bucket_name, Key=s3_key, Range="bytes=0-11")
+    return _has_image_magic(response["Body"].read(), s3_key)
+
+
+def _is_png(body: bytes) -> bool:
+    """Return True for a PNG signature."""
+    return body.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def _is_jpeg(body: bytes) -> bool:
+    """Return True for a JPEG SOI marker."""
+    return body.startswith(b"\xff\xd8\xff")
+
+
+def _is_webp(body: bytes) -> bool:
+    """Return True for a RIFF container whose form type is WEBP."""
+    return body.startswith(b"RIFF") and body[8:12] == b"WEBP"
+
+
+# The formats validate_qr_s3_key admits a key extension for. The bytes must
+# match the key's own extension, so a JPEG cannot be stored - and served under
+# the image/png type the pre-signed POST declares - as a .png key (#559).
+_QR_IMAGE_VALIDATORS_BY_EXTENSION: Dict[str, Any] = {
+    "png": _is_png,
+    "jpg": _is_jpeg,
+    "jpeg": _is_jpeg,
+    "webp": _is_webp,
+}
+
+
+def _has_image_magic(body: bytes, s3_key: str) -> bool:
+    """Return True when the body carries the magic numbers of the key's format."""
+    extension = s3_key.rsplit("/", 1)[-1].rpartition(".")[2]
+    validator = _QR_IMAGE_VALIDATORS_BY_EXTENSION.get(extension)
+    return validator is not None and validator(body)
 
 
 def _validate_qr_upload_inputs(payment_method_name: str, s3_key: str, caller_id: str) -> None:
@@ -175,27 +237,18 @@ def _get_payment_method_qr_key(caller_id: str, payment_method_name: str) -> Opti
 
 def _update_payment_method_qr_url(caller_id: str, payment_method_name: str, s3_key: str) -> Dict[str, Any]:
     """Update payment method with QR code S3 key and return the updated method."""
-    account_id_key = f"ACCOUNT#{caller_id}"
-    response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
+    method_updated: Dict[str, Any] = {}
 
-    if "Item" not in response:
+    def _apply(methods: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        nonlocal method_updated
+        for method in methods:
+            if method.get("name") == payment_method_name:
+                method["qrCodeUrl"] = s3_key
+                method_updated = method
+                return methods
         raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
 
-    preferences = copy.deepcopy(response["Item"].get("preferences", {}))
-    existing_methods = list(preferences.get("paymentMethods", []))
-
-    method_updated = None
-    for method in existing_methods:
-        if method.get("name") == payment_method_name:
-            method["qrCodeUrl"] = s3_key
-            method_updated = method
-            break
-
-    if not method_updated:
-        raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
-
-    preferences["paymentMethods"] = existing_methods
-    _save_preferences(account_id_key, response, preferences)
+    _mutate_payment_methods(caller_id, _apply)
 
     return dict(method_updated)
 
@@ -220,7 +273,7 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     Raises:
         AppError: If S3 object doesn't exist, deletion of the replaced QR
-            object fails, or update fails
+            object fails, or the update fails
     """
     logger = get_logger(__name__)
 
@@ -241,7 +294,9 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # surfaces as an AppError instead of being swallowed.
     previous_qr_key = _get_payment_method_qr_key(caller_id, payment_method_name)
     if previous_qr_key and previous_qr_key != s3_key:
-        _delete_qr_from_s3_storage(previous_qr_key, caller_id, payment_method_name)
+        _delete_qr_if_exists(
+            logger, caller_id, payment_method_name, {"qrCodeUrl": previous_qr_key}, raise_on_error=True
+        )
 
     # Store the new key only after the old object is gone. If this put
     # fails, the payment method is left without a QR image; the error
@@ -264,43 +319,17 @@ def confirm_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     return {"name": payment_method_name, "qrCodeUrl": s3_key}
 
 
-def _delete_qr_from_s3_storage(stored_qr_key: str | None, caller_id: str, payment_method_name: str) -> None:
-    """Delete QR code from S3 storage if it exists.
-
-    Raises:
-        AppError: If the deletion fails. Missing objects are treated as
-            success by the utils helpers, which log real failures at error
-            level before raising.
-    """
-    if not stored_qr_key:
-        return
-
-    if stored_qr_key.startswith("payment-qr-codes/"):
-        delete_qr_by_key(stored_qr_key)
-    else:
-        # Fallback: Legacy slug-based key or HTTP URL - try the old method
-        delete_qr_from_s3(caller_id, payment_method_name)
-
-
 def _clear_qr_url_in_payment_method(caller_id: str, payment_method_name: str) -> None:
     """Update DynamoDB to clear qrCodeUrl for the specified payment method."""
-    account_id_key = f"ACCOUNT#{caller_id}"
-    response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
 
-    if "Item" not in response:
+    def _apply(methods: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        for method in methods:
+            if method.get("name") == payment_method_name:
+                method["qrCodeUrl"] = None
+                return methods
         raise AppError(ErrorCode.NOT_FOUND, f"Payment method '{payment_method_name}' not found")
 
-    preferences = copy.deepcopy(response["Item"].get("preferences", {}))
-    existing_methods = list(preferences.get("paymentMethods", []))
-    updated_methods = []
-    for m in existing_methods:
-        method_copy = dict(m)
-        if method_copy.get("name") == payment_method_name:
-            method_copy["qrCodeUrl"] = None
-        updated_methods.append(method_copy)
-
-    preferences["paymentMethods"] = updated_methods
-    _save_preferences(account_id_key, response, preferences)
+    _mutate_payment_methods(caller_id, _apply)
 
 
 @with_error_handling(error_message="Failed to delete QR code")
@@ -329,9 +358,12 @@ def delete_qr_code(event: Dict[str, Any], context: Any) -> bool:
         raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete QR for reserved methods")
 
     target = _verify_payment_method_exists(caller_id, payment_method_name)
-    stored_qr_key = target.get("qrCodeUrl")
 
-    _delete_qr_from_s3_storage(stored_qr_key, caller_id, payment_method_name)
+    # A failed S3 delete must not clear qrCodeUrl, otherwise the only handle on the
+    # still-present object is lost (#303). The deletePaymentMethod pipeline's
+    # purge step reads the __isError payload and continues, so the method is still
+    # removed there (#433).
+    _delete_qr_if_exists(logger, caller_id, payment_method_name, target, raise_on_error=True)
     if not purge_s3_only:
         _clear_qr_url_in_payment_method(caller_id, payment_method_name)
 

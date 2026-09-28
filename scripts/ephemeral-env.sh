@@ -54,6 +54,10 @@ if [ -z "$RUN_ID" ]; then
   exit 1
 fi
 
+if ! validate_run_id "$RUN_ID"; then
+  exit 1
+fi
+
 STATE_KEY="application/ephemeral/${RUN_ID}/terraform.tfstate"
 
 cd "$ENV_DIR"
