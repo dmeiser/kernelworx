@@ -332,8 +332,8 @@ resource "aws_iam_role_policy" "lambda_campaign_dynamodb" {
 #
 # S3 scope: delete-profile-cascade purges report exports under
 # reports/<profileId>/ in the exports bucket (ListBucketVersions +
-# DeleteObject/DeleteObjectVersion on that prefix only). The other
-# handler does not touch S3. No CloudFront or Cognito permissions.
+# DeleteObject/DeleteObjectVersion on that prefix only). The other handler
+# does not touch S3. No CloudFront or Cognito permissions.
 # The monolithic shared role was retired in #355 (chunk 5), the final chunk of
 # the #326 split.
 
