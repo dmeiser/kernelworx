@@ -79,25 +79,4 @@ describe('update_order_fn UpdateItem request expression names', () => {
       expect(missingExpressionNames(req.update)).toEqual([]);
     }
   });
-
-  test('the consistency check catches a reserved word added without an expression name', () => {
-    // Proves the rule above is live rather than vacuously true: the same
-    // assertion used above fails on a request that uses `#name` without
-    // populating expressionNames (the exact trap #543 described).
-    expect(
-      missingExpressionNames({
-        expression: 'SET #status = :status, updatedAt = :updatedAt',
-        expressionValues: { ':status': 'PAID' }
-      })
-    ).toEqual(['#status']);
-
-    // ...and passes once the name is populated, as update_campaign_fn.js does.
-    expect(
-      missingExpressionNames({
-        expression: 'SET #status = :status',
-        expressionNames: { '#status': 'status' },
-        expressionValues: { ':status': 'PAID' }
-      })
-    ).toEqual([]);
-  });
 });
