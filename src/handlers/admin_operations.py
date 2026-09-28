@@ -22,7 +22,11 @@ from botocore.exceptions import ClientError
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
 from .account_operations import _delete_all_user_data
-from .campaign_operations import _verify_campaign_deleted, _verify_order_keys_deleted
+from .campaign_operations import (
+    _verify_campaign_deleted,
+    batch_delete_keys,
+    delete_orders_for_campaign,
+)
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -1041,27 +1045,6 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
     return catalog_item
 
 
-def _delete_orders_for_campaign(campaign_id: str) -> int:
-    """Delete all orders for a campaign and verify deletion. Returns count deleted."""
-    orders = query_all_items(
-        tables.orders,
-        {
-            "KeyConditionExpression": "campaignId = :cid",
-            "ExpressionAttributeValues": {":cid": campaign_id},
-        },
-    )
-
-    deleted_count = 0
-    for order in orders:
-        tables.orders.delete_item(Key={"campaignId": campaign_id, "orderId": order["orderId"]})
-        deleted_count += 1
-
-    if orders:
-        _verify_order_keys_deleted(orders)
-
-    return deleted_count
-
-
 def _delete_user_orders(account_id: str, logger: Any) -> int:
     """Delete all orders for all campaigns of all profiles owned by a user.
 
@@ -1086,7 +1069,7 @@ def _delete_user_orders(account_id: str, logger: Any) -> int:
             },
         )
         for campaign in campaigns:
-            deleted_count += _delete_orders_for_campaign(campaign["campaignId"])
+            deleted_count += delete_orders_for_campaign(campaign["campaignId"], logger=logger)
 
     logger.info("Deleted user orders", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1115,11 +1098,17 @@ def _delete_user_campaigns(account_id: str, logger: Any) -> int:
                 "ExpressionAttributeValues": {":pid": profile_id},
             },
         )
-        for campaign in campaigns:
-            campaign_id = campaign["campaignId"]
-            tables.campaigns.delete_item(Key={"profileId": profile_id, "campaignId": campaign_id})
-            _verify_campaign_deleted(profile_id, campaign_id)
-            deleted_count += 1
+        campaign_keys = [
+            {"profileId": profile_id, "campaignId": campaign["campaignId"]}
+            for campaign in campaigns
+            if campaign.get("campaignId")
+        ]
+        if campaign_keys:
+            deleted_count += batch_delete_keys(
+                tables.campaigns, campaign_keys, ["profileId", "campaignId"], logger=logger
+            )
+            for campaign in campaigns:
+                _verify_campaign_deleted(profile_id, campaign["campaignId"])
 
     logger.info("Deleted user campaigns", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1140,9 +1129,15 @@ def _delete_user_shares(account_id: str, logger: Any) -> int:
                 "ExpressionAttributeValues": {":pid": profile_id},
             },
         )
-        for share in shares:
-            tables.shares.delete_item(Key={"profileId": profile_id, "targetAccountId": share["targetAccountId"]})
-            deleted_count += 1
+        share_keys = [
+            {"profileId": profile_id, "targetAccountId": share["targetAccountId"]}
+            for share in shares
+            if share.get("targetAccountId")
+        ]
+        if share_keys:
+            deleted_count += batch_delete_keys(
+                tables.shares, share_keys, ["profileId", "targetAccountId"], logger=logger
+            )
 
     logger.info("Deleted user shares", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1151,12 +1146,18 @@ def _delete_user_shares(account_id: str, logger: Any) -> int:
 def _delete_user_profiles(account_id: str, logger: Any) -> int:
     """Delete all profiles owned by a user. Returns count deleted."""
     db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
 
     profiles = _get_user_profiles(db_account_id)
-    for profile in profiles:
-        tables.profiles.delete_item(Key={"ownerAccountId": db_account_id, "profileId": profile["profileId"]})
-        deleted_count += 1
+    profile_keys = [
+        {"ownerAccountId": db_account_id, "profileId": profile["profileId"]}
+        for profile in profiles
+        if profile.get("profileId")
+    ]
+    deleted_count = (
+        batch_delete_keys(tables.profiles, profile_keys, ["ownerAccountId", "profileId"], logger=logger)
+        if profile_keys
+        else 0
+    )
 
     logger.info("Deleted user profiles", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1236,9 +1237,9 @@ def _delete_invites_for_owned_profiles(account_id: str, logger: Any) -> int:
                 "IndexName": "profileId-index",
             },
         )
-        for invite in invites:
-            tables.invites.delete_item(Key={"inviteCode": invite["inviteCode"]})
-            deleted_count += 1
+        invite_keys = [{"inviteCode": invite["inviteCode"]} for invite in invites if invite.get("inviteCode")]
+        if invite_keys:
+            deleted_count += batch_delete_keys(tables.invites, invite_keys, ["inviteCode"], logger=logger)
 
     logger.info("Deleted invites for owned profiles", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1247,7 +1248,6 @@ def _delete_invites_for_owned_profiles(account_id: str, logger: Any) -> int:
 def _delete_inbound_shares(account_id: str, logger: Any) -> int:
     """Delete all inbound shares where the account is the target."""
     db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
 
     shares = query_all_items(
         tables.shares,
@@ -1257,14 +1257,16 @@ def _delete_inbound_shares(account_id: str, logger: Any) -> int:
             "IndexName": "targetAccountId-index",
         },
     )
-    for share in shares:
-        tables.shares.delete_item(
-            Key={
-                "profileId": share["profileId"],
-                "targetAccountId": share["targetAccountId"],
-            }
-        )
-        deleted_count += 1
+    share_keys = [
+        {"profileId": share["profileId"], "targetAccountId": share["targetAccountId"]}
+        for share in shares
+        if share.get("profileId") and share.get("targetAccountId")
+    ]
+    deleted_count = (
+        batch_delete_keys(tables.shares, share_keys, ["profileId", "targetAccountId"], logger=logger)
+        if share_keys
+        else 0
+    )
 
     logger.info("Deleted inbound shares", account_id=account_id, count=deleted_count)
     return deleted_count
