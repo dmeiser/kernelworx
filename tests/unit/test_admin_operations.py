@@ -1326,12 +1326,12 @@ class TestAdminResetUserPassword:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """An email longer than 254 chars is rejected by the validator (#124)."""
-        from src.handlers.admin_operations import _validate_email_for_filter
+        """An email longer than 254 chars is rejected by the filter formatter (#124)."""
+        from src.utils.cognito_filters import cognito_user_filter
 
         long_email = "a" * 250 + "@b.co"
         with pytest.raises(AppError) as exc_info:
-            _validate_email_for_filter(long_email)
+            cognito_user_filter("email", long_email)
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 
@@ -2258,12 +2258,12 @@ class TestAdminDeleteUser:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """A sub longer than 256 chars is rejected by the validator (#124)."""
-        from src.handlers.admin_operations import _validate_sub_for_filter
+        """A sub longer than 256 chars is rejected by the filter formatter (#124)."""
+        from src.utils.cognito_filters import cognito_user_filter
 
         long_sub = "a" * 257
         with pytest.raises(AppError) as exc_info:
-            _validate_sub_for_filter(long_sub)
+            cognito_user_filter("sub", long_sub)
 
         assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
 

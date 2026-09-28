@@ -31,11 +31,13 @@ from .campaign_operations import (
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
+    from utils.cognito_filters import cognito_user_filter
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
+    from ..utils.cognito_filters import cognito_user_filter
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
@@ -588,53 +590,11 @@ def _looks_like_uuid(value: str) -> bool:
 
 def _is_valid_email_prefix(value: str) -> bool:
     """Check if a string is a valid email prefix (local part or local@partial-domain)."""
-    email_prefix_pattern = r"^[a-zA-Z0-9._%+-]+(?:@[a-zA-Z0-9.-]*)?$"
-    return bool(re.match(email_prefix_pattern, value)) and len(value) <= 254
-
-
-_COGNITO_FILTER_METACHARS = frozenset('"\\')
-
-
-def _reject_cognito_filter_metachars(value: str, field_label: str) -> None:
-    """Reject characters that can break a Cognito ListUsers filter literal.
-
-    Cognito filters are double-quoted and use backslash as the escape
-    character for inner double quotes. A value containing a quote or a
-    trailing backslash can escape the terminating quote and break the
-    filter. Reject double quotes, backslashes, and whitespace consistently
-    for any value that will be interpolated into a filter.
-    """
-    if any(ch in _COGNITO_FILTER_METACHARS for ch in value):
-        raise AppError(ErrorCode.INVALID_INPUT, f"Invalid {field_label}")
-    if any(ch.isspace() for ch in value):
-        raise AppError(ErrorCode.INVALID_INPUT, f"Invalid {field_label}")
-
-
-def _validate_email_for_filter(email: str) -> None:
-    """Validate an email before interpolating it into a Cognito ListUsers filter.
-
-    Reject Cognito filter metacharacters (double quotes, backslashes,
-    whitespace) and require a basic local@domain shape. See issue #124.
-    """
-    if not email or len(email) > 254:
-        raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
-    _reject_cognito_filter_metachars(email, "email")
-    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-        raise AppError(ErrorCode.INVALID_INPUT, "Invalid email")
-
-
-def _validate_sub_for_filter(sub: str) -> None:
-    """Validate a sub/account ID before interpolating it into a Cognito filter.
-
-    Reject Cognito filter metacharacters (double quotes, backslashes,
-    whitespace) and oversized values so malformed values surface as
-    INVALID_INPUT instead of a Cognito parse error. See issue #124.
-    Non-UUID account IDs are allowed through so that deletion requests for
-    non-existent users resolve to NOT_FOUND rather than INVALID_INPUT.
-    """
-    if not sub or len(sub) > 256:
-        raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
-    _reject_cognito_filter_metachars(sub, "account ID")
+    try:
+        cognito_user_filter("email_prefix", value)
+    except AppError:
+        return False
+    return True
 
 
 def _validate_search_query(query: str) -> None:
@@ -668,7 +628,7 @@ def _search_user_by_sub(cognito: Any, user_pool_id: str, sub: str, logger: Any) 
     try:
         response = cognito.list_users(
             UserPoolId=user_pool_id,
-            Filter=f'sub = "{sub}"',
+            Filter=cognito_user_filter("sub", sub),
             Limit=1,
         )
         users = response.get("Users", [])
@@ -696,7 +656,7 @@ def _search_users_in_cognito_by_email_prefix(
     try:
         response = cognito.list_users(
             UserPoolId=user_pool_id,
-            Filter=f'email ^= "{query}"',  # Prefix match on email
+            Filter=cognito_user_filter("email_prefix", query),  # Prefix match on email
             Limit=50,  # Reasonable limit for search results
         )
         return list(response.get("Users", []))
@@ -756,13 +716,11 @@ def _find_cognito_user_by_sub(
     the Cognito user still exists.
     """
     raw_sub = account_id[8:] if account_id.startswith("ACCOUNT#") else account_id
-    # Validate before interpolating into the Cognito filter to prevent
-    # quote-injection / filter breakage (#124).
-    _validate_sub_for_filter(raw_sub)
     try:
         users_response = cognito.list_users(
             UserPoolId=user_pool_id,
-            Filter=f'sub = "{raw_sub}"',
+            # Built in one step so the value that was checked is the value sent (#124, #560).
+            Filter=cognito_user_filter("sub", raw_sub),
             Limit=1,
         )
         users = users_response.get("Users", [])
@@ -808,13 +766,11 @@ def _account_exists_in_dynamodb(account_id: str, logger: Any) -> bool:
 
 def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any) -> str:
     """Find username by email. Returns username."""
-    # Validate before interpolating into the Cognito filter to prevent
-    # quote-injection / filter breakage (#124).
-    _validate_email_for_filter(email)
     try:
         response = cognito.list_users(
             UserPoolId=user_pool_id,
-            Filter=f'email = "{email}"',
+            # Built in one step so the value that was checked is the value sent (#124, #560).
+            Filter=cognito_user_filter("email", email),
             Limit=1,
         )
     except ClientError as e:
