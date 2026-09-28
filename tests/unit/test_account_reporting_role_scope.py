@@ -59,10 +59,10 @@ ALLOWED_S3_PREFIX = "reports/"
 
 OWNER_SUB = "owner-sub-001"
 FRIEND_SUB = "friend-sub-002"
-OTHER_SUB = "other-sub-003"
 PROFILE_ID = "PROFILE#profile-123"
-OTHER_PROFILE_ID = "PROFILE#profile-456"
+FRIEND_PROFILE_ID = "PROFILE#profile-789"
 CAMPAIGN_ID = "CAMPAIGN#campaign-123"
+FRIEND_CAMPAIGN_ID = "CAMPAIGN#campaign-789"
 CATALOG_ID = "CATALOG#catalog-123"
 
 
@@ -279,23 +279,29 @@ class TestListUnitCatalogsScope:
         self,
         profiles_table: Any,
         campaigns_table: Any,
+        shares_table: Any,
         catalogs_table: Any,
         lambda_context: Any,
         api_calls: ApiCallRecorder,
     ) -> None:
         seed_profile(profiles_table, OWNER_SUB, PROFILE_ID, unitType="Pack", unitNumber=158)
-        seed_profile(profiles_table, OTHER_SUB, OTHER_PROFILE_ID, unitType="Pack", unitNumber=158)
+        # A seller in the same unit whose profile is not shared with the caller makes
+        # the whole listing FORBIDDEN (batch_check_profile_access reports every
+        # existing-but-unreadable profile), so this scope test seeds only sellers the
+        # caller can read. See tests/unit/test_batch_auth_handlers.py for that contract.
+        seed_profile(profiles_table, FRIEND_SUB, FRIEND_PROFILE_ID, unitType="Pack", unitNumber=158)
+        shares_table.put_item(
+            Item={
+                "profileId": FRIEND_PROFILE_ID,
+                "targetAccountId": f"ACCOUNT#{OWNER_SUB}",
+                "ownerAccountId": f"ACCOUNT#{FRIEND_SUB}",
+                "permissions": ["READ"],
+            }
+        )
         seed_campaign(campaigns_table, PROFILE_ID, CAMPAIGN_ID, catalogId=CATALOG_ID)
-        seed_campaign(campaigns_table, OTHER_PROFILE_ID, "CAMPAIGN#campaign-456", catalogId="CATALOG#catalog-456")
+        seed_campaign(campaigns_table, FRIEND_PROFILE_ID, FRIEND_CAMPAIGN_ID, catalogId=CATALOG_ID)
         catalogs_table.put_item(
             Item={"catalogId": CATALOG_ID, "catalogName": "Fall Catalog", "ownerAccountId": f"ACCOUNT#{OWNER_SUB}"}
-        )
-        catalogs_table.put_item(
-            Item={
-                "catalogId": "CATALOG#catalog-456",
-                "catalogName": "Other Catalog",
-                "ownerAccountId": f"ACCOUNT#{OTHER_SUB}",
-            }
         )
         api_calls.attach()
 
@@ -307,7 +313,7 @@ class TestListUnitCatalogsScope:
             lambda_context,
         )
 
-        # Only the owned profile's catalog is accessible.
+        # The owned and shared profiles both use the same catalog.
         assert [catalog["catalogId"] for catalog in result] == [CATALOG_ID]
         # profiles GSI query + owned BatchGetItem + shares BatchGetItem (miss)
         # + campaigns query + catalogs BatchGetItem (#450).

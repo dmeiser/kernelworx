@@ -117,29 +117,6 @@ class TestCampaignReportingBatchAuth:
             )
             accessible_ids.append(profile_id)
 
-        # 10 profiles caller cannot access
-        for i in range(10):
-            profile_id = f"PROFILE#denied-{i:03d}"
-            profiles_table.put_item(
-                Item={
-                    "ownerAccountId": f"ACCOUNT#{other}",
-                    "profileId": profile_id,
-                    "sellerName": f"Denied {i}",
-                    "unitType": "Pack",
-                    "unitNumber": 158,
-                }
-            )
-            campaigns_table.put_item(
-                Item={
-                    "profileId": profile_id,
-                    "campaignId": f"CAMPAIGN#denied-{i:03d}",
-                    "campaignName": "Fall",
-                    "campaignYear": 2024,
-                    "catalogId": catalog_id,
-                    "unitCampaignKey": unit_campaign_key,
-                }
-            )
-
         # Instrument BatchGetItem on the resource used by batch_check_profile_access.
         resource = get_dynamodb_resource()
         original_batch_get_item = resource.batch_get_item
@@ -168,7 +145,7 @@ class TestCampaignReportingBatchAuth:
 
         result = get_unit_report(event, lambda_context)
 
-        # 30 campaigns were found; only 20 are accessible.
+        # 20 campaigns were found and all 20 are accessible.
         assert len(result["sellers"]) == 20
         assert result["totalOrders"] == 20
         assert result["totalSales"] == 200.0
@@ -178,6 +155,75 @@ class TestCampaignReportingBatchAuth:
         # each share's stored ownerAccountId against the profile base table.
         # These legacy shares omit ownerAccountId, so only two calls are made.
         assert batch_get_item_calls == 2
+
+    def test_get_unit_report_reports_unreadable_seller_as_forbidden(
+        self,
+        dynamodb_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """A seller whose profile exists but is not shared with the caller surfaces FORBIDDEN."""
+        caller = "caller-account"
+        other = "other-account"
+        unit_campaign_key = "Pack#158#Springfield#IL#Fall#2024"
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        campaigns_table = dynamodb.Table("kernelworx-campaigns-v2-ue1-dev")
+
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{caller}",
+                "profileId": "PROFILE#owned-000",
+                "sellerName": "Owned",
+            }
+        )
+        campaigns_table.put_item(
+            Item={
+                "profileId": "PROFILE#owned-000",
+                "campaignId": "CAMPAIGN#owned-000",
+                "campaignName": "Fall",
+                "campaignYear": 2024,
+                "catalogId": "CATALOG#catalog-123",
+                "unitCampaignKey": unit_campaign_key,
+            }
+        )
+
+        private_profile_id = "PROFILE#private-000"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{other}",
+                "profileId": private_profile_id,
+                "sellerName": "Private",
+            }
+        )
+        campaigns_table.put_item(
+            Item={
+                "profileId": private_profile_id,
+                "campaignId": "CAMPAIGN#private-000",
+                "campaignName": "Fall",
+                "campaignYear": 2024,
+                "catalogId": "CATALOG#catalog-123",
+                "unitCampaignKey": unit_campaign_key,
+            }
+        )
+
+        event = {
+            "arguments": {
+                "unitType": "Pack",
+                "unitNumber": 158,
+                "city": "Springfield",
+                "state": "IL",
+                "campaignName": "Fall",
+                "campaignYear": 2024,
+                "catalogId": "CATALOG#catalog-123",
+            },
+            "identity": {"sub": caller},
+        }
+
+        result = get_unit_report(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == "FORBIDDEN"
+        assert private_profile_id in result["message"]
 
 
 class TestListUnitCatalogsBatchAuth:
@@ -208,7 +254,7 @@ class TestListUnitCatalogsBatchAuth:
             }
         )
 
-        # 10 owned + 10 shared = accessible; 10 denied.
+        # 10 owned + 10 shared = accessible.
         for i in range(10):
             profile_id = f"PROFILE#owned-{i:03d}"
             profiles_table.put_item(
@@ -255,27 +301,6 @@ class TestListUnitCatalogsBatchAuth:
                     "profileId": profile_id,
                     "targetAccountId": f"ACCOUNT#{caller}",
                     "permissions": ["READ"],
-                }
-            )
-
-        for i in range(10):
-            profile_id = f"PROFILE#denied-{i:03d}"
-            profiles_table.put_item(
-                Item={
-                    "ownerAccountId": f"ACCOUNT#{other}",
-                    "profileId": profile_id,
-                    "sellerName": f"Denied {i}",
-                    "unitType": "Pack",
-                    "unitNumber": 158,
-                }
-            )
-            campaigns_table.put_item(
-                Item={
-                    "profileId": profile_id,
-                    "campaignId": f"CAMPAIGN#denied-{i:03d}",
-                    "campaignName": "Fall",
-                    "campaignYear": 2024,
-                    "catalogId": "catalog-123",
                 }
             )
 
@@ -388,28 +413,6 @@ class TestListUnitCampaignCatalogsBatchAuth:
                     "profileId": profile_id,
                     "targetAccountId": f"ACCOUNT#{caller}",
                     "permissions": ["READ"],
-                }
-            )
-
-        for i in range(10):
-            profile_id = f"PROFILE#denied-{i:03d}"
-            profiles_table.put_item(
-                Item={
-                    "ownerAccountId": f"ACCOUNT#{other}",
-                    "profileId": profile_id,
-                    "sellerName": f"Denied {i}",
-                    "unitType": "Pack",
-                    "unitNumber": 158,
-                }
-            )
-            campaigns_table.put_item(
-                Item={
-                    "profileId": profile_id,
-                    "campaignId": f"CAMPAIGN#denied-{i:03d}",
-                    "campaignName": "Fall",
-                    "campaignYear": 2024,
-                    "catalogId": "catalog-123",
-                    "unitCampaignKey": unit_campaign_key,
                 }
             )
 

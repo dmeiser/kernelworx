@@ -626,7 +626,7 @@ class TestBatchCheckProfileAccess:
         sample_profile_id: str,
         another_account_id: str,
     ) -> None:
-        """Batch check respects required_permission for shared profiles."""
+        """Batch check honours required_permission for shared profiles, and reports a shortfall."""
         # sample_profile is owned by sample_account_id; another_account_id has READ share
         shares_table.put_item(
             Item={
@@ -637,10 +637,16 @@ class TestBatchCheckProfileAccess:
         )
 
         read_result = batch_check_profile_access(another_account_id, [sample_profile_id], "READ")
-        write_result = batch_check_profile_access(another_account_id, [sample_profile_id], "WRITE")
-
         assert sample_profile_id in read_result
-        assert sample_profile_id not in write_result
+
+        # A lesser share is not a missing profile: the caller is told it lacks WRITE
+        # rather than being handed a silently absent id (the symmetric case from #562).
+        with pytest.raises(AppError) as exc_info:
+            batch_check_profile_access(another_account_id, [sample_profile_id], "WRITE")
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert "WRITE" in str(exc_info.value)
+        assert sample_profile_id in str(exc_info.value)
 
     def test_batch_empty_input(self, dynamodb_table: Any) -> None:
         """Batch check with empty profile IDs returns empty set."""
@@ -982,12 +988,6 @@ class TestBatchCheckProfileAccess:
     ) -> None:
         """Share items without a profileId are ignored rather than crashing."""
         profile_id = "PROFILE#missing-share-id"
-        dynamodb_table.put_item(
-            Item={
-                "ownerAccountId": f"ACCOUNT#{another_account_id}",
-                "profileId": profile_id,
-            }
-        )
 
         resource = get_dynamodb_resource()
         original_batch_get_item = resource.batch_get_item
@@ -1024,7 +1024,7 @@ class TestBatchCheckProfileAccess:
         sample_account_id: str,
         another_account_id: str,
     ) -> None:
-        """Batch check rejects a stale share after the profile is transferred."""
+        """A share that outlived the ownership transfer leaves the profile inaccessible."""
         profile_id = "PROFILE#batch-transfer-profile"
         original_owner = sample_account_id
         dynamodb_table.put_item(
@@ -1053,9 +1053,11 @@ class TestBatchCheckProfileAccess:
             }
         )
 
-        result = batch_check_profile_access(another_account_id, [profile_id])
+        with pytest.raises(AppError) as exc_info:
+            batch_check_profile_access(another_account_id, [profile_id])
 
-        assert profile_id not in result
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert profile_id in str(exc_info.value)
 
     def test_batch_uses_extra_profile_read_to_validate_shares(
         self,
@@ -1111,13 +1113,6 @@ class TestBatchCheckProfileAccess:
         """Validation profile items without a profileId are ignored rather than crashing."""
         profile_id = "PROFILE#missing-validated-id"
         profiles_table_name = dynamodb_table.table_name
-        dynamodb_table.put_item(
-            Item={
-                "ownerAccountId": f"ACCOUNT#{another_account_id}",
-                "profileId": profile_id,
-                "sellerName": "Missing Validated Id",
-            }
-        )
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
@@ -1258,11 +1253,10 @@ class TestBatchCheckProfileAccess:
         dynamodb_table: Any,
         sample_account_id: str,
     ) -> None:
-        """Without raise_on_missing the batch check silently drops a deleted profile.
+        """A nonexistent profile is absent from the result where the single check raises NOT_FOUND.
 
-        This documents the difference from ``check_profile_access``, which raises
-        NOT_FOUND for the very same id; the batch contract only reports existence
-        when the caller opts in with ``raise_on_missing=True``.
+        This is the deliberate difference from ``check_profile_access``: the batch
+        contract drops a profile that is gone instead of failing the whole request.
         """
         missing_profile_id = "PROFILE#batch-dropped-profile"
 
@@ -1272,46 +1266,51 @@ class TestBatchCheckProfileAccess:
 
         assert batch_check_profile_access(sample_account_id, [missing_profile_id]) == set()
 
-    def test_batch_raise_on_missing_raises_not_found(
+    def test_batch_drops_missing_profile_while_returning_accessible(
         self,
         dynamodb_table: Any,
-        shares_table: Any,
         sample_profile: Any,
         sample_profile_id: str,
         sample_account_id: str,
     ) -> None:
-        """raise_on_missing reports profiles that no longer exist, and only those."""
-        other_account_id = "other-account-456"
-        existing_profile_id = "PROFILE#existing-not-shared"
+        """A deleted profile is dropped without hiding the profiles the caller can access."""
+        result = batch_check_profile_access(sample_account_id, [sample_profile_id, "PROFILE#gone-profile"])
+
+        assert result == {sample_profile_id}
+
+    def test_batch_raises_forbidden_for_existing_unshared_profiles(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+        another_account_id: str,
+    ) -> None:
+        """An existing profile the caller cannot read is reported, not silently omitted."""
+        unshared_profile_id = "PROFILE#existing-not-shared"
         dynamodb_table.put_item(
             Item={
-                "ownerAccountId": f"ACCOUNT#{other_account_id}",
-                "profileId": existing_profile_id,
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": unshared_profile_id,
                 "sellerName": "Not Shared",
             }
         )
-        missing_profile_id = "PROFILE#gone-profile"
 
         with pytest.raises(AppError) as exc_info:
-            batch_check_profile_access(
-                sample_account_id,
-                [sample_profile_id, existing_profile_id, missing_profile_id],
-                raise_on_missing=True,
-            )
+            batch_check_profile_access(sample_account_id, [sample_profile_id, unshared_profile_id])
 
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
-        assert missing_profile_id in str(exc_info.value)
-        assert existing_profile_id not in str(exc_info.value)
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert unshared_profile_id in str(exc_info.value)
         assert sample_profile_id not in str(exc_info.value)
 
-    def test_batch_raise_on_missing_keeps_read_share_for_write_request(
+    def test_batch_raises_forbidden_for_read_share_when_write_requested(
         self,
         dynamodb_table: Any,
         shares_table: Any,
         sample_account_id: str,
         another_account_id: str,
     ) -> None:
-        """A READ-only share is not a missing profile: it stays absent without raising."""
+        """A READ-only share is a permission shortfall, not a missing profile."""
         profile_id = "PROFILE#read-only-share"
         dynamodb_table.put_item(
             Item={
@@ -1329,11 +1328,13 @@ class TestBatchCheckProfileAccess:
             }
         )
 
-        result = batch_check_profile_access(sample_account_id, [profile_id], "WRITE", raise_on_missing=True)
+        with pytest.raises(AppError) as exc_info:
+            batch_check_profile_access(sample_account_id, [profile_id], "WRITE")
 
-        assert result == set()
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert profile_id in str(exc_info.value)
 
-    def test_batch_raise_on_missing_skips_existence_check_when_all_accessible(
+    def test_batch_skips_existence_check_when_all_accessible(
         self,
         dynamodb_table: Any,
         sample_profile: Any,
@@ -1352,7 +1353,7 @@ class TestBatchCheckProfileAccess:
 
         monkeypatch.setattr(table, "query", wrapped_query)
 
-        result = batch_check_profile_access(sample_account_id, [sample_profile_id], raise_on_missing=True)
+        result = batch_check_profile_access(sample_account_id, [sample_profile_id])
 
         assert result == {sample_profile_id}
         assert queries == []
