@@ -161,28 +161,43 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
     profile["ownerAccountId"] = db_new_owner_id
 
 
-def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> None:
+def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> int:
     """Update or clean up shares after profile ownership transfer.
 
     - Deletes the share for the new owner (they now own the profile).
     - Updates ownerAccountId on third-party shares to the new owner.
 
-    Logs unexpected failures but does not fail the transfer, since share updates
-    are best-effort cleanup after ownership has already changed.
+    This step is load-bearing, not cleanup: the authorization layer re-validates a
+    share against the owner recorded on the share (see ``_is_share_valid`` in
+    ``src/utils/auth.py``), and the transfer has already deleted the old owner's
+    base-table profile record. A share left recording the old owner is therefore
+    dead, and every collaborator it covers is locked out with no way to recover
+    without re-running this step. Failures are therefore reported to the caller
+    (#549) instead of being logged and forgotten.
+
+    Returns:
+        The number of shares that could not be updated.
+
+    Raises:
+        AppError: RESOURCE_BUSY when the share query itself fails, since without
+            it no share can be repaired. Only DynamoDB client errors (throttling,
+            capacity) are translated; anything else is a bug and propagates.
     """
     try:
         shares = query_all_items(
             tables.shares,
             {"KeyConditionExpression": Key("profileId").eq(db_profile_id)},
         )
-    except Exception:
+    except ClientError as e:
         logger.error(
             "Failed to query shares after ownership transfer",
             profile_id=db_profile_id,
+            error=str(e),
             exc_info=True,
         )
-        return
+        raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to update profile shares. Please retry.") from e
 
+    failed = 0
     for share in shares:
         target_account_id = share.get("targetAccountId")
         if not target_account_id:
@@ -197,13 +212,16 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> N
                     ExpressionAttributeValues={":new_owner": db_new_owner_id},
                     ConditionExpression="attribute_exists(profileId) AND attribute_exists(targetAccountId)",
                 )
-        except Exception:
+        except ClientError as e:
+            failed += 1
             logger.error(
                 "Failed to update share after ownership transfer",
                 profile_id=db_profile_id,
                 target_account_id=target_account_id,
+                error=str(e),
                 exc_info=True,
             )
+    return failed
 
 
 @with_error_handling(error_message="Failed to transfer profile ownership")
@@ -226,6 +244,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     caller_is_admin = is_admin(event) and has_mfa(event)
     _verify_new_owner_has_share(db_profile_id, db_new_owner_id, caller_is_admin)
     _transfer_ownership(profile, db_profile_id, db_new_owner_id)
-    _update_shares_after_transfer(db_profile_id, db_new_owner_id)
+
+    failed_shares = _update_shares_after_transfer(db_profile_id, db_new_owner_id)
+    if failed_shares:
+        # The transfer itself is already durable and re-running the share repair
+        # is idempotent, so surfacing a retryable error beats returning success
+        # over a share graph that silently locked every collaborator out (#549).
+        logger.error(
+            "Ownership transfer completed with unrepaired shares",
+            profile_id=db_profile_id,
+            new_owner_account_id=db_new_owner_id,
+            failed_share_count=failed_shares,
+        )
+        raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to update profile shares. Please retry.")
 
     return profile

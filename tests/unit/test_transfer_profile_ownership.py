@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from typing import Any, Dict
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import boto3
 import pytest
@@ -404,6 +404,8 @@ class TestTransferProfileOwnership:
     def test_update_shares_reports_failure_count_and_is_idempotent(self, shares_table: Any) -> None:
         """_update_shares_after_transfer returns the number of shares it could not repair
         and repairs the remainder, so a retry of the step converges (#549)."""
+        from src.utils import dynamodb as db_module
+
         owner_id = "owner-1"
         new_owner_id = "new-owner"
         third_party = "tp-user"
@@ -425,21 +427,22 @@ class TestTransferProfileOwnership:
                 )
             return real_update(*args, **kwargs)
 
-        with patch.object(shares_table, "update_item", side_effect=flaky_update):
-            failed = transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id)
+        mock_shares = MagicMock(wraps=shares_table)
+        mock_shares.query = shares_table.query
+        mock_shares.delete_item = shares_table.delete_item
+        mock_shares.update_item.side_effect = flaky_update
+        db_module._table_overrides["shares"] = mock_shares
+
+        failed = transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id)
         assert failed == 1
 
         # Re-running the step (client retry) repairs the remaining share and reports 0.
+        mock_shares.update_item.side_effect = real_update
         assert transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id) == 0
 
-        share = shares_table.get_item(
-            Key={"profileId": db_profile_id, "targetAccountId": f"ACCOUNT#{third_party}"}
-        )
+        share = shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": f"ACCOUNT#{third_party}"})
         assert share["Item"]["ownerAccountId"] == db_new_owner_id
-        assert (
-            "Item"
-            not in shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
-        )
+        assert "Item" not in shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
 
     def test_corrupt_share_without_target_account_id_skipped(
         self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
