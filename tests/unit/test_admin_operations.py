@@ -5387,6 +5387,7 @@ class TestAdminSearchUserThrottling:
         result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "alice@exa", mock_logger)
         assert result == []
         mock_logger.warning.assert_called_once()
+        assert "Cognito email prefix search failed" in mock_logger.warning.call_args[0][0]
         log_kwargs = mock_logger.warning.call_args[1]
         assert log_kwargs["query"] == "a***@exa"
 
