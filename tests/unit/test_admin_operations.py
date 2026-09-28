@@ -1852,6 +1852,89 @@ class TestAdminPurgeUserAccount:
             is not None
         )
 
+    def test_cognito_failure_leaves_user_data_intact(
+        self,
+        dynamodb_table: Any,
+        invites_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A Cognito delete failure must not sweep any user data (#551).
+
+        The Cognito call is the commit point: if it fails, the data phase must
+        never run, so the half-deleted state (Cognito user alive, residue
+        destroyed) that the ordering fix targets cannot occur.
+        """
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+        invites_table.put_item(Item={"inviteCode": "INV-OWNED", "profileId": "PROFILE#p1", "status": "PENDING"})
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_cognito.admin_delete_user.side_effect = ClientError(
+                {"Error": {"Code": "NotAuthorizedException", "Message": "Access denied."}},
+                "AdminDeleteUser",
+            )
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        # Neither the sweep nor the account-record delete ran: the residue and
+        # the accounts row survive so the admin retry converges.
+        assert invites_table.get_item(Key={"inviteCode": "INV-OWNED"}).get("Item") is not None
+        assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+
+    def test_data_failure_after_cognito_commit(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A data-phase failure after the Cognito commit is logged loudly (#551).
+
+        The Cognito user is already gone, so leftover records are inert and a
+        re-run of the data phase is safe; the partial delete must be detectable
+        in post-incident review via the error_code-tagged log.
+        """
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_get_client.return_value = mock_cognito
+
+            with patch(
+                "src.handlers.admin_operations.delete_invites_for_owned_profiles",
+                side_effect=ClientError(
+                    {"Error": {"Code": "InternalServerError", "Message": "DynamoDB exploded"}},
+                    "DeleteItem",
+                ),
+            ):
+                result = admin_purge_user_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        # The commit point was reached: the Cognito user is gone.
+        mock_cognito.admin_delete_user.assert_called_once_with(UserPoolId="test-pool-id", Username=target_account_id)
+        captured = capsys.readouterr().out
+        assert "data cleanup failed" in captured
+        assert "INTERNAL_ERROR" in captured
+
     def test_purge_deletes_s3_reports_for_the_supplied_profiles(
         self,
         dynamodb_table: Any,
