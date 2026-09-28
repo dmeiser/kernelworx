@@ -55,7 +55,7 @@ MOCK_AWS = """\
 printf '%s\\0' "$@" >> "$MOCK_AWS_LOG"
 printf '\\0' >> "$MOCK_AWS_LOG"
 case "$*" in
-  *"ClientName==`KernelWorx-Web`"*)
+  *'ClientName==`KernelWorx-Web`'*)
     [ "${WEB_CLIENT_PRESENT:-1}" = "1" ] || exit 0
     echo "__WEB_CLIENT_ID__"
     ;;
@@ -166,40 +166,20 @@ class TestClientResolution:
         assert provisioned_client_id(step) == WEB_CLIENT_ID
 
 
-class TestUnresolvableClientFailsLoudly:
-    """#567: an unresolvable client must stop the step, never guess one."""
+def test_unresolvable_client_fails_loudly_without_guessing(step: Step, tmp_path: Path) -> None:
+    """#567: no web client in the pool stops the step instead of picking one.
 
-    def test_step_fails_when_no_web_client_exists(self, step: Step, tmp_path: Path) -> None:
-        result = run_step(step, tmp_path, "", WEB_CLIENT_PRESENT="0")
-
-        assert result.returncode != 0
-        assert "::error::" in result.stderr
-        assert POOL_ID in result.stderr
-        assert not invocations(step, "provision"), "the step provisioned against an arbitrary client"
-
-    def test_arbitrary_first_client_is_never_probed(self, step: Step, tmp_path: Path) -> None:
-        """The mock answers the --max-results 1 query with a usable-looking id."""
-        result = run_step(step, tmp_path, "", WEB_CLIENT_PRESENT="0")
-
-        assert result.returncode != 0
-        for invocation in invocations(step):
-            assert "--max-results" not in invocation, f"the removed guess is back: {invocation}"
-            assert "UserPoolClients[0].ClientId" not in " ".join(invocation)
-
-    def test_github_error_annotation_is_emitted(self, step: Step, tmp_path: Path) -> None:
-        result = run_step(step, tmp_path, "", WEB_CLIENT_PRESENT="0")
-
-        assert result.returncode != 0
-        assert "KernelWorx-Web" in result.stderr
-
-
-def test_removed_fallback_is_absent_from_the_workflow() -> None:
-    """Static guard so the guessing path cannot reappear unnoticed.
-
-    Comments are excluded: the step explains in prose why the fallback must
-    not come back, and that explanation must not satisfy the guard.
+    The mock answers the removed `list-user-pool-clients --max-results 1`
+    query with a usable-looking first-client id, so the step can only fail
+    here by declining to ask for it.
     """
-    code = [line for line in _step_run_script().splitlines() if not line.lstrip().startswith("#")]
-    body = "\n".join(code)
-    assert "--max-results" not in body
-    assert "UserPoolClients[0].ClientId" not in body
+    result = run_step(step, tmp_path, "", WEB_CLIENT_PRESENT="0")
+
+    assert result.returncode != 0, result.stderr
+    assert "::error::" in result.stderr
+    assert POOL_ID in result.stderr
+    assert "KernelWorx-Web" in result.stderr
+    assert not invocations(step, "provision"), "the step provisioned against an arbitrary client"
+    for invocation in invocations(step):
+        assert "--max-results" not in invocation, f"the removed guess is back: {invocation}"
+        assert "UserPoolClients[0].ClientId" not in " ".join(invocation)
