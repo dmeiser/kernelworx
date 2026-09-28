@@ -40,6 +40,24 @@ resource "aws_appsync_function" "fetch_profile" {
   code = file("${local.js_resolvers_dir}/fetch_profile_fn.js")
 }
 
+# Second invocation in the two-phase ownership check (#545). AppSync
+# rejects duplicate function IDs in a pipeline; this resource points at
+# the same JS file, which branches on ctx.stash.isOwner populated by
+# the first call.
+resource "aws_appsync_function" "fetch_profile_step2" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "FetchProfileStep2Fn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/fetch_profile_fn.js")
+}
+
+
 resource "aws_appsync_function" "check_profile_read_auth" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.shares.name
