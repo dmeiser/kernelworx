@@ -626,7 +626,7 @@ class TestBatchCheckProfileAccess:
         sample_profile_id: str,
         another_account_id: str,
     ) -> None:
-        """Batch check honours required_permission for shared profiles, and reports a shortfall."""
+        """Batch check honors required_permission for shared profiles, and reports a shortfall."""
         # sample_profile is owned by sample_account_id; another_account_id has READ share
         shares_table.put_item(
             Item={
