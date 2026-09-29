@@ -992,16 +992,38 @@ function useUserDataData(accountId: string | undefined, isMfaRequired: boolean) 
     adminSearchUser: GqlAdminUser[];
   }>(ADMIN_SEARCH_USER);
 
-  // Transfer ownership mutation
+  // Transfer ownership mutation. The transfer-dialog state lives next to it so
+  // a failed transfer keeps the dialog open with the search and selection
+  // intact for a retry (only onCompleted closes and clears, matching the
+  // shared-code editing state above).
+  const [transferProfileId, setTransferProfileId] = useState<string | null>(null);
+  const [newOwnerSearch, setNewOwnerSearch] = useState('');
+  const [selectedNewOwner, setSelectedNewOwner] = useState<GqlAdminUser | null>(null);
   const [transferOwnership, { loading: transferring }] = useMutation(TRANSFER_PROFILE_OWNERSHIP, {
     onCompleted: () => {
+      setTransferProfileId(null);
+      setNewOwnerSearch('');
+      setSelectedNewOwner(null);
       void refetchProfiles();
     },
     onError: (error) => logDevError('Transfer failed:', error),
   });
 
+  // Revoke-share confirm-dialog state: success-only close (the dialog stays
+  // open with the 'Revoking...' feedback while the mutation is in flight).
+  const [revokeShareTarget, setRevokeShareTarget] = useState<{
+    profileId: string;
+    targetAccountId: string;
+    email: string;
+  } | null>(null);
+
   // Delete share mutation
-  const [deleteShare, { loading: deletingShare }] = useMutation(ADMIN_DELETE_SHARE);
+  const [deleteShare, { loading: deletingShare }] = useMutation(ADMIN_DELETE_SHARE, {
+    onCompleted: () => {
+      setRevokeShareTarget(null);
+    },
+    onError: (error) => logDevError('Revoke share failed:', error),
+  });
 
   // Update campaign shared code mutation
   const [updateCampaignSharedCode] = useMutation(ADMIN_UPDATE_CAMPAIGN_SHARED_CODE, {
@@ -1076,6 +1098,47 @@ function useUserDataData(accountId: string | undefined, isMfaRequired: boolean) 
     })();
   };
 
+  const handleTransferClick = (profileId: string) => {
+    setTransferProfileId(profileId);
+    setNewOwnerSearch('');
+    setSelectedNewOwner(null);
+  };
+
+  const handleSearchNewOwner = () => {
+    if (newOwnerSearch.trim()) {
+      searchOwner(newOwnerSearch);
+    }
+  };
+
+  const handleConfirmTransfer = () => {
+    if (transferProfileId && selectedNewOwner) {
+      confirmTransfer(transferProfileId, selectedNewOwner);
+    }
+  };
+
+  const handleCancelTransfer = () => {
+    setTransferProfileId(null);
+    setNewOwnerSearch('');
+    setSelectedNewOwner(null);
+  };
+
+  const handleRevokeShare = (targetAccountId: string, email: string) => {
+    setRevokeShareTarget({
+      profileId: selectedProfileForShares ?? '',
+      targetAccountId,
+      email,
+    });
+  };
+
+  const handleConfirmRevokeShare = () => {
+    if (!revokeShareTarget) return;
+    revokeShare(revokeShareTarget.profileId, revokeShareTarget.targetAccountId);
+  };
+
+  const handleCancelRevoke = () => {
+    setRevokeShareTarget(null);
+  };
+
   return {
     profiles,
     profilesLoading,
@@ -1096,14 +1159,24 @@ function useUserDataData(accountId: string | undefined, isMfaRequired: boolean) 
     searchLoading,
     transferring,
     deletingShare,
+    transferProfileId,
+    newOwnerSearch,
+    setNewOwnerSearch,
+    selectedNewOwner,
+    setSelectedNewOwner,
+    handleTransferClick,
+    handleSearchNewOwner,
+    handleConfirmTransfer,
+    handleCancelTransfer,
+    revokeShareTarget,
+    handleRevokeShare,
+    handleConfirmRevokeShare,
+    handleCancelRevoke,
     selectedProfileForCampaigns,
     setSelectedProfileForCampaigns,
     selectedProfileForShares,
     setSelectedProfileForShares,
     mfaRequired,
-    searchOwner,
-    confirmTransfer,
-    revokeShare,
     editingCampaignId,
     editingSharedCode,
     editSharedCode,
@@ -1141,14 +1214,24 @@ export const UserDataPage: React.FC = () => {
     searchLoading,
     transferring,
     deletingShare,
+    transferProfileId,
+    newOwnerSearch,
+    setNewOwnerSearch,
+    selectedNewOwner,
+    setSelectedNewOwner,
+    handleTransferClick,
+    handleSearchNewOwner,
+    handleConfirmTransfer,
+    handleCancelTransfer,
+    revokeShareTarget,
+    handleRevokeShare,
+    handleConfirmRevokeShare,
+    handleCancelRevoke,
     selectedProfileForCampaigns,
     setSelectedProfileForCampaigns,
     selectedProfileForShares,
     setSelectedProfileForShares,
     mfaRequired,
-    searchOwner,
-    confirmTransfer,
-    revokeShare,
     editingCampaignId,
     editingSharedCode,
     editSharedCode,
@@ -1159,61 +1242,8 @@ export const UserDataPage: React.FC = () => {
 
   const [currentTab, setCurrentTab] = useState(0);
 
-  // Transfer dialog state
-  const [transferProfileId, setTransferProfileId] = useState<string | null>(null);
-  const [newOwnerSearch, setNewOwnerSearch] = useState('');
-  const [selectedNewOwner, setSelectedNewOwner] = useState<GqlAdminUser | null>(null);
-
-  // Revoke share confirm dialog
-  const [revokeShareTarget, setRevokeShareTarget] = useState<{
-    profileId: string;
-    targetAccountId: string;
-    email: string;
-  } | null>(null);
-
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setCurrentTab(newValue);
-  };
-
-  const handleTransferClick = (profileId: string) => {
-    setTransferProfileId(profileId);
-    setNewOwnerSearch('');
-    setSelectedNewOwner(null);
-  };
-
-  const handleSearchNewOwner = () => {
-    if (newOwnerSearch.trim()) {
-      searchOwner(newOwnerSearch);
-    }
-  };
-
-  const handleConfirmTransfer = () => {
-    if (transferProfileId && selectedNewOwner) {
-      confirmTransfer(transferProfileId, selectedNewOwner);
-      setTransferProfileId(null);
-      setNewOwnerSearch('');
-      setSelectedNewOwner(null);
-    }
-  };
-
-  const handleCancelTransfer = () => {
-    setTransferProfileId(null);
-    setNewOwnerSearch('');
-    setSelectedNewOwner(null);
-  };
-
-  const handleConfirmRevokeShare = async () => {
-    if (!revokeShareTarget) return;
-    revokeShare(revokeShareTarget.profileId, revokeShareTarget.targetAccountId);
-    setRevokeShareTarget(null);
-  };
-
-  const handleRevokeShare = (targetAccountId: string, email: string) => {
-    setRevokeShareTarget({
-      profileId: selectedProfileForShares ?? '',
-      targetAccountId,
-      email,
-    });
   };
 
   if (!accountId) {
@@ -1360,7 +1390,7 @@ export const UserDataPage: React.FC = () => {
       <ConfirmDialog
         open={!!revokeShareTarget}
         title="Revoke Access?"
-        onClose={() => setRevokeShareTarget(null)}
+        onClose={handleCancelRevoke}
         onConfirm={handleConfirmRevokeShare}
         confirmLabel="Revoke"
         confirmColor="error"
