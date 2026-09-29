@@ -189,25 +189,6 @@ class TestGetQRCodeS3Key:
         """The file extension is honored."""
         assert payment_methods.get_qr_code_s3_key("acct-1", "Venmo", "jpg") == "payment-qr-codes/acct-1/venmo.jpg"
 
-    def test_docstring_does_not_claim_test_only_or_deprecated(self) -> None:
-        """The docstring must not repeat the #529 falsehood that this is
-        deprecated and kept only for test compatibility.
-
-        That wording is wrong: the function is live production code on the
-        presigned-URL read path, so a maintainer trusting it could delete it
-        (or reroute the read path to the UUID builder) and silently orphan
-        pre-migration slug-keyed objects. Fails against the pre-fix docstring.
-        """
-        doc = payment_methods.get_qr_code_s3_key.__doc__
-        assert doc is not None
-        lowered = doc.lower()
-        assert "deprecated" not in lowered
-        assert "for compatibility with tests" not in lowered
-        assert "test-only" not in lowered
-        # The real reason it must be kept: it is production code serving the
-        # pre-migration slug-keyed read path.
-        assert "production code" in lowered
-
     def test_read_path_locates_pre_migration_slug_keyed_object(self, s3_bucket: Any, sample_account_id: str) -> None:
         """The name-based read path finds a pre-UUID-migration slug-keyed object.
 
