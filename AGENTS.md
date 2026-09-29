@@ -188,12 +188,15 @@ The transient/permanent split for a failed DynamoDB (or Cognito) lookup is defin
 everything else -> `INTERNAL_ERROR`, always `raise ... from <failure>` plus a structured
 warning/error log), and `_raise_gather_failures` applies the same rule to the list of failures
 from a parallel gather (any transient failure keeps the request retryable). Import these instead
-of redeclaring the set or re-implementing the split; all four handlers now route through the
-shared helper. One deliberately service-specific code set remains, documented in place:
-`list_unit_catalogs` passes DynamoDB BatchGetItem's `RequestLimitExceeded` as `throttling_codes`
-(scope differs, so importing the canonical set would treat one of the two codes as permanent).
-`campaign_operations` imports the helper at function level, because a top-level import would be
-circular (`admin_operations` -> `deletion_cascade` -> `campaign_operations`).
+of redeclaring the set or re-implementing the split; three handler surfaces route through them:
+`admin_operations` canonically, `campaign_operations` via a function-level import in
+`_raise_delete_error` (a top-level import would be circular:
+`admin_operations` -> `deletion_cascade` -> `campaign_operations`), and `list_catalogs_in_use`
+via `_raise_gather_failures`. The fourth surface — the chunked BatchGetItem helper — keeps its
+own private classification in `src/utils/dynamodb.py`: `_THROTTLING_ERROR_CODES` there adds
+DynamoDB BatchGetItem's `RequestLimitExceeded` to the canonical codes, and collapsing it into
+the canonical set would demote `RequestLimitExceeded` to a permanent `INTERNAL_ERROR`, changing
+the observable error contract.
 
 #556: a `return_exceptions=True` gather must never hand its survivors back as an authoritative
 answer — a shortened "in use"/"in use by" list is worse than an error, because the caller acts on
