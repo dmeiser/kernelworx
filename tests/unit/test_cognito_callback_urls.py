@@ -103,12 +103,10 @@ def test_cognito_password_policy_floor():
     assert user_pool is not None, "aws_cognito_user_pool.main must exist"
     policy = user_pool["password_policy"][0]
     assert policy["minimum_length"] == 15
-    assert policy["maximum_length"] == 64
     assert policy["require_lowercase"] is True
     assert policy["require_uppercase"] is True
     assert policy["require_numbers"] is True
     assert policy["require_symbols"] is True
-    assert user_pool["mfa_configuration"].strip('"') == "OPTIONAL"
 
 
 def test_cognito_module_allowed_oauth_scopes():

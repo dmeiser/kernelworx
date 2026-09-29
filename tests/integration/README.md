@@ -46,9 +46,9 @@ Integration tests validate AppSync resolvers by making real GraphQL requests aga
    export TEST_USER_POOL_ID="us-east-1_xxxxxxxxx"
    export TEST_USER_POOL_CLIENT_ID="xxxxxxxxxxxxxxxxxxxxxxxxxx"
    export TEST_OWNER_EMAIL="integration-test-owner@example.com"
-   export TEST_OWNER_PASSWORD="PermPass123!"
+   export TEST_OWNER_PASSWORD="PermPass123!Secure"
    export TEST_CONTRIBUTOR_EMAIL="integration-test-contributor@example.com"
-   export TEST_CONTRIBUTOR_PASSWORD="PermPass123!"
+   export TEST_CONTRIBUTOR_PASSWORD="PermPass123!Secure"
    ```
 
    **Admin setup:** the owner test user must be a member of the Cognito `ADMIN`

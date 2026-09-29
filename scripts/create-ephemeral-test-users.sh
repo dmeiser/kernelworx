@@ -48,10 +48,10 @@ READONLY_EMAIL="${RUN_ID}-readonly@${TEST_DOMAIN}"
 SMOKE_EMAIL="${RUN_ID}-smoke@${TEST_DOMAIN}"
 
 # Generate a password satisfying Cognito's policy:
-# minimum 8, lowercase, uppercase, number, symbol.
+# minimum 15, lowercase, uppercase, number, symbol.
 generate_password() {
   local prefix
-  prefix=$(openssl rand -base64 9 | tr -d '=+/')
+  prefix=$(openssl rand -base64 18 | tr -d '=+/')
   echo "${prefix}A1!"
 }
 
