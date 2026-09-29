@@ -379,9 +379,12 @@ class TestTransferProfileOwnership:
     def test_share_update_failure_surfaces_retryable_resource_busy(
         self, profiles_table: Any, shares_table: Any
     ) -> None:
-        """A throttled share update leaves a third-party share recording the deleted old
-        owner, so the transfer must report the retryable RESOURCE_BUSY while still
-        repairing the rest of the shares (#549)."""
+        """A throttled share update aborts the transfer as a retryable RESOURCE_BUSY.
+
+        The share repair is rolled back, so the profile stays with the old owner and
+        every share still records them: no collaborator is left locked out by a
+        transfer that reported failure (#549).
+        """
         from src.utils import dynamodb as db_module
 
         owner_id = "owner-1"
@@ -394,9 +397,11 @@ class TestTransferProfileOwnership:
         _seed_share(shares_table, profile_id, third_party, owner_id)
 
         real_update = shares_table.update_item
+        throttled = {"count": 0}
 
         def flaky_update(*args: Any, **kwargs: Any) -> Any:
-            if kwargs["Key"]["targetAccountId"] == f"ACCOUNT#{third_party}":
+            if kwargs["Key"]["targetAccountId"] == f"ACCOUNT#{third_party}" and throttled["count"] == 0:
+                throttled["count"] += 1
                 raise ClientError(
                     {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "slow down"}},
                     "UpdateItem",
@@ -426,16 +431,35 @@ class TestTransferProfileOwnership:
         assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
         assert "retry" in result["message"].lower()
 
-        # The new owner's share is still removed, and the failed share is left visibly
-        # stale (the old owner's record is gone, so the collaborator is locked out).
+        # The transfer never committed, so the profile is still the old owner's and
+        # both shares are exactly as they were: the retry takes the ordinary path.
+        assert "Item" not in profiles_table.get_item(
+            Key={"ownerAccountId": f"ACCOUNT#{new_owner_id}", "profileId": f"PROFILE#{profile_id}"}
+        )
+        assert (
+            profiles_table.get_item(
+                Key={"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": f"PROFILE#{profile_id}"}
+            )["Item"]["sellerName"]
+            == "Test Scout"
+        )
         new_owner_share = shares_table.get_item(
             Key={"profileId": f"PROFILE#{profile_id}", "targetAccountId": f"ACCOUNT#{new_owner_id}"}
         )
-        assert "Item" not in new_owner_share
-        stale_share = shares_table.get_item(
+        assert new_owner_share["Item"]["ownerAccountId"] == f"ACCOUNT#{owner_id}"
+        third_party_share = shares_table.get_item(
             Key={"profileId": f"PROFILE#{profile_id}", "targetAccountId": f"ACCOUNT#{third_party}"}
         )
-        assert stale_share["Item"]["ownerAccountId"] == f"ACCOUNT#{owner_id}"
+        assert third_party_share["Item"]["ownerAccountId"] == f"ACCOUNT#{owner_id}"
+
+        # The retry converges: nothing was left half-done, so the same call succeeds.
+        retry_result = lambda_handler(event, None)
+        assert retry_result["ownerAccountId"] == f"ACCOUNT#{new_owner_id}"
+        assert (
+            shares_table.get_item(
+                Key={"profileId": f"PROFILE#{profile_id}", "targetAccountId": f"ACCOUNT#{third_party}"}
+            )["Item"]["ownerAccountId"]
+            == f"ACCOUNT#{new_owner_id}"
+        )
 
     def test_revoked_share_condition_failure_is_not_reported_as_retryable(
         self, profiles_table: Any, shares_table: Any
@@ -489,9 +513,21 @@ class TestTransferProfileOwnership:
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
         assert "retry" not in result["message"].lower()
 
-    def test_update_shares_reports_failure_count_and_is_idempotent(self, shares_table: Any) -> None:
-        """_update_shares_after_transfer reports the shares it could not repair and
-        repairs the remainder, so a retry of the step converges (#549)."""
+        # The transfer is still rolled back, so the collaborator whose share was
+        # revoked cannot end up locked out of a profile that reports failure (#549).
+        assert "Item" not in profiles_table.get_item(
+            Key={"ownerAccountId": f"ACCOUNT#{new_owner_id}", "profileId": f"PROFILE#{profile_id}"}
+        )
+        assert (
+            profiles_table.get_item(
+                Key={"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": f"PROFILE#{profile_id}"}
+            )["Item"]["sellerName"]
+            == "Test Scout"
+        )
+
+    def test_repair_shares_reports_failure_count_and_is_idempotent(self, shares_table: Any) -> None:
+        """_repair_shares reports the shares it could not repair and repairs the
+        remainder, so a retry of the step converges (#549)."""
         from src.utils import dynamodb as db_module
 
         owner_id = "owner-1"
@@ -521,13 +557,13 @@ class TestTransferProfileOwnership:
         mock_shares.update_item.side_effect = flaky_update
         db_module._table_overrides["shares"] = mock_shares
 
-        failures = transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id)
+        failures = transfer_profile_ownership._repair_shares(db_profile_id, db_new_owner_id)[1]
         assert failures.transient == 1
         assert failures.permanent == 0
 
         # Re-running the step (client retry) repairs the remaining share and reports 0.
         mock_shares.update_item.side_effect = real_update
-        assert transfer_profile_ownership._update_shares_after_transfer(db_profile_id, db_new_owner_id) == (0, 0)
+        assert transfer_profile_ownership._repair_shares(db_profile_id, db_new_owner_id)[1] == (0, 0)
 
         share = shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": f"ACCOUNT#{third_party}"})
         assert share["Item"]["ownerAccountId"] == db_new_owner_id
@@ -858,3 +894,126 @@ class TestTransferProfileOwnership:
         assert "Failed to transfer profile ownership in DynamoDB" in captured
         assert "TransactionCanceledException" in captured
         assert "TransactWriteItems" in captured
+
+    def test_failed_transfer_rolls_back_the_share_repair(
+        self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The destructive profile transaction runs last, and its failure rolls the share
+        repair back.
+
+        Shares left reassigned at an incoming owner whose profile record was never
+        written would lock every collaborator out, so an aborted transfer must leave
+        the pre-transfer share state for the retry to converge (#549).
+        """
+        owner_id = "owner-1"
+        new_owner_id = "new-owner"
+        third_party = "tp-user"
+        profile_id = "profile-rollback"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+        _seed_share(shares_table, profile_id, new_owner_id, owner_id)
+        _seed_share(shares_table, profile_id, third_party, owner_id)
+
+        class MockDynamoClient:
+            def transact_write_items(self, **kwargs):
+                raise ClientError(
+                    {"Error": {"Code": "TransactionCanceledException", "Message": "Transaction cancelled"}},
+                    "TransactWriteItems",
+                )
+
+        monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: MockDynamoClient())
+
+        event = {
+            "identity": {"sub": owner_id},
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_id,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+
+        # The profile is still the old owner's, and both shares record the old owner
+        # again, so no collaborator is locked out by the aborted transfer.
+        assert (
+            profiles_table.get_item(
+                Key={"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": f"PROFILE#{profile_id}"}
+            )["Item"]["sellerName"]
+            == "Test Scout"
+        )
+        assert "Item" not in profiles_table.get_item(
+            Key={"ownerAccountId": f"ACCOUNT#{new_owner_id}", "profileId": f"PROFILE#{profile_id}"}
+        )
+        for target in (new_owner_id, third_party):
+            share = shares_table.get_item(
+                Key={"profileId": f"PROFILE#{profile_id}", "targetAccountId": f"ACCOUNT#{target}"}
+            )
+            assert share["Item"]["ownerAccountId"] == f"ACCOUNT#{owner_id}", target
+
+    def test_rollback_failure_is_logged_with_the_affected_collaborator(
+        self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch, capsys: Any
+    ) -> None:
+        """A rollback write that itself fails cannot be acted on by the caller, but it is
+        an operator problem, so it is logged naming the collaborator it affects (#549)."""
+        from src.utils import dynamodb as db_module
+
+        owner_id = "owner-1"
+        new_owner_id = "new-owner"
+        third_party = "tp-user"
+        profile_id = "profile-rollback-fail"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+        _seed_share(shares_table, profile_id, new_owner_id, owner_id)
+        _seed_share(shares_table, profile_id, third_party, owner_id)
+
+        class MockDynamoClient:
+            def transact_write_items(self, **kwargs):
+                raise ClientError(
+                    {"Error": {"Code": "TransactionCanceledException", "Message": "Transaction cancelled"}},
+                    "TransactWriteItems",
+                )
+
+        monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: MockDynamoClient())
+
+        def throttled(*args: Any, **kwargs: Any) -> Any:
+            raise ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "slow down"}},
+                "UpdateItem",
+            )
+
+        mock_shares = MagicMock(wraps=shares_table)
+        mock_shares.get_item = shares_table.get_item
+        mock_shares.query = shares_table.query
+        mock_shares.delete_item = shares_table.delete_item
+        # The repair itself succeeds; only the rollback writes are throttled.
+        mock_shares.update_item.side_effect = lambda *a, **kw: (
+            shares_table.update_item(*a, **kw)
+            if ":new_owner" in kw["ExpressionAttributeValues"]
+            else throttled(*a, **kw)
+        )
+        mock_shares.put_item.side_effect = throttled
+        db_module._table_overrides["shares"] = mock_shares
+
+        event = {
+            "identity": {"sub": owner_id},
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_id,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+
+        captured = capsys.readouterr().out
+        assert "Failed to roll back share after aborted ownership transfer" in captured
+        assert f"ACCOUNT#{third_party}" in captured
+        assert "Failed to restore share after aborted ownership transfer" in captured
+        assert f"ACCOUNT#{new_owner_id}" in captured
