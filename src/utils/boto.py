@@ -27,7 +27,11 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # RFC 1918 private ranges, the addresses LocalStack or an internal emulator can
 # be reached on. Loopback (127.0.0.0/8, ::1) is checked via ``is_loopback``.
-_PRIVATE_NETWORKS = (ipaddress.ip_network("10.0.0.0/8"), ipaddress.ip_network("172.16.0.0/12"), ipaddress.ip_network("192.168.0.0/16"))
+_PRIVATE_NETWORKS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+)
 _LOCAL_HOSTNAMES = ("localhost", "localstack")
 
 

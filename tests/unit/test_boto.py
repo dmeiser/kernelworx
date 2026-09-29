@@ -170,9 +170,7 @@ class TestEndpointOverrideValidation:
 
             factory()
 
-            mock_client.assert_called_once_with(
-                mock_client.call_args.args[0], endpoint_url=override
-            )
+            mock_client.assert_called_once_with(mock_client.call_args.args[0], endpoint_url=override)
 
     @pytest.mark.parametrize(
         "env_name,factory,bad_value",

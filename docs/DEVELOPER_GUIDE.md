@@ -128,7 +128,7 @@ read it from the accessor: `tables.catalogs.table_name`.
 
 #### AWS Clients (`src/utils/boto.py`)
 
-Build S3 and admin-Cognito clients with the shared factories, not a local `boto3.client(...)`:
+Build S3, admin-Cognito, and low-level DynamoDB clients with the shared factories, not a local `boto3.client(...)`:
 
 ```python
 from utils.boto import get_cognito_client, get_s3_client
