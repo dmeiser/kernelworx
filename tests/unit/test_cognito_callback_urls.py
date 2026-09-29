@@ -92,7 +92,7 @@ def test_ephemeral_cognito_callback_and_logout_urls():
 def test_cognito_password_policy_floor():
     # Regression test for #524: MFA is OPTIONAL (enforced only for admin
     # operations via the injected `mfa` claim), so OWASP's non-MFA floor
-    # applies: minimum 15 characters, capped at 64.
+    # applies: minimum 15 characters.
     doc = load_hcl(TF_APP / "modules" / "cognito" / "main.tf")
     user_pool = None
     for entry in doc.get("resource", []):

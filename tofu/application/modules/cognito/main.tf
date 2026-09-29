@@ -196,7 +196,6 @@ resource "aws_cognito_user_pool" "main" {
   # users see the requirement before the pool rejects them.
   password_policy {
     minimum_length                   = 15
-    maximum_length                   = 64
     require_lowercase                = true
     require_uppercase                = true
     require_numbers                  = true
