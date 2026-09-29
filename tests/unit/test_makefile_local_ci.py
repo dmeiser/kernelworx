@@ -1,4 +1,4 @@
-"""Behavioural tests for the Makefile's local CI mirror (#536).
+"""Behavioral tests for the Makefile's local CI mirror (#536).
 
 The `ci` target advertises itself as the local CI pipeline, so it must plan
 every suite the CI workflow runs (including the AppSync JS resolver suite),
