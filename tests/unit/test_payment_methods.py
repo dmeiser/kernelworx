@@ -171,10 +171,10 @@ class TestValidateQRS3Key:
 class TestGetQRCodeS3Key:
     """Test get_qr_code_s3_key (slug-shaped, pre-UUID-migration keys).
 
-    Regression: #529 — this builder is load-bearing production code, not
-    test-only. The presigned-URL read path uses it to locate QR objects
-    uploaded before the UUID-key migration, so it must keep producing the
-    same slug-shaped keys those objects were stored under.
+    Regression: #529 — this builder is not kept only for tests: the read
+    path's s3Key-less fallback (_find_existing_qr_s3_key) calls it, so it
+    must keep producing the same slug-shaped keys issued before the
+    UUID-key migration.
     """
 
     def test_builds_slug_shaped_key(self) -> None:
@@ -192,11 +192,11 @@ class TestGetQRCodeS3Key:
     def test_read_path_locates_pre_migration_slug_keyed_object(self, s3_bucket: Any, sample_account_id: str) -> None:
         """The name-based read path finds a pre-UUID-migration slug-keyed object.
 
-        This is the production reachability the #529 docstring fix protects:
         generate_presigned_get_url with no s3Key locates the object via
-        _find_existing_qr_s3_key, which builds the key with get_qr_code_s3_key.
-        Routing that lookup through the UUID builder would stop finding the
-        slug-keyed objects this builder exists to serve.
+        _find_existing_qr_s3_key, which builds the key with
+        get_qr_code_s3_key — the s3Key-less payload shape the handler still
+        accepts. Wired resolvers pass explicit s3Keys today, so this covers
+        that legacy shape, not the batch serving path.
         """
         bucket_name = os.environ.get("EXPORTS_BUCKET")
         # A slug-keyed object as created before the UUID-key migration.

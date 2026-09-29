@@ -53,14 +53,20 @@ QR_CODE_S3_PREFIX = "payment-qr-codes"
 def get_qr_code_s3_key(account_id: str, payment_method_name: str, extension: str = "png") -> str:
     """Build the slug-shaped S3 key for a payment method QR code.
 
-    New uploads store a UUID key instead (generate_qr_code_s3_key()), so this
-    builder is not used to write new objects. It is still load-bearing
-    production code: the presigned-URL read path
-    (generate_presigned_get_url -> _find_existing_qr_s3_key) uses it to locate
-    and serve QR objects uploaded before the UUID-key migration. Removing it
-    would leave those pre-migration slug-keyed objects unlocatable by the
-    name-based read path; drop it only once no such objects remain in
-    EXPORTS_BUCKET.
+    Reconstructs the key format used before the UUID-key migration; new
+    uploads store a UUID key instead (generate_qr_code_s3_key()), so nothing
+    writes through this builder. It is not kept only for tests: the read
+    path's name-based fallback (_find_existing_qr_s3_key, used by
+    generate_presigned_get_url when it receives no s3Key) calls it, so it
+    must keep producing the same slug-shaped keys pre-migration objects were
+    stored under. That fallback is reachable only via the handler's
+    s3Key-less payload shape, which no resolver wired to the
+    generate-qr-code-presigned-url Lambda emits today (batch_qr_urls_fn.js
+    always passes explicit s3Keys; the per-method field resolver removed in
+    #367 sent s3Key as well) — so production traffic does not exercise this
+    builder, and pre-migration objects are served from their stored
+    qrCodeUrl. Keep it with the s3Key-less read path it implements; drop it
+    only together with that path.
 
     Args:
         account_id: Account ID
