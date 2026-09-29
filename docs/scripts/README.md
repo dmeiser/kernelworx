@@ -332,5 +332,6 @@ enforces and for the entry points that call it.
   and will fail loudly if the encryption passphrase is missing.
 - The `appsync-ensure-resolver-order.sh` script targets specific resolver/function addresses
   identified in `tofu/application/modules/appsync/resolvers_mutations.tf` and
-  `resolvers_queries.tf`. The current pilot targets: `create_order`, `validate_payment_method_appsync`,
-  `create_seller_profile`, `create_campaign`, `update_my_account`, `list_my_shares`.
+  `resolvers_queries.tf`. The authoritative, per-target rationale list lives with the two
+  invocations: `.github/workflows/deploy-shared.yml` (deploys) and `scripts/ephemeral-env.sh`
+  (ephemeral stacks) — read the `-t` targets and their comment blocks there rather than here.
