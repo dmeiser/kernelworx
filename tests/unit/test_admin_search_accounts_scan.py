@@ -8,10 +8,12 @@ schema (`table_schemas.create_accounts_table_schema`), so DynamoDB validates
 every key condition the handler emits, and assert the operations actually
 issued (#576).
 
-Current, honest behavior: the `email-index` GSI is keyed on `email` alone, so
-`begins_with` is not a legal key condition on it and no index-backed prefix
-search exists. A full email uses the GSI; any partial query is served by a full
-accounts-table scan.
+Current, honest behavior: the accounts table carries two GSIs. `email-index` is
+keyed on `email` alone and answers a complete email; `emailSearchIndex` is a
+prefix-segment index (constant `emailSearchKey` HASH + `email` RANGE) and
+answers an email prefix with one Query. Both are sparse, so an account is only
+reachable through an index once it carries the key attribute; a name fragment is
+still a substring search served by a full accounts-table scan.
 """
 
 from datetime import datetime, timezone
@@ -117,7 +119,7 @@ def search(accounts_table: Any, monkeypatch: Any) -> Any:
     cognito = _FakeCognito(cognito_users)
 
     monkeypatch.setattr("src.handlers.admin_operations.tables", SimpleNamespace(accounts=accounts_table))
-    monkeypatch.setattr("src.handlers.admin_operations._get_cognito_client", lambda: cognito)
+    monkeypatch.setattr("src.handlers.admin_operations.get_cognito_client", lambda: cognito)
     monkeypatch.setattr(
         "src.handlers.admin_operations._batch_get_display_names",
         lambda account_ids, logger: {i: "Alice Anderson" for i in account_ids},
@@ -152,14 +154,20 @@ class TestAdminSearchAccountsScan:
     def test_exact_email_query_uses_email_index_gsi(
         self, search: Any, dynamodb_ops: List[Tuple[str, Dict[str, Any]]]
     ) -> None:
-        """A full email is still answered by the legal `email = :email` key condition."""
+        """A full email is answered by the prefix index, falling back to the scan when unindexed.
+
+        These fixture accounts carry no `emailSearchKey`, which is what an
+        account looks like before the #586 backfill has covered it. The
+        `emailSearchIndex` GSI is sparse, so it cannot project them, and the
+        documented scan fallback is what keeps them findable (#586).
+        """
         result = search("alice@example.com")
 
         assert [user["email"] for user in result] == ["alice@example.com"]
-        assert [operation for operation, _ in dynamodb_ops] == ["Query"]
+        assert [operation for operation, _ in dynamodb_ops] == ["Query", "Scan"]
         query_params = dynamodb_ops[0][1]
-        assert query_params["IndexName"] == "email-index"
-        assert query_params["KeyConditionExpression"] == "email = :email"
+        assert query_params["IndexName"] == "emailSearchIndex"
+        assert query_params["KeyConditionExpression"] == "emailSearchKey = :searchKey AND begins_with(email, :prefix)"
 
     def test_query_under_minimum_length_is_rejected_before_any_read(
         self, search: Any, dynamodb_ops: List[Tuple[str, Dict[str, Any]]]

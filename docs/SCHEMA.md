@@ -6,7 +6,7 @@ Visual schema documentation for the DynamoDB data model.
 
 ```mermaid
 graph LR
-    A["📋 ACCOUNTS<br/>PK: accountId<br/>GSI: email"] 
+    A["📋 ACCOUNTS<br/>PK: accountId<br/>GSI: email, emailSearchKey+email"] 
     B["👤 PROFILES<br/>PK: ownerAccountId + profileId<br/>GSI: profileId"]
     C["📊 CAMPAIGNS<br/>PK: profileId + campaignId<br/>GSI: campaignId, catalogId, unitCampaignKey, profileId+createdAt"]
     D["📦 ORDERS<br/>PK: campaignId + orderId<br/>GSI: orderId, profileId+createdAt"]
@@ -29,12 +29,22 @@ graph LR
 
 ### accounts
 Primary Key: `accountId` (String)
-Global Secondary Indexes: `email-index` (email)
+Global Secondary Indexes:
+- `email-index` (email)
+- `emailSearchIndex` (emailSearchKey + email)
+
+`emailSearchIndex` is a prefix-segment index: a constant HASH key (`emailSearchKey`) plus
+`email` as the RANGE key, which is what makes `begins_with(email, :prefix)` a legal Query
+key condition for admin email search (`email-index` is HASH-only, so a Query key condition
+there must be an equality). The index is **sparse**: an account is only searchable once it
+carries `emailSearchKey`, which the Cognito account bootstrap trigger writes and
+`scripts/backfill_email_search_key.py` backfills for pre-existing accounts.
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
 | accountId | String | PK - Cognito user sub |
-| email | String | GSI - User lookup by email |
+| email | String | GSI - User lookup by email; range key of emailSearchIndex |
+| emailSearchKey | String | GSI - Constant HASH key (`EMAIL`) of emailSearchIndex |
 | givenName | String | User's first name |
 | familyName | String | User's last name |
 | city | String | Location |

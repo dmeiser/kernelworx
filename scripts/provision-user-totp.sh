@@ -21,21 +21,21 @@
 # wait, the first browser login right after provisioning would resubmit the
 # same code and fail its MFA step.
 #
-# The password must never be placed on a command line - neither this script's
+# Credentials must never be placed on a command line - neither this script's
 # own argv nor any aws CLI argv. The argv of a running process is
 # world-readable on Linux via /proc/<pid>/cmdline and shows up in `ps` output
 # for as long as the process lives, so any process on the runner (a wrapper, a
 # diagnostic `ps`, a crash reporter) can read the credential there. That is
 # why the password is a required PROVISION_USER_TOTP_PASSWORD environment
-# variable rather than a positional argument, and why both initiate-auth
-# variants read the auth parameters from a private mktemp file passed with
-# --cli-input-json file://... (the file is removed on every exit path by an
-# EXIT trap, so a failed or retried run cannot leave the password on disk).
+# variable rather than a positional argument, and why every call that carries
+# a credential - both initiate-auth variants, associate-software-token, and
+# verify-software-token - reads it from a private mktemp file passed with
+# --cli-input-json file://... (the files are removed on every exit path by an
+# EXIT trap, so a failed or retried run cannot leave a credential on disk).
 # The environment is mode-0400 per process and readable only by same-uid
 # processes, which is the narrowest channel available to a shell script. Do not
-# "simplify" any of this back to a positional argument or --auth-parameters.
-# That rule covers the password only: the pool access token is still passed on
-# argv to associate-software-token and verify-software-token, tracked in #597.
+# "simplify" any of this back to a positional argument, --auth-parameters, or
+# an inline --access-token.
 #
 # Requires: aws CLI, python3 (stdlib only), and IAM permissions for
 # cognito-idp associate-software-token / verify-software-token /
@@ -91,7 +91,9 @@ fi
 
 AUTH_PARAMS_FILE=$(mktemp)
 chmod 600 "$AUTH_PARAMS_FILE"
-trap 'rm -f "$AUTH_PARAMS_FILE"' EXIT
+ACCESS_TOKEN_PARAMS_FILE=$(mktemp)
+chmod 600 "$ACCESS_TOKEN_PARAMS_FILE"
+trap 'rm -f "$AUTH_PARAMS_FILE" "$ACCESS_TOKEN_PARAMS_FILE"' EXIT
 
 # Build the JSON with python3 (already required above) so a password
 # containing commas, quotes, or other JSON metacharacters is escaped
@@ -126,8 +128,27 @@ ACCESS_TOKEN=$(aws cognito-idp admin-initiate-auth \
   --region "$REGION" \
   --query 'AuthenticationResult.AccessToken' --output text)
 
+# Refresh the parameter file for each software-token call: associate needs only
+# the access token, verify also needs the code. Written by python3 (already
+# required above) so the token is never on a command line, and so the value the
+# file carries is by construction the value the script holds.
+write_access_token_params() {
+  TOTP_ACCESS_TOKEN="$ACCESS_TOKEN" TOTP_USER_CODE="${1:-}" \
+    python3 - "$ACCESS_TOKEN_PARAMS_FILE" <<'PY'
+import json, os, sys
+
+payload = {"AccessToken": os.environ["TOTP_ACCESS_TOKEN"]}
+user_code = os.environ["TOTP_USER_CODE"]
+if user_code:
+    payload["UserCode"] = user_code
+with open(sys.argv[1], "w") as handle:
+    json.dump(payload, handle)
+PY
+}
+
+write_access_token_params
 TOTP_SECRET=$(aws cognito-idp associate-software-token \
-  --access-token "$ACCESS_TOKEN" \
+  --cli-input-json "file://$ACCESS_TOKEN_PARAMS_FILE" \
   --region "$REGION" \
   --query 'SecretCode' --output text)
 
@@ -144,9 +165,9 @@ print(f"{(struct.unpack('>I', digest[offset:offset + 4])[0] & 0x7FFFFFFF) % 1_00
 PY
 )
 
+write_access_token_params "$TOTP_CODE"
 aws cognito-idp verify-software-token \
-  --access-token "$ACCESS_TOKEN" \
-  --user-code "$TOTP_CODE" \
+  --cli-input-json "file://$ACCESS_TOKEN_PARAMS_FILE" \
   --region "$REGION" >/dev/null
 
 # The verify-software-token call above consumed the TOTP code for the current

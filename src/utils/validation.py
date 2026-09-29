@@ -8,6 +8,14 @@ UpdateSellerProfileInput, CreateCampaignInput, UpdateCampaignInput) are
 additive: they mirror the AppSync resolver validation semantics but are not
 yet wired into request handling. That wiring is tracked as follow-up task
 KW-VALIDATION-WIRING-1.
+
+The multi-type handlers in this module (e.g. ``except ValueError, TypeError:``)
+are PEP 758 syntax, valid on the pinned Python 3.14 floor. They are a tuple of
+exception types, NOT Python 2's ``except Exception, name:`` catch-and-bind
+form, and do not bind anything. This is also the spelling ``ruff format``
+produces at that target version, so do not add parentheses: the formatter
+strips them, and the file cannot be parsed at all by a 3.13-or-earlier tool.
+See tests/unit/test_except_syntax.py.
 """
 
 import re
@@ -16,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Self, Tuple
 
 from .errors import AppError, ErrorCode
+from .ids import build_unit_campaign_key as _build_unit_campaign_key
 
 # US phone number pattern: 10 digits with optional formatting
 PHONE_PATTERN = re.compile(r"^(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})$")
@@ -494,9 +503,15 @@ class CreateCampaignInput:
         """Build DynamoDB unitCampaignKey index value if unit fields are present."""
         if not self.unit_type or self.unit_number is None or not self.city or not self.state:
             return None
-        name = self.campaign_name or ""
-        year = str(self.campaign_year) if self.campaign_year is not None else ""
-        return f"{self.unit_type}#{self.unit_number}#{self.city}#{self.state}#{name}#{year}"
+        year = self.campaign_year if self.campaign_year is not None else ""
+        return _build_unit_campaign_key(
+            self.unit_type,
+            self.unit_number,
+            self.city,
+            self.state,
+            self.campaign_name or "",
+            year,
+        )
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Self:
