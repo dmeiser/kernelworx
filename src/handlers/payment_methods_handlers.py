@@ -5,14 +5,13 @@ These handlers provide S3 pre-signed URL generation for QR code uploads
 and confirmations. They integrate with AppSync pipeline resolvers.
 """
 
-import os
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-import boto3
 from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.boto import get_s3_client
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
@@ -25,6 +24,7 @@ try:  # pragma: no cover
         validate_qr_s3_key,
     )
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.boto import get_s3_client
     from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
@@ -106,7 +106,7 @@ def request_qr_upload(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     # Generate pre-signed POST URL (must use direct S3, not CloudFront)
     bucket_name = get_required_env("EXPORTS_BUCKET")
-    s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
+    s3_client = get_s3_client()
 
     # The pre-signed POST only accepts image/png and always issues a .png key,
     # so the confirm step's magic-number check only ever admits PNG for it
@@ -146,7 +146,7 @@ def _validate_s3_object_exists(bucket_name: str, s3_key: str) -> None:
         AppError: NOT_FOUND if the object is missing, INVALID_INPUT if it does
             not hold a permitted image.
     """
-    s3_client = boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
+    s3_client = get_s3_client()
     try:
         head = s3_client.head_object(Bucket=bucket_name, Key=s3_key)
     except ClientError as e:
