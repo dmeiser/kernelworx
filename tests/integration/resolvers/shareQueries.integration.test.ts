@@ -19,8 +19,8 @@ const createUnauthenticatedClient = () => {
  * 
  * Test Data Setup:
  * - TEST_OWNER_EMAIL: Owner of profile (can query shares and invites)
- * - TEST_CONTRIBUTOR_EMAIL: Has WRITE access (can query shares, not invites)
- * - TEST_READONLY_EMAIL: Has READ access (can query shares, not invites)
+ * - TEST_CONTRIBUTOR_EMAIL: Has WRITE access (can query both shares and invites)
+ * - TEST_READONLY_EMAIL: Has READ access (can query neither)
  * 
  * VTL Resolvers Under Test:
  * - listSharesByProfile: Queries main table (PK=profileId, SK begins_with "SHARE#")
@@ -192,6 +192,19 @@ describe('Share Query Operations Integration Tests', () => {
       },
     });
     testInviteCode = inviteData.createProfileInvite.inviteCode;
+
+    // Share profile with readonly (READ-only) so the READ-denial assertions
+    // below test a real READ share rather than the absence of any share.
+    await ownerClient.mutate({
+      mutation: SHARE_PROFILE_DIRECT,
+      variables: {
+        input: {
+          profileId: testProfileId,
+          targetAccountEmail: process.env.TEST_READONLY_EMAIL!,
+          permissions: ['READ'],
+        },
+      },
+    });
 
     // Create unshared profile for authorization testing
     const { data: unsharedProfileData }: any = await ownerClient.mutate({
@@ -542,11 +555,26 @@ describe('Share Query Operations Integration Tests', () => {
       expect(data.listInvitesByProfile.length).toBeGreaterThan(0);
     });
 
-    test('Authorization: Shared user cannot list invites (owner only)', async () => {
-      // FIXED BUG #29: listInvitesByProfile now requires owner-only authorization
-      // Shared user (even with WRITE) gets empty array
-      
+    test('Authorization: Shared user with WRITE can list invites', async () => {
+      // listInvitesByProfile and listSharesByProfile document the same contract
+      // in schema.graphql ("The caller must have write access to the profile")
+      // and hang off the same two pipeline functions, so a WRITE co-owner is
+      // granted both. Before #534 the share lookup was unreachable for a bare
+      // profileId and this query stayed owner-only, leaving the two sibling
+      // queries disagreeing for the same caller.
       const { data }: any = await contributorClient.query({
+        query: LIST_INVITES_BY_PROFILE,
+        variables: { profileId: testProfileId },
+        fetchPolicy: 'network-only',
+      });
+
+      expect(Array.isArray(data.listInvitesByProfile)).toBe(true);
+      expect(data.listInvitesByProfile.map((i: any) => i.inviteCode)).toContain(testInviteCode);
+    });
+
+    test('Authorization: Shared user with READ cannot list invites', async () => {
+      // A READ share is not write access.
+      const { data }: any = await readonlyClient.query({
         query: LIST_INVITES_BY_PROFILE,
         variables: { profileId: testProfileId },
         fetchPolicy: 'network-only',
@@ -556,7 +584,8 @@ describe('Share Query Operations Integration Tests', () => {
     });
 
     test('Authorization: Non-shared user cannot list invites', async () => {
-      // FIXED BUG #29: Non-owner gets empty array
+      // contributor holds WRITE on testProfileId but no share at all on
+      // unsharedProfileId, so this is a genuine non-shared denial.
       const { data }: any = await contributorClient.query({
         query: LIST_INVITES_BY_PROFILE,
         variables: { profileId: unsharedProfileId },
