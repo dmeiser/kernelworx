@@ -413,10 +413,11 @@ def test_transfer_profile_ownership_share_delete_fails():
     }
 
     # Create a mock for shares table that wraps the real table
-    # but makes delete_item raise an exception
+    # but makes update_item raise an exception (only delete_item is post-commit
+    # and best-effort; a repair failure must surface)
     mock_shares = MagicMock(wraps=shares_table)
     mock_shares.get_item = shares_table.get_item  # Keep real get_item for validation
-    mock_shares.delete_item.side_effect = RuntimeError("Simulated failure")
+    mock_shares.update_item.side_effect = RuntimeError("Simulated failure")
 
     # Use the _table_overrides mechanism from dynamodb module
     from src.utils import dynamodb as db_module
