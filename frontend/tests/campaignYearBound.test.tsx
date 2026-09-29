@@ -15,7 +15,7 @@
  * These assertions are on observable behaviour: the `min`/`max` attributes of
  * the rendered inputs, and whether the create mutation actually runs.
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { MockedResponse } from '@apollo/client/testing';
@@ -174,7 +174,7 @@ describe('campaign-year bound (issue #539)', () => {
   });
 
   it('creates a shared campaign dated 2050', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const variables = {
       input: {
         catalogId: CATALOG.catalogId,
@@ -188,11 +188,11 @@ describe('campaign-year bound (issue #539)', () => {
     };
     renderSharedCampaignPage([...SHARED_CAMPAIGN_MOCKS, createdSharedCampaignMock(variables)]);
 
-    await user.type(screen.getByLabelText(/Campaign Name/), 'Fall');
+    fireEvent.change(screen.getByLabelText(/Campaign Name/), { target: { value: 'Fall' } });
     await setYear(user, /Campaign Year/, CAMPAIGN_YEAR_MAX);
     await selectOption(user, /Unit Type/, 'Pack');
-    await user.type(screen.getByLabelText(/Unit Number/), '42');
-    await user.type(screen.getByLabelText(/City/), 'Austin');
+    fireEvent.change(screen.getByLabelText(/Unit Number/), { target: { value: '42' } });
+    fireEvent.change(screen.getByLabelText(/City/), { target: { value: 'Austin' } });
     await selectOption(user, /^State/, 'TX');
 
     const submit = screen.getByRole('button', { name: /Create Shared Campaign/ });
@@ -204,16 +204,16 @@ describe('campaign-year bound (issue #539)', () => {
   });
 
   it('refuses to create a shared campaign dated past 2050', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     // No create mutation is mocked: if the form submitted anyway, Apollo would
     // error instead of the page showing its own out-of-range message.
     renderSharedCampaignPage(SHARED_CAMPAIGN_MOCKS);
 
-    await user.type(screen.getByLabelText(/Campaign Name/), 'Fall');
+    fireEvent.change(screen.getByLabelText(/Campaign Name/), { target: { value: 'Fall' } });
     await setYear(user, /Campaign Year/, 2051);
     await selectOption(user, /Unit Type/, 'Pack');
-    await user.type(screen.getByLabelText(/Unit Number/), '42');
-    await user.type(screen.getByLabelText(/City/), 'Austin');
+    fireEvent.change(screen.getByLabelText(/Unit Number/), { target: { value: '42' } });
+    fireEvent.change(screen.getByLabelText(/City/), { target: { value: 'Austin' } });
     await selectOption(user, /^State/, 'TX');
 
     const submit = screen.getByRole('button', { name: /Create Shared Campaign/ });
@@ -226,13 +226,13 @@ describe('campaign-year bound (issue #539)', () => {
   });
 
   it('refuses to create an own campaign dated past 2050', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     // No create mutation is mocked: if the form submitted anyway, Apollo would
     // report the missing mock instead of the page showing its own message.
     renderCreateCampaignPage();
 
     await selectOption(user, /Select Profile/, /Scout Alpha/);
-    await user.type(screen.getByLabelText(/Campaign Name/), 'Fall');
+    fireEvent.change(screen.getByLabelText(/Campaign Name/), { target: { value: 'Fall' } });
     await selectOption(user, /Select Catalog/, CATALOG.catalogName);
     await setYear(user, /^Year\b/, 2051);
 
@@ -243,4 +243,4 @@ describe('campaign-year bound (issue #539)', () => {
     expect(await screen.findByText('Campaign year must be between 2020 and 2050')).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
-});
+}, 30000); // MUI Select interactions are slow under a loaded parallel run
