@@ -55,7 +55,7 @@ def get_qr_code_s3_key(account_id: str, payment_method_name: str, extension: str
 
     New uploads store a UUID key instead (generate_qr_code_s3_key()), so this
     builder is not used to write new objects. It is still load-bearing
-    production code, not test-only: the presigned-URL read path
+    production code: the presigned-URL read path
     (generate_presigned_get_url -> _find_existing_qr_s3_key) uses it to locate
     and serve QR objects uploaded before the UUID-key migration. Removing it
     would leave those pre-migration slug-keyed objects unlocatable by the
