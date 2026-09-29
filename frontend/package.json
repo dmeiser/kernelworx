@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
+    "lint": "eslint . && node scripts/check-complexity-disables.mjs",
     "lint:complexity": "eslint . --rule 'complexity: [error, 5]' --rule 'max-depth: [error, 3]'",
     "spellcheck": "cspell '**' --config ../cspell.json",
     "preview": "vite preview",
