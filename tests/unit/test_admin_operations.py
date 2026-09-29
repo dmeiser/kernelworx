@@ -131,7 +131,7 @@ class TestLambdaHandler:
         }
 
         # Mock Cognito
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.return_value = {}
@@ -172,7 +172,7 @@ class TestLambdaHandler:
         }
 
         # Mock Cognito
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "11111111-1111-1111-1111-111111111111"}]}
             mock_cognito.admin_delete_user.return_value = {}
@@ -227,7 +227,7 @@ class TestLambdaHandler:
         }
 
         # Mock Cognito
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_cognito.admin_list_groups_for_user.return_value = {"Groups": []}
@@ -256,7 +256,7 @@ class TestLambdaHandler:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {"Items": []}
 
             result = lambda_handler(event, lambda_context)
@@ -280,7 +280,7 @@ class TestLambdaHandler:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {"Items": []}
 
             result = lambda_handler(event, lambda_context)
@@ -304,7 +304,7 @@ class TestLambdaHandler:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {"Items": []}
 
             result = lambda_handler(event, lambda_context)
@@ -327,7 +327,7 @@ class TestLambdaHandler:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {"Items": []}
 
             result = lambda_handler(event, lambda_context)
@@ -398,7 +398,7 @@ class TestAdminListUsers:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
         ):
@@ -461,7 +461,7 @@ class TestAdminListUsers:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
         ):
@@ -510,7 +510,7 @@ class TestAdminListUsers:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
         ):
@@ -559,7 +559,7 @@ class TestAdminListUsers:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
         ):
@@ -605,7 +605,7 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -630,7 +630,7 @@ class TestAdminListUsers:
             "arguments": {"limit": 100},  # Over max
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -657,7 +657,7 @@ class TestAdminListUsers:
             "arguments": {"limit": -5},  # Below min
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -684,7 +684,7 @@ class TestAdminListUsers:
             "arguments": {"limit": None},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -736,7 +736,11 @@ class TestAdminListUsers:
 
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-        assert "USER_POOL_ID" in result["message"]
+        # #575: USER_POOL_ID is read through the canonical
+        # utils.dynamodb.get_required_env, which raises ValueError; the
+        # decorator maps that to the generic admin-operation message, and the
+        # variable name reaches the Lambda log rather than the client.
+        assert "USER_POOL_ID" not in result["message"]
 
     def test_cognito_list_users_error(
         self,
@@ -753,7 +757,7 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.side_effect = ClientError(
                 {"Error": {"Code": "InternalErrorException", "Message": "Internal error"}},
@@ -783,7 +787,7 @@ class TestAdminListUsers:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
         ):
@@ -829,7 +833,7 @@ class TestAdminListUsers:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
         ):
@@ -895,7 +899,7 @@ class TestAdminListUsers:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
         ):
@@ -941,7 +945,7 @@ class TestAdminListUsers:
             "arguments": {},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             # Raise a generic exception
             mock_cognito.list_users.side_effect = RuntimeError("Unexpected error")
@@ -972,7 +976,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.return_value = {}
@@ -1001,7 +1005,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "  TEST@EXAMPLE.COM  "},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.return_value = {}
@@ -1073,7 +1077,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "notfound@example.com"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -1102,7 +1106,6 @@ class TestAdminResetUserPassword:
 
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-        assert "USER_POOL_ID" in result["message"]
 
     def test_cognito_list_users_error(
         self,
@@ -1119,7 +1122,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.side_effect = ClientError(
                 {"Error": {"Code": "InternalErrorException", "Message": "Test error"}},
@@ -1147,7 +1150,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.side_effect = ClientError(
@@ -1176,7 +1179,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.side_effect = ClientError(
@@ -1205,7 +1208,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.side_effect = ClientError(
@@ -1234,7 +1237,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.side_effect = RuntimeError("Unexpected error")
             mock_get_client.return_value = mock_cognito
@@ -1259,7 +1262,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": 'evil"@example.com'},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -1284,7 +1287,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "evil\\@example.com\\"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -1309,7 +1312,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "not-an-email"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -1374,7 +1377,7 @@ class TestAdminMfaRequired:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.return_value = {}
@@ -1581,7 +1584,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             # Mock Cognito list_users to find user by sub
             mock_cognito.list_users.return_value = {
@@ -1677,7 +1680,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -1836,7 +1839,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -1940,7 +1943,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -2003,7 +2006,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": prefixed_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             # Mock Cognito list_users to find user by raw sub
             mock_cognito.list_users.return_value = {
@@ -2062,7 +2065,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             # Mock Cognito list_users to find user by sub
             mock_cognito.list_users.return_value = {
@@ -2189,7 +2192,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": 'other"user'},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -2215,7 +2218,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": "other\\user\\"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -2241,7 +2244,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": "other user"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -2284,7 +2287,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": "not-a-uuid"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -2324,7 +2327,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             # User not found in Cognito
             mock_cognito.list_users.return_value = {"Users": []}
@@ -2357,7 +2360,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             # User not found in Cognito
             mock_cognito.list_users.return_value = {"Users": []}
@@ -2398,7 +2401,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             # Mock list_users to return a valid user with attributes
             mock_cognito.list_users.return_value = {
@@ -2443,7 +2446,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             # Mock Cognito list_users to find user
             mock_cognito.list_users.return_value = {
@@ -2519,7 +2522,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {
                 "Users": [
@@ -2579,7 +2582,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.side_effect = ClientError(
                 {"Error": {"Code": "InternalErrorException", "Message": "Error"}},
@@ -2623,7 +2626,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.side_effect = ClientError(
                 {"Error": {"Code": "InternalErrorException", "Message": "Error"}},
@@ -2668,7 +2671,7 @@ class TestAdminDeleteUser:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             # Cognito lookup succeeds but returns empty user list
             mock_cognito.list_users.return_value = {"Users": []}
@@ -2701,7 +2704,7 @@ class TestAdminDeleteUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
         ):
             mock_cognito = MagicMock()
@@ -3146,7 +3149,7 @@ class TestAdminDeleteUserOrders:
         }
 
         with (
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
             # Mock profiles query
@@ -3212,7 +3215,7 @@ class TestAdminDeleteUserOrders:
         }
 
         with (
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
             # Mock profiles query
@@ -3275,7 +3278,7 @@ class TestAdminDeleteUserOrders:
         }
 
         with (
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
             mock_tables.profiles.query.return_value = {
@@ -3386,7 +3389,7 @@ class TestAdminDeleteUserCampaigns:
         }
 
         with (
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
             # Mock profiles query
@@ -3438,7 +3441,7 @@ class TestAdminDeleteUserCampaigns:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {
                 "Items": [{"profileId": "profile-1", "ownerAccountId": db_account_id}]
             }
@@ -3515,7 +3518,7 @@ class TestAdminDeleteUserCampaigns:
         }
 
         with (
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
             mock_tables.profiles.query.return_value = {
@@ -3546,7 +3549,7 @@ class TestAdminDeleteUserCampaigns:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
             result = admin_delete_user_campaigns(event, lambda_context)
@@ -3579,7 +3582,7 @@ class TestAdminDeleteUserShares:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             # Mock profiles query
             mock_tables.profiles.query.return_value = {
                 "Items": [
@@ -3624,7 +3627,7 @@ class TestAdminDeleteUserShares:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {
                 "Items": [{"profileId": "profile-1", "ownerAccountId": "ACCOUNT#target-user-123"}]
             }
@@ -3691,7 +3694,7 @@ class TestAdminDeleteUserShares:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
             result = admin_delete_user_shares(event, lambda_context)
@@ -3723,7 +3726,7 @@ class TestAdminDeleteUserProfiles:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             # Mock profiles query (no pagination in this handler)
             mock_tables.profiles.query.return_value = {
                 "Items": [
@@ -3796,7 +3799,7 @@ class TestAdminDeleteUserProfiles:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
             result = admin_delete_user_profiles(event, lambda_context)
@@ -3985,7 +3988,10 @@ class TestAccountDeletionHelpers:
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
         monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
 
-        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+        from src.handlers.deletion_cascade import (
+            delete_invites_for_owned_profiles,
+            get_user_profiles,
+        )
 
         account_id = "owner-account"
         account_id_key = f"ACCOUNT#{account_id}"
@@ -4007,7 +4013,7 @@ class TestAccountDeletionHelpers:
             }
         )
 
-        count = _delete_invites_for_owned_profiles(account_id, MagicMock())
+        count = delete_invites_for_owned_profiles(get_user_profiles(account_id_key), MagicMock())
 
         assert count == 1
         assert invites_table.get_item(Key={"inviteCode": invite_code}).get("Item") is None
@@ -4023,7 +4029,7 @@ class TestAccountDeletionHelpers:
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
         monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
 
-        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+        from src.handlers.deletion_cascade import delete_invites_for_owned_profiles, get_user_profiles
 
         account_id = "owner-account-no-invites"
         account_id_key = f"ACCOUNT#{account_id}"
@@ -4037,7 +4043,7 @@ class TestAccountDeletionHelpers:
             }
         )
 
-        count = _delete_invites_for_owned_profiles(account_id, MagicMock())
+        count = delete_invites_for_owned_profiles(get_user_profiles(account_id_key), MagicMock())
         assert count == 0
 
     def test_delete_invites_for_owned_profiles_no_profiles(
@@ -4049,9 +4055,9 @@ class TestAccountDeletionHelpers:
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
         monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
 
-        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+        from src.handlers.deletion_cascade import delete_invites_for_owned_profiles, get_user_profiles
 
-        count = _delete_invites_for_owned_profiles("no-profiles", MagicMock())
+        count = delete_invites_for_owned_profiles(get_user_profiles("ACCOUNT#no-profiles"), MagicMock())
         assert count == 0
 
     def test_delete_inbound_shares(
@@ -4063,7 +4069,7 @@ class TestAccountDeletionHelpers:
         """Inbound shares where the account is the target are deleted."""
         monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
 
-        from src.handlers.admin_operations import _delete_inbound_shares
+        from src.handlers.deletion_cascade import delete_inbound_shares
 
         account_id = "target-account"
         account_id_key = f"ACCOUNT#{account_id}"
@@ -4077,7 +4083,7 @@ class TestAccountDeletionHelpers:
             }
         )
 
-        count = _delete_inbound_shares(account_id, MagicMock())
+        count = delete_inbound_shares(account_id, MagicMock())
 
         assert count == 1
         response = shares_table.query(
@@ -4095,9 +4101,9 @@ class TestAccountDeletionHelpers:
         """No shares are deleted when the account has no inbound shares."""
         monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
 
-        from src.handlers.admin_operations import _delete_inbound_shares
+        from src.handlers.deletion_cascade import delete_inbound_shares
 
-        count = _delete_inbound_shares("no-shares", MagicMock())
+        count = delete_inbound_shares("no-shares", MagicMock())
         assert count == 0
 
     def test_find_cognito_user_by_sub_unprefixed(self) -> None:
@@ -4238,36 +4244,6 @@ class TestAccountDeletionHelpers:
                 _account_exists_in_dynamodb("test-user", MagicMock())
 
 
-class TestGetCognitoClient:
-    """Tests for _get_cognito_client helper."""
-
-    def test_default_client(self, monkeypatch: Any) -> None:
-        """Test default Cognito client without custom endpoint."""
-        monkeypatch.delenv("COGNITO_ENDPOINT", raising=False)
-
-        from src.handlers.admin_operations import _get_cognito_client
-
-        with patch("src.handlers.admin_operations.boto3.client") as mock_client:
-            mock_client.return_value = MagicMock()
-
-            _get_cognito_client()
-
-            mock_client.assert_called_once_with("cognito-idp")
-
-    def test_custom_endpoint_client(self, monkeypatch: Any) -> None:
-        """Test Cognito client with custom endpoint (e.g., localstack)."""
-        monkeypatch.setenv("COGNITO_ENDPOINT", "http://localhost:4566")
-
-        from src.handlers.admin_operations import _get_cognito_client
-
-        with patch("src.handlers.admin_operations.boto3.client") as mock_client:
-            mock_client.return_value = MagicMock()
-
-            _get_cognito_client()
-
-            mock_client.assert_called_once_with("cognito-idp", endpoint_url="http://localhost:4566")
-
-
 class TestAdminSearchUser:
     """Tests for admin_search_user function."""
 
@@ -4299,7 +4275,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -4398,7 +4374,7 @@ class TestAdminSearchUser:
         ]
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -4476,7 +4452,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -4534,7 +4510,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables"),
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -4586,7 +4562,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables"),
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -4627,7 +4603,7 @@ class TestAdminSearchUser:
             "arguments": {"query": "nonexistent"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             with patch("src.handlers.admin_operations.tables") as mock_tables:
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
@@ -4747,7 +4723,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -4806,7 +4782,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -4853,7 +4829,7 @@ class TestAdminSearchUser:
             "arguments": {"query": "ACCOUNT#123e4567-e89b-12d3-a456-426614174000"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             with patch("src.handlers.admin_operations.tables"):
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
@@ -4881,7 +4857,7 @@ class TestAdminSearchUser:
             "arguments": {"query": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"},  # Valid UUID
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             with patch("src.handlers.admin_operations.tables"):
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
@@ -4909,7 +4885,7 @@ class TestAdminSearchUser:
             "arguments": {"query": "orphan"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             with patch("src.handlers.admin_operations.tables") as mock_tables:
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
@@ -4959,7 +4935,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -5017,7 +4993,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -5056,7 +5032,7 @@ class TestAdminSearchUser:
             "arguments": {"query": "malformed"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             with patch("src.handlers.admin_operations.tables") as mock_tables:
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
@@ -5106,7 +5082,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -5149,7 +5125,7 @@ class TestAdminSearchUser:
             "arguments": {"query": "test"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             with patch("src.handlers.admin_operations.tables"):
                 mock_get_client.side_effect = RuntimeError("Unexpected error")
 
@@ -5175,7 +5151,7 @@ class TestAdminSearchUser:
             "arguments": {"query": uuid_str},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.list_users.side_effect = ClientError(
@@ -5204,7 +5180,7 @@ class TestAdminSearchUser:
             "arguments": {"query": "ACCOUNT#12345678-1234-1234-1234-123456789abc"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.list_users.side_effect = ClientError(
@@ -5234,7 +5210,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
         ):
             mock_client = MagicMock()
@@ -5271,7 +5247,7 @@ class TestAdminSearchUser:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
         ):
             mock_client = MagicMock()
@@ -6147,9 +6123,12 @@ class TestAdminGetUserCampaigns:
         admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
         admin_appsync_event["arguments"] = {"accountId": "profile-no-id-user"}
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with (
+            patch("src.handlers.deletion_cascade.tables") as mock_cascade_tables,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+        ):
             # Mock profiles query returning a malformed profile without profileId
-            mock_tables.profiles.query.return_value = {
+            mock_cascade_tables.profiles.query.return_value = {
                 "Items": [
                     {
                         "ownerAccountId": "ACCOUNT#profile-no-id-user",
@@ -7088,7 +7067,7 @@ class TestAdminOperationExceptionHandlers:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -7142,7 +7121,7 @@ class TestAdminOperationExceptionHandlers:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -7186,7 +7165,7 @@ class TestAdminOperationExceptionHandlers:
             "arguments": {"query": "test"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             with patch("src.handlers.admin_operations.tables") as mock_tables:
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
@@ -7223,7 +7202,7 @@ class TestAdminOperationExceptionHandlers:
             "arguments": {"query": "test"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             with patch("src.handlers.admin_operations.tables") as mock_tables:
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
@@ -7257,7 +7236,7 @@ class TestAdminOperationExceptionHandlers:
         }
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -7314,7 +7293,7 @@ class TestAdminOperationExceptionHandlers:
             "arguments": {"query": "test"},
         }
 
-        with patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             with patch("src.handlers.admin_operations.tables") as mock_tables:
                 mock_client = MagicMock()
                 mock_get_client.return_value = mock_client
@@ -7351,7 +7330,7 @@ class TestAdminOperationExceptionHandlers:
         large_items_batch = [{"accountId": f"ACCOUNT#sub-{i}", "email": f"test{i}@example.com"} for i in range(1001)]
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
@@ -7408,7 +7387,7 @@ class TestAdminOperationExceptionHandlers:
         ]
 
         with (
-            patch("src.handlers.admin_operations._get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
             patch("src.handlers.admin_operations.tables") as mock_tables,
             patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
             patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
