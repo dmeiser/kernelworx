@@ -58,6 +58,46 @@ describe('verify_profile_write_access_or_owner_fn response', () => {
         assert.strictEqual(ctx.stash.profileOwner, 'ACCOUNT#owner-1');
     });
 
+    // The unprefixed non-owner branch is the only behaviour #534 changed here:
+    // before it, a bare profileId never reached check_write_permission_fn, so a
+    // caller with a valid WRITE share was denied. Pin both halves of the hand-off.
+    it('carries a BARE profileId through to the share check for a non-owner', () => {
+        const profile = { profileId: 'PROFILE#prof-1', ownerAccountId: 'ACCOUNT#owner-1' };
+        const ctx = {
+            identity: { sub: 'user-123' },
+            args: { profileId: 'prof-1' },
+            stash: {},
+            result: { items: [profile] }
+        };
+
+        const result = response(ctx);
+
+        assert.deepStrictEqual(result, profile);
+        assert.strictEqual(ctx.stash.isOwner, false);
+        // Ownership is not granted - the grant still has to come from the share.
+        assert.strictEqual(ctx.stash.hasWritePermission, undefined);
+        // Normalized on the way to check_write_permission_fn...
+        assert.strictEqual(ctx.stash.profileId, 'PROFILE#prof-1');
+        // ...and the share check must not be skipped.
+        assert.strictEqual(ctx.stash.skipGetItem, undefined);
+        assert.strictEqual(ctx.stash.profileOwner, 'ACCOUNT#owner-1');
+    });
+
+    it('leaves an already-prefixed profileId untouched on the way to the share check', () => {
+        const profile = { profileId: 'PROFILE#prof-1', ownerAccountId: 'ACCOUNT#owner-1' };
+        const ctx = {
+            identity: { sub: 'user-123' },
+            args: { profileId: 'PROFILE#prof-1' },
+            stash: {},
+            result: { items: [profile] }
+        };
+
+        response(ctx);
+
+        assert.strictEqual(ctx.stash.profileId, 'PROFILE#prof-1');
+        assert.strictEqual(ctx.stash.skipGetItem, undefined);
+    });
+
     it('denies when the profile is not found', () => {
         const ctx = {
             identity: { sub: 'user-123' },

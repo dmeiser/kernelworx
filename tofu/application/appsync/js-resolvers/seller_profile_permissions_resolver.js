@@ -1,15 +1,14 @@
 import { util } from '@aws-appsync/utils';
 import { normalizeId } from './lib/ids.js';
+import { isProfileOwner } from './lib/owner_key.js';
 
 export function request(ctx) {
     const callerAccountId = ctx.identity.sub;
     const ownerAccountId = ctx.source.ownerAccountId;
     const profileId = ctx.source.profileId;
-    
+
     // Check ownership - handle both prefixed (ACCOUNT#xxx) and clean (xxx) ownerAccountId
-    const normalizedCaller = normalizeId(callerAccountId, 'ACCOUNT#');
-    const normalizedOwner = normalizeId(ownerAccountId, 'ACCOUNT#');
-    if (normalizedCaller && normalizedCaller === normalizedOwner) {
+    if (isProfileOwner(callerAccountId, ownerAccountId)) {
         ctx.stash.isOwner = true;
         // Return a no-op query
         return {
@@ -17,7 +16,7 @@ export function request(ctx) {
             key: util.dynamodb.toMapValues({ profileId: 'NOOP', targetAccountId: 'NOOP' })
         };
     }
-    
+
     // Normalize profileId to ensure PROFILE# prefix for share lookup
     const dbProfileId = normalizeId(profileId, 'PROFILE#');
     // Normalize targetAccountId to ensure ACCOUNT# prefix for share lookup

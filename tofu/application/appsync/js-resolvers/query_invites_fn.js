@@ -2,8 +2,14 @@ import { util } from '@aws-appsync/utils';
 import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
-    // OWNER-ONLY access (not shared users with WRITE)
-    if (!ctx.stash.isOwner) {
+    // Write access is required, matching the schema's "The caller must have
+    // write access to the profile" and the sibling listSharesByProfile, which
+    // gates on the same pair of pipeline functions. Upstream
+    // verify_profile_write_access_or_owner_fn + check_write_permission_fn have
+    // already denied a caller with no share, a READ-only share, and a stale
+    // post-transfer WRITE share (#432), so honouring hasWritePermission here
+    // does not widen access beyond what those two established.
+    if (!ctx.stash.isOwner && !ctx.stash.hasWritePermission) {
         return {
             operation: 'Query',
             index: 'profileId-index',
@@ -37,8 +43,9 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    // OWNER-ONLY access (not shared users with WRITE)
-    if (!ctx.stash.isOwner) {
+    // Same write-access gate as request(): the two must not disagree, or a
+    // WRITE co-owner would query the index and then have the rows discarded.
+    if (!ctx.stash.isOwner && !ctx.stash.hasWritePermission) {
         return [];
     }
     
