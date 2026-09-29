@@ -1,6 +1,7 @@
 """Shared campaigns page object — create, list, edit, and join shared campaigns."""
 
 import re
+import time
 import uuid
 
 from playwright.sync_api import Locator, Page, expect
@@ -302,7 +303,40 @@ class SharedCampaignsPage(BasePage):
         self._submit_button().click()
         self.page.wait_for_url("**/shared-campaigns", timeout=15_000)
         self.wait_for_loading()
+        self._wait_for_created_campaign(name)
         return name
+
+    def _wait_for_created_campaign(self, campaign_name: str, timeout: int = 30) -> None:
+        """Block until the row for the just-created *campaign_name* is visible.
+
+        ``listMySharedCampaigns`` is a GSI1 query, so it is eventually
+        consistent, and the list page reads it with ``fetchPolicy:
+        'network-only'``; a campaign created moments earlier can therefore be
+        missing from the first result. Each retry reloads the page to re-run the
+        query, mirroring :meth:`CampaignPage.create_campaign_first_catalog`.
+
+        Args:
+            campaign_name: Campaign name submitted on the create form.
+            timeout: Maximum wait in seconds. Defaults to 30.
+
+        Raises:
+            AssertionError: If the row does not appear within *timeout*.
+        """
+        row = self.page.get_by_role("row").filter(has_text=campaign_name)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                expect(row.first).to_be_visible(timeout=2_000)
+                return
+            except AssertionError:
+                pass
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"Shared campaign {campaign_name!r} did not appear in the list within {timeout}s after creation."
+                ) from None
+            self.page.reload()
+            self.wait_for_loading()
+            time.sleep(1)
 
     # ------------------------------------------------------------------
     # Actions — edit / deactivate

@@ -7,7 +7,6 @@ Provides:
 - createManagedCatalog: Create an ADMIN_MANAGED global catalog
 """
 
-import os
 import re
 import time
 import uuid
@@ -16,29 +15,33 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Callable, Dict, NoReturn, Optional, cast
 
-import boto3
 from botocore.exceptions import ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
-from .account_operations import _delete_all_user_data
-from .campaign_operations import (
-    _verify_campaign_deleted,
-    batch_delete_keys,
-    delete_orders_for_campaign,
+from .deletion_cascade import (
+    delete_all_user_data,
+    delete_user_campaigns,
+    delete_user_orders,
+    delete_user_profiles,
+    delete_user_shares,
+    get_user_profiles,
+    normalize_account_id,
 )
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
+    from utils.boto import get_cognito_client
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, tables
+    from utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
+    from ..utils.boto import get_cognito_client
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, tables
+    from ..utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
 
@@ -64,45 +67,82 @@ else:  # pragma: no cover
         from ..utils.pagination import query_all_items
 
 
-def _get_required_env(name: str) -> str:
-    """Get required environment variable or raise error."""
-    value = os.environ.get(name)
-    if not value:
-        raise AppError(ErrorCode.INTERNAL_ERROR, f"Missing required environment variable: {name}")
-    return value
-
-
-def _get_cognito_client() -> Any:
-    """Get Cognito IDP client, supporting localstack endpoint."""
-    endpoint_url = os.environ.get("COGNITO_ENDPOINT")
-    if endpoint_url:
-        return boto3.client("cognito-idp", endpoint_url=endpoint_url)
-    return boto3.client("cognito-idp")
-
-
 # DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
 # RESOURCE_BUSY error instead of silently incomplete admin data (#291, #456).
+# This is the canonical transient/permanent split for these lookups: sibling
+# handlers import it (see _raise_gather_failures, used by #556) rather than
+# redeclaring their own copy. Only redeclare a local set when the caller's AWS
+# surface genuinely differs (e.g. the DynamoDB BatchGetItem throttle code).
 _THROTTLING_ERROR_CODES = frozenset(
     {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
 )
 
 
-def _raise_batch_lookup_error(operation: str, logger: Any, error: Exception, **context: Any) -> NoReturn:
+def _throttling_error_code(error: BaseException) -> str:
+    """Return the AWS error code of a ClientError, or "" for anything else.
+
+    The single place the transient/permanent decision is read: a non-ClientError
+    and a ClientError with an unrecognized code both return a value outside
+    `_THROTTLING_ERROR_CODES`, i.e. permanent.
+    """
+    if not isinstance(error, ClientError):
+        return ""
+    return error.response.get("Error", {}).get("Code", "")
+
+
+def _raise_batch_lookup_error(
+    operation: str,
+    logger: Any,
+    error: BaseException,
+    *,
+    throttling_codes: frozenset[str] = _THROTTLING_ERROR_CODES,
+    busy_message: str = "Temporarily unable to load data. Please retry.",
+    **context: Any,
+) -> NoReturn:
     """Translate a failed batch lookup into a typed AppError (#291).
 
     Throttling conditions become a retryable RESOURCE_BUSY so the admin UI can
     show a retry prompt; any other ClientError or unexpected exception becomes
     an INTERNAL_ERROR after an error-level log. Never returns: always raises.
+
+    `throttling_codes` and `busy_message` let a caller reuse the classification
+    with a service-specific code set or user-facing wording.
     """
     if isinstance(error, ClientError):
-        error_code = error.response.get("Error", {}).get("Code", "")
-        if error_code in _THROTTLING_ERROR_CODES:
+        error_code = _throttling_error_code(error)
+        if error_code in throttling_codes:
             logger.warning(f"{operation} throttled", error=str(error), error_code=error_code, **context)
-            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from error
+            raise AppError(ErrorCode.RESOURCE_BUSY, busy_message) from error
         logger.error(f"{operation} failed", error=str(error), error_code=error_code, **context)
         raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to {operation}") from error
     logger.error(f"{operation} failed unexpectedly", error=str(error), **context)
     raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to {operation}") from error
+
+
+def _raise_gather_failures(
+    operation: str,
+    logger: Any,
+    failures: list[BaseException],
+    *,
+    throttling_codes: frozenset[str] = _THROTTLING_ERROR_CODES,
+    busy_message: str = "Temporarily unable to load data. Please retry.",
+    **context: Any,
+) -> NoReturn:
+    """Refuse a partial answer when a parallel gather collected any failure.
+
+    For N per-item lookups run concurrently, where returning the survivors would
+    be an authoritative-looking but incomplete answer (#556). A single transient
+    failure keeps the whole request retryable; otherwise the first failure is
+    reported as permanent. Never returns: always raises.
+    """
+    for failure in failures:
+        if _throttling_error_code(failure) in throttling_codes:
+            _raise_batch_lookup_error(
+                operation, logger, failure, throttling_codes=throttling_codes, busy_message=busy_message, **context
+            )
+    _raise_batch_lookup_error(
+        operation, logger, failures[0], throttling_codes=throttling_codes, busy_message=busy_message, **context
+    )
 
 
 def _batch_get_unprocessed_keys(response: Dict[str, Any], table_name: str) -> list[Dict[str, Any]]:
@@ -232,7 +272,7 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
     if not keys:
         return display_names
 
-    accounts_table_name = _get_required_env("ACCOUNTS_TABLE_NAME")
+    accounts_table_name = get_required_env("ACCOUNTS_TABLE_NAME")
 
     try:
         for i in range(0, len(keys), _ACCOUNTS_BATCH_GET_LIMIT):
@@ -289,8 +329,8 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     limit = max(1, min(raw_limit or 20, 60))
     next_token = arguments.get("nextToken")
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     cognito_users, pagination_token = _list_cognito_users(cognito, user_pool_id, limit, next_token, logger)
 
@@ -353,8 +393,8 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
 
     _validate_search_query(query)
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     # Determine search strategy based on query format.
     # The map values are Cognito user dicts so we can batch enrich them.
@@ -402,11 +442,6 @@ def _validate_admin_and_get_account_id(event: Dict[str, Any]) -> str:
         raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
 
     return account_id
-
-
-def _normalize_account_id(account_id: str) -> str:
-    """Add ACCOUNT# prefix if not present."""
-    return account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
 
 
 def _add_dynamodb_users_to_map(
@@ -777,7 +812,7 @@ def _delete_user_from_cognito(cognito: Any, user_pool_id: str, username: str, em
 
 def _account_exists_in_dynamodb(account_id: str, logger: Any) -> bool:
     """Check whether an account record exists in DynamoDB."""
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
     try:
         response = tables.accounts.get_item(Key={"accountId": db_account_id}, ProjectionExpression="accountId")
         exists = "Item" in response
@@ -854,8 +889,8 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
     if not email:
         raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     # Find user and initiate reset
     username = _find_user_by_email(cognito, user_pool_id, email, logger)
@@ -871,7 +906,7 @@ def _check_not_self_deletion(caller_id: str, account_id: str) -> None:
     Normalize both IDs to their canonical ACCOUNT# form before comparing so a
     caller passing ``ACCOUNT#<own-sub>`` cannot bypass the guard (#125).
     """
-    if _normalize_account_id(account_id) == _normalize_account_id(caller_id):
+    if normalize_account_id(account_id) == normalize_account_id(caller_id):
         raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete your own account")
 
 
@@ -883,7 +918,7 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     AppSync Lambda resolver for adminDeleteUser mutation.
     Deletes all user data (orders, campaigns, shares, invites, inbound shares,
     S3 reports, profiles, payment method QR codes, and the Account record;
-    catalogs are preserved) via the shared _delete_all_user_data cascade, then
+    catalogs are preserved) via the shared delete_all_user_data cascade, then
     deletes the user from the Cognito User Pool.
 
     Args:
@@ -905,8 +940,8 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     caller_id = identity.get("sub")
     _check_not_self_deletion(str(caller_id), account_id)
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
     account_exists = _account_exists_in_dynamodb(account_id, logger)
@@ -916,7 +951,7 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
 
     # Delete all user data from DynamoDB and S3 using the shared cascade so
     # a partially-deleted Cognito state does not leave records orphaned (#435).
-    _delete_all_user_data(account_id, logger)
+    delete_all_user_data(account_id, logger)
 
     if username:
         _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
@@ -1070,122 +1105,9 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
     return catalog_item
 
 
-def _delete_user_orders(account_id: str, logger: Any) -> int:
-    """Delete all orders for all campaigns of all profiles owned by a user.
-
-    Verifies with strongly consistent reads that each deleted order is gone
-    from the orders table before returning. Raises AppError if a deleted order
-    is still present.
-
-    Returns:
-        Count of orders deleted.
-    """
-    db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
-
-    profiles = _get_user_profiles(db_account_id)
-    for profile in profiles:
-        profile_id = profile["profileId"]
-        campaigns = query_all_items(
-            tables.campaigns,
-            {
-                "KeyConditionExpression": "profileId = :pid",
-                "ExpressionAttributeValues": {":pid": profile_id},
-            },
-        )
-        for campaign in campaigns:
-            deleted_count += delete_orders_for_campaign(campaign["campaignId"], logger=logger)
-
-    logger.info("Deleted user orders", account_id=account_id, count=deleted_count)
-    return deleted_count
-
-
-def _delete_user_campaigns(account_id: str, logger: Any) -> int:
-    """Delete all campaigns for all profiles owned by a user.
-
-    Verifies with strongly consistent reads that each deleted campaign is gone
-    from the campaigns table before returning. Raises AppError if a deleted
-    campaign is still present.
-
-    Returns:
-        Count of campaigns deleted.
-    """
-    db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
-
-    profiles = _get_user_profiles(db_account_id)
-    for profile in profiles:
-        profile_id = profile["profileId"]
-        campaigns = query_all_items(
-            tables.campaigns,
-            {
-                "KeyConditionExpression": "profileId = :pid",
-                "ExpressionAttributeValues": {":pid": profile_id},
-            },
-        )
-        campaign_keys = [
-            {"profileId": profile_id, "campaignId": campaign["campaignId"]}
-            for campaign in campaigns
-            if campaign.get("campaignId")
-        ]
-        if campaign_keys:
-            deleted_count += batch_delete_keys(
-                tables.campaigns, campaign_keys, ["profileId", "campaignId"], logger=logger
-            )
-            for campaign in campaigns:
-                _verify_campaign_deleted(profile_id, campaign["campaignId"])
-
-    logger.info("Deleted user campaigns", account_id=account_id, count=deleted_count)
-    return deleted_count
-
-
-def _delete_user_shares(account_id: str, logger: Any) -> int:
-    """Delete all shares for all profiles owned by a user. Returns count deleted."""
-    db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
-
-    profiles = _get_user_profiles(db_account_id)
-    for profile in profiles:
-        profile_id = profile["profileId"]
-        shares = query_all_items(
-            tables.shares,
-            {
-                "KeyConditionExpression": "profileId = :pid",
-                "ExpressionAttributeValues": {":pid": profile_id},
-            },
-        )
-        share_keys = [
-            {"profileId": profile_id, "targetAccountId": share["targetAccountId"]}
-            for share in shares
-            if share.get("targetAccountId")
-        ]
-        if share_keys:
-            deleted_count += batch_delete_keys(
-                tables.shares, share_keys, ["profileId", "targetAccountId"], logger=logger
-            )
-
-    logger.info("Deleted user shares", account_id=account_id, count=deleted_count)
-    return deleted_count
-
-
-def _delete_user_profiles(account_id: str, logger: Any) -> int:
-    """Delete all profiles owned by a user. Returns count deleted."""
-    db_account_id = _normalize_account_id(account_id)
-
-    profiles = _get_user_profiles(db_account_id)
-    profile_keys = [
-        {"ownerAccountId": db_account_id, "profileId": profile["profileId"]}
-        for profile in profiles
-        if profile.get("profileId")
-    ]
-    deleted_count = (
-        batch_delete_keys(tables.profiles, profile_keys, ["ownerAccountId", "profileId"], logger=logger)
-        if profile_keys
-        else 0
-    )
-
-    logger.info("Deleted user profiles", account_id=account_id, count=deleted_count)
-    return deleted_count
+def _user_profiles_for(account_id: str) -> list[Dict[str, Any]]:
+    """Sweep the profiles table once for a per-domain admin deletion."""
+    return get_user_profiles(normalize_account_id(account_id))
 
 
 @with_error_handling(error_message="Failed to delete user orders")
@@ -1201,7 +1123,7 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    return _delete_user_orders(account_id, logger)
+    return delete_user_orders(_user_profiles_for(account_id), logger)
 
 
 @with_error_handling(error_message="Failed to delete user campaigns")
@@ -1217,7 +1139,7 @@ def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    return _delete_user_campaigns(account_id, logger)
+    return delete_user_campaigns(_user_profiles_for(account_id), logger)
 
 
 @with_error_handling(error_message="Failed to delete user shares")
@@ -1230,7 +1152,7 @@ def admin_delete_user_shares(event: Dict[str, Any], context: Any) -> int:
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    return _delete_user_shares(account_id, logger)
+    return delete_user_shares(_user_profiles_for(account_id), logger)
 
 
 @with_error_handling(error_message="Failed to delete user profiles")
@@ -1243,58 +1165,7 @@ def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    return _delete_user_profiles(account_id, logger)
-
-
-def _delete_invites_for_owned_profiles(account_id: str, logger: Any) -> int:
-    """Delete all invites for profiles owned by the account."""
-    db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
-
-    profiles = _get_user_profiles(db_account_id)
-    for profile in profiles:
-        profile_id = profile["profileId"]
-        invites = query_all_items(
-            tables.invites,
-            {
-                "KeyConditionExpression": "profileId = :pid",
-                "ExpressionAttributeValues": {":pid": profile_id},
-                "IndexName": "profileId-index",
-            },
-        )
-        invite_keys = [{"inviteCode": invite["inviteCode"]} for invite in invites if invite.get("inviteCode")]
-        if invite_keys:
-            deleted_count += batch_delete_keys(tables.invites, invite_keys, ["inviteCode"], logger=logger)
-
-    logger.info("Deleted invites for owned profiles", account_id=account_id, count=deleted_count)
-    return deleted_count
-
-
-def _delete_inbound_shares(account_id: str, logger: Any) -> int:
-    """Delete all inbound shares where the account is the target."""
-    db_account_id = _normalize_account_id(account_id)
-
-    shares = query_all_items(
-        tables.shares,
-        {
-            "KeyConditionExpression": "targetAccountId = :tid",
-            "ExpressionAttributeValues": {":tid": db_account_id},
-            "IndexName": "targetAccountId-index",
-        },
-    )
-    share_keys = [
-        {"profileId": share["profileId"], "targetAccountId": share["targetAccountId"]}
-        for share in shares
-        if share.get("profileId") and share.get("targetAccountId")
-    ]
-    deleted_count = (
-        batch_delete_keys(tables.shares, share_keys, ["profileId", "targetAccountId"], logger=logger)
-        if share_keys
-        else 0
-    )
-
-    logger.info("Deleted inbound shares", account_id=account_id, count=deleted_count)
-    return deleted_count
+    return delete_user_profiles(account_id, _user_profiles_for(account_id), logger)
 
 
 def _soft_delete_catalog(catalog_id: str) -> None:
@@ -1328,7 +1199,7 @@ def _query_and_delete_catalogs(db_account_id: str) -> int:
 
 def _delete_user_catalogs(account_id: str, logger: Any) -> int:
     """Soft delete all catalogs owned by a user. Returns count."""
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
     deleted_count = _query_and_delete_catalogs(db_account_id)
     logger.info("Soft-deleted user catalogs", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1358,7 +1229,7 @@ def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[st
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
 
     # Query profiles by ownerAccountId
     profiles = query_all_items(
@@ -1383,7 +1254,7 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
 
     # Query catalogs by ownerAccountId using GSI
     catalogs = query_all_items(
@@ -1401,17 +1272,6 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
 
     logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs))
     return catalogs
-
-
-def _get_user_profiles(db_account_id: str) -> list[Dict[str, Any]]:
-    """Get all profiles owned by an account."""
-    return query_all_items(
-        tables.profiles,
-        {
-            "KeyConditionExpression": "ownerAccountId = :owner",
-            "ExpressionAttributeValues": {":owner": db_account_id},
-        },
-    )
 
 
 # DynamoDB caps BatchGetItem at 100 keys per request.
@@ -1522,7 +1382,7 @@ def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_
     if not catalog_ids:
         return
 
-    catalogs_table_name = _get_required_env("CATALOGS_TABLE_NAME")
+    catalogs_table_name = get_required_env("CATALOGS_TABLE_NAME")
     try:
         catalog_map = _batch_get_catalog_items(catalog_ids, catalogs_table_name, logger)
     except AppError:
@@ -1561,10 +1421,10 @@ def admin_get_user_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[s
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
 
     # First, get all profiles owned by this account
-    profiles = _get_user_profiles(db_account_id)
+    profiles = get_user_profiles(db_account_id)
     logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
 
     # Now query campaigns for each profile
@@ -1586,7 +1446,7 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
 
     # Query shared campaigns by createdBy using GSI1
     campaigns = query_all_items(

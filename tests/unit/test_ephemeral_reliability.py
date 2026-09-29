@@ -75,11 +75,14 @@ class TestRunIdValidation:
     """RUN_ID reaches S3 state keys and -var values, so all three entry
     points reject anything outside [A-Za-z0-9._-] before any AWS call."""
 
-    INVALID_RUN_IDS = ["../prod", "pr-1/x", "pr 1", "pr-1;rm", ""]
+    INVALID_RUN_IDS = ["../prod", "pr-1/x", "pr-1/../../application/prod", "pr 1", "pr-1;rm", ""]
 
+    # Both actions interpolate RUN_ID into the S3 state key, the -var value, and
+    # (for down) the log-group/bucket cleanup suffix, so both must reject first.
+    @pytest.mark.parametrize("action", ["up", "down"])
     @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
     def test_ephemeral_env_rejects_invalid_run_id(
-        self, repo_root: Path, tmp_env: Path, tmp_path: Path, run_id: str
+        self, repo_root: Path, tmp_env: Path, tmp_path: Path, action: str, run_id: str
     ) -> None:
         recorded = tmp_env / "aws_calls.txt"
         write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
@@ -91,7 +94,7 @@ class TestRunIdValidation:
             export STATE_REGION="us-east-1"
             export TF_VAR_encryption_passphrase="not-used"
             export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
-            scripts/ephemeral-env.sh down {shlex.quote(run_id)}
+            scripts/ephemeral-env.sh {action} {shlex.quote(run_id)}
         """
         result = run_bash(repo_root, script)
         assert result.returncode != 0, result.stderr
@@ -166,6 +169,67 @@ class TestCreateEphemeralTestUsersRunIdValidation:
         calls = (tmp_env / "aws_calls.txt").read_text()
         for suffix in ("owner", "contributor", "readonly", "smoke"):
             assert f"pr-999-{suffix}@kernelworx.test" in calls
+
+
+class TestCreateEphemeralTestUsersPasswordProvisioning:
+    """The exported TEST_*_PASSWORD values are the credentials the integration
+    and e2e suites sign in with, so the script must never export a password
+    Cognito did not accept. It used to swallow a failed AdminSetUserPassword
+    ("(Could not set password)") and export the generated password anyway, so
+    a transient control-plane failure produced a whole suite of
+    "Incorrect username or password" failures followed by Cognito's
+    "Password attempts exceeded" backoff instead of a provisioning error.
+    """
+
+    def _run(self, repo_root: Path, tmp_env: Path, failing_set_password_calls: int) -> subprocess.CompletedProcess[str]:
+        counter = tmp_env / "set-password-calls.txt"
+        recorded = tmp_env / "aws_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            f"""
+            #!/bin/bash
+            printf '%s\\n' "$*" >> "{recorded}"
+            case "$1 $2" in
+              "cognito-idp admin-set-user-password")
+                echo call >> "{counter}"
+                if [ "$(wc -l < "{counter}")" -le {failing_set_password_calls} ]; then
+                  echo "An error occurred (ThrottlingException) when calling the AdminSetUserPassword operation" >&2
+                  exit 254
+                fi
+                ;;
+              "cognito-idp admin-get-user") echo "None" ;;
+              "cognito-idp initiate-auth") echo "an-access-token" ;;
+              "cognito-idp associate-software-token") echo "JBSWY3DPEHPK3PXP" ;;
+            esac
+            exit 0
+            """,
+        )
+        # provision-user-totp.sh waits for the next TOTP window; skip the wait.
+        write_mock(tmp_env, "sleep", "#!/bin/bash\nexit 0")
+        return run_bash(repo_root, "scripts/create-ephemeral-test-users.sh pr-999 pool-123 client-456")
+
+    def _set_password_calls(self, tmp_env: Path) -> list[str]:
+        calls = (tmp_env / "aws_calls.txt").read_text().splitlines()
+        return [line for line in calls if line.startswith("cognito-idp admin-set-user-password")]
+
+    def test_transient_set_password_failure_is_retried(self, repo_root: Path, tmp_env: Path) -> None:
+        result = self._run(repo_root, tmp_env, failing_set_password_calls=3)
+        assert result.returncode == 0, result.stderr
+        owner_calls = [call for call in self._set_password_calls(tmp_env) if "pr-999-owner@" in call]
+        assert len(owner_calls) > 1, "a rejected password must be retried, not exported as-is"
+        for user in ("OWNER", "CONTRIBUTOR", "READONLY", "SMOKE"):
+            assert f"TEST_{user}_PASSWORD=" in result.stdout
+
+    def test_password_never_accepted_fails_without_exporting(self, repo_root: Path, tmp_env: Path) -> None:
+        result = self._run(repo_root, tmp_env, failing_set_password_calls=1000)
+        assert result.returncode != 0, result.stdout
+        assert "Refusing to export test credentials" in result.stderr
+        assert "TEST_OWNER_PASSWORD" not in result.stdout
+        assert not any(line.startswith("export ") for line in result.stdout.splitlines())
+        # The retry is bounded: it gives up instead of looping forever.
+        owner_calls = [call for call in self._set_password_calls(tmp_env) if "pr-999-owner@" in call]
+        assert 1 < len(owner_calls) <= 10
 
 
 class TestCleanupStaleLock:
