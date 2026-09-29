@@ -42,7 +42,9 @@ const update = scriptArgs.includes('--update')
 
 function argValue(flag) {
   const i = scriptArgs.indexOf(flag)
-  return i !== -1 ? scriptArgs[i + 1] : undefined
+  if (i === -1) return undefined
+  const value = scriptArgs[i + 1]
+  return value && !value.startsWith('--') ? value : undefined
 }
 
 const srcDirArg = argValue('--src-dir')
