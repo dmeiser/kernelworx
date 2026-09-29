@@ -115,9 +115,8 @@ if (count > baseline) {
     'The complexity gate (eslint `complexity: [error, { max: 5 }]`) must only gain',
   )
   console.error(
-    'coverage: refactor the new offenders and remove their disables instead. See',
+    'coverage: refactor the new offenders and remove their disables instead (issue #532).',
   )
-  console.error('the frontend complexity gate note in AGENTS.md and issue #532.')
   process.exit(1)
 }
 
