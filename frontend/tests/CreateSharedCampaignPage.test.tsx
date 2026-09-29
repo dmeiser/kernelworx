@@ -11,6 +11,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
+import { InMemoryCache } from '@apollo/client/cache';
 import type { MockedResponse } from '@apollo/client/testing';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -96,10 +97,20 @@ const createdMock: MockedResponse = {
   result: { data: { createSharedCampaign: sharedCampaign('NEWCODE') } },
 };
 
-const renderPage = (mocks: readonly MockedResponse[], catalogId: string | undefined = CATALOG.catalogId) =>
+const renderPage = (
+  mocks: readonly MockedResponse[],
+  catalogId: string | undefined = CATALOG.catalogId,
+  cache = new InMemoryCache(),
+) =>
   render(
-    <MockedProvider mocks={mocks}>
-      <MemoryRouter initialEntries={[{ pathname: '/create-shared-campaign', state: catalogId ? { catalogId } : {} }]}>
+    <MockedProvider mocks={mocks} cache={cache}>
+      <MemoryRouter
+        initialEntries={
+          catalogId === undefined
+            ? ['/create-shared-campaign']
+            : [{ pathname: '/create-shared-campaign', state: { catalogId } }]
+        }
+      >
         <Routes>
           <Route path="/create-shared-campaign" element={<CreateSharedCampaignPage />} />
         </Routes>
@@ -131,13 +142,17 @@ const pickUnitType = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(await screen.findByRole('option', { name: 'Pack' }));
 };
 
-const pickCatalog = async (user: ReturnType<typeof userEvent.setup>) => {
+const openCatalogSelect = async (user: ReturnType<typeof userEvent.setup>) => {
   const label = (await screen.findAllByText(/Select Catalog/)).find((el) => el.tagName === 'LABEL');
   const combo = (label?.closest('.MuiFormControl-root') as HTMLElement).querySelector(
     '[role="combobox"]',
   ) as HTMLElement;
   await waitFor(() => expect(combo).not.toHaveAttribute('aria-disabled', 'true'));
   await user.click(combo);
+};
+
+const pickCatalog = async (user: ReturnType<typeof userEvent.setup>) => {
+  await openCatalogSelect(user);
   await user.click(await screen.findByRole('option', { name: CATALOG.catalogName }));
 };
 
@@ -166,6 +181,57 @@ describe('CreateSharedCampaignPage', () => {
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/shared-campaigns'));
   });
 
+  it('creates the campaign even when the campaign list never loaded', async () => {
+    const user = userEvent.setup({ delay: null });
+    // No list mock at all: the page still creates and redirects, it just has
+    // nothing to add the new campaign to.
+    renderPage([
+      {
+        request: { query: LIST_MANAGED_CATALOGS, variables: {} },
+        result: { data: { listManagedCatalogs: [CATALOG] } },
+      },
+      { request: { query: LIST_MY_CATALOGS, variables: {} }, result: { data: { listMyCatalogs: [] } } },
+      createdMock,
+    ]);
+
+    await pickCatalog(user);
+    await fillRequiredFields(user);
+    await pickUnitType(user);
+    fireEvent.change(screen.getByLabelText(/Start Date/), { target: { value: '2026-08-01' } });
+    fireEvent.change(screen.getByLabelText(/End Date/), { target: { value: '2026-10-31' } });
+    fireEvent.change(screen.getByLabelText(/Message to Scouts/), { target: { value: 'Thanks for helping!' } });
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'Pack 42 fall fundraiser' } });
+
+    await waitFor(() => expect(submit()).toBeEnabled());
+    await user.click(submit());
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/shared-campaigns'));
+  });
+
+  it('does not list the same campaign twice', async () => {
+    const user = userEvent.setup({ delay: null });
+    const cache = new InMemoryCache();
+    // The created campaign's code is already in the list, so the cache update
+    // must not append a second copy of it.
+    renderPage([...baseMocks([sharedCampaign('NEWCODE')]), createdMock], CATALOG.catalogId, cache);
+
+    await fillRequiredFields(user);
+    await pickUnitType(user);
+    fireEvent.change(screen.getByLabelText(/Start Date/), { target: { value: '2026-08-01' } });
+    fireEvent.change(screen.getByLabelText(/End Date/), { target: { value: '2026-10-31' } });
+    fireEvent.change(screen.getByLabelText(/Message to Scouts/), { target: { value: 'Thanks for helping!' } });
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'Pack 42 fall fundraiser' } });
+
+    await waitFor(() => expect(submit()).toBeEnabled());
+    await user.click(submit());
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/shared-campaigns'));
+
+    const listed = cache.readQuery<{ listMySharedCampaigns: { sharedCampaignCode: string }[] }>({
+      query: LIST_MY_SHARED_CAMPAIGNS,
+    });
+    expect(listed?.listMySharedCampaigns).toHaveLength(1);
+  });
+
   it('shows the failure when the create mutation errors', async () => {
     const user = userEvent.setup({ delay: null });
     renderPage([...baseMocks(), { request: createdMock.request, error: new Error('Catalog is no longer active') }]);
@@ -186,7 +252,8 @@ describe('CreateSharedCampaignPage', () => {
 
   it('refuses to create once the active shared-campaign limit is reached', async () => {
     const user = userEvent.setup({ delay: null });
-    const atLimit = Array.from({ length: 50 }, (_, i) => sharedCampaign(`CODE${i}`));
+    // 50 active campaigns plus a deactivated one: only the active ones count.
+    const atLimit = [...Array.from({ length: 50 }, (_, i) => sharedCampaign(`CODE${i}`)), sharedCampaign('OLD', false)];
     renderPage(baseMocks(atLimit));
 
     expect(await screen.findByText(/reached the maximum of 50 active shared campaigns/)).toBeInTheDocument();
@@ -195,6 +262,43 @@ describe('CreateSharedCampaignPage', () => {
     await pickUnitType(user);
     await waitFor(() => expect(submit()).toBeDisabled());
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('says so when the account has no catalog to sell from', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([
+      { request: { query: LIST_MY_SHARED_CAMPAIGNS, variables: {} }, result: { data: { listMySharedCampaigns: [] } } },
+      { request: { query: LIST_MANAGED_CATALOGS, variables: {} }, result: { data: { listManagedCatalogs: [] } } },
+      { request: { query: LIST_MY_CATALOGS, variables: {} }, result: { data: { listMyCatalogs: [] } } },
+    ]);
+
+    await openCatalogSelect(user);
+
+    expect(await screen.findByText('No catalogs available')).toBeInTheDocument();
+  });
+
+  it('offers only admin-managed catalogs', async () => {
+    const user = userEvent.setup({ delay: null });
+    const userManaged = { ...CATALOG, catalogId: 'catalog-2', catalogName: 'Trail Mix', catalogType: 'USER_MANAGED' };
+    renderPage(
+      [
+        {
+          request: { query: LIST_MY_SHARED_CAMPAIGNS, variables: {} },
+          result: { data: { listMySharedCampaigns: [] } },
+        },
+        {
+          request: { query: LIST_MANAGED_CATALOGS, variables: {} },
+          result: { data: { listManagedCatalogs: [CATALOG, userManaged] } },
+        },
+        { request: { query: LIST_MY_CATALOGS, variables: {} }, result: { data: { listMyCatalogs: [] } } },
+      ],
+      undefined,
+    );
+
+    await openCatalogSelect(user);
+
+    expect(await screen.findByRole('option', { name: CATALOG.catalogName })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: userManaged.catalogName })).not.toBeInTheDocument();
   });
 
   it('hides a public catalog the account already owns as a personal catalog', async () => {
@@ -217,12 +321,7 @@ describe('CreateSharedCampaignPage', () => {
       undefined,
     );
 
-    const catalogLabel = (await screen.findAllByText(/Select Catalog/)).find((el) => el.tagName === 'LABEL');
-    const catalogCombo = (catalogLabel?.closest('.MuiFormControl-root') as HTMLElement).querySelector(
-      '[role="combobox"]',
-    ) as HTMLElement;
-    await waitFor(() => expect(catalogCombo).not.toHaveAttribute('aria-disabled', 'true'));
-    await user.click(catalogCombo);
+    await openCatalogSelect(user);
 
     // The duplicate is listed once, under "My Catalogs" rather than "Public Catalogs".
     expect(await screen.findByRole('option', { name: 'My Popcorn' })).toBeInTheDocument();
