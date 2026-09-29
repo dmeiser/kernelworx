@@ -54,15 +54,18 @@ export function response(ctx) {
     }
     
     const share = ctx.result;
-    
+
+    // Access denied paths return null (query permissions model - don't error),
+    // matching the documented contract (schema.graphql getProfile) and the
+    // sibling read resolvers (return_campaign_fn.js, return_order_fn.js).
     // No share found - access denied
     if (!share || !share.profileId) {
-        util.error('Not authorized to access this profile', 'UNAUTHORIZED');
+        return null;
     }
-    
+
     // Share exists - check for READ or WRITE permission
     if (!share.permissions || !Array.isArray(share.permissions)) {
-        util.error('Not authorized to access this profile', 'UNAUTHORIZED');
+        return null;
     }
     
     // Stale share check (#432): a share records the ownerAccountId from when it was
@@ -74,7 +77,7 @@ export function response(ctx) {
     const profile = ctx.stash.profile;
     const currentOwner = profile && profile.ownerAccountId;
     if (share.ownerAccountId && currentOwner && share.ownerAccountId !== currentOwner) {
-        util.error('Not authorized to access this profile', 'UNAUTHORIZED');
+        return null;
     }
     
     // Has READ or WRITE permission - authorized
@@ -86,5 +89,5 @@ export function response(ctx) {
     }
     
     // Share exists but no valid permissions
-    util.error('Not authorized to access this profile', 'UNAUTHORIZED');
+    return null;
 }
