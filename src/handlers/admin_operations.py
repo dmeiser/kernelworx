@@ -7,7 +7,6 @@ Provides:
 - createManagedCatalog: Create an ADMIN_MANAGED global catalog
 """
 
-import os
 import re
 import time
 import uuid
@@ -16,7 +15,6 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Callable, Dict, NoReturn, Optional, cast
 
-import boto3
 from botocore.exceptions import ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
@@ -34,14 +32,16 @@ from .deletion_cascade import (
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
+    from utils.boto import get_cognito_client
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, tables
+    from utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
+    from ..utils.boto import get_cognito_client
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, tables
+    from ..utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
 
@@ -67,45 +67,82 @@ else:  # pragma: no cover
         from ..utils.pagination import query_all_items
 
 
-def _get_required_env(name: str) -> str:
-    """Get required environment variable or raise error."""
-    value = os.environ.get(name)
-    if not value:
-        raise AppError(ErrorCode.INTERNAL_ERROR, f"Missing required environment variable: {name}")
-    return value
-
-
-def _get_cognito_client() -> Any:
-    """Get Cognito IDP client, supporting localstack endpoint."""
-    endpoint_url = os.environ.get("COGNITO_ENDPOINT")
-    if endpoint_url:
-        return boto3.client("cognito-idp", endpoint_url=endpoint_url)
-    return boto3.client("cognito-idp")
-
-
 # DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
 # RESOURCE_BUSY error instead of silently incomplete admin data (#291, #456).
+# This is the canonical transient/permanent split for these lookups: sibling
+# handlers import it (see _raise_gather_failures, used by #556) rather than
+# redeclaring their own copy. Only redeclare a local set when the caller's AWS
+# surface genuinely differs (e.g. the DynamoDB BatchGetItem throttle code).
 _THROTTLING_ERROR_CODES = frozenset(
     {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
 )
 
 
-def _raise_batch_lookup_error(operation: str, logger: Any, error: Exception, **context: Any) -> NoReturn:
+def _throttling_error_code(error: BaseException) -> str:
+    """Return the AWS error code of a ClientError, or "" for anything else.
+
+    The single place the transient/permanent decision is read: a non-ClientError
+    and a ClientError with an unrecognized code both return a value outside
+    `_THROTTLING_ERROR_CODES`, i.e. permanent.
+    """
+    if not isinstance(error, ClientError):
+        return ""
+    return error.response.get("Error", {}).get("Code", "")
+
+
+def _raise_batch_lookup_error(
+    operation: str,
+    logger: Any,
+    error: BaseException,
+    *,
+    throttling_codes: frozenset[str] = _THROTTLING_ERROR_CODES,
+    busy_message: str = "Temporarily unable to load data. Please retry.",
+    **context: Any,
+) -> NoReturn:
     """Translate a failed batch lookup into a typed AppError (#291).
 
     Throttling conditions become a retryable RESOURCE_BUSY so the admin UI can
     show a retry prompt; any other ClientError or unexpected exception becomes
     an INTERNAL_ERROR after an error-level log. Never returns: always raises.
+
+    `throttling_codes` and `busy_message` let a caller reuse the classification
+    with a service-specific code set or user-facing wording.
     """
     if isinstance(error, ClientError):
-        error_code = error.response.get("Error", {}).get("Code", "")
-        if error_code in _THROTTLING_ERROR_CODES:
+        error_code = _throttling_error_code(error)
+        if error_code in throttling_codes:
             logger.warning(f"{operation} throttled", error=str(error), error_code=error_code, **context)
-            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from error
+            raise AppError(ErrorCode.RESOURCE_BUSY, busy_message) from error
         logger.error(f"{operation} failed", error=str(error), error_code=error_code, **context)
         raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to {operation}") from error
     logger.error(f"{operation} failed unexpectedly", error=str(error), **context)
     raise AppError(ErrorCode.INTERNAL_ERROR, f"Failed to {operation}") from error
+
+
+def _raise_gather_failures(
+    operation: str,
+    logger: Any,
+    failures: list[BaseException],
+    *,
+    throttling_codes: frozenset[str] = _THROTTLING_ERROR_CODES,
+    busy_message: str = "Temporarily unable to load data. Please retry.",
+    **context: Any,
+) -> NoReturn:
+    """Refuse a partial answer when a parallel gather collected any failure.
+
+    For N per-item lookups run concurrently, where returning the survivors would
+    be an authoritative-looking but incomplete answer (#556). A single transient
+    failure keeps the whole request retryable; otherwise the first failure is
+    reported as permanent. Never returns: always raises.
+    """
+    for failure in failures:
+        if _throttling_error_code(failure) in throttling_codes:
+            _raise_batch_lookup_error(
+                operation, logger, failure, throttling_codes=throttling_codes, busy_message=busy_message, **context
+            )
+    _raise_batch_lookup_error(
+        operation, logger, failures[0], throttling_codes=throttling_codes, busy_message=busy_message, **context
+    )
 
 
 def _batch_get_unprocessed_keys(response: Dict[str, Any], table_name: str) -> list[Dict[str, Any]]:
@@ -235,7 +272,7 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
     if not keys:
         return display_names
 
-    accounts_table_name = _get_required_env("ACCOUNTS_TABLE_NAME")
+    accounts_table_name = get_required_env("ACCOUNTS_TABLE_NAME")
 
     try:
         for i in range(0, len(keys), _ACCOUNTS_BATCH_GET_LIMIT):
@@ -292,8 +329,8 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     limit = max(1, min(raw_limit or 20, 60))
     next_token = arguments.get("nextToken")
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     cognito_users, pagination_token = _list_cognito_users(cognito, user_pool_id, limit, next_token, logger)
 
@@ -356,8 +393,8 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
 
     _validate_search_query(query)
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     # Determine search strategy based on query format.
     # The map values are Cognito user dicts so we can batch enrich them.
@@ -852,8 +889,8 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
     if not email:
         raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     # Find user and initiate reset
     username = _find_user_by_email(cognito, user_pool_id, email, logger)
@@ -903,8 +940,8 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     caller_id = identity.get("sub")
     _check_not_self_deletion(str(caller_id), account_id)
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
     account_exists = _account_exists_in_dynamodb(account_id, logger)
@@ -1345,7 +1382,7 @@ def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_
     if not catalog_ids:
         return
 
-    catalogs_table_name = _get_required_env("CATALOGS_TABLE_NAME")
+    catalogs_table_name = get_required_env("CATALOGS_TABLE_NAME")
     try:
         catalog_map = _batch_get_catalog_items(catalog_ids, catalogs_table_name, logger)
     except AppError:
