@@ -12,7 +12,7 @@
  * forms must reject a year outside it at submit time - the number input's
  * `min`/`max` attributes are only advisory once a user types.
  *
- * These assertions are on observable behaviour: the `min`/`max` attributes of
+ * These assertions are on observable behavior: the `min`/`max` attributes of
  * the rendered inputs, and whether the create mutation actually runs.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';

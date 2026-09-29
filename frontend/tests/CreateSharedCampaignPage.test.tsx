@@ -1,5 +1,5 @@
 /**
- * Behavioural tests for CreateSharedCampaignPage.
+ * Behavioral tests for CreateSharedCampaignPage.
  *
  * This page was previously untested, so importing it for the campaign-year
  * regression test brought it into the coverage report at 60%. These tests
