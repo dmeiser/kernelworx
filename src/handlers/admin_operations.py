@@ -19,11 +19,14 @@ from botocore.exceptions import ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
-from .account_operations import _delete_all_user_data
-from .campaign_operations import (
-    _verify_campaign_deleted,
-    batch_delete_keys,
-    delete_orders_for_campaign,
+from .deletion_cascade import (
+    delete_all_user_data,
+    delete_user_campaigns,
+    delete_user_orders,
+    delete_user_profiles,
+    delete_user_shares,
+    get_user_profiles,
+    normalize_account_id,
 )
 
 # Handle both Lambda (absolute) and unit test (relative) imports
@@ -441,11 +444,6 @@ def _validate_admin_and_get_account_id(event: Dict[str, Any]) -> str:
     return account_id
 
 
-def _normalize_account_id(account_id: str) -> str:
-    """Add ACCOUNT# prefix if not present."""
-    return account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
-
-
 def _add_dynamodb_users_to_map(
     results_map: dict[str, Dict[str, Any]], query: str, cognito: Any, user_pool_id: str, logger: Any
 ) -> None:
@@ -814,7 +812,7 @@ def _delete_user_from_cognito(cognito: Any, user_pool_id: str, username: str, em
 
 def _account_exists_in_dynamodb(account_id: str, logger: Any) -> bool:
     """Check whether an account record exists in DynamoDB."""
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
     try:
         response = tables.accounts.get_item(Key={"accountId": db_account_id}, ProjectionExpression="accountId")
         exists = "Item" in response
@@ -908,7 +906,7 @@ def _check_not_self_deletion(caller_id: str, account_id: str) -> None:
     Normalize both IDs to their canonical ACCOUNT# form before comparing so a
     caller passing ``ACCOUNT#<own-sub>`` cannot bypass the guard (#125).
     """
-    if _normalize_account_id(account_id) == _normalize_account_id(caller_id):
+    if normalize_account_id(account_id) == normalize_account_id(caller_id):
         raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete your own account")
 
 
@@ -920,7 +918,7 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     AppSync Lambda resolver for adminDeleteUser mutation.
     Deletes all user data (orders, campaigns, shares, invites, inbound shares,
     S3 reports, profiles, payment method QR codes, and the Account record;
-    catalogs are preserved) via the shared _delete_all_user_data cascade, then
+    catalogs are preserved) via the shared delete_all_user_data cascade, then
     deletes the user from the Cognito User Pool.
 
     Args:
@@ -953,7 +951,7 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
 
     # Delete all user data from DynamoDB and S3 using the shared cascade so
     # a partially-deleted Cognito state does not leave records orphaned (#435).
-    _delete_all_user_data(account_id, logger)
+    delete_all_user_data(account_id, logger)
 
     if username:
         _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
@@ -1107,122 +1105,9 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
     return catalog_item
 
 
-def _delete_user_orders(account_id: str, logger: Any) -> int:
-    """Delete all orders for all campaigns of all profiles owned by a user.
-
-    Verifies with strongly consistent reads that each deleted order is gone
-    from the orders table before returning. Raises AppError if a deleted order
-    is still present.
-
-    Returns:
-        Count of orders deleted.
-    """
-    db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
-
-    profiles = _get_user_profiles(db_account_id)
-    for profile in profiles:
-        profile_id = profile["profileId"]
-        campaigns = query_all_items(
-            tables.campaigns,
-            {
-                "KeyConditionExpression": "profileId = :pid",
-                "ExpressionAttributeValues": {":pid": profile_id},
-            },
-        )
-        for campaign in campaigns:
-            deleted_count += delete_orders_for_campaign(campaign["campaignId"], logger=logger)
-
-    logger.info("Deleted user orders", account_id=account_id, count=deleted_count)
-    return deleted_count
-
-
-def _delete_user_campaigns(account_id: str, logger: Any) -> int:
-    """Delete all campaigns for all profiles owned by a user.
-
-    Verifies with strongly consistent reads that each deleted campaign is gone
-    from the campaigns table before returning. Raises AppError if a deleted
-    campaign is still present.
-
-    Returns:
-        Count of campaigns deleted.
-    """
-    db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
-
-    profiles = _get_user_profiles(db_account_id)
-    for profile in profiles:
-        profile_id = profile["profileId"]
-        campaigns = query_all_items(
-            tables.campaigns,
-            {
-                "KeyConditionExpression": "profileId = :pid",
-                "ExpressionAttributeValues": {":pid": profile_id},
-            },
-        )
-        campaign_keys = [
-            {"profileId": profile_id, "campaignId": campaign["campaignId"]}
-            for campaign in campaigns
-            if campaign.get("campaignId")
-        ]
-        if campaign_keys:
-            deleted_count += batch_delete_keys(
-                tables.campaigns, campaign_keys, ["profileId", "campaignId"], logger=logger
-            )
-            for campaign in campaigns:
-                _verify_campaign_deleted(profile_id, campaign["campaignId"])
-
-    logger.info("Deleted user campaigns", account_id=account_id, count=deleted_count)
-    return deleted_count
-
-
-def _delete_user_shares(account_id: str, logger: Any) -> int:
-    """Delete all shares for all profiles owned by a user. Returns count deleted."""
-    db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
-
-    profiles = _get_user_profiles(db_account_id)
-    for profile in profiles:
-        profile_id = profile["profileId"]
-        shares = query_all_items(
-            tables.shares,
-            {
-                "KeyConditionExpression": "profileId = :pid",
-                "ExpressionAttributeValues": {":pid": profile_id},
-            },
-        )
-        share_keys = [
-            {"profileId": profile_id, "targetAccountId": share["targetAccountId"]}
-            for share in shares
-            if share.get("targetAccountId")
-        ]
-        if share_keys:
-            deleted_count += batch_delete_keys(
-                tables.shares, share_keys, ["profileId", "targetAccountId"], logger=logger
-            )
-
-    logger.info("Deleted user shares", account_id=account_id, count=deleted_count)
-    return deleted_count
-
-
-def _delete_user_profiles(account_id: str, logger: Any) -> int:
-    """Delete all profiles owned by a user. Returns count deleted."""
-    db_account_id = _normalize_account_id(account_id)
-
-    profiles = _get_user_profiles(db_account_id)
-    profile_keys = [
-        {"ownerAccountId": db_account_id, "profileId": profile["profileId"]}
-        for profile in profiles
-        if profile.get("profileId")
-    ]
-    deleted_count = (
-        batch_delete_keys(tables.profiles, profile_keys, ["ownerAccountId", "profileId"], logger=logger)
-        if profile_keys
-        else 0
-    )
-
-    logger.info("Deleted user profiles", account_id=account_id, count=deleted_count)
-    return deleted_count
+def _user_profiles_for(account_id: str) -> list[Dict[str, Any]]:
+    """Sweep the profiles table once for a per-domain admin deletion."""
+    return get_user_profiles(normalize_account_id(account_id))
 
 
 @with_error_handling(error_message="Failed to delete user orders")
@@ -1238,7 +1123,7 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    return _delete_user_orders(account_id, logger)
+    return delete_user_orders(_user_profiles_for(account_id), logger)
 
 
 @with_error_handling(error_message="Failed to delete user campaigns")
@@ -1254,7 +1139,7 @@ def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    return _delete_user_campaigns(account_id, logger)
+    return delete_user_campaigns(_user_profiles_for(account_id), logger)
 
 
 @with_error_handling(error_message="Failed to delete user shares")
@@ -1267,7 +1152,7 @@ def admin_delete_user_shares(event: Dict[str, Any], context: Any) -> int:
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    return _delete_user_shares(account_id, logger)
+    return delete_user_shares(_user_profiles_for(account_id), logger)
 
 
 @with_error_handling(error_message="Failed to delete user profiles")
@@ -1280,58 +1165,7 @@ def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    return _delete_user_profiles(account_id, logger)
-
-
-def _delete_invites_for_owned_profiles(account_id: str, logger: Any) -> int:
-    """Delete all invites for profiles owned by the account."""
-    db_account_id = _normalize_account_id(account_id)
-    deleted_count = 0
-
-    profiles = _get_user_profiles(db_account_id)
-    for profile in profiles:
-        profile_id = profile["profileId"]
-        invites = query_all_items(
-            tables.invites,
-            {
-                "KeyConditionExpression": "profileId = :pid",
-                "ExpressionAttributeValues": {":pid": profile_id},
-                "IndexName": "profileId-index",
-            },
-        )
-        invite_keys = [{"inviteCode": invite["inviteCode"]} for invite in invites if invite.get("inviteCode")]
-        if invite_keys:
-            deleted_count += batch_delete_keys(tables.invites, invite_keys, ["inviteCode"], logger=logger)
-
-    logger.info("Deleted invites for owned profiles", account_id=account_id, count=deleted_count)
-    return deleted_count
-
-
-def _delete_inbound_shares(account_id: str, logger: Any) -> int:
-    """Delete all inbound shares where the account is the target."""
-    db_account_id = _normalize_account_id(account_id)
-
-    shares = query_all_items(
-        tables.shares,
-        {
-            "KeyConditionExpression": "targetAccountId = :tid",
-            "ExpressionAttributeValues": {":tid": db_account_id},
-            "IndexName": "targetAccountId-index",
-        },
-    )
-    share_keys = [
-        {"profileId": share["profileId"], "targetAccountId": share["targetAccountId"]}
-        for share in shares
-        if share.get("profileId") and share.get("targetAccountId")
-    ]
-    deleted_count = (
-        batch_delete_keys(tables.shares, share_keys, ["profileId", "targetAccountId"], logger=logger)
-        if share_keys
-        else 0
-    )
-
-    logger.info("Deleted inbound shares", account_id=account_id, count=deleted_count)
-    return deleted_count
+    return delete_user_profiles(account_id, _user_profiles_for(account_id), logger)
 
 
 def _soft_delete_catalog(catalog_id: str) -> None:
@@ -1365,7 +1199,7 @@ def _query_and_delete_catalogs(db_account_id: str) -> int:
 
 def _delete_user_catalogs(account_id: str, logger: Any) -> int:
     """Soft delete all catalogs owned by a user. Returns count."""
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
     deleted_count = _query_and_delete_catalogs(db_account_id)
     logger.info("Soft-deleted user catalogs", account_id=account_id, count=deleted_count)
     return deleted_count
@@ -1395,7 +1229,7 @@ def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[st
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
 
     # Query profiles by ownerAccountId
     profiles = query_all_items(
@@ -1420,7 +1254,7 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
 
     # Query catalogs by ownerAccountId using GSI
     catalogs = query_all_items(
@@ -1438,17 +1272,6 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
 
     logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs))
     return catalogs
-
-
-def _get_user_profiles(db_account_id: str) -> list[Dict[str, Any]]:
-    """Get all profiles owned by an account."""
-    return query_all_items(
-        tables.profiles,
-        {
-            "KeyConditionExpression": "ownerAccountId = :owner",
-            "ExpressionAttributeValues": {":owner": db_account_id},
-        },
-    )
 
 
 # DynamoDB caps BatchGetItem at 100 keys per request.
@@ -1598,10 +1421,10 @@ def admin_get_user_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[s
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
 
     # First, get all profiles owned by this account
-    profiles = _get_user_profiles(db_account_id)
+    profiles = get_user_profiles(db_account_id)
     logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
 
     # Now query campaigns for each profile
@@ -1623,7 +1446,7 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
-    db_account_id = _normalize_account_id(account_id)
+    db_account_id = normalize_account_id(account_id)
 
     # Query shared campaigns by createdBy using GSI1
     campaigns = query_all_items(

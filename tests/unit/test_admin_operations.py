@@ -256,7 +256,7 @@ class TestLambdaHandler:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {"Items": []}
 
             result = lambda_handler(event, lambda_context)
@@ -280,7 +280,7 @@ class TestLambdaHandler:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {"Items": []}
 
             result = lambda_handler(event, lambda_context)
@@ -304,7 +304,7 @@ class TestLambdaHandler:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {"Items": []}
 
             result = lambda_handler(event, lambda_context)
@@ -327,7 +327,7 @@ class TestLambdaHandler:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {"Items": []}
 
             result = lambda_handler(event, lambda_context)
@@ -3149,7 +3149,7 @@ class TestAdminDeleteUserOrders:
         }
 
         with (
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
             # Mock profiles query
@@ -3215,7 +3215,7 @@ class TestAdminDeleteUserOrders:
         }
 
         with (
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
             # Mock profiles query
@@ -3278,7 +3278,7 @@ class TestAdminDeleteUserOrders:
         }
 
         with (
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
             mock_tables.profiles.query.return_value = {
@@ -3389,7 +3389,7 @@ class TestAdminDeleteUserCampaigns:
         }
 
         with (
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
             # Mock profiles query
@@ -3441,7 +3441,7 @@ class TestAdminDeleteUserCampaigns:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {
                 "Items": [{"profileId": "profile-1", "ownerAccountId": db_account_id}]
             }
@@ -3518,7 +3518,7 @@ class TestAdminDeleteUserCampaigns:
         }
 
         with (
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
             mock_tables.profiles.query.return_value = {
@@ -3549,7 +3549,7 @@ class TestAdminDeleteUserCampaigns:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
             result = admin_delete_user_campaigns(event, lambda_context)
@@ -3582,7 +3582,7 @@ class TestAdminDeleteUserShares:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             # Mock profiles query
             mock_tables.profiles.query.return_value = {
                 "Items": [
@@ -3627,7 +3627,7 @@ class TestAdminDeleteUserShares:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.return_value = {
                 "Items": [{"profileId": "profile-1", "ownerAccountId": "ACCOUNT#target-user-123"}]
             }
@@ -3694,7 +3694,7 @@ class TestAdminDeleteUserShares:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
             result = admin_delete_user_shares(event, lambda_context)
@@ -3726,7 +3726,7 @@ class TestAdminDeleteUserProfiles:
             "arguments": {"accountId": target_account_id},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             # Mock profiles query (no pagination in this handler)
             mock_tables.profiles.query.return_value = {
                 "Items": [
@@ -3799,7 +3799,7 @@ class TestAdminDeleteUserProfiles:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
             result = admin_delete_user_profiles(event, lambda_context)
@@ -3988,7 +3988,10 @@ class TestAccountDeletionHelpers:
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
         monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
 
-        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+        from src.handlers.deletion_cascade import (
+            delete_invites_for_owned_profiles,
+            get_user_profiles,
+        )
 
         account_id = "owner-account"
         account_id_key = f"ACCOUNT#{account_id}"
@@ -4010,7 +4013,7 @@ class TestAccountDeletionHelpers:
             }
         )
 
-        count = _delete_invites_for_owned_profiles(account_id, MagicMock())
+        count = delete_invites_for_owned_profiles(get_user_profiles(account_id_key), MagicMock())
 
         assert count == 1
         assert invites_table.get_item(Key={"inviteCode": invite_code}).get("Item") is None
@@ -4026,7 +4029,7 @@ class TestAccountDeletionHelpers:
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
         monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
 
-        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+        from src.handlers.deletion_cascade import delete_invites_for_owned_profiles, get_user_profiles
 
         account_id = "owner-account-no-invites"
         account_id_key = f"ACCOUNT#{account_id}"
@@ -4040,7 +4043,7 @@ class TestAccountDeletionHelpers:
             }
         )
 
-        count = _delete_invites_for_owned_profiles(account_id, MagicMock())
+        count = delete_invites_for_owned_profiles(get_user_profiles(account_id_key), MagicMock())
         assert count == 0
 
     def test_delete_invites_for_owned_profiles_no_profiles(
@@ -4052,9 +4055,9 @@ class TestAccountDeletionHelpers:
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
         monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
 
-        from src.handlers.admin_operations import _delete_invites_for_owned_profiles
+        from src.handlers.deletion_cascade import delete_invites_for_owned_profiles, get_user_profiles
 
-        count = _delete_invites_for_owned_profiles("no-profiles", MagicMock())
+        count = delete_invites_for_owned_profiles(get_user_profiles("ACCOUNT#no-profiles"), MagicMock())
         assert count == 0
 
     def test_delete_inbound_shares(
@@ -4066,7 +4069,7 @@ class TestAccountDeletionHelpers:
         """Inbound shares where the account is the target are deleted."""
         monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
 
-        from src.handlers.admin_operations import _delete_inbound_shares
+        from src.handlers.deletion_cascade import delete_inbound_shares
 
         account_id = "target-account"
         account_id_key = f"ACCOUNT#{account_id}"
@@ -4080,7 +4083,7 @@ class TestAccountDeletionHelpers:
             }
         )
 
-        count = _delete_inbound_shares(account_id, MagicMock())
+        count = delete_inbound_shares(account_id, MagicMock())
 
         assert count == 1
         response = shares_table.query(
@@ -4098,9 +4101,9 @@ class TestAccountDeletionHelpers:
         """No shares are deleted when the account has no inbound shares."""
         monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
 
-        from src.handlers.admin_operations import _delete_inbound_shares
+        from src.handlers.deletion_cascade import delete_inbound_shares
 
-        count = _delete_inbound_shares("no-shares", MagicMock())
+        count = delete_inbound_shares("no-shares", MagicMock())
         assert count == 0
 
     def test_find_cognito_user_by_sub_unprefixed(self) -> None:
@@ -6117,9 +6120,12 @@ class TestAdminGetUserCampaigns:
         admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
         admin_appsync_event["arguments"] = {"accountId": "profile-no-id-user"}
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with (
+            patch("src.handlers.deletion_cascade.tables") as mock_cascade_tables,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+        ):
             # Mock profiles query returning a malformed profile without profileId
-            mock_tables.profiles.query.return_value = {
+            mock_cascade_tables.profiles.query.return_value = {
                 "Items": [
                     {
                         "ownerAccountId": "ACCOUNT#profile-no-id-user",
