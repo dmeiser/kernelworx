@@ -1,13 +1,28 @@
 """Targeted coverage tests for unhit branches and helpers."""
 
 import importlib
-import os
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 import boto3
 import pytest
 from moto import mock_aws
+
+from tests.unit.table_schemas import TABLE_NAMES, create_all_tables, get_all_table_schemas
+
+
+def _transfer_test_tables() -> Any:
+    """Create the moto tables the transfer-ownership handler binds to.
+
+    Schema ownership stays in ``tests/unit/table_schemas.py``: this creates the
+    shared tables under their canonical names, which are the same names
+    ``conftest.py`` exports through ``PROFILES_TABLE_NAME`` /
+    ``SHARES_TABLE_NAME``, so the handler resolves to exactly these tables.
+    """
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    create_all_tables(dynamodb)
+    return dynamodb
 
 
 def test_validation_validate_unit_fields_requires_unit_number():
@@ -113,46 +128,8 @@ def test_report_generation_get_s3_client_default(monkeypatch):
 
 
 @mock_aws
-def test_transfer_profile_ownership_success(monkeypatch):
-    os.environ["AWS_REGION"] = "us-east-1"
-    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
-    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
-
-    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-
-    # Create tables used by handler
-    dynamodb.create_table(
-        TableName="ProfilesTable",
-        KeySchema=[
-            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
-            {"AttributeName": "profileId", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
-            {"AttributeName": "profileId", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-        GlobalSecondaryIndexes=[
-            {
-                "IndexName": "profileId-index",
-                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
-                "Projection": {"ProjectionType": "ALL"},
-            }
-        ],
-    )
-
-    dynamodb.create_table(
-        TableName="SharesTable",
-        KeySchema=[
-            {"AttributeName": "profileId", "KeyType": "HASH"},
-            {"AttributeName": "targetAccountId", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "profileId", "AttributeType": "S"},
-            {"AttributeName": "targetAccountId", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+def test_transfer_profile_ownership_success():
+    dynamodb = _transfer_test_tables()
 
     # Reload handler so it binds to the moto tables via the current env vars.
     from src.utils.dynamodb import reset_dynamodb_resource
@@ -163,8 +140,8 @@ def test_transfer_profile_ownership_success(monkeypatch):
         del sys.modules[module_name]
     transfer_module = importlib.import_module(module_name)
 
-    profiles_table = dynamodb.Table("ProfilesTable")
-    shares_table = dynamodb.Table("SharesTable")
+    profiles_table = dynamodb.Table(TABLE_NAMES["profiles"])
+    shares_table = dynamodb.Table(TABLE_NAMES["shares"])
 
     # Seed data
     profiles_table.put_item(
@@ -192,52 +169,15 @@ def test_transfer_profile_ownership_success(monkeypatch):
 
 @mock_aws
 def test_transfer_profile_ownership_error_paths():
-
-    os.environ["AWS_REGION"] = "us-east-1"
-    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
-    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
-
-    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-    dynamodb.create_table(
-        TableName="ProfilesTable",
-        KeySchema=[
-            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
-            {"AttributeName": "profileId", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
-            {"AttributeName": "profileId", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-        GlobalSecondaryIndexes=[
-            {
-                "IndexName": "profileId-index",
-                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
-                "Projection": {"ProjectionType": "ALL"},
-            }
-        ],
-    )
-
-    dynamodb.create_table(
-        TableName="SharesTable",
-        KeySchema=[
-            {"AttributeName": "profileId", "KeyType": "HASH"},
-            {"AttributeName": "targetAccountId", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "profileId", "AttributeType": "S"},
-            {"AttributeName": "targetAccountId", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+    dynamodb = _transfer_test_tables()
 
     module_name = "src.handlers.transfer_profile_ownership"
     if module_name in sys.modules:
         del sys.modules[module_name]
     transfer_module = importlib.import_module(module_name)
 
-    profiles_table = dynamodb.Table("ProfilesTable")
-    shares_table = dynamodb.Table("SharesTable")
+    profiles_table = dynamodb.Table(TABLE_NAMES["profiles"])
+    shares_table = dynamodb.Table(TABLE_NAMES["shares"])
 
     profiles_table.put_item(Item={"ownerAccountId": "ACCOUNT#owner123", "profileId": "PROFILE#abc"})
 
@@ -271,50 +211,14 @@ def test_transfer_profile_ownership_error_paths():
 @mock_aws
 def test_transfer_profile_ownership_admin_transfer():
     """Test admin can transfer profile without share requirement."""
-    os.environ["AWS_REGION"] = "us-east-1"
-    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
-    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
-
-    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-    dynamodb.create_table(
-        TableName="ProfilesTable",
-        KeySchema=[
-            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
-            {"AttributeName": "profileId", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
-            {"AttributeName": "profileId", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-        GlobalSecondaryIndexes=[
-            {
-                "IndexName": "profileId-index",
-                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
-                "Projection": {"ProjectionType": "ALL"},
-            }
-        ],
-    )
-
-    dynamodb.create_table(
-        TableName="SharesTable",
-        KeySchema=[
-            {"AttributeName": "profileId", "KeyType": "HASH"},
-            {"AttributeName": "targetAccountId", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "profileId", "AttributeType": "S"},
-            {"AttributeName": "targetAccountId", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+    dynamodb = _transfer_test_tables()
 
     module_name = "src.handlers.transfer_profile_ownership"
     if module_name in sys.modules:
         del sys.modules[module_name]
     transfer_module = importlib.import_module(module_name)
 
-    profiles_table = dynamodb.Table("ProfilesTable")
+    profiles_table = dynamodb.Table(TABLE_NAMES["profiles"])
 
     # Seed profile
     profiles_table.put_item(
@@ -345,51 +249,15 @@ def test_transfer_profile_ownership_share_delete_fails():
     """Test that share deletion failure is handled gracefully."""
     from unittest.mock import MagicMock
 
-    os.environ["AWS_REGION"] = "us-east-1"
-    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
-    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
-
-    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-    dynamodb.create_table(
-        TableName="ProfilesTable",
-        KeySchema=[
-            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
-            {"AttributeName": "profileId", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
-            {"AttributeName": "profileId", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-        GlobalSecondaryIndexes=[
-            {
-                "IndexName": "profileId-index",
-                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
-                "Projection": {"ProjectionType": "ALL"},
-            }
-        ],
-    )
-
-    dynamodb.create_table(
-        TableName="SharesTable",
-        KeySchema=[
-            {"AttributeName": "profileId", "KeyType": "HASH"},
-            {"AttributeName": "targetAccountId", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "profileId", "AttributeType": "S"},
-            {"AttributeName": "targetAccountId", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+    dynamodb = _transfer_test_tables()
 
     module_name = "src.handlers.transfer_profile_ownership"
     if module_name in sys.modules:
         del sys.modules[module_name]
     transfer_module = importlib.import_module(module_name)
 
-    profiles_table = dynamodb.Table("ProfilesTable")
-    shares_table = dynamodb.Table("SharesTable")
+    profiles_table = dynamodb.Table(TABLE_NAMES["profiles"])
+    shares_table = dynamodb.Table(TABLE_NAMES["shares"])
 
     # Seed profile and share
     profiles_table.put_item(
@@ -431,30 +299,7 @@ def test_transfer_profile_ownership_share_delete_fails():
 @mock_aws
 def test_transfer_profile_ownership_source_deleted_race():
     """Transfer must fail if the source profile is deleted between read and transaction."""
-    os.environ["AWS_REGION"] = "us-east-1"
-    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
-    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
-
-    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-    dynamodb.create_table(
-        TableName="ProfilesTable",
-        KeySchema=[
-            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
-            {"AttributeName": "profileId", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
-            {"AttributeName": "profileId", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-        GlobalSecondaryIndexes=[
-            {
-                "IndexName": "profileId-index",
-                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
-                "Projection": {"ProjectionType": "ALL"},
-            }
-        ],
-    )
+    _transfer_test_tables()
 
     module_name = "src.handlers.transfer_profile_ownership"
     if module_name in sys.modules:
@@ -474,37 +319,14 @@ def test_transfer_profile_ownership_source_deleted_race():
 @mock_aws
 def test_transfer_profile_ownership_destination_exists_race():
     """Transfer must fail if a profile already exists at the destination key."""
-    os.environ["AWS_REGION"] = "us-east-1"
-    os.environ["PROFILES_TABLE_NAME"] = "ProfilesTable"
-    os.environ["SHARES_TABLE_NAME"] = "SharesTable"
-
-    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-    dynamodb.create_table(
-        TableName="ProfilesTable",
-        KeySchema=[
-            {"AttributeName": "ownerAccountId", "KeyType": "HASH"},
-            {"AttributeName": "profileId", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "ownerAccountId", "AttributeType": "S"},
-            {"AttributeName": "profileId", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-        GlobalSecondaryIndexes=[
-            {
-                "IndexName": "profileId-index",
-                "KeySchema": [{"AttributeName": "profileId", "KeyType": "HASH"}],
-                "Projection": {"ProjectionType": "ALL"},
-            }
-        ],
-    )
+    dynamodb = _transfer_test_tables()
 
     module_name = "src.handlers.transfer_profile_ownership"
     if module_name in sys.modules:
         del sys.modules[module_name]
     transfer_module = importlib.import_module(module_name)
 
-    profiles_table = dynamodb.Table("ProfilesTable")
+    profiles_table = dynamodb.Table(TABLE_NAMES["profiles"])
     profile = {
         "ownerAccountId": "ACCOUNT#owner123",
         "profileId": "PROFILE#abc",
@@ -522,6 +344,72 @@ def test_transfer_profile_ownership_destination_exists_race():
 
     with pytest.raises(Exception):
         transfer_module._transfer_ownership(profile, "PROFILE#abc", "ACCOUNT#new456")
+
+
+def test_transfer_tests_derive_tables_from_shared_schema_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every transfer test must build its moto tables via table_schemas.create_all_tables.
+
+    Regression guard for the hand-rolled ``dynamodb.create_table`` copies this
+    module used to repeat: a private copy would create tables the rest of the
+    suite's shared schema owner knows nothing about, so the transfer tests would
+    silently drift from ``tests/unit/table_schemas.py``.
+    """
+    created: list[Any] = []
+    real_create_all_tables = create_all_tables
+
+    def spy(resource: Any) -> dict[str, Any]:
+        created.append(resource)
+        return real_create_all_tables(resource)
+
+    monkeypatch.setattr(sys.modules[__name__], "create_all_tables", spy)
+
+    test_transfer_profile_ownership_success()
+    test_transfer_profile_ownership_error_paths()
+    test_transfer_profile_ownership_admin_transfer()
+    test_transfer_profile_ownership_share_delete_fails()
+    test_transfer_profile_ownership_source_deleted_race()
+    test_transfer_profile_ownership_destination_exists_race()
+
+    assert len(created) == 6
+
+
+@mock_aws
+def test_shared_tables_expose_canonical_schema_and_bind_the_handler() -> None:
+    """The shared schema owner is what the handler actually reads and writes.
+
+    Asserts the tables that exist are exactly the shared schema set, and that a
+    profile seeded in the shared profiles table is the row the transfer handler
+    mutates - a private table copy would satisfy neither.
+    """
+    dynamodb = _transfer_test_tables()
+    client = boto3.client("dynamodb", region_name="us-east-1")
+
+    assert set(client.list_tables()["TableNames"]) == {schema["TableName"] for schema in get_all_table_schemas()}
+
+    profiles = dynamodb.Table(TABLE_NAMES["profiles"])
+    shares = dynamodb.Table(TABLE_NAMES["shares"])
+    profiles.put_item(Item={"ownerAccountId": "ACCOUNT#owner123", "profileId": "PROFILE#abc", "sellerName": "Scout"})
+    shares.put_item(Item={"profileId": "PROFILE#abc", "targetAccountId": "ACCOUNT#new456", "permissions": ["READ"]})
+
+    module_name = "src.handlers.transfer_profile_ownership"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    transfer_module = importlib.import_module(module_name)
+
+    updated = transfer_module.lambda_handler(
+        {
+            "identity": {"sub": "owner123"},
+            "arguments": {"input": {"profileId": "PROFILE#abc", "newOwnerAccountId": "new456"}},
+        },
+        None,
+    )
+
+    assert updated["ownerAccountId"] == "ACCOUNT#new456"
+    assert (
+        profiles.get_item(Key={"ownerAccountId": "ACCOUNT#new456", "profileId": "PROFILE#abc"})["Item"]["sellerName"]
+        == "Scout"
+    )
+    assert "Item" not in shares.get_item(Key={"profileId": "PROFILE#abc", "targetAccountId": "ACCOUNT#new456"})
 
 
 def test_campaign_reporting_propagates_batch_access_error(monkeypatch):
