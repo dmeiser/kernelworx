@@ -58,7 +58,7 @@ describe('verify_profile_write_access_or_owner_fn response', () => {
         assert.strictEqual(ctx.stash.profileOwner, 'ACCOUNT#owner-1');
     });
 
-    // The unprefixed non-owner branch is the only behaviour #534 changed here:
+    // The unprefixed non-owner branch is the only behavior #534 changed here:
     // before it, a bare profileId never reached check_write_permission_fn, so a
     // caller with a valid WRITE share was denied. Pin both halves of the hand-off.
     it('carries a BARE profileId through to the share check for a non-owner', () => {

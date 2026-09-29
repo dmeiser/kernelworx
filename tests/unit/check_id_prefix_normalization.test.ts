@@ -255,7 +255,7 @@ describe("ID-prefix normalization has a single owner", () => {
 
 describe("the guard catches the duplication it exists to prevent", () => {
   // The review that prompted this guard re-introduced the exact duplication in
-  // two files and every behavioural test stayed green. These cases assert the
+  // two files and every behavioral test stayed green. These cases assert the
   // guard itself fires, so it cannot silently degrade into a no-op.
   const reintroduced = [
     {
