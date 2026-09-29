@@ -18,9 +18,17 @@ Returns: [ID!]! (list of catalog IDs)
 """
 
 import asyncio
-from typing import TYPE_CHECKING, Any, Dict, List, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Set, Tuple, cast
 
 import aioboto3
+
+# Sibling handler modules use a same-package relative import, which resolves both
+# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+# admin_operations owns the transient/permanent lookup-error classification (its
+# `_THROTTLING_ERROR_CODES` is the canonical set), so it is imported here rather
+# than redeclared and the two copies cannot drift. One-way: admin_operations does
+# not import this module.
+from .admin_operations import _raise_gather_failures
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -138,7 +146,13 @@ async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, t
 async def _async_get_shared_campaign_catalog_ids(
     dynamodb: Any, campaigns_table_name: str, profile_ids: List[str], request_logger: Any = logger
 ) -> Set[str]:
-    """Async: Query campaigns for all profiles in parallel."""
+    """Async: Query campaigns for all profiles in parallel.
+
+    A per-profile query failure is raised (see
+    `admin_operations._raise_gather_failures`) instead of being logged and
+    discarded, so the caller never treats a silently truncated set as the
+    authoritative "in use" answer.
+    """
     if not profile_ids:
         return set()
 
@@ -148,13 +162,22 @@ async def _async_get_shared_campaign_catalog_ids(
     # Run all queries concurrently and collect results
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Combine results, logging any exceptions without failing the overall operation
+    # If any profile query failed we cannot answer authoritatively; fail the
+    # whole request instead of returning a truncated set (#556).
+    failures = [result for result in results if isinstance(result, BaseException)]
+    if failures:
+        _raise_gather_failures(
+            "list catalogs in use",
+            request_logger,
+            failures,
+            busy_message="Temporarily unable to list catalogs in use. Please retry.",
+            failed=len(failures),
+            total=len(results),
+        )
+
     catalog_ids: Set[str] = set()
     for result in results:
-        if isinstance(result, set):
-            catalog_ids.update(result)
-        elif isinstance(result, BaseException):
-            request_logger.error("Failed to query campaign catalogs", error=str(result), exc_info=result)
+        catalog_ids.update(cast(Set[str], result))
 
     return catalog_ids
 

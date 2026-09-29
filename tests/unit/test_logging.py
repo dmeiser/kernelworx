@@ -256,6 +256,92 @@ class TestGetCorrelationId:
         assert correlation_id == "appsync-123"
 
 
+class TestSensitiveKeyRedaction:
+    """Tests for structural (key-name based) redaction in the logger."""
+
+    def test_email_extra_is_masked(self, capsys: Any) -> None:
+        """A raw ``email=`` extra is masked by the logger itself (#544)."""
+        logger = StructuredLogger("redact-email", "test-id")
+
+        logger.info("Account lookup", email="user@example.com")
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["email"] == "u***@example.com"
+
+    def test_username_extra_is_masked(self, capsys: Any) -> None:
+        """A raw ``username=`` extra is masked by the logger itself (#544)."""
+        logger = StructuredLogger("redact-username", "test-id")
+
+        logger.info("Federated link", username="person@example.com")
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["username"] == "p***@example.com"
+
+    def test_email_extra_from_extra_dict_is_masked(self, capsys: Any) -> None:
+        """Sensitive keys arriving through ``extra=`` are redacted too."""
+        logger = StructuredLogger("redact-extra-dict", "test-id")
+
+        logger.info("Signup", extra={"email": "user@example.com", "provider": "Google"})
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["email"] == "u***@example.com"
+        assert log_entry["provider"] == "Google"
+
+    def test_non_email_sensitive_keys_are_replaced(self, capsys: Any) -> None:
+        """Sensitive non-email keys are replaced wholesale, not partially masked."""
+        logger = StructuredLogger("redact-others", "test-id")
+
+        logger.info(
+            "Order payload",
+            phone="+15555550123",
+            customerPhone="+15555550124",
+            address="1 Main St",
+            qrCodeUrl="payment-qr-codes/account-1/venmo.png",
+            password="hunter2",
+        )
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        for key in ("phone", "customerPhone", "address", "qrCodeUrl", "password"):
+            assert log_entry[key] == "***"
+
+    def test_already_masked_email_stays_masked(self, capsys: Any) -> None:
+        """Re-masking a value a call site already masked is a no-op."""
+        logger = StructuredLogger("redact-idempotent", "test-id")
+
+        logger.info("Deleted user", email=mask_email("user@example.com"))
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["email"] == "u***@example.com"
+
+    def test_keys_named_mask_are_left_alone(self, capsys: Any) -> None:
+        """A key that already says it is masked is not re-processed."""
+        logger = StructuredLogger("redact-mask-key", "test-id")
+
+        logger.info("Deleted user", maskedEmail="u***@example.com")
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["maskedEmail"] == "u***@example.com"
+
+    def test_non_string_sensitive_value_is_fully_masked(self, capsys: Any) -> None:
+        """A sensitive key whose value is not a string is fully masked."""
+        logger = StructuredLogger("redact-non-string", "test-id")
+
+        logger.info("Contact", email={"address": "user@example.com"})
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["email"] == "***"
+
+    def test_similar_but_ordinary_keys_are_not_redacted(self, capsys: Any) -> None:
+        """Keys that merely resemble a sensitive name keep their value."""
+        logger = StructuredLogger("redact-similar", "test-id")
+
+        logger.info("Order", emailVerified=True, order_id="ORDER#123")
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["emailVerified"] is True
+        assert log_entry["order_id"] == "ORDER#123"
+
+
 class TestMaskEmail:
     """Tests for mask_email helper."""
 
