@@ -251,6 +251,44 @@ class TestPasswordStepFailure:
         assert not exported_credentials(result)
 
 
+class TestErrorCodesMatchWholeCliCodes:
+    """The branch codes must match the whole CLI error code, not a substring.
+
+    The aws CLI frames every failure as
+      An error occurred (<Code>) when calling the <Operation> operation: <message>
+    so an unrelated error whose message merely *mentions*
+    UsernameExistsException or UserNotFoundException must not be classified as
+    that code: a create failure would be misread as "already exists" and a
+    retryable password failure as "no such user".
+    """
+
+    def test_create_failure_message_mentioning_username_exists_still_aborts(self, harness: dict[str, object]) -> None:
+        result = run_script(
+            harness,
+            MOCK_AWS_CREATE_ERROR_USERNAME=CONTRIBUTOR_EMAIL,
+            MOCK_AWS_CREATE_ERROR_CODE="InvalidParameterException",
+            MOCK_AWS_CREATE_ERROR_MESSAGE="Malformed attribute (UsernameExistsException) hint in request.",
+        )
+
+        assert result.returncode != 0, result.stderr
+        assert "InvalidParameterException" in result.stderr
+        assert "User already exists" not in result.stderr
+        assert "may already exist" not in result.stderr
+
+    def test_password_failure_message_mentioning_user_not_found_still_retries(self, harness: dict[str, object]) -> None:
+        result = run_script(
+            harness,
+            MOCK_AWS_PASSWORD_ERROR_USERNAME=OWNER_EMAIL,
+            MOCK_AWS_PASSWORD_ERROR_CODE="TooManyRequestsException",
+            MOCK_AWS_PASSWORD_ERROR_MESSAGE="Rate exceeded; cached (UserNotFoundException) verdict replayed.",
+        )
+
+        assert result.returncode != 0, result.stderr
+        assert "no user" not in result.stderr
+        assert count(harness, "cognito-idp admin-set-user-password") == 5
+        assert "Attempt 5/5" in result.stderr
+
+
 def test_script_is_shellcheck_clean(repo_root: Path) -> None:
     """The new error branching must not introduce shell lint findings."""
     result = subprocess.run(

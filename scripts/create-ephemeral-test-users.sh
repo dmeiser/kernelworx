@@ -87,7 +87,7 @@ set_user_password() {
     # make the password call succeed, and the caller never created the user.
     # Say so once and stop instead of repeating the same doomed call.
     case "$error" in
-      *"($USER_NOT_FOUND_EXCEPTION)"*)
+      *"An error occurred ($USER_NOT_FOUND_EXCEPTION) when calling the "*)
         log "ERROR: Cognito has no user $email ($USER_NOT_FOUND_EXCEPTION), so its password cannot be set."
         log "  The user creation above did not take effect; this is not a retryable failure."
         return 1
@@ -133,7 +133,7 @@ create_or_update_user() {
     --temporary-password "$password" \
     --region "$REGION" 2>&1); then
     case "$create_error" in
-      *"($USERNAME_EXISTS_EXCEPTION)"*)
+      *"An error occurred ($USERNAME_EXISTS_EXCEPTION) when calling the "*)
         log "  (User already exists; continuing with the existing account)"
         ;;
       *)
