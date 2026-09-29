@@ -36,6 +36,23 @@ describe('verify_profile_owner_for_share_fn request', () => {
         });
         assert.strictEqual(result.consistentRead, true);
     });
+
+    it('preserves already-prefixed ownerAccountId', () => {
+        const ctx = {
+            identity: { sub: 'ACCOUNT#user-123' },
+            args: { input: { profileId: 'PROFILE#prof-456' } },
+            stash: {}
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, 'GetItem');
+        assert.deepStrictEqual(result.key, {
+            ownerAccountId: 'ACCOUNT#user-123',
+            profileId: 'PROFILE#prof-456'
+        });
+        assert.strictEqual(result.consistentRead, true);
+    });
 });
 
 describe('verify_profile_owner_for_share_fn response', () => {
