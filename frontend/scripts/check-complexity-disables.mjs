@@ -50,15 +50,14 @@ function argValue(flag) {
 const srcDirArg = argValue('--src-dir')
 const defaultRoot = dirname(fileURLToPath(import.meta.url))
 const frontendRoot = resolve(join(defaultRoot, '..'))
-// The eslint config lints the whole frontend tree (`**/*.{ts,tsx}`), so the
-// gate-off count must cover every directory the rule actually applies to, not
-// only `src/`. The ratchet's own test file loads directive-shaped fixture
-// strings as payloads — those are literals, not disables, and are excluded so
-// the count stays equal to the directives eslint honors.
+// The eslint config lints the whole frontend tree, so the gate-off count must
+// cover every file the rule actually applies to, not only `src/`. collectFiles
+// skips node_modules/dist, and the ratchet's own test file is excluded because
+// its fixture strings are directive-shaped payloads, not disables.
 const selfTestRelPath = join('tests', 'complexity-disables-ratchet.test.ts')
 const scanDirs = srcDirArg
   ? [isAbsolute(srcDirArg) ? srcDirArg : resolve(join(frontendRoot, srcDirArg))]
-  : ['src', 'tests'].map((dir) => join(frontendRoot, dir))
+  : [frontendRoot]
 const baselinePath = argValue('--baseline')
   ? resolve(argValue('--baseline'))
   : join(here, 'complexity-disables.baseline')
