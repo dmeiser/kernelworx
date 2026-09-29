@@ -7,7 +7,6 @@ Provides:
 - createManagedCatalog: Create an ADMIN_MANAGED global catalog
 """
 
-import os
 import re
 import time
 import uuid
@@ -16,7 +15,6 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Callable, Dict, NoReturn, Optional, cast
 
-import boto3
 from botocore.exceptions import ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
@@ -31,14 +29,16 @@ from .campaign_operations import (
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
+    from utils.boto import get_cognito_client
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import get_dynamodb_resource, tables
+    from utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
+    from ..utils.boto import get_cognito_client
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import get_dynamodb_resource, tables
+    from ..utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
 
@@ -62,22 +62,6 @@ else:  # pragma: no cover
         from utils.pagination import query_all_items
     except ModuleNotFoundError:
         from ..utils.pagination import query_all_items
-
-
-def _get_required_env(name: str) -> str:
-    """Get required environment variable or raise error."""
-    value = os.environ.get(name)
-    if not value:
-        raise AppError(ErrorCode.INTERNAL_ERROR, f"Missing required environment variable: {name}")
-    return value
-
-
-def _get_cognito_client() -> Any:
-    """Get Cognito IDP client, supporting localstack endpoint."""
-    endpoint_url = os.environ.get("COGNITO_ENDPOINT")
-    if endpoint_url:
-        return boto3.client("cognito-idp", endpoint_url=endpoint_url)
-    return boto3.client("cognito-idp")
 
 
 # DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
@@ -232,7 +216,7 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
     if not keys:
         return display_names
 
-    accounts_table_name = _get_required_env("ACCOUNTS_TABLE_NAME")
+    accounts_table_name = get_required_env("ACCOUNTS_TABLE_NAME")
 
     try:
         for i in range(0, len(keys), _ACCOUNTS_BATCH_GET_LIMIT):
@@ -289,8 +273,8 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     limit = max(1, min(raw_limit or 20, 60))
     next_token = arguments.get("nextToken")
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     cognito_users, pagination_token = _list_cognito_users(cognito, user_pool_id, limit, next_token, logger)
 
@@ -325,10 +309,11 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
     Search strategy:
     1. If query looks like UUID or ACCOUNT#UUID, search Cognito by sub directly (single result)
     2. Otherwise (minimum `_ACCOUNT_SEARCH_MIN_QUERY_LENGTH` characters):
-       a. Search DynamoDB Accounts table: a complete email uses the email-index
-          GSI, and every partial query (partial email, first name, last name)
-          scans the table, bounded by the `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety
-          limit - there is no index-backed prefix search (#576, see #586)
+       a. Search DynamoDB Accounts table: an email fragment uses the
+          emailSearchIndex GSI (prefix query); every other query (a name
+          fragment) scans the table, bounded by the
+          `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety limit. Both cover logged-in
+          users.
        b. Search Cognito with prefix matching (all users, including those who haven't logged in)
        c. Merge results, deduplicate by accountId
 
@@ -352,8 +337,8 @@ def admin_search_user(event: Dict[str, Any], context: Any) -> list[Dict[str, Any
 
     _validate_search_query(query)
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     # Determine search strategy based on query format.
     # The map values are Cognito user dicts so we can batch enrich them.
@@ -481,41 +466,64 @@ _ACCOUNTS_SCAN_SAFETY_LIMIT = 1000
 # instead of returning a truncated arbitrary subset (#576).
 _ACCOUNT_SEARCH_MIN_QUERY_LENGTH = 3
 
+# Accounts GSI for email prefix search: constant HASH key + email RANGE key, so
+# begins_with(email, :prefix) is a legal key condition (#586). Declared in
+# tofu/application/modules/dynamodb/main.tf; the index is sparse, so an account
+# is only searchable once it carries the constant emailSearchKey attribute.
+_EMAIL_SEARCH_INDEX = "emailSearchIndex"
+_EMAIL_PREFIX_KEY_CONDITION = "emailSearchKey = :searchKey AND begins_with(email, :prefix)"
 
-def _looks_like_full_email(query: str) -> bool:
-    """Check whether the query is a full email (local@domain.tld)."""
-    return "@" in query and bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", query))
 
+def _looks_like_email_query(query: str) -> bool:
+    """Check whether the query is an email fragment (it contains the local/domain separator).
 
-def _try_email_index_gsi(query: str, query_lower: str, max_results: int, logger: Any) -> list[Dict[str, Any]] | None:
-    """Look a full email up via the email-index GSI.
-
-    This is the only index-backed lookup in the account search. `email` is the
-    email-index GSI's partition key, so it can only be matched with equality;
-    there is no index-backed prefix search (#576).
-
-    Returns the matching items (capped at max_results), or None when the
-    query is not a full email or the GSI lookup fails or returns nothing,
-    in which case the caller falls back to a scan.
+    Only email-shaped queries are answered by the prefix index; a bare name
+    fragment (which ``_is_valid_email_prefix`` also accepts) is a substring
+    search, and no prefix index can answer that.
     """
-    if not _looks_like_full_email(query):
-        return None
+    return "@" in query
+
+
+def _query_email_search_index(
+    query: str, query_lower: str, max_results: int, logger: Any
+) -> list[Dict[str, Any]] | None:
+    """Answer an email prefix query with one Query against the emailSearchIndex GSI.
+
+    That index is a constant HASH key (``emailSearchKey``) plus ``email`` as the
+    RANGE key, which is what makes ``begins_with(email, :prefix)`` a legal key
+    condition; the exact-lookup ``email-index`` is HASH-only and so can only be
+    matched with equality and cannot answer a partial email (#576).
+
+    Returns the matching items (capped at ``max_results``), or None when the
+    index cannot answer the query -- index unavailable, or nothing indexed --
+    in which case the caller falls back to the scan. The scan fallback is what
+    keeps accounts that predate the index (and so carry no ``emailSearchKey``)
+    findable until the backfill has covered every row.
+    """
     try:
-        gsi_response = tables.accounts.query(
-            IndexName="email-index",
-            KeyConditionExpression="email = :email",
-            ExpressionAttributeValues={":email": query_lower},
+        response = tables.accounts.query(
+            IndexName=_EMAIL_SEARCH_INDEX,
+            KeyConditionExpression=_EMAIL_PREFIX_KEY_CONDITION,
+            ExpressionAttributeValues={":searchKey": EMAIL_SEARCH_KEY, ":prefix": query_lower},
+            Limit=max_results,
         )
-        gsi_items = cast(list[Dict[str, Any]], gsi_response.get("Items", []))
-        if gsi_items:
-            return gsi_items[:max_results]
     except ClientError as e:
         logger.warning(
-            "DynamoDB email-index query failed, falling back to scan",
+            "DynamoDB email prefix query failed, falling back to scan",
             error=str(e),
             query=mask_email(query),
         )
-    return None
+        return None
+    index_items = cast(list[Dict[str, Any]], response.get("Items", []))
+    if not index_items:
+        return None
+    if response.get("LastEvaluatedKey"):
+        logger.warning(
+            "DynamoDB email prefix search hit the result limit; results may be truncated",
+            query=mask_email(query),
+            max_results=max_results,
+        )
+    return index_items[:max_results]
 
 
 def _scan_accounts_page_into(
@@ -558,23 +566,24 @@ def _scan_accounts_matches(query: str, query_lower: str, max_results: int, logge
 def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]]:
     """Search the accounts table for accounts matching a partial query.
 
-    Searches email, givenName, and familyName fields. A complete email is
-    answered by the email-index GSI (`email = :email`), the only index-backed
-    lookup available. Every other query - a partial email, a first name, a last
-    name - is served by a full scan of the accounts table, bounded by the
-    `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety limit and truncated at
-    `_ACCOUNT_SEARCH_MAX_RESULTS` matches. There is no index-backed prefix
-    search: `email` is the email-index GSI's only key, so DynamoDB accepts
-    equality on it but not `begins_with` (#576, see issue #586).
+    Searches email, givenName, and familyName fields. An email fragment is
+    answered by the emailSearchIndex GSI, whose constant HASH key plus ``email``
+    RANGE key make a ``begins_with`` key condition legal: one index query, no
+    table scan (#586). A name fragment is a substring search that no prefix
+    index can answer, so it is still served by a full scan of the accounts
+    table, bounded by the `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety limit and
+    truncated at `_ACCOUNT_SEARCH_MAX_RESULTS` matches. Either path falls back
+    to the scan when the index has no answer.
 
     Returns all matching accounts (up to max_results limit).
     """
     query_lower = query.lower()
 
     try:
-        gsi_items = _try_email_index_gsi(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
-        if gsi_items is not None:
-            return gsi_items
+        if _looks_like_email_query(query):
+            index_items = _query_email_search_index(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
+            if index_items is not None:
+                return index_items
         return _scan_accounts_matches(query, query_lower, _ACCOUNT_SEARCH_MAX_RESULTS, logger)
     except ClientError as e:
         logger.warning("DynamoDB search failed", error=str(e), query=mask_email(query))
@@ -829,8 +838,8 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
     if not email:
         raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     # Find user and initiate reset
     username = _find_user_by_email(cognito, user_pool_id, email, logger)
@@ -880,8 +889,8 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     caller_id = identity.get("sub")
     _check_not_self_deletion(str(caller_id), account_id)
 
-    user_pool_id = _get_required_env("USER_POOL_ID")
-    cognito = _get_cognito_client()
+    user_pool_id = get_required_env("USER_POOL_ID")
+    cognito = get_cognito_client()
 
     username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
     account_exists = _account_exists_in_dynamodb(account_id, logger)
@@ -1497,7 +1506,7 @@ def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_
     if not catalog_ids:
         return
 
-    catalogs_table_name = _get_required_env("CATALOGS_TABLE_NAME")
+    catalogs_table_name = get_required_env("CATALOGS_TABLE_NAME")
     try:
         catalog_map = _batch_get_catalog_items(catalog_ids, catalogs_table_name, logger)
     except AppError:

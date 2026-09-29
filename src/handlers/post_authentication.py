@@ -16,11 +16,11 @@ from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.dynamodb import tables
+    from utils.dynamodb import EMAIL_SEARCH_KEY, tables
     from utils.ids import ensure_account_id
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.dynamodb import tables
+    from ..utils.dynamodb import EMAIL_SEARCH_KEY, tables
     from ..utils.ids import ensure_account_id
     from ..utils.logging import get_logger, mask_email
 
@@ -87,8 +87,11 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             update_expression = "SET updatedAt = :updated"
             expression_values = {":updated": timestamp}
             if email:
-                update_expression += ", email = :email"
+                update_expression += ", email = :email, emailSearchKey = :emailSearchKey"
                 expression_values[":email"] = email
+                # Keep the prefix-search index membership in step with the email:
+                # the GSI is sparse, so a row whose key drifts is not searchable.
+                expression_values[":emailSearchKey"] = EMAIL_SEARCH_KEY
             tables.accounts.update_item(
                 Key={"accountId": account_id_key},
                 UpdateExpression=update_expression,
@@ -101,7 +104,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
             account_item = {
                 "accountId": account_id_key,  # PK: ACCOUNT#uuid
-                "email": email,  # GSI: email
+                "email": email,  # GSI: email-index HASH, emailSearchIndex RANGE
+                "emailSearchKey": EMAIL_SEARCH_KEY,  # GSI: emailSearchIndex HASH (constant bucket)
                 "givenName": user_attributes.get("given_name", ""),  # Optional metadata
                 "familyName": user_attributes.get("family_name", ""),  # Optional metadata
                 "city": "",  # Will be set via updateMyAccount if provided

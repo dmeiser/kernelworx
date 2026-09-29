@@ -11,7 +11,28 @@ import sys
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TextIO
+
+
+class _StdoutHandler(logging.StreamHandler[TextIO]):
+    """Stream handler that writes to the current ``sys.stdout`` at emit time.
+
+    Resolving ``sys.stdout`` when a record is emitted rather than binding it
+    once at construction keeps the JSON line visible to harnesses that swap
+    ``sys.stdout`` after import, such as pytest's ``capsys`` fixture.
+    """
+
+    @property
+    def stream(self) -> TextIO:
+        return sys.stdout
+
+    @stream.setter
+    def stream(self, value: TextIO) -> None:
+        pass
+
+
+_handler = _StdoutHandler(sys.stdout)
+_handler.setFormatter(logging.Formatter("%(message)s"))
 
 
 class StructuredLogger:
@@ -29,14 +50,14 @@ class StructuredLogger:
     def __init__(self, name: str, correlation_id: Optional[str] = None) -> None:
         self.logger = logging.getLogger(name)
         self.logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
+        if _handler not in self.logger.handlers:
+            self.logger.addHandler(_handler)
         self.correlation_id = correlation_id or str(uuid.uuid4())
 
     def _log(self, level: str, message: str, **kwargs: Any) -> None:
         """Internal method to emit structured JSON logs."""
-        level_num = getattr(logging, level, None)
-        if level_num is None or isinstance(level_num, str):
-            level_num = logging.getLevelName(level)
-        if isinstance(level_num, str):
+        level_num = logging.getLevelName(level)
+        if not isinstance(level_num, int):
             level_num = logging.INFO
         if not self.logger.isEnabledFor(level_num):
             return
@@ -65,7 +86,7 @@ class StructuredLogger:
         # Remove None values
         log_entry = {k: v for k, v in log_entry.items() if v is not None}
 
-        print(json.dumps(log_entry, default=str), file=sys.stdout, flush=True)
+        self.logger.log(level_num, json.dumps(log_entry, default=str))
 
     def info(self, message: str, **kwargs: Any) -> None:
         """Log info level message."""
