@@ -77,6 +77,7 @@ costEstimator
 creatorMessage
 ctype
 Cub
+customerphone
 cutover
 Dataloader
 dateutils
@@ -297,6 +298,7 @@ pyvenv
 QLAPI
 qrcode
 qrCode
+qrcodeurl
 queryable
 randomising
 readonly
@@ -425,6 +427,7 @@ unshare
 unshift
 unstub
 untrack
+unvalidated
 updatable
 updateable
 upsert

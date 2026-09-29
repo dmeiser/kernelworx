@@ -208,10 +208,10 @@ def test_pre_token_generation_emits_structured_json_records(capsys: Any) -> None
         "response": {},
     }
 
-    with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
+    with patch("src.handlers.pre_token_generation._cognito_client") as mock_client:
         pre_token_generation.lambda_handler(event, MagicMock())
 
-    mock_cognito.admin_get_user.assert_not_called()
+    mock_client.assert_not_called()
     records = _structured_records(capsys)
     _assert_structured_records(records)
     assert any(record["message"] == "pre-token-generation: federated identity -> mfa=false" for record in records)
@@ -232,8 +232,8 @@ def test_pre_token_generation_emits_structured_traceback_on_lookup_failure(capsy
         "response": {},
     }
 
-    with patch("src.handlers.pre_token_generation.cognito") as mock_cognito:
-        mock_cognito.admin_get_user.side_effect = Exception("cognito down")
+    with patch("src.handlers.pre_token_generation._cognito_client") as mock_client:
+        mock_client.return_value.admin_get_user.side_effect = Exception("cognito down")
         result = pre_token_generation.lambda_handler(event, MagicMock())
 
     assert result == event
