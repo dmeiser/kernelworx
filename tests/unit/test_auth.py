@@ -8,14 +8,13 @@ from src.utils.auth import (
     batch_check_profile_access,
     check_profile_access,
     get_account,
-    get_dynamodb_resource,
     has_mfa,
     is_admin,
     is_profile_owner,
     require_admin_mfa,
     require_profile_access,
 )
-from src.utils.dynamodb import tables
+from src.utils.dynamodb import get_dynamodb_resource, tables
 from src.utils.errors import AppError, ErrorCode
 
 
@@ -697,7 +696,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, profile_ids)
 
@@ -744,7 +743,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, profile_ids)
 
@@ -789,8 +788,8 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
-        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
         result = batch_check_profile_access(sample_account_id, profile_ids)
 
@@ -843,8 +842,8 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
-        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
         result = batch_check_profile_access(sample_account_id, profile_ids)
 
@@ -857,7 +856,7 @@ class TestBatchCheckProfileAccess:
         sample_account_id: str,
         monkeypatch: Any,
     ) -> None:
-        """Exhausted ownership retries raise an internal error instead of silently denying."""
+        """Exhausted ownership retries raise a retryable error instead of silently denying (#557)."""
         profile_ids: list[str] = []
         for n in range(3):
             profile_id = f"PROFILE#unproc-owner-exhausted-{n}"
@@ -880,13 +879,13 @@ class TestBatchCheckProfileAccess:
             }
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
-        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
         with pytest.raises(AppError) as exc_info:
             batch_check_profile_access(sample_account_id, profile_ids)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
 
     def test_batch_raises_when_share_unprocessed_exhausted(
         self,
@@ -896,7 +895,7 @@ class TestBatchCheckProfileAccess:
         another_account_id: str,
         monkeypatch: Any,
     ) -> None:
-        """Exhausted share retries raise an internal error instead of silently denying."""
+        """Exhausted share retries raise a retryable error instead of silently denying (#557)."""
         profile_ids: list[str] = []
         for n in range(3):
             profile_id = f"PROFILE#unproc-share-exhausted-{n}"
@@ -930,13 +929,13 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
-        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
         with pytest.raises(AppError) as exc_info:
             batch_check_profile_access(sample_account_id, profile_ids)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
 
     def test_batch_owned_item_missing_profile_id_is_ignored(
         self,
@@ -972,7 +971,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [profile_id])
 
@@ -1011,7 +1010,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [profile_id])
 
@@ -1102,7 +1101,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(*args, **kwargs)
 
         monkeypatch.setattr(resource, "batch_get_item", counted_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [profile_id])
 
@@ -1146,7 +1145,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [profile_id])
 
@@ -1191,7 +1190,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(*args, **kwargs)
 
         monkeypatch.setattr(resource, "batch_get_item", wrapped_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [sample_profile_id])
 
@@ -1238,7 +1237,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(*args, **kwargs)
 
         monkeypatch.setattr(resource, "batch_get_item", wrapped_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [profile_id])
 

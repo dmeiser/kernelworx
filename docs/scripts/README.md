@@ -9,6 +9,29 @@ the script's actual `--help` output or usage text.
 
 ## Scripts Reference
 
+### Run identifiers (ephemeral runs)
+
+The `<run-id>` argument accepted by `scripts/ephemeral-env.sh`,
+`scripts/recover-deploy.sh`, `scripts/recover-destroy.sh`, and
+`scripts/create-ephemeral-test-users.sh` is governed by this single contract —
+those four per-script argument lists all point here rather than restating it:
+
+- **Format** — must match `[A-Za-z0-9._-]+`.
+- **Provenance** — the `pr-<number>` value derived from the `pull_request` /
+  `workflow_dispatch` inputs (`pr_number`) of `ephemeral-test.yml`,
+  `manual-teardown.yml`, and `recover-environment.yml`.
+- **Enforcement** — `validate_run_id` in
+  `scripts/ephemeral-recover-common.sh` is the single owner of the rule. All four
+  shell entry points call it before any AWS call, so a traversal-shaped id such
+  as `../prod` or `pr-1/x` fails instead of reaching another environment's S3
+  state key (`application/ephemeral/<run-id>/terraform.tfstate`) or its
+  `-var="environment=$RUN_ID"` value.
+- **Python side** — `scripts/generate_integration_env.py` applies the identical
+  regex to its `ephemeral/<run-id>` stack selector before it runs `tofu init`.
+
+A new entry point that takes a run-id must validate it the same way before its
+first AWS call.
+
 ### `scripts/ephemeral-env.sh`
 
 **Manage ephemeral per-run test environments.**
@@ -24,8 +47,8 @@ the script's actual `--help` output or usage text.
 **Key flags/arguments:**
 
 - `<up|env|down>` — Required action
-- `<run-id>` — Required run identifier; must match `[A-Za-z0-9._-]+` (see
-  `validate_run_id` under `ephemeral-recover-common.sh`)
+- `<run-id>` — Required. See
+  [Run identifiers](#run-identifiers-ephemeral-runs) above.
 - The script sources `./.env` for `TF_VAR_encryption_passphrase` and AWS credentials.
 
 ### `scripts/recover-deploy.sh`
@@ -36,8 +59,8 @@ state file is missing.
 
 **Key flags/arguments:**
 
-- `<run-id>` — Required run identifier; must match `[A-Za-z0-9._-]+` (see
-  `validate_run_id` under `ephemeral-recover-common.sh`)
+- `<run-id>` — Required. See
+  [Run identifiers](#run-identifiers-ephemeral-runs) above.
 
 ### `scripts/recover-destroy.sh`
 
@@ -47,8 +70,8 @@ destroy orphaned resources for a run-id.** Imports whatever still exists, then r
 
 **Key flags/arguments:**
 
-- `<run-id>` — Required run identifier; must match `[A-Za-z0-9._-]+` (see
-  `validate_run_id` under `ephemeral-recover-common.sh`)
+- `<run-id>` — Required. See
+  [Run identifiers](#run-identifiers-ephemeral-runs) above.
 
 ### `scripts/appsync-ensure-resolver-order.sh`
 
@@ -86,8 +109,9 @@ email quota (#483); its credentials are exported as `TEST_SMOKE_EMAIL`/`TEST_SMO
 
 **Key flags/arguments:**
 
-- `<run-id>` — Required run identifier; must match `[A-Za-z0-9._-]+` or the script
-  exits before any Cognito call.
+- `<run-id>` — Required. See
+  [Run identifiers](#run-identifiers-ephemeral-runs) above; the script rejects a
+  non-matching value before its first Cognito call.
 - `<user-pool-id>` — Required Cognito User Pool ID.
 - `<client-id>` — Required App Client ID.
 
@@ -224,12 +248,9 @@ Provides functions for env loading, run-id validation, backend initialization, S
 emptying, stale lock cleanup, state recovery, resource importing, and CloudWatch log
 group cleanup.
 
-`validate_run_id` is the single owner of the run-id rule: a run-id must match
-`[A-Za-z0-9._-]+` (the same rule as `scripts/generate_integration_env.py`), because the
-value is interpolated into an S3 state key and a `-var` value. `ephemeral-env.sh`,
-`recover-deploy.sh`, and `recover-destroy.sh` each call it before any AWS call, so a
-traversal-shaped id such as `../prod` or `pr-1/x` fails instead of touching another
-environment's state.
+`validate_run_id` is the single owner of the run-id rule; see
+[Run identifiers](#run-identifiers-ephemeral-runs) above for the contract it
+enforces and for the entry points that call it.
 
 **Key flags/arguments:** None (sourced library).
 

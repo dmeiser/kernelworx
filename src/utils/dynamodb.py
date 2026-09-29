@@ -2,13 +2,19 @@
 Centralized DynamoDB table access utilities.
 
 Provides singleton-pattern table accessors with lazy initialization
-and test monkeypatch support.
+and test monkeypatch support, plus the shared chunked BatchGetItem helper.
 """
 
 import os
-from typing import TYPE_CHECKING, Optional
+import time
+from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 
 import boto3
+from botocore.exceptions import ClientError
+
+from .errors import AppError, ErrorCode
+from .logging import get_logger
+from .pagination import BASE_BACKOFF_SECONDS, MAX_RETRY_ATTEMPTS
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb import DynamoDBServiceResource
@@ -21,6 +27,25 @@ if TYPE_CHECKING:
 # and are only reachable through a table scan. Written by the Cognito account
 # bootstrap trigger and by the one-off backfill (scripts/backfill_email_search_key.py).
 EMAIL_SEARCH_KEY = "EMAIL"
+
+# Named with a leading underscore so `batch_get_chunked`'s `logger` parameter
+# can fall back to it without shadowing the module global.
+_logger = get_logger(__name__)
+
+# DynamoDB caps BatchGetItem at 100 keys per request; the shared helper is the
+# single place that enforces it so every call site inherits the cap (#557).
+BATCH_GET_CHUNK_SIZE: int = 100
+
+# DynamoDB throttling codes. A throttled read is retryable, so it surfaces as a
+# retryable RESOURCE_BUSY rather than a non-retryable internal error (#557).
+_THROTTLING_ERROR_CODES = frozenset(
+    {
+        "ProvisionedThroughputExceededException",
+        "ThrottlingException",
+        "TooManyRequestsException",
+        "RequestLimitExceeded",
+    }
+)
 
 # Module-level cache for test overrides
 _table_overrides: dict[str, Optional["Table"]] = {}
@@ -66,6 +91,103 @@ def get_dynamodb_resource() -> "DynamoDBServiceResource":
     For table-level operations, prefer using the `tables` singleton.
     """
     return _get_dynamodb()
+
+
+def _unprocessed_keys(response: Any, table_name: str) -> list[dict[str, Any]]:
+    """Extract the keys DynamoDB reports as unprocessed for a table in a BatchGetItem response."""
+    unprocessed = response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", [])
+    return list(unprocessed)
+
+
+def _batch_get_attempt(
+    table_name: str,
+    keys: list[dict[str, Any]],
+    on_item: Callable[[dict[str, Any]], None],
+    consistent_read: bool,
+    log: Any,
+) -> list[dict[str, Any]]:
+    """Run one BatchGetItem attempt, hand items to on_item, and return unprocessed keys.
+
+    Failures are translated here so every caller reports them identically: a
+    throttling condition becomes a retryable RESOURCE_BUSY, anything else an
+    INTERNAL_ERROR. Never returns unprocessed keys after raising.
+    """
+    key_spec: dict[str, Any] = {"Keys": keys}
+    if consistent_read:
+        key_spec["ConsistentRead"] = True
+
+    try:
+        response: Any = get_dynamodb_resource().batch_get_item(RequestItems=cast(Any, {table_name: key_spec}))
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "")
+        if error_code in _THROTTLING_ERROR_CODES:
+            log.warning("BatchGetItem throttled", error=str(exc), error_code=error_code, table_name=table_name)
+            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from exc
+        log.error("BatchGetItem failed", error=str(exc), error_code=error_code, table_name=table_name)
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to load data") from exc
+    except Exception as exc:
+        log.error("BatchGetItem failed unexpectedly", error=str(exc), table_name=table_name)
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to load data") from exc
+
+    for item in response.get("Responses", {}).get(table_name, []):
+        on_item(item)
+    return _unprocessed_keys(response, table_name)
+
+
+def batch_get_chunked(
+    table_name: str,
+    keys: list[dict[str, Any]],
+    on_item: Callable[[dict[str, Any]], None],
+    *,
+    consistent_read: bool = True,
+    max_attempts: int = MAX_RETRY_ATTEMPTS,
+    logger: Any = None,
+) -> None:
+    """Batch-get keys with UnprocessedKeys retry, chunked at DynamoDB's 100-key cap.
+
+    The single owner of the BatchGetItem + UnprocessedKeys drain loop every
+    handler used to reimplement (#557). Calls on_item for every returned item.
+    An empty key list makes no API call at all.
+
+    Args:
+        table_name: Table to read from.
+        keys: Keys to fetch; split into ``BATCH_GET_CHUNK_SIZE``-key requests.
+        on_item: Called with each returned item.
+        consistent_read: Issue a strongly consistent read (omitted from the
+            request when False, preserving DynamoDB's eventual-consistency default).
+        max_attempts: Attempts per chunk before giving up.
+        logger: Structured logger to use; falls back to this module's logger.
+
+    Raises:
+        AppError: RESOURCE_BUSY, the retryable signal, in two cases: a throttling
+            ClientError is translated and raised on the attempt that hit it
+            immediately, and keys still unprocessed after a chunk's final
+            attempt are also reported as RESOURCE_BUSY. Any other BatchGetItem
+            failure is translated to INTERNAL_ERROR.
+    """
+    if not keys:
+        return
+
+    log = logger if logger is not None else _logger
+    for start in range(0, len(keys), BATCH_GET_CHUNK_SIZE):
+        pending: list[dict[str, Any]] = list(keys[start : start + BATCH_GET_CHUNK_SIZE])
+        for attempt in range(max_attempts):
+            if not pending:
+                break
+            pending = _batch_get_attempt(table_name, pending, on_item, consistent_read, log)
+            if pending and attempt < max_attempts - 1:
+                log.warning(
+                    "Unprocessed keys, retrying",
+                    table_name=table_name,
+                    attempt=attempt + 1,
+                    count=len(pending),
+                )
+                time.sleep(BASE_BACKOFF_SECONDS * (2**attempt))
+        if pending:
+            raise AppError(
+                ErrorCode.RESOURCE_BUSY,
+                f"DynamoDB BatchGetItem failed to return {len(pending)} keys after retries",
+            )
 
 
 class TableAccessor:

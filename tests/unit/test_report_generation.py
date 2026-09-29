@@ -433,7 +433,7 @@ class TestRequestCampaignReport:
 
         mock_s3.generate_presigned_url = fake_generate_presigned_url
 
-        monkeypatch.setattr("src.handlers.report_generation._get_s3_client", lambda: mock_s3)
+        monkeypatch.setattr("src.handlers.report_generation.s3_client", mock_s3)
 
         event = {
             **appsync_event,

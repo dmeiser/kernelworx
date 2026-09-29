@@ -348,6 +348,28 @@ class TestGenerateQrCodePresignedUrl:
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
         mock_check_access.assert_called_once_with("other-account", "profile-abc", "WRITE")
 
+    def test_rejects_former_owner_when_profile_id_provided(self) -> None:
+        """Test that matching ownerAccountId does not bypass profile access check (#545)."""
+        former_owner = "account-former-owner"
+        event: Dict[str, Any] = {
+            "qrCodeUrl": f"payment-qr-codes/{former_owner}/venmo.png",
+            "ownerAccountId": former_owner,
+            "identity": {"sub": former_owner},
+            "methodName": "Venmo",
+            "s3Key": f"payment-qr-codes/{former_owner}/venmo.png",
+            "profileId": "transferred-profile",
+        }
+
+        with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
+            mock_check_access.return_value = False
+
+            result = generate_qr_code_presigned_url(event, None)
+
+        assert isinstance(result, dict)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        mock_check_access.assert_called_once_with(former_owner, "transferred-profile", "WRITE")
+
 
 class TestBatchGenerateQrCodePresignedUrls:
     """Test the batch payload (s3Keys list) used by the batch_qr_urls pipeline function (#330)."""
@@ -495,3 +517,27 @@ class TestBatchGenerateQrCodePresignedUrls:
 
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+
+    def test_batch_rejects_former_owner_when_profile_id_provided(self, s3_bucket: Any) -> None:
+        """Test that matching ownerAccountId does not bypass profile access check in batch mode (#545)."""
+        former_owner = "account-former-owner"
+        key = f"payment-qr-codes/{former_owner}/venmo.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=key, Body=b"fake-qr-data")
+
+        event: Dict[str, Any] = {
+            "s3Keys": [key],
+            "ownerAccountId": former_owner,
+            "identity": {"sub": former_owner},
+            "profileId": "transferred-profile",
+        }
+
+        with patch("src.handlers.generate_qr_code_presigned_url.check_profile_access") as mock_check_access:
+            mock_check_access.return_value = False
+
+            result = generate_qr_code_presigned_url(event, None)
+
+        assert isinstance(result, dict)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.FORBIDDEN
+        mock_check_access.assert_called_once_with(former_owner, "transferred-profile", "WRITE")
