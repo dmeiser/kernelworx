@@ -13,6 +13,31 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, TextIO
 
+#: Extra key names whose values are never emitted in the clear. Keys are
+#: matched case-insensitively against these lowercase names, so ``customerPhone``
+#: and ``qrCodeUrl`` are caught alongside ``email``. This is the structural
+#: backstop for redaction: individual call sites still mask explicitly with
+#: :func:`mask_email`, but a new call site that forgets cannot leak PII.
+_SENSITIVE_KEYS = frozenset({"email", "username", "phone", "customerphone", "address", "qrcodeurl", "password"})
+#: Sensitive keys whose value is an address and can therefore be masked
+#: partially instead of dropped entirely.
+_MASKABLE_KEYS = frozenset({"email", "username"})
+
+
+def _redact_sensitive(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Return ``entry`` with sensitive top-level values masked.
+
+    Keys already named as masked (e.g. ``maskedEmail``) are left untouched, and
+    masking an already-masked address is idempotent, so explicit
+    :func:`mask_email` call sites keep working unchanged.
+    """
+    for key, value in entry.items():
+        normalized = key.lower()
+        if normalized not in _SENSITIVE_KEYS or "mask" in normalized:
+            continue
+        entry[key] = mask_email(value) if normalized in _MASKABLE_KEYS else "***"
+    return entry
+
 
 class _StdoutHandler(logging.StreamHandler[TextIO]):
     """Stream handler that writes to the current ``sys.stdout`` at emit time.
@@ -74,6 +99,7 @@ class StructuredLogger:
         if isinstance(extra, dict):
             log_entry.update(extra)
         log_entry.update(kwargs)
+        log_entry = _redact_sensitive(log_entry)
 
         if exc_info:
             if exc_info is True:
