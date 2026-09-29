@@ -783,6 +783,56 @@ describe('AdminPage - Delete User', () => {
     expect(operations).not.toContain('AdminPurgeUserAccount');
   });
 
+  test('delete user completes when cascade responses carry no counts and no profiles', async () => {
+    const user = userEvent.setup();
+    const accountId = 'ACCOUNT#test-user-1';
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_ORDERS, variables: { accountId } },
+        result: { data: { adminDeleteUserOrders: null } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_CAMPAIGNS, variables: { accountId } },
+        result: { data: {} },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_SHARES, variables: { accountId } },
+        result: { data: { adminDeleteUserShares: null } },
+      },
+      {
+        // No profile rows left to read: the purge is called with an empty list.
+        request: { query: ADMIN_GET_USER_PROFILES, variables: { accountId } },
+        result: { data: {} },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_PROFILES, variables: { accountId } },
+        result: { data: {} },
+      },
+      {
+        request: { query: ADMIN_PURGE_USER_ACCOUNT, variables: { accountId, profileIds: [] } },
+        result: { data: { adminPurgeUserAccount: true } },
+      },
+    ]);
+    renderAdmin(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Delete user test@example.com/i }));
+    await user.click(screen.getByRole('button', { name: /delete user/i }));
+
+    // Every step tolerated an absent count and the cascade still reached the purge,
+    // which the matching profileIds: [] mock request proves.
+    await waitFor(() => {
+      expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument();
+    });
+  });
+
   test('clicking user row navigates to user details', async () => {
     const user = userEvent.setup();
     const mocks = baseMocks([
