@@ -14,10 +14,8 @@ owner's record invalidates any other shares that still reference the previous ow
 so stale shares are automatically rejected by subsequent authorization checks.
 """
 
-import os
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-import boto3
 from boto3.dynamodb.conditions import Key
 from boto3.dynamodb.types import TypeSerializer
 from botocore.exceptions import ClientError
@@ -25,6 +23,7 @@ from botocore.exceptions import ClientError
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import has_mfa, is_admin
+    from utils.boto import get_dynamodb_client
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_account_id, ensure_profile_id
@@ -32,6 +31,7 @@ try:  # pragma: no cover
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import has_mfa, is_admin
+    from ..utils.boto import get_dynamodb_client
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_account_id, ensure_profile_id
@@ -120,8 +120,7 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
 
     old_key = {"ownerAccountId": old_owner_id, "profileId": db_profile_id}
 
-    endpoint_url = os.getenv("DYNAMODB_ENDPOINT")
-    dynamodb_client = boto3.client("dynamodb", endpoint_url=endpoint_url)
+    dynamodb_client = get_dynamodb_client()
     table_name = tables.profiles.name
     try:
         dynamodb_client.transact_write_items(

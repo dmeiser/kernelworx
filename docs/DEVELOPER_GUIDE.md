@@ -138,7 +138,9 @@ s3 = get_s3_client()
 ```
 
 Endpoint overrides (`S3_ENDPOINT`, `COGNITO_ENDPOINT`, `DYNAMODB_ENDPOINT`) are read and validated in exactly that
-module — a set value must be an `http(s)` URL with a host, so an override is honored
+module — a set value must be an `http(s)` URL whose host is a loopback address or a private range
+(RFC 1918, or the `localhost`/`localstack` hostnames), because an unvalidated override silently redirects
+SigV4-signed requests — and the Lambda's own credentials — to whatever host it names. An override is honored
 everywhere it applies or raises, never silently dropped by one call site. The `get_s3_client`
 override argument exists only for the pre-existing per-module `s3_client` test seam
 (`src/utils/payment_methods.py`, `src/handlers/report_generation.py`,
@@ -147,7 +149,8 @@ override argument exists only for the pre-existing per-module `s3_client` test s
 Deliberate exceptions: the `pre-token-generation` trigger builds its Cognito client once at
 module scope for warm-start connection reuse (#458), and the account-deletion and pre-signup
 handlers build per-call Cognito clients. `DYNAMODB_ENDPOINT` is validated the same way:
-`src/utils/dynamodb.py` routes its resource construction through the shared validator (#523).
+`src/utils/dynamodb.py` routes its resource construction through the shared validator, and the
+low-level DynamoDB client used by profile-ownership transactions is built with `get_dynamodb_client` (#523).
 
 #### ID Generation (`src/utils/ids.py`)
 

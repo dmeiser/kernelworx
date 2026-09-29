@@ -85,6 +85,28 @@ class TestGetDynamoDB:
             _get_dynamodb()
             mock_resource.assert_called_once_with("dynamodb", endpoint_url=None)
 
+    def test_private_range_endpoint_override_accepted(self) -> None:
+        """A private-range DYNAMODB_ENDPOINT is accepted and passed verbatim."""
+        reset_dynamodb_resource()
+        with patch.dict(os.environ, {"DYNAMODB_ENDPOINT": "http://192.168.1.10:4566"}):
+            with patch("boto3.resource") as mock_resource:
+                mock_resource.return_value = MagicMock()
+                _get_dynamodb()
+                mock_resource.assert_called_once_with("dynamodb", endpoint_url="http://192.168.1.10:4566")
+
+    def test_public_host_endpoint_override_rejected(self) -> None:
+        """A public-host DYNAMODB_ENDPOINT raises ValueError instead of redirecting signed requests (#523).
+
+        Regression test: before the loopback/private gate this URL passed
+        shape-only validation and was handed to boto3 verbatim.
+        """
+        reset_dynamodb_resource()
+        with patch.dict(os.environ, {"DYNAMODB_ENDPOINT": "https://attacker.example.com"}):
+            with patch("boto3.resource") as mock_resource:
+                with pytest.raises(ValueError, match="DYNAMODB_ENDPOINT"):
+                    _get_dynamodb()
+                mock_resource.assert_not_called()
+
     @pytest.mark.parametrize(
         "bad_value",
         [

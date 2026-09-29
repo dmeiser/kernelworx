@@ -63,8 +63,9 @@ def _get_dynamodb() -> "DynamoDBServiceResource":
     """Get DynamoDB resource with optional endpoint override for LocalStack.
 
     The override is validated in ``utils.boto.validated_endpoint_override``:
-    a set ``DYNAMODB_ENDPOINT`` must be an http(s) URL with a host, otherwise
-    a ValueError raises rather than silently redirecting signed requests (#523).
+    a set ``DYNAMODB_ENDPOINT`` must be an http(s) URL whose host is a loopback
+    or private address, otherwise a ValueError raises rather than silently
+    redirecting signed requests (#523).
     """
     global _dynamodb_resource
     if _dynamodb_resource is None:
