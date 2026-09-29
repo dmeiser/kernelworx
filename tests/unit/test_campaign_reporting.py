@@ -1,19 +1,42 @@
 """Unit tests for campaign reporting Lambda handler (unitCampaignKey-index-based implementation)."""
 
 import json
+import threading
 from decimal import Decimal
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers.campaign_reporting import _build_order_detail, _get_accessible_profiles, get_unit_report
+from src.handlers.campaign_reporting import (
+    _ORDER_QUERY_CONCURRENCY,
+    MAX_UNIT_REPORT_CAMPAIGN_QUERIES,
+    _build_order_detail,
+    _get_accessible_profiles,
+    get_unit_report,
+)
 from src.utils.report_limits import (
     APPSYNC_RESPONSE_LIMIT_BYTES,
     MAX_UNIT_REPORT_GRAPH_BYTES,
     OrderGraphBudget,
     order_graph_bytes,
 )
+
+
+def _orders_by_campaign_query(orders_by_campaign: Dict[str, list[Dict[str, Any]]]) -> Any:
+    """Return a DynamoDB ``query`` stand-in that answers per campaignId.
+
+    The handler reads each campaign's orders on its own worker thread, so a
+    stand-in keyed by call order would make these tests depend on scheduling.
+    Every orders query carries the campaign it reads in its key condition, so the
+    stand-in answers from that and stays correct however the reads are scheduled.
+    """
+
+    def query(**kwargs: Any) -> Dict[str, Any]:
+        campaign_id = kwargs["KeyConditionExpression"].get_expression()["values"][1]
+        return {"Items": orders_by_campaign.get(campaign_id, [])}
+
+    return query
 
 
 class TestGetUnitReport:
@@ -150,10 +173,7 @@ class TestGetUnitReport:
         self._setup_profile_query_mock(mock_profiles_table, sample_profiles)
 
         # Return orders for each campaign
-        mock_orders_table.query.side_effect = [
-            {"Items": sample_orders["CAMPAIGN#campaign1"]},
-            {"Items": sample_orders["CAMPAIGN#campaign2"]},
-        ]
+        mock_orders_table.query.side_effect = _orders_by_campaign_query(sample_orders)
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
@@ -338,10 +358,7 @@ class TestGetUnitReport:
 
         mock_profiles_table.get_item.side_effect = get_item_side_effect
 
-        mock_orders_table.query.side_effect = [
-            {"Items": sample_orders["CAMPAIGN#campaign1"]},
-            {"Items": sample_orders["CAMPAIGN#campaign2"]},
-        ]
+        mock_orders_table.query.side_effect = _orders_by_campaign_query(sample_orders)
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
@@ -610,10 +627,7 @@ class TestGetUnitReport:
 
         mock_profiles_table.get_item.side_effect = get_item_side_effect
 
-        mock_orders_table.query.side_effect = [
-            {"Items": sample_orders["CAMPAIGN#campaign1"]},
-            {"Items": sample_orders["CAMPAIGN#campaign2"]},
-        ]
+        mock_orders_table.query.side_effect = _orders_by_campaign_query(sample_orders)
 
         with (
             patch("src.handlers.campaign_reporting.tables") as mock_tables,
@@ -1020,10 +1034,8 @@ class TestUnitReportOrderGraphCeiling:
                 }
             ]
         }
-        # Orders are queried one campaign at a time, in campaign order.
-        orders_table.query.side_effect = [
-            {"Items": orders_by_campaign.get(campaign["campaignId"], [])} for campaign in campaigns
-        ]
+        # Orders are queried one campaign at a time; the stand-in answers per campaignId.
+        orders_table.query.side_effect = _orders_by_campaign_query(orders_by_campaign)
 
         budget = OrderGraphBudget if max_graph_bytes is None else _ceiling_override(max_graph_bytes)
         with (
@@ -1194,3 +1206,180 @@ class TestUnitReportOrderGraphCeiling:
         # One page is enough to reach the ceiling; the handler does not keep
         # following LastEvaluatedKey through the rest of the table.
         assert orders_table.query.call_count == 1
+
+
+class TestUnitReportOrderQueryConcurrency:
+    """Tests for how the unit report reads the orders table (#555).
+
+    A report used to issue one orders-table Query per campaign of every
+    accessible seller, one after the other, so its wall clock grew with
+    sellers x campaigns and a large unit timed out with no report at all. The
+    reads now run concurrently, capped, and a unit past the cap is refused with
+    an actionable error rather than a timeout. These tests measure the reads the
+    handler actually issues - a serial implementation fails them by blocking on
+    the barrier, not by matching any source text.
+    """
+
+    @pytest.fixture
+    def event(self) -> Dict[str, Any]:
+        """AppSync event for a unit campaign report."""
+        return {
+            "arguments": {
+                "unitType": "Pack",
+                "unitNumber": 158,
+                "city": "Springfield",
+                "state": "IL",
+                "campaignName": "Fall",
+                "campaignYear": 2024,
+                "catalogId": "CATALOG#catalog-123",
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+    def _campaign(self, index: int, profile_index: int | None = None) -> Dict[str, Any]:
+        """Build a campaign of the unit, owned by its own profile."""
+        return {
+            "campaignId": f"CAMPAIGN#campaign{index}",
+            "profileId": f"PROFILE#profile{index if profile_index is None else profile_index}",
+            "campaignName": "Fall",
+            "campaignYear": 2024,
+            "catalogId": "CATALOG#catalog-123",
+            "unitCampaignKey": "Pack#158#Springfield#IL#Fall#2024",
+        }
+
+    def _order(self, campaign_index: int, order_index: int) -> Dict[str, Any]:
+        """Build one order of a campaign, worth 10.00."""
+        return {
+            "orderId": f"ORDER#order{campaign_index}-{order_index}",
+            "campaignId": f"CAMPAIGN#campaign{campaign_index}",
+            "customerName": "Customer",
+            "orderDate": "2024-10-01T12:00:00Z",
+            "totalAmount": Decimal("10.00"),
+            "lineItems": [
+                {
+                    "productId": "PRODUCT#1",
+                    "productName": "Caramel Corn",
+                    "quantity": 1,
+                    "pricePerUnit": Decimal("10.00"),
+                    "subtotal": Decimal("10.00"),
+                }
+            ],
+        }
+
+    def _orders_by_campaign(
+        self, campaign_indexes: list[int], orders_per_campaign: int = 1
+    ) -> Dict[str, list[Dict[str, Any]]]:
+        """Build the orders each campaign returns, keyed by campaignId."""
+        return {
+            f"CAMPAIGN#campaign{index}": [self._order(index, n) for n in range(orders_per_campaign)]
+            for index in campaign_indexes
+        }
+
+    def _concurrent_orders_query(
+        self, orders_by_campaign: Dict[str, list[Dict[str, Any]]]
+    ) -> tuple[Any, Dict[str, int]]:
+        """Return an orders ``query`` stand-in that only answers when reads overlap.
+
+        Every read blocks on a barrier sized to the concurrency cap, so a report
+        that reads its campaigns one after another never gets past the first read
+        (the barrier times out and the report fails) and a report that reads them
+        all at once is recorded as such. The caller's numbers are how the
+        concurrency is measured: how many queries were issued and how many were
+        in flight at the busiest moment.
+        """
+        barrier = threading.Barrier(_ORDER_QUERY_CONCURRENCY, timeout=10)
+        state = {"queries": 0, "in_flight": 0, "max_in_flight": 0}
+        lock = threading.Lock()
+
+        def query(**kwargs: Any) -> Dict[str, Any]:
+            campaign_id = kwargs["KeyConditionExpression"].get_expression()["values"][1]
+            with lock:
+                state["queries"] += 1
+                state["in_flight"] += 1
+                state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+            try:
+                barrier.wait()
+            finally:
+                with lock:
+                    state["in_flight"] -= 1
+            return {"Items": orders_by_campaign.get(campaign_id, [])}
+
+        return query, state
+
+    def _run(
+        self, event: Dict[str, Any], campaigns: list[Dict[str, Any]], lambda_context: Any
+    ) -> tuple[Dict[str, Any], Dict[str, int]]:
+        """Run get_unit_report over a unit's campaigns, with overlapping order reads."""
+        orders_by_campaign = self._orders_by_campaign(
+            [int(campaign["campaignId"].removeprefix("CAMPAIGN#campaign")) for campaign in campaigns]
+        )
+        orders_query, state = self._concurrent_orders_query(orders_by_campaign)
+        orders_table = MagicMock()
+        orders_table.query.side_effect = orders_query
+        campaigns_table = MagicMock()
+        campaigns_table.query.return_value = {"Items": campaigns}
+        profiles_table = MagicMock()
+        profiles_table.query.side_effect = lambda **kwargs: {
+            "Items": [
+                {
+                    "profileId": kwargs["ExpressionAttributeValues"][":profileId"],
+                    "sellerName": "Scout",
+                }
+            ]
+        }
+
+        with (
+            patch("src.handlers.campaign_reporting.tables") as mock_tables,
+            patch("src.handlers.campaign_reporting.batch_check_profile_access") as mock_check_access,
+        ):
+            mock_tables.profiles = profiles_table
+            mock_tables.campaigns = campaigns_table
+            mock_tables.orders = orders_table
+            mock_check_access.return_value = {campaign["profileId"] for campaign in campaigns}
+            return get_unit_report(event, lambda_context), state
+
+    def test_campaign_order_reads_run_concurrently_and_capped(self, event: Dict[str, Any], lambda_context: Any) -> None:
+        """A 30-seller unit reads its 30 campaigns' orders at the cap, not one at a time."""
+        campaigns = [self._campaign(index) for index in range(30)]
+
+        result, state = self._run(event, campaigns, lambda_context)
+
+        assert "__isError" not in result
+        assert state["queries"] == len(campaigns)
+        assert state["max_in_flight"] == _ORDER_QUERY_CONCURRENCY
+
+    def test_reads_scale_with_campaigns_not_with_seller_campaign_rounds(
+        self, event: Dict[str, Any], lambda_context: Any
+    ) -> None:
+        """Sellers with several campaigns each read every campaign, still capped and correct."""
+        campaigns = [
+            self._campaign(profile_index * 4 + campaign, profile_index)
+            for profile_index in range(30)
+            for campaign in range(4)
+        ]
+
+        result, state = self._run(event, campaigns, lambda_context)
+
+        assert "__isError" not in result
+        assert len(result["sellers"]) == 30
+        assert result["totalOrders"] == len(campaigns)
+        assert result["totalSales"] == float(len(campaigns) * 10)
+        # One read per campaign - the unit's 120 campaigns, not 120 rounds of
+        # one, and never more than the cap in flight at a time.
+        assert state["queries"] == len(campaigns)
+        assert state["max_in_flight"] == _ORDER_QUERY_CONCURRENCY
+
+    def test_a_unit_past_the_query_cap_is_refused_before_any_read(
+        self, event: Dict[str, Any], lambda_context: Any
+    ) -> None:
+        """Too many campaigns for one report is a typed error, not a Lambda timeout."""
+        campaigns = [self._campaign(index) for index in range(MAX_UNIT_REPORT_CAMPAIGN_QUERIES + 1)]
+
+        result, state = self._run(event, campaigns, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == "RESOURCE_BUSY"
+        assert str(MAX_UNIT_REPORT_CAMPAIGN_QUERIES) in result["message"]
+        assert str(len(campaigns)) in result["message"]
+        # The cap is enforced before the handler spends a minute on orders.
+        assert state["queries"] == 0

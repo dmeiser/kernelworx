@@ -10,6 +10,7 @@ from boto3.dynamodb.conditions import Key
 try:  # pragma: no cover
     from utils.auth import batch_check_profile_access
     from utils.dynamodb import tables
+    from utils.errors import AppError, ErrorCode
     from utils.ids import build_unit_campaign_key, ensure_catalog_id, ensure_profile_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items, query_all_items_iter
@@ -17,6 +18,7 @@ try:  # pragma: no cover
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import batch_check_profile_access
     from ..utils.dynamodb import tables
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import build_unit_campaign_key, ensure_catalog_id, ensure_profile_id
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items, query_all_items_iter
@@ -62,6 +64,23 @@ def _group_campaigns_by_profile(campaigns: List[Dict[str, Any]]) -> Dict[str, Li
 
 
 _PROFILE_BATCH_LIMIT = 100
+
+# Orders are read one campaign at a time, because that is the only way to read
+# them: the orders table is keyed {campaignId, orderId} and carries just the
+# orderId-index GSI, so a unit's campaigns cannot be resolved through a
+# BatchGetItem (their order ids are not enumerable from the campaign items) nor
+# through a single Query over a shared partition (there is none). The lever left
+# is the wall clock, so the per-campaign queries run concurrently up to the same
+# cap the profile reads already use - which is what makes the module's order
+# reads batched like its other reads instead of special-cased (#555).
+_ORDER_QUERY_CONCURRENCY = 10
+
+# Even at that concurrency an unbounded unit keeps the handler inside its Lambda
+# timeout and returns nothing at all, so the number of campaign queries one
+# report may issue is capped. The cap sits well above the largest unit #577
+# sized the order-graph ceiling for (a 30-seller pack unit, one campaign per
+# seller) and the refusal is a typed, actionable error rather than a timeout.
+MAX_UNIT_REPORT_CAMPAIGN_QUERIES = 500
 
 
 def _query_single_profile(profile_id: str) -> Optional[tuple[str, Dict[str, Any]]]:
@@ -132,37 +151,100 @@ def _build_order_detail(order: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _get_seller_data(
-    profile_id: str, profile: Dict[str, Any], campaigns: List[Dict[str, Any]], budget: OrderGraphBudget
-) -> Dict[str, Any]:
-    """Get seller data including orders from all campaigns.
+def _fetch_campaign_order_details(campaign_id: str, budget: OrderGraphBudget) -> List[Dict[str, Any]]:
+    """Stream one campaign's orders into the order details its seller will return.
 
     Orders are streamed, and each order detail is charged to the unit-wide
     ``budget`` as it is built and before it is accumulated, so a unit with an
     order graph too large to return exhausts neither the Lambda's memory and
     time budget nor AppSync's resolver-response size limit: the detail that
-    would cross the ceiling is never kept (#577).
+    would cross the ceiling is never kept and this campaign's query stops paging
+    at that point (#577). ``budget`` is shared with the other workers, which is
+    why charging happens here and ``OrderGraphBudget.admit`` serialises it.
     """
-    seller_name = profile.get("sellerName", "Unknown")
-    seller_orders: List[Dict[str, Any]] = []
-    seller_total_sales = Decimal("0")
+    order_details: List[Dict[str, Any]] = []
+    for order in query_all_items_iter(tables.orders, {"KeyConditionExpression": Key("campaignId").eq(campaign_id)}):
+        order_detail = _build_order_detail(order)
+        budget.admit(order_detail)
+        order_details.append(order_detail)
+    return order_details
 
-    for campaign in campaigns:
-        campaign_id = campaign["campaignId"]
-        orders = query_all_items_iter(tables.orders, {"KeyConditionExpression": Key("campaignId").eq(campaign_id)})
 
-        for order in orders:
-            order_detail = _build_order_detail(order)
-            budget.admit(order_detail)
-            seller_orders.append(order_detail)
-            seller_total_sales += order_detail["totalAmount"]
+def _fetch_orders_for_campaigns(campaign_ids: List[str], budget: OrderGraphBudget) -> Dict[str, List[Dict[str, Any]]]:
+    """Read every campaign's order details, running at most ``_ORDER_QUERY_CONCURRENCY`` queries at once.
 
+    Campaign ids are fetched in chunks no larger than the concurrency cap, which
+    keeps at most that many worker threads alive; ``executor.map`` yields each
+    chunk's results in campaign order, so the report is identical to the serial
+    read this replaces. Every chunk's details are accumulated, so the ceiling on
+    the order graph held for the call is ``budget``, not the chunking.
+    """
+
+    def fetch(campaign_id: str) -> List[Dict[str, Any]]:
+        return _fetch_campaign_order_details(campaign_id, budget)
+
+    details_by_campaign: Dict[str, List[Dict[str, Any]]] = {}
+    for start in range(0, len(campaign_ids), _ORDER_QUERY_CONCURRENCY):
+        chunk = campaign_ids[start : start + _ORDER_QUERY_CONCURRENCY]
+        max_workers = min(_ORDER_QUERY_CONCURRENCY, len(chunk))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(fetch, chunk))
+        details_by_campaign.update(zip(chunk, results))
+    return details_by_campaign
+
+
+def _campaign_reads_by_seller(
+    accessible_profiles: Dict[str, Dict[str, Any]], profile_campaigns: Dict[str, List[Dict[str, Any]]]
+) -> List[tuple[str, str]]:
+    """Return the (profileId, campaignId) pairs whose orders this report must read."""
+    return [
+        (profile_id, cast(str, campaign["campaignId"]))
+        for profile_id in accessible_profiles
+        for campaign in profile_campaigns[profile_id]
+    ]
+
+
+def _enforce_campaign_query_cap(campaign_count: int) -> None:
+    """Refuse a unit whose order reads would exceed the per-report query cap."""
+    if campaign_count <= MAX_UNIT_REPORT_CAMPAIGN_QUERIES:
+        return
+    logger.warning(
+        "Unit report campaign-query cap reached",
+        campaigns=campaign_count,
+        maxCampaigns=MAX_UNIT_REPORT_CAMPAIGN_QUERIES,
+    )
+    raise AppError(
+        ErrorCode.RESOURCE_BUSY,
+        f"This unit's report covers {campaign_count} campaigns, more than the "
+        f"{MAX_UNIT_REPORT_CAMPAIGN_QUERIES} one report may read. "
+        "Split the report by seller, or narrow the request to a single campaign.",
+    )
+
+
+def _order_details_by_seller(
+    campaign_reads: List[tuple[str, str]], details_by_campaign: Dict[str, List[Dict[str, Any]]]
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Group each seller's campaigns' order details under that seller."""
+    details_by_seller: Dict[str, List[Dict[str, Any]]] = {profile_id: [] for profile_id, _ in campaign_reads}
+    for profile_id, campaign_id in campaign_reads:
+        details_by_seller[profile_id].extend(details_by_campaign[campaign_id])
+    return details_by_seller
+
+
+def _get_seller_data(profile_id: str, profile: Dict[str, Any], order_details: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Summarize a seller from the order details read for their campaigns.
+
+    The orders themselves are read by ``_fetch_orders_for_campaigns`` so the
+    whole unit's campaign queries can run concurrently; by the time they arrive
+    they are already charged against the report's order-graph ceiling.
+    """
+    seller_total_sales = sum((detail["totalAmount"] for detail in order_details), Decimal("0"))
     return {
         "profileId": profile_id,
-        "sellerName": seller_name,
+        "sellerName": profile.get("sellerName", "Unknown"),
         "totalSales": seller_total_sales,
-        "orderCount": len(seller_orders),
-        "orders": seller_orders,
+        "orderCount": len(order_details),
+        "orders": order_details,
     }
 
 
@@ -182,14 +264,25 @@ def _extract_unit_report_params(event: Dict[str, Any]) -> tuple[str, int, str, s
 def _aggregate_seller_data(
     accessible_profiles: Dict[str, Dict[str, Any]], profile_campaigns: Dict[str, List[Dict[str, Any]]]
 ) -> tuple[List[Dict[str, Any]], Decimal, int]:
-    """Aggregate seller data from accessible profiles, bounded by the shared order-graph ceiling."""
+    """Aggregate seller data from accessible profiles, bounded by the shared order-graph ceiling.
+
+    The unit's campaign order reads are collected first and fetched together
+    (#555): read one at a time, a report cost one serial orders-table Query per
+    campaign of every accessible seller, so its wall clock grew with sellers x
+    campaigns and a large unit timed out with no report at all.
+    """
+    campaign_reads = _campaign_reads_by_seller(accessible_profiles, profile_campaigns)
+    _enforce_campaign_query_cap(len(campaign_reads))
+
+    budget = OrderGraphBudget("This unit's", MAX_UNIT_REPORT_GRAPH_BYTES)
+    campaign_ids = list(dict.fromkeys(campaign_id for _, campaign_id in campaign_reads))
+    details_by_seller = _order_details_by_seller(campaign_reads, _fetch_orders_for_campaigns(campaign_ids, budget))
+
     sellers: List[Dict[str, Any]] = []
     total_unit_sales = Decimal("0")
     total_unit_orders = 0
-    budget = OrderGraphBudget("This unit's", MAX_UNIT_REPORT_GRAPH_BYTES)
-
     for profile_id, profile in accessible_profiles.items():
-        seller_data = _get_seller_data(profile_id, profile, profile_campaigns[profile_id], budget)
+        seller_data = _get_seller_data(profile_id, profile, details_by_seller[profile_id])
         if seller_data["orders"] or seller_data["totalSales"] > 0:
             sellers.append(seller_data)
             total_unit_sales += seller_data["totalSales"]
