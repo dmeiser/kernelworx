@@ -66,7 +66,7 @@ Ephemeral per-PR stacks live in `tofu/application/environments/ephemeral` and ar
 - If the current state object is missing but a previous S3 version exists, `ephemeral-env.sh down`, `recover-deploy.sh`, and `recover-destroy.sh` restore the latest version before proceeding, so resources are tracked.
 - `ephemeral-env.sh down` and `recover-destroy.sh` automatically empty ephemeral S3 buckets (purging all object versions and delete markers) prior to `tofu destroy` to prevent `BucketNotEmpty` errors.
 - Recovery imports in `scripts/ephemeral-recover-common.sh` continue on error across all resources and are dynamically verified against all declared OpenTofu modules in `tests/unit/test_ephemeral_reliability.py`.
-- A run-id must match `[A-Za-z0-9._-]+`; `validate_run_id` in `scripts/ephemeral-recover-common.sh` is the single owner of that rule (the same rule `scripts/generate_integration_env.py` applies to `ephemeral/<run-id>`). `ephemeral-env.sh`, `recover-deploy.sh`, and `recover-destroy.sh` each call it before any AWS call, so a `workflow_dispatch` `pr_number` containing `/` or `..` cannot traverse out of the stack's state key. When adding an entry point that consumes a run-id, call `validate_run_id` there too.
+- The run-id contract (format, provenance, enforcement) is owned by the "Run identifiers" section of `docs/scripts/README.md`; `validate_run_id` in `scripts/ephemeral-recover-common.sh` is its single enforcement point, called by every run-id entry point before any AWS call. When adding an entry point that consumes a run-id, call `validate_run_id` there too.
 
 ### Recovery workflows
 
