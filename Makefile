@@ -35,7 +35,7 @@ help:
 	@echo ""
 	@echo "Comprehensive:"
 	@echo "  make all               - Run everything (format + lint + typecheck + test)"
-	@echo "  make ci                - Run CI pipeline (lint + typecheck + spellcheck + unit/JS/guard tests)"
+	@echo "  make ci                - Run CI pipeline (lint + typecheck + spellcheck + test + test-frontend + test-guards + js-resolvers)"
 	@echo "  make clean             - Clean generated files"
 
 # Python unit tests
