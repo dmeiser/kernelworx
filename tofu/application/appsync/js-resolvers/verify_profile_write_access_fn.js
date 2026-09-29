@@ -21,6 +21,18 @@ import { util } from '@aws-appsync/utils';
 // to drive the unchanged share path. All existing authz semantics (shares,
 // idempotent deletes) are preserved.
 
+// Route an unresolvable profileId through the same silent-deny branch as the
+// "profile not found" case, so the read-list queries (listSharesByProfile /
+// listInvitesByProfile) answer with an empty list instead of an error. The
+// retired verifier returned `{ authorized: false }` for a missing profileId;
+// both queries must keep that contract, and neither must turn an empty result
+// into a GraphQL error or a profile-existence oracle.
+function denyUnresolvedProfileId(ctx) {
+    ctx.stash.isOwner = false;
+    ctx.stash.hasWritePermission = false;
+    ctx.stash.skipGetItem = true;
+}
+
 // idempotent-delete detection: deleteOrder/deleteCampaign where the lookup step
 // already stashed a null item (item already gone = success).
 function isIdempotentDeleteSkip(ctx) {
@@ -85,6 +97,14 @@ export function request(ctx) {
 
     // Step 2 (non-owner confirmed in Step 1): fall back to the GSI query.
     if (ctx.stash && ctx.stash.isOwner === false) {
+        // The unresolvable-id path stashed skipGetItem instead of a usable id;
+        // issue no live read.
+        if (ctx.stash.skipGetItem) {
+            return {
+                operation: 'GetItem',
+                key: util.dynamodb.toMapValues({ ownerAccountId: 'NOOP', profileId: 'NOOP' })
+            };
+        }
         const dbProfileId = resolveDbProfileId(ctx);
         return {
             operation: 'Query',
@@ -100,6 +120,17 @@ export function request(ctx) {
     // to confirm ownership before any eventually-consistent GSI read (#438).
     const dbProfileId = resolveDbProfileId(ctx);
     if (!dbProfileId) {
+        const isQueryParent = ctx.info && ctx.info.parentTypeName === 'Query';
+        if (isQueryParent) {
+            // S1: a blank or unresolvable profileId on the two read-list queries
+            // must not surface as a GraphQL error; route through the same
+            // silent-deny branch as the not-found case so the result is [].
+            denyUnresolvedProfileId(ctx);
+            return {
+                operation: 'GetItem',
+                key: util.dynamodb.toMapValues({ ownerAccountId: 'NOOP', profileId: 'NOOP' })
+            };
+        }
         console.error(
             'Profile ID not found in request or stash: ' +
                 JSON.stringify({
@@ -176,10 +207,10 @@ export function response(ctx) {
         // existence oracle. Deny silently so the downstream check_write_permission
         // and query_shares / query_invites steps fall through to their empty
         // result, which is the contract these queries had before #547.
-        if (ctx.info && ctx.info.parentTypeName === 'Query') {
-            ctx.stash.isOwner = false;
-            ctx.stash.hasWritePermission = false;
-            ctx.stash.skipGetItem = true;
+        // S1: an unresolvable profileId (skipGetItem set in request) routes here
+        // too, so a blank id produces the same empty list rather than an error.
+        if (ctx.stash.skipGetItem || (ctx.info && ctx.info.parentTypeName === 'Query')) {
+            denyUnresolvedProfileId(ctx);
             return null;
         }
         // Write path: the profile must exist to be mutated, so a missing profile

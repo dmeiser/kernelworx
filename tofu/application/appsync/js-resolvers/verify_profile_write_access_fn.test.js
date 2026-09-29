@@ -362,6 +362,43 @@ describe('verify_profile_write_access_fn for the share/invite query resolvers (#
         });
     }
 
+    // S1: a blank or otherwise unresolvable profileId must take the same silent-deny
+    // branch as the not-found case, not surface INVALID_INPUT, so neither query turns
+    // a malformed id into a GraphQL error or a profile-existence oracle. The retired
+    // verifier returned `{ authorized: false }` for this input and both queries must
+    // keep that contract.
+    for (const fieldName of ['listSharesByProfile', 'listInvitesByProfile']) {
+        it(`${fieldName} answers with an empty list when the profileId is blank`, () => {
+            const ctx = queryCtx({
+                info: { fieldName, parentTypeName: 'Query' },
+                args: { profileId: '' }
+            });
+
+            // Step 1 must not issue a live read for an id it cannot resolve.
+            const step1 = request(ctx);
+            assert.strictEqual(step1.operation, 'GetItem');
+            assert.deepStrictEqual(step1.key, { ownerAccountId: 'NOOP', profileId: 'NOOP' });
+
+            assert.deepStrictEqual(runQueryPipeline(ctx, fieldName, { items: [] }, { items: [] }), []);
+            assert.strictEqual(ctx.stash.isOwner, false);
+            assert.strictEqual(ctx.stash.hasWritePermission, false);
+            assert.strictEqual(ctx.stash.skipGetItem, true);
+        });
+    }
+
+    // S1: the INVALID_INPUT raise stays on the mutation path, where a missing id is a
+    // genuine client error rather than a silent empty list.
+    it('still raises INVALID_INPUT for a missing profileId on a mutation', () => {
+        const ctx = {
+            identity: { sub: 'user-123' },
+            info: { fieldName: 'createOrder', parentTypeName: 'Mutation' },
+            args: { input: {} },
+            stash: {}
+        };
+
+        assert.throws(() => request(ctx), /INVALID_INPUT: Profile ID is required/);
+    });
+
     // The reported #547 sequence: transferProfileOwnership moves the profile item into
     // the new owner's partition, so the caller's strongly consistent base-table GetItem
     // misses, while the eventually-consistent profileId-index GSI can still project the
