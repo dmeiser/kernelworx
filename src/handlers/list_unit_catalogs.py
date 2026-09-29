@@ -11,12 +11,14 @@ try:  # pragma: no cover
     from utils.auth import batch_check_profile_access
     from utils.dynamodb import get_dynamodb_resource, tables
     from utils.errors import AppError, ErrorCode
+    from utils.ids import build_unit_campaign_key
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import batch_check_profile_access
     from ..utils.dynamodb import get_dynamodb_resource, tables
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import build_unit_campaign_key
     from ..utils.logging import get_logger
     from ..utils.pagination import query_all_items
 
@@ -63,6 +65,10 @@ def _collect_catalog_ids(profiles: List[Dict[str, Any]], campaign_name: str, cam
 
 
 _CATALOG_BATCH_GET_LIMIT = 100
+# DynamoDB BatchGetItem throttle codes, intentionally NOT the canonical
+# admin_operations._THROTTLING_ERROR_CODES: BatchGetItem signals throttling as
+# `RequestLimitExceeded`, where a Query reports `TooManyRequestsException`.
+# Importing the canonical set here would treat one of the two codes as permanent.
 _THROTTLING_ERROR_CODES = {
     "ProvisionedThroughputExceededException",
     "ThrottlingException",
@@ -207,13 +213,6 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
     return catalogs
 
 
-def _build_unit_campaign_key(
-    unit_type: str, unit_number: int, city: str, state: str, campaign_name: str, campaign_year: int
-) -> str:
-    """Build the unitCampaignKey for unit+campaign queries."""
-    return f"{unit_type}#{unit_number}#{city}#{state}#{campaign_name}#{campaign_year}"
-
-
 def _add_catalog_id_if_accessible(catalog_ids: Set[str], campaign: Dict[str, Any], accessible_ids: set[str]) -> None:
     """Add a campaign's catalog ID if the profile is accessible and catalogId is a string."""
     profile_id = campaign["profileId"]
@@ -266,7 +265,7 @@ def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dic
     logger.info(f"Listing catalogs for {unit_type} {unit_number} in {city}, {state}, campaign {campaign_name}")
 
     # Step 1: Query unitCampaignKey-index
-    unit_campaign_key = _build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
+    unit_campaign_key = build_unit_campaign_key(unit_type, unit_number, city, state, campaign_name, campaign_year)
     unit_campaigns = query_all_items(
         tables.campaigns,
         {
