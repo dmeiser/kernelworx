@@ -601,7 +601,7 @@ const DeleteUserProgressView: React.FC<{ progress: DeleteUserProgressState }> = 
 // True when the cascade stopped on an error (the dialog then offers Close).
 const cascadeFailed = (progress: DeleteUserProgressState | null): boolean => Boolean(progress?.error);
 
-const DeleteUserDialogActions: React.FC<DeleteUserDialogProps> = ({
+const DeleteUserDialogActions: React.FC<Omit<DeleteUserDialogProps, 'target'>> = ({
   progress,
   deletingUser,
   onCancel,

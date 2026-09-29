@@ -8,8 +8,11 @@
  * switches that gate off for one function, so the total count of such
  * directives is a progress metric: it may only shrink, never grow.
  *
- * This script counts the directives under the source directory (default:
- * `src/`), compares the count to the committed baseline in
+ * This script counts the directives under the directories eslint applies the
+ * rule to (default: `src/` plus `tests/`, matching the trailing `ts,tsx`
+ * file pattern in eslint.config.js; the ratchet's own test file is
+ * excluded because its fixture strings are directive-shaped payloads, not
+ * disables), compares the count to the committed baseline in
  * `complexity-disables.baseline` (a single integer), and exits non-zero when
  * the count exceeds the baseline. It never fails when the count is below the
  * baseline; run it with `--update` to ratchet the baseline down to the current
@@ -43,11 +46,17 @@ function argValue(flag) {
 }
 
 const srcDirArg = argValue('--src-dir')
-const srcDir = srcDirArg
-  ? isAbsolute(srcDirArg)
-    ? srcDirArg
-    : resolve(join(dirname(fileURLToPath(import.meta.url)), '..', srcDirArg))
-  : resolve(join(dirname(fileURLToPath(import.meta.url)), '..', 'src'))
+const defaultRoot = dirname(fileURLToPath(import.meta.url))
+const frontendRoot = resolve(join(defaultRoot, '..'))
+// The eslint config lints the whole frontend tree (`**/*.{ts,tsx}`), so the
+// gate-off count must cover every directory the rule actually applies to, not
+// only `src/`. The ratchet's own test file loads directive-shaped fixture
+// strings as payloads — those are literals, not disables, and are excluded so
+// the count stays equal to the directives eslint honors.
+const selfTestRelPath = join('tests', 'complexity-disables-ratchet.test.ts')
+const scanDirs = srcDirArg
+  ? [isAbsolute(srcDirArg) ? srcDirArg : resolve(join(frontendRoot, srcDirArg))]
+  : ['src', 'tests'].map((dir) => join(frontendRoot, dir))
 const baselinePath = argValue('--baseline')
   ? resolve(argValue('--baseline'))
   : join(here, 'complexity-disables.baseline')
@@ -71,15 +80,17 @@ function collectFiles(dir) {
 }
 
 const hits = []
-for (const file of collectFiles(srcDir)) {
-  const lines = readFileSync(file, 'utf8').split('\n')
-  lines.forEach((line, i) => {
-    if (COMPLEXITY_DISABLE.test(line)) {
-      hits.push(`${file.replace(resolve(join(here, '..')) + '/', '')}:${i + 1}`)
-    }
-  })
+for (const dir of scanDirs) {
+  for (const file of collectFiles(dir)) {
+    if (file.endsWith(selfTestRelPath)) continue
+    const lines = readFileSync(file, 'utf8').split('\n')
+    lines.forEach((line, i) => {
+      if (COMPLEXITY_DISABLE.test(line)) {
+        hits.push(`${file.replace(frontendRoot + '/', '')}:${i + 1}`)
+      }
+    })
+  }
 }
-
 const count = hits.length
 let baseline = null
 try {

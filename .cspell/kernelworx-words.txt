@@ -370,6 +370,8 @@ stdlib
 strikethrough
 stylesheet
 subclasses
+subcomponent
+subcomponents
 submenu
 summarizer
 superadmin
