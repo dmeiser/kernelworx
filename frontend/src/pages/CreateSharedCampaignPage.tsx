@@ -32,6 +32,7 @@ import {
   LIST_MY_SHARED_CAMPAIGNS,
 } from '../lib/graphql';
 import { CampaignYearField } from '../components/CampaignYearField';
+import { CAMPAIGN_YEAR_MAX, CAMPAIGN_YEAR_MIN, isCampaignYearInRange } from '../constants/campaign';
 import { StateAutocomplete } from '../components/StateAutocomplete';
 import { PageHeader } from '../components/PageHeader';
 import type { GqlCatalog, GqlSharedCampaign } from '../types';
@@ -76,6 +77,16 @@ function isFormValid(data: FormData): boolean {
   const hasCampaignFields = hasRequiredCampaignFields(catalogId, campaignName, campaignYear);
   const hasUnitFields = hasRequiredUnitFields(unitType, unitNumber, city, state);
   return hasCampaignFields && hasUnitFields && validateCreatorMessageLength(creatorMessage);
+}
+
+/**
+ * Message shown when the year is outside the shared campaign-year range. The
+ * year is range-checked here rather than in `isFormValid` so the user is told
+ * why the campaign cannot be created, matching how the unit fields are handled.
+ */
+function campaignYearError(campaignYear: number): string | null {
+  if (isCampaignYearInRange(campaignYear)) return null;
+  return `Campaign year must be between ${CAMPAIGN_YEAR_MIN} and ${CAMPAIGN_YEAR_MAX}`;
 }
 
 // ============================================================================
@@ -527,6 +538,13 @@ export const CreateSharedCampaignPage: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    const yearError = campaignYearError(campaignYear);
+    if (yearError) {
+      setError(yearError);
+      scrollToTop();
+      return;
+    }
+
     if (!formIsValid) {
       showValidationError();
       return;
