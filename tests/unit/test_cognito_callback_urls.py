@@ -89,6 +89,28 @@ def test_ephemeral_cognito_callback_and_logout_urls():
     assert "http://localhost:5173/" in logouts
 
 
+def test_cognito_password_policy_floor():
+    # Regression test for #524: MFA is OPTIONAL (enforced only for admin
+    # operations via the injected `mfa` claim), so OWASP's non-MFA floor
+    # applies: minimum 15 characters, capped at 64.
+    doc = load_hcl(TF_APP / "modules" / "cognito" / "main.tf")
+    user_pool = None
+    for entry in doc.get("resource", []):
+        for k, v in entry.items():
+            if k.strip('"') == "aws_cognito_user_pool":
+                user_pool = v.get("main") or v.get('"main"')
+
+    assert user_pool is not None, "aws_cognito_user_pool.main must exist"
+    policy = user_pool["password_policy"][0]
+    assert policy["minimum_length"] == 15
+    assert policy["maximum_length"] == 64
+    assert policy["require_lowercase"] is True
+    assert policy["require_uppercase"] is True
+    assert policy["require_numbers"] is True
+    assert policy["require_symbols"] is True
+    assert user_pool["mfa_configuration"].strip('"') == "OPTIONAL"
+
+
 def test_cognito_module_allowed_oauth_scopes():
     doc = load_hcl(TF_APP / "modules" / "cognito" / "main.tf")
     for entry in doc.get("resource", []):
