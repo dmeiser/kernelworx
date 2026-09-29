@@ -21,8 +21,11 @@ except ModuleNotFoundError:  # pragma: no cover
 
 logger = get_logger(__name__)
 
-_MAX_RETRIES: int = 3
-_BASE_BACKOFF_SECONDS: float = 0.05
+# Shared retry constants: every DynamoDB retry loop (the query/scan wrappers
+# below and the BatchGetItem helper in ``utils.dynamodb``) backs off identically
+# so a fix to one cannot drift from the others (#557).
+MAX_RETRY_ATTEMPTS: int = 3
+BASE_BACKOFF_SECONDS: float = 0.05
 _THROUGHPUT_ERROR: str = "ProvisionedThroughputExceededException"
 
 
@@ -36,7 +39,7 @@ def _is_throughput_error(exc: BaseException) -> bool:
 
 def _calculate_backoff(attempt: int) -> float:
     """Return deterministic exponential backoff for the given retry attempt."""
-    return float(_BASE_BACKOFF_SECONDS * (2**attempt))
+    return float(BASE_BACKOFF_SECONDS * (2**attempt))
 
 
 def _call_with_retry(
@@ -50,7 +53,7 @@ def _call_with_retry(
         try:
             return method(**kwargs)
         except ClientError as exc:
-            if _is_throughput_error(exc) and attempt < _MAX_RETRIES:
+            if _is_throughput_error(exc) and attempt < MAX_RETRY_ATTEMPTS:
                 attempt += 1
                 backoff = _calculate_backoff(attempt)
                 logger.warning(
