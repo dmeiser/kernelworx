@@ -493,7 +493,9 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
 );
 
 // The Shared Code cell: inline editor while editing, the current code otherwise.
-const CampaignSharedCodeCell: React.FC<CampaignRowProps> = ({
+const CampaignSharedCodeCell: React.FC<
+  Omit<CampaignRowProps, 'onSaveCode' | 'onCancelCode' | 'onClearCode'>
+> = ({
   campaign,
   editing,
   editingSharedCode,
@@ -804,7 +806,7 @@ const TransferDialog: React.FC<TransferDialogProps> = ({ open, onClose, ...rest 
   </Dialog>
 );
 
-const TransferDialogBody: React.FC<TransferDialogProps> = ({
+const TransferDialogBody: React.FC<Omit<TransferDialogProps, 'open' | 'onClose'>> = ({
   searchQuery,
   onSearchQueryChange,
   onSearch,
@@ -877,7 +879,7 @@ const OwnerSearchField: React.FC<OwnerSearchFieldProps> = ({
   );
 };
 
-const TransferDialogActions: React.FC<TransferDialogProps> = ({
+const TransferDialogActions: React.FC<Omit<TransferDialogProps, 'open'>> = ({
   onClose,
   onConfirm,
   selectedOwner,
