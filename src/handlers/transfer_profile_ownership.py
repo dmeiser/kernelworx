@@ -4,18 +4,23 @@ This handler transfers ownership of a SellerProfile to a new owner who must alre
 have access via a share. The transfer involves:
 1. Verifying caller is current owner (or admin)
 2. Verifying new owner has existing share
-3. Atomically deleting the old owner's base-table record and creating a new record
+3. Repairing the shares first (deleting the new owner's share, re-pointing
+   third-party shares' ownerAccountId at the incoming owner)
+4. Atomically deleting the old owner's base-table record and creating a new record
    with the updated ownerAccountId (the hash key cannot be updated in place)
-4. Updating existing shares (deleting the new owner's share, updating third-party
-   shares' ownerAccountId)
 
 Because ownership is encoded in the profile base-table hash key, deleting the old
 owner's record invalidates any other shares that still reference the previous owner,
-so stale shares are automatically rejected by subsequent authorization checks.
+so stale shares are automatically rejected by subsequent authorization checks. That
+makes the share repair load-bearing rather than cleanup, and it is the only thing
+that re-points those shares at the new owner. It therefore runs before the
+destructive step and is rolled back if anything after it fails, so the transfer
+either lands with every share repaired or leaves the pre-transfer state untouched
+for a retry to converge (#549).
 """
 
 import os
-from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Tuple
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -173,33 +178,82 @@ class _ShareRepairFailures(NamedTuple):
     permanent: int
 
 
+class _ShareRepair(NamedTuple):
+    """The share mutations a repair applied, recorded so they can be undone.
+
+    The repair runs before the ownership transfer commits, so a failure of the
+    transfer (or of the repair itself) can be rolled back to the exact
+    pre-transfer share state instead of leaving shares pointing at an owner whose
+    profile record does not exist, which would lock out every collaborator (#549).
+    """
+
+    reassigned: List[Tuple[str, str]]  # (targetAccountId, ownerAccountId before the repair)
+    removed: List[Dict[str, Any]]  # whole share items deleted by the repair
+
+
 _SHARE_REPAIR_RETRYABLE = "Temporarily unable to update profile shares. Please retry."
 _SHARE_REPAIR_PERMANENT = "Failed to update profile shares. Please contact support."
 
 
-def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> _ShareRepairFailures:
-    """Update or clean up shares after profile ownership transfer.
+def _undo_share_repair(db_profile_id: str, repair: _ShareRepair) -> None:
+    """Roll an applied share repair back to the pre-transfer state.
 
-    - Deletes the share for the new owner (they now own the profile).
-    - Updates ownerAccountId on third-party shares to the new owner.
+    Best effort by design: it runs on a path that is already raising, and a
+    rollback failure is an operator problem (logged with the affected
+    collaborator), not something the caller can act on.
+    """
+    for target_account_id, previous_owner_id in repair.reassigned:
+        try:
+            tables.shares.update_item(
+                Key={"profileId": db_profile_id, "targetAccountId": target_account_id},
+                UpdateExpression="SET ownerAccountId = :previous_owner",
+                ExpressionAttributeValues={":previous_owner": previous_owner_id},
+            )
+        except ClientError as e:
+            logger.error(
+                "Failed to roll back share after aborted ownership transfer",
+                profile_id=db_profile_id,
+                target_account_id=target_account_id,
+                error=str(e),
+                exc_info=True,
+            )
+    for share in repair.removed:
+        try:
+            tables.shares.put_item(Item=share)
+        except ClientError as e:
+            logger.error(
+                "Failed to restore share after aborted ownership transfer",
+                profile_id=db_profile_id,
+                target_account_id=share.get("targetAccountId"),
+                error=str(e),
+                exc_info=True,
+            )
+
+
+def _repair_shares(db_profile_id: str, db_new_owner_id: str) -> Tuple[_ShareRepair, _ShareRepairFailures]:
+    """Point every share of the profile at the incoming owner, before the transfer commits.
+
+    - Deletes the share for the new owner (they are about to own the profile).
+    - Re-points third-party shares' ownerAccountId at the new owner.
 
     This step is load-bearing, not cleanup: the authorization layer re-validates a
     share against the owner recorded on the share (see ``_is_share_valid`` in
-    ``src/utils/auth.py``), and the transfer has already deleted the old owner's
-    base-table profile record. A share left recording the old owner is therefore
-    dead, and every collaborator it covers is locked out with no way to recover
-    without re-running this step. Failures are therefore reported to the caller
-    (#549) instead of being logged and forgotten.
+    ``src/utils/auth.py``). A share recording the wrong owner is dead, so every
+    collaborator it covers is locked out, and this is the only code that re-points
+    those shares. It therefore runs first and is rolled back by the caller if the
+    transfer does not commit, so no retry of this mutation can end in a silently
+    broken share graph (#549).
 
     Returns:
-        The shares that could not be updated, split into transient failures
-        (retrying may help) and permanent ones (retrying cannot help).
+        The changes actually applied (for rollback) and the shares that could not
+        be updated, split into transient failures (retrying may help) and
+        permanent ones (retrying cannot help).
 
     Raises:
         AppError: when the share query itself fails, since without it no share can
-            be repaired. A throttled query is a retryable RESOURCE_BUSY; any other
-            client error is INTERNAL_ERROR, and anything that is not a client
-            error at all is a bug and propagates.
+            be repaired and nothing has been changed yet. A throttled query is a
+            retryable RESOURCE_BUSY; any other client error is INTERNAL_ERROR, and
+            anything that is not a client error at all is a bug and propagates.
     """
     try:
         shares = query_all_items(
@@ -209,20 +263,22 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> _
     except ClientError as e:
         if is_transient_client_error(e):
             logger.warning(
-                "Share query after ownership transfer throttled",
+                "Share query before ownership transfer throttled",
                 profile_id=db_profile_id,
                 error=str(e),
                 exc_info=True,
             )
             raise AppError(ErrorCode.RESOURCE_BUSY, _SHARE_REPAIR_RETRYABLE) from e
         logger.error(
-            "Failed to query shares after ownership transfer",
+            "Failed to query shares before ownership transfer",
             profile_id=db_profile_id,
             error=str(e),
             exc_info=True,
         )
         raise AppError(ErrorCode.INTERNAL_ERROR, _SHARE_REPAIR_PERMANENT) from e
 
+    reassigned: List[Tuple[str, str]] = []
+    removed: List[Dict[str, Any]] = []
     transient_failures = 0
     permanent_failures = 0
     for share in shares:
@@ -232,6 +288,7 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> _
         try:
             if target_account_id == db_new_owner_id:
                 tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": target_account_id})
+                removed.append(share)
             else:
                 tables.shares.update_item(
                     Key={"profileId": db_profile_id, "targetAccountId": target_account_id},
@@ -239,6 +296,7 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> _
                     ExpressionAttributeValues={":new_owner": db_new_owner_id},
                     ConditionExpression="attribute_exists(profileId) AND attribute_exists(targetAccountId)",
                 )
+                reassigned.append((target_account_id, share.get("ownerAccountId", db_new_owner_id)))
         except ClientError as e:
             transient = is_transient_client_error(e)
             if transient:
@@ -246,14 +304,17 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> _
             else:
                 permanent_failures += 1
             logger.error(
-                "Failed to update share after ownership transfer",
+                "Failed to update share before ownership transfer",
                 profile_id=db_profile_id,
                 target_account_id=target_account_id,
                 transient=transient,
                 error=str(e),
                 exc_info=True,
             )
-    return _ShareRepairFailures(transient=transient_failures, permanent=permanent_failures)
+    return (
+        _ShareRepair(reassigned=reassigned, removed=removed),
+        _ShareRepairFailures(transient=transient_failures, permanent=permanent_failures),
+    )
 
 
 @with_error_handling(error_message="Failed to transfer profile ownership")
@@ -272,23 +333,34 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # plain owner) must transfer to a user who already has a share (#336).
     caller_is_admin = is_admin(event) and has_mfa(event)
     _verify_new_owner_has_share(db_profile_id, db_new_owner_id, caller_is_admin)
-    _transfer_ownership(profile, db_profile_id, db_new_owner_id)
 
-    failures = _update_shares_after_transfer(db_profile_id, db_new_owner_id)
+    # The share repair runs first and the destructive profile transaction last, so
+    # a failure of either leaves the pre-transfer state intact and the caller's
+    # retry takes the ordinary path again (#549). It is idempotent: re-pointing an
+    # already-correct share and re-adding the new owner's already-deleted share are
+    # both no-ops.
+    repair, failures = _repair_shares(db_profile_id, db_new_owner_id)
     if failures.transient or failures.permanent:
-        # The transfer itself is already durable and re-running the share repair
-        # is idempotent, so a surfaced failure beats returning success over a
-        # share graph that silently locked every collaborator out (#549). A
-        # permanent failure is never invited to retry: it would fail identically.
+        _undo_share_repair(db_profile_id, repair)
         logger.error(
-            "Ownership transfer completed with failed share repairs",
+            "Ownership transfer aborted; share repair rolled back",
             profile_id=db_profile_id,
             new_owner_account_id=db_new_owner_id,
             transient_failure_count=failures.transient,
             permanent_failure_count=failures.permanent,
         )
+        # A permanent failure is never invited to retry: it would fail identically.
         if failures.transient:
             raise AppError(ErrorCode.RESOURCE_BUSY, _SHARE_REPAIR_RETRYABLE)
         raise AppError(ErrorCode.INTERNAL_ERROR, _SHARE_REPAIR_PERMANENT)
+
+    try:
+        _transfer_ownership(profile, db_profile_id, db_new_owner_id)
+    except AppError:
+        # The transfer did not commit, so the profile still lives under the old
+        # owner; shares re-pointed at the incoming owner would lock every
+        # collaborator out until the next attempt, so roll them back.
+        _undo_share_repair(db_profile_id, repair)
+        raise
 
     return profile
