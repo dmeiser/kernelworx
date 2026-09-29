@@ -1,4 +1,7 @@
-.PHONY: help test test-frontend test-e2e test-integration test-cleanup test-all lint lint-python lint-frontend lint-infra spellcheck typecheck format format-python format-frontend tflint kics infra all ci clean
+.PHONY: help test test-frontend test-e2e test-integration test-cleanup test-all \
+	js-resolvers lint lint-python lint-frontend lint-infra spellcheck typecheck \
+	format format-python format-frontend tflint kics all ci ci-full \
+	test-guards clean
 
 # Default target
 help:
@@ -10,7 +13,8 @@ help:
 	@echo "  make test-e2e          - Run Python E2E smoke tests (pytest-playwright)"
 	@echo "  make test-integration  - Run integration tests"
 	@echo "  make test-cleanup      - Run TypeScript global cleanup only"
-	@echo "  make test-all          - Run all tests (unit + integration + e2e)"
+	@echo "  make test-all          - Run all tests (unit + integration + e2e + js-resolvers)"
+	@echo "  make js-resolvers      - Run AppSync JS resolver tests (node --test)"
 	@echo ""
 	@echo "Linting & Type Checking:"
 	@echo "  make lint              - Run all linters (Python + TypeScript)"
@@ -31,7 +35,7 @@ help:
 	@echo ""
 	@echo "Comprehensive:"
 	@echo "  make all               - Run everything (format + lint + typecheck + test)"
-	@echo "  make ci                - Run CI pipeline (spellcheck + lint + typecheck + test)"
+	@echo "  make ci                - Run CI pipeline (lint + typecheck + spellcheck + unit/JS/guard tests)"
 	@echo "  make clean             - Clean generated files"
 
 # Python unit tests
@@ -64,8 +68,13 @@ test-guards:
 	@echo "Running TypeScript guard tests..."
 	npm run test:guards
 
+# AppSync JS resolver tests (node --test)
+js-resolvers:
+	@echo "Running AppSync JS resolver tests..."
+	npm run test:js-resolvers
+
 # Run all tests
-test-all: test test-guards test-frontend test-integration test-e2e
+test-all: test test-guards test-frontend test-integration test-e2e js-resolvers
 
 # Python linting and type checking
 lint-python:
@@ -138,7 +147,7 @@ lint-infra: tflint kics
 all: format lint typecheck test test-frontend
 
 # Local CI pipeline (no live AWS required)
-ci: lint typecheck spellcheck test test-frontend test-guards
+ci: lint typecheck spellcheck test test-frontend test-guards js-resolvers
 
 # Full CI pipeline including integration tests (requires AWS credentials)
 ci-full: ci test-integration
