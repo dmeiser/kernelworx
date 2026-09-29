@@ -1125,8 +1125,8 @@ type Mutation {
     """The user's email address."""
     email: AWSEmail!
   ): Boolean!
-  """Delete a user and all their data from Cognito, DynamoDB, and S3 via the full deletion cascade (admin only). The caller cannot delete their own account. Returns true on success."""
-  adminDeleteUser(
+  """Delete the account record and the Cognito user for an account whose per-entity data the caller has already deleted (admin only). The caller cannot purge their own account. Catalogs are never deleted. Returns true on success."""
+  adminPurgeUserAccount(
     """The account ID to delete."""
     accountId: ID!
   ): Boolean!
@@ -1147,11 +1147,6 @@ type Mutation {
   ): Int!
   """Delete all profiles owned by the given account (admin only). Returns the number of profiles deleted."""
   adminDeleteUserProfiles(
-    """The account ID to clean up."""
-    accountId: ID!
-  ): Int!
-  """Soft-delete all catalogs owned by the given account (admin only). Returns the number of catalogs soft-deleted."""
-  adminDeleteUserCatalogs(
     """The account ID to clean up."""
     accountId: ID!
   ): Int!

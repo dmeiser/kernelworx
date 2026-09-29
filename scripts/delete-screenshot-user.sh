@@ -35,5 +35,5 @@ aws cognito-idp admin-delete-user \
 echo "✅ Cognito user deleted."
 echo ""
 echo "To delete the associated DynamoDB data, sign in as Alex Kernel and use"
-echo "Account Settings -> Delete Account, or ask an admin to run the"
-echo "adminDeleteUser mutation for the account."
+echo "Account Settings -> Delete Account, or ask an admin to delete the account"
+echo "from the admin console."

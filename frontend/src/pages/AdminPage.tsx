@@ -59,7 +59,11 @@ import {
   LIST_MANAGED_CATALOGS,
   ADMIN_SEARCH_USER,
   ADMIN_RESET_USER_PASSWORD,
-  ADMIN_DELETE_USER,
+  ADMIN_PURGE_USER_ACCOUNT,
+  ADMIN_DELETE_USER_ORDERS,
+  ADMIN_DELETE_USER_CAMPAIGNS,
+  ADMIN_DELETE_USER_SHARES,
+  ADMIN_DELETE_USER_PROFILES,
   CREATE_MANAGED_CATALOG,
   UPDATE_CATALOG,
   DELETE_CATALOG,
@@ -70,7 +74,18 @@ import { useAdminMfa } from '../hooks/useAdminMfa';
 import { isMfaRequiredError, MFA_REQUIRED_ERROR_CODE } from '../lib/mfaErrors';
 import { formatDisplayDate } from '../lib/date-utils';
 import type { GqlCatalog, GqlAdminUser, GqlProductInput } from '../types/graphql-generated';
-import type { GqlAdminDeleteUserMutation, GqlAdminDeleteUserMutationVariables } from '../types/graphql-generated';
+import type {
+  GqlAdminPurgeUserAccountMutation,
+  GqlAdminPurgeUserAccountMutationVariables,
+  GqlAdminDeleteUserOrdersMutation,
+  GqlAdminDeleteUserOrdersMutationVariables,
+  GqlAdminDeleteUserCampaignsMutation,
+  GqlAdminDeleteUserCampaignsMutationVariables,
+  GqlAdminDeleteUserSharesMutation,
+  GqlAdminDeleteUserSharesMutationVariables,
+  GqlAdminDeleteUserProfilesMutation,
+  GqlAdminDeleteUserProfilesMutationVariables,
+} from '../types/graphql-generated';
 
 // --- Type Definitions ---
 interface TabPanelProps {
@@ -454,9 +469,10 @@ export const AdminPage: React.FC = () => {
   const [editingCatalog, setEditingCatalog] = useState<GqlCatalog | null>(null);
   const [deleteCatalogTarget, setDeleteCatalogTarget] = useState<GqlCatalog | null>(null);
 
-  // Delete progress state (the server owns the cascade, so there is a single step)
+  // Delete progress state
   const [deleteProgress, setDeleteProgress] = useState<{
     step: string;
+    completed: string[];
     error?: string;
   } | null>(null);
 
@@ -514,9 +530,27 @@ export const AdminPage: React.FC = () => {
     },
   });
 
-  // The server owns the whole delete cascade (#521): adminDeleteUser runs the
-  // shared delete_all_user_data cascade and then removes the Cognito user.
-  const [deleteUser] = useMutation<GqlAdminDeleteUserMutation, GqlAdminDeleteUserMutationVariables>(ADMIN_DELETE_USER);
+  // Deletion is client-side by decision (#521). The client issues the
+  // per-entity deletes it can reach, then adminPurgeUserAccount for the two
+  // things a browser cannot do: the accounts record and the Cognito user.
+  // Catalogs are deliberately never deleted.
+  const [deleteUserOrders] = useMutation<GqlAdminDeleteUserOrdersMutation, GqlAdminDeleteUserOrdersMutationVariables>(
+    ADMIN_DELETE_USER_ORDERS,
+  );
+  const [deleteUserCampaigns] = useMutation<
+    GqlAdminDeleteUserCampaignsMutation,
+    GqlAdminDeleteUserCampaignsMutationVariables
+  >(ADMIN_DELETE_USER_CAMPAIGNS);
+  const [deleteUserShares] = useMutation<GqlAdminDeleteUserSharesMutation, GqlAdminDeleteUserSharesMutationVariables>(
+    ADMIN_DELETE_USER_SHARES,
+  );
+  const [deleteUserProfiles] = useMutation<
+    GqlAdminDeleteUserProfilesMutation,
+    GqlAdminDeleteUserProfilesMutationVariables
+  >(ADMIN_DELETE_USER_PROFILES);
+  const [purgeUserAccount] = useMutation<GqlAdminPurgeUserAccountMutation, GqlAdminPurgeUserAccountMutationVariables>(
+    ADMIN_PURGE_USER_ACCOUNT,
+  );
 
   const catalogs = catalogsData?.listManagedCatalogs || [];
 
@@ -599,21 +633,39 @@ export const AdminPage: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line complexity -- Client-side cascade requires sequential steps
   const confirmDeleteUser = async () => {
     /* v8 ignore start -- Delete user dialog only opens when a target is selected */
     if (!deleteUserTarget) return;
     /* v8 ignore stop */
 
     const accountId = deleteUserTarget.accountId;
+    const completed: string[] = [];
 
     try {
-      // Single call: adminDeleteUser performs the server-side cascade (orders,
-      // campaigns, shares, invites, inbound shares, S3 reports, profiles,
-      // payment QR codes, account record) and then deletes the Cognito user.
-      // Catalogs are preserved per product design, so the client must not
-      // soft-delete them (#521).
-      setDeleteProgress({ step: 'Deleting user and all associated data...' });
-      await deleteUser({ variables: { accountId } });
+      // Client-side cascade (#521). Catalogs are never deleted, so there is
+      // deliberately no catalog step here.
+      setDeleteProgress({ step: 'Deleting sales/orders...', completed });
+      const ordersResult = await deleteUserOrders({ variables: { accountId } });
+      completed.push(`Deleted ${ordersResult.data?.adminDeleteUserOrders ?? 0} orders`);
+
+      setDeleteProgress({ step: 'Deleting campaigns...', completed: [...completed] });
+      const campaignsResult = await deleteUserCampaigns({ variables: { accountId } });
+      completed.push(`Deleted ${campaignsResult.data?.adminDeleteUserCampaigns ?? 0} campaigns`);
+
+      setDeleteProgress({ step: 'Deleting shares...', completed: [...completed] });
+      const sharesResult = await deleteUserShares({ variables: { accountId } });
+      completed.push(`Deleted ${sharesResult.data?.adminDeleteUserShares ?? 0} shares`);
+
+      setDeleteProgress({ step: 'Deleting profiles...', completed: [...completed] });
+      const profilesResult = await deleteUserProfiles({ variables: { accountId } });
+      completed.push(`Deleted ${profilesResult.data?.adminDeleteUserProfiles ?? 0} profiles`);
+
+      // Last: the accounts record and the Cognito user, which a browser with
+      // no AWS credentials cannot delete itself.
+      setDeleteProgress({ step: 'Deleting user account...', completed: [...completed] });
+      await purgeUserAccount({ variables: { accountId } });
+      completed.push('User account deleted');
 
       // Success!
       setDeleteProgress(null);
@@ -632,6 +684,7 @@ export const AdminPage: React.FC = () => {
       }
       setDeleteProgress({
         step: 'Error occurred',
+        completed,
         /* v8 ignore next -- Throwing a non-Error value in jsdom is not practical to simulate */
         error: error instanceof Error ? error.message : 'Unknown error',
       });
@@ -810,6 +863,17 @@ export const AdminPage: React.FC = () => {
                   {deleteProgress.step}
                 </Typography>
               </Box>
+
+              {/* Completed steps */}
+              {deleteProgress.completed.length > 0 && (
+                <Box sx={{ pl: 2, borderLeft: 2, borderColor: 'success.main', mb: 2 }}>
+                  {deleteProgress.completed.map((msg, i) => (
+                    <Typography key={i} variant="body2" color="text.secondary">
+                      ✓ {msg}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
 
               {/* Error message */}
               {deleteProgress.error && (

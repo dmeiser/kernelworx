@@ -3,8 +3,14 @@ Admin operations handlers for superadmin functionality.
 
 Provides:
 - adminResetUserPassword: Send password reset email to user
-- adminDeleteUser: Delete user from Cognito and DynamoDB
+- adminPurgeUserAccount: Delete the account record and the Cognito user
 - createManagedCatalog: Create an ADMIN_MANAGED global catalog
+
+User deletion is client-side by decision (#521). The client issues the
+per-entity ``adminDeleteUser*`` mutations it can reach, and calls
+``adminPurgeUserAccount`` for exactly the two things a browser cannot do
+itself: deleting the ``accounts`` record and deleting the Cognito user.
+Catalogs are never deleted.
 """
 
 import re
@@ -19,7 +25,6 @@ from botocore.exceptions import ClientError
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
 from .deletion_cascade import (
-    delete_all_user_data,
     delete_user_campaigns,
     delete_user_orders,
     delete_user_profiles,
@@ -868,34 +873,40 @@ def _check_not_self_deletion(caller_id: str, account_id: str) -> None:
         raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete your own account")
 
 
-@with_error_handling(error_message="Failed to delete user")
-def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
+@with_error_handling(error_message="Failed to purge user account")
+def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     """
-    Delete a user and all their data from Cognito, DynamoDB, and S3 (admin only).
+    Delete the account record and the Cognito user (admin only).
 
-    AppSync Lambda resolver for adminDeleteUser mutation.
-    Deletes all user data (orders, campaigns, shares, invites, inbound shares,
-    S3 reports, profiles, payment method QR codes, and the Account record;
-    catalogs are preserved) via the shared delete_all_user_data cascade, then
-    deletes the user from the Cognito User Pool.
+    AppSync Lambda resolver for the adminPurgeUserAccount mutation. This is the
+    deliberately minimal server-side operation that user deletion cannot be
+    completed without (#521): the browser holds no AWS credentials, so it can
+    neither delete the ``accounts`` table row nor call Cognito
+    ``AdminDeleteUser``. Everything else in a user deletion (orders,
+    campaigns, shares, invites, inbound shares, S3 reports, profiles, payment
+    QR codes) is deleted by the client through the per-entity
+    ``adminDeleteUser*`` mutations, and catalogs are never deleted.
+
+    Call this after the client's per-entity deletes, so a failure there leaves
+    the account intact rather than half-deleted.
 
     Args:
         event: AppSync event with identity and arguments
         context: Lambda context
 
     Returns:
-        True if user was deleted successfully
+        True if the account was purged successfully
 
     Raises:
-        AppError: If not admin, self-deletion is attempted, or a deletion error occurs.
-        An absent Cognito user is treated as idempotent success.
+        AppError: If not admin, self-purge is attempted, the user does not
+            exist, or a deletion error occurs. An absent Cognito user is
+            treated as idempotent success.
     """
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
 
-    identity = event.get("identity", {})
-    caller_id = identity.get("sub")
+    caller_id = event.get("identity", {}).get("sub")
     _check_not_self_deletion(str(caller_id), account_id)
 
     user_pool_id = get_required_env("USER_POOL_ID")
@@ -907,16 +918,23 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     if not username and not account_exists:
         raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
 
-    # Delete all user data from DynamoDB and S3 using the shared cascade so
-    # a partially-deleted Cognito state does not leave records orphaned (#435).
-    delete_all_user_data(account_id, logger)
-
     if username:
         _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
     else:
-        logger.info("Cognito user already absent; DynamoDB cleanup completed", account_id=account_id)
+        logger.info("Cognito user already absent", account_id=account_id)
 
-    logger.info("User deleted successfully", account_id=account_id, email=mask_email(email))
+    if account_exists:
+        db_account_id = normalize_account_id(account_id)
+        try:
+            tables.accounts.delete_item(Key={"accountId": db_account_id})
+            logger.info("Deleted account record", account_id=db_account_id)
+        except ClientError as e:
+            logger.error("Failed to delete account record", error=str(e), account_id=db_account_id)
+            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account record") from e
+    else:
+        logger.info("Account record already absent", account_id=account_id)
+
+    logger.info("User account purged", account_id=account_id, email=mask_email(email))
     return True
 
 
@@ -1124,57 +1142,6 @@ def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
 
     account_id = _validate_admin_and_get_account_id(event)
     return delete_user_profiles(account_id, _user_profiles_for(account_id), logger)
-
-
-def _soft_delete_catalog(catalog_id: str) -> None:
-    """Soft delete a catalog by setting isDeleted = true."""
-    tables.catalogs.update_item(
-        Key={"catalogId": catalog_id},
-        UpdateExpression="SET isDeleted = :true",
-        ExpressionAttributeValues={":true": True},
-    )
-
-
-def _query_and_delete_catalogs(db_account_id: str) -> int:
-    """Query for user's catalogs via the ownerAccountId GSI and soft delete them. Returns count."""
-    catalogs = query_all_items(
-        tables.catalogs,
-        {
-            "IndexName": "ownerAccountId-index",
-            "KeyConditionExpression": "ownerAccountId = :owner",
-            "FilterExpression": "attribute_not_exists(isDeleted) OR isDeleted = :false",
-            "ExpressionAttributeValues": {":owner": db_account_id, ":false": False},
-        },
-    )
-
-    deleted_count = 0
-    for catalog in catalogs:
-        _soft_delete_catalog(catalog["catalogId"])
-        deleted_count += 1
-
-    return deleted_count
-
-
-def _delete_user_catalogs(account_id: str, logger: Any) -> int:
-    """Soft delete all catalogs owned by a user. Returns count."""
-    db_account_id = normalize_account_id(account_id)
-    deleted_count = _query_and_delete_catalogs(db_account_id)
-    logger.info("Soft-deleted user catalogs", account_id=account_id, count=deleted_count)
-    return deleted_count
-
-
-@with_error_handling(error_message="Failed to delete user catalogs")
-def admin_delete_user_catalogs(event: Dict[str, Any], context: Any) -> int:
-    """
-    Soft delete all catalogs owned by a user (admin only).
-
-    Sets isDeleted=true on each catalog instead of removing from database.
-    Returns the count of soft-deleted catalogs.
-    """
-    logger = get_logger(__name__)
-
-    account_id = _validate_admin_and_get_account_id(event)
-    return _delete_user_catalogs(account_id, logger)
 
 
 @with_error_handling(error_message="Failed to get user profiles")
@@ -1557,12 +1524,11 @@ _OPERATION_HANDLERS = {
     "adminListUsers": admin_list_users,
     "adminSearchUser": admin_search_user,
     "adminResetUserPassword": admin_reset_user_password,
-    "adminDeleteUser": admin_delete_user,
+    "adminPurgeUserAccount": admin_purge_user_account,
     "adminDeleteUserOrders": admin_delete_user_orders,
     "adminDeleteUserCampaigns": admin_delete_user_campaigns,
     "adminDeleteUserShares": admin_delete_user_shares,
     "adminDeleteUserProfiles": admin_delete_user_profiles,
-    "adminDeleteUserCatalogs": admin_delete_user_catalogs,
     "createManagedCatalog": create_managed_catalog,
     "adminGetUserProfiles": admin_get_user_profiles,
     "adminGetUserCatalogs": admin_get_user_catalogs,

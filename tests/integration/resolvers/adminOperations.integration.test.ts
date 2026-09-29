@@ -3,7 +3,7 @@
  * 
  * Tests 3 resolvers:
  * - adminResetUserPassword (Lambda resolver - admin only)
- * - adminDeleteUser (Lambda resolver - admin only)
+ * - adminPurgeUserAccount (Lambda resolver - admin only)
  * - createManagedCatalog (Lambda resolver - admin only)
  * 
  * Coverage:
@@ -37,9 +37,9 @@ const ADMIN_RESET_USER_PASSWORD = gql`
   }
 `;
 
-const ADMIN_DELETE_USER = gql`
-  mutation AdminDeleteUser($accountId: ID!) {
-    adminDeleteUser(accountId: $accountId)
+const ADMIN_PURGE_USER_ACCOUNT = gql`
+  mutation AdminPurgeUserAccount($accountId: ID!) {
+    adminPurgeUserAccount(accountId: $accountId)
   }
 `;
 
@@ -65,12 +65,6 @@ const ADMIN_DELETE_USER_SHARES = gql`
 const ADMIN_DELETE_USER_PROFILES = gql`
   mutation AdminDeleteUserProfiles($accountId: ID!) {
     adminDeleteUserProfiles(accountId: $accountId)
-  }
-`;
-
-const ADMIN_DELETE_USER_CATALOGS = gql`
-  mutation AdminDeleteUserCatalogs($accountId: ID!) {
-    adminDeleteUserCatalogs(accountId: $accountId)
   }
 `;
 
@@ -460,7 +454,7 @@ describe('Admin Operations Integration Tests', () => {
     });
   });
 
-  describe('adminDeleteUser', () => {
+  describe('adminPurgeUserAccount', () => {
     // NOTE: We don't actually delete the test users as that would break subsequent tests
     // Instead we test authorization and error cases
     
@@ -468,7 +462,7 @@ describe('Admin Operations Integration Tests', () => {
       it('SECURITY: Non-admin contributor cannot delete users', async () => {
         await expect(
           contributorClient.mutate({
-            mutation: ADMIN_DELETE_USER,
+            mutation: ADMIN_PURGE_USER_ACCOUNT,
             variables: {
               accountId: 'any-account-id',
             },
@@ -479,7 +473,7 @@ describe('Admin Operations Integration Tests', () => {
       it('SECURITY: Non-admin readonly user cannot delete users', async () => {
         await expect(
           readonlyClient.mutate({
-            mutation: ADMIN_DELETE_USER,
+            mutation: ADMIN_PURGE_USER_ACCOUNT,
             variables: {
               accountId: 'any-account-id',
             },
@@ -490,7 +484,7 @@ describe('Admin Operations Integration Tests', () => {
       it('SECURITY: Admin cannot delete their own account', async () => {
         await expect(
           adminClient.mutate({
-            mutation: ADMIN_DELETE_USER,
+            mutation: ADMIN_PURGE_USER_ACCOUNT,
             variables: {
               accountId: adminAccountId,
             },
@@ -503,7 +497,7 @@ describe('Admin Operations Integration Tests', () => {
       it('should return NOT_FOUND for non-existent account', async () => {
         await expect(
           adminClient.mutate({
-            mutation: ADMIN_DELETE_USER,
+            mutation: ADMIN_PURGE_USER_ACCOUNT,
             variables: {
               accountId: 'nonexistent-account-id-12345',
             },
@@ -514,7 +508,7 @@ describe('Admin Operations Integration Tests', () => {
       it('should reject empty account ID', async () => {
         await expect(
           adminClient.mutate({
-            mutation: ADMIN_DELETE_USER,
+            mutation: ADMIN_PURGE_USER_ACCOUNT,
             variables: {
               accountId: '   ',
             },
@@ -544,13 +538,13 @@ describe('Admin Operations Integration Tests', () => {
 
       it('should delete user from DynamoDB', async () => {
         const { data } = await adminClient.mutate({
-          mutation: ADMIN_DELETE_USER,
+          mutation: ADMIN_PURGE_USER_ACCOUNT,
           variables: {
             accountId: tempAccountId.replace('ACCOUNT#', ''),
           },
         });
 
-        expect(data?.adminDeleteUser).toBe(true);
+        expect(data?.adminPurgeUserAccount).toBe(true);
 
         // Verify account was deleted
         const getResult = await dynamoClient.send(new GetItemCommand({
@@ -791,38 +785,6 @@ describe('Admin Operations Integration Tests', () => {
       });
     });
 
-    describe('adminDeleteUserCatalogs', () => {
-      it('SECURITY: Admin CAN call adminDeleteUserCatalogs', async () => {
-        const { data } = await adminClient.mutate({
-          mutation: ADMIN_DELETE_USER_CATALOGS,
-          variables: { accountId: 'nonexistent-account-id' },
-        });
-        
-        expect(data?.adminDeleteUserCatalogs).toBeDefined();
-        expect(typeof data.adminDeleteUserCatalogs).toBe('number');
-        expect(data.adminDeleteUserCatalogs).toBe(0);
-      });
-
-      it('SECURITY: Non-admin contributor CANNOT delete user catalogs', async () => {
-        await expect(
-          contributorClient.mutate({
-            mutation: ADMIN_DELETE_USER_CATALOGS,
-            variables: { accountId: 'any-account-id' },
-          })
-        ).rejects.toThrow(/Admin access required|FORBIDDEN/i);
-      });
-
-      it('SECURITY: Non-admin readonly user CANNOT delete user catalogs', async () => {
-        await expect(
-          readonlyClient.mutate({
-            mutation: ADMIN_DELETE_USER_CATALOGS,
-            variables: { accountId: 'any-account-id' },
-          })
-        ).rejects.toThrow(/Admin access required|FORBIDDEN/i);
-      });
-    });
-  });
-
   // ============================================================
   // NEW: Admin User Data Queries
   // ============================================================
@@ -1003,10 +965,9 @@ describe('Admin Operations Integration Tests', () => {
   // - adminGetUserProfiles (query) ⬅️ NEW
   // - adminGetUserCatalogs (query) ⬅️ NEW
   // - adminResetUserPassword (mutation)
-  // - adminDeleteUser (mutation)
+  // - adminPurgeUserAccount (mutation)
   // - adminDeleteUserOrders (mutation)
   // - adminDeleteUserCampaigns (mutation)
   // - adminDeleteUserShares (mutation)
-  // - adminDeleteUserCatalogs (mutation)
   // - createManagedCatalog (mutation)
 });

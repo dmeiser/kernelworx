@@ -33,12 +33,11 @@ PASSTHROUGH_RESOLVER = "lambda_passthrough_resolver.js"
 
 EXPECTED_ADMIN_FIELDS = {
     "adminResetUserPassword",
-    "adminDeleteUser",
+    "adminPurgeUserAccount",
     "adminDeleteUserOrders",
     "adminDeleteUserCampaigns",
     "adminDeleteUserShares",
     "adminDeleteUserProfiles",
-    "adminDeleteUserCatalogs",
     "createManagedCatalog",
     "adminDeleteShare",
     "adminUpdateCampaignSharedCode",
