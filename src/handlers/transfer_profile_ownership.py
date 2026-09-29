@@ -164,6 +164,26 @@ def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owne
     profile["ownerAccountId"] = db_new_owner_id
 
 
+def _transfer_without_commit_confirmed(db_profile_id: str, db_old_owner_id: str) -> bool:
+    """Confirm via consistent read that the transfer has not committed.
+
+    A precondition is that the old owner's base-table record is still in place. If
+    the confirm read itself fails, the pre-transfer state is unknown, so the
+    answer is treated as "committed" and no rollback is attempted: undoing a
+    committed transfer would strand every collaborator just the same.
+    """
+    try:
+        return _confirm_ownership_strongly_consistently(db_profile_id, db_old_owner_id) is not None
+    except Exception as e:
+        logger.error(
+            "Failed to confirm pre-transfer profile state; skipping rollback",
+            profile_id=db_profile_id,
+            error=str(e),
+            exc_info=True,
+        )
+        return False
+
+
 class _ShareRepairFailures(NamedTuple):
     """Counts of shares the repair step could not fix, split by whether a retry helps.
 
@@ -207,9 +227,16 @@ def _undo_share_repair(db_profile_id: str, repair: _ShareRepair) -> None:
             tables.shares.update_item(
                 Key={"profileId": db_profile_id, "targetAccountId": target_account_id},
                 UpdateExpression="SET ownerAccountId = :previous_owner",
+                ConditionExpression="attribute_exists(targetAccountId)",
                 ExpressionAttributeValues={":previous_owner": previous_owner_id},
             )
-        except ClientError as e:
+        except Exception as e:
+            if isinstance(e, ClientError) and e.response.get("Error", {}).get("Code", "") == "ConditionalCheckFailedException":
+                # The share was revoked after the repair applied it and before the
+                # transfer failed. Its rollback target is absence, which already
+                # holds, so re-creating a ghost item would be wrong; treat the
+                # conflict as the rollback already being done.
+                continue
             logger.error(
                 "Failed to roll back share after aborted ownership transfer",
                 profile_id=db_profile_id,
@@ -219,8 +246,16 @@ def _undo_share_repair(db_profile_id: str, repair: _ShareRepair) -> None:
             )
     for share in repair.removed:
         try:
-            tables.shares.put_item(Item=share)
-        except ClientError as e:
+            tables.shares.put_item(
+                Item=share,
+                ConditionExpression="attribute_not_exists(targetAccountId)",
+            )
+        except Exception as e:
+            if isinstance(e, ClientError) and e.response.get("Error", {}).get("Code", "") == "ConditionalCheckFailedException":
+                # The new owner's share was re-added (or re-created) between the
+                # repair deletion and the rollback, so restoring it would
+                # duplicate a live item; the rollback target is already met.
+                continue
             logger.error(
                 "Failed to restore share after aborted ownership transfer",
                 profile_id=db_profile_id,
@@ -230,7 +265,7 @@ def _undo_share_repair(db_profile_id: str, repair: _ShareRepair) -> None:
             )
 
 
-def _repair_shares(db_profile_id: str, db_new_owner_id: str) -> Tuple[_ShareRepair, _ShareRepairFailures]:
+def _repair_shares(db_profile_id: str, db_new_owner_id: str, old_owner_id: str) -> Tuple[_ShareRepair, _ShareRepairFailures]:
     """Point every share of the profile at the incoming owner, before the transfer commits.
 
     - Deletes the share for the new owner (they are about to own the profile).
@@ -296,7 +331,7 @@ def _repair_shares(db_profile_id: str, db_new_owner_id: str) -> Tuple[_ShareRepa
                     ExpressionAttributeValues={":new_owner": db_new_owner_id},
                     ConditionExpression="attribute_exists(profileId) AND attribute_exists(targetAccountId)",
                 )
-                reassigned.append((target_account_id, share.get("ownerAccountId", db_new_owner_id)))
+                reassigned.append((target_account_id, share.get("ownerAccountId") or old_owner_id))
         except ClientError as e:
             transient = is_transient_client_error(e)
             if transient:
@@ -339,7 +374,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # retry takes the ordinary path again (#549). It is idempotent: re-pointing an
     # already-correct share and re-adding the new owner's already-deleted share are
     # both no-ops.
-    repair, failures = _repair_shares(db_profile_id, db_new_owner_id)
+    repair, failures = _repair_shares(db_profile_id, db_new_owner_id, profile["ownerAccountId"])
     if failures.transient or failures.permanent:
         _undo_share_repair(db_profile_id, repair)
         logger.error(
@@ -357,10 +392,24 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         _transfer_ownership(profile, db_profile_id, db_new_owner_id)
     except AppError:
-        # The transfer did not commit, so the profile still lives under the old
+        # The transaction is atomic, so a ClientError-turned-AppError proves the
+        # transfer never committed and the profile still lives under the old
         # owner; shares re-pointed at the incoming owner would lock every
         # collaborator out until the next attempt, so roll them back.
         _undo_share_repair(db_profile_id, repair)
         raise
+    except Exception as e:
+        # A raw non-client error (a BotoCoreError from the transaction) took this
+        # same rollback path too, so the repaired shares are never left on disk.
+        # Unlike the ClientError case the commit state is unknown, so a consistent
+        # read guards against un-doing an already-committed transfer.
+        if _transfer_without_commit_confirmed(db_profile_id, profile["ownerAccountId"]):
+            _undo_share_repair(db_profile_id, repair)
+            logger.error(
+                "Ownership transfer aborted; share repair rolled back",
+                profile_id=db_profile_id,
+                new_owner_account_id=db_new_owner_id,
+            )
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to transfer profile ownership") from e
 
     return profile
