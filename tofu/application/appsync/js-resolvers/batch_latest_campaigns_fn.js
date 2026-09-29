@@ -24,13 +24,12 @@
 // stripped by the esbuild bundle, but are banned too as defense-in-depth.
 // Enforced by tests/unit/check_templatefile_escaping.test.ts (#570).
 import { util, runtime } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 const tableName = '${campaigns_table_name}';
 
 function normalizeProfileId(profileId) {
-    return (typeof profileId === 'string' && profileId.startsWith('PROFILE#'))
-        ? profileId
-        : 'PROFILE#' + profileId;
+    return normalizeId(profileId, 'PROFILE#');
 }
 
 export function request(ctx) {

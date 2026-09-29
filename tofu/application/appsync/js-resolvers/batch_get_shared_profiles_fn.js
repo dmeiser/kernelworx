@@ -1,4 +1,5 @@
 import { util, runtime } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 /**
  * listMyShares pipeline - function 2 of 2.
@@ -30,10 +31,7 @@ const MAX_BATCH_KEYS = 100;
 const tableName = '${table_name}';
 
 function normalizeAccountId(accountId) {
-    if (typeof accountId !== 'string') {
-        accountId = '';
-    }
-    return accountId.startsWith('ACCOUNT#') ? accountId : 'ACCOUNT#' + accountId;
+    return normalizeId(accountId, 'ACCOUNT#') || 'ACCOUNT#';
 }
 
 export function request(ctx) {

@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     const profile = ctx.stash.profile;
@@ -9,7 +10,7 @@ export function request(ctx) {
     }
     
     // Check if caller is owner first (ownerAccountId uses ACCOUNT# prefix)
-    const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
+    const expectedOwner = normalizeId(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
     if (profile.ownerAccountId === expectedOwner) {
         ctx.stash.authorized = true;
         // No DB operation needed for owner - return a no-op that won't query the database
@@ -26,7 +27,7 @@ export function request(ctx) {
     // Not owner - check for share
     ctx.stash.authorized = false;
     const profileId = profile.profileId;  // Use profile.profileId which has PROFILE# prefix
-    const targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
+    const targetAccountId = normalizeId(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
     
     // Check for share in shares table: profileId + targetAccountId
     return {

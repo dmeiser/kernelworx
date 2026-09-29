@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     // If already owner or profile was invalid/not found, skip this check
@@ -21,7 +22,7 @@ export function request(ctx) {
     }
     
     // Get share from shares table using profileId + targetAccountId (caller's sub)
-    const targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
+    const targetAccountId = normalizeId(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
     
     return {
         operation: 'GetItem',

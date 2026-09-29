@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 /**
  * Checks whether the catalog is referenced by any shared campaigns.
@@ -10,8 +11,7 @@ import { util } from '@aws-appsync/utils';
  */
 export function request(ctx) {
     const catalogId = ctx.args.catalogId;
-    // Normalize catalogId to ensure CATALOG# prefix
-    const dbCatalogId = catalogId && catalogId.startsWith('CATALOG#') ? catalogId : `CATALOG#${catalogId}`;
+    const dbCatalogId = normalizeId(catalogId, 'CATALOG#');
 
     return {
         operation: 'Query',

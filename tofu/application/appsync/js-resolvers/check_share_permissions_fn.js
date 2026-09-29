@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     // If already authorized (owner or skipAuth), skip this check
@@ -28,8 +29,8 @@ export function request(ctx) {
     }
     
     // Normalize profileId to ensure PROFILE# prefix for share lookup
-    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
-    const targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
+    const dbProfileId = normalizeId(profileId, 'PROFILE#');
+    const targetAccountId = normalizeId(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
 
     // Look up share in shares table: profileId + targetAccountId
     return {
