@@ -168,6 +168,48 @@ class TestValidateQRS3Key:
         assert payment_methods.validate_qr_s3_key(s3_key, account_id) is False
 
 
+class TestGetQRCodeS3Key:
+    """Test get_qr_code_s3_key (slug-shaped, pre-UUID-migration keys).
+
+    Regression: #529 — this builder is load-bearing production code, not
+    test-only. The presigned-URL read path uses it to locate QR objects
+    uploaded before the UUID-key migration, so it must keep producing the
+    same slug-shaped keys those objects were stored under.
+    """
+
+    def test_builds_slug_shaped_key(self) -> None:
+        """The key is the slug of the payment method name, not a UUID."""
+        assert payment_methods.get_qr_code_s3_key("acct-1", "Venmo") == "payment-qr-codes/acct-1/venmo.png"
+
+    def test_slugifies_multiword_names(self) -> None:
+        """Multi-word / special-character names slugify to the stored slug."""
+        assert payment_methods.get_qr_code_s3_key("acct-1", "Venmo - Tom") == "payment-qr-codes/acct-1/venmo-tom.png"
+
+    def test_custom_extension(self) -> None:
+        """The file extension is honored."""
+        assert payment_methods.get_qr_code_s3_key("acct-1", "Venmo", "jpg") == "payment-qr-codes/acct-1/venmo.jpg"
+
+    def test_read_path_locates_pre_migration_slug_keyed_object(self, s3_bucket: Any, sample_account_id: str) -> None:
+        """The name-based read path finds a pre-UUID-migration slug-keyed object.
+
+        This is the production reachability the #529 docstring fix protects:
+        generate_presigned_get_url with no s3Key locates the object via
+        _find_existing_qr_s3_key, which builds the key with get_qr_code_s3_key.
+        Routing that lookup through the UUID builder would stop finding the
+        slug-keyed objects this builder exists to serve.
+        """
+        bucket_name = os.environ.get("EXPORTS_BUCKET")
+        # A slug-keyed object as created before the UUID-key migration.
+        slug_key = payment_methods.get_qr_code_s3_key(sample_account_id, "Venmo - Tom")
+        s3_bucket.put_object(Bucket=bucket_name, Key=slug_key, Body=b"fake-qr")
+
+        # No s3Key supplied, so the name-based slug lookup must find it.
+        url = payment_methods.generate_presigned_get_url(sample_account_id, "Venmo - Tom")
+
+        assert url is not None
+        assert "venmo-tom.png" in url
+
+
 class TestGenerateQRCodeS3Key:
     """Test generate_qr_code_s3_key function (UUID-based)."""
 

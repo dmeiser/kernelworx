@@ -51,10 +51,16 @@ QR_CODE_S3_PREFIX = "payment-qr-codes"
 
 
 def get_qr_code_s3_key(account_id: str, payment_method_name: str, extension: str = "png") -> str:
-    """Generate S3 key for a payment method QR code.
+    """Build the slug-shaped S3 key for a payment method QR code.
 
-    DEPRECATED: Use generate_qr_code_s3_key() for new uploads.
-    This function remains for compatibility with tests that rely on predictable keys.
+    New uploads store a UUID key instead (generate_qr_code_s3_key()), so this
+    builder is not used to write new objects. It is still load-bearing
+    production code, not test-only: the presigned-URL read path
+    (generate_presigned_get_url -> _find_existing_qr_s3_key) uses it to locate
+    and serve QR objects uploaded before the UUID-key migration. Removing it
+    would leave those pre-migration slug-keyed objects unlocatable by the
+    name-based read path; drop it only once no such objects remain in
+    EXPORTS_BUCKET.
 
     Args:
         account_id: Account ID
