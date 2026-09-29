@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId, stripIdPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     // If not authorized, return empty query
@@ -16,7 +17,7 @@ export function request(ctx) {
     
     const profileId = ctx.args.profileId;
     // Normalize profileId to ensure PROFILE# prefix
-    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeId(profileId, 'PROFILE#');
     // Query shares table directly by PK (profileId)
     return {
         operation: 'Query',
@@ -38,8 +39,6 @@ export function response(ctx) {
     const items = ctx.result.items || [];
     return items.map(item => ({
         ...item,
-        targetAccountId: item.targetAccountId && item.targetAccountId.startsWith('ACCOUNT#')
-            ? item.targetAccountId.substring(8)
-            : item.targetAccountId
+        targetAccountId: stripIdPrefix(item.targetAccountId, 'ACCOUNT#')
     }));
 }

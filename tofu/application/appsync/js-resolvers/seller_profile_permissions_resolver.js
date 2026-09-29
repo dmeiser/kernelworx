@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     const callerAccountId = ctx.identity.sub;
@@ -6,8 +7,9 @@ export function request(ctx) {
     const profileId = ctx.source.profileId;
     
     // Check ownership - handle both prefixed (ACCOUNT#xxx) and clean (xxx) ownerAccountId
-    const expectedOwnerPrefixed = 'ACCOUNT#' + callerAccountId;
-    if (expectedOwnerPrefixed === ownerAccountId || callerAccountId === ownerAccountId) {
+    const normalizedCaller = normalizeId(callerAccountId, 'ACCOUNT#');
+    const normalizedOwner = normalizeId(ownerAccountId, 'ACCOUNT#');
+    if (normalizedCaller && normalizedCaller === normalizedOwner) {
         ctx.stash.isOwner = true;
         // Return a no-op query
         return {
@@ -17,9 +19,9 @@ export function request(ctx) {
     }
     
     // Normalize profileId to ensure PROFILE# prefix for share lookup
-    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeId(profileId, 'PROFILE#');
     // Normalize targetAccountId to ensure ACCOUNT# prefix for share lookup
-    const dbTargetAccountId = callerAccountId && callerAccountId.startsWith('ACCOUNT#') ? callerAccountId : `ACCOUNT#${callerAccountId}`;
+    const dbTargetAccountId = normalizeId(callerAccountId, 'ACCOUNT#');
     
     // Query shares table for share record: profileId + targetAccountId
     return {

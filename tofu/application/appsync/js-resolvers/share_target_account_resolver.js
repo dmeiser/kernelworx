@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 // Fields of the DynamoDB account item that are safe to expose to any
 // collaborator who can list shares on a profile (#455). The full item —
@@ -21,9 +22,7 @@ export function request(ctx) {
     const targetAccountId = ctx.source.targetAccountId;
 
     // Normalize accountId to ensure ACCOUNT# prefix
-    const dbAccountId = targetAccountId && targetAccountId.startsWith('ACCOUNT#')
-        ? targetAccountId
-        : `ACCOUNT#${targetAccountId}`;
+    const dbAccountId = targetAccountId ? normalizeId(targetAccountId, 'ACCOUNT#') : targetAccountId;
 
     return {
         operation: 'GetItem',

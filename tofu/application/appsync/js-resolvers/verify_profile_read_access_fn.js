@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     // If campaign not found, skip this function
@@ -39,7 +40,7 @@ export function request(ctx) {
     ctx.stash.profileId = profileId;
     
     // Add PROFILE# prefix for DynamoDB query (field resolver strips it for API responses)
-    const dbProfileId = profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeId(profileId, 'PROFILE#');
     
     // NEW STRUCTURE: Query profileId-index GSI to find profile
     return {

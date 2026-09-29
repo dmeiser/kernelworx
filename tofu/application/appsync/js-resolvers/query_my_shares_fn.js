@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 /**
  * listMyShares pipeline - function 1 of 2.
@@ -25,10 +26,7 @@ import { util } from '@aws-appsync/utils';
 const MAX_PAGE_LIMIT = 100;
 
 function normalizeAccountId(accountId) {
-    if (typeof accountId !== 'string') {
-        accountId = '';
-    }
-    return accountId.startsWith('ACCOUNT#') ? accountId : `ACCOUNT#${accountId}`;
+    return normalizeId(accountId, 'ACCOUNT#') || 'ACCOUNT#';
 }
 
 function hasAccessiblePermissions(permissions) {

@@ -1,10 +1,11 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     const profileId = ctx.args.profileId;
     
     // Add PROFILE# prefix if not present (frontend sends clean UUIDs)
-    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeId(profileId, 'PROFILE#');
     
     // Validate profileId exists
     if (!profileId) {
@@ -56,10 +57,10 @@ export function response(ctx) {
     }
     
     // Check if caller is owner - ownerAccountId now has 'ACCOUNT#' prefix
-    const callerSub = ctx.identity.sub;
+    const callerSub = ctx.identity && ctx.identity.sub;
     const profileOwner = profile.ownerAccountId;
     
-    if (profileOwner === 'ACCOUNT#' + callerSub) {
+    if (profileOwner === normalizeId(callerSub, 'ACCOUNT#')) {
         ctx.stash.isOwner = true;
         ctx.stash.hasWritePermission = true;
         return { authorized: true };
@@ -74,8 +75,9 @@ export function response(ctx) {
     
     // Only set profileId if it's valid, otherwise skip second function
     const profileIdArg = ctx.args.profileId;
-    if (profileIdArg && profileIdArg.startsWith('PROFILE#')) {
-        ctx.stash.profileId = profileIdArg;
+    const normalizedProfileIdArg = normalizeId(profileIdArg, 'PROFILE#');
+    if (normalizedProfileIdArg) {
+        ctx.stash.profileId = normalizedProfileIdArg;
     } else {
         ctx.stash.hasWritePermission = false;
         ctx.stash.skipGetItem = true; // Signal to skip next function

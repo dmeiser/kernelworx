@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 // This code backs TWO aws_appsync_function resources (verify_profile_write_access
 // and verify_profile_write_access_step2 in functions_sharing.tf) that run
@@ -52,9 +53,7 @@ function resolveDbProfileId(ctx) {
         return null;
     }
 
-    return (typeof profileId === 'string' && profileId.startsWith('PROFILE#'))
-        ? profileId
-        : 'PROFILE#' + profileId;
+    return normalizeId(profileId, 'PROFILE#');
 }
 
 export function request(ctx) {
@@ -107,9 +106,7 @@ export function request(ctx) {
         util.error('Profile ID is required', 'INVALID_INPUT');
     }
 
-    const callerAccountId = ctx.identity && ctx.identity.sub && ctx.identity.sub.startsWith('ACCOUNT#')
-        ? ctx.identity.sub
-        : 'ACCOUNT#' + (ctx.identity && ctx.identity.sub ? ctx.identity.sub : '');
+    const callerAccountId = normalizeId(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
 
     return {
         operation: 'GetItem',
