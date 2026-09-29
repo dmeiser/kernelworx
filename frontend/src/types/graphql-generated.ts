@@ -351,8 +351,6 @@ export type GqlMutation = {
   adminDeleteShare: Scalars['Boolean']['output'];
   /** Delete all campaigns across all profiles owned by the given account (admin only). Returns the number of campaigns deleted. */
   adminDeleteUserCampaigns: Scalars['Int']['output'];
-  /** Soft-delete all catalogs owned by the given account (admin only). Returns the number of catalogs soft-deleted. */
-  adminDeleteUserCatalogs: Scalars['Int']['output'];
   /** Delete all orders across all campaigns of all profiles owned by the given account (admin only). Returns the number of orders deleted. */
   adminDeleteUserOrders: Scalars['Int']['output'];
   /** Delete all profiles owned by the given account (admin only). Returns the number of profiles deleted. */
@@ -443,11 +441,6 @@ export type GqlMutation_AdminDeleteUserCampaignsArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
-export type GqlMutation_AdminDeleteUserCatalogsArgs = {
-  accountId: Scalars['ID']['input'];
-};
-
-/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_AdminDeleteUserOrdersArgs = {
   accountId: Scalars['ID']['input'];
 };
@@ -465,6 +458,7 @@ export type GqlMutation_AdminDeleteUserSharesArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_AdminPurgeUserAccountArgs = {
   accountId: Scalars['ID']['input'];
+  profileIds: Array<Scalars['ID']['input']>;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -2679,6 +2673,7 @@ export type GqlAdminResetUserPasswordMutation = { __typename?: 'Mutation'; admin
 
 export type GqlAdminPurgeUserAccountMutationVariables = Exact<{
   accountId: Scalars['ID']['input'];
+  profileIds: Array<Scalars['ID']['input']>;
 }>;
 
 export type GqlAdminPurgeUserAccountMutation = { __typename?: 'Mutation'; adminPurgeUserAccount: boolean };

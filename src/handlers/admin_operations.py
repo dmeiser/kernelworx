@@ -3,14 +3,19 @@ Admin operations handlers for superadmin functionality.
 
 Provides:
 - adminResetUserPassword: Send password reset email to user
-- adminPurgeUserAccount: Delete the account record and the Cognito user
+- adminPurgeUserAccount: Sweep the client-unreachable residue, then delete the
+  accounts record and the Cognito user
 - createManagedCatalog: Create an ADMIN_MANAGED global catalog
 
 User deletion is client-side by decision (#521). The client issues the
-per-entity ``adminDeleteUser*`` mutations it can reach, and calls
-``adminPurgeUserAccount`` for exactly the two things a browser cannot do
-itself: deleting the ``accounts`` record and deleting the Cognito user.
-Catalogs are never deleted.
+per-entity ``adminDeleteUser*`` mutations it can reach, reads the profile IDs
+with ``adminGetUserProfiles`` before deleting the profile rows, and calls
+``adminPurgeUserAccount`` with them as ``profileIds``. The purge sweeps the
+four classes the browser cannot reach itself — invites for the account's
+profiles, inbound shares on other owners' profiles, S3 report objects, and
+payment-QR S3 objects — reusing the shared ``deletion_cascade`` helpers, then
+deletes the ``accounts`` record and the Cognito user. Catalogs are never
+deleted.
 """
 
 import re
@@ -25,9 +30,12 @@ from botocore.exceptions import ClientError
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
 from .deletion_cascade import (
+    delete_inbound_shares,
+    delete_invites_for_owned_profiles,
     delete_user_campaigns,
     delete_user_orders,
     delete_user_profiles,
+    delete_user_s3_reports,
     delete_user_shares,
     get_user_profiles,
     normalize_account_id,
@@ -41,6 +49,7 @@ try:  # pragma: no cover
     from utils.dynamodb import EMAIL_SEARCH_KEY, batch_get_chunked, get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
+    from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
     from ..utils.boto import get_cognito_client
@@ -48,6 +57,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import EMAIL_SEARCH_KEY, batch_get_chunked, get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
+    from ..utils.payment_methods import delete_all_user_qr_codes
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -882,10 +892,20 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     deliberately minimal server-side operation that user deletion cannot be
     completed without (#521): the browser holds no AWS credentials, so it can
     neither delete the ``accounts`` table row nor call Cognito
-    ``AdminDeleteUser``. Everything else in a user deletion (orders,
-    campaigns, shares, invites, inbound shares, S3 reports, profiles, payment
-    QR codes) is deleted by the client through the per-entity
-    ``adminDeleteUser*`` mutations, and catalogs are never deleted.
+    ``AdminDeleteUser``. Everything else a browser CAN delete (orders,
+    campaigns, shares, profiles) is deleted by the client through the
+    per-entity ``adminDeleteUser*`` mutations, and catalogs are never deleted.
+
+    The caller supplies the profile IDs it read via ``adminGetUserProfiles``
+    BEFORE deleting the profile rows, as the ``profileIds`` argument. The purge
+    first verifies each of them is actually gone with a strongly consistent
+    read — a surviving profile means the client cascade has not completed, so
+    it refuses with CONFLICT and deletes nothing — then sweeps the four
+    classes the browser cannot reach, reusing the shared deletion_cascade
+    helpers: invites for the account's profiles, inbound shares on other
+    owners' profiles, S3 report objects, and payment-QR S3 objects. Invites
+    and reports are keyed by profileId, which survives the deleted profile
+    rows.
 
     Call this after the client's per-entity deletes, so a failure there leaves
     the account intact rather than half-deleted.
@@ -899,12 +919,14 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
 
     Raises:
         AppError: If not admin, self-purge is attempted, the user does not
-            exist, or a deletion error occurs. An absent Cognito user is
-            treated as idempotent success.
+            exist, a supplied profile still exists (CONFLICT), or a deletion
+            error occurs. An absent Cognito user is treated as idempotent
+            success.
     """
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
+    profile_ids = _validate_profile_ids_argument(event.get("arguments", {}).get("profileIds"))
 
     caller_id = event.get("identity", {}).get("sub")
     _check_not_self_deletion(str(caller_id), account_id)
@@ -917,6 +939,17 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
 
     if not username and not account_exists:
         raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
+
+    # The purge runs after the client's per-entity deletes (#521). It verifies
+    # rather than trusts: while any supplied profile still exists the cascade
+    # has not completed, so nothing is deleted and the account stays intact.
+    _assert_profiles_deleted(account_id, profile_ids, logger)
+
+    profiles_for_sweep = [{"profileId": profile_id} for profile_id in profile_ids]
+    delete_invites_for_owned_profiles(profiles_for_sweep, logger)
+    delete_inbound_shares(account_id, logger)
+    delete_user_s3_reports(profiles_for_sweep, logger)
+    delete_all_user_qr_codes(account_id, logger)
 
     if username:
         _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
@@ -936,6 +969,42 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
 
     logger.info("User account purged", account_id=account_id, email=mask_email(email))
     return True
+
+
+def _validate_profile_ids_argument(profile_ids: Any) -> list[str]:
+    """Validate the client-supplied profileIds list for the purge (#521).
+
+    The schema requires ``[ID!]!``; this guards the Lambda entry point itself,
+    which a caller can reach without going through GraphQL validation.
+    """
+    if not isinstance(profile_ids, list) or not all(
+        isinstance(profile_id, str) and profile_id.strip() for profile_id in profile_ids
+    ):
+        raise AppError(ErrorCode.INVALID_INPUT, "profileIds must be a list of profile IDs")
+    return profile_ids
+
+
+def _assert_profiles_deleted(account_id: str, profile_ids: list[str], logger: Any) -> None:
+    """Refuse the purge while any client-reported-deleted profile still exists (#521).
+
+    The strongly consistent read is required because the profile rows were
+    just deleted by a different writer (the client's cascade moments earlier).
+    """
+    db_account_id = normalize_account_id(account_id)
+    for profile_id in profile_ids:
+        try:
+            response = tables.profiles.get_item(
+                Key={"ownerAccountId": db_account_id, "profileId": profile_id},
+                ConsistentRead=True,
+            )
+        except ClientError as e:
+            _raise_batch_lookup_error("verify profile deletion", logger, e, profile_id=profile_id)
+        if "Item" in response:
+            logger.warning("Purge refused: profile still present", profile_id=profile_id)
+            raise AppError(
+                ErrorCode.CONFLICT,
+                "The account's profiles must be deleted before the account can be purged",
+            )
 
 
 def _parse_product_price(price: Any) -> Decimal:

@@ -61,6 +61,17 @@ def get_catalogs_table() -> Any:
     return dynamodb.Table("kernelworx-catalogs-ue1-dev")
 
 
+@pytest.fixture(autouse=True)
+def _stub_s3_client_slots(monkeypatch: Any) -> None:
+    """Stub the S3 client slots used by the purge's S3 sweeps for every test in this module.
+
+    The sweeps page through this stub, so they are no-ops unless a test
+    replaces the slot with a configured client (see TestAdminPurgeUserAccount).
+    """
+    monkeypatch.setattr("src.handlers.delete_profile_cascade.s3_client", MagicMock())
+    monkeypatch.setattr("src.utils.payment_methods.s3_client", MagicMock())
+
+
 @pytest.fixture
 def sample_account_id() -> str:
     """Sample account ID (Cognito sub) as a valid UUID."""
@@ -164,7 +175,7 @@ class TestLambdaHandler:
         event = {
             **admin_appsync_event,
             "info": {"fieldName": "adminPurgeUserAccount"},
-            "arguments": {"accountId": target_account_id},
+            "arguments": {"accountId": target_account_id, "profileIds": []},
         }
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
@@ -1528,9 +1539,10 @@ class TestAdminPurgeUserAccount:
     """Tests for admin_purge_user_account handler (#521).
 
     Deletion is client-side by decision: the client issues the per-entity
-    adminDeleteUser* mutations and calls this operation for exactly the two
-    things a browser cannot do itself, the accounts record and the Cognito
-    user. Catalogs are never deleted.
+    adminDeleteUser* mutations and calls this operation for the four classes
+    it cannot reach (invites for owned profiles, inbound shares, S3 reports,
+    payment-QR codes) plus the two things no browser can do itself, the
+    accounts record and the Cognito user. Catalogs are never deleted.
     """
 
     def _seed_account(self, account_id: str) -> None:
@@ -1541,6 +1553,12 @@ class TestAdminPurgeUserAccount:
                 "createdAt": datetime.now(timezone.utc).isoformat(),
             }
         )
+
+    def _mock_cognito(self, target_account_id: str) -> MagicMock:
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.return_value = {"Users": [{"Username": target_account_id}]}
+        mock_cognito.admin_delete_user.return_value = {}
+        return mock_cognito
 
     def test_deletes_account_record_and_cognito_user(
         self,
@@ -1556,12 +1574,10 @@ class TestAdminPurgeUserAccount:
         target_account_id = "11111111-1111-1111-1111-111111111111"
         self._seed_account(target_account_id)
 
-        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id}}
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
-            mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {"Users": [{"Username": target_account_id}]}
-            mock_cognito.admin_delete_user.return_value = {}
+            mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
             result = admin_purge_user_account(event, lambda_context)
@@ -1577,34 +1593,33 @@ class TestAdminPurgeUserAccount:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """The purge is minimal: the client owns the per-entity deletes (#521)."""
+        """The purge writes only the accounts row; the client owns the per-entity deletes (#521)."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
         target_account_id = "target-user-123"
         self._seed_account(target_account_id)
 
-        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id}}
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
-            mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {"Users": [{"Username": target_account_id}]}
-            mock_cognito.admin_delete_user.return_value = {}
+            mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
             with patch("src.handlers.admin_operations.tables") as mock_tables:
                 mock_tables.accounts.get_item.return_value = {"Item": {"accountId": "ACCOUNT#target-user-123"}}
+                mock_tables.profiles.get_item.return_value = {}
                 result = admin_purge_user_account(event, lambda_context)
 
                 assert result is True
-                # Only the accounts row is written; no other table is touched.
-                touched = {call_args[0][0] for call_args in mock_tables.method_calls if call_args[0]}
-                assert "catalogs" not in touched
-                assert "profiles" not in touched
-                assert "campaigns" not in touched
-                assert "orders" not in touched
-                assert "shares" not in touched
-                assert "invites" not in touched
+                writes = [
+                    name
+                    for name, _args, _kwargs in mock_tables.mock_calls
+                    if name.split(".")[-1] in {"delete_item", "put_item", "update_item", "batch_write_item"}
+                ]
+                assert writes == ["accounts.delete_item"]
+                profile_ops = [name for name, _a, _k in mock_tables.mock_calls if name.startswith("profiles.")]
+                assert set(profile_ops) <= {"profiles.get_item"}
 
     def test_catalog_survives_a_purge(
         self,
@@ -1634,12 +1649,10 @@ class TestAdminPurgeUserAccount:
             }
         )
 
-        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id}}
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
-            mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {"Users": [{"Username": target_account_id}]}
-            mock_cognito.admin_delete_user.return_value = {}
+            mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
             assert admin_purge_user_account(event, lambda_context) is True
@@ -1647,6 +1660,286 @@ class TestAdminPurgeUserAccount:
         catalog = catalogs_table.get_item(Key={"catalogId": "CATALOG#owned-catalog"}).get("Item")
         assert catalog is not None
         assert catalog.get("isDeleted") is not True
+
+    def test_refuses_while_a_profile_remains(
+        self,
+        dynamodb_table: Any,
+        profiles_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A surviving profile means the client cascade never finished: refuse with CONFLICT (#521)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{target_account_id}",
+                "profileId": "PROFILE#p1",
+                "sellerName": "Still There",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.CONFLICT
+        # Nothing was deleted: the Cognito user and the accounts row survive.
+        mock_cognito.admin_delete_user.assert_not_called()
+        assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+
+    def test_succeeds_once_the_profiles_are_gone(
+        self,
+        dynamodb_table: Any,
+        profiles_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """After the client deleted every profile, the verification read finds none and the purge completes."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+        assert result is True
+        mock_cognito.admin_delete_user.assert_called_once()
+        assert "Item" not in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+
+    def test_purge_sweeps_invites_for_the_supplied_profiles(
+        self,
+        dynamodb_table: Any,
+        invites_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Invites on the account's profiles are swept; invites on other profiles survive."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+
+        invites_table.put_item(Item={"inviteCode": "INV-OWNED", "profileId": "PROFILE#p1", "status": "PENDING"})
+        invites_table.put_item(Item={"inviteCode": "INV-OTHER", "profileId": "PROFILE#other", "status": "PENDING"})
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_get_client.return_value = self._mock_cognito(target_account_id)
+            assert admin_purge_user_account(event, lambda_context) is True
+
+        assert invites_table.get_item(Key={"inviteCode": "INV-OWNED"}).get("Item") is None
+        assert invites_table.get_item(Key={"inviteCode": "INV-OTHER"}).get("Item") is not None
+
+    def test_purge_sweeps_inbound_shares(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Shares granting the deleted account access to other owners' profiles are swept."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+
+        shares_table.put_item(
+            Item={"profileId": "PROFILE#other-owner", "targetAccountId": f"ACCOUNT#{target_account_id}"}
+        )
+        shares_table.put_item(
+            Item={"profileId": "PROFILE#other-owner", "targetAccountId": "ACCOUNT#someone-else"}
+        )
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_get_client.return_value = self._mock_cognito(target_account_id)
+            assert admin_purge_user_account(event, lambda_context) is True
+
+        assert shares_table.get_item(Key={"profileId": "PROFILE#other-owner", "targetAccountId": "ACCOUNT#target-user-123"}).get("Item") is None
+        assert shares_table.get_item(Key={"profileId": "PROFILE#other-owner", "targetAccountId": "ACCOUNT#someone-else"}).get("Item") is not None
+
+    def test_purge_deletes_s3_reports_for_the_supplied_profiles(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """The report objects under each supplied profile's prefix are deleted."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = [
+            {"Versions": [{"Key": "reports/PROFILE#p1/report.xlsx", "VersionId": "v1"}], "DeleteMarkers": []}
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+        monkeypatch.setattr("src.handlers.delete_profile_cascade.s3_client", mock_s3)
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_get_client.return_value = self._mock_cognito(target_account_id)
+            assert admin_purge_user_account(event, lambda_context) is True
+
+        deleted = mock_s3.delete_objects.call_args.kwargs["Delete"]["Objects"]
+        assert deleted == [{"Key": "reports/PROFILE#p1/report.xlsx", "VersionId": "v1"}]
+
+    def test_purge_deletes_payment_qr_codes(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """The payment-QR S3 objects for the account are deleted."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("EXPORTS_BUCKET", "test-qr-bucket")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+
+        mock_s3 = MagicMock()
+        mock_paginator = MagicMock()
+        mock_paginator.paginate.return_value = [
+            {
+                "Versions": [
+                    {"Key": "payment-qr-codes/target-user-123/visa.png", "VersionId": "v1"},
+                ],
+                "DeleteMarkers": [],
+            }
+        ]
+        mock_s3.get_paginator.return_value = mock_paginator
+        monkeypatch.setattr("src.utils.payment_methods.s3_client", mock_s3)
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_get_client.return_value = self._mock_cognito(target_account_id)
+            assert admin_purge_user_account(event, lambda_context) is True
+
+        assert mock_s3.delete_objects.call_count >= 1
+        deleted_keys = {
+            obj["Key"]
+            for call_obj in mock_s3.delete_objects.call_args_list
+            for obj in call_obj.kwargs["Delete"]["Objects"]
+        }
+        assert "payment-qr-codes/target-user-123/visa.png" in deleted_keys
+
+    @pytest.mark.parametrize(
+        "bad_profile_ids",
+        [None, "PROFILE#p1", ["PROFILE#p1", ""], [123]],
+    )
+    def test_rejects_malformed_profile_ids(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        bad_profile_ids: Any,
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A non-list or empty-member profileIds argument fails validation before any lookup."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {**admin_appsync_event, "arguments": {"accountId": "target-user-123", "profileIds": bad_profile_ids}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        mock_cognito.list_users.assert_not_called()
+
+    def test_profile_verification_throttling_returns_resource_busy(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A throttled verification read is retryable and deletes nothing (#291)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_get_client.return_value = mock_cognito
+
+            with patch("src.handlers.admin_operations.tables") as mock_tables:
+                mock_tables.accounts.get_item.return_value = {"Item": {"accountId": "ACCOUNT#target-user-123"}}
+                mock_tables.profiles.get_item.side_effect = ClientError(
+                    {"Error": {"Code": "ProvisionedThroughputExceededException"}}, "GetItem"
+                )
+                result = admin_purge_user_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+        mock_cognito.admin_delete_user.assert_not_called()
+
+    def test_absent_account_record_still_deletes_cognito_user(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A partially-migrated account (Cognito only) is still purged."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "cognito-only-user-1"
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+        assert result is True
+        mock_cognito.admin_delete_user.assert_called_once_with(UserPoolId="test-pool-id", Username=target_account_id)
+        assert "Item" not in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
 
     def test_self_purge_rejected(
         self,
@@ -1658,7 +1951,10 @@ class TestAdminPurgeUserAccount:
         """An admin cannot purge their own account (#125)."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
-        event = {**admin_appsync_event, "arguments": {"accountId": admin_appsync_event["identity"]["sub"]}}
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": admin_appsync_event["identity"]["sub"], "profileIds": []},
+        }
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_get_client.return_value = MagicMock()
@@ -1678,7 +1974,7 @@ class TestAdminPurgeUserAccount:
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
-        event = {**admin_appsync_event, "arguments": {"accountId": "ghost-user"}}
+        event = {**admin_appsync_event, "arguments": {"accountId": "ghost-user", "profileIds": []}}
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
@@ -1705,7 +2001,7 @@ class TestAdminPurgeUserAccount:
         target_account_id = "partial-user-1"
         self._seed_account(target_account_id)
 
-        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id}}
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
@@ -1730,16 +2026,15 @@ class TestAdminPurgeUserAccount:
         target_account_id = "target-user-123"
         self._seed_account(target_account_id)
 
-        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id}}
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
-            mock_cognito = MagicMock()
-            mock_cognito.list_users.return_value = {"Users": [{"Username": target_account_id}]}
-            mock_cognito.admin_delete_user.return_value = {}
+            mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
             with patch("src.handlers.admin_operations.tables") as mock_tables:
                 mock_tables.accounts.get_item.return_value = {"Item": {"accountId": "ACCOUNT#target-user-123"}}
+                mock_tables.profiles.get_item.return_value = {}
                 mock_tables.accounts.delete_item.side_effect = ClientError(
                     {"Error": {"Code": "ResourceNotFoundException"}}, "DeleteItem"
                 )
@@ -1760,7 +2055,7 @@ class TestAdminPurgeUserAccount:
         """Metacharacter accountIds are rejected before the Cognito sub filter (#124)."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
 
-        event = {**admin_appsync_event, "arguments": {"accountId": bad_account_id}}
+        event = {**admin_appsync_event, "arguments": {"accountId": bad_account_id, "profileIds": []}}
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()

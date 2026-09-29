@@ -64,6 +64,7 @@ import {
   ADMIN_DELETE_USER_CAMPAIGNS,
   ADMIN_DELETE_USER_SHARES,
   ADMIN_DELETE_USER_PROFILES,
+  ADMIN_GET_USER_PROFILES,
   CREATE_MANAGED_CATALOG,
   UPDATE_CATALOG,
   DELETE_CATALOG,
@@ -85,6 +86,8 @@ import type {
   GqlAdminDeleteUserSharesMutationVariables,
   GqlAdminDeleteUserProfilesMutation,
   GqlAdminDeleteUserProfilesMutationVariables,
+  GqlAdminGetUserProfilesQuery,
+  GqlAdminGetUserProfilesQueryVariables,
 } from '../types/graphql-generated';
 
 // --- Type Definitions ---
@@ -551,6 +554,14 @@ export const AdminPage: React.FC = () => {
   const [purgeUserAccount] = useMutation<GqlAdminPurgeUserAccountMutation, GqlAdminPurgeUserAccountMutationVariables>(
     ADMIN_PURGE_USER_ACCOUNT,
   );
+  // The purge needs the profile IDs read BEFORE the profile rows are deleted,
+  // because the server sweeps the profile-keyed residue by them (#521).
+  const [getUserProfilesForPurge] = useLazyQuery<
+    GqlAdminGetUserProfilesQuery,
+    GqlAdminGetUserProfilesQueryVariables
+  >(ADMIN_GET_USER_PROFILES, {
+    fetchPolicy: 'network-only',
+  });
 
   const catalogs = catalogsData?.listManagedCatalogs || [];
 
@@ -658,13 +669,18 @@ export const AdminPage: React.FC = () => {
       completed.push(`Deleted ${sharesResult.data?.adminDeleteUserShares ?? 0} shares`);
 
       setDeleteProgress({ step: 'Deleting profiles...', completed: [...completed] });
+      // The server purge sweeps the profile-keyed residue (invites, S3
+      // reports) by profile ID, so the IDs must be read while the profile
+      // rows still exist (#521).
+      const profilesData = await getUserProfilesForPurge({ variables: { accountId } });
+      const profileIds = (profilesData.data?.adminGetUserProfiles ?? []).map((profile) => profile.profileId);
       const profilesResult = await deleteUserProfiles({ variables: { accountId } });
       completed.push(`Deleted ${profilesResult.data?.adminDeleteUserProfiles ?? 0} profiles`);
 
       // Last: the accounts record and the Cognito user, which a browser with
       // no AWS credentials cannot delete itself.
       setDeleteProgress({ step: 'Deleting user account...', completed: [...completed] });
-      await purgeUserAccount({ variables: { accountId } });
+      await purgeUserAccount({ variables: { accountId, profileIds } });
       completed.push('User account deleted');
 
       // Success!

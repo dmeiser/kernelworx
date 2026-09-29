@@ -912,8 +912,8 @@ export const ADMIN_RESET_USER_PASSWORD = gql`
 `;
 
 export const ADMIN_PURGE_USER_ACCOUNT = gql`
-  mutation AdminPurgeUserAccount($accountId: ID!) {
-    adminPurgeUserAccount(accountId: $accountId)
+  mutation AdminPurgeUserAccount($accountId: ID!, $profileIds: [ID!]!) {
+    adminPurgeUserAccount(accountId: $accountId, profileIds: $profileIds)
   }
 `;
 

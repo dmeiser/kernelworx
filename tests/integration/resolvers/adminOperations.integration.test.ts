@@ -38,8 +38,8 @@ const ADMIN_RESET_USER_PASSWORD = gql`
 `;
 
 const ADMIN_PURGE_USER_ACCOUNT = gql`
-  mutation AdminPurgeUserAccount($accountId: ID!) {
-    adminPurgeUserAccount(accountId: $accountId)
+  mutation AdminPurgeUserAccount($accountId: ID!, $profileIds: [ID!]!) {
+    adminPurgeUserAccount(accountId: $accountId, profileIds: $profileIds)
   }
 `;
 
@@ -465,6 +465,7 @@ describe('Admin Operations Integration Tests', () => {
             mutation: ADMIN_PURGE_USER_ACCOUNT,
             variables: {
               accountId: 'any-account-id',
+              profileIds: [],
             },
           })
         ).rejects.toThrow(/Admin access required|FORBIDDEN/i);
@@ -476,6 +477,7 @@ describe('Admin Operations Integration Tests', () => {
             mutation: ADMIN_PURGE_USER_ACCOUNT,
             variables: {
               accountId: 'any-account-id',
+              profileIds: [],
             },
           })
         ).rejects.toThrow(/Admin access required|FORBIDDEN/i);
@@ -487,6 +489,7 @@ describe('Admin Operations Integration Tests', () => {
             mutation: ADMIN_PURGE_USER_ACCOUNT,
             variables: {
               accountId: adminAccountId,
+              profileIds: [],
             },
           })
         ).rejects.toThrow(/Cannot delete your own account|INVALID_INPUT/i);
@@ -500,6 +503,7 @@ describe('Admin Operations Integration Tests', () => {
             mutation: ADMIN_PURGE_USER_ACCOUNT,
             variables: {
               accountId: 'nonexistent-account-id-12345',
+              profileIds: [],
             },
           })
         ).rejects.toThrow(/not found|NOT_FOUND/i);
@@ -511,6 +515,7 @@ describe('Admin Operations Integration Tests', () => {
             mutation: ADMIN_PURGE_USER_ACCOUNT,
             variables: {
               accountId: '   ',
+              profileIds: [],
             },
           })
         ).rejects.toThrow(/Account ID is required|INVALID_INPUT/i);
@@ -541,6 +546,7 @@ describe('Admin Operations Integration Tests', () => {
           mutation: ADMIN_PURGE_USER_ACCOUNT,
           variables: {
             accountId: tempAccountId.replace('ACCOUNT#', ''),
+            profileIds: [],
           },
         });
 

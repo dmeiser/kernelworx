@@ -1129,6 +1129,8 @@ type Mutation {
   adminPurgeUserAccount(
     """The account ID to delete."""
     accountId: ID!
+    """The profile IDs the caller read via adminGetUserProfiles before deleting the profile rows. The purge refuses with CONFLICT while any of them still exists, then sweeps the profile-keyed residue the browser cannot reach."""
+    profileIds: [ID!]!
   ): Boolean!
   """Delete all orders across all campaigns of all profiles owned by the given account (admin only). Returns the number of orders deleted."""
   adminDeleteUserOrders(

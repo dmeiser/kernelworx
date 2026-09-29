@@ -22,6 +22,7 @@ import {
   ADMIN_DELETE_USER_CAMPAIGNS,
   ADMIN_DELETE_USER_SHARES,
   ADMIN_DELETE_USER_PROFILES,
+  ADMIN_GET_USER_PROFILES,
   CREATE_MANAGED_CATALOG,
   UPDATE_CATALOG,
   DELETE_CATALOG,
@@ -688,11 +689,32 @@ describe('AdminPage - Delete User', () => {
         result: { data: { adminDeleteUserShares: 1 } },
       },
       {
+        // The purge sweeps the profile-keyed residue server-side by the IDs
+        // read here, so the read must happen before the profiles are deleted.
+        request: { query: ADMIN_GET_USER_PROFILES, variables: { accountId } },
+        result: {
+          data: {
+            adminGetUserProfiles: [
+              {
+                __typename: 'SellerProfile',
+                profileId: 'PROFILE#p1',
+                ownerAccountId: accountId,
+                sellerName: 'Test Scout',
+                createdAt: '2025-01-01T00:00:00Z',
+                updatedAt: '2025-01-01T00:00:00Z',
+                isOwner: true,
+                permissions: null,
+              },
+            ],
+          },
+        },
+      },
+      {
         request: { query: ADMIN_DELETE_USER_PROFILES, variables: { accountId } },
         result: { data: { adminDeleteUserProfiles: 1 } },
       },
       {
-        request: { query: ADMIN_PURGE_USER_ACCOUNT, variables: { accountId } },
+        request: { query: ADMIN_PURGE_USER_ACCOUNT, variables: { accountId, profileIds: ['PROFILE#p1'] } },
         result: { data: { adminPurgeUserAccount: true } },
       },
     ]);
@@ -709,13 +731,16 @@ describe('AdminPage - Delete User', () => {
       expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument();
     });
 
-    // The purge runs last, after every per-entity delete (#521).
+    // The purge runs last, after every per-entity delete (#521), and the
+    // profile read sits between the shares and the profile deletion so the
+    // IDs are captured while the rows still exist.
     expect(operations).toEqual([
       'ListManagedCatalogs',
       'AdminSearchUser',
       'AdminDeleteUserOrders',
       'AdminDeleteUserCampaigns',
       'AdminDeleteUserShares',
+      'AdminGetUserProfiles',
       'AdminDeleteUserProfiles',
       'AdminPurgeUserAccount',
     ]);
@@ -1330,11 +1355,15 @@ describe('AdminPage - production Apollo client defaults', () => {
         result: { data: { adminDeleteUserShares: 0 } },
       },
       {
+        request: { query: ADMIN_GET_USER_PROFILES, variables: { accountId } },
+        result: { data: { adminGetUserProfiles: [] } },
+      },
+      {
         request: { query: ADMIN_DELETE_USER_PROFILES, variables: { accountId } },
         result: { data: { adminDeleteUserProfiles: 0 } },
       },
       {
-        request: { query: ADMIN_PURGE_USER_ACCOUNT, variables: { accountId } },
+        request: { query: ADMIN_PURGE_USER_ACCOUNT, variables: { accountId, profileIds: [] } },
         result: { errors: [new GraphQLError('Purge failed')] },
       },
     ]);
