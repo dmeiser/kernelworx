@@ -17,7 +17,6 @@
 
 import { render, screen } from '@testing-library/react';
 import { MockedProvider } from '@apollo/client/testing/react';
-import { InMemoryCache } from '@apollo/client';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { describe, it, expect, vi } from 'vitest';
 import { CreateCampaignPage } from '../src/pages/CreateCampaignPage';
@@ -67,20 +66,7 @@ const SHARED_CAMPAIGN_MOCKS = [
   {
     request: { query: LIST_MY_SHARED_CAMPAIGNS, variables: {} },
     result: { data: { listMySharedCampaigns: [] }, delay: 0 },
-  },
-  ...EMPTY_CATALOG_MOCKS,
-];
-
-function makeCache() {
-  return new InMemoryCache({
-    possibleTypes: {
-      Catalog: ['SharedCampaign', 'SellerCatalog', 'User'],
-      SharedCampaign: ['SharedCampaign', 'SellerCatalog', 'User'],
-      SellerCatalog: ['SellerCatalog', 'User'],
-      User: ['User'],
-    },
-  });
-}
+  }];
 
 describe('campaign-year bound (issue #539)', () => {
   it('bounds the year to min 2020 and max currentYear + 5 on the Create Campaign page', () => {
