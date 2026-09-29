@@ -13,7 +13,7 @@ help:
 	@echo "  make test-e2e          - Run Python E2E smoke tests (pytest-playwright)"
 	@echo "  make test-integration  - Run integration tests"
 	@echo "  make test-cleanup      - Run TypeScript global cleanup only"
-	@echo "  make test-all          - Run all tests (unit + integration + e2e + js-resolvers)"
+	@echo "  make test-all          - Run all tests (unit + guards + frontend + integration + e2e + js-resolvers)"
 	@echo "  make js-resolvers      - Run AppSync JS resolver tests (node --test)"
 	@echo ""
 	@echo "Linting & Type Checking:"
@@ -34,7 +34,7 @@ help:
 	@echo "  make kics              - Run KICS security scan"
 	@echo ""
 	@echo "Comprehensive:"
-	@echo "  make all               - Run everything (format + lint + typecheck + test)"
+	@echo "  make all               - Run everything (format + lint + typecheck + test + test-frontend)"
 	@echo "  make ci                - Run CI pipeline (lint + typecheck + spellcheck + test + test-frontend + test-guards + js-resolvers)"
 	@echo "  make clean             - Clean generated files"
 

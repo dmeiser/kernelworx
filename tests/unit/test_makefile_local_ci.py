@@ -54,8 +54,7 @@ def test_ci_plans_the_appsync_js_resolver_suite():
     proc = _run_make(REPO_ROOT, "-n", "ci")
     assert proc.returncode == 0, proc.stderr
     assert "npm run test:js-resolvers" in proc.stdout, (
-        "`make ci` does not plan the AppSync JS resolver suite that CI runs "
-        f"(planned commands:\n{proc.stdout})"
+        f"`make ci` does not plan the AppSync JS resolver suite that CI runs (planned commands:\n{proc.stdout})"
     )
 
 
@@ -69,8 +68,7 @@ def test_stray_files_cannot_shadow_test_targets(tmp_path: Path):
         proc = _run_make(sandbox, "-n", target)
         assert proc.returncode == 0, f"{target}: {proc.stderr}"
         assert "is up to date" not in proc.stdout, (
-            f"target `{target}` was shadowed by a stray file of the same name "
-            f"(output:\n{proc.stdout})"
+            f"target `{target}` was shadowed by a stray file of the same name (output:\n{proc.stdout})"
         )
 
 
@@ -80,9 +78,7 @@ def test_phony_list_declares_only_real_targets():
     declared = _phony_names(text)
     defined = _defined_target_names(text)
     phantoms = declared - defined
-    assert not phantoms, (
-        f".PHONY declares names with no corresponding target: {sorted(phantoms)}"
-    )
+    assert not phantoms, f".PHONY declares names with no corresponding target: {sorted(phantoms)}"
 
 
 def test_ci_and_ci_full_targets_are_protected_from_shadowing():
