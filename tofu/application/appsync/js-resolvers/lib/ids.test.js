@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { normalizeId, stripIdPrefix, parseEmbeddedCampaignId } from './ids.js';
+import { normalizeId, normalizeIdOrPrefix, stripIdPrefix, parseEmbeddedCampaignId, buildOrderId } from './ids.js';
 
 describe('normalizeId', () => {
     it('prepends prefix when missing', () => {
@@ -39,6 +39,36 @@ describe('stripIdPrefix', () => {
         assert.strictEqual(stripIdPrefix(undefined, 'ACCOUNT#'), undefined);
         assert.strictEqual(stripIdPrefix('', 'ACCOUNT#'), '');
         assert.strictEqual(stripIdPrefix(123, 'ACCOUNT#'), 123);
+    });
+});
+
+describe('normalizeIdOrPrefix', () => {
+    it('behaves like normalizeId for a real value', () => {
+        assert.strictEqual(normalizeIdOrPrefix('123', 'PROFILE#'), 'PROFILE#123');
+        assert.strictEqual(normalizeIdOrPrefix('PROFILE#123', 'PROFILE#'), 'PROFILE#123');
+    });
+
+    it('falls back to a bare prefix so a key attribute is never null', () => {
+        assert.strictEqual(normalizeIdOrPrefix(null, 'ACCOUNT#'), 'ACCOUNT#');
+        assert.strictEqual(normalizeIdOrPrefix('', 'ACCOUNT#'), 'ACCOUNT#');
+        assert.strictEqual(normalizeIdOrPrefix(undefined, 'ACCOUNT#'), 'ACCOUNT#');
+        assert.strictEqual(normalizeIdOrPrefix(123, 'ACCOUNT#'), 'ACCOUNT#');
+    });
+});
+
+describe('buildOrderId', () => {
+    it('round-trips through parseEmbeddedCampaignId', () => {
+        const orderId = buildOrderId('CAMPAIGN#campaign-123', '550e8400-e29b-41d4-a716-446655440000');
+
+        assert.strictEqual(orderId, 'ORDER#campaign-123#550e8400-e29b-41d4-a716-446655440000');
+        assert.strictEqual(parseEmbeddedCampaignId(orderId), 'CAMPAIGN#campaign-123');
+    });
+
+    it('does not double the campaign prefix when one is already stripped', () => {
+        assert.strictEqual(
+            buildOrderId('campaign-123', 'suffix-1'),
+            buildOrderId('CAMPAIGN#campaign-123', 'suffix-1')
+        );
     });
 });
 

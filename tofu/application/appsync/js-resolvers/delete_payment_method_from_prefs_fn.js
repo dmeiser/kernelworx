@@ -2,6 +2,7 @@
  * Remove payment method from preferences array.
  */
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
     const accountId = ctx.stash.accountId;
@@ -12,7 +13,7 @@ export function request(ctx) {
 
     const updated = methods.filter(m => !m.name || m.name.toLowerCase() !== nameLower);
 
-    const key = { accountId: `ACCOUNT#${accountId}` };
+    const key = { accountId: expectedOwnerKey(accountId) };
 
     // Optimistic concurrency: require the account to still exist AND the stored
     // preferences to match the snapshot read by the validation step. This prevents

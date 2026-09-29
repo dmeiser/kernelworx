@@ -1,5 +1,6 @@
 import { util } from '@aws-appsync/utils';
-import { normalizeId } from './lib/ids.js';
+import { normalizeId} from './lib/ids.js';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
     // If campaign not found, skip this function
@@ -81,7 +82,7 @@ export function response(ctx) {
     }
     
     // Check if caller is owner (ownerAccountId is now ACCOUNT#sub format)
-    const callerAccountId = 'ACCOUNT#' + ctx.identity.sub;
+    const callerAccountId = expectedOwnerKey(ctx.identity.sub);
     const profileOwner = profile.ownerAccountId;
     
     if (profileOwner === callerAccountId) {

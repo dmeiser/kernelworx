@@ -1,8 +1,9 @@
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
     // accountId has ACCOUNT# prefix in DynamoDB
-    const accountId = 'ACCOUNT#' + ctx.identity.sub;
+    const accountId = expectedOwnerKey(ctx.identity.sub);
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ accountId: accountId })

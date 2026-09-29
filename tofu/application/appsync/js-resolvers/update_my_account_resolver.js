@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
   if (!ctx.identity || !ctx.identity.sub) {
@@ -31,7 +32,7 @@ export function request(ctx) {
 
   return {
     operation: 'UpdateItem',
-    key: util.dynamodb.toMapValues({ accountId: 'ACCOUNT#' + ctx.identity.sub }),
+    key: util.dynamodb.toMapValues({ accountId: expectedOwnerKey(ctx.identity.sub) }),
     update: {
       expression: 'SET ' + sets.join(', '),
       expressionNames: expNames,

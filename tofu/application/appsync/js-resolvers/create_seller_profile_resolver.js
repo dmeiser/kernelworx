@@ -1,4 +1,6 @@
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     if (!ctx.identity || !ctx.identity.sub) {
@@ -28,8 +30,8 @@ export function request(ctx) {
         }
     }
 
-    const profileId = 'PROFILE#' + util.autoId();
-    const ownerAccountId = 'ACCOUNT#' + ctx.identity.sub;
+    const profileId = normalizeId(util.autoId(), 'PROFILE#');
+    const ownerAccountId = expectedOwnerKey(ctx.identity.sub);
     const now = util.time.nowISO8601();
 
     const item = {

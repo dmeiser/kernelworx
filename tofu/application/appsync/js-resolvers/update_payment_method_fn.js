@@ -2,6 +2,7 @@
  * Update payment method name in preferences.
  */
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
     const accountId = ctx.stash.accountId;
@@ -19,7 +20,7 @@ export function request(ctx) {
         return m;
     });
 
-    const key = { accountId: `ACCOUNT#${accountId}` };
+    const key = { accountId: expectedOwnerKey(accountId) };
 
     // Optimistic concurrency: require the account to still exist AND the stored
     // preferences to match the snapshot read by the validation step. This prevents

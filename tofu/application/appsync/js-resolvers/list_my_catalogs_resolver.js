@@ -1,7 +1,8 @@
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
-    const ownerAccountId = 'ACCOUNT#' + ctx.identity.sub;
+    const ownerAccountId = expectedOwnerKey(ctx.identity.sub);
     return {
         operation: 'Query',
         index: 'ownerAccountId-index',

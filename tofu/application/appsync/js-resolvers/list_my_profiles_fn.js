@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 /**
  * Page-size budget for listMyProfiles (issue #328 follow-up).
@@ -37,7 +38,7 @@ function effectiveLimit(requestedLimit) {
  * Query profiles table by ownerAccountId (partition key).
  */
 export function request(ctx) {
-    const accountId = `ACCOUNT#${ctx.identity.sub}`;
+    const accountId = expectedOwnerKey(ctx.identity.sub);
 
     // Using low-level DynamoDB API to query by partition key
     const request = {

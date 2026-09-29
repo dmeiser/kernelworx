@@ -1,5 +1,6 @@
 import { util } from '@aws-appsync/utils';
-import { normalizeId } from './lib/ids.js';
+import { normalizeId} from './lib/ids.js';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 function parseIsoToMs(dateStr) {
     if (typeof dateStr !== 'string') {
@@ -133,7 +134,7 @@ export function request(ctx) {
         util.error('unitType is required when unit fields are present', 'INVALID_INPUT');
     }
 
-    const campaignId = 'CAMPAIGN#' + util.autoId();
+    const campaignId = normalizeId(util.autoId(), 'CAMPAIGN#');
     const now = util.time.nowISO8601();
 
     const campaignItem = {

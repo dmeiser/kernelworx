@@ -1,10 +1,11 @@
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
     return {
         operation: 'GetItem',
         consistentRead: true,
-        key: util.dynamodb.toMapValues({ accountId: `ACCOUNT#${ctx.identity.sub}` })
+        key: util.dynamodb.toMapValues({ accountId: expectedOwnerKey(ctx.identity.sub) })
     };
 }
 

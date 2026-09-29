@@ -1,7 +1,8 @@
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
-    const accountId = 'ACCOUNT#' + ctx.identity.sub;
+    const accountId = expectedOwnerKey(ctx.identity.sub);
     const preferences = ctx.args.preferences;
     const now = util.time.nowISO8601();
     

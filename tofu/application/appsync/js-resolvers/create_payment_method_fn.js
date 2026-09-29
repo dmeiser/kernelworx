@@ -4,6 +4,7 @@
  * Adds the new payment method to the user's preferences.paymentMethods array.
  */
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
     const accountId = ctx.stash.accountId;
@@ -23,7 +24,7 @@ export function request(ctx) {
     
     // Update preferences.paymentMethods in the account item
     const key = {
-        accountId: `ACCOUNT#${accountId}`
+        accountId: expectedOwnerKey(accountId)
     };
     
     // Optimistic concurrency: require the account to still exist AND the stored

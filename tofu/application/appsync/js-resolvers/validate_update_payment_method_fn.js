@@ -2,6 +2,7 @@
  * Validate update payment method request.
  */
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
     const accountId = ctx.identity.sub;
@@ -30,7 +31,7 @@ export function request(ctx) {
     ctx.stash.newName = newName;
     ctx.stash.newLower = newLower;
 
-    const key = { accountId: `ACCOUNT#${accountId}` };
+    const key = { accountId: expectedOwnerKey(accountId) };
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues(key),

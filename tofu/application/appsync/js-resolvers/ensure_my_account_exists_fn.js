@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 function claim(ctx, name) {
     const value = ctx.identity && ctx.identity.claims ? ctx.identity.claims[name] : undefined;
@@ -6,7 +7,7 @@ function claim(ctx, name) {
 }
 
 export function request(ctx) {
-    const accountId = `ACCOUNT#${ctx.identity.sub}`;
+    const accountId = expectedOwnerKey(ctx.identity.sub);
 
     // No-op when already found; response() will return ctx.prev.result.
     if (ctx.prev.result) {

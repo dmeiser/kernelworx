@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { expectedOwnerKey } from './lib/owner_key.js';
 
 export function request(ctx) {
     return {
@@ -15,7 +16,7 @@ export function response(ctx) {
         util.error('Shared Campaign not found', 'NOT_FOUND');
     }
     // Check ownership
-    if (ctx.result.createdBy !== `ACCOUNT#${ctx.identity.sub}`) {
+    if (ctx.result.createdBy !== expectedOwnerKey(ctx.identity.sub)) {
         util.error('Only the creator can delete this campaign sharedCampaign', 'FORBIDDEN');
     }
     ctx.stash.sharedCampaign = ctx.result;

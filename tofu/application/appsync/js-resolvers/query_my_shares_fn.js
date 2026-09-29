@@ -1,5 +1,5 @@
 import { util } from '@aws-appsync/utils';
-import { normalizeId } from './lib/ids.js';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 /**
  * listMyShares pipeline - function 1 of 2.
@@ -25,10 +25,6 @@ import { normalizeId } from './lib/ids.js';
 
 const MAX_PAGE_LIMIT = 100;
 
-function normalizeAccountId(accountId) {
-    return normalizeId(accountId, 'ACCOUNT#') || 'ACCOUNT#';
-}
-
 function hasAccessiblePermissions(permissions) {
     if (!Array.isArray(permissions) || permissions.length === 0) {
         return false;
@@ -42,7 +38,7 @@ function hasAccessiblePermissions(permissions) {
 }
 
 export function request(ctx) {
-    const targetAccountId = normalizeAccountId(ctx.identity && ctx.identity.sub);
+    const targetAccountId = normalizeIdOrPrefix(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
     return {
         operation: 'Query',
         index: 'targetAccountId-index',
