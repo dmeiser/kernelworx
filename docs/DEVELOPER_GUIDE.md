@@ -181,6 +181,11 @@ raise AppError(ErrorCode.NOT_FOUND, "Campaign not found")
 raise AppError(ErrorCode.UNAUTHORIZED, "Not authorized to view this profile")
 ```
 
+Do not translate a failed DynamoDB/Cognito lookup yourself, and never return the survivors of an
+`asyncio.gather(..., return_exceptions=True)` as the answer to a list query: a truncated list reads
+as "none in use" and gets acted on. `admin_operations._raise_batch_lookup_error` (one failure) and
+`_raise_gather_failures` (a collected list) own that classification — see AGENTS.md.
+
 #### Cognito Retries (`src/utils/cognito.py`)
 
 Do not hand-roll a backoff loop for Cognito User Pool calls; wrap the client method:

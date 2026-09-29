@@ -65,6 +65,10 @@ def _collect_catalog_ids(profiles: List[Dict[str, Any]], campaign_name: str, cam
 
 
 _CATALOG_BATCH_GET_LIMIT = 100
+# DynamoDB BatchGetItem throttle codes, intentionally NOT the canonical
+# admin_operations._THROTTLING_ERROR_CODES: BatchGetItem signals throttling as
+# `RequestLimitExceeded`, where a Query reports `TooManyRequestsException`.
+# Importing the canonical set here would treat one of the two codes as permanent.
 _THROTTLING_ERROR_CODES = {
     "ProvisionedThroughputExceededException",
     "ThrottlingException",
