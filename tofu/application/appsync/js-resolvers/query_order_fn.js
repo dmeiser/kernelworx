@@ -1,16 +1,5 @@
 import { util } from '@aws-appsync/utils';
-
-function parseEmbeddedCampaignId(orderId) {
-    if (typeof orderId !== 'string' || !orderId.startsWith('ORDER#')) {
-        return null;
-    }
-    const parts = orderId.split('#');
-    // New format: ORDER#<campaignId without CAMPAIGN# prefix>#<uuid>
-    if (parts.length !== 3 || !parts[1] || !parts[2]) {
-        return null;
-    }
-    return 'CAMPAIGN#' + parts[1];
-}
+import { parseEmbeddedCampaignId } from './lib/ids.js';
 
 export function request(ctx) {
     const orderId = ctx.args.orderId;

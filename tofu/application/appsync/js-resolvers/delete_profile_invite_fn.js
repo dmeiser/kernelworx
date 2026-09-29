@@ -1,15 +1,11 @@
 import { util } from '@aws-appsync/utils';
+import { ownerGetItemRequest } from './lib/owner_key.js';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     const profileId = ctx.args.profileId;
-    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
-    const expectedOwner = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : 'ACCOUNT#' + ctx.identity.sub;
-    ctx.stash.profileId = dbProfileId;
-    return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ ownerAccountId: expectedOwner, profileId: dbProfileId }),
-        consistentRead: true
-    };
+    ctx.stash.profileId = normalizeId(profileId, 'PROFILE#');
+    return ownerGetItemRequest(ctx.identity.sub, profileId);
 }
 
 export function response(ctx) {

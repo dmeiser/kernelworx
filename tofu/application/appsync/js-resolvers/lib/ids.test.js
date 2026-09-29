@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { normalizeId, stripIdPrefix } from './ids.js';
+import { normalizeId, stripIdPrefix, parseEmbeddedCampaignId } from './ids.js';
 
 describe('normalizeId', () => {
     it('prepends prefix when missing', () => {
@@ -39,5 +39,30 @@ describe('stripIdPrefix', () => {
         assert.strictEqual(stripIdPrefix(undefined, 'ACCOUNT#'), undefined);
         assert.strictEqual(stripIdPrefix('', 'ACCOUNT#'), '');
         assert.strictEqual(stripIdPrefix(123, 'ACCOUNT#'), 123);
+    });
+});
+
+describe('parseEmbeddedCampaignId', () => {
+    it('extracts and normalizes campaignId from orderId with embedded campaign', () => {
+        assert.strictEqual(
+            parseEmbeddedCampaignId('ORDER#campaign-123#550e8400-e29b-41d4-a716-446655440000'),
+            'CAMPAIGN#campaign-123'
+        );
+    });
+
+    it('returns null for legacy order IDs without embedded campaign', () => {
+        assert.strictEqual(
+            parseEmbeddedCampaignId('ORDER#550e8400-e29b-41d4-a716-446655440000'),
+            null
+        );
+    });
+
+    it('returns null for invalid or non-string inputs', () => {
+        assert.strictEqual(parseEmbeddedCampaignId(null), null);
+        assert.strictEqual(parseEmbeddedCampaignId(undefined), null);
+        assert.strictEqual(parseEmbeddedCampaignId(''), null);
+        assert.strictEqual(parseEmbeddedCampaignId('NOTANORDER#123#456'), null);
+        assert.strictEqual(parseEmbeddedCampaignId('ORDER#onlyonepart'), null);
+        assert.strictEqual(parseEmbeddedCampaignId('ORDER#part1#part2#part3'), null);
     });
 });

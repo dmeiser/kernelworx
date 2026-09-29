@@ -1,9 +1,10 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     const catalogId = ctx.args.catalogId;
     // Normalize catalogId to ensure CATALOG# prefix
-    const dbCatalogId = catalogId && catalogId.startsWith('CATALOG#') ? catalogId : `CATALOG#${catalogId}`;
+    const dbCatalogId = normalizeId(catalogId, 'CATALOG#');
     // Soft delete: mark isDeleted = true, keep record in table for orphan detection
     return {
         operation: 'UpdateItem',

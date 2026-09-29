@@ -38,6 +38,24 @@ describe('lookup_profile_for_update_fn request', () => {
         assert.strictEqual(result.key.profileId, 'PROFILE#prof-456');
         assert.strictEqual(result.consistentRead, true);
     });
+
+    it('preserves already-prefixed identity.sub and profileId', () => {
+        const ctx = {
+            identity: { sub: 'ACCOUNT#user-uuid-123' },
+            args: {
+                input: {
+                    profileId: 'PROFILE#prof-456',
+                },
+            },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, 'GetItem');
+        assert.strictEqual(result.key.ownerAccountId, 'ACCOUNT#user-uuid-123');
+        assert.strictEqual(result.key.profileId, 'PROFILE#prof-456');
+        assert.strictEqual(result.consistentRead, true);
+    });
 });
 
 describe('lookup_profile_for_update_fn response', () => {

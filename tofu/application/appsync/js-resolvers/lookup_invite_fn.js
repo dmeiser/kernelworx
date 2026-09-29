@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     const inviteCode = ctx.args.input.inviteCode;
@@ -32,7 +33,7 @@ export function response(ctx) {
     }
     
     ctx.stash.invite = invite;
-    ctx.stash.targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
+    ctx.stash.targetAccountId = normalizeId(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
     
     return invite;
 }
