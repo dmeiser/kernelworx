@@ -1,7 +1,6 @@
 import { util } from '@aws-appsync/utils';
-import { stripIdPrefix } from './lib/ids.js';
+import { normalizeId, stripIdPrefix } from './lib/ids.js';
 import { validatePhone, validateAddress } from './lib/validation.js';
-import { normalizeId } from './lib/ids.js';
 
 function validateCustomer(input) {
     if (!input.customerName || (typeof input.customerName === 'string' && !input.customerName.trim())) {
