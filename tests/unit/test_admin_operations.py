@@ -1771,9 +1771,7 @@ class TestAdminPurgeUserAccount:
         shares_table.put_item(
             Item={"profileId": "PROFILE#other-owner", "targetAccountId": f"ACCOUNT#{target_account_id}"}
         )
-        shares_table.put_item(
-            Item={"profileId": "PROFILE#other-owner", "targetAccountId": "ACCOUNT#someone-else"}
-        )
+        shares_table.put_item(Item={"profileId": "PROFILE#other-owner", "targetAccountId": "ACCOUNT#someone-else"})
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
@@ -1781,8 +1779,18 @@ class TestAdminPurgeUserAccount:
             mock_get_client.return_value = self._mock_cognito(target_account_id)
             assert admin_purge_user_account(event, lambda_context) is True
 
-        assert shares_table.get_item(Key={"profileId": "PROFILE#other-owner", "targetAccountId": "ACCOUNT#target-user-123"}).get("Item") is None
-        assert shares_table.get_item(Key={"profileId": "PROFILE#other-owner", "targetAccountId": "ACCOUNT#someone-else"}).get("Item") is not None
+        assert (
+            shares_table.get_item(
+                Key={"profileId": "PROFILE#other-owner", "targetAccountId": "ACCOUNT#target-user-123"}
+            ).get("Item")
+            is None
+        )
+        assert (
+            shares_table.get_item(
+                Key={"profileId": "PROFILE#other-owner", "targetAccountId": "ACCOUNT#someone-else"}
+            ).get("Item")
+            is not None
+        )
 
     def test_purge_deletes_s3_reports_for_the_supplied_profiles(
         self,

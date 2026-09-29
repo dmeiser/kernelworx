@@ -556,12 +556,12 @@ export const AdminPage: React.FC = () => {
   );
   // The purge needs the profile IDs read BEFORE the profile rows are deleted,
   // because the server sweeps the profile-keyed residue by them (#521).
-  const [getUserProfilesForPurge] = useLazyQuery<
-    GqlAdminGetUserProfilesQuery,
-    GqlAdminGetUserProfilesQueryVariables
-  >(ADMIN_GET_USER_PROFILES, {
-    fetchPolicy: 'network-only',
-  });
+  const [getUserProfilesForPurge] = useLazyQuery<GqlAdminGetUserProfilesQuery, GqlAdminGetUserProfilesQueryVariables>(
+    ADMIN_GET_USER_PROFILES,
+    {
+      fetchPolicy: 'network-only',
+    },
+  );
 
   const catalogs = catalogsData?.listManagedCatalogs || [];
 

@@ -790,6 +790,7 @@ describe('Admin Operations Integration Tests', () => {
         ).rejects.toThrow(/Admin access required|FORBIDDEN/i);
       });
     });
+  });
 
   // ============================================================
   // NEW: Admin User Data Queries
