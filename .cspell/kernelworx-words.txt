@@ -347,6 +347,7 @@ sharedCampaigns
 sheetjs
 shortlink
 Shelbyville
+shellcheck
 Signin
 signout
 Signup
