@@ -51,14 +51,18 @@ class DynamoDbCallRecorder:
                 table_name = params.get("TableName")
                 if isinstance(table_name, str):
                     calls.append((operation_name, table_name))
-                for request_table in (params.get("RequestItems") or {}):
+                for request_table in params.get("RequestItems") or {}:
                     calls.append((operation_name, request_table))
             return original(self, operation_name, params)
 
         self._monkeypatch.setattr(botocore.client.BaseClient, "_make_api_call", recording_call)
 
     def count(self, operation: str, table: str) -> int:
-        return sum(1 for recorded_operation, recorded_table in self.calls if (recorded_operation, recorded_table) == (operation, table))
+        return sum(
+            1
+            for recorded_operation, recorded_table in self.calls
+            if (recorded_operation, recorded_table) == (operation, table)
+        )
 
 
 @pytest.fixture
@@ -121,9 +125,7 @@ def _remaining(dynamodb: Any, table_name: str) -> int:
 class TestDeleteAllUserDataProfileSweepCount:
     """The cascade must read the caller's profile list exactly once per deletion."""
 
-    def test_profiles_table_is_queried_once(
-        self, seeded_cascade: Any, dynamodb_calls: DynamoDbCallRecorder
-    ) -> None:
+    def test_profiles_table_is_queried_once(self, seeded_cascade: Any, dynamodb_calls: DynamoDbCallRecorder) -> None:
         dynamodb_calls.attach()
 
         delete_all_user_data(ACCOUNT_ID)
@@ -143,7 +145,9 @@ class TestDeleteAllUserDataProfileSweepCount:
 
         assert dynamodb_calls.count("Query", PROFILES_TABLE) == 1
 
-    def test_cascade_still_deletes_every_domain(self, seeded_cascade: Any, dynamodb_calls: DynamoDbCallRecorder) -> None:
+    def test_cascade_still_deletes_every_domain(
+        self, seeded_cascade: Any, dynamodb_calls: DynamoDbCallRecorder
+    ) -> None:
         """The single sweep must not skip any sub-cascade's deletions."""
         dynamodb_calls.attach()
 
