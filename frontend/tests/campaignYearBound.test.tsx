@@ -113,7 +113,7 @@ describe('campaign-year bound (issue #539)', () => {
     ];
 
     render(
-      <MockedProvider mocks={mocks} addTypename={false} cache={makeCache()}>
+      <MockedProvider mocks={mocks} >
         <MemoryRouter initialEntries={['/create-campaign']}>
           <Routes>
             <Route path="/create-campaign" element={<CreateCampaignPage />} />
@@ -130,7 +130,7 @@ describe('campaign-year bound (issue #539)', () => {
 
   it('bounds the year to min 2020 and max currentYear + 5 on the Create Shared Campaign page', () => {
     render(
-      <MockedProvider mocks={SHARED_CAMPAIGN_MOCKS} addTypename={false} cache={makeCache()}>
+      <MockedProvider mocks={SHARED_CAMPAIGN_MOCKS} >
         <MemoryRouter initialEntries={['/create-shared-campaign']}>
           <Routes>
             <Route path="/create-shared-campaign" element={<CreateSharedCampaignPage />} />
