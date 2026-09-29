@@ -238,26 +238,26 @@ describe('ForgotPasswordPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
-        'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol',
+        'Password must be at least 15 characters and include uppercase, lowercase, number, and symbol',
       );
     });
 
     test('shows validation error when passwords do not match', async () => {
-      await fillResetForm('123456', 'Password123!', 'Different456!');
+      await fillResetForm('123456', 'Password123!xyz', 'Different456!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       expect(await screen.findByRole('alert')).toHaveTextContent('Passwords do not match');
     });
 
     test('confirms reset successfully and redirects to login after a delay', async () => {
-      await fillResetForm('123456', 'Password123!', 'Password123!');
+      await fillResetForm('123456', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       await waitFor(() => {
         expect(confirmResetPassword).toHaveBeenCalledWith({
           username: 'user@example.com',
           confirmationCode: '123456',
-          newPassword: 'Password123!',
+          newPassword: 'Password123!xyz',
         });
       });
 
@@ -274,7 +274,7 @@ describe('ForgotPasswordPage', () => {
     });
 
     test('clears a scheduled redirect when going back to the email form', async () => {
-      await fillResetForm('123456', 'Password123!', 'Password123!');
+      await fillResetForm('123456', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       await waitFor(() => {
@@ -289,7 +289,7 @@ describe('ForgotPasswordPage', () => {
     });
 
     test('clears a previous redirect timer when resetting again', async () => {
-      await fillResetForm('123456', 'Password123!', 'Password123!');
+      await fillResetForm('123456', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
       await waitFor(
         () => {
@@ -299,14 +299,14 @@ describe('ForgotPasswordPage', () => {
       );
 
       mockNavigate.mockClear();
-      await fillResetForm('654321', 'NewPass123!', 'NewPass123!');
+      await fillResetForm('654321', 'NewPass123!wxyz', 'NewPass123!wxyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       await waitFor(() => {
         expect(confirmResetPassword).toHaveBeenLastCalledWith({
           username: 'user@example.com',
           confirmationCode: '654321',
-          newPassword: 'NewPass123!',
+          newPassword: 'NewPass123!wxyz',
         });
       });
 
@@ -320,7 +320,7 @@ describe('ForgotPasswordPage', () => {
 
     test('displays mapped error for invalid verification code', async () => {
       vi.mocked(confirmResetPassword).mockRejectedValue(createNamedError('CodeMismatchException'));
-      await fillResetForm('000000', 'Password123!', 'Password123!');
+      await fillResetForm('000000', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -330,7 +330,7 @@ describe('ForgotPasswordPage', () => {
 
     test('treats confirmation UserNotFoundException as invalid code to avoid account enumeration', async () => {
       vi.mocked(confirmResetPassword).mockRejectedValue(createNamedError('UserNotFoundException'));
-      await fillResetForm('000000', 'Password123!', 'Password123!');
+      await fillResetForm('000000', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -340,7 +340,7 @@ describe('ForgotPasswordPage', () => {
 
     test('displays mapped error for expired verification code', async () => {
       vi.mocked(confirmResetPassword).mockRejectedValue(createNamedError('ExpiredCodeException'));
-      await fillResetForm('000000', 'Password123!', 'Password123!');
+      await fillResetForm('000000', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -350,17 +350,17 @@ describe('ForgotPasswordPage', () => {
 
     test('displays mapped error for invalid password', async () => {
       vi.mocked(confirmResetPassword).mockRejectedValue(createNamedError('InvalidPasswordException'));
-      await fillResetForm('123456', 'Password123!', 'Password123!');
+      await fillResetForm('123456', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
-        'Password does not meet requirements: minimum 8 characters with uppercase, lowercase, numbers, and symbols.',
+        'Password does not meet requirements: minimum 15 characters with uppercase, lowercase, numbers, and symbols.',
       );
     });
 
     test('displays a generic error for unmapped confirmResetPassword failures', async () => {
       vi.mocked(confirmResetPassword).mockRejectedValue(createNamedError('UnexpectedException', ''));
-      await fillResetForm('123456', 'Password123!', 'Password123!');
+      await fillResetForm('123456', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       expect(await screen.findByText('Unable to reset password. Please try again.')).toBeInTheDocument();
@@ -368,7 +368,7 @@ describe('ForgotPasswordPage', () => {
 
     test('clears errors and success alerts when closed', async () => {
       vi.mocked(confirmResetPassword).mockRejectedValue(createNamedError('CodeMismatchException'));
-      await fillResetForm('000000', 'Password123!', 'Password123!');
+      await fillResetForm('000000', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
       const alert = await screen.findByRole('alert');
       expect(alert).toBeInTheDocument();
@@ -380,7 +380,7 @@ describe('ForgotPasswordPage', () => {
     });
 
     test('shows validation error when confirmation code is empty', async () => {
-      await fillResetForm('', 'Password123!', 'Password123!');
+      await fillResetForm('', 'Password123!xyz', 'Password123!xyz');
       forceSubmitForm();
 
       expect(await screen.findByText('Confirmation code is required')).toBeInTheDocument();
@@ -388,7 +388,7 @@ describe('ForgotPasswordPage', () => {
     });
 
     test('shows validation error when confirmation code is not 6 digits', async () => {
-      await fillResetForm('12345', 'Password123!', 'Password123!');
+      await fillResetForm('12345', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       expect(await screen.findByText('Confirmation code must be 6 digits')).toBeInTheDocument();
