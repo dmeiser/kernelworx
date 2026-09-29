@@ -122,10 +122,10 @@ export function describeVerifyProfileOwnerFamily(familyKey) {
             assert.deepStrictEqual(ctx.stash.profile, profile);
         });
 
-        it('throws FORBIDDEN when the caller does not own the profile', () => {
+        it('throws FORBIDDEN with this family message when the caller does not own the profile', () => {
             assert.throws(
                 () => family.response({ stash: {}, result: null }),
-                new RegExp(`FORBIDDEN: ${family.forbiddenMessage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)
+                (error) => error.message === `FORBIDDEN: ${family.forbiddenMessage}`
             );
         });
 

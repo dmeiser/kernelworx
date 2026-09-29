@@ -352,7 +352,9 @@ def test_transfer_tests_derive_tables_from_shared_schema_owner(monkeypatch: pyte
     Regression guard for the hand-rolled ``dynamodb.create_table`` copies this
     module used to repeat: a private copy would create tables the rest of the
     suite's shared schema owner knows nothing about, so the transfer tests would
-    silently drift from ``tests/unit/table_schemas.py``.
+    silently drift from ``tests/unit/table_schemas.py``. The tests are discovered
+    rather than listed, so adding or removing one neither breaks this guard nor
+    leaves a new transfer test unchecked.
     """
     created: list[Any] = []
     real_create_all_tables = create_all_tables
@@ -363,14 +365,18 @@ def test_transfer_tests_derive_tables_from_shared_schema_owner(monkeypatch: pyte
 
     monkeypatch.setattr(sys.modules[__name__], "create_all_tables", spy)
 
-    test_transfer_profile_ownership_success()
-    test_transfer_profile_ownership_error_paths()
-    test_transfer_profile_ownership_admin_transfer()
-    test_transfer_profile_ownership_share_delete_fails()
-    test_transfer_profile_ownership_source_deleted_race()
-    test_transfer_profile_ownership_destination_exists_race()
+    module_globals = vars(sys.modules[__name__])
+    transfer_tests = [
+        value
+        for name, value in sorted(module_globals.items())
+        if name.startswith("test_transfer_profile_ownership_") and callable(value)
+    ]
+    assert transfer_tests, "no transfer-ownership tests were found to check"
 
-    assert len(created) == 6
+    for transfer_test in transfer_tests:
+        before = len(created)
+        transfer_test()
+        assert len(created) > before, f"{transfer_test.__name__} built its tables without the shared schema owner"
 
 
 @mock_aws
