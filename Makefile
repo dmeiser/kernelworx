@@ -1,5 +1,5 @@
 .PHONY: help test test-frontend test-e2e test-integration test-cleanup test-all \
-	js-resolvers test-js lint lint-python lint-frontend lint-infra spellcheck typecheck \
+	js-resolvers lint lint-python lint-frontend lint-infra spellcheck typecheck \
 	format format-python format-frontend tflint kics all ci ci-full \
 	test-guards clean
 
