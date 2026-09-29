@@ -405,7 +405,7 @@ def assert_async_reads_within_role_scope(calls: List[Tuple[str, str]]) -> None:
 
     The role grants only GetItem/Query/BatchGetItem on the domain tables, so a
     handler issuing any other action (or touching another table) would be
-    refused at runtime. This is the behavioural form of that contract for the
+    refused at runtime. This is the behavioral form of that contract for the
     async list-catalogs-in-use path: it pins the recorded operations rather
     than an assertion message.
     """
