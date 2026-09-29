@@ -1,37 +1,9 @@
 import { util } from '@aws-appsync/utils';
-
-function parseEmbeddedCampaignId(orderId) {
-    if (typeof orderId !== 'string' || !orderId.startsWith('ORDER#')) {
-        return null;
-    }
-    const parts = orderId.split('#');
-    // New format: ORDER#<campaignId without CAMPAIGN# prefix>#<uuid>
-    if (parts.length !== 3 || !parts[1] || !parts[2]) {
-        return null;
-    }
-    return 'CAMPAIGN#' + parts[1];
-}
+import { buildOrderLookupRequest } from './lib/order_lookup.js';
 
 export function request(ctx) {
     const orderId = ctx.args.orderId || ctx.args.input.orderId;
-    const embeddedCampaignId = parseEmbeddedCampaignId(orderId);
-    if (embeddedCampaignId) {
-        // Strongly-consistent base-table lookup for new order IDs.
-        return {
-            operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ campaignId: embeddedCampaignId, orderId: orderId })
-        };
-    }
-    // Fallback to GSI for legacy order IDs (ORDER#<uuid>)
-    return {
-        operation: 'Query',
-        index: 'orderId-index',
-        query: {
-        expression: 'orderId = :orderId',
-        expressionValues: util.dynamodb.toMapValues({ ':orderId': orderId })
-        },
-        limit: 1
-    };
+    return buildOrderLookupRequest(orderId);
 }
 
 export function response(ctx) {
