@@ -188,11 +188,12 @@ The transient/permanent split for a failed DynamoDB (or Cognito) lookup is defin
 everything else -> `INTERNAL_ERROR`, always `raise ... from <failure>` plus a structured
 warning/error log), and `_raise_gather_failures` applies the same rule to the list of failures
 from a parallel gather (any transient failure keeps the request retryable). Import these instead
-of redeclaring the set or re-implementing the split. Two local sets are deliberate and
-documented in place: `list_unit_catalogs` uses DynamoDB BatchGetItem's `RequestLimitExceeded`
-(scope differs, so importing it would treat one of the two codes as permanent), and
-`campaign_operations` is cycle-blocked (`admin_operations` imports it at top level, so the
-reverse import would be circular).
+of redeclaring the set or re-implementing the split; all four handlers now route through the
+shared helper. One deliberately service-specific code set remains, documented in place:
+`list_unit_catalogs` passes DynamoDB BatchGetItem's `RequestLimitExceeded` as `throttling_codes`
+(scope differs, so importing the canonical set would treat one of the two codes as permanent).
+`campaign_operations` imports the helper at function level, because a top-level import would be
+circular (`admin_operations` -> `deletion_cascade` -> `campaign_operations`).
 
 #556: a `return_exceptions=True` gather must never hand its survivors back as an authoritative
 answer — a shortened "in use"/"in use by" list is worse than an error, because the caller acts on
