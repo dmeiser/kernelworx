@@ -20,6 +20,7 @@
  * the rest of the pipeline.
  */
 import { util, runtime } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     const campaign = ctx.stash && ctx.stash.campaign;
@@ -38,9 +39,7 @@ export function request(ctx) {
     }
 
     const rawProfileId = campaign.profileId;
-    const dbProfileId = (typeof rawProfileId === 'string' && rawProfileId.startsWith('PROFILE#'))
-        ? rawProfileId
-        : 'PROFILE#' + rawProfileId;
+    const dbProfileId = normalizeId(rawProfileId, 'PROFILE#');
 
     return {
         operation: 'Query',

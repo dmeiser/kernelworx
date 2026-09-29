@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { stripIdPrefix } from './lib/ids.js';
 import { validatePhone, validateAddress } from './lib/validation.js';
 import { normalizeId } from './lib/ids.js';
 
@@ -114,7 +115,7 @@ export function request(ctx) {
 
     const totalAmount = totalAmountCents / 100;
 
-    const campaignIdWithoutPrefix = campaignId.startsWith('CAMPAIGN#') ? campaignId.substring(9) : campaignId;
+    const campaignIdWithoutPrefix = stripIdPrefix(campaignId, 'CAMPAIGN#');
     const orderId = `ORDER#${campaignIdWithoutPrefix}#${util.autoId()}`;
     const now = util.time.nowISO8601();
 

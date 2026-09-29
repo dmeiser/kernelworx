@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     const sharedCampaign = ctx.stash && ctx.stash.sharedCampaign;
@@ -17,9 +18,7 @@ export function request(ctx) {
         };
     }
 
-    const catalogId = (typeof rawCatalogId === 'string' && rawCatalogId.startsWith('CATALOG#'))
-        ? rawCatalogId
-        : 'CATALOG#' + rawCatalogId;
+    const catalogId = normalizeId(rawCatalogId, 'CATALOG#');
 
     return {
         operation: 'GetItem',

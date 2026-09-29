@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 function buildUnitCampaignKey(unitType, unitNumber, city, state, campaignName, campaignYear) {
     const unitNumStr = '' + unitNumber;
@@ -7,12 +8,7 @@ function buildUnitCampaignKey(unitType, unitNumber, city, state, campaignName, c
 }
 
 function normalizeCatalogId(catalogId) {
-    if (catalogId === null || catalogId === undefined) {
-        return null;
-    }
-    return (typeof catalogId === 'string' && catalogId.startsWith('CATALOG#'))
-        ? catalogId
-        : 'CATALOG#' + catalogId;
+    return normalizeId(catalogId, 'CATALOG#');
 }
 
 function hasUnitUpdate(input) {

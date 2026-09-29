@@ -10,10 +10,10 @@ export function request(ctx) {
         };
     }
     
-    const profileId = ctx.stash.profileId;
+    const profileId = normalizeId(ctx.stash.profileId, 'PROFILE#');
     
     // Additional validation - if profileId is not set or invalid, skip
-    if (!profileId || !profileId.startsWith('PROFILE#')) {
+    if (!profileId) {
         ctx.stash.hasWritePermission = false;
         return {
         operation: 'GetItem',

@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
     // OWNER-ONLY access (not shared users with WRITE)
@@ -15,7 +16,7 @@ export function request(ctx) {
     
     const profileId = ctx.args.profileId;
     // Add PROFILE# prefix for DynamoDB query
-    const dbProfileId = profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeId(profileId, 'PROFILE#');
     
     // Query invites for this profile using profileId-index GSI
     return {

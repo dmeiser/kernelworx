@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './lib/ids.js';
 
 export function request(ctx) {
   const paymentMethod = (ctx.args && ctx.args.input && ctx.args.input.paymentMethod !== undefined)
@@ -34,7 +35,7 @@ export function request(ctx) {
     util.error('Owner account ID not found in pipeline context', 'INVALID_INPUT');
   }
 
-  const accountId = rawOwner.startsWith('ACCOUNT#') ? rawOwner : 'ACCOUNT#' + rawOwner;
+  const accountId = normalizeId(rawOwner, 'ACCOUNT#');
   ctx.stash.paymentMethodToValidate = paymentMethod;
 
   return {
