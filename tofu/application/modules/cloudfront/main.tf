@@ -245,6 +245,12 @@ resource "aws_cloudfront_distribution" "site" {
       default_ttl = 0
       max_ttl     = 0
 
+      # #550: these documents are served on the trusted site origin, so they
+      # need the security headers too - above all framing protection, or the
+      # login form is a clickjacking target. Narrow CSP (framing only); the
+      # full application CSP is not safe for Cognito's hosted-UI documents.
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.auth_security.id
+
       function_association {
         event_type   = "viewer-response"
         function_arn = aws_cloudfront_function.auth_location_rewrite[0].arn

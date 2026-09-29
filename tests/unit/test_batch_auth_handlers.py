@@ -151,7 +151,7 @@ class TestCampaignReportingBatchAuth:
             return original_batch_get_item(*args, **kwargs)
 
         monkeypatch.setattr(resource, "batch_get_item", counted_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         event = {
             "arguments": {
@@ -289,7 +289,7 @@ class TestListUnitCatalogsBatchAuth:
             return original_batch_get_item(*args, **kwargs)
 
         monkeypatch.setattr(resource, "batch_get_item", counted_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         event = {
             "arguments": {
@@ -423,7 +423,7 @@ class TestListUnitCampaignCatalogsBatchAuth:
             return original_batch_get_item(*args, **kwargs)
 
         monkeypatch.setattr(resource, "batch_get_item", counted_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         event = {
             "arguments": {

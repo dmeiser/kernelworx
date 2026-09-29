@@ -103,7 +103,7 @@ class TestListUnitCatalogs:
             return {"Responses": {table_name: items}, "UnprocessedKeys": {}}
 
         mock_resource.batch_get_item.side_effect = batch_get_side_effect
-        with patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource):
+        with patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource):
             yield mock_resource
 
     def test_list_unit_catalogs_success(
@@ -564,7 +564,7 @@ class TestListUnitCampaignCatalogs:
             return {"Responses": {table_name: items}, "UnprocessedKeys": {}}
 
         mock_resource.batch_get_item.side_effect = batch_get_side_effect
-        with patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource):
+        with patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource):
             yield mock_resource
 
     def test_list_unit_campaign_catalogs_success(
@@ -876,7 +876,7 @@ class TestFetchCatalogsBatching:
 
     def test_fetch_catalogs_empty_set(self) -> None:
         """Empty catalog_ids returns empty list with zero BatchGetItem calls."""
-        with patch("src.handlers.list_unit_catalogs.get_dynamodb_resource") as mock_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_resource:
             result = _fetch_catalogs(set())
             assert result == []
             mock_resource.assert_not_called()
@@ -894,7 +894,7 @@ class TestFetchCatalogsBatching:
 
         mock_resource.batch_get_item.side_effect = batch_get_side_effect
 
-        with patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource):
+        with patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource):
             result = _fetch_catalogs(catalog_ids)
 
         assert len(result) == 150
@@ -931,7 +931,7 @@ class TestFetchCatalogsBatching:
         mock_resource.batch_get_item.side_effect = batch_get_side_effect
 
         with (
-            patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource),
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
             patch("time.sleep") as mock_sleep,
         ):
             result = _fetch_catalogs(catalog_ids)
@@ -941,7 +941,7 @@ class TestFetchCatalogsBatching:
         mock_sleep.assert_called_once_with(0.05)
 
     def test_fetch_catalogs_unprocessed_keys_exhausted(self) -> None:
-        """AppError(INTERNAL_ERROR) is raised if keys remain unprocessed after 3 attempts."""
+        """A persistent throttle raises the retryable AppError(RESOURCE_BUSY) after 3 attempts (#557)."""
         catalog_ids = {"cat-1"}
         mock_resource = MagicMock()
         mock_resource.batch_get_item.return_value = {
@@ -950,13 +950,13 @@ class TestFetchCatalogsBatching:
         }
 
         with (
-            patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource),
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
             patch("time.sleep"),
             pytest.raises(AppError) as exc_info,
         ):
             _fetch_catalogs(catalog_ids)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
         assert "DynamoDB BatchGetItem failed to return 1 keys after retries" in exc_info.value.message
 
     def test_fetch_catalogs_throttling_error(self) -> None:
@@ -968,7 +968,7 @@ class TestFetchCatalogsBatching:
         mock_resource.batch_get_item.side_effect = ClientError(error_response, "BatchGetItem")
 
         with (
-            patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource),
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
             pytest.raises(AppError) as exc_info,
         ):
             _fetch_catalogs({"cat-1"})
@@ -984,7 +984,7 @@ class TestFetchCatalogsBatching:
         mock_resource.batch_get_item.side_effect = ClientError(error_response, "BatchGetItem")
 
         with (
-            patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource),
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
             pytest.raises(AppError) as exc_info,
         ):
             _fetch_catalogs({"cat-1"})
@@ -1002,7 +1002,7 @@ class TestFetchCatalogsBatching:
 
         with (
             patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
-            patch("src.handlers.list_unit_catalogs.get_dynamodb_resource", return_value=mock_resource),
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
         ):
             mock_tables.catalogs.table_name = "custom-catalogs-table"
             _fetch_catalogs({"cat-1"})
