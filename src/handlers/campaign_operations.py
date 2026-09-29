@@ -46,6 +46,9 @@ BATCH_SIZE = 25
 MAX_BATCH_WRITE_ATTEMPTS = 5
 BATCH_WRITE_BACKOFF_SECONDS = 0.05
 
+# Intentionally mirrors admin_operations._THROTTLING_ERROR_CODES but is kept as a
+# separate copy because admin_operations imports this module at top level
+# (`from .campaign_operations import ...`), so importing back would be circular.
 _THROTTLING_ERROR_CODES = frozenset(
     {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
 )

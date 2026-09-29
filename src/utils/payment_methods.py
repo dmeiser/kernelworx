@@ -11,7 +11,6 @@ import re
 import uuid
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
-import boto3
 from botocore.exceptions import ClientError
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -19,11 +18,13 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.boto import get_s3_client
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.s3 import purge_s3_prefix
 except ModuleNotFoundError:  # pragma: no cover
+    from .boto import get_s3_client
     from .dynamodb import get_required_env, tables
     from .errors import AppError, ErrorCode
     from .logging import get_logger
@@ -123,14 +124,6 @@ def validate_qr_s3_key(s3_key: str, account_id: str) -> bool:
         return False
 
     return True
-
-
-def _get_s3_client() -> "S3Client":
-    """Return the S3 client (module-level override for tests, otherwise a fresh boto3 client)."""
-    global s3_client
-    if s3_client is not None:
-        return s3_client
-    return boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
 
 def slugify(text: str) -> str:
@@ -587,7 +580,7 @@ def upload_qr_to_s3(
     bucket_name = get_required_env("EXPORTS_BUCKET")
 
     try:
-        s3 = _get_s3_client()
+        s3 = get_s3_client(s3_client)
         s3.put_object(Bucket=bucket_name, Key=s3_key, Body=file_bytes, ContentType=content_type)
 
         logger.info("Uploaded QR code to S3", account_id=account_id, payment_method=payment_method_name, s3_key=s3_key)
@@ -613,7 +606,7 @@ def delete_qr_by_key(s3_key: str) -> None:
     bucket_name = get_required_env("EXPORTS_BUCKET")
 
     try:
-        s3 = _get_s3_client()
+        s3 = get_s3_client(s3_client)
         s3.delete_object(Bucket=bucket_name, Key=s3_key)
         logger.info("Deleted QR code from S3", s3_key=s3_key)
     except ClientError as e:
@@ -652,7 +645,7 @@ def delete_qr_from_s3(account_id: str, payment_method_name: str) -> None:
     extensions = ["png", "jpg", "webp"]
 
     try:
-        s3 = _get_s3_client()
+        s3 = get_s3_client(s3_client)
 
         deleted_any = False
         for ext in extensions:  # pragma: no branch
@@ -736,7 +729,7 @@ def generate_presigned_get_url(
     bucket_name = get_required_env("EXPORTS_BUCKET")
 
     try:
-        s3 = _get_s3_client()
+        s3: "S3Client" = get_s3_client(s3_client)
 
         if s3_key:
             # Never sign a caller-supplied key without proving ownership;
@@ -781,7 +774,7 @@ def delete_all_user_qr_codes(account_id: str, logger: Any = None) -> int:
         return 0
 
     log = logger or get_logger(__name__)
-    s3 = _get_s3_client()
+    s3 = get_s3_client(s3_client)
     clean_id = account_id.replace("ACCOUNT#", "")
     prefixes = [f"{QR_CODE_S3_PREFIX}/{account_id}/"]
     if clean_id != account_id:

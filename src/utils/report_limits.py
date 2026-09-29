@@ -27,6 +27,7 @@ is sized so the order count #577 approved for a report still passes on both.
 """
 
 import json
+import threading
 from typing import Any, Mapping
 
 try:  # pragma: no cover
@@ -130,21 +131,28 @@ class OrderGraphBudget:
 
     Callers charge each record *before* accumulating it, so a report that is
     going to be refused never pays for keeping what it cannot return.
+
+    The unit report charges from several worker threads at once (#555), so
+    charging is serialised: admission stays a single running total, and the
+    admitted bytes never overshoot the ceiling by more than the records the
+    workers are mid-admission on.
     """
 
     def __init__(self, subject: str, max_bytes: int) -> None:
         self._subject = subject
         self._max_bytes = max_bytes
         self._spent = 0
+        self._lock = threading.Lock()
 
     def admit(self, record: Mapping[str, Any]) -> None:
         """Charge one record, refusing the record that would cross the ceiling."""
-        self._spent += order_graph_bytes(record)
-        if self._spent > self._max_bytes:
-            logger.warning(
-                "Report order-graph ceiling reached",
-                subject=self._subject,
-                spentBytes=self._spent,
-                maxBytes=self._max_bytes,
-            )
-            raise report_too_large_error(self._subject, self._max_bytes)
+        with self._lock:
+            self._spent += order_graph_bytes(record)
+            if self._spent > self._max_bytes:
+                logger.warning(
+                    "Report order-graph ceiling reached",
+                    subject=self._subject,
+                    spentBytes=self._spent,
+                    maxBytes=self._max_bytes,
+                )
+                raise report_too_large_error(self._subject, self._max_bytes)
