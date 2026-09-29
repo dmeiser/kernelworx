@@ -6,7 +6,7 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
-import { ApolloClient, InMemoryCache } from '@apollo/client';
+import { ApolloClient, InMemoryCache, ApolloLink } from '@apollo/client';
 import { ApolloProvider } from '@apollo/client/react';
 import { MockLink } from '@apollo/client/testing';
 import { GraphQLError } from 'graphql';
@@ -18,11 +18,6 @@ import {
   ADMIN_SEARCH_USER,
   ADMIN_RESET_USER_PASSWORD,
   ADMIN_DELETE_USER,
-  ADMIN_DELETE_USER_ORDERS,
-  ADMIN_DELETE_USER_CAMPAIGNS,
-  ADMIN_DELETE_USER_SHARES,
-  ADMIN_DELETE_USER_PROFILES,
-  ADMIN_DELETE_USER_CATALOGS,
   CREATE_MANAGED_CATALOG,
   UPDATE_CATALOG,
   DELETE_CATALOG,
@@ -121,6 +116,31 @@ function renderAdminWithProductionClient(mocks: any[]) {
       </BrowserRouter>
     </ApolloProvider>,
   );
+}
+
+/**
+ * Renders the page with a link that records every operation it forwards, so a
+ * test can assert exactly which GraphQL operations the component issued.
+ */
+function renderAdminWithRecordingClient(mocks: any[]) {
+  const operations: string[] = [];
+  const recordingLink = new ApolloLink((operation, forward) => {
+    operations.push(operation.operationName ?? 'anonymous');
+    return forward(operation);
+  });
+  const client = new ApolloClient({
+    link: recordingLink.concat(new MockLink(mocks)),
+    cache: new InMemoryCache(),
+    defaultOptions: apolloClient.defaultOptions,
+  });
+  const rendered = render(
+    <ApolloProvider client={client}>
+      <BrowserRouter>
+        <AdminPage />
+      </BrowserRouter>
+    </ApolloProvider>,
+  );
+  return { ...rendered, operations };
 }
 
 describe('AdminPage - User Search', () => {
@@ -620,7 +640,32 @@ describe('AdminPage - Delete User', () => {
     });
   });
 
-  test('delete user executes cascading delete steps', async () => {
+  // #521: the server cascade preserves catalogs, so the confirmation copy must
+  // not tell the operator their catalogs are deleted.
+  test('delete dialog does not claim custom catalogs are deleted', async () => {
+    const user = userEvent.setup();
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+    ]);
+    renderAdmin(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Delete user test@example.com/i }));
+
+    expect(await screen.findByText(/custom catalogs are preserved and will not be deleted/i)).toBeInTheDocument();
+    expect(screen.queryByRole('listitem', { name: /custom catalogs/i })).not.toBeInTheDocument();
+  });
+
+  // #521: adminDeleteUser runs the whole server-side cascade, so the client
+  // must not re-issue the per-entity adminDeleteUser* mutations. In particular
+  // it must not soft-delete catalogs, which the server cascade preserves.
+  test('delete user issues only adminDeleteUser and never the per-entity cascade mutations', async () => {
     const user = userEvent.setup();
     const accountId = 'ACCOUNT#test-user-1';
     const mocks = baseMocks([
@@ -629,31 +674,11 @@ describe('AdminPage - Delete User', () => {
         result: { data: { adminSearchUser: [mockAdminUser] } },
       },
       {
-        request: { query: ADMIN_DELETE_USER_ORDERS, variables: { accountId } },
-        result: { data: { adminDeleteUserOrders: 5 } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER_CAMPAIGNS, variables: { accountId } },
-        result: { data: { adminDeleteUserCampaigns: 2 } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER_SHARES, variables: { accountId } },
-        result: { data: { adminDeleteUserShares: 1 } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER_PROFILES, variables: { accountId } },
-        result: { data: { adminDeleteUserProfiles: 1 } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER_CATALOGS, variables: { accountId } },
-        result: { data: { adminDeleteUserCatalogs: 0 } },
-      },
-      {
         request: { query: ADMIN_DELETE_USER, variables: { accountId } },
         result: { data: { adminDeleteUser: true } },
       },
     ]);
-    renderAdmin(mocks);
+    const { operations } = renderAdminWithRecordingClient(mocks);
 
     fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
     await user.click(screen.getByRole('button', { name: /search/i }));
@@ -665,6 +690,9 @@ describe('AdminPage - Delete User', () => {
     await waitFor(() => {
       expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument();
     });
+
+    // Only the two read operations plus the single delete mutation.
+    expect(operations).toEqual(['ListManagedCatalogs', 'AdminSearchUser', 'AdminDeleteUser']);
   });
 
   test('delete user shows error on failure', async () => {
@@ -676,7 +704,7 @@ describe('AdminPage - Delete User', () => {
         result: { data: { adminSearchUser: [mockAdminUser] } },
       },
       {
-        request: { query: ADMIN_DELETE_USER_ORDERS, variables: { accountId } },
+        request: { query: ADMIN_DELETE_USER, variables: { accountId } },
         error: new Error('Network error during delete'),
       },
     ]);
@@ -691,53 +719,6 @@ describe('AdminPage - Delete User', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Network error during delete/i)).toBeInTheDocument();
-    });
-  });
-
-  test('delete user handles mutation results with missing counts', async () => {
-    const user = userEvent.setup();
-    const accountId = 'ACCOUNT#test-user-1';
-    const mocks = baseMocks([
-      {
-        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
-        result: { data: { adminSearchUser: [mockAdminUser] } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER_ORDERS, variables: { accountId } },
-        result: { data: { adminDeleteUserOrders: null } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER_CAMPAIGNS, variables: { accountId } },
-        result: { data: {} },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER_SHARES, variables: { accountId } },
-        result: { data: { adminDeleteUserShares: null } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER_PROFILES, variables: { accountId } },
-        result: { data: {} },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER_CATALOGS, variables: { accountId } },
-        result: { data: { adminDeleteUserCatalogs: null } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER, variables: { accountId } },
-        result: { data: { adminDeleteUser: true } },
-      },
-    ]);
-    renderAdmin(mocks);
-
-    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
-    await user.click(screen.getByRole('button', { name: /search/i }));
-    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
-
-    await user.click(screen.getByRole('button', { name: /Delete user test@example.com/i }));
-    await user.click(screen.getByRole('button', { name: /delete user/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument();
     });
   });
 
@@ -1292,7 +1273,7 @@ describe('AdminPage - production Apollo client defaults', () => {
     vi.clearAllMocks();
   });
 
-  test('cascading delete stops at the first GraphQL error and does not show success', async () => {
+  test('delete user surfaces a GraphQL error from adminDeleteUser and does not show success', async () => {
     const user = userEvent.setup();
     const accountId = 'ACCOUNT#test-user-1';
     const mocks = baseMocks([
@@ -1301,12 +1282,8 @@ describe('AdminPage - production Apollo client defaults', () => {
         result: { data: { adminSearchUser: [mockAdminUser] } },
       },
       {
-        request: { query: ADMIN_DELETE_USER_ORDERS, variables: { accountId } },
-        result: { data: { adminDeleteUserOrders: 5 } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER_CAMPAIGNS, variables: { accountId } },
-        result: { errors: [new GraphQLError('Campaign delete failed')] },
+        request: { query: ADMIN_DELETE_USER, variables: { accountId } },
+        result: { errors: [new GraphQLError('Cascade delete failed')] },
       },
     ]);
     renderAdminWithProductionClient(mocks);
@@ -1319,7 +1296,7 @@ describe('AdminPage - production Apollo client defaults', () => {
     await user.click(screen.getByRole('button', { name: /delete user/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Campaign delete failed/i)).toBeInTheDocument();
+      expect(screen.getByText(/Cascade delete failed/i)).toBeInTheDocument();
     });
     expect(screen.queryByText(/deleted successfully/i)).not.toBeInTheDocument();
   });
