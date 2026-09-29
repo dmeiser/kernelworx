@@ -34,6 +34,9 @@ resource "aws_appsync_resolver" "get_profile" {
   pipeline_config {
     functions = [
       aws_appsync_function.fetch_profile.function_id,
+      # Step 2 of the two-phase owner check (#545): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.fetch_profile_step2.function_id,
       aws_appsync_function.check_profile_read_auth.function_id,
     ]
   }
@@ -442,6 +445,9 @@ resource "aws_appsync_resolver" "payment_methods_for_profile" {
   pipeline_config {
     functions = [
       aws_appsync_function.fetch_profile.function_id,
+      # Step 2 of the two-phase owner check (#545): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.fetch_profile_step2.function_id,
       aws_appsync_function.check_payment_methods_access.function_id,
       aws_appsync_function.get_owner_payment_methods.function_id,
       aws_appsync_function.filter_payment_methods_by_access.function_id,

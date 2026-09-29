@@ -126,6 +126,29 @@ hard-coded fallback table name, and never hard-code an environment-specific tabl
 result. When a handler needs the name for a raw call (e.g. `BatchGetItem` on the resource),
 read it from the accessor: `tables.catalogs.table_name`.
 
+#### AWS Clients (`src/utils/boto.py`)
+
+Build S3 and admin-Cognito clients with the shared factories, not a local `boto3.client(...)`:
+
+```python
+from utils.boto import get_cognito_client, get_s3_client
+
+cognito = get_cognito_client()
+s3 = get_s3_client()
+```
+
+Endpoint overrides (`S3_ENDPOINT`, `COGNITO_ENDPOINT`) are read and validated in exactly that
+module — a set value must be an `http(s)` URL with a host, so an override is honored
+everywhere it applies or raises, never silently dropped by one call site. The `get_s3_client`
+override argument exists only for the pre-existing per-module `s3_client` test seam
+(`src/utils/payment_methods.py`, `src/handlers/report_generation.py`,
+`src/handlers/delete_profile_cascade.py`); production code passes nothing.
+
+Deliberate exceptions: the `pre-token-generation` trigger builds its Cognito client once at
+module scope for warm-start connection reuse (#458), and the account-deletion and pre-signup
+handlers build per-call Cognito clients. `DYNAMODB_ENDPOINT` is still read unvalidated in
+`src/utils/dynamodb.py` (#523).
+
 #### ID Generation (`src/utils/ids.py`)
 
 Use centralized ID normalization helpers for consistent prefixed IDs:
@@ -140,6 +163,12 @@ profile_id = ensure_prefix("PROFILE", user_input)
 raw_id = strip_prefix(profile_id)
 ```
 
+`build_unit_campaign_key` owns the `unitCampaignKey-index` partition-key layout
+(`unitType#unitNumber#city#state#campaignName#campaignYear`). Unit reporting, unit catalog
+listing, and the campaign write path (`CreateCampaignInput.build_unit_campaign_key`) all use
+it, so the layout has exactly one definition and no call site rebuilds the string. The format
+cannot change without a data migration.
+
 #### Error Handling (`src/utils/errors.py`)
 
 Use `AppError` for all application errors:
@@ -151,6 +180,11 @@ raise AppError(ErrorCode.INVALID_INPUT, "Profile name is required")
 raise AppError(ErrorCode.NOT_FOUND, "Campaign not found")
 raise AppError(ErrorCode.UNAUTHORIZED, "Not authorized to view this profile")
 ```
+
+Do not translate a failed DynamoDB/Cognito lookup yourself, and never return the survivors of an
+`asyncio.gather(..., return_exceptions=True)` as the answer to a list query: a truncated list reads
+as "none in use" and gets acted on. `admin_operations._raise_batch_lookup_error` (one failure) and
+`_raise_gather_failures` (a collected list) own that classification — see AGENTS.md.
 
 #### Cognito Retries (`src/utils/cognito.py`)
 
