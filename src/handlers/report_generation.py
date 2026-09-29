@@ -5,13 +5,10 @@ Implements:
 - requestCampaignReport: Generate Excel/CSV report for campaign data
 """
 
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import TYPE_CHECKING, Any, Dict
-
-import boto3
 
 if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_s3.client import S3Client
@@ -19,6 +16,7 @@ if TYPE_CHECKING:  # pragma: no cover
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.auth import check_profile_access
+    from utils.boto import get_s3_client
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_campaign_id
@@ -27,6 +25,7 @@ try:  # pragma: no cover
     from utils.report_limits import MAX_CAMPAIGN_REPORT_GRAPH_BYTES, OrderGraphBudget
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import check_profile_access
+    from ..utils.boto import get_s3_client
     from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_campaign_id
@@ -51,14 +50,6 @@ REPORT_URL_EXPIRATION_SECONDS = 3 * 60 * 60
 
 # Module-level proxy that tests can monkeypatch
 s3_client: "S3Client | None" = None
-
-
-def _get_s3_client() -> "S3Client":
-    """Return the S3 client (module-level override for tests, otherwise a fresh boto3 client)."""
-    global s3_client
-    if s3_client is not None:
-        return s3_client
-    return boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
 
 def _generate_report_content(orders: list[Dict[str, Any]], report_format: str) -> tuple[bytes, str, str]:
@@ -129,7 +120,7 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         exports_bucket = get_required_env("EXPORTS_BUCKET")
         s3_key = f"reports/{profile_id}/{campaign_id}/{report_id}.{file_extension}"
 
-        s3 = _get_s3_client()
+        s3 = get_s3_client(s3_client)
         s3.put_object(
             Bucket=exports_bucket,
             Key=s3_key,

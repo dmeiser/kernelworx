@@ -55,6 +55,38 @@ generate_password() {
   echo "${prefix}A1!"
 }
 
+# The TEST_*_PASSWORD values this script exports are the credentials the
+# integration and e2e suites sign in with, so a password Cognito did not accept
+# must never be exported: the suites would keep presenting a password that does
+# not work until Cognito's failed-attempt backoff ("Password attempts exceeded")
+# locks the user out, and the run then fails on a misleading auth error far from
+# the real cause. The admin control plane fails transiently (throttling,
+# propagation), so retry the assignment briefly and abort the run if it still
+# has not taken effect.
+PASSWORD_SET_ATTEMPTS=5
+PASSWORD_SET_BACKOFF_SECONDS=2
+
+set_user_password() {
+  local email=$1
+  local password=$2
+  local attempt=1
+  while [ "$attempt" -le "$PASSWORD_SET_ATTEMPTS" ]; do
+    if aws cognito-idp admin-set-user-password \
+      --user-pool-id "$USER_POOL_ID" \
+      --username "$email" \
+      --password "$password" \
+      --permanent \
+      --region "$REGION" >/dev/null; then
+      return 0
+    fi
+    log "  (Attempt $attempt/$PASSWORD_SET_ATTEMPTS could not set the password for $email)"
+    attempt=$((attempt + 1))
+    sleep "$PASSWORD_SET_BACKOFF_SECONDS"
+  done
+  log "Refusing to export test credentials: the password for $email was never set."
+  return 1
+}
+
 OWNER_PASSWORD=$(generate_password)
 CONTRIBUTOR_PASSWORD=$(generate_password)
 READONLY_PASSWORD=$(generate_password)
@@ -79,13 +111,7 @@ create_or_update_user() {
     --region "$REGION" \
     >/dev/null 2>&1 || log "  (User may already exist)"
 
-  aws cognito-idp admin-set-user-password \
-    --user-pool-id "$USER_POOL_ID" \
-    --username "$email" \
-    --password "$password" \
-    --permanent \
-    --region "$REGION" \
-    >/dev/null 2>&1 || log "  (Could not set password)"
+  set_user_password "$email" "$password"
 
   aws cognito-idp admin-update-user-attributes \
     --user-pool-id "$USER_POOL_ID" \

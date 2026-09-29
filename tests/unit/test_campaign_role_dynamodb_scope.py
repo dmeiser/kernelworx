@@ -23,7 +23,8 @@ import botocore.client
 import pytest
 
 from src.handlers.campaign_operations import delete_campaign_orders
-from src.handlers.campaign_reporting import _build_unit_campaign_key, get_unit_report
+from src.handlers.campaign_reporting import get_unit_report
+from src.utils.ids import build_unit_campaign_key as _build_unit_campaign_key
 
 PROFILE_TABLE = "kernelworx-profiles-v2-ue1-dev"
 CAMPAIGNS_TABLE = "kernelworx-campaigns-v2-ue1-dev"
