@@ -6,8 +6,10 @@ The account/reporting-domain Lambda functions (``request-report``,
 #354 (chunk 4 of the #326 IAM role split, reusing the wiring pattern #351
 established). That role grants DynamoDB read actions (GetItem/Query/
 BatchGetItem) on exactly the tables the handlers touch (profiles, shares,
-campaigns, orders, catalogs — the first two only via the shared
-``utils.auth`` collaborator paths), plus S3 PutObject / GetObject scoped to
+campaigns, orders, catalogs — via the shared ``utils.auth`` collaborator
+paths, and read directly by list-catalogs-in-use: its owned-profile query, its
+``targetAccountId-index`` shares query, and the per-share owner re-validation
+read on profiles, #530/#432), plus S3 PutObject / GetObject scoped to
 the ``reports/*`` prefix of the exports bucket (request-report uploads the
 generated report and returns a pre-signed GET URL, which S3 authorizes
 against the signing role's policy at request time). Every handler in this
@@ -26,7 +28,7 @@ domain role.
 """
 
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from unittest.mock import AsyncMock, MagicMock
 
 import boto3
@@ -368,40 +370,73 @@ class TestListUnitCatalogsScope:
 
 
 class RecordingAsyncTable:
-    """Minimal aioboto3 Table double that records Query calls with its table name."""
+    """Minimal aioboto3 Table double that records reads with its table name.
+
+    ``query`` and ``get_item`` append ``(operation, table)`` pairs to the shared
+    ``calls`` list (queries never paginate). ``get_item`` also keeps the full
+    request in ``last_get_item`` so a test can pin ``ConsistentRead``, and
+    returns a hit only when a seeded item matches every key attribute.
+    """
 
     def __init__(self, table_name: str, items: List[Dict[str, Any]], calls: List[Tuple[str, str]]) -> None:
         self._table_name = table_name
         self._items = items
         self._calls = calls
+        self.last_get_item: Optional[Dict[str, Any]] = None
 
     async def query(self, **kwargs: Any) -> Dict[str, Any]:
         """Record the Query and return the seeded page (never paginates)."""
         self._calls.append(("Query", self._table_name))
         return {"Items": list(self._items)}
 
+    async def get_item(self, **kwargs: Any) -> Dict[str, Any]:
+        """Record the GetItem; return the seeded item matching the key, else a miss."""
+        self._calls.append(("GetItem", self._table_name))
+        self.last_get_item = kwargs
+        key = kwargs.get("Key") or {}
+        for item in self._items:
+            if all(item.get(attr) == value for attr, value in key.items()):
+                return {"Item": dict(item)}
+        return {}
+
+
+def assert_async_reads_within_role_scope(calls: List[Tuple[str, str]]) -> None:
+    """Assert aioboto3-recorded reads stay inside the #354 account-reporting role.
+
+    The role grants only GetItem/Query/BatchGetItem on the domain tables, so a
+    handler issuing any other action (or touching another table) would be
+    refused at runtime. This is the behavioural form of that contract for the
+    async list-catalogs-in-use path: it pins the recorded operations rather
+    than an assertion message.
+    """
+    assert calls, "expected the handler to issue DynamoDB reads"
+    operations = {op for op, _ in calls}
+    table_names = {table for _, table in calls}
+    assert operations <= ALLOWED_DYNAMODB_ACTIONS, (
+        f"actions the account-reporting role refuses: {operations - ALLOWED_DYNAMODB_ACTIONS}"
+    )
+    assert table_names <= DOMAIN_TABLES, f"reads outside the domain role scope: {table_names - DOMAIN_TABLES}"
+
 
 class TestListCatalogsInUseScope:
-    """list-catalogs-in-use queries only profiles/shares/campaigns (aioboto3 path).
+    """list-catalogs-in-use reads only profiles/shares/campaigns (aioboto3 path).
 
     moto cannot intercept aiobotocore, so like tests/unit/test_list_catalogs_in_use.py
     this drives the real async orchestrator with a mocked aioboto3 session whose
-    Table.query records (operation, table) pairs; the scope assertions are the
-    same botocore-layer contract the other domains check.
+    Table.query/Table.get_item record (operation, table) pairs; the scope
+    assertions are the same contract the other domains check at the botocore
+    layer. The real operation set is Query (owned profiles, shares
+    targetAccountId GSI, campaigns) plus the per-share owner re-validation read
+    on profiles (#530/#432): a strongly consistent GetItem for owner-bearing
+    shares, or a profileId-index GSI Query for legacy shares without
+    ownerAccountId.
     """
 
-    @pytest.mark.asyncio
-    async def test_queries_only_domain_tables(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _orchestrate(
+        self, tables_by_name: Dict[str, RecordingAsyncTable]
+    ) -> Tuple[Set[str], List[str], Set[str]]:
+        """Run the real orchestrator against the given table doubles."""
         import src.handlers.list_catalogs_in_use as module
-
-        calls: List[Tuple[str, str]] = []
-        tables_by_name = {
-            "kernelworx-profiles-v2-ue1-dev": RecordingAsyncTable(PROFILES_TABLE, [{"profileId": PROFILE_ID}], calls),
-            "kernelworx-shares-ue1-dev": RecordingAsyncTable(
-                SHARES_TABLE, [{"profileId": "PROFILE#shared-1", "permissions": ["READ"]}], calls
-            ),
-            "kernelworx-campaigns-v2-ue1-dev": RecordingAsyncTable(CAMPAIGNS_TABLE, [{"catalogId": CATALOG_ID}], calls),
-        }
 
         async def table_factory(table_name: str) -> RecordingAsyncTable:
             return tables_by_name[table_name]
@@ -417,15 +452,80 @@ class TestListCatalogsInUseScope:
         original_session = module.aioboto3.Session
         module.aioboto3.Session = MagicMock(return_value=mock_session)
         try:
-            owned, shared_profiles, shared_catalogs = await module._async_get_all_catalog_ids(f"ACCOUNT#{OWNER_SUB}")
+            return await module._async_get_all_catalog_ids(f"ACCOUNT#{OWNER_SUB}")
         finally:
             module.aioboto3.Session = original_session
+
+    @staticmethod
+    def _tables_by_name(
+        calls: List[Tuple[str, str]], share: Dict[str, Any], profiles_items: List[Dict[str, Any]]
+    ) -> Dict[str, RecordingAsyncTable]:
+        """Build the profiles/shares/campaigns doubles for one orchestrator run."""
+        return {
+            "kernelworx-profiles-v2-ue1-dev": RecordingAsyncTable(PROFILES_TABLE, profiles_items, calls),
+            "kernelworx-shares-ue1-dev": RecordingAsyncTable(SHARES_TABLE, [share], calls),
+            "kernelworx-campaigns-v2-ue1-dev": RecordingAsyncTable(CAMPAIGNS_TABLE, [{"catalogId": CATALOG_ID}], calls),
+        }
+
+    @pytest.mark.asyncio
+    async def test_owner_bearing_share_revalidates_with_consistent_getitem(self) -> None:
+        calls: List[Tuple[str, str]] = []
+        share = {"profileId": "PROFILE#shared-1", "permissions": ["READ"], "ownerAccountId": f"ACCOUNT#{OWNER_SUB}"}
+        tables_by_name = self._tables_by_name(
+            calls,
+            share,
+            [
+                {"ownerAccountId": f"ACCOUNT#{OWNER_SUB}", "profileId": PROFILE_ID},
+                {"ownerAccountId": f"ACCOUNT#{OWNER_SUB}", "profileId": "PROFILE#shared-1"},
+            ],
+        )
+
+        owned, shared_profiles, shared_catalogs = await self._orchestrate(tables_by_name)
 
         assert owned == {CATALOG_ID}
         assert shared_profiles == ["PROFILE#shared-1"]
         assert shared_catalogs == {CATALOG_ID}
-        assert calls, "expected the orchestrator to issue DynamoDB queries"
+        # Real operation set: Query for the owned-profiles, shares-GSI and
+        # campaigns reads, plus the strongly consistent GetItem on the profiles
+        # base table that re-validates an owner-bearing share against the
+        # profile's current owner (#530/#432). The #354 account-reporting role
+        # legitimately grants both dynamodb:GetItem and dynamodb:Query on the
+        # profiles table, so this extra re-validation read is permitted and
+        # stays inside the domain role's read-only scope.
         operations = {op for op, _ in calls}
-        table_names = {table for _, table in calls}
-        assert operations == {"Query"}, f"list-catalogs-in-use must only Query, got {operations}"
-        assert table_names <= DOMAIN_TABLES, f"queries outside the domain role scope: {table_names - DOMAIN_TABLES}"
+        assert operations == {"Query", "GetItem"}, (
+            "list-catalogs-in-use must read via Query plus the owner re-validation GetItem on profiles, "
+            f"got {operations}"
+        )
+        assert ("GetItem", PROFILES_TABLE) in calls, "owner-bearing share must trigger the profiles GetItem"
+        profiles_table = tables_by_name["kernelworx-profiles-v2-ue1-dev"]
+        assert profiles_table.last_get_item is not None, "the re-validation read must have been issued"
+        assert profiles_table.last_get_item.get("ConsistentRead") is True, (
+            "the #432 owner re-validation read must be strongly consistent"
+        )
+        assert_async_reads_within_role_scope(calls)
+
+    @pytest.mark.asyncio
+    async def test_legacy_share_without_owner_never_issues_getitem(self) -> None:
+        calls: List[Tuple[str, str]] = []
+        # Legacy share with no ownerAccountId: there is no owner key to read
+        # under, so the handler must not issue the base-table GetItem; the
+        # profile-existence check falls back to the profileId-index GSI Query.
+        share = {"profileId": "PROFILE#shared-1", "permissions": ["READ"]}
+        tables_by_name = self._tables_by_name(
+            calls, share, [{"ownerAccountId": f"ACCOUNT#{OWNER_SUB}", "profileId": PROFILE_ID}]
+        )
+
+        owned, shared_profiles, shared_catalogs = await self._orchestrate(tables_by_name)
+
+        assert owned == {CATALOG_ID}
+        assert shared_profiles == ["PROFILE#shared-1"]
+        assert shared_catalogs == {CATALOG_ID}
+        profiles_table = tables_by_name["kernelworx-profiles-v2-ue1-dev"]
+        assert profiles_table.last_get_item is None, "a share without ownerAccountId must not issue a GetItem"
+        assert ("GetItem", PROFILES_TABLE) not in calls, (
+            "a share without ownerAccountId must not trigger the profiles GetItem"
+        )
+        # The GSI existence check records as a Query on the profiles table.
+        assert ("Query", PROFILES_TABLE) in calls
+        assert_async_reads_within_role_scope(calls)
