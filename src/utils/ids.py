@@ -83,6 +83,15 @@ def ensure_account_id(id_value: Optional[str]) -> Optional[str]:
     return ensure_prefix("ACCOUNT", id_value)
 
 
+def normalize_account_id(account_id: str) -> str:
+    """Add the ACCOUNT# prefix if not present, returning a plain string.
+
+    The non-optional counterpart of :func:`ensure_account_id` for call sites
+    that already reject a missing account id.
+    """
+    return account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
+
+
 def ensure_product_id(id_value: Optional[str]) -> Optional[str]:
     """Normalize product ID with PRODUCT# prefix."""
     return ensure_prefix("PRODUCT", id_value)

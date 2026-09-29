@@ -10,21 +10,23 @@ from typing import TYPE_CHECKING, Any, Dict
 import boto3
 from botocore.exceptions import ClientError
 
+# Sibling handler modules use a same-package relative import, which resolves both
+# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+# The cascade lives in its own module so this dependency runs one way: neither
+# module here imports `admin_operations` (#554).
+from .deletion_cascade import delete_all_user_data
+
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.cognito import retry_on_transient_errors
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
-    from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.cognito import retry_on_transient_errors
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
-    from ..utils.payment_methods import delete_all_user_qr_codes
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -39,61 +41,6 @@ else:  # pragma: no cover
 
 
 logger = get_logger(__name__)
-
-
-def _delete_user_s3_reports(account_id: str, logger: Any) -> int:
-    """Delete all S3 report objects and versions for all profiles owned by the user.
-
-    Returns the count of deleted S3 report versions.
-    """
-    from .admin_operations import _get_user_profiles, _normalize_account_id
-    from .delete_profile_cascade import _delete_s3_reports
-
-    db_account_id = _normalize_account_id(account_id)
-    profiles = _get_user_profiles(db_account_id)
-    total_deleted = 0
-    for profile in profiles:
-        profile_id = profile.get("profileId")
-        if profile_id:
-            total_deleted += _delete_s3_reports(str(profile_id))
-
-    logger.info("Deleted user S3 reports", account_id=account_id, count=total_deleted)
-    return total_deleted
-
-
-def _delete_all_user_data(account_id: str, logger: Any = None) -> None:
-    """Delete all user data from DynamoDB and S3 using shared deletion internals."""
-    from .admin_operations import (
-        _delete_inbound_shares,
-        _delete_invites_for_owned_profiles,
-        _delete_user_campaigns,
-        _delete_user_orders,
-        _delete_user_profiles,
-        _delete_user_shares,
-        _normalize_account_id,
-    )
-
-    log = logger or get_logger(__name__)
-
-    _delete_user_orders(account_id, log)
-    _delete_user_campaigns(account_id, log)
-    _delete_user_shares(account_id, log)
-    _delete_invites_for_owned_profiles(account_id, log)
-    _delete_inbound_shares(account_id, log)
-    _delete_user_s3_reports(account_id, log)
-    _delete_user_profiles(account_id, log)
-    # Catalogs are preserved per product design and should never be deleted.
-    # Delete payment method QR codes from S3 per captain decision
-    delete_all_user_qr_codes(account_id, log)
-
-    account_id_key = _normalize_account_id(account_id)
-    try:
-        tables.accounts.delete_item(Key={"accountId": account_id_key})
-        log.info("Deleted account from DynamoDB", account_id=account_id_key)
-    except ClientError as e:
-        log.error("Failed to delete account from DynamoDB", error=str(e), account_id=account_id_key)
-        raise
-    log.info("Deleted all user data from DynamoDB")
 
 
 def _lookup_cognito_user_with_retry(cognito: Any, user_pool_id: str, account_id: str) -> str | None:
@@ -177,7 +124,7 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
             logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(e), exc_info=True)
             raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
 
-        _delete_all_user_data(account_id, logger)
+        delete_all_user_data(account_id, logger)
         _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
         logger.info("Account deletion completed successfully")
         return True

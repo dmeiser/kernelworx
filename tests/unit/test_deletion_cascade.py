@@ -21,7 +21,7 @@ import boto3
 import botocore.client
 import pytest
 
-from src.handlers.account_operations import _delete_all_user_data as delete_all_user_data
+from src.handlers.deletion_cascade import delete_all_user_data
 
 ACCOUNT_ID = "user-123-456"
 ACCOUNT_KEY = f"ACCOUNT#{ACCOUNT_ID}"
@@ -156,17 +156,26 @@ class TestDeleteAllUserDataProfileSweepCount:
         assert _remaining(seeded_cascade, INVITES_TABLE) == 0
         assert _remaining(seeded_cascade, ACCOUNTS_TABLE) == 0
 
-    def test_sweep_count_does_not_grow_with_profile_count(
+    def test_profile_sweep_count_is_independent_of_profile_count(
         self, seeded_cascade: Any, dynamodb_calls: DynamoDbCallRecorder
     ) -> None:
-        """A second profile sweep would show up as a per-profile or per-sub-cascade repeat."""
+        """Adding profiles must scale the per-profile work, never the profile sweep itself."""
+        profiles = seeded_cascade.Table(PROFILES_TABLE)
+        for index in range(3, 8):
+            profiles.put_item(
+                Item={
+                    "ownerAccountId": ACCOUNT_KEY,
+                    "profileId": f"PROFILE#extra-{index}",
+                    "sellerName": f"Extra {index}",
+                }
+            )
+
         dynamodb_calls.attach()
 
         delete_all_user_data(ACCOUNT_ID)
 
-        total_queries = sum(1 for operation, _ in dynamodb_calls.calls if operation == "Query")
-        # Two profiles x (campaigns, shares, invites) queries plus the one profile sweep.
-        assert total_queries == 1 + 2 * 3
+        assert dynamodb_calls.count("Query", PROFILES_TABLE) == 1
+        assert _remaining(seeded_cascade, PROFILES_TABLE) == 0
 
 
 def test_delete_all_user_data_deletes_payment_qr_codes(
