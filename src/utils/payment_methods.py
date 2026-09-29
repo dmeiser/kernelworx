@@ -553,51 +553,6 @@ def validate_qr_file(file_bytes: bytes, content_type: str) -> None:
         raise AppError(ErrorCode.INVALID_INPUT, "QR code must be PNG, JPG, or WEBP format")
 
 
-def upload_qr_to_s3(
-    account_id: str, payment_method_name: str, file_bytes: bytes, content_type: str = "image/png"
-) -> str:
-    """
-    Upload QR code to S3.
-
-    Args:
-        account_id: Account ID
-        payment_method_name: Payment method name
-        file_bytes: Image file bytes
-        content_type: MIME type (default: image/png)
-
-    Returns:
-        S3 key for the uploaded file
-
-    Raises:
-        AppError: If upload fails or file validation fails
-    """
-    logger = get_logger(__name__)
-
-    # Validate file
-    validate_qr_file(file_bytes, content_type)
-
-    # Determine file extension from content type
-    extension_map = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
-    extension = extension_map.get(content_type, "png")
-
-    # Generate S3 key
-    s3_key = get_qr_code_s3_key(account_id, payment_method_name, extension)
-
-    bucket_name = get_required_env("EXPORTS_BUCKET")
-
-    try:
-        s3 = get_s3_client(s3_client)
-        s3.put_object(Bucket=bucket_name, Key=s3_key, Body=file_bytes, ContentType=content_type)
-
-        logger.info("Uploaded QR code to S3", account_id=account_id, payment_method=payment_method_name, s3_key=s3_key)
-
-        return s3_key
-
-    except ClientError as e:
-        logger.error("Failed to upload QR code to S3", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to upload QR code")
-
-
 def delete_qr_by_key(s3_key: str) -> None:
     """
     Delete a specific QR code from S3 by its key.
