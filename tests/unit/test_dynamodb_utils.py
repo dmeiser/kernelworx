@@ -68,8 +68,46 @@ class TestGetDynamoDB:
             assert hasattr(result, "Table")
 
     def test_uses_endpoint_override(self) -> None:
-        """Test that endpoint URL is used when set."""
+        """Test that a valid endpoint URL is passed through when set."""
         reset_dynamodb_resource()
+        with patch.dict(os.environ, {"DYNAMODB_ENDPOINT": "http://localhost:8000"}):
+            with patch("boto3.resource") as mock_resource:
+                mock_resource.return_value = MagicMock()
+                _get_dynamodb()
+                mock_resource.assert_called_once_with("dynamodb", endpoint_url="http://localhost:8000")
+
+    def test_no_endpoint_override_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that no endpoint URL is passed when the variable is unset."""
+        reset_dynamodb_resource()
+        monkeypatch.delenv("DYNAMODB_ENDPOINT", raising=False)
+        with patch("boto3.resource") as mock_resource:
+            mock_resource.return_value = MagicMock()
+            _get_dynamodb()
+            mock_resource.assert_called_once_with("dynamodb", endpoint_url=None)
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            "localhost:4566",
+            "ftp://localhost:4566",
+            "http://",
+            "",
+        ],
+    )
+    def test_invalid_endpoint_override_rejected(self, bad_value: str) -> None:
+        """A DYNAMODB_ENDPOINT that is not an http(s) URL with a host raises ValueError (#523).
+
+        Regression test: before the fix the raw value was passed to boto3, so a
+        malformed override silently redirected signed requests instead of failing.
+        """
+        reset_dynamodb_resource()
+        with patch.dict(os.environ, {"DYNAMODB_ENDPOINT": bad_value}):
+            with patch("boto3.resource") as mock_resource:
+                with pytest.raises(ValueError, match="DYNAMODB_ENDPOINT"):
+                    _get_dynamodb()
+                mock_resource.assert_not_called()
+        # A failed construction must not poison the module-level cache: a later
+        # call with a valid override still constructs the resource.
         with patch.dict(os.environ, {"DYNAMODB_ENDPOINT": "http://localhost:8000"}):
             with patch("boto3.resource") as mock_resource:
                 mock_resource.return_value = MagicMock()

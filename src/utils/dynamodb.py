@@ -10,6 +10,14 @@ from typing import TYPE_CHECKING, Optional
 
 import boto3
 
+if TYPE_CHECKING:  # pragma: no cover
+    from utils.boto import validated_endpoint_override
+else:  # pragma: no cover
+    try:
+        from utils.boto import validated_endpoint_override
+    except ModuleNotFoundError:
+        from ..utils.boto import validated_endpoint_override
+
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb import DynamoDBServiceResource
     from mypy_boto3_dynamodb.service_resource import Table
@@ -52,10 +60,15 @@ def get_required_env(name: str, default: Optional[str] = None) -> str:
 
 
 def _get_dynamodb() -> "DynamoDBServiceResource":
-    """Get DynamoDB resource with optional endpoint override for LocalStack."""
+    """Get DynamoDB resource with optional endpoint override for LocalStack.
+
+    The override is validated in ``utils.boto.validated_endpoint_override``:
+    a set ``DYNAMODB_ENDPOINT`` must be an http(s) URL with a host, otherwise
+    a ValueError raises rather than silently redirecting signed requests (#523).
+    """
     global _dynamodb_resource
     if _dynamodb_resource is None:
-        _dynamodb_resource = boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
+        _dynamodb_resource = boto3.resource("dynamodb", endpoint_url=validated_endpoint_override("DYNAMODB_ENDPOINT"))
     return _dynamodb_resource
 
 

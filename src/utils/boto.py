@@ -1,17 +1,16 @@
 """
 Centralized boto3 client factories with endpoint-override validation (#523, #575).
 
-The single construction path for the S3 and admin-Cognito clients that #575
-consolidated, so retry/botocore config or endpoint handling changes once, in
-one reviewed place. Endpoint overrides (S3_ENDPOINT, COGNITO_ENDPOINT) are
-validated here rather than at each call site: a set value must be an http(s)
-URL with a host.
+The single construction path for the S3, admin-Cognito, and DynamoDB clients,
+so retry/botocore config or endpoint handling changes once, in one reviewed
+place. Endpoint overrides (S3_ENDPOINT, COGNITO_ENDPOINT, DYNAMODB_ENDPOINT)
+are validated here rather than at each call site: a set value must be an
+http(s) URL with a host.
 
 The pre-token-generation trigger builds its Cognito client once at module scope
 on purpose (warm-start connection reuse, #458), and the account-deletion and
 pre-signup handlers construct their own per-call Cognito clients, so those
-three sites are not routed through here. The DYNAMODB_ENDPOINT override
-remains unvalidated (#523).
+three sites are not routed through here.
 """
 
 import os
@@ -24,7 +23,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_s3.client import S3Client
 
 
-def _validated_endpoint_override(env_name: str) -> Optional[str]:
+def validated_endpoint_override(env_name: str) -> Optional[str]:
     """Read a service endpoint override from the environment and validate it.
 
     Args:
@@ -47,7 +46,7 @@ def _validated_endpoint_override(env_name: str) -> Optional[str]:
 
 def get_cognito_client() -> Any:
     """Get a Cognito IDP client, honoring the COGNITO_ENDPOINT override."""
-    return boto3.client("cognito-idp", endpoint_url=_validated_endpoint_override("COGNITO_ENDPOINT"))
+    return boto3.client("cognito-idp", endpoint_url=validated_endpoint_override("COGNITO_ENDPOINT"))
 
 
 def get_s3_client(override: Any = None) -> "S3Client":
@@ -62,4 +61,4 @@ def get_s3_client(override: Any = None) -> "S3Client":
     """
     if override is not None:
         return cast("S3Client", override)
-    return boto3.client("s3", endpoint_url=_validated_endpoint_override("S3_ENDPOINT"))
+    return boto3.client("s3", endpoint_url=validated_endpoint_override("S3_ENDPOINT"))
