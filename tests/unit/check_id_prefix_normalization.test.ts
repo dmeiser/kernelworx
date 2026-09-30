@@ -24,6 +24,7 @@ const LIB_DIR = join(JS_RESOLVERS_DIR, "lib");
 const WRITE_PATH_RESOLVERS = [
   "verify_profile_write_access_fn.js",
   "lookup_profile_for_update_fn.js",
+  "check_write_permission_fn.js",
 ];
 
 // The ID prefixes the profile write path uses.
