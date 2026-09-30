@@ -53,9 +53,7 @@ describe('ScoutsPage helpers', () => {
     expect(areBothProfilesLoaded(undefined, false)).toBe(false);
     expect(areBothProfilesLoaded({ listMyProfiles: { profiles: [] } }, true)).toBe(true);
     expect(getMyProfiles(undefined)).toEqual([]);
-    expect(getMyProfiles({ listMyProfiles: { profiles: [{ profileId: 'x' }] } } as any)).toEqual([
-      { profileId: 'x' },
-    ]);
+    expect(getMyProfiles({ listMyProfiles: { profiles: [{ profileId: 'x' }] } } as any)).toEqual([{ profileId: 'x' }]);
   });
 
   it('isPageLoading works with combinations', () => {
@@ -64,11 +62,18 @@ describe('ScoutsPage helpers', () => {
     expect(isPageLoading(false, false, true)).toBe(false);
   });
 
-  it('buildPreferencesVariables encodes JSON', () => {
-    const obj = { showReadOnlyProfiles: false };
-    const vars = buildPreferencesVariables(obj as any, true);
+  it('buildPreferencesVariables merges the toggle into the live blob and locks on it (#510)', () => {
+    const blob = JSON.stringify({ showReadOnlyProfiles: false, paymentMethods: [{ name: 'Cash' }] });
+    const vars = buildPreferencesVariables(blob, true);
     expect(typeof vars.preferences).toBe('string');
-    expect(JSON.parse(vars.preferences)).toEqual({ showReadOnlyProfiles: true });
+    expect(JSON.parse(vars.preferences)).toEqual({ showReadOnlyProfiles: true, paymentMethods: [{ name: 'Cash' }] });
+    expect(vars.expectedPreferences).toBe(blob);
+  });
+
+  it('buildPreferencesVariables sends a null snapshot when no blob was read', () => {
+    const vars = buildPreferencesVariables(undefined, false);
+    expect(JSON.parse(vars.preferences)).toEqual({ showReadOnlyProfiles: false });
+    expect(vars.expectedPreferences).toBeNull();
   });
 
   it('dialog open helpers', () => {
@@ -121,14 +126,24 @@ describe('ScoutsPage helpers', () => {
 
   it('updatePreferencesWithRollback success and rollback on error', async () => {
     const setShow = vi.fn();
+    const client = { query: vi.fn().mockResolvedValue({ data: {} }) };
     const successFn = vi.fn().mockResolvedValue({});
-    await updatePreferencesWithRollback(successFn as any, { showReadOnlyProfiles: true }, false, setShow);
+    await updatePreferencesWithRollback(
+      successFn as any,
+      '{"showReadOnlyProfiles":true}',
+      false,
+      setShow,
+      client as any,
+    );
     expect(setShow).toHaveBeenCalledWith(false);
+    expect(client.query).not.toHaveBeenCalled();
 
     const failing = vi.fn().mockRejectedValue(new Error('boom'));
-    await updatePreferencesWithRollback(failing as any, { showReadOnlyProfiles: true }, false, setShow);
+    await updatePreferencesWithRollback(failing as any, '{"showReadOnlyProfiles":true}', false, setShow, client as any);
     // On failure it should revert the value
-    expect(setShow).toHaveBeenCalled();
+    expect(setShow).toHaveBeenCalledWith(true);
+    // ... and refresh the cached blob so a retry reads a fresh snapshot (#510)
+    expect(client.query).toHaveBeenCalledWith(expect.objectContaining({ fetchPolicy: 'network-only' }));
   });
 
   it('loadSharedProfilesWithErrorHandling handles success and error', async () => {
@@ -144,7 +159,14 @@ describe('ScoutsPage helpers', () => {
 
     // error path
     const failingClient = { query: vi.fn().mockRejectedValue(new Error('fail')) };
-    await loadSharedProfilesWithErrorHandling(failingClient as any, {} as any, setProfiles, setLoaded, setError, setLoading);
+    await loadSharedProfilesWithErrorHandling(
+      failingClient as any,
+      {} as any,
+      setProfiles,
+      setLoaded,
+      setError,
+      setLoading,
+    );
     expect(setError).toHaveBeenCalled();
   });
 

@@ -144,12 +144,16 @@ const SharedProfilesSection: React.FC<{
 const shouldShowEmptyState = (myProfiles: Profile[], filteredSharedProfiles: Profile[], loading: boolean): boolean =>
   myProfiles.length === 0 && filteredSharedProfiles.length === 0 && !loading;
 
-// Helper to build preferences update variables
-const buildPreferencesVariables = (preferences: { showReadOnlyProfiles: boolean }, newChecked: boolean) => ({
+// Helper to build preferences update variables. Takes the raw preferences
+// blob (read live from the Apollo cache) so the write is a read-modify-write
+// of the real stored blob — never a default — and threads the same blob back
+// as `expectedPreferences` for the resolver's optimistic lock (#510).
+const buildPreferencesVariables = (preferences: string | null | undefined, newChecked: boolean) => ({
   preferences: JSON.stringify({
-    ...preferences,
+    ...parsePreferences(preferences ?? undefined),
     showReadOnlyProfiles: newChecked,
   }),
+  expectedPreferences: preferences ?? null,
 });
 
 // Helper to check if should open dialog on return path
@@ -224,12 +228,17 @@ const maybeDeleteProfile = async (
   }
 };
 
-// Helper to update preferences with error handling
+// Helper to update preferences with error handling. On failure, rolls the
+// toggle back and refreshes the cached blob so a retry works from a fresh
+// snapshot (#510).
 const updatePreferencesWithRollback = async (
-  updatePreferences: (options: { variables: { preferences: string } }) => Promise<unknown>,
-  preferences: { showReadOnlyProfiles: boolean },
+  updatePreferences: (options: {
+    variables: { preferences: string; expectedPreferences: string | null };
+  }) => Promise<unknown>,
+  preferences: string | null | undefined,
   checked: boolean,
   setShowReadOnlyProfiles: (v: boolean) => void,
+  apolloClient: ReturnType<typeof useApolloClient>,
 ): Promise<void> => {
   setShowReadOnlyProfiles(checked);
   try {
@@ -241,6 +250,9 @@ const updatePreferencesWithRollback = async (
       console.error('Failed to update preferences:', error);
     }
     setShowReadOnlyProfiles(!checked);
+    // The stored blob changed underneath us (e.g. a retryable ConflictException
+    // from the optimistic lock) — refetch so the next attempt reads fresh.
+    void apolloClient.query({ query: GET_MY_ACCOUNT, fetchPolicy: 'network-only' }).catch(() => {});
   }
 };
 
@@ -376,14 +388,24 @@ export const ScoutsPage: React.FC = () => {
   // Update preferences mutation
   const [updatePreferences] = useMutation(UPDATE_MY_PREFERENCES);
 
-  // Save preference to DynamoDB when it changes
+  const apolloClient = useApolloClient();
+
+  // Save preference to DynamoDB when it changes. Reads the live blob from the
+  // Apollo cache rather than the possibly-default memo so the write can never
+  // clobber keys that were never loaded (e.g. paymentMethods, #510).
   const handleToggleReadOnly = async (checked: boolean) => {
-    await updatePreferencesWithRollback(updatePreferences, preferences, checked, setShowReadOnlyProfiles);
+    const cached = apolloClient.readQuery<{ getMyAccount: { preferences?: string } }>({ query: GET_MY_ACCOUNT });
+    await updatePreferencesWithRollback(
+      updatePreferences,
+      cached?.getMyAccount?.preferences,
+      checked,
+      setShowReadOnlyProfiles,
+      apolloClient,
+    );
   };
 
   // Fetch owned profiles. listMyProfiles is server-side paginated (capped
   // pages, #328), so walk every nextToken page to get the full set.
-  const apolloClient = useApolloClient();
   const [myProfiles, setMyProfiles] = useState<Profile[]>([]);
   const [myProfilesLoaded, setMyProfilesLoaded] = useState(false);
   const [myProfilesLoading, setMyProfilesLoading] = useState(false);
@@ -505,6 +527,7 @@ export const ScoutsPage: React.FC = () => {
               control={
                 <Switch
                   checked={showReadOnlyProfiles}
+                  disabled={accountLoading}
                   onChange={(e) => {
                     void handleToggleReadOnly(e.target.checked);
                   }}
