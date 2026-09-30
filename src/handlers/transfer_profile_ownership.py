@@ -116,6 +116,27 @@ def _verify_new_owner_has_share(db_profile_id: str, db_new_owner_id: str, caller
             raise AppError(ErrorCode.INVALID_INPUT, "New owner must have existing access to the profile")
 
 
+def _resolve_transfer_input(event: Dict[str, Any]) -> Tuple[str, str, str]:
+    """Resolve and validate the transfer input into database-form ids.
+
+    Returns the ``(db_profile_id, db_new_owner_id, db_caller_id)`` triple the
+    transfer runs on. Raises ``UNAUTHORIZED`` when the caller identity is
+    missing and ``AppError`` (via ``require_str``/``ensure_*``) when an argument
+    is absent or malformed.
+    """
+    caller_account_id = event.get("identity", {}).get("sub")
+    if not caller_account_id:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
+    input_args = event.get("arguments", {}).get("input", {})
+    profile_id = require_str(input_args, "profileId")
+    new_owner_account_id = require_str(input_args, "newOwnerAccountId")
+
+    db_profile_id = ensure_profile_id(profile_id) or ""
+    db_new_owner_id = ensure_account_id(new_owner_account_id) or ""
+    db_caller_id = ensure_account_id(caller_account_id) or ""
+    return db_profile_id, db_new_owner_id, db_caller_id
+
+
 def _transfer_ownership(profile: Dict[str, Any], db_profile_id: str, db_new_owner_id: str) -> None:
     """Transfer ownership atomically using a DynamoDB transaction.
 
@@ -365,16 +386,7 @@ def _repair_shares(db_profile_id: str, db_new_owner_id: str, old_owner_id: str) 
 @with_error_handling(error_message="Failed to transfer profile ownership")
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Transfer profile ownership."""
-    caller_account_id = event.get("identity", {}).get("sub")
-    if not caller_account_id:
-        raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
-    input_args = event.get("arguments", {}).get("input", {})
-    profile_id = require_str(input_args, "profileId")
-    new_owner_account_id = require_str(input_args, "newOwnerAccountId")
-
-    db_profile_id = ensure_profile_id(profile_id) or ""
-    db_new_owner_id = ensure_account_id(new_owner_account_id) or ""
-    db_caller_id = ensure_account_id(caller_account_id) or ""
+    db_profile_id, db_new_owner_id, db_caller_id = _resolve_transfer_input(event)
 
     profile = _get_and_verify_profile(db_profile_id, db_caller_id, event)
     # Only an MFA-verified admin skips the share check; everyone else (including a
