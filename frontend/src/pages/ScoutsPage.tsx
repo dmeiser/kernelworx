@@ -232,8 +232,8 @@ const maybeDeleteProfile = async (
 
 // Helper to update preferences with error handling. On success, refreshes the
 // cached blob so the next toggle locks against the blob we just wrote; on
-// failure, rolls the toggle back and refreshes the cache so a retry works from
-// a fresh snapshot (#510).
+// failure, surfaces the mutation error to the user, rolls the toggle back and
+// refreshes the cache so a retry works from a fresh snapshot (#510).
 const updatePreferencesWithRollback = async (
   updatePreferences: (options: {
     variables: { preferences: string; expectedPreferences: string | null };
@@ -242,26 +242,35 @@ const updatePreferencesWithRollback = async (
   checked: boolean,
   setShowReadOnlyProfiles: (v: boolean) => void,
   apolloClient: ReturnType<typeof useApolloClient>,
+  onMutationError: (message: string | null) => void,
 ): Promise<void> => {
   setShowReadOnlyProfiles(checked);
   try {
     await updatePreferences({
       variables: buildPreferencesVariables(preferences, checked),
     });
+    onMutationError(null);
     // The mutation result is not normalized into the GET_MY_ACCOUNT entry (no
     // id), so refetch on success too — otherwise the next toggle would send a
     // stale snapshot and fail the optimistic lock.
     await apolloClient.query({ query: GET_MY_ACCOUNT, fetchPolicy: 'network-only' }).catch(() => {});
   } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
     if (import.meta.env.DEV) {
       console.error('Failed to update preferences:', error);
     }
     setShowReadOnlyProfiles(!checked);
+    onMutationError(err.message);
     // The stored blob changed underneath us (e.g. a retryable ConflictException
     // from the optimistic lock) — refetch so the next attempt reads fresh.
     void apolloClient.query({ query: GET_MY_ACCOUNT, fetchPolicy: 'network-only' }).catch(() => {});
   }
 };
+
+// Helper to derive the mutation error message; mirrors PaymentMethodsPage's
+// handleMutationError precedent.
+const getMutationErrorMessage = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
 // Helper to load shared profiles with error handling
 const loadSharedProfilesWithErrorHandling = async (
@@ -395,6 +404,10 @@ export const ScoutsPage: React.FC = () => {
   // Update preferences mutation
   const [updatePreferences] = useMutation(UPDATE_MY_PREFERENCES);
 
+  // Mutation error surfaced via the page's error alert (PaymentMethodsPage
+  // handleMutationError precedent); cleared on the next successful toggle.
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
+
   const apolloClient = useApolloClient();
 
   // Save preference to DynamoDB when it changes. Reads the live blob from the
@@ -408,6 +421,7 @@ export const ScoutsPage: React.FC = () => {
       checked,
       setShowReadOnlyProfiles,
       apolloClient,
+      setPreferencesError,
     );
   };
 
@@ -567,6 +581,7 @@ export const ScoutsPage: React.FC = () => {
 
       <ConditionalErrorAlert error={error} />
       <ConditionalInfoAlert message={infoMessage} />
+      {preferencesError ? <ErrorAlert message={preferencesError} /> : null}
 
       {/* Owned Profiles */}
       <OwnedProfilesSection profiles={myProfiles} />
@@ -634,6 +649,7 @@ export {
   handleReturnNavigation,
   canDeleteCurrentProfile,
   maybeDeleteProfile,
+  getMutationErrorMessage,
   updatePreferencesWithRollback,
   loadSharedProfilesWithErrorHandling,
   handleSharedProfilesError,

@@ -152,6 +152,7 @@ describe('ScoutsPage helpers', () => {
 
   it('updatePreferencesWithRollback refreshes the cache on success and rollbacks on error', async () => {
     const setShow = vi.fn();
+    const onMutationError = vi.fn();
     const client = { query: vi.fn().mockResolvedValue({ data: {} }) };
     const successFn = vi.fn().mockResolvedValue({});
     await updatePreferencesWithRollback(
@@ -160,16 +161,28 @@ describe('ScoutsPage helpers', () => {
       false,
       setShow,
       client as any,
+      onMutationError as any,
     );
     expect(setShow).toHaveBeenCalledWith(false);
     // On success it should refresh the cached blob so the next toggle locks
     // against fresh state (#510)
     expect(client.query).toHaveBeenCalledWith(expect.objectContaining({ fetchPolicy: 'network-only' }));
+    // A successful toggle clears any previously surfaced error (#510).
+    expect(onMutationError).toHaveBeenCalledWith(null);
 
     const failing = vi.fn().mockRejectedValue(new Error('boom'));
-    await updatePreferencesWithRollback(failing as any, '{"showReadOnlyProfiles":true}', false, setShow, client as any);
-    // On failure it should revert the value
+    await updatePreferencesWithRollback(
+      failing as any,
+      '{"showReadOnlyProfiles":true}',
+      false,
+      setShow,
+      client as any,
+      onMutationError as any,
+    );
+    // On failure it should revert the value and surface the failure to the
+    // user via the page's error-alert state (#510).
     expect(setShow).toHaveBeenCalledWith(true);
+    expect(onMutationError).toHaveBeenCalledWith('boom');
     // ... and refresh the cached blob so a retry reads a fresh snapshot (#510)
     expect(client.query).toHaveBeenCalledWith(expect.objectContaining({ fetchPolicy: 'network-only' }));
   });

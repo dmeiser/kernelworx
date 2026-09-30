@@ -35,6 +35,7 @@ let mockMyProfilesError: Error | null = null;
 let mockMyProfilesLoading = false;
 
 const profilesQueryMock = vi.fn();
+const apolloQuerySpy = vi.fn();
 const loadAccountMock = vi.fn();
 const updatePreferencesMock = vi.fn().mockResolvedValue({ data: {} });
 const createProfileMock = vi.fn().mockResolvedValue({ data: { createSellerProfile: { profileId: 'PROFILE#new1' } } });
@@ -122,6 +123,7 @@ vi.mock('@apollo/client/react', async () => {
       return null;
     },
     query: (options: any) => {
+      apolloQuerySpy(options);
       const name = getOpName(options?.query);
       if (name === 'ListMyProfiles') {
         profilesQueryMock(options);
@@ -176,6 +178,7 @@ describe('ScoutsPage – interactions', () => {
       preferences: JSON.stringify({ showReadOnlyProfiles: true }),
     };
     vi.clearAllMocks();
+    apolloQuerySpy.mockClear();
     capturedCreateOpts = undefined;
     capturedUpdateOpts = undefined;
     capturedDeleteOpts = undefined;
@@ -257,6 +260,43 @@ describe('ScoutsPage – interactions', () => {
     const vars = updatePreferencesMock.mock.calls[0][0].variables;
     expect(JSON.parse(vars.preferences).paymentMethods).toEqual([{ name: 'Venmo', qrCodeUrl: 'qr.png' }]);
     expect(vars.expectedPreferences).toBe(mockAccountData.preferences);
+  }, 10000);
+
+  it('failed toggle surfaces the mutation error in the error alert and keeps the rollback (#510)', async () => {
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
+    updatePreferencesMock.mockRejectedValueOnce(new Error('Preferences were modified by another request.'));
+    const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(checkbox!);
+
+    // The mutation failure is surfaced to the user as the page's error alert.
+    await waitFor(
+      () => expect(screen.getByText('Preferences were modified by another request.')).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+    // The toggle reverted to the stored value.
+    expect(checkbox.checked).toBe(true);
+    // The cached blob was refreshed so a retry locks on fresh state.
+    expect(apolloQuerySpy).toHaveBeenCalledWith(expect.objectContaining({ fetchPolicy: 'network-only' }));
+  }, 10000);
+
+  it('a subsequent successful toggle clears the surfaced error (#510)', async () => {
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
+    updatePreferencesMock.mockRejectedValueOnce(new Error('Preferences were modified by another request.'));
+    const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(checkbox!);
+    await waitFor(
+      () => expect(screen.getByText('Preferences were modified by another request.')).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+
+    fireEvent.click(checkbox!);
+    await waitFor(() => expect(screen.queryByText('Preferences were modified by another request.')).toBeNull(), {
+      timeout: 5000,
+    });
   }, 10000);
 
   // ── create profile mutations ──────────────────────────────────────────────
