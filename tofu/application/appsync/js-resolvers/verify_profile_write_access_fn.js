@@ -2,8 +2,9 @@ import { util } from '@aws-appsync/utils';
 
 // This code backs TWO aws_appsync_function resources (verify_profile_write_access
 // and verify_profile_write_access_step2 in functions_sharing.tf) that run
-// back-to-back in each write-mutation pipeline so it can perform a two-phase
-// authorization:
+// back-to-back in the six write-mutation pipelines and in the two profile
+// read-list queries (listSharesByProfile / listInvitesByProfile), so it can
+// perform a two-phase authorization:
 //
 //   Step 1: a strongly consistent base-table GetItem keyed
 //           {ownerAccountId: <caller>, profileId}. An item can only live under
@@ -19,6 +20,18 @@ import { util } from '@aws-appsync/utils';
 // base-table read; the GSI query is used only to surface the profile item and
 // to drive the unchanged share path. All existing authz semantics (shares,
 // idempotent deletes) are preserved.
+
+// Route an unresolvable profileId through the same silent-deny branch as the
+// "profile not found" case, so the read-list queries (listSharesByProfile /
+// listInvitesByProfile) answer with an empty list instead of an error. The
+// retired verifier returned `{ authorized: false }` for a missing profileId;
+// both queries must keep that contract, and neither must turn an empty result
+// into a GraphQL error or a profile-existence oracle.
+function denyUnresolvedProfileId(ctx) {
+    ctx.stash.isOwner = false;
+    ctx.stash.hasWritePermission = false;
+    ctx.stash.skipGetItem = true;
+}
 
 // idempotent-delete detection: deleteOrder/deleteCampaign where the lookup step
 // already stashed a null item (item already gone = success).
@@ -40,6 +53,10 @@ function resolveDbProfileId(ctx) {
 
     if (ctx.args && ctx.args.input && ctx.args.input.profileId) {
         profileId = ctx.args.input.profileId;
+    } else if (ctx.args && ctx.args.profileId) {
+        // Query resolvers (listSharesByProfile / listInvitesByProfile, #547) pass
+        // the id as a top-level argument rather than under input.
+        profileId = ctx.args.profileId;
     } else if (ctx.stash && ctx.stash.order && ctx.stash.order.profileId) {
         // Orders have profileId attribute - use it directly (not PK which is the campaign key)
         profileId = ctx.stash.order.profileId;
@@ -80,6 +97,14 @@ export function request(ctx) {
 
     // Step 2 (non-owner confirmed in Step 1): fall back to the GSI query.
     if (ctx.stash && ctx.stash.isOwner === false) {
+        // The unresolvable-id path stashed skipGetItem instead of a usable id;
+        // issue no live read.
+        if (ctx.stash.skipGetItem) {
+            return {
+                operation: 'GetItem',
+                key: util.dynamodb.toMapValues({ ownerAccountId: 'NOOP', profileId: 'NOOP' })
+            };
+        }
         const dbProfileId = resolveDbProfileId(ctx);
         return {
             operation: 'Query',
@@ -95,6 +120,17 @@ export function request(ctx) {
     // to confirm ownership before any eventually-consistent GSI read (#438).
     const dbProfileId = resolveDbProfileId(ctx);
     if (!dbProfileId) {
+        const isQueryParent = ctx.info && ctx.info.parentTypeName === 'Query';
+        if (isQueryParent) {
+            // S1: a blank or unresolvable profileId on the two read-list queries
+            // must not surface as a GraphQL error; route through the same
+            // silent-deny branch as the not-found case so the result is [].
+            denyUnresolvedProfileId(ctx);
+            return {
+                operation: 'GetItem',
+                key: util.dynamodb.toMapValues({ ownerAccountId: 'NOOP', profileId: 'NOOP' })
+            };
+        }
         console.error(
             'Profile ID not found in request or stash: ' +
                 JSON.stringify({
@@ -105,6 +141,14 @@ export function request(ctx) {
                 })
         );
         util.error('Profile ID is required', 'INVALID_INPUT');
+    }
+
+    // Expose the normalized id on the stash for downstream pipeline steps. #547:
+    // check_write_permission (listSharesByProfile / listInvitesByProfile) reads
+    // ctx.stash.profileId; the mutation steps keep resolving their own id, so
+    // storing the same value here is inert for them.
+    if (ctx.stash) {
+        ctx.stash.profileId = dbProfileId;
     }
 
     const callerAccountId = ctx.identity && ctx.identity.sub && ctx.identity.sub.startsWith('ACCOUNT#')
@@ -157,6 +201,20 @@ export function response(ctx) {
     // Step 2 response for the non-owner path: ctx.result is the GSI Query.
     const profile = ctx.result && ctx.result.items && ctx.result.items[0];
     if (!profile) {
+        // Read path (#547): listSharesByProfile / listInvitesByProfile answer
+        // with an empty list for a profile that does not exist (or is not yet
+        // projected on the GSI) - never an error, and never a NOT_FOUND
+        // existence oracle. Deny silently so the downstream check_write_permission
+        // and query_shares / query_invites steps fall through to their empty
+        // result, which is the contract these queries had before #547.
+        // S1: an unresolvable profileId (skipGetItem set in request) routes here
+        // too, so a blank id produces the same empty list rather than an error.
+        if (ctx.stash.skipGetItem || (ctx.info && ctx.info.parentTypeName === 'Query')) {
+            denyUnresolvedProfileId(ctx);
+            return null;
+        }
+        // Write path: the profile must exist to be mutated, so a missing profile
+        // is a client error rather than a silent skip.
         util.error('Profile not found', 'NOT_FOUND');
     }
 

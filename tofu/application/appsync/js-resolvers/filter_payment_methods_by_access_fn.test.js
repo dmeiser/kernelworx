@@ -74,4 +74,26 @@ describe('filter_payment_methods_by_access_fn response', () => {
         const names = result.map(m => m.name);
         assert.deepStrictEqual(names, ['Cash', 'Check', 'Venmo', 'Zelle']);
     });
+
+    it('does not duplicate entries when sort keys collide (#540)', () => {
+        const ctx = {
+            prev: {
+                result: [
+                    { name: 'Venmo', qrCodeUrl: 'url1' },
+                    { name: 'venmo', qrCodeUrl: 'url2' },
+                ],
+            },
+            stash: {
+                canSeeQR: true,
+                ownerAccountId: 'ACCOUNT#account-123',
+                profileId: 'profile-abc',
+            },
+        };
+
+        const result = response(ctx);
+
+        const names = result.map(m => m.name);
+        const uniqueNames = new Set(names);
+        assert.strictEqual(names.length, uniqueNames.size);
+    });
 });

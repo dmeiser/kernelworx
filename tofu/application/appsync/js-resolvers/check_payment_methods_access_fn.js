@@ -17,9 +17,18 @@ export function request(ctx) {
     // Store owner account ID for next steps (already has ACCOUNT# prefix)
     ctx.stash.ownerAccountId = profile.ownerAccountId;
     
-    // Check if caller is owner (profile.ownerAccountId has ACCOUNT# prefix)
+    // Check if caller is owner (profile.ownerAccountId has ACCOUNT# prefix).
+    // Ownership check (#545):
+    // Only trust ownership if verified by the strongly consistent base-table
+    // GetItem in step 1 (ctx.stash.isOwner === true).
+    // If ctx.stash.isOwner is undefined (e.g. standalone test), fall back to
+    // checking profile.ownerAccountId for backward compatibility.
     const callerAccountId = callerId.startsWith('ACCOUNT#') ? callerId : `ACCOUNT#${callerId}`;
-    if (profile.ownerAccountId === callerAccountId) {
+    const isOwner = ctx.stash.isOwner !== undefined
+        ? ctx.stash.isOwner === true
+        : profile.ownerAccountId === callerAccountId;
+
+    if (isOwner) {
         ctx.stash.accessLevel = 'OWNER';
         ctx.stash.canSeeQR = true;
         // Return NOOP GetItem - must have operation for data source
