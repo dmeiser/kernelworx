@@ -282,7 +282,10 @@ def _undo_share_repair(db_profile_id: str, repair: _ShareRepair) -> None:
                 ExpressionAttributeValues={":previous_owner": previous_owner_id},
             )
         except Exception as e:
-            if isinstance(e, ClientError) and e.response.get("Error", {}).get("Code", "") == "ConditionalCheckFailedException":
+            if (
+                isinstance(e, ClientError)
+                and e.response.get("Error", {}).get("Code", "") == "ConditionalCheckFailedException"
+            ):
                 # The share was revoked after the repair applied it and before the
                 # transfer failed. Its rollback target is absence, which already
                 # holds, so re-creating a ghost item would be wrong; treat the
@@ -297,7 +300,9 @@ def _undo_share_repair(db_profile_id: str, repair: _ShareRepair) -> None:
             )
 
 
-def _repair_shares(db_profile_id: str, db_new_owner_id: str, old_owner_id: str) -> Tuple[_ShareRepair, _ShareRepairFailures]:
+def _repair_shares(
+    db_profile_id: str, db_new_owner_id: str, old_owner_id: str
+) -> Tuple[_ShareRepair, _ShareRepairFailures]:
     """Point every share of the profile at the incoming owner, before the transfer commits.
 
     - Re-points every share's ownerAccountId (including the incoming owner's own
