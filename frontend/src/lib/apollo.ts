@@ -191,6 +191,7 @@ export function mapErrorCodeToMessage(errorCode: string | undefined, defaultMess
     // Conflict errors
     ALREADY_EXISTS: 'This item already exists.',
     DUPLICATE_ENTRY: 'A duplicate entry was detected.',
+    RESOURCE_BUSY: 'This operation could not be completed right now. Please try again.',
 
     // Invite/sharing errors
     INVITE_EXPIRED: 'This invite code has expired.',
