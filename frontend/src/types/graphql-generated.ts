@@ -349,18 +349,16 @@ export type GqlMutation = {
   __typename?: 'Mutation';
   /** Delete a specific share, revoking that account's access to a profile (admin only). Returns true on success. */
   adminDeleteShare: Scalars['Boolean']['output'];
-  /** Delete a user from Cognito and DynamoDB (admin only). The caller cannot delete their own account. Returns true on success. */
-  adminDeleteUser: Scalars['Boolean']['output'];
   /** Delete all campaigns across all profiles owned by the given account (admin only). Returns the number of campaigns deleted. */
   adminDeleteUserCampaigns: Scalars['Int']['output'];
-  /** Soft-delete all catalogs owned by the given account (admin only). Returns the number of catalogs soft-deleted. */
-  adminDeleteUserCatalogs: Scalars['Int']['output'];
   /** Delete all orders across all campaigns of all profiles owned by the given account (admin only). Returns the number of orders deleted. */
   adminDeleteUserOrders: Scalars['Int']['output'];
   /** Delete all profiles owned by the given account (admin only). Returns the number of profiles deleted. */
   adminDeleteUserProfiles: Scalars['Int']['output'];
   /** Delete all shares across all profiles owned by the given account (admin only). Returns the number of shares deleted. */
   adminDeleteUserShares: Scalars['Int']['output'];
+  /** Delete the account record and the Cognito user for an account whose per-entity data the caller has already deleted (admin only). The caller cannot purge their own account. Catalogs are never deleted. Returns true on success. */
+  adminPurgeUserAccount: Scalars['Boolean']['output'];
   /** Send a password-reset email to a user by email (admin only). Returns true once the reset is initiated. */
   adminResetUserPassword: Scalars['Boolean']['output'];
   /** Set or clear a campaign's sharedCampaignCode, associating it with a shared campaign (admin only). Returns the updated campaign. */
@@ -438,17 +436,7 @@ export type GqlMutation_AdminDeleteShareArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
-export type GqlMutation_AdminDeleteUserArgs = {
-  accountId: Scalars['ID']['input'];
-};
-
-/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_AdminDeleteUserCampaignsArgs = {
-  accountId: Scalars['ID']['input'];
-};
-
-/** The root mutation object for the KernelWorx API. */
-export type GqlMutation_AdminDeleteUserCatalogsArgs = {
   accountId: Scalars['ID']['input'];
 };
 
@@ -465,6 +453,12 @@ export type GqlMutation_AdminDeleteUserProfilesArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_AdminDeleteUserSharesArgs = {
   accountId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_AdminPurgeUserAccountArgs = {
+  accountId: Scalars['ID']['input'];
+  profileIds: Array<Scalars['ID']['input']>;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -2677,11 +2671,12 @@ export type GqlAdminResetUserPasswordMutationVariables = Exact<{
 
 export type GqlAdminResetUserPasswordMutation = { __typename?: 'Mutation'; adminResetUserPassword: boolean };
 
-export type GqlAdminDeleteUserMutationVariables = Exact<{
+export type GqlAdminPurgeUserAccountMutationVariables = Exact<{
   accountId: Scalars['ID']['input'];
+  profileIds: Array<Scalars['ID']['input']>;
 }>;
 
-export type GqlAdminDeleteUserMutation = { __typename?: 'Mutation'; adminDeleteUser: boolean };
+export type GqlAdminPurgeUserAccountMutation = { __typename?: 'Mutation'; adminPurgeUserAccount: boolean };
 
 export type GqlAdminDeleteUserOrdersMutationVariables = Exact<{
   accountId: Scalars['ID']['input'];
@@ -2706,12 +2701,6 @@ export type GqlAdminDeleteUserProfilesMutationVariables = Exact<{
 }>;
 
 export type GqlAdminDeleteUserProfilesMutation = { __typename?: 'Mutation'; adminDeleteUserProfiles: number };
-
-export type GqlAdminDeleteUserCatalogsMutationVariables = Exact<{
-  accountId: Scalars['ID']['input'];
-}>;
-
-export type GqlAdminDeleteUserCatalogsMutation = { __typename?: 'Mutation'; adminDeleteUserCatalogs: number };
 
 export type GqlAdminDeleteShareMutationVariables = Exact<{
   profileId: Scalars['ID']['input'];
