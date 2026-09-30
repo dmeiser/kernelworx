@@ -217,38 +217,11 @@ module "dynamodb" {
 
 ## 6. Authorization Pattern
 
-**Access Control Logic**:
-```python
-def check_profile_access(caller_account_id: str, profile_id: str, required_permission: str = "READ") -> bool:
-    """
-    Check if caller can perform required_permission on profile.
-    
-    Permissions: "READ", "WRITE"
-    
-    Returns True if:
-    - Caller is owner (strongly consistent base-table lookup succeeds)
-    - Caller has a Share with appropriate permissions AND the share's
-      stored ownerAccountId still matches the profile's current owner
-    
-    Raises NOT_FOUND if the profile does not exist.
-    Admin checks are performed separately via is_admin(); do not add them here.
-    """
-    # Check ownership with a strongly consistent base-table read
-    if is_profile_owner(caller_account_id, profile_id):
-        return True
-    
-    # Check shares with strongly consistent reads and validate against
-    # the profile's current owner to reject stale/revoked shares.
-    share = get_share(profile_id, caller_account_id)
-    if share and share_still_valid(share, profile_id):
-        return required_permission in share["permissions"]
-    
-    # Distinguish missing profiles from forbidden access
-    if not profile_exists(profile_id):
-        raise NotFound(f"Profile {profile_id} not found")
-    
-    return False
-```
+**Access Control Logic**: implemented once in `src/utils/auth.py` — the
+`check_profile_access` docstring and its inline comments are the authoritative contract
+(strongly consistent owner-keyed read, share validated against the profile's current
+owner, `NOT_FOUND` for a missing profile, and both ID spellings normalized once at this
+edge). Read it there rather than reimplementing it from a sketch.
 
 **Important implementation details**:
 - Owner checks use strongly consistent `get_item` on the profiles base table.

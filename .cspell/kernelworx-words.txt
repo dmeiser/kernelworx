@@ -136,6 +136,7 @@ fullWidth
 getfail
 getsizeof
 getters
+getvalue
 GEZDGNBVGY
 giftcard
 GitHub
