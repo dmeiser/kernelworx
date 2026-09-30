@@ -1446,6 +1446,225 @@ class TestGetAccount:
         assert result is None
 
 
+class TestIdDialectAlignment:
+    """Tests that the Python authorization layer accepts both ID spellings.
+
+    The GraphQL/API layer treats the prefixed form (``PROFILE#…``, ``ACCOUNT#…``)
+    as authoritative and the display/UI layer the unprefixed form, and the
+    AppSync boundary normalizes both spellings. The Python layer must accept both
+    and compare canonically, so a caller posting the authoritative prefixed form is
+    authorized exactly as the unprefixed one. These tests cover both spellings on
+    each affected entry point, plus the case where a prefixed id does not resolve:
+    it is denied exactly the way the unprefixed one is.
+    """
+
+    # check_profile_access -------------------------------------------------
+
+    def test_check_profile_access_owner_allows_unprefixed_and_prefixed(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """The owner is allowed whether the caller posts the prefixed or unprefixed id."""
+        assert check_profile_access(sample_account_id, sample_profile_id, "READ") is True
+        # Both the caller and the profile id in the schema-documented prefixed form.
+        assert check_profile_access(f"ACCOUNT#{sample_account_id}", sample_profile_id, "READ") is True
+
+    def test_check_profile_access_owner_allows_mixed_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """Prefixed caller + unprefixed profile id and vice versa both resolve to the same owner."""
+        raw_profile_id = sample_profile_id.replace("PROFILE#", "")
+
+        assert check_profile_access(f"ACCOUNT#{sample_account_id}", raw_profile_id, "READ") is True
+        assert check_profile_access(sample_account_id, sample_profile_id, "READ") is True
+
+    def test_check_profile_access_non_owner_denied_in_both_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """A non-owner is denied in both the prefixed and unprefixed spellings."""
+        assert check_profile_access(another_account_id, sample_profile_id, "READ") is False
+        assert check_profile_access(f"ACCOUNT#{another_account_id}", sample_profile_id, "READ") is False
+
+    def test_check_profile_access_missing_id_denied_in_both_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+    ) -> None:
+        """A profile id that does not resolve is denied (NOT_FOUND) in both spellings.
+
+        The prefixed form is denied exactly the way the unprefixed form is: both
+        raise NOT_FOUND, not FORBIDDEN and not a malformed-key miss that would look
+        the same as a legitimate denial.
+        """
+        with pytest.raises(AppError) as unprefixed_exc:
+            check_profile_access(sample_account_id, "does-not-exist", "READ")
+        assert unprefixed_exc.value.error_code == ErrorCode.NOT_FOUND
+
+        with pytest.raises(AppError) as prefixed_exc:
+            check_profile_access(f"ACCOUNT#{sample_account_id}", "PROFILE#does-not-exist", "READ")
+        assert prefixed_exc.value.error_code == ErrorCode.NOT_FOUND
+
+    # require_profile_access ------------------------------------------------
+
+    def test_require_profile_access_allows_owner_in_both_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """require_profile_access lets the owner through in both spellings."""
+        require_profile_access(sample_account_id, sample_profile_id, "WRITE")
+        require_profile_access(f"ACCOUNT#{sample_account_id}", sample_profile_id, "WRITE")
+
+    def test_require_profile_access_missing_id_raises_not_found_in_both_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+    ) -> None:
+        """A non-resolving profile id raises NOT_FOUND whether prefixed or unprefixed."""
+        for profile_id in ("does-not-exist", "PROFILE#does-not-exist"):
+            with pytest.raises(AppError) as exc_info:
+                require_profile_access(sample_account_id, profile_id, "READ")
+            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+
+    # is_profile_owner ------------------------------------------------------
+
+    def test_is_profile_owner_true_in_both_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """is_profile_owner reports the owner in both the prefixed and unprefixed spellings."""
+        assert is_profile_owner(sample_account_id, sample_profile_id) is True
+        assert is_profile_owner(f"ACCOUNT#{sample_account_id}", sample_profile_id) is True
+
+    def test_is_profile_owner_missing_id_raises_not_found_in_both_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+    ) -> None:
+        """is_profile_owner raises NOT_FOUND for a non-resolving id in both spellings."""
+        for profile_id in ("does-not-exist", "PROFILE#does-not-exist"):
+            with pytest.raises(AppError) as exc_info:
+                is_profile_owner(sample_account_id, profile_id)
+            assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+
+    # batch_check_profile_access --------------------------------------------
+
+    def test_batch_check_returns_owner_in_both_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+    ) -> None:
+        """batch_check_profile_access returns the owned id under either spelling."""
+        raw_profile_id = sample_profile_id.replace("PROFILE#", "")
+
+        assert batch_check_profile_access(sample_account_id, [raw_profile_id]) == {raw_profile_id}
+        assert batch_check_profile_access(f"ACCOUNT#{sample_account_id}", [sample_profile_id]) == {sample_profile_id}
+
+    def test_batch_check_drops_missing_id_silently_in_both_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+    ) -> None:
+        """A non-resolving id is dropped silently in both spellings (the batch contract).
+
+        Unlike check_profile_access, the batch entry point does not raise NOT_FOUND:
+        a deleted profile contributes nothing. That holds for both spellings.
+        """
+        assert batch_check_profile_access(sample_account_id, ["does-not-exist"]) == set()
+        assert batch_check_profile_access(f"ACCOUNT#{sample_account_id}", ["PROFILE#does-not-exist"]) == set()
+
+    # get_account -----------------------------------------------------------
+
+    def test_get_account_returns_account_in_both_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+    ) -> None:
+        """get_account resolves the account under the prefixed and unprefixed spellings."""
+        import boto3
+
+        accounts_table = boto3.resource("dynamodb", region_name="us-east-1").Table("kernelworx-accounts-ue1-dev")
+        accounts_table.put_item(Item={"accountId": f"ACCOUNT#{sample_account_id}", "email": "t@example.com"})
+
+        assert get_account(sample_account_id) is not None
+        assert get_account(f"ACCOUNT#{sample_account_id}") is not None
+
+    def test_get_account_missing_returns_none_in_both_spellings(self, dynamodb_table: Any) -> None:
+        """get_account returns None for a non-resolving id in both spellings."""
+        assert get_account("does-not-exist") is None
+        assert get_account("ACCOUNT#does-not-exist") is None
+
+    # Canonical comparison: no double- or foreign-prefixed value may match --
+
+    def test_canonical_compare_rejects_double_prefixed_and_foreign_caller(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """Normalizing to the canonical form means a malformed id never matches the owner.
+
+        A caller posting a double-prefixed id (``ACCOUNT#ACCOUNT#<sub>``) or a
+        foreign-prefixed one (``PROFILE#<sub>``) normalizes to a distinct canonical
+        value, so it cannot be matched against the owner's stored ``ACCOUNT#<sub>``
+        key. This is what "compare canonically" is for: a hand-rolled
+        ``ACCOUNT#<id>`` concatenation would turn the double-prefixed value into a
+        malformed key and a substring match could let a foreign prefix through.
+        """
+        # The owner posts the malformed/foreign spellings: they are NOT the owner.
+        assert check_profile_access(f"ACCOUNT#ACCOUNT#{sample_account_id}", sample_profile_id, "READ") is False
+        assert check_profile_access(f"PROFILE#{sample_account_id}", sample_profile_id, "READ") is False
+
+        # get_account likewise returns None rather than resolving a malformed key.
+        assert get_account(f"ACCOUNT#ACCOUNT#{sample_account_id}") is None
+
+    def test_canonical_compare_is_owner_idempotent(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """Normalizing an already-prefixed id is idempotent, so the owner still matches.
+
+        Proof that the canonical compare is a normalization, not a re-prefix: an
+        id that already carries the correct prefix normalizes to itself, so the
+        owner (prefixed or unprefixed) resolves to the one stored key.
+        """
+        import boto3
+
+        accounts_table = boto3.resource("dynamodb", region_name="us-east-1").Table("kernelworx-accounts-ue1-dev")
+        accounts_table.put_item(Item={"accountId": f"ACCOUNT#{sample_account_id}", "email": "t@example.com"})
+
+        assert check_profile_access(f"ACCOUNT#{sample_account_id}", sample_profile_id, "READ") is True
+        assert check_profile_access(sample_account_id, sample_profile_id, "READ") is True
+        assert get_account(f"ACCOUNT#{sample_account_id}") is not None
+        assert get_account(sample_account_id) is not None
+
+
 class TestIsAdmin:
     """Tests for is_admin function - checks JWT cognito:groups claim."""
 

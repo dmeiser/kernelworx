@@ -18,10 +18,15 @@ from .logging import get_logger
 logger = get_logger(__name__)
 
 
-def _is_profile_owner(profiles_table: "Table", caller_account_id: str, db_profile_id: str) -> bool:
-    """Check if caller is the profile owner via strongly consistent base-table lookup."""
+def _is_profile_owner(profiles_table: "Table", db_caller_id: str, db_profile_id: str) -> bool:
+    """Check if caller is the profile owner via strongly consistent base-table lookup.
+
+    ``db_caller_id`` is the canonical ``ACCOUNT#``-prefixed form, normalized once at the
+    caller's edge, so the key is built directly rather than concatenating a prefix the
+    value may already carry.
+    """
     direct_response = profiles_table.get_item(
-        Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": db_profile_id},
+        Key={"ownerAccountId": db_caller_id, "profileId": db_profile_id},
         ConsistentRead=True,
     )
     return "Item" in direct_response
@@ -128,16 +133,20 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     db_profile_id = ensure_profile_id(profile_id)
     # ensure_profile_id returns Optional[str], but we know profile_id is not None here
     assert db_profile_id is not None
+    # Normalize the caller once, at this edge. The API layer accepts the prefixed
+    # (ACCOUNT#) and unprefixed spellings and the AppSync boundary normalizes them the
+    # same way, so a caller posting the authoritative prefixed form must authorize
+    # identically to the unprefixed one.
+    db_caller_id = ensure_account_id(caller_account_id)
+    # ensure_account_id returns Optional[str], but we know caller_account_id is not None here
+    assert db_caller_id is not None
 
     # Check if caller is owner (faster, strongly consistent)
-    if _is_profile_owner(tables.profiles, caller_account_id, db_profile_id):
+    if _is_profile_owner(tables.profiles, db_caller_id, db_profile_id):
         return True
 
     # Check share permissions, validating the share against the profile's
     # current owner with a strongly consistent base-table read.
-    db_caller_id = ensure_account_id(caller_account_id)
-    # ensure_account_id returns Optional[str], but we know caller_account_id is not None here
-    assert db_caller_id is not None
     if _check_share_permissions(tables.profiles, tables.shares, db_profile_id, db_caller_id, required_permission):
         return True
 
@@ -354,10 +363,11 @@ def is_profile_owner(caller_account_id: str, profile_id: str) -> bool:
     if not items:
         raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
 
-    profile = items[0]
-    stored_owner = profile.get("ownerAccountId", "")
-    # Handle both with and without prefix for backward compatibility
-    return stored_owner == caller_account_id or stored_owner == f"ACCOUNT#{caller_account_id}"
+    # Compare canonically: normalize both the stored owner and the caller to the
+    # ACCOUNT# form, so either caller spelling (and a legacy unprefixed stored
+    # owner) resolves to the same owner instead of a hand-rolled prefix match.
+    stored_owner = cast(str, items[0].get("ownerAccountId", ""))
+    return ensure_account_id(stored_owner) == ensure_account_id(caller_account_id)
 
 
 def get_account(account_id: str) -> Optional[Dict[str, Any]]:
@@ -370,8 +380,13 @@ def get_account(account_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Account item or None if not found
     """
-    # Multi-table design: accountId is the only key (format: ACCOUNT#uuid)
-    response = tables.accounts.get_item(Key={"accountId": f"ACCOUNT#{account_id}"})
+    # Multi-table design: accountId is the only key (format: ACCOUNT#uuid).
+    # Normalize once at the edge so the prefixed and unprefixed spellings hit the
+    # same key rather than building a malformed double-prefixed one.
+    db_account_id = ensure_account_id(account_id)
+    if db_account_id is None:
+        return None
+    response = tables.accounts.get_item(Key={"accountId": db_account_id})
 
     return response.get("Item")
 
