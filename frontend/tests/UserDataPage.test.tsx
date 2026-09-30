@@ -640,6 +640,14 @@ describe('UserDataPage', () => {
 
     const sharesTab = await screen.findByRole('tab', { name: 'Shares' });
     await user.click(sharesTab);
+
+    // The section heading and helper text render whenever the tab is shown,
+    // not only in the no-profiles empty state.
+    expect(await screen.findByRole('heading', { name: 'Profile Shares' })).toBeInTheDocument();
+    expect(
+      screen.getByText('Select a profile to view and manage who has access to it.'),
+    ).toBeInTheDocument();
+
     await user.click(screen.getByRole('button', { name: 'Scout Alpha' }));
 
     expect(await screen.findByText('reader@example.com')).toBeInTheDocument();

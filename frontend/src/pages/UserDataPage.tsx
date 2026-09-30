@@ -626,24 +626,23 @@ interface SharesTabProps {
   onRevoke: (targetAccountId: string, email: string) => void;
 }
 
-const SharesTab: React.FC<SharesTabProps> = ({ profiles, ...rest }) => {
-  if (profiles.length === 0) {
-    return (
-      <>
-        <Typography variant="h6" gutterBottom>
-          Profile Shares
-        </Typography>
+const SharesTab: React.FC<SharesTabProps> = ({ profiles, ...rest }) => (
+  <>
+    <Typography variant="h6" gutterBottom>
+      Profile Shares
+    </Typography>
 
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Select a profile to view and manage who has access to it.
-        </Typography>
+    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+      Select a profile to view and manage who has access to it.
+    </Typography>
 
-        <Alert severity="info">No profiles to manage shares for.</Alert>
-      </>
-    );
-  }
-  return <SharesTabContent profiles={profiles} {...rest} />;
-};
+    {profiles.length === 0 ? (
+      <Alert severity="info">No profiles to manage shares for.</Alert>
+    ) : (
+      <SharesTabContent profiles={profiles} {...rest} />
+    )}
+  </>
+);
 
 const SharesTabContent: React.FC<SharesTabProps> = ({
   profiles,
