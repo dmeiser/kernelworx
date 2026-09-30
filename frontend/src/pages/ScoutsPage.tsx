@@ -228,9 +228,10 @@ const maybeDeleteProfile = async (
   }
 };
 
-// Helper to update preferences with error handling. On failure, rolls the
-// toggle back and refreshes the cached blob so a retry works from a fresh
-// snapshot (#510).
+// Helper to update preferences with error handling. On success, refreshes the
+// cached blob so the next toggle locks against the blob we just wrote; on
+// failure, rolls the toggle back and refreshes the cache so a retry works from
+// a fresh snapshot (#510).
 const updatePreferencesWithRollback = async (
   updatePreferences: (options: {
     variables: { preferences: string; expectedPreferences: string | null };
@@ -245,6 +246,10 @@ const updatePreferencesWithRollback = async (
     await updatePreferences({
       variables: buildPreferencesVariables(preferences, checked),
     });
+    // The mutation result is not normalized into the GET_MY_ACCOUNT entry (no
+    // id), so refetch on success too — otherwise the next toggle would send a
+    // stale snapshot and fail the optimistic lock.
+    await apolloClient.query({ query: GET_MY_ACCOUNT, fetchPolicy: 'network-only' }).catch(() => {});
   } catch (error) {
     if (import.meta.env.DEV) {
       console.error('Failed to update preferences:', error);
