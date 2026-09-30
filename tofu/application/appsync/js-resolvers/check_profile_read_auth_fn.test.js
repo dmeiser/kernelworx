@@ -94,13 +94,13 @@ describe('check_profile_read_auth_fn response', () => {
         assert.throws(() => response(ctx), /DynamoDBException: DynamoDB error/);
     });
 
-    it('denies when no share is found', () => {
+    it('returns null when no share is found (#522)', () => {
         const ctx = {
             stash: { profile: profile('ACCOUNT#owner-1') },
             result: null
         };
 
-        assert.throws(() => response(ctx), /UNAUTHORIZED: Not authorized to access this profile/);
+        assert.strictEqual(response(ctx), null);
     });
 
     it('returns the profile with share permissions when share owner matches the profile owner', () => {
@@ -123,7 +123,7 @@ describe('check_profile_read_auth_fn response', () => {
         assert.deepStrictEqual(result.permissions, ['READ']);
     });
 
-    it('denies a STALE share whose ownerAccountId no longer matches the profile owner (#432)', () => {
+    it('returns null for a STALE share whose ownerAccountId no longer matches the profile owner (#432, #522)', () => {
         const stashedProfile = profile('ACCOUNT#new-owner');
         const share = {
             profileId: 'PROFILE#prof-1',
@@ -136,10 +136,20 @@ describe('check_profile_read_auth_fn response', () => {
             result: share
         };
 
-        assert.throws(
-            () => response(ctx),
-            /UNAUTHORIZED: Not authorized to access this profile/
-        );
+        assert.strictEqual(response(ctx), null);
+    });
+
+    it('returns null when the share has malformed permissions (#522)', () => {
+        const ctx = {
+            stash: { profile: profile('ACCOUNT#owner-1') },
+            result: {
+                profileId: 'PROFILE#prof-1',
+                targetAccountId: 'ACCOUNT#user-123',
+                ownerAccountId: 'ACCOUNT#owner-1'
+            }
+        };
+
+        assert.strictEqual(response(ctx), null);
     });
 
     it('accepts a legacy share without ownerAccountId when permissions allow (backward compat)', () => {
@@ -161,7 +171,7 @@ describe('check_profile_read_auth_fn response', () => {
         assert.deepStrictEqual(result.permissions, ['WRITE']);
     });
 
-    it('denies a share without any permission', () => {
+    it('returns null for a share without any permission (#522)', () => {
         const stashedProfile = profile('ACCOUNT#owner-1');
         const share = {
             profileId: 'PROFILE#prof-1',
@@ -174,6 +184,6 @@ describe('check_profile_read_auth_fn response', () => {
             result: share
         };
 
-        assert.throws(() => response(ctx), /UNAUTHORIZED: Not authorized to access this profile/);
+        assert.strictEqual(response(ctx), null);
     });
 });

@@ -48,12 +48,17 @@ READONLY_EMAIL="${RUN_ID}-readonly@${TEST_DOMAIN}"
 SMOKE_EMAIL="${RUN_ID}-smoke@${TEST_DOMAIN}"
 
 # Generate a password satisfying Cognito's policy:
-# minimum 8, lowercase, uppercase, number, symbol.
+# minimum 15, lowercase, uppercase, number, symbol.
 generate_password() {
   local prefix
-  prefix=$(openssl rand -base64 9 | tr -d '=+/')
+  prefix=$(openssl rand -base64 18 | tr -d '=+/')
   echo "${prefix}A1!"
 }
+
+# Cognito error codes this script branches on. Both appear in the aws CLI's
+# stderr as "(<Code>) when calling the <Operation> operation: <message>".
+USERNAME_EXISTS_EXCEPTION="UsernameExistsException"
+USER_NOT_FOUND_EXCEPTION="UserNotFoundException"
 
 # The TEST_*_PASSWORD values this script exports are the credentials the
 # integration and e2e suites sign in with, so a password Cognito did not accept
@@ -70,20 +75,32 @@ set_user_password() {
   local email=$1
   local password=$2
   local attempt=1
+  local error=""
   while [ "$attempt" -le "$PASSWORD_SET_ATTEMPTS" ]; do
-    if aws cognito-idp admin-set-user-password \
+    error=$(aws cognito-idp admin-set-user-password \
       --user-pool-id "$USER_POOL_ID" \
       --username "$email" \
       --password "$password" \
       --permanent \
-      --region "$REGION" >/dev/null; then
-      return 0
-    fi
-    log "  (Attempt $attempt/$PASSWORD_SET_ATTEMPTS could not set the password for $email)"
+      --region "$REGION" 2>&1) && return 0
+    # A missing user is not a transient condition: no number of retries can
+    # make the password call succeed, and the caller never created the user.
+    # Say so once and stop instead of repeating the same doomed call.
+    case "$error" in
+      *"An error occurred ($USER_NOT_FOUND_EXCEPTION) when calling the "*)
+        log "ERROR: Cognito has no user $email ($USER_NOT_FOUND_EXCEPTION), so its password cannot be set."
+        log "  The user creation above did not take effect; this is not a retryable failure."
+        return 1
+        ;;
+    esac
+    log "  (Attempt $attempt/$PASSWORD_SET_ATTEMPTS could not set the password for $email: $error)"
     attempt=$((attempt + 1))
     sleep "$PASSWORD_SET_BACKOFF_SECONDS"
   done
   log "Refusing to export test credentials: the password for $email was never set."
+  if [ -n "$error" ]; then
+    log "  Last Cognito error: $error"
+  fi
   return 1
 }
 
@@ -103,13 +120,30 @@ create_or_update_user() {
 
   log "Setting up $user_type user: $email"
 
-  aws cognito-idp admin-create-user \
+  # Only UsernameExistsException means "the user is already there". Any other
+  # failure (a quota, a malformed attribute, a network error) previously fell
+  # into the same "may already exist" message, so the run carried on and the
+  # password step then failed against a user that was never created, hiding the
+  # real cause. Surface it and abort instead.
+  local create_error=""
+  if ! create_error=$(aws cognito-idp admin-create-user \
     --user-pool-id "$USER_POOL_ID" \
     --username "$email" \
     --message-action SUPPRESS \
     --temporary-password "$password" \
-    --region "$REGION" \
-    >/dev/null 2>&1 || log "  (User may already exist)"
+    --region "$REGION" 2>&1); then
+    case "$create_error" in
+      *"An error occurred ($USERNAME_EXISTS_EXCEPTION) when calling the "*)
+        log "  (User already exists; continuing with the existing account)"
+        ;;
+      *)
+        log "ERROR: could not create the $user_type user $email. Cognito said:"
+        log "  $create_error"
+        log "  This is not an 'already exists' condition, so the run cannot continue."
+        exit 1
+        ;;
+    esac
+  fi
 
   set_user_password "$email" "$password"
 

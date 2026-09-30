@@ -287,7 +287,7 @@ describe('Profile Query Operations Integration Tests', () => {
       expect(data.getProfile.permissions).toEqual(['WRITE']);
     });
 
-    it('rejects non-shared user accessing profile', async () => {
+    it('returns null for non-shared user accessing profile (#522)', async () => {
       // Arrange: Create profile (don't share)
       const profileName = `${getTestPrefix()}-NotSharedTest`;
       const { data: createData } = await ownerClient.mutate({
@@ -297,14 +297,15 @@ describe('Profile Query Operations Integration Tests', () => {
       const profileId = createData.createSellerProfile.profileId;
       createdProfileIds.push(profileId);
 
-      // Act & Assert: Contributor (not shared) queries profile - should be rejected
-      await expect(
-        contributorClient.query({
-          query: GET_PROFILE,
-          variables: { profileId },
-          fetchPolicy: 'network-only',
-        })
-      ).rejects.toThrow(/not authorized|unauthorized/i);
+      // Act: Contributor (not shared) queries the profile
+      const { data } = await contributorClient.query({
+        query: GET_PROFILE,
+        variables: { profileId },
+        fetchPolicy: 'network-only',
+      });
+
+      // Assert: schema documents null on denial (schema.graphql getProfile), not a query error
+      expect(data.getProfile).toBeNull();
     });
 
     it('rejects unauthenticated user accessing profile', async () => {
