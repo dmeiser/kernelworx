@@ -14,8 +14,30 @@ vi.mock('aws-amplify/auth', () => ({
   updateMFAPreference: vi.fn(),
   updatePassword: vi.fn(),
   fetchMFAPreference: vi.fn(),
+  fetchAuthSession: vi.fn(),
   deleteWebAuthnCredential: vi.fn(),
 }));
+
+// Native (password) session shape by default: an idToken payload with no
+// identities claim, so the real checkIsFederatedSession detection runs.
+const nativeSession = {
+  tokens: { idToken: { payload: { sub: 'native-user' } } },
+};
+
+const federatedSession = {
+  tokens: {
+    idToken: {
+      payload: {
+        sub: 'federated-user',
+        identities: [{ providerName: 'Google' }],
+      },
+    },
+  },
+};
+
+const mockNativeSession = () => {
+  vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(nativeSession as any);
+};
 
 vi.mock('../../src/lib/mfaStatus', () => ({
   getMfaEnabledFromCognito: vi.fn(),
@@ -34,6 +56,7 @@ const mockQrDataUrl = 'data:image/png;base64,mockqrcode';
 describe('useMfa', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNativeSession();
     vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({
       sharedSecret: mockSharedSecret,
       getSetupUri: vi.fn(() => new URL('otpauth://totp/PopcornManager:user?secret=JBSWY3DPEHPK3PXP')),
@@ -181,14 +204,15 @@ describe('useMfa', () => {
   it('handles disable MFA confirmation flow', async () => {
     const { result } = renderHook(() => useMfa());
 
-    act(() => {
-      result.current.handleDisableMFA();
+    await act(async () => {
+      await result.current.handleDisableMFA();
     });
 
     expect(result.current.pendingConfirmation).toEqual({
       type: 'disable',
       message: 'Are you sure you want to disable multi-factor authentication? This will make your account less secure.',
     });
+    expect(result.current.federatedNotice).toBe(false);
 
     await act(async () => {
       await result.current.confirmDisableMFA('123456');
@@ -244,11 +268,48 @@ describe('useMfa', () => {
     expect(result.current.mfaError).toBe('Incorrect username or password.');
   });
 
-  it('cancels disable MFA confirmation without disabling', () => {
+  it('quits with a federated notice instead of a password prompt for a federated session', async () => {
+    // Federated session detected through the real checkIsFederatedSession logic:
+    // only the leaf fetchAuthSession is mocked with an identities claim.
+    vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(federatedSession as any);
     const { result } = renderHook(() => useMfa());
 
     act(() => {
-      result.current.handleDisableMFA();
+      result.current.setMfaEnabled(true);
+    });
+
+    await act(async () => {
+      await result.current.handleDisableMFA();
+    });
+
+    expect(amplifyAuth.fetchAuthSession).toHaveBeenCalledTimes(1);
+    expect(result.current.federatedNotice).toBe(true);
+    expect(result.current.pendingConfirmation).toBeNull();
+    expect(amplifyAuth.updatePassword).not.toHaveBeenCalled();
+    expect(amplifyAuth.updateMFAPreference).not.toHaveBeenCalled();
+    expect(result.current.mfaEnabled).toBe(true);
+  });
+
+  it('never shows a federated notice for a native session (disabled path)', async () => {
+    const { result } = renderHook(() => useMfa());
+
+    act(() => {
+      result.current.setMfaEnabled(true);
+    });
+
+    await act(async () => {
+      await result.current.handleDisableMFA();
+    });
+
+    expect(result.current.federatedNotice).toBe(false);
+    expect(amplifyAuth.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('cancels disable MFA confirmation without disabling', async () => {
+    const { result } = renderHook(() => useMfa());
+
+    await act(async () => {
+      await result.current.handleDisableMFA();
     });
     expect(result.current.pendingConfirmation).not.toBeNull();
 
@@ -279,6 +340,7 @@ describe('useMfa', () => {
 describe('useMfa error paths', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNativeSession();
     vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({
       sharedSecret: mockSharedSecret,
       getSetupUri: vi.fn(() => new URL('otpauth://totp/PopcornManager:user?secret=JBSWY3DPEHPK3PXP')),
@@ -297,7 +359,10 @@ describe('useMfa error paths', () => {
 
     act(() => {
       result.current.setMfaError('stale error');
-      result.current.handleDisableMFA();
+    });
+
+    await act(async () => {
+      await result.current.handleDisableMFA();
     });
 
     await act(async () => {

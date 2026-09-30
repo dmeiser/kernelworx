@@ -24,6 +24,7 @@ import {
   Security as SecurityIcon,
 } from '@mui/icons-material';
 import type { UseMfaReturn } from '../../hooks/useMfa';
+import { handleSignOutAndRedirect } from '../../lib/authUtils';
 
 interface MfaSectionProps {
   mfaHook: UseMfaReturn;
@@ -81,7 +82,7 @@ const MfaPrimaryActions: React.FC<MfaPrimaryActionsProps> = ({ hook, onSetup }) 
         variant="outlined"
         color="error"
         startIcon={<DeleteIcon />}
-        onClick={hook.handleDisableMFA}
+        onClick={() => void hook.handleDisableMFA()}
         disabled={hook.mfaLoading}
         sx={{ mt: 2 }}
       >
@@ -157,6 +158,26 @@ const MfaSetupSection: React.FC<MfaSetupSectionProps> = ({ hook }) => {
   );
 };
 
+const FederatedDisableNotice: React.FC = () => {
+  const handleSignIn = () => {
+    void handleSignOutAndRedirect();
+  };
+
+  return (
+    <Box sx={{ py: 1, mb: 2 }}>
+      <Alert severity="warning" sx={{ mb: 2 }}>
+        <strong>Administrator Security Policy:</strong> Changing MFA requires a password sign-in.
+      </Alert>
+      <Typography variant="body2" color="text.secondary" paragraph>
+        This account signs in through a social provider which cannot present MFA. Changing MFA requires signing in with your email and password. Please sign out and sign in with your password.
+      </Typography>
+      <Button variant="contained" color="primary" onClick={handleSignIn}>
+        Sign Out
+      </Button>
+    </Box>
+  );
+};
+
 interface MfaConfirmDialogProps {
   hook: UseMfaReturn;
 }
@@ -223,6 +244,8 @@ export const MfaSection: React.FC<MfaSectionProps> = ({ mfaHook, onSetupMFA, isA
         <strong>Administrator notice:</strong> Admin operations need an authenticator app (TOTP) enrolled; a passkey alone signs you in but does not grant admin.
       </Alert>
     )}
+
+    {mfaHook.federatedNotice && <FederatedDisableNotice />}
 
     <MfaStatusAlerts hook={mfaHook} />
     <MfaPrimaryActions hook={mfaHook} onSetup={onSetupMFA} />

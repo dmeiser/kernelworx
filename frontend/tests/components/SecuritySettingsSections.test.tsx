@@ -8,6 +8,11 @@ import { MfaSection } from '../../src/components/settings/MfaSection';
 import { PasskeySection } from '../../src/components/settings/PasskeySection';
 import type { UseMfaReturn } from '../../src/hooks/useMfa';
 import type { UsePasskeysReturn } from '../../src/hooks/usePasskeys';
+import { handleSignOutAndRedirect } from '../../src/lib/authUtils';
+
+vi.mock('../../src/lib/authUtils', () => ({
+  handleSignOutAndRedirect: vi.fn(),
+}));
 
 const createMockMfaHook = (overrides?: Partial<UseMfaReturn>): UseMfaReturn => ({
   mfaSetupCode: null,
@@ -20,10 +25,11 @@ const createMockMfaHook = (overrides?: Partial<UseMfaReturn>): UseMfaReturn => (
   setMfaSuccess: vi.fn(),
   mfaLoading: false,
   mfaEnabled: false,
+  federatedNotice: false,
   pendingConfirmation: null,
   handleSetupMFA: vi.fn().mockResolvedValue(undefined),
   handleVerifyMFA: vi.fn().mockResolvedValue(undefined),
-  handleDisableMFA: vi.fn(),
+  handleDisableMFA: vi.fn().mockResolvedValue(undefined),
   confirmDisableMFA: vi.fn().mockResolvedValue(undefined),
   cancelMfaConfirmation: vi.fn(),
   checkMfaStatus: vi.fn().mockResolvedValue(undefined),
@@ -172,7 +178,7 @@ describe('MfaSection states and interactions', () => {
   });
 
   it('wires the disable button to handleDisableMFA', () => {
-    const handleDisableMFA = vi.fn();
+    const handleDisableMFA = vi.fn().mockResolvedValue(undefined);
     render(<MfaSection mfaHook={createMockMfaHook({ mfaEnabled: true, handleDisableMFA })} onSetupMFA={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: /Disable MFA/i }));
@@ -289,6 +295,27 @@ describe('MfaSection states and interactions', () => {
     fireEvent.click(disableButton);
     expect(confirmDisableMFA).toHaveBeenCalledTimes(1);
     expect(confirmDisableMFA).toHaveBeenCalledWith('correct-horse');
+  });
+
+  it('requires a password sign-in for federated sessions instead of the password prompt', () => {
+    render(
+      <MfaSection
+        mfaHook={
+          createMockMfaHook({
+            mfaEnabled: true,
+            federatedNotice: true,
+          })
+        }
+        onSetupMFA={vi.fn()}
+      />,
+    );
+
+    // Federated sessions get the sign-out affordance, not a password prompt
+    // that could never succeed (no native password to re-check).
+    expect(screen.getByText(/Changing MFA requires signing in with your email and password/i)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign Out' }));
+    expect(handleSignOutAndRedirect).toHaveBeenCalledTimes(1);
   });
 });
 
