@@ -59,11 +59,21 @@ SITES = [
 
 
 def _admin_literal(relpath: str, pattern: str) -> str:
+    """Return the group-name literal captured by the pinned admin check."""
     source = (REPO_ROOT / relpath).read_text(encoding="utf-8")
     matches = re.findall(pattern, source)
     assert matches, f"no admin group check matching {pattern!r} in {relpath}"
     assert len(matches) == 1, f"expected one admin group check in {relpath}, found {matches}"
     return matches[0]
+
+
+def _admin_expression(relpath: str, pattern: str) -> str:
+    """Return the full matched admin-check expression (not just its literal)."""
+    source = (REPO_ROOT / relpath).read_text(encoding="utf-8")
+    found = re.findall(pattern, source)
+    assert found, f"no admin group check matching {pattern!r} in {relpath}"
+    expression = re.search(pattern, source).group(0)
+    return expression
 
 
 @pytest.mark.parametrize(("relpath", "pattern", "label"), SITES, ids=[site[2] for site in SITES])
@@ -83,15 +93,19 @@ def test_admin_group_name_is_uppercase_admin(
 def test_no_site_accepts_a_lowercase_admin_spelling(
     relpath: str, pattern: str, label: str
 ) -> None:
-    """No site adds an extra lowercase (or otherwise differing) group spelling.
+    """No pinned admin-check expression adds an extra lowercase spelling.
 
-    This is the specific regression: an OR-ed `|| groups.includes('admin')`
-    in the resolver would still satisfy the check above only if the primary
-    literal changed, so assert the single-accepting form explicitly.
+    Asserts only over the exact admin-check expressions pinned in SITES, not
+    a whole-file scan: an innocuous lowercase 'admin' elsewhere in the file
+    (a comment, a log message) does not grant admin and must not fail CI. The
+    behavioral regression itself is covered by the node test
+    "does not treat the lowercase group \"admin\" as admin (#504)" in
+    get_catalog_for_delete_fn.test.js.
     """
-    source = (REPO_ROOT / relpath).read_text(encoding="utf-8")
-    lowercase = re.findall(r"['\"]admin['\"]", source)
-    assert not lowercase, (
-        f"{label} ({relpath}) still references a lowercase 'admin' literal "
-        f"at {lowercase}; only the uppercase {ADMIN_GROUP!r} group grants admin."
+    expression = _admin_expression(relpath, pattern)
+    lowercase_in_expression = re.findall(r"['\"]admin['\"]", expression)
+    assert not lowercase_in_expression, (
+        f"{label} ({relpath}) admin check {expression!r} still accepts a "
+        f"lowercase 'admin' spelling; only the uppercase {ADMIN_GROUP!r} "
+        f"group grants admin (#504)."
     )
