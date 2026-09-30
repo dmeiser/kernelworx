@@ -1,6 +1,7 @@
 """Tests for authorization utilities."""
 
 from typing import Any, Dict
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -14,7 +15,7 @@ from src.utils.auth import (
     require_admin_mfa,
     require_profile_access,
 )
-from src.utils.dynamodb import get_dynamodb_resource, tables
+from src.utils.dynamodb import get_dynamodb_resource, override_table, tables
 from src.utils.errors import AppError, ErrorCode
 
 
@@ -1444,6 +1445,21 @@ class TestGetAccount:
         result = get_account("nonexistent-account")
 
         assert result is None
+
+    def test_unresolvable_id_reports_not_found_without_a_lookup(self) -> None:
+        """An id with no value to normalize is unresolved: None, and no DynamoDB read.
+
+        ``get_account`` normalizes the key once at its own edge. An empty id yields
+        nothing to normalize, so there is no key to read: the account is reported
+        missing exactly as a non-existent id is, rather than issuing a lookup built
+        from a malformed or empty key. The prefixed and unprefixed spellings of a
+        real id are covered by ``TestIdDialectAlignment``.
+        """
+        accounts = MagicMock()
+        override_table("accounts", accounts)
+
+        assert get_account("") is None
+        accounts.get_item.assert_not_called()
 
 
 class TestIdDialectAlignment:
