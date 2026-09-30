@@ -563,16 +563,19 @@ class TestTransferProfileOwnership:
 
         # Re-running the step (client retry) repairs the remaining share and reports 0.
         mock_shares.update_item.side_effect = real_update
-        assert transfer_profile_ownership._repair_shares(db_profile_id, db_new_owner_id, f"ACCOUNT#{owner_id}")[1] == (0, 0)
+        assert transfer_profile_ownership._repair_shares(db_profile_id, db_new_owner_id, f"ACCOUNT#{owner_id}")[1] == (
+            0,
+            0,
+        )
 
         share = shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": f"ACCOUNT#{third_party}"})
         assert share["Item"]["ownerAccountId"] == db_new_owner_id
         # The new owner's own share is not deleted by the repair (only re-pointed
         # like every other share); it is removed after the transfer commits.
         assert (
-            shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})[
-                "Item"
-            ]["ownerAccountId"]
+            shares_table.get_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})["Item"][
+                "ownerAccountId"
+            ]
             == db_new_owner_id
         )
 
@@ -1151,9 +1154,9 @@ class TestTransferProfileOwnership:
         # the untouched collaborator and the new owner are back on the old owner.
         assert "Item" not in shares_table.get_item(Key=revoked_key)
         assert (
-            shares_table.get_item(
-                Key={"profileId": f"PROFILE#{profile_id}", "targetAccountId": f"ACCOUNT#{other_id}"}
-            )["Item"]["ownerAccountId"]
+            shares_table.get_item(Key={"profileId": f"PROFILE#{profile_id}", "targetAccountId": f"ACCOUNT#{other_id}"})[
+                "Item"
+            ]["ownerAccountId"]
             == f"ACCOUNT#{owner_id}"
         )
         restored = shares_table.get_item(
@@ -1381,10 +1384,7 @@ class TestTransferProfileOwnership:
         crashed = {"done": False}
 
         def dies_after_commit(*args: Any, **kwargs: Any) -> Any:
-            if (
-                kwargs["Key"]["targetAccountId"] == f"ACCOUNT#{new_owner_id}"
-                and not crashed["done"]
-            ):
+            if kwargs["Key"]["targetAccountId"] == f"ACCOUNT#{new_owner_id}" and not crashed["done"]:
                 crashed["done"] = True
                 raise RuntimeError("lambda killed right after the commit")
             return real_delete(*args, **kwargs)
