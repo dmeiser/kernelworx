@@ -232,6 +232,7 @@ moto
 mktemp
 MUI
 multiline
+multiword
 mutex
 mypy
 MZXW
@@ -358,6 +359,7 @@ singleline
 slowmo
 slugification
 slugified
+slugifies
 slugify
 slugifying
 snackbar
