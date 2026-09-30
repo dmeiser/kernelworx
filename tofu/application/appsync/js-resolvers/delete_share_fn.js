@@ -21,7 +21,11 @@ export function request(ctx) {
             targetAccountId: dbTargetAccountId 
         }),
         condition: {
-            expression: 'ownerAccountId = :caller',
+            // Guard the share's recorded owner, tolerating legacy shares that predate
+            // ownerAccountId (missing attribute fails a plain equality condition, which
+            // made pre-migration shares impossible to revoke). Profile ownership is the
+            // real authorization check and runs first in verify_profile_owner_for_revoke.
+            expression: 'attribute_not_exists(ownerAccountId) OR ownerAccountId = :caller',
             expressionValues: util.dynamodb.toMapValues({ ':caller': callerAccountId })
         }
     };
