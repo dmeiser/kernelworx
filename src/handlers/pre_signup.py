@@ -104,6 +104,24 @@ def _existing_user_email_verified(existing_user: Dict[str, Any]) -> bool:
     return False
 
 
+def _log_link_refusal(reason: str, existing_username: str) -> None:
+    """Record a pre-signup link refusal as a greppable metric/log line.
+
+    Every time the account-linking path refuses to hand a federated identity to
+    an existing account, one structured WARNING is emitted with the machine-
+    greppable field ``preSignupLinkRefused`` set to True. That makes the
+    email-squatting class this guard exists to stop (#503) observable in
+    CloudWatch Logs, not just in the links that would have slipped through
+    without it. ``reason`` names which fail-closed check tripped.
+    """
+    logger.warning(
+        "Pre-signup account-linking refused",
+        preSignupLinkRefused=True,
+        refusalReason=reason,
+        username=mask_email(existing_username),
+    )
+
+
 def _handle_existing_user(
     cognito: Any, user_pool_id: str, email: str, username: str, existing_user: Dict[str, Any]
 ) -> NoReturn:
@@ -116,16 +134,14 @@ def _handle_existing_user(
     existing_username = existing_user["Username"]
 
     if existing_user.get("UserStatus") != "CONFIRMED":
-        logger.warning("Refusing to link: existing user is not confirmed", username=mask_email(existing_username))
+        _log_link_refusal("existing_user_not_confirmed", existing_username)
         raise FederatedIdentityLinkedException(
             "An account with this email already exists but is not fully set up. "
             "Please resolve the existing account before signing in."
         )
 
     if not _existing_user_email_verified(existing_user):
-        logger.warning(
-            "Refusing to link: existing user has an unverified email", username=mask_email(existing_username)
-        )
+        _log_link_refusal("existing_user_email_not_verified", existing_username)
         raise FederatedIdentityLinkedException(
             "An account with this email already exists but its email is not verified. "
             "Please resolve the existing account before signing in."

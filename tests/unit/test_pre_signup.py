@@ -359,6 +359,39 @@ class TestExistingUserStateCheck:
         mock_cognito.admin_link_provider_for_user.assert_not_called()
         assert "email is not verified" in message
 
+    def test_refusal_is_logged_with_greppable_field(
+        self,
+        federated_signup_event: dict[str, Any],
+        lambda_context: MagicMock,
+    ) -> None:
+        """Every refusal must emit the greppable ``preSignupLinkRefused`` marker
+        so this class of squatting (issue #503) is observable, not just the
+        links that would have slipped through."""
+        with (
+            patch("boto3.client") as mock_client,
+            patch("src.handlers.pre_signup.logger.warning") as mock_warn,
+        ):
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "existing-user-uuid",
+                        "UserStatus": "CONFIRMED",
+                        "Attributes": [{"Name": "email_verified", "Value": "false"}],
+                    }
+                ]
+            }
+            mock_client.return_value = mock_cognito
+            with pytest.raises(FederatedIdentityLinkedException):
+                lambda_handler(federated_signup_event, lambda_context)
+
+        mock_cognito.admin_link_provider_for_user.assert_not_called()
+        # The refusal is recorded exactly once, with the machine-greppable marker field.
+        refused = [c for c in mock_warn.call_args_list if c.kwargs.get("preSignupLinkRefused") is True]
+        assert len(refused) == 1
+        assert refused[0].args[0] == "Pre-signup account-linking refused"
+        assert refused[0].kwargs.get("refusalReason") == "existing_user_email_not_verified"
+
 
 class TestErrorHandling:
     """Tests for error handling scenarios"""
