@@ -1061,9 +1061,7 @@ def _assert_profiles_deleted(account_id: str, profile_ids: list[str], logger: An
         except ClientError as e:
             _raise_batch_lookup_error("verify profile deletion", logger, e, profile_id=profile_id)
         if "Item" in response:
-            logger.warning(
-                "Purge refused: profile still present", profile_id=profile_id, actor_sub=actor_sub
-            )
+            logger.warning("Purge refused: profile still present", profile_id=profile_id, actor_sub=actor_sub)
             raise AppError(
                 ErrorCode.CONFLICT,
                 "The account's profiles must be deleted before the account can be purged",
