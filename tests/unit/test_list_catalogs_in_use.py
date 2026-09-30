@@ -504,19 +504,31 @@ class TestAsyncGetSharedCampaignCatalogIds:
         assert result == {"CATALOG#cat1", "CATALOG#cat2", "CATALOG#cat3"}
 
     @pytest.mark.asyncio
-    async def test_handles_query_errors_gracefully(self) -> None:
-        """Should continue processing if one profile query fails."""
+    async def test_raises_resource_busy_when_a_profile_query_fails(self) -> None:
+        """A single failed per-profile query must not be swallowed (#556).
+
+        Regression test for #556: previously a per-profile DynamoDB failure was
+        logged and discarded, so the caller returned the surviving catalogs as
+        the authoritative "in use" answer. Now any failure raises a retryable
+        RESOURCE_BUSY so the request is retried instead of answered incompletely.
+        """
+        import botocore.exceptions
+
         from src.handlers.list_catalogs_in_use import _async_get_shared_campaign_catalog_ids
+        from src.utils.errors import AppError, ErrorCode
 
         call_count = 0
 
         async def mock_query(**kwargs: object) -> Dict[str, List[Dict[str, str]]]:
             nonlocal call_count
             call_count += 1
-            # First call succeeds, second raises an exception
+            # First profile's query succeeds, second profile's query is throttled
             if call_count == 1:
                 return {"Items": [{"catalogId": "CATALOG#cat1"}]}
-            raise Exception("DynamoDB error")
+            raise botocore.exceptions.ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "throttled"}},
+                "Query",
+            )
 
         mock_table = AsyncMock()
         mock_table.query.side_effect = mock_query
@@ -524,36 +536,99 @@ class TestAsyncGetSharedCampaignCatalogIds:
         mock_dynamodb = AsyncMock()
         mock_dynamodb.Table.return_value = mock_table
 
-        result = await _async_get_shared_campaign_catalog_ids(
-            mock_dynamodb, "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2"]
-        )
+        with pytest.raises(AppError) as exc_info:
+            await _async_get_shared_campaign_catalog_ids(
+                mock_dynamodb, "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2"]
+            )
 
-        # Should return results from successful query
-        assert result == {"CATALOG#cat1"}
+        # Refuses the partial answer with the retryable code, preserving the cause
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert "retry" in exc_info.value.message.lower()
+        assert isinstance(exc_info.value.__cause__, botocore.exceptions.ClientError)
 
     @pytest.mark.asyncio
-    async def test_ignores_non_set_non_exception_results(self) -> None:
-        """Should skip results that are neither a set nor an exception."""
+    async def test_raises_internal_error_for_unexpected_failure(self) -> None:
+        """A non-ClientError failure is permanent, so it is not reported as retryable."""
         from src.handlers.list_catalogs_in_use import _async_get_shared_campaign_catalog_ids
+        from src.utils.errors import AppError, ErrorCode
 
-        async def mock_get_campaigns(dynamodb: Any, table_name: str, profile_id: str) -> object:
-            if profile_id == "PROFILE#prof1":
-                return {"CATALOG#cat1"}
-            # Return an unexpected scalar type to exercise the else-false branch.
-            return "ignored"
+        async def mock_query(**kwargs: object) -> Dict[str, List[Dict[str, str]]]:
+            raise RuntimeError("network blip")
 
-        import src.handlers.list_catalogs_in_use as module
+        mock_table = AsyncMock()
+        mock_table.query.side_effect = mock_query
 
-        original = module._async_get_campaigns_for_profile
-        module._async_get_campaigns_for_profile = mock_get_campaigns
-        try:
-            result = await _async_get_shared_campaign_catalog_ids(
-                AsyncMock(), "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2"]
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        with pytest.raises(AppError) as exc_info:
+            await _async_get_shared_campaign_catalog_ids(
+                mock_dynamodb, "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2", "PROFILE#prof3"]
             )
-        finally:
-            module._async_get_campaigns_for_profile = original
 
-        assert result == {"CATALOG#cat1"}
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+    @pytest.mark.asyncio
+    async def test_raises_internal_error_for_non_throttling_client_error(self) -> None:
+        """A permanent ClientError is not retryable, so it maps to INTERNAL_ERROR."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.list_catalogs_in_use import _async_get_shared_campaign_catalog_ids
+        from src.utils.errors import AppError, ErrorCode
+
+        async def mock_query(**kwargs: object) -> Dict[str, List[Dict[str, str]]]:
+            raise ClientError(
+                {"Error": {"Code": "AccessDeniedException", "Message": "not authorized"}},
+                "Query",
+            )
+
+        mock_table = AsyncMock()
+        mock_table.query.side_effect = mock_query
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        with pytest.raises(AppError) as exc_info:
+            await _async_get_shared_campaign_catalog_ids(
+                mock_dynamodb, "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2"]
+            )
+
+        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert isinstance(exc_info.value.__cause__, ClientError)
+
+    @pytest.mark.asyncio
+    async def test_throttling_failure_wins_over_permanent_failure(self) -> None:
+        """A throttled profile keeps the whole request retryable."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.list_catalogs_in_use import _async_get_shared_campaign_catalog_ids
+        from src.utils.errors import AppError, ErrorCode
+
+        outcomes = [
+            ClientError({"Error": {"Code": "AccessDeniedException", "Message": "not authorized"}}, "Query"),
+            ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "throttled"}},
+                "Query",
+            ),
+        ]
+
+        async def mock_query(**kwargs: object) -> Dict[str, List[Dict[str, str]]]:
+            raise outcomes.pop(0)
+
+        mock_table = AsyncMock()
+        mock_table.query.side_effect = mock_query
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        with pytest.raises(AppError) as exc_info:
+            await _async_get_shared_campaign_catalog_ids(
+                mock_dynamodb, "campaigns-table", ["PROFILE#prof1", "PROFILE#prof2"]
+            )
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert isinstance(exc_info.value.__cause__, ClientError)
 
 
 class TestAsyncGetAllCatalogIds:
@@ -724,6 +799,115 @@ class TestHandler:
             result = handler(event, None)
 
         assert result == []
+
+    def test_returns_resource_busy_payload_when_a_profile_query_is_throttled(self) -> None:
+        """A throttled per-profile query must reach the caller as a typed RESOURCE_BUSY, not a short list."""
+        import os
+
+        from botocore.exceptions import ClientError
+
+        import src.handlers.list_catalogs_in_use as module
+        from src.handlers.list_catalogs_in_use import handler
+        from src.utils.errors import ErrorCode
+
+        os.environ["PROFILES_TABLE_NAME"] = "test-profiles"
+        os.environ["CAMPAIGNS_TABLE_NAME"] = "test-campaigns"
+        os.environ["SHARES_TABLE_NAME"] = "test-shares"
+
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.query.return_value = {"Items": [{"profileId": "PROFILE#owned1"}]}
+        mock_shares_table = AsyncMock()
+        mock_shares_table.query.return_value = {"Items": []}
+
+        async def failing_query(**kwargs: object) -> Dict[str, List[Dict[str, str]]]:
+            raise ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "throttled"}},
+                "Query",
+            )
+
+        mock_campaigns_table = AsyncMock()
+        mock_campaigns_table.query.side_effect = failing_query
+
+        async def mock_table(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            if "campaigns" in table_name:
+                return mock_campaigns_table
+            return mock_shares_table
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table = mock_table
+
+        mock_session = MagicMock()
+        mock_context_manager = AsyncMock()
+        mock_context_manager.__aenter__.return_value = mock_dynamodb
+        mock_context_manager.__aexit__.return_value = None
+        mock_session.resource.return_value = mock_context_manager
+
+        original_session = module.aioboto3.Session
+        module.aioboto3.Session = MagicMock(return_value=mock_session)
+        try:
+            result = handler({"identity": {"sub": "test-user-id"}}, None)
+        finally:
+            module.aioboto3.Session = original_session
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+        assert "retry" in result["message"].lower()
+
+    def test_returns_internal_error_payload_when_a_profile_query_is_denied(self) -> None:
+        """A permanent per-profile query failure must reach the caller as INTERNAL_ERROR."""
+        import os
+
+        from botocore.exceptions import ClientError
+
+        import src.handlers.list_catalogs_in_use as module
+        from src.handlers.list_catalogs_in_use import handler
+        from src.utils.errors import ErrorCode
+
+        os.environ["PROFILES_TABLE_NAME"] = "test-profiles"
+        os.environ["CAMPAIGNS_TABLE_NAME"] = "test-campaigns"
+        os.environ["SHARES_TABLE_NAME"] = "test-shares"
+
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.query.return_value = {"Items": [{"profileId": "PROFILE#owned1"}]}
+        mock_shares_table = AsyncMock()
+        mock_shares_table.query.return_value = {"Items": []}
+
+        async def failing_query(**kwargs: object) -> Dict[str, List[Dict[str, str]]]:
+            raise ClientError(
+                {"Error": {"Code": "AccessDeniedException", "Message": "not authorized"}},
+                "Query",
+            )
+
+        mock_campaigns_table = AsyncMock()
+        mock_campaigns_table.query.side_effect = failing_query
+
+        async def mock_table(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            if "campaigns" in table_name:
+                return mock_campaigns_table
+            return mock_shares_table
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table = mock_table
+
+        mock_session = MagicMock()
+        mock_context_manager = AsyncMock()
+        mock_context_manager.__aenter__.return_value = mock_dynamodb
+        mock_context_manager.__aexit__.return_value = None
+        mock_session.resource.return_value = mock_context_manager
+
+        original_session = module.aioboto3.Session
+        module.aioboto3.Session = MagicMock(return_value=mock_session)
+        try:
+            result = handler({"identity": {"sub": "test-user-id"}}, None)
+        finally:
+            module.aioboto3.Session = original_session
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def test_returns_error_payload_on_exception(self) -> None:
         """Should convert unexpected exceptions into an INTERNAL_ERROR payload."""

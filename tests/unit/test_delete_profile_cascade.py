@@ -958,18 +958,21 @@ class TestDeleteProfileCascade:
         mock_s3.get_paginator.assert_called_once()
         sleep_mock.assert_not_called()
 
-    def test_get_s3_client_default(self) -> None:
-        """Test _get_s3_client returns default boto3 S3 client when s3_client is None."""
-        import src.handlers.delete_profile_cascade as mod
-        from src.handlers.delete_profile_cascade import _get_s3_client
+    def test_s3_client_override_slot_is_passed_to_shared_factory(self, monkeypatch: Any) -> None:
+        """The module-level s3_client slot reaches the shared S3 factory (#575)."""
+        mock_s3 = MagicMock()
+        with patch("src.handlers.delete_profile_cascade.get_s3_client", return_value=mock_s3) as mock_factory:
+            from src.handlers.delete_profile_cascade import _delete_s3_reports
 
-        mod.s3_client = None
-        with patch("boto3.client") as mock_boto:
-            mock_client = MagicMock()
-            mock_boto.return_value = mock_client
-            client = _get_s3_client()
-            assert client == mock_client
-            mock_boto.assert_called_once_with("s3")
+            monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
+            mock_paginator = MagicMock()
+            mock_paginator.paginate.return_value = [{"Versions": [], "DeleteMarkers": []}]
+            mock_s3.get_paginator.return_value = mock_paginator
+
+            with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+                _delete_s3_reports("p1")
+
+            mock_factory.assert_called_once_with(mock_s3)
 
     def test_delete_s3_reports_with_unprefixed_profile_id(self, monkeypatch: Any) -> None:
         """Test S3 report deletion when profile_id has no PROFILE# prefix."""
