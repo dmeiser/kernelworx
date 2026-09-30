@@ -34,6 +34,9 @@ resource "aws_appsync_resolver" "get_profile" {
   pipeline_config {
     functions = [
       aws_appsync_function.fetch_profile.function_id,
+      # Step 2 of the two-phase owner check (#545): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.fetch_profile_step2.function_id,
       aws_appsync_function.check_profile_read_auth.function_id,
     ]
   }
@@ -217,7 +220,12 @@ resource "aws_appsync_resolver" "list_shares_by_profile" {
 
   pipeline_config {
     functions = [
-      aws_appsync_function.verify_profile_write_or_owner.function_id,
+      # #547: two-phase owner check (#438) - the strongly consistent base-table
+      # GetItem decides ownership; the GSI runs only for non-owners. This was
+      # previously the pre-#438 verify_profile_write_or_owner single-step GSI
+      # read, which authorized off the eventually-consistent GSI.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_write_permission.function_id,
       aws_appsync_function.query_shares.function_id,
     ]
@@ -240,7 +248,10 @@ resource "aws_appsync_resolver" "list_invites_by_profile" {
 
   pipeline_config {
     functions = [
-      aws_appsync_function.verify_profile_write_or_owner.function_id,
+      # #547: two-phase owner check (#438), same as listSharesByProfile - ownership
+      # is decided by the strongly consistent base-table GetItem, never the GSI.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_write_permission.function_id,
       aws_appsync_function.query_invites.function_id,
     ]
@@ -442,6 +453,9 @@ resource "aws_appsync_resolver" "payment_methods_for_profile" {
   pipeline_config {
     functions = [
       aws_appsync_function.fetch_profile.function_id,
+      # Step 2 of the two-phase owner check (#545): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.fetch_profile_step2.function_id,
       aws_appsync_function.check_payment_methods_access.function_id,
       aws_appsync_function.get_owner_payment_methods.function_id,
       aws_appsync_function.filter_payment_methods_by_access.function_id,
