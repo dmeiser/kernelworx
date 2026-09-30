@@ -78,6 +78,16 @@ describe('update_order_fn early-return guards after util.error', () => {
     expect(req).toBeUndefined();
   });
 
+  test('omitted paymentMethod is not written and keeps its current value (#506)', () => {
+    const req: any = updateOrderFn.request(validCtx({ customerName: 'Test' }) as any);
+    expect(errors).toEqual([]);
+    expect(req.operation).toBe('UpdateItem');
+    // An omitted field must not appear in the update expression: the stored
+    // paymentMethod is non-nullable and must keep its current value.
+    expect(req.update.expression).not.toContain('paymentMethod');
+    expect(req.update.expressionValues).not.toHaveProperty(':paymentMethod');
+  });
+
   test('valid input still produces an UpdateItem', () => {
     const req: any = updateOrderFn.request(
       validCtx({ customerName: 'Test', customerPhone: '5551234567', orderDate: '2025-12-31T00:00:00Z' }) as any

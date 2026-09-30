@@ -1,16 +1,20 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-  // #506: distinguish "absent" from "explicitly null". Order.paymentMethod is
-  // non-nullable, so persisting an explicit null corrupts the order; the
-  // client must omit the field to keep the current value.
-  const supplied = ctx.args && ctx.args.input && ctx.args.input.paymentMethod;
-  if (supplied === null) {
+  const input = ctx.args && ctx.args.input;
+
+  // #506: distinguish "absent" from "explicitly null" by KEY PRESENCE.
+  // Order.paymentMethod is non-nullable, so persisting an explicit null
+  // corrupts the order; the client must omit the field to keep the current
+  // value. The APPSYNC_JS runtime can surface an omitted nullable input
+  // field with a null value, so a value check alone cannot tell the two
+  // apart; Object.hasOwn (the documented `in` replacement) can.
+  if (input && Object.hasOwn(input, 'paymentMethod') && input.paymentMethod === null) {
     util.error('paymentMethod cannot be null; omit the field to keep the current value', 'INVALID_INPUT');
   }
 
-  const paymentMethod = (supplied !== undefined)
-    ? supplied
+  const paymentMethod = (input && input.paymentMethod !== undefined)
+    ? input.paymentMethod
     : null;
 
   if (paymentMethod === null) {
