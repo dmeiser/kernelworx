@@ -220,7 +220,12 @@ resource "aws_appsync_resolver" "list_shares_by_profile" {
 
   pipeline_config {
     functions = [
-      aws_appsync_function.verify_profile_write_or_owner.function_id,
+      # #547: two-phase owner check (#438) - the strongly consistent base-table
+      # GetItem decides ownership; the GSI runs only for non-owners. This was
+      # previously the pre-#438 verify_profile_write_or_owner single-step GSI
+      # read, which authorized off the eventually-consistent GSI.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_write_permission.function_id,
       aws_appsync_function.query_shares.function_id,
     ]
@@ -243,7 +248,10 @@ resource "aws_appsync_resolver" "list_invites_by_profile" {
 
   pipeline_config {
     functions = [
-      aws_appsync_function.verify_profile_write_or_owner.function_id,
+      # #547: two-phase owner check (#438), same as listSharesByProfile - ownership
+      # is decided by the strongly consistent base-table GetItem, never the GSI.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_write_permission.function_id,
       aws_appsync_function.query_invites.function_id,
     ]
