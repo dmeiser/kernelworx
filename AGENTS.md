@@ -67,6 +67,7 @@ Ephemeral per-PR stacks live in `tofu/application/environments/ephemeral` and ar
 - `ephemeral-env.sh down` and `recover-destroy.sh` automatically empty ephemeral S3 buckets (purging all object versions and delete markers) prior to `tofu destroy` to prevent `BucketNotEmpty` errors.
 - Recovery imports in `scripts/ephemeral-recover-common.sh` continue on error across all resources and are dynamically verified against all declared OpenTofu modules in `tests/unit/test_ephemeral_reliability.py`.
 - The run-id contract (format, provenance, enforcement) is owned by the "Run identifiers" section of `docs/scripts/README.md`; `validate_run_id` in `scripts/ephemeral-recover-common.sh` is its single enforcement point, called by every run-id entry point before any AWS call. When adding an entry point that consumes a run-id, call `validate_run_id` there too.
+- `generate_password()` in `scripts/create-ephemeral-test-users.sh` builds each test user's password ONCE, before the password-set retry loop, so a generator bug fails deterministically across all five attempts with the same rejected password (a policy rejection masquerades as a flaky/quota failure). Fix generators so a policy-invalid password is impossible by construction (every character class supplied unconditionally, see the fixed `Aa1!` suffix); never paper over a generator bug with more retries.
 
 ### Recovery workflows
 
