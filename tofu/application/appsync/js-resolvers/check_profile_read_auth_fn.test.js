@@ -24,6 +24,26 @@ describe('check_profile_read_auth_fn request', () => {
         assert.strictEqual(ctx.stash.authorized, true);
     });
 
+    it('queries the shares table for a former owner when stash.isOwner is false (#545)', () => {
+        const ctx = {
+            identity: { sub: 'former-owner' },
+            stash: {
+                isOwner: false,
+                profile: profile('ACCOUNT#former-owner')
+            }
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, 'GetItem');
+        assert.strictEqual(result.consistentRead, true);
+        assert.deepStrictEqual(result.key, {
+            profileId: { S: 'PROFILE#prof-1' },
+            targetAccountId: { S: 'ACCOUNT#former-owner' }
+        });
+        assert.strictEqual(ctx.stash.authorized, false);
+    });
+
     it('queries the shares table when caller is not the owner', () => {
         const ctx = {
             identity: { sub: 'user-123' },

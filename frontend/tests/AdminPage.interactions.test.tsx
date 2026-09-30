@@ -6,7 +6,7 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
-import { ApolloClient, InMemoryCache } from '@apollo/client';
+import { ApolloClient, InMemoryCache, ApolloLink } from '@apollo/client';
 import { ApolloProvider } from '@apollo/client/react';
 import { MockLink } from '@apollo/client/testing';
 import { GraphQLError } from 'graphql';
@@ -17,12 +17,12 @@ import {
   LIST_MANAGED_CATALOGS,
   ADMIN_SEARCH_USER,
   ADMIN_RESET_USER_PASSWORD,
-  ADMIN_DELETE_USER,
+  ADMIN_PURGE_USER_ACCOUNT,
   ADMIN_DELETE_USER_ORDERS,
   ADMIN_DELETE_USER_CAMPAIGNS,
   ADMIN_DELETE_USER_SHARES,
   ADMIN_DELETE_USER_PROFILES,
-  ADMIN_DELETE_USER_CATALOGS,
+  ADMIN_GET_USER_PROFILES,
   CREATE_MANAGED_CATALOG,
   UPDATE_CATALOG,
   DELETE_CATALOG,
@@ -121,6 +121,31 @@ function renderAdminWithProductionClient(mocks: any[]) {
       </BrowserRouter>
     </ApolloProvider>,
   );
+}
+
+/**
+ * Renders the page with a link that records every operation it forwards, so a
+ * test can assert exactly which GraphQL operations the component issued.
+ */
+function renderAdminWithRecordingClient(mocks: any[]) {
+  const operations: string[] = [];
+  const recordingLink = new ApolloLink((operation, forward) => {
+    operations.push(operation.operationName ?? 'anonymous');
+    return forward(operation);
+  });
+  const client = new ApolloClient({
+    link: recordingLink.concat(new MockLink(mocks)),
+    cache: new InMemoryCache(),
+    defaultOptions: apolloClient.defaultOptions,
+  });
+  const rendered = render(
+    <ApolloProvider client={client}>
+      <BrowserRouter>
+        <AdminPage />
+      </BrowserRouter>
+    </ApolloProvider>,
+  );
+  return { ...rendered, operations };
 }
 
 describe('AdminPage - User Search', () => {
@@ -620,7 +645,30 @@ describe('AdminPage - Delete User', () => {
     });
   });
 
-  test('delete user executes cascading delete steps', async () => {
+  // #521: deletion is client-side by decision. The client issues the
+  // per-entity deletes it can reach plus the minimal purge, and must never
+  // issue the removed whole-user adminDeleteUser mutation.
+  test('delete dialog does not claim custom catalogs are deleted', async () => {
+    const user = userEvent.setup();
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+    ]);
+    renderAdmin(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /Delete user test@example.com/i }));
+
+    expect(await screen.findByText(/custom catalogs are preserved and will not be deleted/i)).toBeInTheDocument();
+    expect(screen.queryByRole('listitem', { name: /custom catalogs/i })).not.toBeInTheDocument();
+  });
+
+  test('delete user runs the client-side cascade and never soft-deletes catalogs', async () => {
     const user = userEvent.setup();
     const accountId = 'ACCOUNT#test-user-1';
     const mocks = baseMocks([
@@ -641,19 +689,36 @@ describe('AdminPage - Delete User', () => {
         result: { data: { adminDeleteUserShares: 1 } },
       },
       {
+        // The purge sweeps the profile-keyed residue server-side by the IDs
+        // read here, so the read must happen before the profiles are deleted.
+        request: { query: ADMIN_GET_USER_PROFILES, variables: { accountId } },
+        result: {
+          data: {
+            adminGetUserProfiles: [
+              {
+                __typename: 'SellerProfile',
+                profileId: 'PROFILE#p1',
+                ownerAccountId: accountId,
+                sellerName: 'Test Scout',
+                createdAt: '2025-01-01T00:00:00Z',
+                updatedAt: '2025-01-01T00:00:00Z',
+                isOwner: true,
+                permissions: null,
+              },
+            ],
+          },
+        },
+      },
+      {
         request: { query: ADMIN_DELETE_USER_PROFILES, variables: { accountId } },
         result: { data: { adminDeleteUserProfiles: 1 } },
       },
       {
-        request: { query: ADMIN_DELETE_USER_CATALOGS, variables: { accountId } },
-        result: { data: { adminDeleteUserCatalogs: 0 } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER, variables: { accountId } },
-        result: { data: { adminDeleteUser: true } },
+        request: { query: ADMIN_PURGE_USER_ACCOUNT, variables: { accountId, profileIds: ['PROFILE#p1'] } },
+        result: { data: { adminPurgeUserAccount: true } },
       },
     ]);
-    renderAdmin(mocks);
+    const { operations } = renderAdminWithRecordingClient(mocks);
 
     fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
     await user.click(screen.getByRole('button', { name: /search/i }));
@@ -665,9 +730,26 @@ describe('AdminPage - Delete User', () => {
     await waitFor(() => {
       expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument();
     });
+
+    // The purge runs last, after every per-entity delete (#521), and the
+    // profile read sits between the shares and the profile deletion so the
+    // IDs are captured while the rows still exist.
+    expect(operations).toEqual([
+      'ListManagedCatalogs',
+      'AdminSearchUser',
+      'AdminDeleteUserOrders',
+      'AdminDeleteUserCampaigns',
+      'AdminDeleteUserShares',
+      'AdminGetUserProfiles',
+      'AdminDeleteUserProfiles',
+      'AdminPurgeUserAccount',
+    ]);
+    // The removed whole-user cascade and the catalog soft-delete are never issued.
+    expect(operations).not.toContain('AdminDeleteUser');
+    expect(operations.some((name) => /Catalog/i.test(name) && name !== 'ListManagedCatalogs')).toBe(false);
   });
 
-  test('delete user shows error on failure', async () => {
+  test('delete user stops on the first failed delete and does not purge the account', async () => {
     const user = userEvent.setup();
     const accountId = 'ACCOUNT#test-user-1';
     const mocks = baseMocks([
@@ -677,10 +759,14 @@ describe('AdminPage - Delete User', () => {
       },
       {
         request: { query: ADMIN_DELETE_USER_ORDERS, variables: { accountId } },
+        result: { data: { adminDeleteUserOrders: 5 } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_CAMPAIGNS, variables: { accountId } },
         error: new Error('Network error during delete'),
       },
     ]);
-    renderAdmin(mocks);
+    const { operations } = renderAdminWithRecordingClient(mocks);
 
     fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
     await user.click(screen.getByRole('button', { name: /search/i }));
@@ -692,9 +778,12 @@ describe('AdminPage - Delete User', () => {
     await waitFor(() => {
       expect(screen.getByText(/Network error during delete/i)).toBeInTheDocument();
     });
+    expect(screen.queryByText(/deleted successfully/i)).not.toBeInTheDocument();
+    // A partial failure must not reach the account/Cognito purge.
+    expect(operations).not.toContain('AdminPurgeUserAccount');
   });
 
-  test('delete user handles mutation results with missing counts', async () => {
+  test('delete user completes when cascade responses carry no counts and no profiles', async () => {
     const user = userEvent.setup();
     const accountId = 'ACCOUNT#test-user-1';
     const mocks = baseMocks([
@@ -715,16 +804,17 @@ describe('AdminPage - Delete User', () => {
         result: { data: { adminDeleteUserShares: null } },
       },
       {
+        // No profile rows left to read: the purge is called with an empty list.
+        request: { query: ADMIN_GET_USER_PROFILES, variables: { accountId } },
+        result: { data: {} },
+      },
+      {
         request: { query: ADMIN_DELETE_USER_PROFILES, variables: { accountId } },
         result: { data: {} },
       },
       {
-        request: { query: ADMIN_DELETE_USER_CATALOGS, variables: { accountId } },
-        result: { data: { adminDeleteUserCatalogs: null } },
-      },
-      {
-        request: { query: ADMIN_DELETE_USER, variables: { accountId } },
-        result: { data: { adminDeleteUser: true } },
+        request: { query: ADMIN_PURGE_USER_ACCOUNT, variables: { accountId, profileIds: [] } },
+        result: { data: { adminPurgeUserAccount: true } },
       },
     ]);
     renderAdmin(mocks);
@@ -736,6 +826,8 @@ describe('AdminPage - Delete User', () => {
     await user.click(screen.getByRole('button', { name: /Delete user test@example.com/i }));
     await user.click(screen.getByRole('button', { name: /delete user/i }));
 
+    // Every step tolerated an absent count and the cascade still reached the purge,
+    // which the matching profileIds: [] mock request proves.
     await waitFor(() => {
       expect(screen.getByText(/deleted successfully/i)).toBeInTheDocument();
     });
@@ -1292,7 +1384,7 @@ describe('AdminPage - production Apollo client defaults', () => {
     vi.clearAllMocks();
   });
 
-  test('cascading delete stops at the first GraphQL error and does not show success', async () => {
+  test('a GraphQL error from the purge surfaces and does not show success', async () => {
     const user = userEvent.setup();
     const accountId = 'ACCOUNT#test-user-1';
     const mocks = baseMocks([
@@ -1302,11 +1394,27 @@ describe('AdminPage - production Apollo client defaults', () => {
       },
       {
         request: { query: ADMIN_DELETE_USER_ORDERS, variables: { accountId } },
-        result: { data: { adminDeleteUserOrders: 5 } },
+        result: { data: { adminDeleteUserOrders: 0 } },
       },
       {
         request: { query: ADMIN_DELETE_USER_CAMPAIGNS, variables: { accountId } },
-        result: { errors: [new GraphQLError('Campaign delete failed')] },
+        result: { data: { adminDeleteUserCampaigns: 0 } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_SHARES, variables: { accountId } },
+        result: { data: { adminDeleteUserShares: 0 } },
+      },
+      {
+        request: { query: ADMIN_GET_USER_PROFILES, variables: { accountId } },
+        result: { data: { adminGetUserProfiles: [] } },
+      },
+      {
+        request: { query: ADMIN_DELETE_USER_PROFILES, variables: { accountId } },
+        result: { data: { adminDeleteUserProfiles: 0 } },
+      },
+      {
+        request: { query: ADMIN_PURGE_USER_ACCOUNT, variables: { accountId, profileIds: [] } },
+        result: { errors: [new GraphQLError('Purge failed')] },
       },
     ]);
     renderAdminWithProductionClient(mocks);
@@ -1319,7 +1427,7 @@ describe('AdminPage - production Apollo client defaults', () => {
     await user.click(screen.getByRole('button', { name: /delete user/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Campaign delete failed/i)).toBeInTheDocument();
+      expect(screen.getByText(/Purge failed/i)).toBeInTheDocument();
     });
     expect(screen.queryByText(/deleted successfully/i)).not.toBeInTheDocument();
   });

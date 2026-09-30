@@ -1,6 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { request, response } from './verify_profile_write_access_fn.js';
+import * as checkWritePermission from './check_write_permission_fn.js';
+import * as queryShares from './query_shares_fn.js';
+import * as queryInvites from './query_invites_fn.js';
 
 // Shared ctx helpers. Step 1 has stash.isOwner === undefined; step 2 has it
 // set to true/false by the step-1 response.
@@ -270,5 +273,169 @@ describe('verify_profile_write_access_fn response (cross-cutting)', () => {
             () => response(ctx),
             /DynamoDBException: DynamoDB: boom/
         );
+    });
+});
+
+// #547: listSharesByProfile / listInvitesByProfile run this two-phase pair but
+// pass profileId as a top-level argument (ctx.args.profileId), not under
+// ctx.args.input, and their downstream check_write_permission step reads the
+// normalized id off ctx.stash.profileId.
+describe('verify_profile_write_access_fn for the share/invite query resolvers (#547)', () => {
+    function queryCtx(extra = {}) {
+        return {
+            identity: { sub: 'user-123' },
+            info: { fieldName: 'listSharesByProfile', parentTypeName: 'Query' },
+            args: { profileId: 'prof-456' },
+            stash: {},
+            ...extra
+        };
+    }
+
+    it('step 1 decides ownership with the strongly consistent GetItem off the top-level profileId', () => {
+        const result = request(queryCtx());
+
+        assert.strictEqual(result.operation, 'GetItem');
+        assert.strictEqual(result.consistentRead, true);
+        assert.deepStrictEqual(result.key, {
+            ownerAccountId: 'ACCOUNT#user-123',
+            profileId: 'PROFILE#prof-456'
+        });
+    });
+
+    it('step 1 stashes the normalized profileId for the downstream check_write_permission step', () => {
+        const ctx = queryCtx();
+        request(ctx);
+
+        assert.strictEqual(ctx.stash.profileId, 'PROFILE#prof-456');
+    });
+
+    it('step 1 preserves an already-prefixed top-level profileId', () => {
+        const result = request(queryCtx({ args: { profileId: 'PROFILE#prof-456' } }));
+
+        assert.strictEqual(result.key.profileId, 'PROFILE#prof-456');
+    });
+
+    it('step 2 locates the profile via the GSI for a non-owner, using the top-level profileId', () => {
+        const ctx = queryCtx({ stash: { isOwner: false } });
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, 'Query');
+        assert.strictEqual(result.index, 'profileId-index');
+        assert.deepStrictEqual(result.query, {
+            expression: 'profileId = :profileId',
+            expressionValues: { ':profileId': 'PROFILE#prof-456' }
+        });
+    });
+
+    it('step 1 turns a consistent GetItem miss into a non-owner verdict', () => {
+        const ctx = queryCtx();
+        request(ctx); // step 1
+        const out = response({ ...ctx, result: null }); // consistent GetItem found nothing
+        assert.strictEqual(ctx.stash.isOwner, false);
+        assert.strictEqual(out, null);
+    });
+
+    // Drives the whole read pipeline: verifier step 1 (consistent ownership GetItem) ->
+    // verifier step 2 (GSI locator) -> check_write_permission -> the list step.
+    function runQueryPipeline(verifierCtx, finalField, step2Result, finalResult) {
+        const final = finalField === 'listInvitesByProfile' ? queryInvites : queryShares;
+        const stash = verifierCtx.stash;
+
+        request(verifierCtx);
+        response({ ...verifierCtx, result: null });
+        request(verifierCtx);
+        response({ ...verifierCtx, result: step2Result });
+        checkWritePermission.request({ ...verifierCtx, stash });
+        checkWritePermission.response({ ...verifierCtx, stash, result: null });
+        final.request({ ...verifierCtx, stash });
+        return final.response({ ...verifierCtx, stash, result: finalResult });
+    }
+
+    // A profile that does not exist (or is not yet projected on the GSI) must keep
+    // answering with an empty list, as these queries did before #547, instead of a
+    // NOT_FOUND GraphQL error on two non-nullable list fields.
+    for (const fieldName of ['listSharesByProfile', 'listInvitesByProfile']) {
+        it(`${fieldName} answers with an empty list when the profile does not exist`, () => {
+            const ctx = queryCtx({ info: { fieldName, parentTypeName: 'Query' } });
+
+            assert.deepStrictEqual(runQueryPipeline(ctx, fieldName, { items: [] }, { items: [] }), []);
+        });
+    }
+
+    // S1: a blank or otherwise unresolvable profileId must take the same silent-deny
+    // branch as the not-found case, not surface INVALID_INPUT, so neither query turns
+    // a malformed id into a GraphQL error or a profile-existence oracle. The retired
+    // verifier returned `{ authorized: false }` for this input and both queries must
+    // keep that contract.
+    for (const fieldName of ['listSharesByProfile', 'listInvitesByProfile']) {
+        it(`${fieldName} answers with an empty list when the profileId is blank`, () => {
+            const ctx = queryCtx({
+                info: { fieldName, parentTypeName: 'Query' },
+                args: { profileId: '' }
+            });
+
+            // Step 1 must not issue a live read for an id it cannot resolve.
+            const step1 = request(ctx);
+            assert.strictEqual(step1.operation, 'GetItem');
+            assert.deepStrictEqual(step1.key, { ownerAccountId: 'NOOP', profileId: 'NOOP' });
+
+            assert.deepStrictEqual(runQueryPipeline(ctx, fieldName, { items: [] }, { items: [] }), []);
+            assert.strictEqual(ctx.stash.isOwner, false);
+            assert.strictEqual(ctx.stash.hasWritePermission, false);
+            assert.strictEqual(ctx.stash.skipGetItem, true);
+        });
+    }
+
+    // S1: the INVALID_INPUT raise stays on the mutation path, where a missing id is a
+    // genuine client error rather than a silent empty list.
+    it('still raises INVALID_INPUT for a missing profileId on a mutation', () => {
+        const ctx = {
+            identity: { sub: 'user-123' },
+            info: { fieldName: 'createOrder', parentTypeName: 'Mutation' },
+            args: { input: {} },
+            stash: {}
+        };
+
+        assert.throws(() => request(ctx), /INVALID_INPUT: Profile ID is required/);
+    });
+
+    // The reported #547 sequence: transferProfileOwnership moves the profile item into
+    // the new owner's partition, so the caller's strongly consistent base-table GetItem
+    // misses, while the eventually-consistent profileId-index GSI can still project the
+    // caller as owner. The pre-#547 verifier decided ownership from that GSI item's
+    // ownerAccountId, which let a former owner read the new owner's owner-only invite
+    // codes. Ownership comes from the step 1 read alone, so the GSI row must not flip it.
+    it('a stale GSI row still naming the caller as owner does not restore ownership', () => {
+        const ctx = queryCtx({ info: { fieldName: 'listInvitesByProfile', parentTypeName: 'Query' } });
+        const unexpiredInvite = {
+            inviteCode: 'abc123',
+            profileId: 'PROFILE#prof-456',
+            permissions: ['WRITE'],
+            expiresAt: 1704067200 + 3600,
+            createdBy: 'ACCOUNT#new-owner'
+        };
+
+        const invites = runQueryPipeline(
+            ctx,
+            'listInvitesByProfile',
+            { items: [{ profileId: 'PROFILE#prof-456', ownerAccountId: 'ACCOUNT#user-123' }] },
+            { items: [unexpiredInvite] }
+        );
+
+        assert.strictEqual(ctx.stash.isOwner, false, 'the GSI item must not make the caller the owner');
+        assert.strictEqual(ctx.stash.profileOwner, 'ACCOUNT#user-123');
+        assert.deepStrictEqual(invites, [], 'a former owner must not read the new owner invites');
+    });
+
+    it('keeps NOT_FOUND on the write path, where the profile must exist to mutate it', () => {
+        const ctx = {
+            identity: { sub: 'user-123' },
+            info: { fieldName: 'updateOrder', parentTypeName: 'Mutation' },
+            args: { input: { profileId: 'prof-456' } },
+            stash: { isOwner: false },
+            result: { items: [] }
+        };
+
+        assert.throws(() => response(ctx), /NOT_FOUND: Profile not found/);
     });
 });

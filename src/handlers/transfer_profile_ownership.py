@@ -24,6 +24,7 @@ from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import require_str
     from utils.auth import has_mfa, is_admin
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
@@ -31,6 +32,7 @@ try:  # pragma: no cover
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import require_str
     from ..utils.auth import has_mfa, is_admin
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
@@ -207,9 +209,12 @@ def _update_shares_after_transfer(db_profile_id: str, db_new_owner_id: str) -> N
 @with_error_handling(error_message="Failed to transfer profile ownership")
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Transfer profile ownership."""
-    caller_account_id = event["identity"]["sub"]
-    profile_id = event["arguments"]["input"]["profileId"]
-    new_owner_account_id = event["arguments"]["input"]["newOwnerAccountId"]
+    caller_account_id = event.get("identity", {}).get("sub")
+    if not caller_account_id:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
+    input_args = event.get("arguments", {}).get("input", {})
+    profile_id = require_str(input_args, "profileId")
+    new_owner_account_id = require_str(input_args, "newOwnerAccountId")
 
     db_profile_id = ensure_profile_id(profile_id) or ""
     db_new_owner_id = ensure_account_id(new_owner_account_id) or ""
