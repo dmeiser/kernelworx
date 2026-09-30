@@ -263,10 +263,11 @@ enforces and for the entry points that call it.
 **Build, test, lint, and deployment commands.** Top-level targets include:
 
 - `make all` — Format + lint + typecheck + test (backend + frontend)
-- `make ci` — Spellcheck + lint + typecheck + test (backend + frontend) + guards
+- `make ci` — Spellcheck + lint + typecheck + test (backend + frontend) + guards + js-resolvers
 - `make test` — Python unit tests
 - `make test-e2e` — Python E2E smoke tests
-- `make test-all` — All tests (unit + guards + frontend + integration + e2e)
+- `make test-all` — All tests (unit + guards + frontend + integration + e2e + js-resolvers)
+- `make js-resolvers` — AppSync JS resolver tests (node --test)
 - `make lint` — Run all linters
 - `make format` — Format all code
 - `make tflint` — Run tflint on OpenTofu code
@@ -276,7 +277,7 @@ enforces and for the entry points that call it.
 
 ### GitHub Actions workflows (`.github/workflows/`)
 
-- **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + complexity + test + guards)
+- **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + complexity + test + guards + js-resolvers + infra lint)
 - **`deploy-dev.yml`** / **`deploy-prod.yml`** — Environment deployment workflows
 - **`deploy-shared.yml`** — Shared infrastructure (Cognito, CloudFront, WAF) deployment
 - **`ephemeral-test.yml`** — Ephemeral environment test creation/destruction

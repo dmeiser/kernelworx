@@ -39,8 +39,10 @@ export function response(ctx) {
     }
     
     if (ctx.error) {
-        // Don't error out - just return null for permissions
-        return null;
+        // Fail closed loudly: a swallowed datastore error is indistinguishable from
+        // a real "no permissions" answer, so a throttle silently strips write access
+        // from the UI and never reaches AppSync's resolver error metrics (#553).
+        util.error(ctx.error.message, ctx.error.type);
     }
     
     const share = ctx.result;

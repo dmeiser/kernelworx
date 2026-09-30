@@ -40,19 +40,18 @@ def _caller_can_access_qr(caller_id: str, owner_account_id: str, profile_id: str
 
     Owners may always retrieve their own QR codes. WRITE collaborators may
     retrieve QR codes for payment methods on profiles they have WRITE access to.
+    When a profileId is present, ownership is re-derived strongly consistently
+    via check_profile_access instead of trusting owner_account_id (#545).
     """
-    if caller_id == owner_account_id:
-        return True
+    if profile_id:
+        try:
+            return cast(bool, check_profile_access(caller_id, profile_id, "WRITE"))
+        except AppError as e:
+            if e.error_code == ErrorCode.NOT_FOUND:
+                return False
+            raise
 
-    if not profile_id:
-        return False
-
-    try:
-        return cast(bool, check_profile_access(caller_id, profile_id, "WRITE"))
-    except AppError as e:
-        if e.error_code == ErrorCode.NOT_FOUND:
-            return False
-        raise
+    return caller_id == owner_account_id
 
 
 def _validate_and_extract_params(event: Dict[str, Any]) -> tuple[str, str, str | None]:

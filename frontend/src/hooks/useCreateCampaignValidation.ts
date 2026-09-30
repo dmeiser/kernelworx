@@ -2,6 +2,7 @@
  * Custom hook for form validation logic
  */
 import { useCallback } from 'react';
+import { CAMPAIGN_YEAR_MAX, CAMPAIGN_YEAR_MIN, isCampaignYearInRange } from '../constants/campaign';
 
 interface ValidationResult {
   isValid: boolean;
@@ -17,6 +18,7 @@ export const useCreateCampaignValidation = (
   unitNumber: string,
   city: string,
   state: string,
+  campaignYear: number,
 ) => {
   const validateProfileSelection = useCallback((): ValidationResult => {
     if (!profileId) {
@@ -44,11 +46,26 @@ export const useCreateCampaignValidation = (
     return { isValid: true, error: null };
   }, [isSharedCampaignMode, unitType, unitNumber, city, state]);
 
+  // The year is range-checked at submit (like the unit fields) rather than in
+  // `isFormValid`, so the user gets the reason the campaign cannot be created.
+  // In shared-campaign mode the year is copied from the campaign being joined
+  // rather than chosen here, so it is not range-checked at all.
+  const validateCampaignYear = useCallback((): ValidationResult => {
+    if (isSharedCampaignMode || isCampaignYearInRange(campaignYear)) {
+      return { isValid: true, error: null };
+    }
+    return {
+      isValid: false,
+      error: `Campaign year must be between ${CAMPAIGN_YEAR_MIN} and ${CAMPAIGN_YEAR_MAX}`,
+    };
+  }, [isSharedCampaignMode, campaignYear]);
+
   const isFormValid = isSharedCampaignMode ? !!profileId : !!profileId && !!campaignName && !!catalogId;
 
   return {
     isFormValid,
     validateProfileSelection,
     validateUnitFields,
+    validateCampaignYear,
   };
 };
