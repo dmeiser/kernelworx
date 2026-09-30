@@ -428,6 +428,7 @@ unpadded
 unparsed
 unqueryable
 unregister
+unretryable
 unsets
 unshare
 unshift
