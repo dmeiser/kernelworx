@@ -1163,7 +1163,7 @@ export type GqlUnitSellerSummary = {
   totalSales: Scalars['Float']['output'];
 };
 
-/** Input for updateCampaign. Only the provided fields are changed. */
+/** Input for updateCampaign. Only the provided fields are changed. An explicit null is rejected with INVALID_INPUT for campaignName, campaignYear, isActive, and catalogId, which the Campaign type declares non-null. */
 export type GqlUpdateCampaignInput = {
   /** The ID of the campaign to update. */
   campaignId: Scalars['ID']['input'];
