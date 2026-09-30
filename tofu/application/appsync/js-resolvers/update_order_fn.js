@@ -53,6 +53,13 @@ export function request(ctx) {
         exprValues[':customerAddress'] = input.customerAddress;
     }
     if (input.paymentMethod !== undefined) {
+        // #506: defense in depth — the write must not persist an explicit null
+        // into the non-nullable Order.paymentMethod even if the pipeline's
+        // validation step is reordered or removed.
+        if (input.paymentMethod === null) {
+            util.error('paymentMethod cannot be null; omit the field to keep the current value', 'INVALID_INPUT');
+            return;
+        }
         updates.push('paymentMethod = :paymentMethod');
         exprValues[':paymentMethod'] = input.paymentMethod;
     }

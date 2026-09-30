@@ -65,6 +65,19 @@ describe('update_order_fn early-return guards after util.error', () => {
     expect(req).toBeUndefined();
   });
 
+  test('explicit null paymentMethod records the error and no UpdateItem is built (#506)', () => {
+    const req: any = updateOrderFn.request(validCtx({ paymentMethod: null }) as any);
+    expect(errors).toEqual([
+      {
+        msg: 'paymentMethod cannot be null; omit the field to keep the current value',
+        type: 'INVALID_INPUT'
+      }
+    ]);
+    // Without the guard, request() would persist null into the non-nullable
+    // Order.paymentMethod column.
+    expect(req).toBeUndefined();
+  });
+
   test('valid input still produces an UpdateItem', () => {
     const req: any = updateOrderFn.request(
       validCtx({ customerName: 'Test', customerPhone: '5551234567', orderDate: '2025-12-31T00:00:00Z' }) as any

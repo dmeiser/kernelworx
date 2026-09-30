@@ -1,8 +1,16 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-  const paymentMethod = (ctx.args && ctx.args.input && ctx.args.input.paymentMethod !== undefined)
-    ? ctx.args.input.paymentMethod
+  // #506: distinguish "absent" from "explicitly null". Order.paymentMethod is
+  // non-nullable, so persisting an explicit null corrupts the order; the
+  // client must omit the field to keep the current value.
+  const supplied = ctx.args && ctx.args.input && ctx.args.input.paymentMethod;
+  if (supplied === null) {
+    util.error('paymentMethod cannot be null; omit the field to keep the current value', 'INVALID_INPUT');
+  }
+
+  const paymentMethod = (supplied !== undefined)
+    ? supplied
     : null;
 
   if (paymentMethod === null) {
