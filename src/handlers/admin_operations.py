@@ -16,6 +16,14 @@ profiles, inbound shares on other owners' profiles, S3 report objects, and
 payment-QR S3 objects — reusing the shared ``deletion_cascade`` helpers, then
 deletes the ``accounts`` record and the Cognito user. Catalogs are never
 deleted.
+
+Audit attribution (#507): AppSync logs at ERROR level only, so these handlers
+are the only record that an admin operation happened at all. Every admin audit
+line therefore carries the acting administrator's ``sub`` as ``actor_sub``, and
+the ``_require_admin_and_get_*`` helpers return the actor alongside the target
+so it cannot be silently dropped: the target is the account, profile, or
+campaign the request names, the actor is the caller, and they are different
+principals.
 """
 
 import re
@@ -314,9 +322,15 @@ def admin_list_users(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     display_names = _batch_get_display_names(account_ids, logger)
     groups_map = _batch_get_user_groups(cognito, user_pool_id, usernames, logger)
 
+    actor_sub = _actor_sub(event)
     admin_users = _build_admin_users_from_cognito(cognito_users, display_names, groups_map)
 
-    logger.info("Listed users", count=len(admin_users), has_more=bool(pagination_token))
+    logger.info(
+        "Listed users",
+        count=len(admin_users),
+        has_more=bool(pagination_token),
+        actor_sub=actor_sub,
+    )
     return {"users": admin_users, "nextToken": pagination_token}
 
 
@@ -404,9 +418,31 @@ def _search_by_uuid(query: str, cognito: Any, user_pool_id: str, logger: Any) ->
     return {}
 
 
-def _validate_admin_and_get_account_id(event: Dict[str, Any]) -> str:
-    """Validate admin access and extract account ID from event."""
+def _actor_sub(event: Dict[str, Any]) -> str:
+    """Return the acting administrator's Cognito ``sub`` for audit logging (#507).
+
+    Read only after ``require_admin_mfa`` has approved the caller, so resolving
+    the actor can never change an authorization decision. A missing ``sub``
+    yields an empty string rather than raising, so auditing can never turn a
+    permitted operation into a failure.
+    """
+    sub = event.get("identity", {}).get("sub")
+    return str(sub) if sub else ""
+
+
+def _require_admin_and_get_target_account_id(event: Dict[str, Any]) -> tuple[str, str]:
+    """Require admin + MFA, returning ``(target_account_id, actor_sub)`` (#507).
+
+    The two values are returned together so the actor travels with the target:
+    every admin audit line downstream records both, which is what makes an
+    administrative action attributable after the fact. ``target_account_id`` is
+    the account named by the request — usually somebody else — and ``actor_sub``
+    is the calling administrator's own Cognito ``sub``. They are distinct
+    principals and must not be conflated (the historical helper name invited
+    exactly that reading).
+    """
     require_admin_mfa(event)
+    actor_sub = _actor_sub(event)
 
     arguments = event.get("arguments", {})
     account_id = str(arguments.get("accountId", "")).strip()
@@ -414,7 +450,7 @@ def _validate_admin_and_get_account_id(event: Dict[str, Any]) -> str:
     if not account_id:
         raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
 
-    return account_id
+    return account_id, actor_sub
 
 
 def _add_dynamodb_users_to_map(
@@ -773,16 +809,28 @@ def _find_cognito_user_by_sub(
     return None, None
 
 
-def _delete_user_from_cognito(cognito: Any, user_pool_id: str, username: str, email: str, logger: Any) -> None:
+def _delete_user_from_cognito(
+    cognito: Any, user_pool_id: str, username: str, email: str, logger: Any, actor_sub: str = ""
+) -> None:
     """Delete user from Cognito, treating UserNotFoundException as idempotent success."""
     masked_email = mask_email(email)
     try:
         cognito.admin_delete_user(UserPoolId=user_pool_id, Username=username)
-        logger.info("Deleted user from Cognito", username=mask_email(username), email=masked_email)
+        logger.info(
+            "Deleted user from Cognito",
+            username=mask_email(username),
+            email=masked_email,
+            actor_sub=actor_sub,
+        )
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code == "UserNotFoundException":
-            logger.info("Cognito user already deleted", username=mask_email(username), email=masked_email)
+            logger.info(
+                "Cognito user already deleted",
+                username=mask_email(username),
+                email=masked_email,
+                actor_sub=actor_sub,
+            )
             return
         logger.error("Cognito admin_delete_user failed", error=str(e), error_code=error_code)
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito") from e
@@ -874,7 +922,13 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
     username = _find_user_by_email(cognito, user_pool_id, email, logger)
     _initiate_password_reset(cognito, user_pool_id, username, email, logger)
 
-    logger.info("Password reset initiated", email=mask_email(email), username=mask_email(username))
+    actor_sub = _actor_sub(event)
+    logger.info(
+        "Password reset initiated",
+        email=mask_email(email),
+        username=mask_email(username),
+        actor_sub=actor_sub,
+    )
     return True
 
 
@@ -930,9 +984,11 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     """
     logger = get_logger(__name__)
 
-    account_id = _validate_admin_and_get_account_id(event)
+    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
     profile_ids = _validate_profile_ids_argument(event.get("arguments", {}).get("profileIds"))
 
+    # The self-deletion guard keeps its own raw read of the caller's sub so its
+    # decision is bit-for-bit what it was before #507; actor_sub is audit only.
     caller_id = event.get("identity", {}).get("sub")
     _check_not_self_deletion(str(caller_id), account_id)
 
@@ -957,22 +1013,22 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     delete_all_user_qr_codes(account_id, logger)
 
     if username:
-        _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
+        _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger, actor_sub)
     else:
-        logger.info("Cognito user already absent", account_id=account_id)
+        logger.info("Cognito user already absent", account_id=account_id, actor_sub=actor_sub)
 
     if account_exists:
         db_account_id = normalize_account_id(account_id)
         try:
             tables.accounts.delete_item(Key={"accountId": db_account_id})
-            logger.info("Deleted account record", account_id=db_account_id)
+            logger.info("Deleted account record", account_id=db_account_id, actor_sub=actor_sub)
         except ClientError as e:
             logger.error("Failed to delete account record", error=str(e), account_id=db_account_id)
             raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account record") from e
     else:
-        logger.info("Account record already absent", account_id=account_id)
+        logger.info("Account record already absent", account_id=account_id, actor_sub=actor_sub)
 
-    logger.info("User account purged", account_id=account_id, email=mask_email(email))
+    logger.info("User account purged", account_id=account_id, email=mask_email(email), actor_sub=actor_sub)
     return True
 
 
@@ -1102,8 +1158,12 @@ def _persist_catalog(catalog_item: Dict[str, Any], logger: Any) -> None:
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to create catalog")
 
 
-def _validate_admin_and_get_caller_id(event: Dict[str, Any]) -> str:
-    """Validate admin access and extract caller ID."""
+def _require_admin_and_get_actor_sub(event: Dict[str, Any]) -> str:
+    """Require admin + MFA and return the acting administrator's own ``sub`` (#507).
+
+    The actor counterpart to `_require_admin_and_get_target_account_id`: this
+    one returns the caller, whose sub is what the audit line must record.
+    """
     require_admin_mfa(event)
 
     identity = event.get("identity", {})
@@ -1134,7 +1194,7 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
     """
     logger = get_logger(__name__)
 
-    caller_id = _validate_admin_and_get_caller_id(event)
+    caller_id = _require_admin_and_get_actor_sub(event)
 
     arguments = event.get("arguments", {})
     catalog_input = arguments.get("input", {})
@@ -1150,7 +1210,12 @@ def create_managed_catalog(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
     _persist_catalog(catalog_item, logger)
 
-    logger.info("Created managed catalog", catalog_id=catalog_id, catalog_name=catalog_name)
+    logger.info(
+        "Created managed catalog",
+        catalog_id=catalog_id,
+        catalog_name=catalog_name,
+        actor_sub=caller_id,
+    )
 
     return catalog_item
 
@@ -1172,8 +1237,10 @@ def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
     """
     logger = get_logger(__name__)
 
-    account_id = _validate_admin_and_get_account_id(event)
-    return delete_user_orders(_user_profiles_for(account_id), logger)
+    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
+    deleted_count = delete_user_orders(_user_profiles_for(account_id), logger)
+    logger.info("Admin deleted user orders", account_id=account_id, count=deleted_count, actor_sub=actor_sub)
+    return deleted_count
 
 
 @with_error_handling(error_message="Failed to delete user campaigns")
@@ -1188,8 +1255,10 @@ def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
     """
     logger = get_logger(__name__)
 
-    account_id = _validate_admin_and_get_account_id(event)
-    return delete_user_campaigns(_user_profiles_for(account_id), logger)
+    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
+    deleted_count = delete_user_campaigns(_user_profiles_for(account_id), logger)
+    logger.info("Admin deleted user campaigns", account_id=account_id, count=deleted_count, actor_sub=actor_sub)
+    return deleted_count
 
 
 @with_error_handling(error_message="Failed to delete user shares")
@@ -1201,8 +1270,10 @@ def admin_delete_user_shares(event: Dict[str, Any], context: Any) -> int:
     """
     logger = get_logger(__name__)
 
-    account_id = _validate_admin_and_get_account_id(event)
-    return delete_user_shares(_user_profiles_for(account_id), logger)
+    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
+    deleted_count = delete_user_shares(_user_profiles_for(account_id), logger)
+    logger.info("Admin deleted user shares", account_id=account_id, count=deleted_count, actor_sub=actor_sub)
+    return deleted_count
 
 
 @with_error_handling(error_message="Failed to delete user profiles")
@@ -1214,8 +1285,10 @@ def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
     """
     logger = get_logger(__name__)
 
-    account_id = _validate_admin_and_get_account_id(event)
-    return delete_user_profiles(account_id, _user_profiles_for(account_id), logger)
+    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
+    deleted_count = delete_user_profiles(account_id, _user_profiles_for(account_id), logger)
+    logger.info("Admin deleted user profiles", account_id=account_id, count=deleted_count, actor_sub=actor_sub)
+    return deleted_count
 
 
 @with_error_handling(error_message="Failed to get user profiles")
@@ -1227,7 +1300,7 @@ def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[st
     """
     logger = get_logger(__name__)
 
-    account_id = _validate_admin_and_get_account_id(event)
+    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
     db_account_id = normalize_account_id(account_id)
 
     # Query profiles by ownerAccountId
@@ -1239,7 +1312,7 @@ def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[st
         },
     )
 
-    logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
+    logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles), actor_sub=actor_sub)
     return profiles
 
 
@@ -1252,7 +1325,7 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
     """
     logger = get_logger(__name__)
 
-    account_id = _validate_admin_and_get_account_id(event)
+    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
     db_account_id = normalize_account_id(account_id)
 
     # Query catalogs by ownerAccountId using GSI
@@ -1269,7 +1342,7 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
         },
     )
 
-    logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs))
+    logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs), actor_sub=actor_sub)
     return catalogs
 
 
@@ -1354,7 +1427,7 @@ def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_
     _attach_campaign_catalogs(campaigns, catalog_map, treat_deleted_as_null)
 
 
-def _get_campaigns_for_profiles(profiles: list[Dict[str, Any]], logger: Any) -> list[Dict[str, Any]]:
+def _get_campaigns_for_profiles(profiles: list[Dict[str, Any]], logger: Any, actor_sub: str) -> list[Dict[str, Any]]:
     """Query campaigns for each profile."""
     all_campaigns = []
     for profile in profiles:
@@ -1368,7 +1441,12 @@ def _get_campaigns_for_profiles(profiles: list[Dict[str, Any]], logger: Any) -> 
                 },
             )
             all_campaigns.extend(campaigns)
-            logger.info("Retrieved campaigns for profile", profile_id=profile_id, count=len(campaigns))
+            logger.info(
+                "Retrieved campaigns for profile",
+                profile_id=profile_id,
+                count=len(campaigns),
+                actor_sub=actor_sub,
+            )
     return all_campaigns
 
 
@@ -1381,19 +1459,19 @@ def admin_get_user_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[s
     """
     logger = get_logger(__name__)
 
-    account_id = _validate_admin_and_get_account_id(event)
+    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
     db_account_id = normalize_account_id(account_id)
 
     # First, get all profiles owned by this account
     profiles = get_user_profiles(db_account_id)
-    logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles))
+    logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles), actor_sub=actor_sub)
 
     # Now query campaigns for each profile
-    all_campaigns = _get_campaigns_for_profiles(profiles, logger)
+    all_campaigns = _get_campaigns_for_profiles(profiles, logger, actor_sub)
     # Pre-resolve catalogs in one chunked BatchGetItem so the Campaign.catalog
     # field resolver short-circuits instead of doing per-item GetItem reads (#332).
     _batch_get_campaign_catalogs(all_campaigns, treat_deleted_as_null=False, logger=logger)
-    logger.info("Retrieved user campaigns", account_id=account_id, count=len(all_campaigns))
+    logger.info("Retrieved user campaigns", account_id=account_id, count=len(all_campaigns), actor_sub=actor_sub)
     return all_campaigns
 
 
@@ -1406,7 +1484,7 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
     """
     logger = get_logger(__name__)
 
-    account_id = _validate_admin_and_get_account_id(event)
+    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
     db_account_id = normalize_account_id(account_id)
 
     # Query shared campaigns by createdBy using GSI1
@@ -1425,7 +1503,12 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
     # field resolver short-circuits instead of doing per-item GetItem reads (#332).
     _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=True, logger=logger)
 
-    logger.info("Retrieved user shared campaigns", account_id=account_id, count=len(campaigns))
+    logger.info(
+        "Retrieved user shared campaigns",
+        account_id=account_id,
+        count=len(campaigns),
+        actor_sub=actor_sub,
+    )
     return campaigns
 
 
@@ -1447,9 +1530,15 @@ def _query_profile_shares(db_profile_id: str) -> list[Dict[str, Any]]:
     )
 
 
-def _validate_admin_and_get_profile_id(event: Dict[str, Any]) -> str:
-    """Validate admin access and extract profile ID with prefix."""
+def _require_admin_and_get_target_profile_id(event: Dict[str, Any]) -> tuple[str, str]:
+    """Require admin + MFA, returning ``(db_profile_id, actor_sub)`` (#507).
+
+    ``db_profile_id`` is the target profile named by the request; ``actor_sub``
+    is the calling administrator, returned alongside so the audit line can
+    attribute the operation.
+    """
     require_admin_mfa(event)
+    actor_sub = _actor_sub(event)
 
     arguments = event.get("arguments", {})
     profile_id = arguments.get("profileId", "").strip()
@@ -1458,7 +1547,8 @@ def _validate_admin_and_get_profile_id(event: Dict[str, Any]) -> str:
         raise AppError(ErrorCode.INVALID_INPUT, "Profile ID is required")
 
     # Add PROFILE# prefix if not present
-    return profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
+    db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
+    return db_profile_id, actor_sub
 
 
 @with_error_handling(error_message="Failed to get profile shares")
@@ -1470,13 +1560,13 @@ def admin_get_profile_shares(event: Dict[str, Any], context: Any) -> list[Dict[s
     """
     logger = get_logger(__name__)
 
-    db_profile_id = _validate_admin_and_get_profile_id(event)
+    db_profile_id, actor_sub = _require_admin_and_get_target_profile_id(event)
 
     # Query shares and convert sets to lists
     shares = _query_profile_shares(db_profile_id)
     _convert_permissions_to_lists(shares)
 
-    logger.info("Retrieved profile shares", profile_id=db_profile_id, count=len(shares))
+    logger.info("Retrieved profile shares", profile_id=db_profile_id, count=len(shares), actor_sub=actor_sub)
     return shares
 
 
@@ -1487,9 +1577,14 @@ def _normalize_profile_and_account_ids(profile_id: str, target_account_id: str) 
     return db_profile_id, db_target_id
 
 
-def _validate_and_get_share_ids(event: Dict[str, Any]) -> tuple[str, str]:
-    """Validate admin and extract profile/account IDs."""
+def _require_admin_and_get_share_ids(event: Dict[str, Any]) -> tuple[str, str, str]:
+    """Require admin + MFA, returning ``(profile_id, target_account_id, actor_sub)`` (#507).
+
+    The first two are the share the request names; the third is the calling
+    administrator, carried so the revocation can be attributed.
+    """
     require_admin_mfa(event)
+    actor_sub = _actor_sub(event)
 
     arguments = event.get("arguments", {})
     profile_id = arguments.get("profileId", "").strip()
@@ -1498,7 +1593,7 @@ def _validate_and_get_share_ids(event: Dict[str, Any]) -> tuple[str, str]:
     if not profile_id or not target_account_id:
         raise AppError(ErrorCode.INVALID_INPUT, "Profile ID and target account ID are required")
 
-    return profile_id, target_account_id
+    return profile_id, target_account_id, actor_sub
 
 
 @with_error_handling(error_message="Failed to delete share")
@@ -1510,12 +1605,17 @@ def admin_delete_share(event: Dict[str, Any], context: Any) -> bool:
     """
     logger = get_logger(__name__)
 
-    profile_id, target_account_id = _validate_and_get_share_ids(event)
+    profile_id, target_account_id, actor_sub = _require_admin_and_get_share_ids(event)
     db_profile_id, db_target_id = _normalize_profile_and_account_ids(profile_id, target_account_id)
 
     tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_target_id})
 
-    logger.info("Deleted share", profile_id=profile_id, target_account_id=target_account_id)
+    logger.info(
+        "Deleted share",
+        profile_id=profile_id,
+        target_account_id=target_account_id,
+        actor_sub=actor_sub,
+    )
     return True
 
 
@@ -1557,9 +1657,14 @@ def _update_campaign_shared_code(
     return cast(Dict[str, Any], response.get("Attributes", {}))
 
 
-def _validate_admin_and_get_campaign_id(event: Dict[str, Any]) -> tuple[str, Optional[str]]:
-    """Validate admin access and extract campaign ID and shared code."""
+def _require_admin_and_get_target_campaign_id(event: Dict[str, Any]) -> tuple[str, Optional[str], str]:
+    """Require admin + MFA, returning ``(campaign_id, shared_campaign_code, actor_sub)`` (#507).
+
+    ``campaign_id`` is the target campaign named by the request; ``actor_sub``
+    is the calling administrator, carried so the update can be attributed.
+    """
     require_admin_mfa(event)
+    actor_sub = _actor_sub(event)
 
     arguments = event.get("arguments", {})
     campaign_id = arguments.get("campaignId", "").strip()
@@ -1568,7 +1673,7 @@ def _validate_admin_and_get_campaign_id(event: Dict[str, Any]) -> tuple[str, Opt
     if not campaign_id:
         raise AppError(ErrorCode.INVALID_INPUT, "Campaign ID is required")
 
-    return campaign_id, shared_campaign_code
+    return campaign_id, shared_campaign_code, actor_sub
 
 
 @with_error_handling(error_message="Failed to update campaign shared code")
@@ -1580,7 +1685,7 @@ def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Di
     """
     logger = get_logger(__name__)
 
-    campaign_id, shared_campaign_code = _validate_admin_and_get_campaign_id(event)
+    campaign_id, shared_campaign_code, actor_sub = _require_admin_and_get_target_campaign_id(event)
 
     # Add CAMPAIGN# prefix if not present
     db_campaign_id = campaign_id if campaign_id.startswith("CAMPAIGN#") else f"CAMPAIGN#{campaign_id}"
@@ -1589,7 +1694,12 @@ def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Di
     profile_id = _get_campaign_profile_id(db_campaign_id, campaign_id)
     updated_campaign = _update_campaign_shared_code(profile_id, db_campaign_id, shared_campaign_code)
 
-    logger.info("Updated campaign shared code", campaign_id=campaign_id, shared_campaign_code=shared_campaign_code)
+    logger.info(
+        "Updated campaign shared code",
+        campaign_id=campaign_id,
+        shared_campaign_code=shared_campaign_code,
+        actor_sub=actor_sub,
+    )
     return updated_campaign
 
 

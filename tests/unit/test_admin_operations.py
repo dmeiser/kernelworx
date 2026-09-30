@@ -11,6 +11,8 @@ Tests for:
 - createManagedCatalog
 """
 
+import json
+import logging
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -6657,3 +6659,246 @@ class TestAdminOperationExceptionHandlers:
 
             # Should have 50 results (max_results limit)
             assert len(result) == 50
+
+
+class TestAdminAuditActorLogging:
+    """Admin audit lines must record WHO acted, not only what was targeted (#507).
+
+    AppSync logs at ERROR level only, so these handlers are the sole record
+    that an admin operation happened. Each test drives a real handler and
+    asserts the structured INFO record carries the acting administrator's
+    Cognito ``sub`` as ``actor_sub``, alongside the target the operation
+    names. Every assertion here fails against the pre-fix handlers, which
+    logged the target only.
+    """
+
+    @staticmethod
+    def _audit_record(caplog: Any, message: str) -> Dict[str, Any]:
+        """Return the single structured log record whose ``message`` matches."""
+        records = []
+        for record in caplog.records:
+            emitted = record.getMessage()
+            if not emitted.startswith("{"):
+                continue
+            entry = json.loads(emitted)
+            if entry.get("message") == message:
+                records.append(entry)
+
+        assert len(records) == 1, f"expected exactly one {message!r} record, got {len(records)}"
+        return records[0]
+
+    def test_delete_share_records_the_actor(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        caplog: Any,
+    ) -> None:
+        """Revoking a share names the administrator who revoked it."""
+        caplog.set_level(logging.INFO)
+        shares_table.put_item(
+            Item={
+                "profileId": "PROFILE#audited-share",
+                "targetAccountId": "ACCOUNT#target",
+                "permissions": {"READ"},
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminDeleteShare"
+        admin_appsync_event["arguments"] = {
+            "profileId": "audited-share",
+            "targetAccountId": "target",
+        }
+
+        assert lambda_handler(admin_appsync_event, lambda_context) is True
+
+        entry = self._audit_record(caplog, "Deleted share")
+        assert entry["actor_sub"] == sample_account_id
+        assert entry["target_account_id"] == "target"
+
+    def test_delete_user_orders_records_the_actor(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        sample_account_id: str,
+        caplog: Any,
+    ) -> None:
+        """A per-entity admin delete is attributable even with nothing to delete."""
+        caplog.set_level(logging.INFO)
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
+
+        admin_appsync_event["info"]["fieldName"] = "adminDeleteUserOrders"
+        admin_appsync_event["arguments"] = {"accountId": "target-user-123"}
+
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
+            mock_tables.profiles.query.return_value = {"Items": []}
+
+            assert lambda_handler(admin_appsync_event, lambda_context) == 0
+
+        entry = self._audit_record(caplog, "Admin deleted user orders")
+        assert entry["actor_sub"] == sample_account_id
+        assert entry["account_id"] == "target-user-123"
+
+    def test_purge_records_the_actor_on_every_deletion_line(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        sample_account_id: str,
+        caplog: Any,
+    ) -> None:
+        """The purge's account-record and Cognito deletions both name the actor."""
+        caplog.set_level(logging.INFO)
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "11111111-1111-1111-1111-111111111111"
+        get_accounts_table().put_item(
+            Item={
+                "accountId": f"ACCOUNT#{target_account_id}",
+                "email": "target@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {"accountId": target_account_id, "profileIds": []},
+        }
+
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.return_value = {"Users": [{"Username": target_account_id}]}
+        mock_cognito.admin_delete_user.return_value = {}
+
+        with patch("src.handlers.admin_operations.get_cognito_client", return_value=mock_cognito):
+            assert admin_purge_user_account(event, lambda_context) is True
+
+        for message in ("Deleted user from Cognito", "Deleted account record", "User account purged"):
+            assert self._audit_record(caplog, message)["actor_sub"] == sample_account_id, message
+
+    def test_reset_password_records_the_actor(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        sample_account_id: str,
+        caplog: Any,
+    ) -> None:
+        """A password reset names the administrator who triggered it."""
+        caplog.set_level(logging.INFO)
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {**admin_appsync_event, "arguments": {"email": "target@example.com"}}
+
+        with (
+            patch("src.handlers.admin_operations.get_cognito_client"),
+            patch(
+                "src.handlers.admin_operations._find_user_by_email",
+                return_value="target",
+            ),
+            patch("src.handlers.admin_operations._initiate_password_reset"),
+        ):
+            assert admin_reset_user_password(event, lambda_context) is True
+
+        assert self._audit_record(caplog, "Password reset initiated")["actor_sub"] == sample_account_id
+
+    def test_create_managed_catalog_records_the_actor(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        sample_account_id: str,
+        caplog: Any,
+    ) -> None:
+        """Creating an ADMIN_MANAGED catalog names the administrator."""
+        caplog.set_level(logging.INFO)
+        monkeypatch.setenv("CATALOGS_TABLE_NAME", "kernelworx-catalogs-ue1-dev")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {
+                "input": {
+                    "catalogName": "Audited Catalog",
+                    "products": [{"productName": "Popcorn", "price": 10.0}],
+                }
+            },
+        }
+
+        assert create_managed_catalog(event, lambda_context)["catalogName"] == "Audited Catalog"
+
+        assert self._audit_record(caplog, "Created managed catalog")["actor_sub"] == sample_account_id
+
+    def test_read_only_admin_queries_record_the_actor(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        sample_account_id: str,
+        shares_table: Any,
+        profiles_table: Any,
+        caplog: Any,
+    ) -> None:
+        """Admin read paths are attributed too, so "who looked" is answerable."""
+        caplog.set_level(logging.INFO)
+
+        shares_table.put_item(
+            Item={"profileId": "PROFILE#audited", "targetAccountId": "ACCOUNT#user-1", "permissions": {"READ"}}
+        )
+
+        shares_event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminGetProfileShares"},
+            "arguments": {"profileId": "audited"},
+        }
+        profiles_event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminGetUserProfiles"},
+            "arguments": {"accountId": "target-user-123"},
+        }
+
+        assert lambda_handler(shares_event, lambda_context) is not None
+        assert lambda_handler(profiles_event, lambda_context) is not None
+
+        for message in ("Retrieved profile shares", "Retrieved user profiles"):
+            assert self._audit_record(caplog, message)["actor_sub"] == sample_account_id, message
+
+    def test_missing_sub_yields_an_empty_actor_not_a_failure(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        shares_table: Any,
+        caplog: Any,
+    ) -> None:
+        """Auditing never turns an authorized operation into an error (#507).
+
+        ``require_admin_mfa`` reads the admin/MFA claims, not ``sub``, so a
+        caller can carry valid admin claims with no ``sub``. The operation must
+        still succeed and the audit line must still be emitted, with an empty
+        actor rather than a raised error or a missing field.
+        """
+        caplog.set_level(logging.INFO)
+
+        shares_table.put_item(
+            Item={"profileId": "PROFILE#no-sub", "targetAccountId": "ACCOUNT#target", "permissions": {"READ"}}
+        )
+
+        event = {
+            **admin_appsync_event,
+            "identity": {key: value for key, value in admin_appsync_event["identity"].items() if key != "sub"},
+            "info": {"fieldName": "adminDeleteShare"},
+            "arguments": {"profileId": "no-sub", "targetAccountId": "target"},
+        }
+
+        assert lambda_handler(event, lambda_context) is True
+
+        entry = self._audit_record(caplog, "Deleted share")
+        assert entry["actor_sub"] == ""
+        assert entry["target_account_id"] == "target"
