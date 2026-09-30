@@ -22,6 +22,11 @@ python-hcl2) and assert the *meaning* of the edge architecture contract:
   module inputs: the module default keeps the 300s dev ramp, and only prod
   passes one year + includeSubDomains (#430); preload is never set without
   its own go/no-go.
+- #550: the Cognito hosted-UI ordered behaviors proxy the login form onto the
+  trusted site origin, so they carry their own response headers policy:
+  HSTS (same module inputs), nosniff, Referrer-Policy, XFO DENY, and a
+  deliberately narrow CSP holding only frame-ancestors 'none' — the full
+  application CSP would break Cognito's own assets/inline bootstrap scripts.
 - Dev/prod wire the WAF into the distribution; ephemeral passes create =
   false and has no CloudFront at all. The api Route53 record is gone while
   the load-bearing login record remains.
@@ -417,6 +422,61 @@ def test_response_headers_policy_enforces_security_headers(cloudfront_module):
     dist = first_resource(cloudfront_module, "aws_cloudfront_distribution", "site")
     default = block(dist["default_cache_behavior"])
     assert default["response_headers_policy_id"] == ("${aws_cloudfront_response_headers_policy.security.id}")
+
+
+def test_auth_behaviors_carry_security_response_headers(cloudfront_module):
+    """#550: the Cognito hosted UI is first-party content on the site origin.
+
+    The login form, the hosted-UI callback pages and the .well-known discovery
+    documents are proxied from Cognito onto https://<site-host>, so without a
+    response headers policy they ship with no framing protection at all - a
+    clickjackable credential form on the domain users are trained to trust.
+    """
+    doc = cloudfront_module["response_headers"]
+    policies = resources(doc, "aws_cloudfront_response_headers_policy")
+    labels = [label for label, _ in policies]
+    assert "security" in labels
+    assert len(labels) == 2, f"expected the site policy plus one auth policy, found {labels}"
+
+    auth_label = next(label for label in labels if label != "security")
+    auth_policy = first_resource(doc, "aws_cloudfront_response_headers_policy", auth_label)
+    sec = block(auth_policy["security_headers_config"])
+
+    # Framing protection: XFO DENY for the legacy path, frame-ancestors 'none'
+    # in the CSP for the modern one.
+    frame = block(sec["frame_options"])
+    assert frame["frame_option"] == "DENY"
+    assert frame["override"] is True
+    auth_csp = block(sec["content_security_policy"])
+    assert auth_csp["override"] is True
+    auth_csp_text = block(doc["locals"])["auth_csp"]
+    assert auth_csp_text == "frame-ancestors 'none'", "auth CSP must be narrowed to framing only"
+    assert auth_csp["content_security_policy"] == "${local.auth_csp}"
+
+    assert block(sec["content_type_options"])["override"] is True
+    ref = block(sec["referrer_policy"])
+    assert ref["referrer_policy"] == "strict-origin-when-cross-origin"
+    assert ref["override"] is True
+
+    # HSTS reuses the same per-environment inputs as the site policy, so the
+    # 300s-dev / 31536000-prod split (#430) still applies to the login pages.
+    hsts = block(sec["strict_transport_security"])
+    assert hsts["access_control_max_age_sec"] == "${var.hsts_max_age_sec}"
+    assert hsts["include_subdomains"] == "${var.hsts_include_subdomains}"
+    assert hsts["override"] is True
+
+    dist = first_resource(cloudfront_module, "aws_cloudfront_distribution", "site")
+    auth_specs = [e["ordered_cache_behavior"] for e in dist.get("dynamic", []) if "ordered_cache_behavior" in e]
+    auth_spec = next(
+        s for s in auth_specs if s["for_each"] == "${var.auth_origin_domain != null ? local.auth_path_patterns : []}"
+    )
+    behavior = auth_spec["content"][0]
+    assert behavior["response_headers_policy_id"] == "${aws_cloudfront_response_headers_policy.%s.id}" % auth_label
+
+    # ...and the site policy is still the only one on the default behavior, so
+    # the two are never conflated.
+    default = block(dist["default_cache_behavior"])
+    assert default["response_headers_policy_id"] == "${aws_cloudfront_response_headers_policy.security.id}"
 
 
 def test_index_html_meta_csp_mirrors_headers_policy():

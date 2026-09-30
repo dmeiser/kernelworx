@@ -4,13 +4,12 @@ Authorization utilities for checking profile and resource access.
 Implements owner-based and share-based authorization model.
 """
 
-import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, cast
+from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table
 
-from .dynamodb import get_dynamodb_resource, tables
+from .dynamodb import batch_get_chunked, tables
 from .errors import AppError, ErrorCode
 from .ids import ensure_account_id, ensure_profile_id
 from .logging import get_logger
@@ -110,66 +109,6 @@ def _check_share_permissions(
     return _has_required_permission(permissions, required_permission)
 
 
-def _maybe_warn_and_sleep(keys_to_fetch: list[Dict[str, str]], attempt: int, table_name: str) -> None:
-    """Log a warning and back off when BatchGetItem returns unprocessed keys."""
-    if keys_to_fetch and attempt < 2:
-        logger.warning(
-            "Unprocessed keys, retrying",
-            table_name=table_name,
-            attempt=attempt + 1,
-            count=len(keys_to_fetch),
-        )
-        time.sleep(0.05 * (2**attempt))
-
-
-def _fetch_batch(
-    table_name: str,
-    keys_to_fetch: list[Dict[str, str]],
-    on_item: Callable[[Dict[str, Any]], None],
-) -> list[Dict[str, str]]:
-    """Fetch one batch of keys with strongly consistent reads, retrying UnprocessedKeys.
-
-    Returns any keys still unprocessed after retries.
-    """
-    for attempt in range(3):
-        if not keys_to_fetch:
-            break
-        response = cast(
-            Dict[str, Any],
-            get_dynamodb_resource().batch_get_item(
-                RequestItems={table_name: {"Keys": keys_to_fetch, "ConsistentRead": True}}
-            ),
-        )
-        for item in response.get("Responses", {}).get(table_name, []):
-            on_item(item)
-
-        unprocessed = response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", [])
-        keys_to_fetch = cast(list[Dict[str, str]], unprocessed)
-        _maybe_warn_and_sleep(keys_to_fetch, attempt, table_name)
-
-    return keys_to_fetch
-
-
-def _batch_get_all_items(
-    table_name: str,
-    keys: list[Dict[str, str]],
-    on_item: Callable[[Dict[str, Any]], None],
-) -> None:
-    """Batch-get keys in 100-item chunks, retrying UnprocessedKeys.
-
-    Calls on_item for every returned item. Raises AppError(INTERNAL_ERROR)
-    if any keys are still unprocessed after retries.
-    """
-    for i in range(0, len(keys), 100):
-        batch = keys[i : i + 100]
-        remaining = _fetch_batch(table_name, batch, on_item)
-        if remaining:
-            raise AppError(
-                ErrorCode.INTERNAL_ERROR,
-                f"DynamoDB BatchGetItem failed to return {len(remaining)} keys after retries",
-            )
-
-
 def check_profile_access(caller_account_id: str, profile_id: str, required_permission: str = "READ") -> bool:
     """
     Check if caller has access to profile.
@@ -230,8 +169,41 @@ def _batch_check_owned_profiles(db_profile_ids: list[str], db_caller_id: str) ->
         if db_pid:
             owned_db_ids.add(cast(str, db_pid))
 
-    _batch_get_all_items(tables.profiles.table_name, profile_keys, _on_owned_item)
+    batch_get_chunked(tables.profiles.table_name, profile_keys, _on_owned_item)
     return owned_db_ids
+
+
+def _validate_share_candidates(candidates: list[tuple[str, Optional[str]]]) -> set[str]:
+    """Return the db_profile_ids whose share still matches the profile's current owner.
+
+    Shares that record their owner are validated against the profile base table
+    with a strongly consistent read. Shares without ``ownerAccountId`` are
+    accepted only after verifying the profile still exists via the eventually
+    consistent GSI; production shares always include this attribute.
+    """
+    profile_keys: list[Dict[str, str]] = []
+    backward_compat_ids: list[str] = []
+    for db_pid, share_owner in candidates:
+        if not share_owner:
+            backward_compat_ids.append(db_pid)
+        else:
+            profile_keys.append({"ownerAccountId": share_owner, "profileId": db_pid})
+
+    valid_db_ids: set[str] = set()
+
+    def _on_profile_item(item: Dict[str, Any]) -> None:
+        db_pid = item.get("profileId")
+        if db_pid:
+            valid_db_ids.add(cast(str, db_pid))
+
+    if profile_keys:
+        batch_get_chunked(tables.profiles.table_name, profile_keys, _on_profile_item)
+
+    for db_pid in backward_compat_ids:
+        if _profile_exists(tables.profiles, db_pid):
+            valid_db_ids.add(db_pid)
+
+    return valid_db_ids
 
 
 def _batch_check_shared_profiles(remaining_ids: list[str], db_caller_id: str, required_permission: str) -> set[str]:
@@ -243,48 +215,46 @@ def _batch_check_shared_profiles(remaining_ids: list[str], db_caller_id: str, re
     owner's record no longer exists. Shares without ``ownerAccountId`` are
     accepted only when the profile still exists (verified via the eventually
     consistent GSI); production shares always include this attribute.
+
+    A share that grants less than ``required_permission`` (READ when WRITE was
+    requested) is a permission shortfall rather than an absent profile, so once
+    that share is confirmed to still match its profile the caller gets
+    AppError(FORBIDDEN) naming the profile and the missing permission. A profile
+    the caller is not shared with at all, and a share that no longer validates,
+    stay dropped exactly as before.
     """
-    candidate_shares: list[tuple[str, Optional[str]]] = []
+    granted_shares: list[tuple[str, Optional[str]]] = []
+    insufficient_shares: list[tuple[str, Optional[str]]] = []
     share_keys = [{"profileId": pid, "targetAccountId": db_caller_id} for pid in remaining_ids]
 
     def _on_share_item(share: Dict[str, Any]) -> None:
-        permissions = _normalize_permissions(share.get("permissions", []))
-        if not _has_required_permission(permissions, required_permission):
-            return
         db_pid = share.get("profileId")
-        if db_pid:
-            candidate_shares.append((cast(str, db_pid), share.get("ownerAccountId")))
+        if not db_pid:
+            return
+        candidate = (cast(str, db_pid), share.get("ownerAccountId"))
+        permissions = _normalize_permissions(share.get("permissions", []))
+        if _has_required_permission(permissions, required_permission):
+            granted_shares.append(candidate)
+        else:
+            insufficient_shares.append(candidate)
 
-    _batch_get_all_items(tables.shares.table_name, share_keys, _on_share_item)
+    batch_get_chunked(tables.shares.table_name, share_keys, _on_share_item)
 
-    if not candidate_shares:
+    if not granted_shares and not insufficient_shares:
         return set()
 
-    # Shares that record their owner are validated against the profile base
-    # table. Shares without ownerAccountId are accepted only after verifying
-    # the profile still exists via the GSI.
-    profile_keys: list[Dict[str, str]] = []
-    valid_shared_db_ids: set[str] = set()
-    backward_compat_ids: list[str] = []
-    for db_pid, share_owner in candidate_shares:
-        if not share_owner:
-            backward_compat_ids.append(db_pid)
-        else:
-            profile_keys.append({"ownerAccountId": share_owner, "profileId": db_pid})
+    valid_db_ids = _validate_share_candidates(granted_shares + insufficient_shares)
 
-    def _on_profile_item(item: Dict[str, Any]) -> None:
-        db_pid = item.get("profileId")
-        if db_pid:
-            valid_shared_db_ids.add(cast(str, db_pid))
+    # A share that grants less than the required permission is a permission
+    # shortfall, not an absent profile: report it instead of dropping it.
+    denied_db_ids = valid_db_ids.intersection(db_pid for db_pid, _ in insufficient_shares)
+    if denied_db_ids:
+        raise AppError(
+            ErrorCode.FORBIDDEN,
+            f"You do not have {required_permission} access to {', '.join(sorted(denied_db_ids))}",
+        )
 
-    if profile_keys:
-        _batch_get_all_items(tables.profiles.table_name, profile_keys, _on_profile_item)
-
-    for db_pid in backward_compat_ids:
-        if _profile_exists(tables.profiles, db_pid):
-            valid_shared_db_ids.add(db_pid)
-
-    return valid_shared_db_ids
+    return valid_db_ids.intersection(db_pid for db_pid, _ in granted_shares)
 
 
 def batch_check_profile_access(
@@ -296,6 +266,18 @@ def batch_check_profile_access(
     Returns the set of original profile IDs the caller is allowed to access.
     Owner checks and share checks are batched so a unit with N scouts no longer
     triggers up to 3*N individual DynamoDB reads.
+
+    Requested profiles that do not exist are silently dropped from the result:
+    a profile deleted after the caller built its id list contributes nothing
+    instead of failing the whole request. This is the deliberate difference from
+    ``check_profile_access``, which raises NOT_FOUND for a profile that is gone.
+
+    A profile the caller is not shared with at all is likewise absent from the
+    result, so a resolver can report on the subset of a unit the caller can read
+    instead of failing on the rest of the unit. A share that exists but grants
+    less than ``required_permission`` is the one case that is not silent: it
+    raises FORBIDDEN naming the profile and the missing permission, so a
+    permission shortfall is never indistinguishable from a deleted profile.
     """
     required_permission = required_permission.upper()
     db_caller_id = ensure_account_id(caller_account_id)

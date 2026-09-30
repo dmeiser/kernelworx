@@ -456,6 +456,12 @@ jobs:
           # recovered from Cognito), and the new secret is exported for the
           # smoke tests below. Local runs refresh it via
           # scripts/create-test-users.sh.
+          #
+          # Must be the tofu-managed KernelWorx-Web app client
+          # (module.cognito.client_id). Never fall back to
+          # `list-user-pool-clients --max-results 1`: it returns the first
+          # client in pool order and breaks provisioning (#567; see AGENTS.md).
+          # Stop here rather than guessing.
           CLIENT_ID="${{ needs.deploy.outputs.client_id }}"
           if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" = "None" ]; then
             CLIENT_ID=$(aws cognito-idp list-user-pool-clients \
@@ -464,11 +470,8 @@ jobs:
               --query 'UserPoolClients[?ClientName==`KernelWorx-Web`].ClientId | [0]' --output text)
           fi
           if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" = "None" ]; then
-            CLIENT_ID=$(aws cognito-idp list-user-pool-clients \
-              --user-pool-id "$TEST_USER_POOL_ID" \
-              --region "$AWS_REGION" \
-              --max-results 1 \
-              --query 'UserPoolClients[0].ClientId' --output text)
+            echo "::error::Deploy job exported no client_id and the pool $TEST_USER_POOL_ID has no KernelWorx-Web app client; cannot resolve the app client for TOTP provisioning" >&2
+            exit 1
           fi
 
           # The password goes through the environment, never a positional
