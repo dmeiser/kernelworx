@@ -33,6 +33,7 @@ import {
 import { ArrowBack as BackIcon, Save as SaveIcon, ExpandMore as ExpandMoreIcon } from '@mui/icons-material';
 import { useCreateCampaignPageSetup } from '../hooks/useCreateCampaignPageSetup';
 import { CatalogSection } from '../components/CatalogSection';
+import { CampaignYearField } from '../components/CampaignYearField';
 import { StateAutocomplete } from '../components/StateAutocomplete';
 import { PageHeader } from '../components/PageHeader';
 import { LoadingState } from '../components/LoadingState';
@@ -149,19 +150,12 @@ const CampaignNameYearSection: React.FC<CampaignNameYearSectionProps> = ({
           fullWidth
           disabled={submitting}
         />
-        <TextField
+        <CampaignYearField
           label="Year"
-          type="number"
           value={campaignYear}
-          onChange={(e) => onCampaignYearChange(parseInt(e.target.value, 10))}
-          required
+          onChange={onCampaignYearChange}
           disabled={submitting}
           sx={{ minWidth: { xs: '100%', sm: 120 } }}
-          inputProps={{
-            min: 2020,
-            max: new Date().getFullYear() + 5,
-            step: 1,
-          }}
         />
       </Stack>
     </Stack>

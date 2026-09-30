@@ -8,9 +8,17 @@ export function request(ctx) {
         util.error('Profile not found in stash', 'INTERNAL_ERROR');
     }
     
-    // Check if caller is owner first (ownerAccountId uses ACCOUNT# prefix)
+    // Check if caller is owner first (ownerAccountId uses ACCOUNT# prefix).
+    // Ownership check (#545):
+    // Only trust ownership if verified by the strongly consistent base-table
+    // GetItem in step 1 (ctx.stash.isOwner === true).
+    // If ctx.stash.isOwner is undefined (e.g. standalone test), fall back to
+    // checking profile.ownerAccountId for backward compatibility.
     const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
-    if (profile.ownerAccountId === expectedOwner) {
+    const isOwner = ctx.stash.isOwner !== undefined
+        ? ctx.stash.isOwner === true
+        : profile.ownerAccountId === expectedOwner;
+    if (isOwner) {
         ctx.stash.authorized = true;
         // No DB operation needed for owner - return a no-op that won't query the database
         return {

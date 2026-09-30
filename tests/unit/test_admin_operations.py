@@ -5342,14 +5342,14 @@ class TestAdminSearchUserThrottling:
         mock_logger = MagicMock()
 
         with pytest.raises(AppError) as exc_info:
-            _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
+            _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "alice@exa", mock_logger)
 
         assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
         assert exc_info.value.message == "Temporarily unable to load data. Please retry."
         mock_logger.warning.assert_called_once()
         log_kwargs = mock_logger.warning.call_args[1]
         assert log_kwargs["error_code"] == error_code
-        assert log_kwargs["query"] == "user@"
+        assert log_kwargs["query"] == "a***@exa"
 
     def test_search_users_in_cognito_by_email_prefix_non_throttling_client_error_returns_empty(self) -> None:
         """Non-throttling ClientError in _search_users_in_cognito_by_email_prefix logs warning and returns []."""
@@ -5360,10 +5360,12 @@ class TestAdminSearchUserThrottling:
         )
         mock_logger = MagicMock()
 
-        result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
+        result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "alice@exa", mock_logger)
         assert result == []
         mock_logger.warning.assert_called_once()
         assert "Cognito email prefix search failed" in mock_logger.warning.call_args[0][0]
+        log_kwargs = mock_logger.warning.call_args[1]
+        assert log_kwargs["query"] == "a***@exa"
 
     def test_search_users_in_cognito_by_email_prefix_genuine_not_found_returns_empty(self) -> None:
         """Empty Cognito Users list in _search_users_in_cognito_by_email_prefix returns []."""
@@ -5407,7 +5409,7 @@ class TestBatchHelpers:
         """A single account id is looked up and its display name returned."""
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.return_value = {
@@ -5430,7 +5432,7 @@ class TestBatchHelpers:
         """ACCOUNT# prefixed ids are normalized and stripped when building the map."""
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.return_value = {
@@ -5452,7 +5454,7 @@ class TestBatchHelpers:
 
         ids = [f"user-{i}" for i in range(150)]
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.side_effect = [
@@ -5475,7 +5477,7 @@ class TestBatchHelpers:
         """Duplicate account ids are deduplicated before calling BatchGetItem."""
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.return_value = {
@@ -5497,7 +5499,7 @@ class TestBatchHelpers:
         """Items with neither givenName nor familyName do not populate displayName."""
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.return_value = {
@@ -5515,7 +5517,7 @@ class TestBatchHelpers:
         """A non-throttling ClientError during BatchGetItem raises INTERNAL_ERROR."""
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.side_effect = ClientError(
@@ -5527,7 +5529,7 @@ class TestBatchHelpers:
                 _batch_get_display_names(["user-1"], MagicMock())
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to load display names" in exc_info.value.message
+            assert "Failed to load data" in exc_info.value.message
 
     def test_batch_get_display_names_throttling_raises_retryable(
         self,
@@ -5536,7 +5538,7 @@ class TestBatchHelpers:
         """A throttling ClientError during BatchGetItem raises retryable RESOURCE_BUSY."""
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.side_effect = ClientError(
@@ -5557,7 +5559,7 @@ class TestBatchHelpers:
         """A non-ClientError exception during BatchGetItem raises INTERNAL_ERROR."""
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.side_effect = RuntimeError("network blip")
@@ -5566,7 +5568,7 @@ class TestBatchHelpers:
                 _batch_get_display_names(["user-1"], MagicMock())
 
             assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-            assert "Failed to load display names" in exc_info.value.message
+            assert "Failed to load data" in exc_info.value.message
 
     def test_batch_get_display_names_unprocessed_keys_retried(
         self,
@@ -5575,7 +5577,7 @@ class TestBatchHelpers:
         """UnprocessedKeys from BatchGetItem are retried before returning results."""
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.side_effect = [
@@ -5605,7 +5607,7 @@ class TestBatchHelpers:
         ids = [f"user-{i}" for i in range(101)]
         retry_keys = [{"accountId": "ACCOUNT#user-0"}]
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.side_effect = [
@@ -5637,13 +5639,13 @@ class TestBatchHelpers:
         self,
         monkeypatch: Any,
     ) -> None:
-        """UnprocessedKeys that persist through all attempts let the outer batch loop continue."""
+        """UnprocessedKeys that survive every attempt now raise retryable RESOURCE_BUSY (#557)."""
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "test-accounts")
 
         ids = [f"user-{i}" for i in range(101)]
         first_key = {"accountId": "ACCOUNT#user-0"}
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_get_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource:
             mock_resource = MagicMock()
             mock_get_resource.return_value = mock_resource
             mock_resource.batch_get_item.side_effect = [
@@ -5666,10 +5668,13 @@ class TestBatchHelpers:
                 },
             ]
 
-            result = _batch_get_display_names(ids, MagicMock())
+            with pytest.raises(AppError) as exc_info:
+                _batch_get_display_names(ids, MagicMock())
 
-            assert result == {"user-100": "C D"}
-            assert mock_resource.batch_get_item.call_count == 4
+            assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+            # The stuck chunk is abandoned after its retries; the second chunk is never fetched,
+            # so no silently incomplete display-name map can reach the admin UI.
+            assert mock_resource.batch_get_item.call_count == 3
 
     def test_batch_get_user_groups_empty(
         self,
@@ -6315,7 +6320,7 @@ class TestAdminGetUserSharedCampaigns:
 
         with (
             patch("src.handlers.admin_operations.query_all_items", return_value=campaigns),
-            patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource,
+            patch("src.utils.dynamodb.get_dynamodb_resource") as mock_resource,
             patch("src.handlers.admin_operations.tables") as mock_tables,
         ):
             mock_resource.return_value.batch_get_item.return_value = {
@@ -6344,7 +6349,7 @@ class TestAdminGetUserSharedCampaigns:
 
         with (
             patch("src.handlers.admin_operations.query_all_items", return_value=campaigns),
-            patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource,
+            patch("src.utils.dynamodb.get_dynamodb_resource") as mock_resource,
         ):
             mock_resource.return_value.batch_get_item.return_value = {
                 "Responses": {"kernelworx-catalogs-ue1-dev": []},
@@ -6417,7 +6422,7 @@ class TestBatchGetCampaignCatalogs:
         assert shared[0]["catalog"] is None
 
     def test_no_catalog_ids_skips_dynamodb_call(self, dynamodb_table: Any) -> None:
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_resource:
             _batch_get_campaign_catalogs([{"campaignId": "C1"}], treat_deleted_as_null=False, logger=MagicMock())
             mock_resource.return_value.batch_get_item.assert_not_called()
 
@@ -6425,7 +6430,7 @@ class TestBatchGetCampaignCatalogs:
         catalogs_table.put_item(Item={"catalogId": "CATALOG#a", "catalogName": "Catalog A"})
         campaigns = [{"campaignId": "C1", "catalogId": "CATALOG#a"}]
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_resource:
             mock_resource.return_value.batch_get_item.side_effect = [
                 {
                     "Responses": {},
@@ -6445,11 +6450,12 @@ class TestBatchGetCampaignCatalogs:
             assert campaigns[0]["catalog"]["catalogName"] == "Catalog A"
 
     def test_unprocessed_after_retries_raises(self, dynamodb_table: Any) -> None:
+        """A persistent throttle is retryable: the shared helper raises RESOURCE_BUSY (#557)."""
         campaigns = [{"campaignId": "C1", "catalogId": "CATALOG#stuck"}]
 
         with (
-            patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource,
-            patch("src.handlers.admin_operations.time.sleep"),
+            patch("src.utils.dynamodb.get_dynamodb_resource") as mock_resource,
+            patch("time.sleep"),
         ):
             mock_resource.return_value.batch_get_item.return_value = {
                 "Responses": {},
@@ -6459,7 +6465,7 @@ class TestBatchGetCampaignCatalogs:
             with pytest.raises(AppError) as exc_info:
                 _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=False, logger=MagicMock())
 
-            assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+            assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
 
     def test_throttling_raises_retryable_resource_busy(self, dynamodb_table: Any) -> None:
         campaigns = [{"campaignId": "C1", "catalogId": "CATALOG#a"}]
@@ -6468,7 +6474,7 @@ class TestBatchGetCampaignCatalogs:
             "BatchGetItem",
         )
 
-        with patch("src.handlers.admin_operations.get_dynamodb_resource") as mock_resource:
+        with patch("src.utils.dynamodb.get_dynamodb_resource") as mock_resource:
             mock_resource.return_value.batch_get_item.side_effect = throttling
 
             with pytest.raises(AppError) as exc_info:
