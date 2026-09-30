@@ -11,7 +11,8 @@ This Lambda is necessary because:
 
 Uses aioboto3 for async parallel queries:
 - owned_profile_ids and shared_profile_ids run concurrently
-- owned_catalog_ids and shared_catalog_ids wait for their respective profile_ids, then run N queries in parallel
+- owned_catalog_ids and shared_catalog_ids wait for their respective profile_ids, then run N queries in
+  parallel, bounded to the concurrency and chunk caps campaign_reporting uses (#541)
 
 GraphQL query: listCatalogsInUse
 Returns: [ID!]! (list of catalog IDs)
@@ -29,6 +30,11 @@ import aioboto3
 # than redeclared and the two copies cannot drift. One-way: admin_operations does
 # not import this module.
 from .admin_operations import _raise_gather_failures
+
+# The query-bounding caps are owned by the sibling report module so the two
+# modules cannot drift (#541): one concurrency cap and one chunk cap in the
+# codebase, not two.
+from .campaign_reporting import _ORDER_QUERY_CONCURRENCY, _PROFILE_BATCH_LIMIT
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -146,7 +152,14 @@ async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, t
 async def _async_get_shared_campaign_catalog_ids(
     dynamodb: Any, campaigns_table_name: str, profile_ids: List[str], request_logger: Any = logger
 ) -> Set[str]:
-    """Async: Query campaigns for all profiles in parallel.
+    """Async: Query campaigns for all profiles with bounded concurrency.
+
+    Profile ids are processed in chunks no larger than
+    ``campaign_reporting._PROFILE_BATCH_LIMIT`` and each per-profile query
+    (its pagination loop included) holds one of
+    ``campaign_reporting._ORDER_QUERY_CONCURRENCY`` semaphore slots, so at most
+    that many DynamoDB queries are ever in flight at once - the same bounding
+    strategy the sibling report module uses (#541).
 
     A per-profile query failure is raised (see
     `admin_operations._raise_gather_failures`) instead of being logged and
@@ -156,28 +169,35 @@ async def _async_get_shared_campaign_catalog_ids(
     if not profile_ids:
         return set()
 
-    # Create tasks for all profile queries
-    tasks = [_async_get_campaigns_for_profile(dynamodb, campaigns_table_name, pid) for pid in profile_ids]
+    semaphore = asyncio.Semaphore(_ORDER_QUERY_CONCURRENCY)
 
-    # Run all queries concurrently and collect results
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    # If any profile query failed we cannot answer authoritatively; fail the
-    # whole request instead of returning a truncated set (#556).
-    failures = [result for result in results if isinstance(result, BaseException)]
-    if failures:
-        _raise_gather_failures(
-            "list catalogs in use",
-            request_logger,
-            failures,
-            busy_message="Temporarily unable to list catalogs in use. Please retry.",
-            failed=len(failures),
-            total=len(results),
-        )
+    async def _bounded_query(profile_id: str) -> Set[str]:
+        async with semaphore:
+            return await _async_get_campaigns_for_profile(dynamodb, campaigns_table_name, profile_id)
 
     catalog_ids: Set[str] = set()
-    for result in results:
-        catalog_ids.update(cast(Set[str], result))
+    # Chunk the profile list so no more than _PROFILE_BATCH_LIMIT tasks exist
+    # per gather wave; a failing chunk still raises via _raise_gather_failures
+    # before the next chunk starts, never returning a truncated set.
+    for start in range(0, len(profile_ids), _PROFILE_BATCH_LIMIT):
+        chunk = profile_ids[start : start + _PROFILE_BATCH_LIMIT]
+        results = await asyncio.gather(*(_bounded_query(pid) for pid in chunk), return_exceptions=True)
+
+        # If any profile query failed we cannot answer authoritatively; fail the
+        # whole request instead of returning a truncated set (#556).
+        failures = [result for result in results if isinstance(result, BaseException)]
+        if failures:
+            _raise_gather_failures(
+                "list catalogs in use",
+                request_logger,
+                failures,
+                busy_message="Temporarily unable to list catalogs in use. Please retry.",
+                failed=len(failures),
+                total=len(results),
+            )
+
+        for result in results:
+            catalog_ids.update(cast(Set[str], result))
 
     return catalog_ids
 
