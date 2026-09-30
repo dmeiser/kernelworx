@@ -158,7 +158,7 @@ cd tofu/application/environments/dev
 tofu import 'module.dynamodb.aws_dynamodb_table.accounts' table-name
 
 # Import existing S3 bucket
-tofu import 'module.s3.aws_s3_bucket.static_assets' bucket-name
+tofu import 'module.s3.aws_s3_bucket.static' bucket-name
 ```
 
 **Finding existing resources:**
