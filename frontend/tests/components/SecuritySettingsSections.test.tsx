@@ -22,7 +22,6 @@ const createMockMfaHook = (overrides?: Partial<UseMfaReturn>): UseMfaReturn => (
   mfaEnabled: false,
   pendingConfirmation: null,
   handleSetupMFA: vi.fn().mockResolvedValue(undefined),
-  confirmSetupMFA: vi.fn().mockResolvedValue(undefined),
   handleVerifyMFA: vi.fn().mockResolvedValue(undefined),
   handleDisableMFA: vi.fn(),
   confirmDisableMFA: vi.fn().mockResolvedValue(undefined),

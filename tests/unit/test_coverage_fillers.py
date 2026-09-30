@@ -2,7 +2,6 @@
 
 import importlib
 import sys
-from types import SimpleNamespace
 from typing import Any
 
 import boto3
@@ -72,7 +71,7 @@ def test_payment_methods_delete_qr_uuid_fallback(monkeypatch):
     # First 3 calls (slug-based) raise NoSuchKey, next 3 (UUID) succeed
     no_such_key = ClientError({"Error": {"Code": "NoSuchKey", "Message": "Not found"}}, "DeleteObject")
     mock_s3.delete_object.side_effect = [no_such_key, no_such_key, no_such_key, None, None, None]
-    monkeypatch.setattr(payment_methods, "_get_s3_client", lambda: mock_s3)
+    monkeypatch.setattr(payment_methods, "get_s3_client", lambda _override=None: mock_s3)
 
     # UUID fallback success path
     payment_methods.delete_qr_from_s3("ACCOUNT#test", "test-method")
@@ -93,7 +92,7 @@ def test_payment_methods_delete_qr_uuid_fallback_error(monkeypatch):
     # Slug deletes: NoSuchKey, NoSuchKey, NoSuchKey
     # UUID deletes: NoSuchKey, AccessDenied
     mock_s3.delete_object.side_effect = [no_such_key, no_such_key, no_such_key, no_such_key, access_denied]
-    monkeypatch.setattr(payment_methods, "_get_s3_client", lambda: mock_s3)
+    monkeypatch.setattr(payment_methods, "get_s3_client", lambda _override=None: mock_s3)
 
     # UUID fallback with non-NoSuchKey error surfaces a typed AppError
     from src.utils.errors import AppError, ErrorCode
@@ -104,27 +103,13 @@ def test_payment_methods_delete_qr_uuid_fallback_error(monkeypatch):
     assert mock_s3.delete_object.call_count == 5
 
 
-def test_report_generation_get_s3_client_default(monkeypatch):
+def test_report_generation_uses_shared_s3_factory():
+    """report_generation routes S3 construction through the shared factory (#575)."""
     from src.handlers import report_generation
+    from src.utils import boto
 
-    report_generation.s3_client = None
-
-    created: list[tuple[str, str | None]] = []
-
-    def fake_client(service_name: str, endpoint_url: str | None = None):
-        created.append((service_name, endpoint_url))
-        return SimpleNamespace()
-
-    monkeypatch.setattr(report_generation.boto3, "client", fake_client)
-    client = report_generation._get_s3_client()
-    assert created == [("s3", None)]
-    assert isinstance(client, SimpleNamespace)
-
-    # When module-level client set, return it directly
-    sentinel_client = object()
-    report_generation.s3_client = sentinel_client  # type: ignore[assignment]
-    assert report_generation._get_s3_client() is sentinel_client
-    report_generation.s3_client = None
+    assert not hasattr(report_generation, "_get_s3_client")
+    assert report_generation.get_s3_client is boto.get_s3_client
 
 
 @mock_aws

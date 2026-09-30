@@ -61,5 +61,3 @@ export const US_STATES = [
   'WY',
   'DC',
 ];
-
-export const CAMPAIGN_OPTIONS = ['Fall', 'Spring', 'Summer', 'Winter'];

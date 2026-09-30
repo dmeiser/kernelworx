@@ -1,5 +1,6 @@
 import { util } from '@aws-appsync/utils';
 import { validatePhone, validateAddress } from './lib/validation.js';
+import { enrichLineItems } from './lib/line_items.js';
 
 function validateOrderDate(orderDate) {
     if (!orderDate || typeof orderDate !== 'string' || !orderDate.trim()) {
@@ -16,7 +17,6 @@ export function request(ctx) {
 
     const updates = [];
     const exprValues = {};
-    const exprNames = {};
 
     if (input.customerName !== undefined) {
         if (typeof input.customerName !== 'string' || !input.customerName.trim()) {
@@ -77,42 +77,7 @@ export function request(ctx) {
             util.error('Catalog not loaded for lineItems update', 'INTERNAL_ERROR');
         }
 
-        const productsMap = {};
-        for (const product of catalog.products || []) {
-            productsMap[product.productId] = product;
-        }
-
-        const enrichedLineItems = [];
-        // Accumulate money in integer cents to avoid floating-point drift.
-        let totalAmountCents = 0;
-
-        for (const lineItem of input.lineItems) {
-            const productId = lineItem.productId;
-            const quantity = lineItem.quantity;
-
-            if (quantity < 1) {
-                util.error('Quantity must be at least 1 (got ' + quantity + ')', 'INVALID_INPUT');
-            }
-
-            if (!productsMap[productId]) {
-                util.error('Product ' + productId + ' not found in catalog', 'INVALID_INPUT');
-            }
-
-            const product = productsMap[productId];
-            const pricePerUnitCents = Math.round(product.price * 100);
-            const pricePerUnit = pricePerUnitCents / 100;
-            const subtotalCents = pricePerUnitCents * quantity;
-            totalAmountCents += subtotalCents;
-            const subtotal = subtotalCents / 100;
-
-            enrichedLineItems.push({
-                productId: productId,
-                productName: product.productName,
-                quantity: quantity,
-                pricePerUnit: pricePerUnit,
-                subtotal: subtotal
-            });
-        }
+        const { enrichedLineItems, totalAmountCents } = enrichLineItems(input.lineItems, catalog);
 
         updates.push('lineItems = :lineItems');
         exprValues[':lineItems'] = enrichedLineItems;
@@ -140,7 +105,6 @@ export function request(ctx) {
         key: util.dynamodb.toMapValues({ campaignId: order.campaignId, orderId: order.orderId }),
         update: {
             expression: updateExpression,
-            expressionNames: Object.keys(exprNames).length > 0 ? exprNames : undefined,
             expressionValues: util.dynamodb.toMapValues(exprValues)
         }
     };

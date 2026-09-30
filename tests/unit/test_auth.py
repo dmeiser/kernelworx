@@ -8,13 +8,13 @@ from src.utils.auth import (
     batch_check_profile_access,
     check_profile_access,
     get_account,
-    get_dynamodb_resource,
     has_mfa,
     is_admin,
     is_profile_owner,
     require_admin_mfa,
     require_profile_access,
 )
+from src.utils.dynamodb import get_dynamodb_resource, tables
 from src.utils.errors import AppError, ErrorCode
 
 
@@ -625,7 +625,7 @@ class TestBatchCheckProfileAccess:
         sample_profile_id: str,
         another_account_id: str,
     ) -> None:
-        """Batch check respects required_permission for shared profiles."""
+        """Batch check honors required_permission for shared profiles, and reports a shortfall."""
         # sample_profile is owned by sample_account_id; another_account_id has READ share
         shares_table.put_item(
             Item={
@@ -636,10 +636,16 @@ class TestBatchCheckProfileAccess:
         )
 
         read_result = batch_check_profile_access(another_account_id, [sample_profile_id], "READ")
-        write_result = batch_check_profile_access(another_account_id, [sample_profile_id], "WRITE")
-
         assert sample_profile_id in read_result
-        assert sample_profile_id not in write_result
+
+        # A lesser share is not a missing profile: the caller is told it lacks WRITE
+        # rather than being handed a silently absent id (the symmetric case from #562).
+        with pytest.raises(AppError) as exc_info:
+            batch_check_profile_access(another_account_id, [sample_profile_id], "WRITE")
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert "WRITE" in str(exc_info.value)
+        assert sample_profile_id in str(exc_info.value)
 
     def test_batch_empty_input(self, dynamodb_table: Any) -> None:
         """Batch check with empty profile IDs returns empty set."""
@@ -690,7 +696,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, profile_ids)
 
@@ -737,7 +743,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, profile_ids)
 
@@ -782,8 +788,8 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
-        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
         result = batch_check_profile_access(sample_account_id, profile_ids)
 
@@ -836,8 +842,8 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
-        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
         result = batch_check_profile_access(sample_account_id, profile_ids)
 
@@ -850,7 +856,7 @@ class TestBatchCheckProfileAccess:
         sample_account_id: str,
         monkeypatch: Any,
     ) -> None:
-        """Exhausted ownership retries raise an internal error instead of silently denying."""
+        """Exhausted ownership retries raise a retryable error instead of silently denying (#557)."""
         profile_ids: list[str] = []
         for n in range(3):
             profile_id = f"PROFILE#unproc-owner-exhausted-{n}"
@@ -873,13 +879,13 @@ class TestBatchCheckProfileAccess:
             }
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
-        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
         with pytest.raises(AppError) as exc_info:
             batch_check_profile_access(sample_account_id, profile_ids)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
 
     def test_batch_raises_when_share_unprocessed_exhausted(
         self,
@@ -889,7 +895,7 @@ class TestBatchCheckProfileAccess:
         another_account_id: str,
         monkeypatch: Any,
     ) -> None:
-        """Exhausted share retries raise an internal error instead of silently denying."""
+        """Exhausted share retries raise a retryable error instead of silently denying (#557)."""
         profile_ids: list[str] = []
         for n in range(3):
             profile_id = f"PROFILE#unproc-share-exhausted-{n}"
@@ -923,13 +929,13 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
-        monkeypatch.setattr("src.utils.auth.time.sleep", lambda _seconds: None)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
         with pytest.raises(AppError) as exc_info:
             batch_check_profile_access(sample_account_id, profile_ids)
 
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
 
     def test_batch_owned_item_missing_profile_id_is_ignored(
         self,
@@ -965,7 +971,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [profile_id])
 
@@ -981,12 +987,6 @@ class TestBatchCheckProfileAccess:
     ) -> None:
         """Share items without a profileId are ignored rather than crashing."""
         profile_id = "PROFILE#missing-share-id"
-        dynamodb_table.put_item(
-            Item={
-                "ownerAccountId": f"ACCOUNT#{another_account_id}",
-                "profileId": profile_id,
-            }
-        )
 
         resource = get_dynamodb_resource()
         original_batch_get_item = resource.batch_get_item
@@ -1010,20 +1010,28 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [profile_id])
 
         assert result == set()
 
-    def test_batch_stale_share_after_ownership_transfer_denied(
+    @pytest.mark.parametrize("required_permission", ["READ", "WRITE"])
+    def test_batch_stale_share_after_ownership_transfer_is_dropped(
         self,
         dynamodb_table: Any,
         shares_table: Any,
         sample_account_id: str,
         another_account_id: str,
+        required_permission: str,
     ) -> None:
-        """Batch check rejects a stale share after the profile is transferred."""
+        """A share that outlived the ownership transfer leaves the profile inaccessible.
+
+        Parametrized over the required permission because a stale share under a
+        WRITE request is a permission shortfall candidate: it must still be
+        dropped rather than raising FORBIDDEN, because the shortfall check runs
+        only on shares that still validate against their profile's current owner.
+        """
         profile_id = "PROFILE#batch-transfer-profile"
         original_owner = sample_account_id
         dynamodb_table.put_item(
@@ -1052,9 +1060,10 @@ class TestBatchCheckProfileAccess:
             }
         )
 
-        result = batch_check_profile_access(another_account_id, [profile_id])
-
-        assert profile_id not in result
+        # The share grants READ, but it no longer matches the profile's owner, so it
+        # is not a permission shortfall against a live share: the profile is simply
+        # absent, exactly as it was before the transfer.
+        assert batch_check_profile_access(another_account_id, [profile_id], required_permission) == set()
 
     def test_batch_uses_extra_profile_read_to_validate_shares(
         self,
@@ -1092,7 +1101,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(*args, **kwargs)
 
         monkeypatch.setattr(resource, "batch_get_item", counted_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [profile_id])
 
@@ -1110,13 +1119,6 @@ class TestBatchCheckProfileAccess:
         """Validation profile items without a profileId are ignored rather than crashing."""
         profile_id = "PROFILE#missing-validated-id"
         profiles_table_name = dynamodb_table.table_name
-        dynamodb_table.put_item(
-            Item={
-                "ownerAccountId": f"ACCOUNT#{another_account_id}",
-                "profileId": profile_id,
-                "sellerName": "Missing Validated Id",
-            }
-        )
         shares_table.put_item(
             Item={
                 "profileId": profile_id,
@@ -1143,7 +1145,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(RequestItems=RequestItems)
 
         monkeypatch.setattr(resource, "batch_get_item", patched_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [profile_id])
 
@@ -1188,7 +1190,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(*args, **kwargs)
 
         monkeypatch.setattr(resource, "batch_get_item", wrapped_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [sample_profile_id])
 
@@ -1235,7 +1237,7 @@ class TestBatchCheckProfileAccess:
             return original_batch_get_item(*args, **kwargs)
 
         monkeypatch.setattr(resource, "batch_get_item", wrapped_batch_get_item)
-        monkeypatch.setattr("src.utils.auth.get_dynamodb_resource", lambda: resource)
+        monkeypatch.setattr("src.utils.dynamodb.get_dynamodb_resource", lambda: resource)
 
         result = batch_check_profile_access(sample_account_id, [profile_id])
 
@@ -1251,6 +1253,118 @@ class TestBatchCheckProfileAccess:
         )
         assert share_request[shares_table_name].get("ConsistentRead") is True
         assert validation_request[profiles_table_name].get("ConsistentRead") is True
+
+    def test_batch_default_drops_missing_profile_while_single_check_raises(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+    ) -> None:
+        """A nonexistent profile is absent from the result where the single check raises NOT_FOUND.
+
+        This is the deliberate difference from ``check_profile_access``: the batch
+        contract drops a profile that is gone instead of failing the whole request.
+        """
+        missing_profile_id = "PROFILE#batch-dropped-profile"
+
+        with pytest.raises(AppError) as exc_info:
+            check_profile_access(sample_account_id, missing_profile_id)
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+
+        assert batch_check_profile_access(sample_account_id, [missing_profile_id]) == set()
+
+    def test_batch_drops_missing_profile_while_returning_accessible(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+    ) -> None:
+        """A deleted profile is dropped without hiding the profiles the caller can access."""
+        result = batch_check_profile_access(sample_account_id, [sample_profile_id, "PROFILE#gone-profile"])
+
+        assert result == {sample_profile_id}
+
+    def test_batch_drops_existing_profiles_the_caller_is_not_shared_with(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Another seller's profile is absent, leaving the caller's own profiles readable.
+
+        A profile that exists but is not shared with the caller is deliberately
+        not an error: the unit-reporting callers list a whole unit, and one seller
+        in it must not make the caller's own sellers unreadable.
+        """
+        unshared_profile_id = "PROFILE#existing-not-shared"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": unshared_profile_id,
+                "sellerName": "Not Shared",
+            }
+        )
+
+        result = batch_check_profile_access(sample_account_id, [sample_profile_id, unshared_profile_id])
+
+        assert result == {sample_profile_id}
+
+    def test_batch_raises_forbidden_for_read_share_when_write_requested(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_account_id: str,
+        another_account_id: str,
+    ) -> None:
+        """A READ-only share is a permission shortfall, not a missing profile."""
+        profile_id = "PROFILE#read-only-share"
+        dynamodb_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+                "profileId": profile_id,
+                "sellerName": "Read Only Share",
+            }
+        )
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": f"ACCOUNT#{sample_account_id}",
+                "permissions": ["READ"],
+                "ownerAccountId": f"ACCOUNT#{another_account_id}",
+            }
+        )
+
+        with pytest.raises(AppError) as exc_info:
+            batch_check_profile_access(sample_account_id, [profile_id], "WRITE")
+
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
+        assert profile_id in str(exc_info.value)
+
+    def test_batch_skips_existence_check_when_all_accessible(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+        monkeypatch: Any,
+    ) -> None:
+        """No profileId-index lookups happen when every requested profile is accessible."""
+        table = tables.profiles
+        original_query = table.query
+        queries: list[Dict[str, Any]] = []
+
+        def wrapped_query(**kwargs: Any) -> Dict[str, Any]:
+            queries.append(kwargs)
+            return original_query(**kwargs)
+
+        monkeypatch.setattr(table, "query", wrapped_query)
+
+        result = batch_check_profile_access(sample_account_id, [sample_profile_id])
+
+        assert result == {sample_profile_id}
+        assert queries == []
 
 
 class TestRequireProfileAccess:
