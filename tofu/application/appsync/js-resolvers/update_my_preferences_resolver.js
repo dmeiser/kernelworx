@@ -19,6 +19,13 @@ export function request(ctx) {
     // snapshot, only a first write may create the attribute — a missing or
     // stale snapshot fails loudly instead of silently discarding a concurrent
     // update (for example a payment-method write) the caller never saw.
+    // An explicit null is not the same as omitting the field: only omission
+    // means "no snapshot read yet" (first-write semantics). A caller passing
+    // null explicitly is masking a bug, so reject it loudly.
+    if (expectedPreferences === null) {
+        util.error('expectedPreferences must be a JSON string or omitted, not null', 'INVALID_INPUT');
+    }
+
     const conditionValues = {};
     let conditionExpression;
     if (expectedPreferences) {

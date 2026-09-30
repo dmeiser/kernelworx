@@ -148,15 +148,17 @@ const shouldShowEmptyState = (myProfiles: Profile[], filteredSharedProfiles: Pro
 // read live from the Apollo cache: when a blob is stored, the write merges the
 // toggle over its parsed content and the same blob string is threaded back as
 // `expectedPreferences` for the resolver's optimistic lock (#510); with no
-// stored blob (true first write), the write is just the toggle and the lock
-// expects no stored preferences. No default is ever merged into or locked on.
-const buildPreferencesVariables = (preferences: string | null | undefined, newChecked: boolean) => ({
-  preferences: JSON.stringify({
+// stored blob (true first write), the write is just the toggle and the field
+// is OMITTED so the lock expects no stored preferences — the resolver rejects
+// an explicit null, so a missing blob must not be sent as one. No default is
+// ever merged into or locked on.
+const buildPreferencesVariables = (preferences: string | null | undefined, newChecked: boolean) => {
+  const merged = JSON.stringify({
     ...(preferences ? JSON.parse(preferences) : {}),
     showReadOnlyProfiles: newChecked,
-  }),
-  expectedPreferences: preferences ?? null,
-});
+  });
+  return preferences ? { preferences: merged, expectedPreferences: preferences } : { preferences: merged };
+};
 
 // Helper to check if should open dialog on return path
 const shouldAutoOpenDialog = (returnPath: string | undefined, createDialogOpen: boolean): boolean =>
@@ -236,7 +238,7 @@ const maybeDeleteProfile = async (
 // refreshes the cache so a retry works from a fresh snapshot (#510).
 const updatePreferencesWithRollback = async (
   updatePreferences: (options: {
-    variables: { preferences: string; expectedPreferences: string | null };
+    variables: { preferences: string; expectedPreferences?: string };
   }) => Promise<unknown>,
   preferences: string | null | undefined,
   checked: boolean,
@@ -269,8 +271,7 @@ const updatePreferencesWithRollback = async (
 
 // Helper to derive the mutation error message; mirrors PaymentMethodsPage's
 // handleMutationError precedent.
-const getMutationErrorMessage = (err: unknown): string =>
-  err instanceof Error ? err.message : String(err);
+const getMutationErrorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 // Helper to load shared profiles with error handling
 const loadSharedProfilesWithErrorHandling = async (

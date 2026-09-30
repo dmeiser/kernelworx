@@ -78,7 +78,7 @@ describe('update_my_preferences_resolver request', () => {
     assert.strictEqual(req.condition.expressionValues[':readPrefsStr'], snapshot);
   });
 
-  it('allows only a first write when there is no snapshot', () => {
+  it('allows only a first write when the snapshot field is omitted', () => {
     const req = request({
       identity: IDENTITY,
       args: { preferences: JSON.stringify({ showReadOnlyProfiles: false }) },
@@ -86,6 +86,17 @@ describe('update_my_preferences_resolver request', () => {
 
     assert.strictEqual(req.condition.expression, 'attribute_exists(accountId) AND attribute_not_exists(preferences)');
     assert.deepStrictEqual(req.condition.expressionValues, {});
+  });
+
+  it('rejects an explicit null snapshot: null is not the same as omitted', () => {
+    assert.throws(
+      () =>
+        request({
+          identity: IDENTITY,
+          args: { preferences: JSON.stringify({ showReadOnlyProfiles: false }), expectedPreferences: null },
+        }),
+      /INVALID_INPUT: expectedPreferences must be a JSON string or omitted, not null/,
+    );
   });
 
   it('lock matches a legacy row whose stored preferences is the raw AWSJSON string (S) — the toggle succeeds and self-normalizes', () => {

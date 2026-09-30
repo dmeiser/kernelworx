@@ -96,10 +96,13 @@ describe('ScoutsPage helpers', () => {
     expect(JSON.parse(vars.preferences)).toEqual({ showReadOnlyProfiles: true });
   });
 
-  it('buildPreferencesVariables sends a null snapshot when no blob was read', () => {
+  it('buildPreferencesVariables omits the snapshot field when no blob was read', () => {
     const vars = buildPreferencesVariables(undefined, false);
     expect(JSON.parse(vars.preferences)).toEqual({ showReadOnlyProfiles: false });
-    expect(vars.expectedPreferences).toBeNull();
+    // The resolver rejects an explicit null, so absence of a snapshot must be
+    // expressed by omitting the field, not by sending null.
+    expect('expectedPreferences' in vars).toBe(false);
+    expect(vars.expectedPreferences).toBeUndefined();
   });
 
   it('dialog open helpers', () => {
