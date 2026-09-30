@@ -144,13 +144,15 @@ const SharedProfilesSection: React.FC<{
 const shouldShowEmptyState = (myProfiles: Profile[], filteredSharedProfiles: Profile[], loading: boolean): boolean =>
   myProfiles.length === 0 && filteredSharedProfiles.length === 0 && !loading;
 
-// Helper to build preferences update variables. Takes the raw preferences
-// blob (read live from the Apollo cache) so the write is a read-modify-write
-// of the real stored blob — never a default — and threads the same blob back
-// as `expectedPreferences` for the resolver's optimistic lock (#510).
+// Helper to build preferences update variables from the raw preferences blob
+// read live from the Apollo cache: when a blob is stored, the write merges the
+// toggle over its parsed content and the same blob string is threaded back as
+// `expectedPreferences` for the resolver's optimistic lock (#510); with no
+// stored blob (true first write), the write is just the toggle and the lock
+// expects no stored preferences. No default is ever merged into or locked on.
 const buildPreferencesVariables = (preferences: string | null | undefined, newChecked: boolean) => ({
   preferences: JSON.stringify({
-    ...parsePreferences(preferences ?? undefined),
+    ...(preferences ? JSON.parse(preferences) : {}),
     showReadOnlyProfiles: newChecked,
   }),
   expectedPreferences: preferences ?? null,

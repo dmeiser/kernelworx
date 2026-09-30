@@ -67,7 +67,33 @@ describe('ScoutsPage helpers', () => {
     const vars = buildPreferencesVariables(blob, true);
     expect(typeof vars.preferences).toBe('string');
     expect(JSON.parse(vars.preferences)).toEqual({ showReadOnlyProfiles: true, paymentMethods: [{ name: 'Cash' }] });
+    // The lock must compare against the raw stored blob verbatim, not a
+    // re-serialization of it.
     expect(vars.expectedPreferences).toBe(blob);
+  });
+
+  it('buildPreferencesVariables merges extra blob keys into the write, not defaults (#510)', () => {
+    const blob = '{"showReadOnlyProfiles":true,"paymentMethods":[{"name":"Venmo"}],"uiDensity":"compact"}';
+    const vars = buildPreferencesVariables(blob, false);
+    expect(vars.expectedPreferences).toBe(blob);
+    const written = JSON.parse(vars.preferences);
+    expect(written.showReadOnlyProfiles).toBe(false);
+    expect(written.uiDensity).toBe('compact');
+    expect(written.paymentMethods).toEqual([{ name: 'Venmo' }]);
+  });
+
+  it('buildPreferencesVariables locks on the snapshot the resolver would reject on when the blob is stale (#510)', () => {
+    // The user read this blob earlier; the server since stored a different one.
+    const staleSnapshot = JSON.stringify({ showReadOnlyProfiles: true });
+    const freshStoredBlob = JSON.stringify({ showReadOnlyProfiles: false, paymentMethods: [{ name: 'Cash' }] });
+    // The helper is fed the snapshot from the cache read (staleSnapshot), not
+    // the fresh stored blob, so expectedPreferences must be exactly the value
+    // the resolver's `preferences = :readPrefs` condition rejects on.
+    const vars = buildPreferencesVariables(staleSnapshot, true);
+    expect(vars.expectedPreferences).toBe(staleSnapshot);
+    expect(vars.expectedPreferences).not.toBe(freshStoredBlob);
+    expect(JSON.parse(vars.expectedPreferences as string)).not.toEqual(JSON.parse(freshStoredBlob));
+    expect(JSON.parse(vars.preferences)).toEqual({ showReadOnlyProfiles: true });
   });
 
   it('buildPreferencesVariables sends a null snapshot when no blob was read', () => {
