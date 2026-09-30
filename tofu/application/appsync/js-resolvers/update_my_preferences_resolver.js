@@ -2,10 +2,28 @@ import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
     const accountId = 'ACCOUNT#' + ctx.identity.sub;
-    const preferences = ctx.args.preferences;
+    // AWSJSON arrives as a string, but the stored `preferences` attribute is a
+    // DynamoDB map (payment methods live under preferences.paymentMethods), so
+    // parse before writing to keep the attribute shape stable (#510).
+    const preferences = JSON.parse(ctx.args.preferences);
+    const expectedPreferences = ctx.args.expectedPreferences;
     const now = util.time.nowISO8601();
-    
-    // Use UpdateItem with attribute_exists condition to ensure account exists
+
+    // Optimistic lock (#510): the write only lands when the stored blob still
+    // matches the snapshot the caller read (same conditional-write pattern as
+    // the payment-method mutations, #433). With no snapshot, only a first
+    // write may create the attribute — a missing or stale snapshot fails
+    // loudly instead of silently discarding a concurrent update (for example
+    // a payment-method write) the caller never saw.
+    const conditionValues = {};
+    let conditionExpression;
+    if (expectedPreferences) {
+        conditionExpression = 'attribute_exists(accountId) AND preferences = :readPrefs';
+        conditionValues[':readPrefs'] = JSON.parse(expectedPreferences);
+    } else {
+        conditionExpression = 'attribute_exists(accountId) AND attribute_not_exists(preferences)';
+    }
+
     return {
         operation: 'UpdateItem',
         key: util.dynamodb.toMapValues({ accountId: accountId }),
@@ -17,7 +35,8 @@ export function request(ctx) {
             })
         },
         condition: {
-            expression: 'attribute_exists(accountId)'
+            expression: conditionExpression,
+            expressionValues: util.dynamodb.toMapValues(conditionValues)
         }
     };
 }
@@ -25,7 +44,10 @@ export function request(ctx) {
 export function response(ctx) {
     if (ctx.error) {
         if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
-        util.error('Account not found. Please sign out and sign in again.', 'NOT_FOUND');
+            // Retryable: the stored blob changed (or the account/preferences
+            // state no longer matches the caller's snapshot). The caller must
+            // re-read and retry rather than overwrite someone else's write.
+            util.error('Preferences were modified by another request. Please refresh and retry.', 'ConflictException');
         }
         util.error(ctx.error.message, ctx.error.type);
     }

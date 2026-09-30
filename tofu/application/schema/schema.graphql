@@ -945,10 +945,17 @@ type Mutation {
     """The fields to update."""
     input: UpdateMyAccountInput!
   ): Account!
-  """Replace the caller's account preferences blob. Returns the updated account."""
+  """Replace the caller's account preferences blob. Returns the updated account.
+
+  The write is optimistically locked: it only lands if the stored blob still
+  equals `expectedPreferences` (the value the caller last read via getMyAccount),
+  and fails with a retryable `ConflictException` otherwise. Pass null only when
+  the account has no stored preferences yet."""
   updateMyPreferences(
     """The new preferences value."""
     preferences: AWSJSON!
+    """The preferences blob this write is based on, from getMyAccount; null when the account has no stored preferences yet."""
+    expectedPreferences: AWSJSON
   ): Account!
   """Delete the caller's account and all associated data (profiles, campaigns, orders, shares, and invites; catalogs are preserved) and remove the user from Cognito. Returns true on success."""
   deleteMyAccount: Boolean!

@@ -114,6 +114,13 @@ vi.mock('@apollo/client/react', async () => {
   // useApolloClient returns an instance whose query method serves both the
   // paginated listMyProfiles connection and the shared-profiles list.
   const useApolloClient = () => ({
+    readQuery: (options: any) => {
+      const name = getOpName(options?.query);
+      if (name === 'GetMyAccount') {
+        return mockAccountData ? { getMyAccount: mockAccountData } : null;
+      }
+      return null;
+    },
     query: (options: any) => {
       const name = getOpName(options?.query);
       if (name === 'ListMyProfiles') {
@@ -216,6 +223,40 @@ describe('ScoutsPage – interactions', () => {
     fireEvent.click(checkbox!);
 
     await waitFor(() => expect(updatePreferencesMock).toHaveBeenCalled(), { timeout: 3000 });
+  }, 10000);
+
+  it('toggle sends the live blob as the optimistic-lock snapshot (#510)', async () => {
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
+    const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(checkbox!);
+
+    await waitFor(() => expect(updatePreferencesMock).toHaveBeenCalled(), { timeout: 3000 });
+    const vars = updatePreferencesMock.mock.calls[0][0].variables;
+    expect(vars.expectedPreferences).toBe(mockAccountData.preferences);
+    expect(JSON.parse(vars.preferences)).toEqual({ showReadOnlyProfiles: false });
+  }, 10000);
+
+  it('toggle preserves paymentMethods stored in the preferences blob (#510)', async () => {
+    mockAccountData = {
+      accountId: 'acct-1',
+      email: 'test@example.com',
+      preferences: JSON.stringify({
+        showReadOnlyProfiles: true,
+        paymentMethods: [{ name: 'Venmo', qrCodeUrl: 'qr.png' }],
+      }),
+    };
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
+    const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(checkbox!);
+
+    await waitFor(() => expect(updatePreferencesMock).toHaveBeenCalled(), { timeout: 3000 });
+    const vars = updatePreferencesMock.mock.calls[0][0].variables;
+    expect(JSON.parse(vars.preferences).paymentMethods).toEqual([{ name: 'Venmo', qrCodeUrl: 'qr.png' }]);
+    expect(vars.expectedPreferences).toBe(mockAccountData.preferences);
   }, 10000);
 
   // ── create profile mutations ──────────────────────────────────────────────

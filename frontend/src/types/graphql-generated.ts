@@ -417,7 +417,14 @@ export type GqlMutation = {
   updateCatalog: GqlCatalog;
   /** Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account. */
   updateMyAccount: GqlAccount;
-  /** Replace the caller's account preferences blob. Returns the updated account. */
+  /**
+   * Replace the caller's account preferences blob. Returns the updated account.
+   *
+   * The write is optimistically locked: it only lands if the stored blob still
+   * equals `expectedPreferences` (the value the caller last read via getMyAccount),
+   * and fails with a retryable `ConflictException` otherwise. Pass null only when
+   * the account has no stored preferences yet.
+   */
   updateMyPreferences: GqlAccount;
   /** Update an order on a profile the caller has write access to. Only provided fields change. Returns the updated order. */
   updateOrder: GqlOrder;
@@ -607,6 +614,7 @@ export type GqlMutation_UpdateMyAccountArgs = {
 
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpdateMyPreferencesArgs = {
+  expectedPreferences?: InputMaybe<Scalars['AWSJSON']['input']>;
   preferences: Scalars['AWSJSON']['input'];
 };
 
@@ -1390,6 +1398,7 @@ export type GqlDeleteMyAccountMutation = { __typename?: 'Mutation'; deleteMyAcco
 
 export type GqlUpdateMyPreferencesMutationVariables = Exact<{
   preferences: Scalars['AWSJSON']['input'];
+  expectedPreferences?: InputMaybe<Scalars['AWSJSON']['input']>;
 }>;
 
 export type GqlUpdateMyPreferencesMutation = {
