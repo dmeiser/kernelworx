@@ -70,10 +70,24 @@ function getUpdatedUnitField(input, campaign, field) {
     return input[field] !== undefined ? input[field] : campaign[field];
 }
 
+// Fields the Campaign output type declares non-null; an explicit null would
+// persist NULL into DynamoDB and make every read of the campaign fail.
+const NON_NULLABLE_OUTPUT_FIELDS = ['campaignName', 'campaignYear', 'isActive'];
+
+function rejectExplicitNulls(input) {
+    for (const field of NON_NULLABLE_OUTPUT_FIELDS) {
+        if (input[field] === null) {
+            util.error(field + ' cannot be null', 'INVALID_INPUT');
+            return;
+        }
+    }
+}
+
 export function request(ctx) {
     const campaign = ctx.stash.campaign;
     const input = ctx.args.input || ctx.args;
 
+    rejectExplicitNulls(input);
     validateUnitUpdate(input, campaign);
 
     // Build update expression dynamically
@@ -122,14 +136,19 @@ export function request(ctx) {
         updates.push('unitNumber = :unitNumber');
         exprValues[':unitNumber'] = input.unitNumber;
     }
-    if (input.city !== undefined) {
+    if (input.city !== undefined && input.city !== null) {
         updates.push('city = :city');
         exprValues[':city'] = input.city;
+    } else if (input.city === null) {
+        removes.push('city');
     }
-    if (input.state !== undefined) {
+    if (input.state !== undefined && input.state !== null) {
         updates.push('#state = :state');
         exprNames['#state'] = 'state';
         exprValues[':state'] = input.state;
+    } else if (input.state === null) {
+        removes.push('#state');
+        exprNames['#state'] = 'state';
     }
 
     // Recompute unitCampaignKey whenever unit fields, name, or year change and unit info is present

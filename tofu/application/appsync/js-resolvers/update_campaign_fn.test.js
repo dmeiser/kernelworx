@@ -147,6 +147,71 @@ describe('update_campaign_fn request', () => {
     );
   });
 
+  for (const field of ['campaignName', 'campaignYear', 'isActive']) {
+    it(`rejects explicit null for non-nullable output field ${field}`, () => {
+      const ctx = {
+        stash: {
+          campaign: {
+            profileId: 'PROFILE#scout',
+            campaignId: 'CAMPAIGN#c1',
+            campaignName: 'Fall',
+            campaignYear: 2024,
+            isActive: true,
+          },
+        },
+        args: {
+          input: {
+            [field]: null,
+          },
+        },
+      };
+
+      let capturedError = null;
+      const originalError = util.error;
+      util.error = (message, type) => {
+        capturedError = { message, type };
+        throw new Error(message);
+      };
+      try {
+        request(ctx);
+      } catch (_err) {
+        // expected
+      } finally {
+        util.error = originalError;
+      }
+
+      assert.ok(capturedError);
+      assert.strictEqual(capturedError.type, 'INVALID_INPUT');
+      assert.match(capturedError.message, new RegExp(`${field} cannot be null`));
+    });
+  }
+
+  it('removes city and state when explicitly nulled', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+        },
+      },
+      args: {
+        input: {
+          city: null,
+          state: null,
+        },
+      },
+    };
+
+    const result = request(ctx);
+
+    assert.doesNotMatch(result.update.expression, /city = :city/);
+    assert.doesNotMatch(result.update.expression, /#state = :state/);
+    assert.match(result.update.expression, /REMOVE city, #state/);
+    assert.strictEqual(result.update.expressionNames['#state'], 'state');
+  });
+
   it('errors when unitType is provided without all unit fields', () => {
     const ctx = {
       stash: {
@@ -250,7 +315,7 @@ describe('update_campaign_fn request', () => {
 
     assert.match(result.update.expression, /unitType = :unitType/);
     assert.doesNotMatch(result.update.expression, /unitCampaignKey = :unitCampaignKey/);
-    assert.match(result.update.expression, /REMOVE unitCampaignKey/);
+    assert.match(result.update.expression, /REMOVE .*unitCampaignKey/);
   });
 
   it('does not prefix null catalogId with CATALOG#', () => {
