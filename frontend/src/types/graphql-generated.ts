@@ -293,6 +293,10 @@ export type GqlCreateProfileInviteInput = {
 export type GqlCreateSellerProfileInput = {
   /** The seller's display name (required, up to 100 characters). */
   sellerName: Scalars['String']['input'];
+  /** The scout unit number (a positive integer). */
+  unitNumber?: InputMaybe<Scalars['Int']['input']>;
+  /** The scout unit type: one of Pack, Troop, Crew, Ship, or Post. */
+  unitType?: InputMaybe<Scalars['String']['input']>;
 };
 
 /** Input for createSharedCampaign. Publishes a campaign so other units can find and clone it. */
@@ -1231,6 +1235,10 @@ export type GqlUpdateSellerProfileInput = {
   profileId: Scalars['ID']['input'];
   /** The seller's new display name. */
   sellerName: Scalars['String']['input'];
+  /** The seller's new scout unit number (a positive integer). */
+  unitNumber?: InputMaybe<Scalars['Int']['input']>;
+  /** The seller's new scout unit type: one of Pack, Troop, Crew, Ship, or Post. */
+  unitType?: InputMaybe<Scalars['String']['input']>;
 };
 
 /** Input for updateSharedCampaign. Only the provided fields are changed. */

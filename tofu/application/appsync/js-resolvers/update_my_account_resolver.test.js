@@ -85,6 +85,37 @@ describe('update_my_account_resolver request', () => {
     }
   });
 
+  it('rejects a unitType outside Pack, Troop, Crew, Ship, Post', () => {
+    const invalidValues = ['invalid', 'pack', 'PACK', 'Battalion', ''];
+
+    for (const val of invalidValues) {
+      const ctx = {
+        identity: { sub: 'user-123' },
+        args: { input: { unitType: val } },
+      };
+
+      assert.throws(
+        () => request(ctx),
+        /INVALID_INPUT: unitType must be one of: Crew, Pack, Post, Ship, Troop/,
+        `Expected unitType ${JSON.stringify(val)} to be rejected`
+      );
+    }
+  });
+
+  it('accepts every valid unitType: Pack, Troop, Crew, Ship, Post', () => {
+    for (const unitType of ['Pack', 'Troop', 'Crew', 'Ship', 'Post']) {
+      const ctx = {
+        identity: { sub: 'user-123' },
+        args: { input: { unitType: unitType } },
+      };
+
+      const result = request(ctx);
+
+      assert.strictEqual(result.update.expressionValues[':unitType'], unitType);
+      assert.match(result.update.expression, /#unitType = :unitType/);
+    }
+  });
+
   it('builds UpdateItem request with all allowed fields including state alias', () => {
     const ctx = {
       identity: { sub: 'user-123' },

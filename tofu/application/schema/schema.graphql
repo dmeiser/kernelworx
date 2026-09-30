@@ -478,6 +478,10 @@ type CampaignReport {
 input CreateSellerProfileInput {
   """The seller's display name (required, up to 100 characters)."""
   sellerName: String!
+  """The scout unit type: one of Pack, Troop, Crew, Ship, or Post."""
+  unitType: String
+  """The scout unit number (a positive integer)."""
+  unitNumber: Int
 }
 
 """Input for updateSellerProfile."""
@@ -486,6 +490,10 @@ input UpdateSellerProfileInput {
   profileId: ID!
   """The seller's new display name."""
   sellerName: String!
+  """The seller's new scout unit type: one of Pack, Troop, Crew, Ship, or Post."""
+  unitType: String
+  """The seller's new scout unit number (a positive integer)."""
+  unitNumber: Int
 }
 
 """Input for createCampaign. Creates a new active campaign on a profile.

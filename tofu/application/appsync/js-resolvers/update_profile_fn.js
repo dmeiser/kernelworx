@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { assertValidUnitType } from './lib/unit_fields.js';
 
 export function request(ctx) {
     const profile = ctx.stash.profile;
@@ -12,6 +13,9 @@ export function request(ctx) {
         ':updatedAt': now
     };
     
+    // unitType, when provided, must be one of Pack, Troop, Crew, Ship, Post
+    assertValidUnitType(input.unitType);
+
     // Add unitType if provided
     if (input.unitType !== undefined && input.unitType !== null) {
         expressionParts.push('unitType = :unitType');

@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { assertValidUnitType, assertValidUnitNumber } from './lib/unit_fields.js';
 
 export function request(ctx) {
   if (!ctx.identity || !ctx.identity.sub) {
@@ -13,11 +14,8 @@ export function request(ctx) {
     util.error('At least one field must be provided (givenName, familyName, city, state, unitType, or unitNumber)', 'INVALID_INPUT');
   }
 
-  if (input.unitNumber !== undefined && input.unitNumber !== null) {
-    if (typeof input.unitNumber !== 'number' || !Number.isFinite(input.unitNumber) || Math.floor(input.unitNumber) !== input.unitNumber || input.unitNumber < 1) {
-      util.error('unitNumber must be a positive integer', 'INVALID_INPUT');
-    }
-  }
+  assertValidUnitType(input.unitType);
+  assertValidUnitNumber(input.unitNumber);
 
   const expNames = { '#updatedAt': 'updatedAt' };
   const expVals = { ':updatedAt': util.time.nowISO8601() };
