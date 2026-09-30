@@ -76,7 +76,11 @@ const NON_NULLABLE_OUTPUT_FIELDS = ['campaignName', 'campaignYear', 'isActive', 
 
 function rejectExplicitNulls(input) {
     for (const field of NON_NULLABLE_OUTPUT_FIELDS) {
-        if (input[field] === null) {
+        // The APPSYNC_JS runtime can surface an omitted nullable input field
+        // with a null value, so a value check alone cannot tell an explicit
+        // null from an omitted field; key presence can (same contract as
+        // #506's update_order_fn / validate_payment_method_fn).
+        if (Object.hasOwn(input, field) && input[field] === null) {
             util.error(field + ' cannot be null', 'INVALID_INPUT');
             return;
         }
@@ -103,11 +107,14 @@ export function request(ctx) {
     const campaignName = getUpdatedUnitField(input, campaign, 'campaignName');
     const campaignYear = getUpdatedUnitField(input, campaign, 'campaignYear');
 
-    if (input.campaignName !== undefined) {
+    // SET branches for non-nullable-output fields also skip a null value: an
+    // omitted field can surface as null in this runtime and must leave the
+    // stored value untouched (an explicit null was rejected above).
+    if (input.campaignName !== undefined && input.campaignName !== null) {
         updates.push('campaignName = :campaignName');
         exprValues[':campaignName'] = input.campaignName;
     }
-    if (input.campaignYear !== undefined) {
+    if (input.campaignYear !== undefined && input.campaignYear !== null) {
         updates.push('campaignYear = :campaignYear');
         exprValues[':campaignYear'] = input.campaignYear;
     }
@@ -119,12 +126,12 @@ export function request(ctx) {
         updates.push('endDate = :endDate');
         exprValues[':endDate'] = input.endDate;
     }
-    if (input.catalogId !== undefined) {
+    if (input.catalogId !== undefined && input.catalogId !== null) {
         updates.push('catalogId = :catalogId');
         // Normalize catalogId to DB format (CATALOG#...)
         exprValues[':catalogId'] = normalizeCatalogId(input.catalogId);
     }
-    if (input.isActive !== undefined) {
+    if (input.isActive !== undefined && input.isActive !== null) {
         updates.push('isActive = :isActive');
         exprValues[':isActive'] = input.isActive;
     }
@@ -136,17 +143,20 @@ export function request(ctx) {
         updates.push('unitNumber = :unitNumber');
         exprValues[':unitNumber'] = input.unitNumber;
     }
-    if (input.city !== undefined && input.city !== null) {
+    // Key presence distinguishes an explicit null (clear the field) from an
+    // omitted field, whose value may read as null in this runtime and must
+    // not trigger a REMOVE.
+    if (Object.hasOwn(input, 'city') && input.city !== null) {
         updates.push('city = :city');
         exprValues[':city'] = input.city;
-    } else if (input.city === null) {
+    } else if (Object.hasOwn(input, 'city') && input.city === null) {
         removes.push('city');
     }
-    if (input.state !== undefined && input.state !== null) {
+    if (Object.hasOwn(input, 'state') && input.state !== null) {
         updates.push('#state = :state');
         exprNames['#state'] = 'state';
         exprValues[':state'] = input.state;
-    } else if (input.state === null) {
+    } else if (Object.hasOwn(input, 'state') && input.state === null) {
         removes.push('#state');
         exprNames['#state'] = 'state';
     }
@@ -220,11 +230,12 @@ export function response(ctx) {
     // Start with existing campaign data to preserve all fields
     const result = { ...campaign };
 
-    // Apply updates
-    if (input.campaignName !== undefined) {
+    // Apply updates. Same presence/null gating as request(): an omitted field
+    // can surface as null here and must not overwrite the stored value.
+    if (input.campaignName !== undefined && input.campaignName !== null) {
         result.campaignName = input.campaignName;
     }
-    if (input.campaignYear !== undefined) {
+    if (input.campaignYear !== undefined && input.campaignYear !== null) {
         result.campaignYear = input.campaignYear;
     }
     if (input.startDate !== undefined) {
@@ -233,10 +244,10 @@ export function response(ctx) {
     if (input.endDate !== undefined) {
         result.endDate = input.endDate;
     }
-    if (input.catalogId !== undefined) {
+    if (input.catalogId !== undefined && input.catalogId !== null) {
         result.catalogId = normalizeCatalogId(input.catalogId);
     }
-    if (input.isActive !== undefined) {
+    if (input.isActive !== undefined && input.isActive !== null) {
         result.isActive = input.isActive;
     }
     if (input.unitType !== undefined) {
@@ -245,10 +256,10 @@ export function response(ctx) {
     if (input.unitNumber !== undefined) {
         result.unitNumber = input.unitNumber;
     }
-    if (input.city !== undefined) {
+    if (Object.hasOwn(input, 'city')) {
         result.city = input.city;
     }
-    if (input.state !== undefined) {
+    if (Object.hasOwn(input, 'state')) {
         result.state = input.state;
     }
 
