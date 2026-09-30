@@ -137,19 +137,168 @@ class TestAsyncGetSharedProfileIds:
             ]
         }
 
-        mock_dynamodb = AsyncMock()
-        mock_dynamodb.Table.return_value = mock_table
+        # Legacy shares without ownerAccountId are accepted when the profile
+        # still exists via the GSI; the existence check returns the profiles.
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.query.return_value = {"Items": [{"profileId": "PROFILE#prof1"}]}
 
-        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
 
         assert result == ["PROFILE#prof1", "PROFILE#prof2"]
-        mock_table.query.assert_called_once_with(
-            IndexName="targetAccountId-index",
-            KeyConditionExpression="targetAccountId = :targetAccountId",
-            ExpressionAttributeValues={":targetAccountId": "ACCOUNT#test-user"},
-            ProjectionExpression="profileId, #permissions",
-            ExpressionAttributeNames={"#permissions": "permissions"},
+        # No ProjectionExpression: the whole item (including ownerAccountId)
+        # is returned from the ALL-projected GSI.
+        assert mock_table.query.await_args_list[0].kwargs == {
+            "IndexName": "targetAccountId-index",
+            "KeyConditionExpression": "targetAccountId = :targetAccountId",
+            "ExpressionAttributeValues": {":targetAccountId": "ACCOUNT#test-user"},
+        }
+
+    @pytest.mark.asyncio
+    async def test_returns_profile_ids_from_shares_with_valid_owner(self) -> None:
+        """Shares whose recorded owner still owns the profile keep working."""
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {
+            "Items": [
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"], "ownerAccountId": "ACCOUNT#owner1"},
+                {"profileId": "PROFILE#prof2", "permissions": ["WRITE"], "ownerAccountId": "ACCOUNT#owner2"},
+            ]
+        }
+
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.get_item.return_value = {"Item": {}}
+
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
         )
+
+        assert result == ["PROFILE#prof1", "PROFILE#prof2"]
+        # Strongly consistent re-read under each share's recorded owner (#432).
+        assert mock_profiles_table.get_item.await_count == 2
+        mock_profiles_table.get_item.assert_any_call(
+            Key={"ownerAccountId": "ACCOUNT#owner1", "profileId": "PROFILE#prof1"}, ConsistentRead=True
+        )
+        mock_profiles_table.get_item.assert_any_call(
+            Key={"ownerAccountId": "ACCOUNT#owner2", "profileId": "PROFILE#prof2"}, ConsistentRead=True
+        )
+
+    @pytest.mark.asyncio
+    async def test_excludes_stale_shares_after_ownership_transfer(self) -> None:
+        """A share stamped by a previous owner must not grant access (#432, #530).
+
+        After ``transfer_profile_ownership`` the old owner's base-table record is
+        deleted and the share repair is best-effort, so a stale share keeps its
+        old ``ownerAccountId``. The strongly consistent read under that recorded
+        owner comes back empty and the share is dropped instead of surfacing the
+        profile's catalog IDs to the ex-collaborator.
+        """
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {
+            "Items": [
+                {"profileId": "PROFILE#stale", "permissions": ["READ"], "ownerAccountId": "ACCOUNT#old-owner"},
+                {"profileId": "PROFILE#valid", "permissions": ["WRITE"], "ownerAccountId": "ACCOUNT#current-owner"},
+            ]
+        }
+
+        mock_profiles_table = AsyncMock()
+
+        async def mock_get_item(Key: Dict[str, str], ConsistentRead: bool = False) -> Dict[str, Any]:
+            # The stale share's recorded owner no longer owns the profile.
+            if Key["ownerAccountId"] == "ACCOUNT#old-owner":
+                return {}
+            return {"Item": {"profileId": Key["profileId"]}}
+
+        mock_profiles_table.get_item.side_effect = mock_get_item
+
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
+
+        assert result == ["PROFILE#valid"]
+
+    @pytest.mark.asyncio
+    async def test_accepts_legacy_share_without_owner_when_profile_exists(self) -> None:
+        """Shares missing ownerAccountId are accepted only if the profile still exists."""
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {"Items": [{"profileId": "PROFILE#legacy", "permissions": ["READ"]}]}
+
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.query.return_value = {"Items": [{"profileId": "PROFILE#legacy"}]}
+
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
+
+        assert result == ["PROFILE#legacy"]
+
+    @pytest.mark.asyncio
+    async def test_drops_legacy_share_without_owner_when_profile_gone(self) -> None:
+        """A share without ownerAccountId whose profile no longer exists is dropped."""
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {"Items": [{"profileId": "PROFILE#legacy", "permissions": ["READ"]}]}
+
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.query.return_value = {"Items": []}
+
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
+
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_query_is_accepted_by_dynamodb_expression_validation(self) -> None:
@@ -170,7 +319,7 @@ class TestAsyncGetSharedProfileIds:
         mock_dynamodb = AsyncMock()
         mock_dynamodb.Table.return_value = mock_table
 
-        await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table")
         query_kwargs = mock_table.query.call_args.kwargs
 
         with mock_aws():
@@ -200,7 +349,71 @@ class TestAsyncGetSharedProfileIds:
             )
             response = real_table.query(**query_kwargs)
 
-        assert response["Items"] == [{"profileId": "PROFILE#prof1", "permissions": ["READ"]}]
+        # No projection: the query returns the whole item, including the base
+        # table's range key (targetAccountId) alongside the attributes read.
+        assert response["Items"] == [
+            {
+                "profileId": "PROFILE#prof1",
+                "targetAccountId": "ACCOUNT#test-user",
+                "permissions": ["READ"],
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_query_returns_owner_account_id_the_stale_share_check_needs(self) -> None:
+        """The emitted query must return ownerAccountId, which the stale-share check reads."""
+        from src.handlers.list_catalogs_in_use import _async_get_shared_profile_ids
+
+        mock_table = AsyncMock()
+        mock_table.query.return_value = {"Items": []}
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table")
+        query_kwargs = mock_table.query.call_args.kwargs
+
+        with mock_aws():
+            dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+            dynamodb.create_table(
+                TableName="shares-table",
+                KeySchema=[
+                    {"AttributeName": "profileId", "KeyType": "HASH"},
+                    {"AttributeName": "targetAccountId", "KeyType": "RANGE"},
+                ],
+                AttributeDefinitions=[
+                    {"AttributeName": "profileId", "AttributeType": "S"},
+                    {"AttributeName": "targetAccountId", "AttributeType": "S"},
+                ],
+                GlobalSecondaryIndexes=[
+                    {
+                        "IndexName": "targetAccountId-index",
+                        "KeySchema": [{"AttributeName": "targetAccountId", "KeyType": "HASH"}],
+                        "Projection": {"ProjectionType": "ALL"},
+                    }
+                ],
+                BillingMode="PAY_PER_REQUEST",
+            )
+            real_table = dynamodb.Table("shares-table")
+            real_table.put_item(
+                Item={
+                    "profileId": "PROFILE#prof1",
+                    "targetAccountId": "ACCOUNT#test-user",
+                    "permissions": ["READ"],
+                    "ownerAccountId": "ACCOUNT#owner1",
+                }
+            )
+            response = real_table.query(**query_kwargs)
+
+        # No projection: the query returns the whole item, including the base
+        # table's range key (targetAccountId) alongside the attributes read.
+        assert response["Items"] == [
+            {
+                "profileId": "PROFILE#prof1",
+                "targetAccountId": "ACCOUNT#test-user",
+                "permissions": ["READ"],
+                "ownerAccountId": "ACCOUNT#owner1",
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_returns_empty_list_when_no_shares(self) -> None:
@@ -213,7 +426,9 @@ class TestAsyncGetSharedProfileIds:
         mock_dynamodb = AsyncMock()
         mock_dynamodb.Table.return_value = mock_table
 
-        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
 
         assert result == []
 
@@ -225,18 +440,29 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.side_effect = [
             {
-                "Items": [{"profileId": "PROFILE#prof1", "permissions": ["READ"]}],
+                "Items": [{"profileId": "PROFILE#prof1", "permissions": ["READ"], "ownerAccountId": "ACCOUNT#owner1"}],
                 "LastEvaluatedKey": {"pk": "key1"},
             },
             {
-                "Items": [{"profileId": "PROFILE#prof2", "permissions": ["WRITE"]}],
+                "Items": [{"profileId": "PROFILE#prof2", "permissions": ["WRITE"], "ownerAccountId": "ACCOUNT#owner2"}],
             },
         ]
 
-        mock_dynamodb = AsyncMock()
-        mock_dynamodb.Table.return_value = mock_table
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.get_item.return_value = {"Item": {}}
 
-        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
 
         assert result == ["PROFILE#prof1", "PROFILE#prof2"]
         assert mock_table.query.call_count == 2
@@ -249,21 +475,32 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.side_effect = [
             {
-                "Items": [{"profileId": "PROFILE#prof1", "permissions": ["READ"]}],
+                "Items": [{"profileId": "PROFILE#prof1", "permissions": ["READ"], "ownerAccountId": "ACCOUNT#owner1"}],
                 "LastEvaluatedKey": {"pk": "key1"},
             },
             {
                 "Items": [
-                    {"profileId": "PROFILE#prof2", "permissions": ["WRITE"]},
+                    {"profileId": "PROFILE#prof2", "permissions": ["WRITE"], "ownerAccountId": "ACCOUNT#owner2"},
                     {},  # Item without profileId
                 ],
             },
         ]
 
-        mock_dynamodb = AsyncMock()
-        mock_dynamodb.Table.return_value = mock_table
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.get_item.return_value = {"Item": {}}
 
-        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
 
         assert result == ["PROFILE#prof1", "PROFILE#prof2"]
 
@@ -275,15 +512,26 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.return_value = {
             "Items": [
-                {"profileId": "PROFILE#prof1", "permissions": ["READ"]},
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"], "ownerAccountId": "ACCOUNT#owner1"},
                 {},  # Missing profileId
             ]
         }
 
-        mock_dynamodb = AsyncMock()
-        mock_dynamodb.Table.return_value = mock_table
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.get_item.return_value = {"Item": {}}
 
-        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
 
         assert result == ["PROFILE#prof1"]
 
@@ -295,17 +543,32 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.return_value = {
             "Items": [
-                {"profileId": "PROFILE#prof1", "permissions": ["READ"]},
-                {"profileId": "PROFILE#prof2", "permissions": []},
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"], "ownerAccountId": "ACCOUNT#owner1"},
+                {"profileId": "PROFILE#prof2", "permissions": [], "ownerAccountId": "ACCOUNT#owner2"},
             ]
         }
 
-        mock_dynamodb = AsyncMock()
-        mock_dynamodb.Table.return_value = mock_table
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.get_item.return_value = {"Item": {}}
 
-        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
 
         assert result == ["PROFILE#prof1"]
+        # Only the candidate with READ/WRITE reaches the owner re-read.
+        mock_profiles_table.get_item.assert_awaited_once_with(
+            Key={"ownerAccountId": "ACCOUNT#owner1", "profileId": "PROFILE#prof1"}, ConsistentRead=True
+        )
 
     @pytest.mark.asyncio
     async def test_filters_shares_with_invalid_permissions(self) -> None:
@@ -315,15 +578,26 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.return_value = {
             "Items": [
-                {"profileId": "PROFILE#prof1", "permissions": ["WRITE"]},
-                {"profileId": "PROFILE#prof2", "permissions": ["ADMIN"]},
+                {"profileId": "PROFILE#prof1", "permissions": ["WRITE"], "ownerAccountId": "ACCOUNT#owner1"},
+                {"profileId": "PROFILE#prof2", "permissions": ["ADMIN"], "ownerAccountId": "ACCOUNT#owner2"},
             ]
         }
 
-        mock_dynamodb = AsyncMock()
-        mock_dynamodb.Table.return_value = mock_table
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.get_item.return_value = {"Item": {}}
 
-        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
 
         assert result == ["PROFILE#prof1"]
 
@@ -335,17 +609,32 @@ class TestAsyncGetSharedProfileIds:
         mock_table = AsyncMock()
         mock_table.query.return_value = {
             "Items": [
-                {"profileId": "PROFILE#prof1", "permissions": ["READ"]},
+                {"profileId": "PROFILE#prof1", "permissions": ["READ"], "ownerAccountId": "ACCOUNT#owner1"},
                 {"profileId": "PROFILE#prof2"},
             ]
         }
 
-        mock_dynamodb = AsyncMock()
-        mock_dynamodb.Table.return_value = mock_table
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.get_item.return_value = {"Item": {}}
 
-        result = await _async_get_shared_profile_ids(mock_dynamodb, "shares-table", "ACCOUNT#test-user")
+        mock_dynamodb = AsyncMock()
+
+        async def mock_table_by_name(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            return mock_table
+
+        mock_dynamodb.Table = mock_table_by_name
+
+        result = await _async_get_shared_profile_ids(
+            mock_dynamodb, "shares-table", "ACCOUNT#test-user", "profiles-table"
+        )
 
         assert result == ["PROFILE#prof1"]
+        # The share without permissions is filtered before the owner re-read.
+        mock_profiles_table.get_item.assert_awaited_once_with(
+            Key={"ownerAccountId": "ACCOUNT#owner1", "profileId": "PROFILE#prof1"}, ConsistentRead=True
+        )
 
 
 class TestAsyncGetCampaignsForProfile:
@@ -696,12 +985,15 @@ class TestAsyncGetAllCatalogIds:
 
         mock_profiles_table = AsyncMock()
         mock_profiles_table.query.return_value = {"Items": [{"profileId": "PROFILE#owned1"}]}
+        mock_profiles_table.get_item.return_value = {"Item": {}}
 
         mock_campaigns_table = AsyncMock()
         mock_campaigns_table.query.return_value = {"Items": [{"catalogId": "CATALOG#cat1"}]}
 
         mock_shares_table = AsyncMock()
-        mock_shares_table.query.return_value = {"Items": [{"profileId": "PROFILE#shared1", "permissions": ["READ"]}]}
+        mock_shares_table.query.return_value = {
+            "Items": [{"profileId": "PROFILE#shared1", "permissions": ["READ"], "ownerAccountId": "ACCOUNT#owner1"}]
+        }
 
         async def mock_table(table_name: str) -> AsyncMock:
             """Return the appropriate mock table based on name."""
@@ -731,6 +1023,71 @@ class TestAsyncGetAllCatalogIds:
         assert owned == {"CATALOG#cat1"}
         assert shared_profiles == ["PROFILE#shared1"]
         assert shared_catalogs == {"CATALOG#cat1"}
+
+    @pytest.mark.asyncio
+    async def test_excludes_stale_shared_profile_catalogs_after_transfer(self) -> None:
+        """Catalogs of a profile left behind by a stale share are not returned (#530).
+
+        The share still exists on the targetAccountId-index GSI with READ and a
+        pre-transfer ownerAccountId; the strongly consistent read under that old
+        owner is empty, so the profile (and its catalogs) must not be surfaced.
+        """
+        import importlib
+
+        import src.handlers.list_catalogs_in_use as module
+
+        importlib.reload(module)
+
+        mock_profiles_table = AsyncMock()
+        mock_profiles_table.query.return_value = {"Items": []}
+
+        async def mock_get_item(Key: Dict[str, str], ConsistentRead: bool = False) -> Dict[str, Any]:
+            return {}
+
+        mock_profiles_table.get_item.side_effect = mock_get_item
+
+        mock_campaigns_table = AsyncMock()
+        mock_campaigns_table.query.return_value = {"Items": [{"catalogId": "CATALOG#stale"}]}
+
+        mock_shares_table = AsyncMock()
+        mock_shares_table.query.return_value = {
+            "Items": [
+                {
+                    "profileId": "PROFILE#stale",
+                    "permissions": ["READ"],
+                    "ownerAccountId": "ACCOUNT#old-owner",
+                }
+            ]
+        }
+
+        async def mock_table(table_name: str) -> AsyncMock:
+            if "profiles" in table_name:
+                return mock_profiles_table
+            if "campaigns" in table_name:
+                return mock_campaigns_table
+            return mock_shares_table
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table = mock_table
+
+        mock_session = MagicMock()
+        mock_context_manager = AsyncMock()
+        mock_context_manager.__aenter__.return_value = mock_dynamodb
+        mock_context_manager.__aexit__.return_value = None
+        mock_session.resource.return_value = mock_context_manager
+
+        original_session = module.aioboto3.Session
+        module.aioboto3.Session = MagicMock(return_value=mock_session)
+        try:
+            owned, shared_profiles, shared_catalogs = await module._async_get_all_catalog_ids("ACCOUNT#test-user")
+        finally:
+            module.aioboto3.Session = original_session
+
+        assert owned == set()
+        assert shared_profiles == []
+        assert shared_catalogs == set()
+        # The stale share never reached the campaigns table.
+        mock_campaigns_table.query.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_returns_empty_shared_catalogs_when_no_shared_profiles(self) -> None:
