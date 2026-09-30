@@ -696,9 +696,14 @@ def _search_users_in_cognito_by_email_prefix(
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code in _THROTTLING_ERROR_CODES:
-            logger.warning("Cognito email prefix search throttled", error=str(e), error_code=error_code, query=query)
+            logger.warning(
+                "Cognito email prefix search throttled",
+                error=str(e),
+                error_code=error_code,
+                query=mask_email(query),
+            )
             raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from e
-        logger.warning("Cognito email prefix search failed", error=str(e), query=query)
+        logger.warning("Cognito email prefix search failed", error=str(e), query=mask_email(query))
         return []
 
 

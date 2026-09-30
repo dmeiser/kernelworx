@@ -4562,14 +4562,14 @@ class TestAdminSearchUserThrottling:
         mock_logger = MagicMock()
 
         with pytest.raises(AppError) as exc_info:
-            _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
+            _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "alice@exa", mock_logger)
 
         assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
         assert exc_info.value.message == "Temporarily unable to load data. Please retry."
         mock_logger.warning.assert_called_once()
         log_kwargs = mock_logger.warning.call_args[1]
         assert log_kwargs["error_code"] == error_code
-        assert log_kwargs["query"] == "user@"
+        assert log_kwargs["query"] == "a***@exa"
 
     def test_search_users_in_cognito_by_email_prefix_non_throttling_client_error_returns_empty(self) -> None:
         """Non-throttling ClientError in _search_users_in_cognito_by_email_prefix logs warning and returns []."""
@@ -4580,10 +4580,12 @@ class TestAdminSearchUserThrottling:
         )
         mock_logger = MagicMock()
 
-        result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "user@", mock_logger)
+        result = _search_users_in_cognito_by_email_prefix(mock_cognito, "pool-id", "alice@exa", mock_logger)
         assert result == []
         mock_logger.warning.assert_called_once()
         assert "Cognito email prefix search failed" in mock_logger.warning.call_args[0][0]
+        log_kwargs = mock_logger.warning.call_args[1]
+        assert log_kwargs["query"] == "a***@exa"
 
     def test_search_users_in_cognito_by_email_prefix_genuine_not_found_returns_empty(self) -> None:
         """Empty Cognito Users list in _search_users_in_cognito_by_email_prefix returns []."""

@@ -70,19 +70,6 @@ resource "aws_appsync_function" "check_profile_read_auth" {
   code = file("${local.js_resolvers_dir}/check_profile_read_auth_fn.js")
 }
 
-resource "aws_appsync_function" "verify_profile_write_or_owner" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.profiles.name
-  name        = "VerifyProfileWriteAccessOrOwnerFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/verify_profile_write_access_or_owner_fn.js")
-}
-
 resource "aws_appsync_function" "check_write_permission" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.shares.name
