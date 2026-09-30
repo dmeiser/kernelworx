@@ -3,7 +3,6 @@
  */
 
 import { gql } from '@apollo/client';
-import type { GqlAdminUser } from '../types/graphql-generated';
 
 // ============================================================================
 // Fragments
@@ -826,11 +825,6 @@ export const ADMIN_SEARCH_USER = gql`
     }
   }
 `;
-
-// Type for search results
-export type AdminSearchUserResponse = {
-  adminSearchUser: GqlAdminUser[];
-};
 
 export const ADMIN_GET_USER_PROFILES = gql`
   ${SELLER_PROFILE_FRAGMENT}

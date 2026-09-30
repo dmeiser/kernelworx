@@ -4,12 +4,14 @@ import { renderHook, act } from '@testing-library/react';
 // Mock validation hook
 const mockValidateProfileSelection = vi.fn();
 const mockValidateUnitFields = vi.fn();
+const mockValidateCampaignYear = vi.fn();
 
 vi.mock('../../src/hooks/useCreateCampaignValidation', () => ({
   useCreateCampaignValidation: () => ({
     isFormValid: true,
     validateProfileSelection: mockValidateProfileSelection,
     validateUnitFields: mockValidateUnitFields,
+    validateCampaignYear: mockValidateCampaignYear,
   }),
 }));
 
@@ -59,6 +61,7 @@ describe('useCreateCampaignSubmitHandler', () => {
     vi.clearAllMocks();
     mockValidateProfileSelection.mockReturnValue({ isValid: true, error: null });
     mockValidateUnitFields.mockReturnValue({ isValid: true, error: null });
+    mockValidateCampaignYear.mockReturnValue({ isValid: true, error: null });
     mockSubmitCampaign.mockResolvedValue(undefined);
   });
 
@@ -114,6 +117,30 @@ describe('useCreateCampaignSubmitHandler', () => {
 
     expect(formState.setToastMessage).toHaveBeenCalledWith({
       message: 'When specifying a unit, all fields are required',
+      severity: 'error',
+    });
+    expect(mockSubmitCampaign).not.toHaveBeenCalled();
+  });
+
+  it('shows error when the campaign year is outside the allowed range', async () => {
+    mockValidateCampaignYear.mockReturnValue({
+      isValid: false,
+      error: 'Campaign year must be between 2020 and 2050',
+    });
+
+    const formState = createMockFormState({ campaignYear: 2051 });
+    const { result } = renderHook(() => useCreateCampaignSubmitHandler(formState));
+
+    await act(async () => {
+      await result.current.handleSubmit({
+        isSharedCampaignMode: false,
+        effectiveSharedCampaignCode: undefined,
+        sharedCampaignCreatedByName: undefined,
+      });
+    });
+
+    expect(formState.setToastMessage).toHaveBeenCalledWith({
+      message: 'Campaign year must be between 2020 and 2050',
       severity: 'error',
     });
     expect(mockSubmitCampaign).not.toHaveBeenCalled();
