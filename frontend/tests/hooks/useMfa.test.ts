@@ -229,7 +229,7 @@ describe('useMfa', () => {
   });
 });
 
-describe('useMfa error paths and confirmSetupMFA', () => {
+describe('useMfa error paths', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({
@@ -242,7 +242,9 @@ describe('useMfa error paths and confirmSetupMFA', () => {
     vi.mocked(amplifyAuth.fetchMFAPreference).mockResolvedValue({ preferred: 'TOTP' } as any);
   });
 
-  it('regenerates the TOTP setup via confirmSetupMFA and clears prior errors', async () => {
+  it('regenerates the TOTP setup via handleSetupMFA and clears prior errors', async () => {
+    // handleSetupMFA is the only setup entry point, so a retry after a failed
+    // attempt must clear the stale error as part of re-issuing setUpTOTP.
     const { result } = renderHook(() => useMfa());
 
     act(() => {
@@ -251,7 +253,7 @@ describe('useMfa error paths and confirmSetupMFA', () => {
     });
 
     await act(async () => {
-      await result.current.confirmSetupMFA();
+      await result.current.handleSetupMFA();
     });
 
     expect(result.current.mfaError).toBeNull();
@@ -265,7 +267,7 @@ describe('useMfa error paths and confirmSetupMFA', () => {
     const { result } = renderHook(() => useMfa());
 
     await act(async () => {
-      await result.current.confirmSetupMFA();
+      await result.current.handleSetupMFA();
     });
 
     expect(result.current.mfaError).toBe('totp exploded');

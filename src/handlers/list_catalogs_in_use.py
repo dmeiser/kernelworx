@@ -6,12 +6,13 @@ Returns all catalog IDs used by campaigns for profiles the user owns or has acce
 This Lambda is necessary because:
 1. We need to query profiles owned by the account (1 query)
 2. We need to query campaigns for each owned profile (N queries)
-3. We need to query campaigns for shared profiles (1 shares query + N campaign queries)
+3. We need to query campaigns for shared profiles (1 shares query, N owner re-validation reads, N campaign queries)
 4. A pipeline resolver can't dynamically query N profiles
 
 Uses aioboto3 for async parallel queries:
 - owned_profile_ids and shared_profile_ids run concurrently
-- owned_catalog_ids and shared_catalog_ids wait for their respective profile_ids, then run N queries in parallel
+- owned_catalog_ids and shared_catalog_ids wait for their respective profile_ids, then run N queries in
+  parallel, bounded to the concurrency and chunk caps campaign_reporting uses (#541)
 
 GraphQL query: listCatalogsInUse
 Returns: [ID!]! (list of catalog IDs)
@@ -29,6 +30,11 @@ import aioboto3
 # than redeclared and the two copies cannot drift. One-way: admin_operations does
 # not import this module.
 from .admin_operations import _raise_gather_failures
+
+# The query-bounding caps are owned by the sibling report module so the two
+# modules cannot drift (#541): one concurrency cap and one chunk cap in the
+# codebase, not two.
+from .campaign_reporting import _ORDER_QUERY_CONCURRENCY, _PROFILE_BATCH_LIMIT
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -110,23 +116,73 @@ async def _async_get_campaigns_for_profile(dynamodb: Any, campaigns_table_name: 
     return set(catalog_list)
 
 
-async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, target_account_id: str) -> List[str]:
-    """Async: Get profile IDs that are shared with this account."""
+async def _async_profile_exists(profiles_table: Any, db_profile_id: str) -> bool:
+    """Async: Check if a profile exists via the (eventually consistent) GSI."""
+    response = await profiles_table.query(
+        IndexName="profileId-index",
+        KeyConditionExpression="profileId = :profileId",
+        ExpressionAttributeValues={":profileId": db_profile_id},
+        Limit=1,
+    )
+    return bool(response.get("Items", []))
+
+
+async def _async_share_is_valid(profiles_table: Any, share: Dict[str, Any], db_profile_id: str) -> bool:
+    """Verify a share record still reflects the profile's current owner (#432).
+
+    Mirrors ``utils.auth._is_share_valid``: the transfer handler rewrites
+    third-party shares best-effort, so a stale share survives an ownership
+    transfer and keeps its old ``ownerAccountId``. A strongly consistent
+    base-table read under the share's recorded owner only succeeds while the
+    share is still valid. Shares missing ``ownerAccountId`` are accepted only
+    when the profile still exists (verified via the GSI).
+    """
+    share_owner = share.get("ownerAccountId")
+    if not share_owner:
+        return await _async_profile_exists(profiles_table, db_profile_id)
+    profile_response = await profiles_table.get_item(
+        Key={"ownerAccountId": share_owner, "profileId": db_profile_id}, ConsistentRead=True
+    )
+    return "Item" in profile_response
+
+
+async def _async_validate_shared_profiles(
+    dynamodb: Any, profiles_table_name: str, candidate_shares: List[Tuple[str, Dict[str, Any]]]
+) -> List[str]:
+    """Async: Drop stale shares whose recorded owner no longer owns the profile."""
+    if not candidate_shares:
+        return []
+    profiles_table = await dynamodb.Table(profiles_table_name)
+    # One consistent read per candidate share, run in parallel so the
+    # re-validation does not serialize the share fan-out.
+    valid = await asyncio.gather(
+        *[_async_share_is_valid(profiles_table, share, pid) for pid, share in candidate_shares]
+    )
+    return [pid for (pid, _share), valid_share in zip(candidate_shares, valid) if valid_share]
+
+
+async def _async_get_shared_profile_ids(
+    dynamodb: Any, shares_table_name: str, target_account_id: str, profiles_table_name: str
+) -> List[str]:
+    """Async: Get profile IDs that are shared with this account.
+
+    After the ``targetAccountId-index`` GSI query, each share with READ/WRITE
+    is re-validated against the profile's current owner with a strongly
+    consistent base-table read (the #432 stale-share check the other share
+    consumers run, e.g. ``utils.auth._is_share_valid``).
+    """
     table = await dynamodb.Table(shares_table_name)
+    # No ProjectionExpression: the GSI projection is ALL and the items are
+    # read whole (ownerAccountId is needed for the #432 stale-share check).
     query_params = {
         "IndexName": "targetAccountId-index",
         "KeyConditionExpression": "targetAccountId = :targetAccountId",
         "ExpressionAttributeValues": {":targetAccountId": target_account_id},
-        # "permissions" is a DynamoDB reserved word; it must be referenced via
-        # an expression attribute name or the query is rejected with a
-        # ValidationException.
-        "ProjectionExpression": "profileId, #permissions",
-        "ExpressionAttributeNames": {"#permissions": "permissions"},
     }
-    results: List[str] = []
+    candidate_shares: List[Tuple[str, Dict[str, Any]]] = []
     response = await table.query(**query_params)
-    results.extend(
-        item["profileId"]
+    candidate_shares.extend(
+        (item["profileId"], item)
         for item in response.get("Items", [])
         if item.get("profileId") and _share_item_has_accessible_permissions(item)
     )
@@ -134,19 +190,26 @@ async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, t
     while response.get("LastEvaluatedKey"):
         query_params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
         response = await table.query(**query_params)
-        results.extend(
-            item["profileId"]
+        candidate_shares.extend(
+            (item["profileId"], item)
             for item in response.get("Items", [])
             if item.get("profileId") and _share_item_has_accessible_permissions(item)
         )
 
-    return results
+    return await _async_validate_shared_profiles(dynamodb, profiles_table_name, candidate_shares)
 
 
 async def _async_get_shared_campaign_catalog_ids(
     dynamodb: Any, campaigns_table_name: str, profile_ids: List[str], request_logger: Any = logger
 ) -> Set[str]:
-    """Async: Query campaigns for all profiles in parallel.
+    """Async: Query campaigns for all profiles with bounded concurrency.
+
+    Profile ids are processed in chunks no larger than
+    ``campaign_reporting._PROFILE_BATCH_LIMIT`` and each per-profile query
+    (its pagination loop included) holds one of
+    ``campaign_reporting._ORDER_QUERY_CONCURRENCY`` semaphore slots, so at most
+    that many DynamoDB queries are ever in flight at once - the same bounding
+    strategy the sibling report module uses (#541).
 
     A per-profile query failure is raised (see
     `admin_operations._raise_gather_failures`) instead of being logged and
@@ -156,28 +219,35 @@ async def _async_get_shared_campaign_catalog_ids(
     if not profile_ids:
         return set()
 
-    # Create tasks for all profile queries
-    tasks = [_async_get_campaigns_for_profile(dynamodb, campaigns_table_name, pid) for pid in profile_ids]
+    semaphore = asyncio.Semaphore(_ORDER_QUERY_CONCURRENCY)
 
-    # Run all queries concurrently and collect results
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    # If any profile query failed we cannot answer authoritatively; fail the
-    # whole request instead of returning a truncated set (#556).
-    failures = [result for result in results if isinstance(result, BaseException)]
-    if failures:
-        _raise_gather_failures(
-            "list catalogs in use",
-            request_logger,
-            failures,
-            busy_message="Temporarily unable to list catalogs in use. Please retry.",
-            failed=len(failures),
-            total=len(results),
-        )
+    async def _bounded_query(profile_id: str) -> Set[str]:
+        async with semaphore:
+            return await _async_get_campaigns_for_profile(dynamodb, campaigns_table_name, profile_id)
 
     catalog_ids: Set[str] = set()
-    for result in results:
-        catalog_ids.update(cast(Set[str], result))
+    # Chunk the profile list so no more than _PROFILE_BATCH_LIMIT tasks exist
+    # per gather wave; a failing chunk still raises via _raise_gather_failures
+    # before the next chunk starts, never returning a truncated set.
+    for start in range(0, len(profile_ids), _PROFILE_BATCH_LIMIT):
+        chunk = profile_ids[start : start + _PROFILE_BATCH_LIMIT]
+        results = await asyncio.gather(*(_bounded_query(pid) for pid in chunk), return_exceptions=True)
+
+        # If any profile query failed we cannot answer authoritatively; fail the
+        # whole request instead of returning a truncated set (#556).
+        failures = [result for result in results if isinstance(result, BaseException)]
+        if failures:
+            _raise_gather_failures(
+                "list catalogs in use",
+                request_logger,
+                failures,
+                busy_message="Temporarily unable to list catalogs in use. Please retry.",
+                failed=len(failures),
+                total=len(results),
+            )
+
+        for result in results:
+            catalog_ids.update(cast(Set[str], result))
 
     return catalog_ids
 
@@ -200,7 +270,9 @@ async def _async_get_all_catalog_ids(
     async with session.resource("dynamodb") as dynamodb:
         # Step 1 & 2: Run owned profiles and shared profiles queries in parallel
         owned_profiles_task = _async_get_owned_profile_ids(dynamodb, profiles_table_name, account_id)
-        shared_profiles_task = _async_get_shared_profile_ids(dynamodb, shares_table_name, account_id)
+        shared_profiles_task = _async_get_shared_profile_ids(
+            dynamodb, shares_table_name, account_id, profiles_table_name
+        )
 
         owned_profile_ids, shared_profile_ids = await asyncio.gather(owned_profiles_task, shared_profiles_task)
 

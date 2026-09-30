@@ -59,12 +59,12 @@ import {
   LIST_MANAGED_CATALOGS,
   ADMIN_SEARCH_USER,
   ADMIN_RESET_USER_PASSWORD,
-  ADMIN_DELETE_USER,
+  ADMIN_PURGE_USER_ACCOUNT,
   ADMIN_DELETE_USER_ORDERS,
   ADMIN_DELETE_USER_CAMPAIGNS,
   ADMIN_DELETE_USER_SHARES,
   ADMIN_DELETE_USER_PROFILES,
-  ADMIN_DELETE_USER_CATALOGS,
+  ADMIN_GET_USER_PROFILES,
   CREATE_MANAGED_CATALOG,
   UPDATE_CATALOG,
   DELETE_CATALOG,
@@ -76,8 +76,8 @@ import { isMfaRequiredError, MFA_REQUIRED_ERROR_CODE } from '../lib/mfaErrors';
 import { formatDisplayDate } from '../lib/date-utils';
 import type { GqlCatalog, GqlAdminUser, GqlProductInput } from '../types/graphql-generated';
 import type {
-  GqlAdminDeleteUserMutation,
-  GqlAdminDeleteUserMutationVariables,
+  GqlAdminPurgeUserAccountMutation,
+  GqlAdminPurgeUserAccountMutationVariables,
   GqlAdminDeleteUserOrdersMutation,
   GqlAdminDeleteUserOrdersMutationVariables,
   GqlAdminDeleteUserCampaignsMutation,
@@ -86,8 +86,8 @@ import type {
   GqlAdminDeleteUserSharesMutationVariables,
   GqlAdminDeleteUserProfilesMutation,
   GqlAdminDeleteUserProfilesMutationVariables,
-  GqlAdminDeleteUserCatalogsMutation,
-  GqlAdminDeleteUserCatalogsMutationVariables,
+  GqlAdminGetUserProfilesQuery,
+  GqlAdminGetUserProfilesQueryVariables,
 } from '../types/graphql-generated';
 
 // --- Type Definitions ---
@@ -472,7 +472,7 @@ export const AdminPage: React.FC = () => {
   const [editingCatalog, setEditingCatalog] = useState<GqlCatalog | null>(null);
   const [deleteCatalogTarget, setDeleteCatalogTarget] = useState<GqlCatalog | null>(null);
 
-  // Cascading delete progress state
+  // Delete progress state
   const [deleteProgress, setDeleteProgress] = useState<{
     step: string;
     completed: string[];
@@ -533,7 +533,10 @@ export const AdminPage: React.FC = () => {
     },
   });
 
-  // Cascading delete mutations (called sequentially)
+  // Deletion is client-side by decision (#521). The client issues the
+  // per-entity deletes it can reach, then adminPurgeUserAccount for the two
+  // things a browser cannot do: the accounts record and the Cognito user.
+  // Catalogs are deliberately never deleted.
   const [deleteUserOrders] = useMutation<GqlAdminDeleteUserOrdersMutation, GqlAdminDeleteUserOrdersMutationVariables>(
     ADMIN_DELETE_USER_ORDERS,
   );
@@ -548,11 +551,17 @@ export const AdminPage: React.FC = () => {
     GqlAdminDeleteUserProfilesMutation,
     GqlAdminDeleteUserProfilesMutationVariables
   >(ADMIN_DELETE_USER_PROFILES);
-  const [deleteUserCatalogs] = useMutation<
-    GqlAdminDeleteUserCatalogsMutation,
-    GqlAdminDeleteUserCatalogsMutationVariables
-  >(ADMIN_DELETE_USER_CATALOGS);
-  const [deleteUser] = useMutation<GqlAdminDeleteUserMutation, GqlAdminDeleteUserMutationVariables>(ADMIN_DELETE_USER);
+  const [purgeUserAccount] = useMutation<GqlAdminPurgeUserAccountMutation, GqlAdminPurgeUserAccountMutationVariables>(
+    ADMIN_PURGE_USER_ACCOUNT,
+  );
+  // The purge needs the profile IDs read BEFORE the profile rows are deleted,
+  // because the server sweeps the profile-keyed residue by them (#521).
+  const [getUserProfilesForPurge] = useLazyQuery<GqlAdminGetUserProfilesQuery, GqlAdminGetUserProfilesQueryVariables>(
+    ADMIN_GET_USER_PROFILES,
+    {
+      fetchPolicy: 'network-only',
+    },
+  );
 
   const catalogs = catalogsData?.listManagedCatalogs || [];
 
@@ -635,7 +644,7 @@ export const AdminPage: React.FC = () => {
     }
   };
 
-  // eslint-disable-next-line complexity -- Cascading delete requires sequential steps
+  // eslint-disable-next-line complexity -- Client-side cascade requires sequential steps
   const confirmDeleteUser = async () => {
     /* v8 ignore start -- Delete user dialog only opens when a target is selected */
     if (!deleteUserTarget) return;
@@ -645,34 +654,33 @@ export const AdminPage: React.FC = () => {
     const completed: string[] = [];
 
     try {
-      // Step 1: Delete orders
+      // Client-side cascade (#521). Catalogs are never deleted, so there is
+      // deliberately no catalog step here.
       setDeleteProgress({ step: 'Deleting sales/orders...', completed });
       const ordersResult = await deleteUserOrders({ variables: { accountId } });
       completed.push(`Deleted ${ordersResult.data?.adminDeleteUserOrders ?? 0} orders`);
 
-      // Step 2: Delete campaigns
       setDeleteProgress({ step: 'Deleting campaigns...', completed: [...completed] });
       const campaignsResult = await deleteUserCampaigns({ variables: { accountId } });
       completed.push(`Deleted ${campaignsResult.data?.adminDeleteUserCampaigns ?? 0} campaigns`);
 
-      // Step 3: Delete shares
       setDeleteProgress({ step: 'Deleting shares...', completed: [...completed] });
       const sharesResult = await deleteUserShares({ variables: { accountId } });
       completed.push(`Deleted ${sharesResult.data?.adminDeleteUserShares ?? 0} shares`);
 
-      // Step 4: Delete profiles
       setDeleteProgress({ step: 'Deleting profiles...', completed: [...completed] });
+      // The server purge sweeps the profile-keyed residue (invites, S3
+      // reports) by profile ID, so the IDs must be read while the profile
+      // rows still exist (#521).
+      const profilesData = await getUserProfilesForPurge({ variables: { accountId } });
+      const profileIds = (profilesData.data?.adminGetUserProfiles ?? []).map((profile) => profile.profileId);
       const profilesResult = await deleteUserProfiles({ variables: { accountId } });
       completed.push(`Deleted ${profilesResult.data?.adminDeleteUserProfiles ?? 0} profiles`);
 
-      // Step 5: Delete catalogs
-      setDeleteProgress({ step: 'Deleting catalogs...', completed: [...completed] });
-      const catalogsResult = await deleteUserCatalogs({ variables: { accountId } });
-      completed.push(`Deleted ${catalogsResult.data?.adminDeleteUserCatalogs ?? 0} catalogs`);
-
-      // Step 6: Delete user from Cognito + DynamoDB
+      // Last: the accounts record and the Cognito user, which a browser with
+      // no AWS credentials cannot delete itself.
       setDeleteProgress({ step: 'Deleting user account...', completed: [...completed] });
-      await deleteUser({ variables: { accountId } });
+      await purgeUserAccount({ variables: { accountId, profileIds } });
       completed.push('User account deleted');
 
       // Success!
@@ -856,9 +864,10 @@ export const AdminPage: React.FC = () => {
                 <li>Campaigns</li>
                 <li>Shares</li>
                 <li>Profiles (Scouts)</li>
-                <li>Custom catalogs</li>
                 <li>User account</li>
               </ul>
+              Their custom catalogs are preserved and will not be deleted.
+              <br />
               This action cannot be undone.
             </DialogContentText>
           ) : (

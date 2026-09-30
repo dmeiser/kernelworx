@@ -1,17 +1,20 @@
 """Shared account-deletion cascade internals.
 
-The cascade that removes a user (self-service ``deleteMyAccount`` and admin
-``adminDeleteUser``) used to be split between ``account_operations``, which
-orchestrated it, and ``admin_operations``, which held the per-domain
-sub-cascades. That split was a circular import: ``admin_operations`` imported
-the orchestrator at module scope, so the orchestrator had to import the
-sub-cascades back inside function bodies. A consequence was that every
-sub-cascade re-paginated the whole profiles table on its own, so one account
-deletion paid six full profiles sweeps (#554).
+The whole-user deletion cascade used to be split between
+``account_operations``, which orchestrated it, and ``admin_operations``,
+which held the per-domain sub-cascades. That split was a circular import:
+``admin_operations`` imported the orchestrator at module scope, so the
+orchestrator had to import the sub-cascades back inside function bodies.
+A consequence was that every sub-cascade re-paginated the whole profiles
+table on its own, so one account deletion paid six full profiles sweeps
+(#554).
 
 The internals now live here, below both handlers in the graph:
 ``delete_all_user_data`` sweeps the profiles table once and passes the list
-into each sub-cascade, which only ever iterates it.
+into each sub-cascade, which only ever iterates it. Only self-service
+``deleteMyAccount`` runs the whole cascade today: admin deletion is
+client-side (#521) and reuses these per-entity sub-cascades directly, then
+calls ``adminPurgeUserAccount`` — see the #521 entry in AGENTS.md.
 """
 
 from typing import TYPE_CHECKING, Any, Dict

@@ -44,7 +44,7 @@ interface OptionalFields {
 const SIGNUP_ERROR_MESSAGES: Record<string, string> = {
   UsernameExistsException: 'An account with this email already exists',
   InvalidPasswordException:
-    'Password does not meet requirements: minimum 8 characters with uppercase, lowercase, numbers, and symbols',
+    'Password does not meet requirements: minimum 15 characters with uppercase, lowercase, numbers, and symbols',
   InvalidParameterException: 'Invalid input. Please check your information',
 };
 
@@ -80,7 +80,7 @@ function getVerificationErrorMessage(error: { name?: string; message?: string })
   return getErrorFromTable(VERIFICATION_ERROR_MESSAGES, error.name, fallback);
 }
 
-const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{15,}$/;
 
 // Helper: Validate form fields and return error message or null
 function validateFormFields(
@@ -97,7 +97,7 @@ function validateFormFields(
     [() => email.includes('@'), 'Please enter a valid email address'],
     [
       () => PASSWORD_REGEX.test(password),
-      'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol',
+      'Password must be at least 15 characters and include uppercase, lowercase, number, and symbol',
     ],
     [() => password === confirmPassword, 'Passwords do not match'],
     [() => ageConfirmed, 'You must be 13 years or older to create an account'],
@@ -696,7 +696,7 @@ const SignupFormView: React.FC<SignupFormViewProps> = ({
         margin="normal"
         required
         autoComplete="new-password"
-        helperText="Minimum 8 characters with uppercase, lowercase, numbers, and symbols"
+        helperText="Minimum 15 characters with uppercase, lowercase, numbers, and symbols"
       />
 
       <TextField
