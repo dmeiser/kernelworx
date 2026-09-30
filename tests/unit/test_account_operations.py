@@ -1037,19 +1037,16 @@ class TestDeleteMyAccount:
         sample_account_id: str,
         monkeypatch: Any,
     ) -> None:
-        """Test _delete_user_s3_reports handles profiles missing profileId attribute."""
-        from src.handlers.account_operations import _delete_user_s3_reports
+        """Test delete_user_s3_reports handles profiles missing profileId attribute."""
+        from src.handlers.deletion_cascade import delete_user_s3_reports
 
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
         account_id_key = f"ACCOUNT#{sample_account_id}"
 
-        # Insert a profile item missing profileId (or with None/empty)
-        # With mock query, test the exact if profile_id branch.
+        # A profile item missing profileId (or with None/empty) must be skipped.
         mock_logger = MagicMock()
-        with patch("src.handlers.admin_operations._get_user_profiles") as mock_get_profiles:
-            mock_get_profiles.return_value = [{"ownerAccountId": account_id_key}]
-            count = _delete_user_s3_reports(sample_account_id, mock_logger)
-            assert count == 0
+        count = delete_user_s3_reports([{"ownerAccountId": account_id_key}], mock_logger)
+        assert count == 0
 
     def test_delete_user_s3_reports_no_bucket(
         self,
@@ -1057,16 +1054,16 @@ class TestDeleteMyAccount:
         sample_account_id: str,
         monkeypatch: Any,
     ) -> None:
-        """Test _delete_user_s3_reports returns 0 when EXPORTS_BUCKET is not set."""
-        from src.handlers.account_operations import _delete_user_s3_reports
+        """Test delete_user_s3_reports returns 0 when EXPORTS_BUCKET is not set."""
+        from src.handlers.deletion_cascade import delete_user_s3_reports
 
         monkeypatch.delenv("EXPORTS_BUCKET", raising=False)
         mock_logger = MagicMock()
 
-        with patch("src.handlers.admin_operations._get_user_profiles") as mock_get_profiles:
-            mock_get_profiles.return_value = [{"ownerAccountId": f"ACCOUNT#{sample_account_id}", "profileId": "p1"}]
-            count = _delete_user_s3_reports(sample_account_id, mock_logger)
-            assert count == 0
+        count = delete_user_s3_reports(
+            [{"ownerAccountId": f"ACCOUNT#{sample_account_id}", "profileId": "p1"}], mock_logger
+        )
+        assert count == 0
 
     def test_delete_account_s3_reports_error_fails(
         self,
@@ -1113,7 +1110,7 @@ class TestDeleteMyAccount:
             mock_cognito.list_users.return_value = {"Users": [{"Username": "testuser@example.com"}]}
 
             with patch(
-                "src.handlers.delete_profile_cascade._delete_s3_reports",
+                "src.handlers.deletion_cascade._delete_s3_reports",
                 side_effect=AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete S3 reports"),
             ):
                 event = {
@@ -1131,8 +1128,8 @@ class TestDeleteMyAccount:
         sample_account_id: str,
         monkeypatch: Any,
     ) -> None:
-        """Test _delete_user_s3_reports deletes versions and markers across prefixes."""
-        from src.handlers.account_operations import _delete_user_s3_reports
+        """Test delete_user_s3_reports deletes versions and markers across prefixes."""
+        from src.handlers.deletion_cascade import delete_user_s3_reports
 
         monkeypatch.setenv("EXPORTS_BUCKET", "test-reports-bucket")
         mock_s3 = MagicMock()
@@ -1151,12 +1148,10 @@ class TestDeleteMyAccount:
         mock_s3.get_paginator.return_value = mock_paginator
         mock_logger = MagicMock()
 
-        with patch("src.handlers.admin_operations._get_user_profiles") as mock_get_profiles:
-            mock_get_profiles.return_value = [{"profileId": "PROFILE#p1"}]
-            with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
-                count = _delete_user_s3_reports(sample_account_id, mock_logger)
-                assert count >= 3
-                mock_s3.delete_objects.assert_called()
+        with patch("src.handlers.delete_profile_cascade.s3_client", mock_s3):
+            count = delete_user_s3_reports([{"profileId": "PROFILE#p1"}], mock_logger)
+            assert count >= 3
+            mock_s3.delete_objects.assert_called()
 
 
 class TestCognitoFilterValidation:
@@ -1245,11 +1240,11 @@ class TestCognitoFilterValidation:
 
 
 class TestDeleteAllUserData:
-    """Tests for _delete_all_user_data helper."""
+    """Tests for delete_all_user_data (deletion_cascade)."""
 
     def test_delete_all_user_data_prefixed(self, dynamodb_table: Any, s3_bucket: Any) -> None:
-        """_delete_all_user_data normalizes ACCOUNT#-prefixed account ID."""
-        from src.handlers.account_operations import _delete_all_user_data
+        """delete_all_user_data normalizes ACCOUNT#-prefixed account ID."""
+        from src.handlers.deletion_cascade import delete_all_user_data
 
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
         accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
@@ -1261,20 +1256,20 @@ class TestDeleteAllUserData:
             }
         )
 
-        _delete_all_user_data(f"ACCOUNT#{target_account_id}")
+        delete_all_user_data(f"ACCOUNT#{target_account_id}")
         response = accounts_table.get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
         assert "Item" not in response
 
     def test_delete_all_user_data_client_error(self, dynamodb_table: Any, s3_bucket: Any) -> None:
-        """_delete_all_user_data propagates ClientError on account delete."""
+        """delete_all_user_data propagates ClientError on account delete."""
         from botocore.exceptions import ClientError
 
-        from src.handlers.account_operations import _delete_all_user_data
+        from src.handlers.deletion_cascade import delete_all_user_data
 
-        with patch("src.handlers.account_operations.tables.accounts.delete_item") as mock_delete:
+        with patch("src.handlers.deletion_cascade.tables.accounts.delete_item") as mock_delete:
             mock_delete.side_effect = ClientError(
                 {"Error": {"Code": "ResourceNotFoundException", "Message": "Table not found"}},
                 "DeleteItem",
             )
             with pytest.raises(ClientError):
-                _delete_all_user_data("test-user")
+                delete_all_user_data("test-user")

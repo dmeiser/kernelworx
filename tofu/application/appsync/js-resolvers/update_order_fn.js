@@ -17,7 +17,6 @@ export function request(ctx) {
 
     const updates = [];
     const exprValues = {};
-    const exprNames = {};
 
     if (input.customerName !== undefined) {
         if (typeof input.customerName !== 'string' || !input.customerName.trim()) {
@@ -106,7 +105,6 @@ export function request(ctx) {
         key: util.dynamodb.toMapValues({ campaignId: order.campaignId, orderId: order.orderId }),
         update: {
             expression: updateExpression,
-            expressionNames: Object.keys(exprNames).length > 0 ? exprNames : undefined,
             expressionValues: util.dynamodb.toMapValues(exprValues)
         }
     };

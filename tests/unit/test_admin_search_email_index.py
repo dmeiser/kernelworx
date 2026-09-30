@@ -300,7 +300,7 @@ def test_admin_search_user_uses_the_index_for_a_partial_email(
         "Enabled": True,
         "UserStatus": "CONFIRMED",
     }
-    monkeypatch.setattr("src.handlers.admin_operations._get_cognito_client", lambda: _FakeCognito([cognito_user]))
+    monkeypatch.setattr("src.handlers.admin_operations.get_cognito_client", lambda: _FakeCognito([cognito_user]))
     dynamodb_calls.clear()
 
     results = admin_search_user(event, lambda_context)
