@@ -254,7 +254,7 @@ describe('MfaSection states and interactions', () => {
     expect(screen.getByRole('button', { name: 'Verify & Enable' })).toBeDisabled();
   });
 
-  it('shows the disable confirmation dialog with cancel and confirm paths', () => {
+  it('shows the disable confirmation dialog, gated on a password, with cancel and confirm paths', () => {
     const cancelMfaConfirmation = vi.fn();
     const confirmDisableMFA = vi.fn();
     render(
@@ -275,10 +275,20 @@ describe('MfaSection states and interactions', () => {
     expect(within(dialog).getByText('Disable MFA?')).toBeInTheDocument();
     expect(within(dialog).getByText('Sure about it?')).toBeInTheDocument();
 
+    // Disabling is gated on re-authenticating with the password: the Disable
+    // button stays disabled until a password is entered.
+    const passwordInput = within(dialog).getByLabelText(/Password/);
+    const disableButton = within(dialog).getByRole('button', { name: 'Disable' });
+    expect(disableButton).toBeDisabled();
+
+    fireEvent.change(passwordInput, { target: { value: 'correct-horse' } });
+    expect(disableButton).toBeEnabled();
+
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(cancelMfaConfirmation).toHaveBeenCalledTimes(1);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Disable' }));
+    fireEvent.click(disableButton);
     expect(confirmDisableMFA).toHaveBeenCalledTimes(1);
+    expect(confirmDisableMFA).toHaveBeenCalledWith('correct-horse');
   });
 });
 

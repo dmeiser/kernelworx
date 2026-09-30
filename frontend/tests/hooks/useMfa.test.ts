@@ -12,6 +12,7 @@ vi.mock('aws-amplify/auth', () => ({
   setUpTOTP: vi.fn(),
   verifyTOTPSetup: vi.fn(),
   updateMFAPreference: vi.fn(),
+  updatePassword: vi.fn(),
   fetchMFAPreference: vi.fn(),
   deleteWebAuthnCredential: vi.fn(),
 }));
@@ -40,6 +41,7 @@ describe('useMfa', () => {
     (vi.mocked(QRCode.toDataURL) as any).mockResolvedValue(mockQrDataUrl);
     vi.mocked(amplifyAuth.verifyTOTPSetup).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.updateMFAPreference).mockResolvedValue(undefined as any);
+    vi.mocked(amplifyAuth.updatePassword).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.fetchMFAPreference).mockResolvedValue({ preferred: 'TOTP' } as any);
   });
   /* cspell:enable */
@@ -189,12 +191,57 @@ describe('useMfa', () => {
     });
 
     await act(async () => {
-      await result.current.confirmDisableMFA();
+      await result.current.confirmDisableMFA('123456');
     });
 
     expect(amplifyAuth.updateMFAPreference).toHaveBeenCalledWith({ totp: 'DISABLED' });
     expect(result.current.mfaEnabled).toBe(false);
     expect(result.current.pendingConfirmation).toBeNull();
+  });
+
+  it('re-authenticates by re-checking the password before disabling MFA (#512)', async () => {
+    // Cognito's UpdateUserMFAPreference accepts any live session, so the
+    // disable path must first re-authenticate. The house pattern (usePasswordChange)
+    // is to re-check the current password via updatePassword: an unchanged
+    // password is a net no-op that still proves possession of the password.
+    vi.mocked(amplifyAuth.updatePassword).mockClear();
+    vi.mocked(amplifyAuth.updateMFAPreference).mockClear();
+    const { result } = renderHook(() => useMfa());
+
+    act(() => {
+      result.current.setMfaEnabled(true);
+    });
+
+    await act(async () => {
+      await result.current.confirmDisableMFA('correct-horse');
+    });
+
+    expect(amplifyAuth.updatePassword).toHaveBeenCalledWith({
+      oldPassword: 'correct-horse',
+      newPassword: 'correct-horse',
+    });
+    expect(amplifyAuth.updateMFAPreference).toHaveBeenCalledWith({ totp: 'DISABLED' });
+    expect(result.current.mfaEnabled).toBe(false);
+  });
+
+  it('refuses to disable MFA when the password is not verified (no re-auth, #512)', async () => {
+    // A hijacked/borrowed session that cannot supply the current password must
+    // not be able to turn MFA off: the re-auth fails, so the preference is left
+    // untouched and the account stays MFA-protected.
+    vi.mocked(amplifyAuth.updatePassword).mockRejectedValueOnce(new Error('Incorrect username or password.'));
+    const { result } = renderHook(() => useMfa());
+
+    act(() => {
+      result.current.setMfaEnabled(true);
+    });
+
+    await act(async () => {
+      await result.current.confirmDisableMFA('wrong-password');
+    });
+
+    expect(amplifyAuth.updateMFAPreference).not.toHaveBeenCalled();
+    expect(result.current.mfaEnabled).toBe(true);
+    expect(result.current.mfaError).toBe('Incorrect username or password.');
   });
 
   it('cancels disable MFA confirmation without disabling', () => {
@@ -239,6 +286,7 @@ describe('useMfa error paths', () => {
     (vi.mocked(QRCode.toDataURL) as any).mockResolvedValue(mockQrDataUrl);
     vi.mocked(amplifyAuth.verifyTOTPSetup).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.updateMFAPreference).mockResolvedValue(undefined as any);
+    vi.mocked(amplifyAuth.updatePassword).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.fetchMFAPreference).mockResolvedValue({ preferred: 'TOTP' } as any);
   });
 
@@ -313,7 +361,7 @@ describe('useMfa error paths', () => {
     const { result } = renderHook(() => useMfa());
 
     await act(async () => {
-      await result.current.confirmDisableMFA();
+      await result.current.confirmDisableMFA('123456');
     });
 
     expect(result.current.mfaError).toBe('disable exploded');
@@ -325,7 +373,7 @@ describe('useMfa error paths', () => {
     const { result } = renderHook(() => useMfa());
 
     await act(async () => {
-      await result.current.confirmDisableMFA();
+      await result.current.confirmDisableMFA('123456');
     });
 
     expect(result.current.mfaError).toBe('Failed to disable MFA');

@@ -16,6 +16,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import React, { useEffect, useState } from 'react';
 import {
   CheckCircle as CheckIcon,
   Delete as DeleteIcon,
@@ -161,6 +162,14 @@ interface MfaConfirmDialogProps {
 }
 
 const MfaConfirmDialog: React.FC<MfaConfirmDialogProps> = ({ hook }) => {
+  const [password, setPassword] = useState('');
+
+  // The component stays mounted across open/close, so clear any stale entry
+  // each time the dialog opens.
+  useEffect(() => {
+    if (hook.pendingConfirmation) setPassword('');
+  }, [hook.pendingConfirmation]);
+
   if (!hook.pendingConfirmation) return null;
 
   return (
@@ -168,11 +177,30 @@ const MfaConfirmDialog: React.FC<MfaConfirmDialogProps> = ({ hook }) => {
       <DialogTitle>Disable MFA?</DialogTitle>
       <DialogContent>
         <Typography>{hook.pendingConfirmation.message}</Typography>
+        <Typography variant="body2" color="text.secondary" paragraph sx={{ mt: 2 }}>
+          Enter your password to confirm:
+        </Typography>
+        <TextField
+          label="Password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          disabled={hook.mfaLoading}
+          helperText="Enter your password"
+          sx={{ minWidth: 200 }}
+        />
       </DialogContent>
       <DialogActions>
-        <Button onClick={hook.cancelMfaConfirmation}>Cancel</Button>
-        <Button onClick={() => void hook.confirmDisableMFA()} color="error" variant="contained">
-          Disable
+        <Button onClick={hook.cancelMfaConfirmation} disabled={hook.mfaLoading}>
+          Cancel
+        </Button>
+        <Button
+          onClick={() => void hook.confirmDisableMFA(password)}
+          disabled={hook.mfaLoading || password.length === 0}
+          color="error"
+          variant="contained"
+        >
+          {hook.mfaLoading ? <CircularProgress size={24} /> : 'Disable'}
         </Button>
       </DialogActions>
     </Dialog>
