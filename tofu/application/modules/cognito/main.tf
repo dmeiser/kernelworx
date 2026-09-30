@@ -186,16 +186,8 @@ resource "aws_cognito_user_pool" "main" {
   deletion_protection = var.environment == "prod" ? "ACTIVE" : "INACTIVE"
 
   # Username configuration
-  #
-  # `auto_verified_attributes` must stay ABSENT. With `email` listed, a native
-  # SignUp supplying an arbitrary address would be auto-confirmed and marked
-  # `email_verified = true` with no proof of mailbox possession, so the
-  # pre-signup trigger's fail-closed guard (src/handlers/pre_signup.py) would
-  # happily bind the real victim's federated identity to the attacker's account
-  # (and a `verified_email` password reset would be intercepted). Omitting it
-  # makes Cognito send a confirmation code (CONFIRM_SIGN_UP_WITH_CODE), which is
-  # the precondition that guard depends on. See issue #503.
-  username_attributes = ["email"]
+  username_attributes      = ["email"]
+  auto_verified_attributes = ["email"]
 
   # Password policy
   # Matches client-side validation in ForgotPasswordPage.tsx and SignupPage.tsx.
