@@ -94,3 +94,35 @@ def test_two_phase_write_check_uses_distinct_functions() -> None:
         assert pipeline.index(step1) < pipeline.index(step2), (
             f"{mutation} must run the ownership read before the share-path lookup"
         )
+
+
+def test_two_phase_fetch_profile_check_uses_distinct_functions() -> None:
+    functions: set[str] = set()
+    for path in sorted(APPSYNC_DIR.glob("functions_*.tf")):
+        doc = load_hcl(path)
+        for resource in doc.get("resource", []):
+            for res_type, instances in resource.items():
+                if res_type == "aws_appsync_function":
+                    functions.update(instances)
+    assert "fetch_profile" in functions
+    assert "fetch_profile_step2" in functions
+    step1 = "${aws_appsync_function.fetch_profile.function_id}"
+    step2 = "${aws_appsync_function.fetch_profile_step2.function_id}"
+    two_phase_queries = (
+        "payment_methods_for_profile",
+        "get_profile",
+    )
+    doc = load_hcl(APPSYNC_DIR / "resolvers_queries.tf")
+    resolvers = {
+        name: attrs
+        for resource in doc.get("resource", [])
+        for res_type, instances in resource.items()
+        if res_type == "aws_appsync_resolver"
+        for name, attrs in instances.items()
+    }
+    for query in two_phase_queries:
+        attrs = resolvers[query]
+        pipeline = [fn for cfg in attrs.get("pipeline_config", []) for fn in cfg.get("functions", [])]
+        assert pipeline.index(step1) < pipeline.index(step2), (
+            f"{query} must run the ownership read before the share-path lookup"
+        )

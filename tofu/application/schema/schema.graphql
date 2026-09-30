@@ -809,7 +809,7 @@ type Query {
     """The profile's ID."""
     profileId: ID!
   ): [Share!]!
-  """List the pending invites on a profile. The caller must have write access to the profile."""
+  """List the pending invites on a profile. Owner only: a caller whose write access comes from a share is not authorized to list invites and receives an empty list."""
   listInvitesByProfile(
     """The profile's ID."""
     profileId: ID!
