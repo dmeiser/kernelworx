@@ -147,7 +147,7 @@ describe('update_campaign_fn request', () => {
     );
   });
 
-  for (const field of ['campaignName', 'campaignYear', 'isActive']) {
+  for (const field of ['campaignName', 'campaignYear', 'isActive', 'catalogId']) {
     it(`rejects explicit null for non-nullable output field ${field}`, () => {
       const ctx = {
         stash: {
@@ -318,7 +318,7 @@ describe('update_campaign_fn request', () => {
     assert.match(result.update.expression, /REMOVE .*unitCampaignKey/);
   });
 
-  it('does not prefix null catalogId with CATALOG#', () => {
+  it('rejects explicit null catalogId with INVALID_INPUT', () => {
     const ctx = {
       stash: {
         campaign: {
@@ -335,9 +335,7 @@ describe('update_campaign_fn request', () => {
       },
     };
 
-    const result = request(ctx);
-    assert.match(result.update.expression, /catalogId = :catalogId/);
-    assert.strictEqual(result.update.expressionValues[':catalogId'], null);
+    assert.throws(() => request(ctx), (err) => err.message === 'INVALID_INPUT: catalogId cannot be null');
   });
 
   it('recomputes unitCampaignKey when unitNumber changes', () => {

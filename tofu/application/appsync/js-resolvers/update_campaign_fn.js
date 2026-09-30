@@ -72,7 +72,7 @@ function getUpdatedUnitField(input, campaign, field) {
 
 // Fields the Campaign output type declares non-null; an explicit null would
 // persist NULL into DynamoDB and make every read of the campaign fail.
-const NON_NULLABLE_OUTPUT_FIELDS = ['campaignName', 'campaignYear', 'isActive'];
+const NON_NULLABLE_OUTPUT_FIELDS = ['campaignName', 'campaignYear', 'isActive', 'catalogId'];
 
 function rejectExplicitNulls(input) {
     for (const field of NON_NULLABLE_OUTPUT_FIELDS) {
