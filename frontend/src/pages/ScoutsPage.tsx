@@ -269,10 +269,6 @@ const updatePreferencesWithRollback = async (
   }
 };
 
-// Helper to derive the mutation error message; mirrors PaymentMethodsPage's
-// handleMutationError precedent.
-const getMutationErrorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
-
 // Helper to load shared profiles with error handling
 const loadSharedProfilesWithErrorHandling = async (
   apolloClient: ReturnType<typeof useApolloClient>,
@@ -650,7 +646,6 @@ export {
   handleReturnNavigation,
   canDeleteCurrentProfile,
   maybeDeleteProfile,
-  getMutationErrorMessage,
   updatePreferencesWithRollback,
   loadSharedProfilesWithErrorHandling,
   handleSharedProfilesError,
