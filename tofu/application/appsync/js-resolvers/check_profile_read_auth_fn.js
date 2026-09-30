@@ -8,9 +8,17 @@ export function request(ctx) {
         util.error('Profile not found in stash', 'INTERNAL_ERROR');
     }
     
-    // Check if caller is owner first (ownerAccountId uses ACCOUNT# prefix)
+    // Check if caller is owner first (ownerAccountId uses ACCOUNT# prefix).
+    // Ownership check (#545):
+    // Only trust ownership if verified by the strongly consistent base-table
+    // GetItem in step 1 (ctx.stash.isOwner === true).
+    // If ctx.stash.isOwner is undefined (e.g. standalone test), fall back to
+    // checking profile.ownerAccountId for backward compatibility.
     const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
-    if (profile.ownerAccountId === expectedOwner) {
+    const isOwner = ctx.stash.isOwner !== undefined
+        ? ctx.stash.isOwner === true
+        : profile.ownerAccountId === expectedOwner;
+    if (isOwner) {
         ctx.stash.authorized = true;
         // No DB operation needed for owner - return a no-op that won't query the database
         return {
@@ -54,15 +62,18 @@ export function response(ctx) {
     }
     
     const share = ctx.result;
-    
+
+    // Access denied paths return null (query permissions model - don't error),
+    // matching the documented contract (schema.graphql getProfile) and the
+    // sibling read resolvers (return_campaign_fn.js, return_order_fn.js).
     // No share found - access denied
     if (!share || !share.profileId) {
-        util.error('Not authorized to access this profile', 'UNAUTHORIZED');
+        return null;
     }
-    
+
     // Share exists - check for READ or WRITE permission
     if (!share.permissions || !Array.isArray(share.permissions)) {
-        util.error('Not authorized to access this profile', 'UNAUTHORIZED');
+        return null;
     }
     
     // Stale share check (#432): a share records the ownerAccountId from when it was
@@ -74,7 +85,7 @@ export function response(ctx) {
     const profile = ctx.stash.profile;
     const currentOwner = profile && profile.ownerAccountId;
     if (share.ownerAccountId && currentOwner && share.ownerAccountId !== currentOwner) {
-        util.error('Not authorized to access this profile', 'UNAUTHORIZED');
+        return null;
     }
     
     // Has READ or WRITE permission - authorized
@@ -86,5 +97,5 @@ export function response(ctx) {
     }
     
     // Share exists but no valid permissions
-    util.error('Not authorized to access this profile', 'UNAUTHORIZED');
+    return null;
 }

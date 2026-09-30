@@ -3,7 +3,6 @@
  */
 
 import { gql } from '@apollo/client';
-import type { GqlAdminUser } from '../types/graphql-generated';
 
 // ============================================================================
 // Fragments
@@ -827,11 +826,6 @@ export const ADMIN_SEARCH_USER = gql`
   }
 `;
 
-// Type for search results
-export type AdminSearchUserResponse = {
-  adminSearchUser: GqlAdminUser[];
-};
-
 export const ADMIN_GET_USER_PROFILES = gql`
   ${SELLER_PROFILE_FRAGMENT}
   query AdminGetUserProfiles($accountId: ID!) {
@@ -911,9 +905,9 @@ export const ADMIN_RESET_USER_PASSWORD = gql`
   }
 `;
 
-export const ADMIN_DELETE_USER = gql`
-  mutation AdminDeleteUser($accountId: ID!) {
-    adminDeleteUser(accountId: $accountId)
+export const ADMIN_PURGE_USER_ACCOUNT = gql`
+  mutation AdminPurgeUserAccount($accountId: ID!, $profileIds: [ID!]!) {
+    adminPurgeUserAccount(accountId: $accountId, profileIds: $profileIds)
   }
 `;
 
@@ -938,12 +932,6 @@ export const ADMIN_DELETE_USER_SHARES = gql`
 export const ADMIN_DELETE_USER_PROFILES = gql`
   mutation AdminDeleteUserProfiles($accountId: ID!) {
     adminDeleteUserProfiles(accountId: $accountId)
-  }
-`;
-
-export const ADMIN_DELETE_USER_CATALOGS = gql`
-  mutation AdminDeleteUserCatalogs($accountId: ID!) {
-    adminDeleteUserCatalogs(accountId: $accountId)
   }
 `;
 

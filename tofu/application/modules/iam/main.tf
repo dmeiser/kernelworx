@@ -594,8 +594,11 @@ resource "aws_iam_role_policy" "lambda_payment_s3" {
 #     on profiles base table, GetItem on shares, Query on profiles
 #     profileId-index GSI). Read-only.
 #   - list-catalogs-in-use: Query on the profiles base table (ownerAccountId),
-#     Query on shares targetAccountId-index GSI, Query on the campaigns base
-#     table (profileId). Read-only.
+#     Query on shares targetAccountId-index GSI, per-share owner re-validation
+#     (#530, the #432 stale-share check) as a strongly consistent GetItem on
+#     the profiles base table plus a profileId-index GSI Query for legacy
+#     shares missing ownerAccountId, Query on the campaigns base table
+#     (profileId). Read-only.
 #   - list-unit-catalogs / list-unit-campaign-catalogs: Query on profiles
 #     unitType-unitNumber-index GSI or campaigns unitCampaignKey-index GSI,
 #     the batched auth path utils.auth.batch_check_profile_access
