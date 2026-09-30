@@ -3,12 +3,22 @@ Admin operations handlers for superadmin functionality.
 
 Provides:
 - adminResetUserPassword: Send password reset email to user
-- adminDeleteUser: Delete user from Cognito and DynamoDB
+- adminPurgeUserAccount: Sweep the client-unreachable residue, then delete the
+  accounts record and the Cognito user
 - createManagedCatalog: Create an ADMIN_MANAGED global catalog
+
+User deletion is client-side by decision (#521). The client issues the
+per-entity ``adminDeleteUser*`` mutations it can reach, reads the profile IDs
+with ``adminGetUserProfiles`` before deleting the profile rows, and calls
+``adminPurgeUserAccount`` with them as ``profileIds``. The purge sweeps the
+four classes the browser cannot reach itself — invites for the account's
+profiles, inbound shares on other owners' profiles, S3 report objects, and
+payment-QR S3 objects — reusing the shared ``deletion_cascade`` helpers, then
+deletes the ``accounts`` record and the Cognito user. Catalogs are never
+deleted.
 """
 
 import re
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -20,10 +30,12 @@ from botocore.exceptions import ClientError
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
 from .deletion_cascade import (
-    delete_all_user_data,
+    delete_inbound_shares,
+    delete_invites_for_owned_profiles,
     delete_user_campaigns,
     delete_user_orders,
     delete_user_profiles,
+    delete_user_s3_reports,
     delete_user_shares,
     get_user_profiles,
     normalize_account_id,
@@ -34,16 +46,18 @@ try:  # pragma: no cover
     from utils.auth import require_admin_mfa
     from utils.boto import get_cognito_client
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, get_required_env, tables
+    from utils.dynamodb import EMAIL_SEARCH_KEY, batch_get_chunked, get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
+    from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
     from ..utils.boto import get_cognito_client
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import EMAIL_SEARCH_KEY, get_dynamodb_resource, get_required_env, tables
+    from ..utils.dynamodb import EMAIL_SEARCH_KEY, batch_get_chunked, get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
+    from ..utils.payment_methods import delete_all_user_qr_codes
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -145,11 +159,6 @@ def _raise_gather_failures(
     )
 
 
-def _batch_get_unprocessed_keys(response: Dict[str, Any], table_name: str) -> list[Dict[str, Any]]:
-    """Extract the unprocessed keys DynamoDB reports for a table in a BatchGetItem response."""
-    return cast(list[Dict[str, Any]], response.get("UnprocessedKeys", {}).get(table_name, {}).get("Keys", []))
-
-
 def _get_user_groups(cognito: Any, user_pool_id: str, username: str, logger: Any) -> list[str]:
     """Get the groups a user belongs to; failures raise a typed AppError (#291)."""
     try:
@@ -200,10 +209,6 @@ def _collect_parallel_keyed_results(
     return results
 
 
-# DynamoDB caps BatchGetItem at 100 keys per request.
-_ACCOUNTS_BATCH_GET_LIMIT = 100
-
-
 def _dedup_account_keys(account_ids: list[str]) -> list[Dict[str, str]]:
     """Build the de-duplicated BatchGetItem keys for the Accounts table."""
     seen: set[str] = set()
@@ -227,40 +232,6 @@ def _apply_display_name_item(item: Dict[str, Any], display_names: dict[str, str]
         display_names[key] = f"{given_name} {family_name}".strip()
 
 
-def _fetch_display_name_attempt(
-    keys_to_fetch: list[Dict[str, str]],
-    accounts_table_name: str,
-    display_names: dict[str, str],
-    attempt: int,
-    logger: Any,
-) -> list[Dict[str, Any]]:
-    """Run one BatchGetItem attempt; store returned names and return unprocessed keys."""
-    response = get_dynamodb_resource().batch_get_item(RequestItems={accounts_table_name: {"Keys": keys_to_fetch}})
-    for item in response.get("Responses", {}).get(accounts_table_name, []):
-        _apply_display_name_item(item, display_names)
-
-    unprocessed = _batch_get_unprocessed_keys(response, accounts_table_name)
-    if unprocessed and attempt < 2:
-        logger.warning(
-            "Unprocessed display-name keys, retrying",
-            attempt=attempt + 1,
-            count=len(unprocessed),
-        )
-        time.sleep(0.05 * (2**attempt))
-    return unprocessed
-
-
-def _fetch_display_names_chunk(
-    keys: list[Dict[str, str]], accounts_table_name: str, display_names: dict[str, str], logger: Any
-) -> None:
-    """Fetch one 100-key chunk, retrying unprocessed keys for up to 3 attempts."""
-    keys_to_fetch = keys
-    for attempt in range(3):
-        if not keys_to_fetch:
-            break
-        keys_to_fetch = _fetch_display_name_attempt(keys_to_fetch, accounts_table_name, display_names, attempt, logger)
-
-
 def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, str]:
     """Batch fetch display names from the Accounts table using BatchGetItem.
 
@@ -274,14 +245,16 @@ def _batch_get_display_names(account_ids: list[str], logger: Any) -> dict[str, s
 
     accounts_table_name = get_required_env("ACCOUNTS_TABLE_NAME")
 
-    try:
-        for i in range(0, len(keys), _ACCOUNTS_BATCH_GET_LIMIT):
-            _fetch_display_names_chunk(
-                keys[i : i + _ACCOUNTS_BATCH_GET_LIMIT], accounts_table_name, display_names, logger
-            )
-    except Exception as e:
-        _raise_batch_lookup_error("load display names", logger, e)
+    def _store_display_name(item: Dict[str, Any]) -> None:
+        _apply_display_name_item(item, display_names)
 
+    batch_get_chunked(
+        accounts_table_name,
+        keys,
+        _store_display_name,
+        consistent_read=False,
+        logger=logger,
+    )
     return display_names
 
 
@@ -723,9 +696,14 @@ def _search_users_in_cognito_by_email_prefix(
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code in _THROTTLING_ERROR_CODES:
-            logger.warning("Cognito email prefix search throttled", error=str(e), error_code=error_code, query=query)
+            logger.warning(
+                "Cognito email prefix search throttled",
+                error=str(e),
+                error_code=error_code,
+                query=mask_email(query),
+            )
             raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from e
-        logger.warning("Cognito email prefix search failed", error=str(e), query=query)
+        logger.warning("Cognito email prefix search failed", error=str(e), query=mask_email(query))
         return []
 
 
@@ -910,34 +888,52 @@ def _check_not_self_deletion(caller_id: str, account_id: str) -> None:
         raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete your own account")
 
 
-@with_error_handling(error_message="Failed to delete user")
-def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
+@with_error_handling(error_message="Failed to purge user account")
+def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     """
-    Delete a user and all their data from Cognito, DynamoDB, and S3 (admin only).
+    Delete the account record and the Cognito user (admin only).
 
-    AppSync Lambda resolver for adminDeleteUser mutation.
-    Deletes all user data (orders, campaigns, shares, invites, inbound shares,
-    S3 reports, profiles, payment method QR codes, and the Account record;
-    catalogs are preserved) via the shared delete_all_user_data cascade, then
-    deletes the user from the Cognito User Pool.
+    AppSync Lambda resolver for the adminPurgeUserAccount mutation. This is the
+    deliberately minimal server-side operation that user deletion cannot be
+    completed without (#521): the browser holds no AWS credentials, so it can
+    neither delete the ``accounts`` table row nor call Cognito
+    ``AdminDeleteUser``. Everything else a browser CAN delete (orders,
+    campaigns, shares, profiles) is deleted by the client through the
+    per-entity ``adminDeleteUser*`` mutations, and catalogs are never deleted.
+
+    The caller supplies the profile IDs it read via ``adminGetUserProfiles``
+    BEFORE deleting the profile rows, as the ``profileIds`` argument. The purge
+    first verifies each of them is actually gone with a strongly consistent
+    read — a surviving profile means the client cascade has not completed, so
+    it refuses with CONFLICT and deletes nothing — then sweeps the four
+    classes the browser cannot reach, reusing the shared deletion_cascade
+    helpers: invites for the account's profiles, inbound shares on other
+    owners' profiles, S3 report objects, and payment-QR S3 objects. Invites
+    and reports are keyed by profileId, which survives the deleted profile
+    rows.
+
+    Call this after the client's per-entity deletes, so a failure there leaves
+    the account intact rather than half-deleted.
 
     Args:
         event: AppSync event with identity and arguments
         context: Lambda context
 
     Returns:
-        True if user was deleted successfully
+        True if the account was purged successfully
 
     Raises:
-        AppError: If not admin, self-deletion is attempted, or a deletion error occurs.
-        An absent Cognito user is treated as idempotent success.
+        AppError: If not admin, self-purge is attempted, the user does not
+            exist, a supplied profile still exists (CONFLICT), or a deletion
+            error occurs. An absent Cognito user is treated as idempotent
+            success.
     """
     logger = get_logger(__name__)
 
     account_id = _validate_admin_and_get_account_id(event)
+    profile_ids = _validate_profile_ids_argument(event.get("arguments", {}).get("profileIds"))
 
-    identity = event.get("identity", {})
-    caller_id = identity.get("sub")
+    caller_id = event.get("identity", {}).get("sub")
     _check_not_self_deletion(str(caller_id), account_id)
 
     user_pool_id = get_required_env("USER_POOL_ID")
@@ -949,17 +945,71 @@ def admin_delete_user(event: Dict[str, Any], context: Any) -> bool:
     if not username and not account_exists:
         raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
 
-    # Delete all user data from DynamoDB and S3 using the shared cascade so
-    # a partially-deleted Cognito state does not leave records orphaned (#435).
-    delete_all_user_data(account_id, logger)
+    # The purge runs after the client's per-entity deletes (#521). It verifies
+    # rather than trusts: while any supplied profile still exists the cascade
+    # has not completed, so nothing is deleted and the account stays intact.
+    _assert_profiles_deleted(account_id, profile_ids, logger)
+
+    profiles_for_sweep = [{"profileId": profile_id} for profile_id in profile_ids]
+    delete_invites_for_owned_profiles(profiles_for_sweep, logger)
+    delete_inbound_shares(account_id, logger)
+    delete_user_s3_reports(profiles_for_sweep, logger)
+    delete_all_user_qr_codes(account_id, logger)
 
     if username:
         _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
     else:
-        logger.info("Cognito user already absent; DynamoDB cleanup completed", account_id=account_id)
+        logger.info("Cognito user already absent", account_id=account_id)
 
-    logger.info("User deleted successfully", account_id=account_id, email=mask_email(email))
+    if account_exists:
+        db_account_id = normalize_account_id(account_id)
+        try:
+            tables.accounts.delete_item(Key={"accountId": db_account_id})
+            logger.info("Deleted account record", account_id=db_account_id)
+        except ClientError as e:
+            logger.error("Failed to delete account record", error=str(e), account_id=db_account_id)
+            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account record") from e
+    else:
+        logger.info("Account record already absent", account_id=account_id)
+
+    logger.info("User account purged", account_id=account_id, email=mask_email(email))
     return True
+
+
+def _validate_profile_ids_argument(profile_ids: Any) -> list[str]:
+    """Validate the client-supplied profileIds list for the purge (#521).
+
+    The schema requires ``[ID!]!``; this guards the Lambda entry point itself,
+    which a caller can reach without going through GraphQL validation.
+    """
+    if not isinstance(profile_ids, list) or not all(
+        isinstance(profile_id, str) and profile_id.strip() for profile_id in profile_ids
+    ):
+        raise AppError(ErrorCode.INVALID_INPUT, "profileIds must be a list of profile IDs")
+    return profile_ids
+
+
+def _assert_profiles_deleted(account_id: str, profile_ids: list[str], logger: Any) -> None:
+    """Refuse the purge while any client-reported-deleted profile still exists (#521).
+
+    The strongly consistent read is required because the profile rows were
+    just deleted by a different writer (the client's cascade moments earlier).
+    """
+    db_account_id = normalize_account_id(account_id)
+    for profile_id in profile_ids:
+        try:
+            response = tables.profiles.get_item(
+                Key={"ownerAccountId": db_account_id, "profileId": profile_id},
+                ConsistentRead=True,
+            )
+        except ClientError as e:
+            _raise_batch_lookup_error("verify profile deletion", logger, e, profile_id=profile_id)
+        if "Item" in response:
+            logger.warning("Purge refused: profile still present", profile_id=profile_id)
+            raise AppError(
+                ErrorCode.CONFLICT,
+                "The account's profiles must be deleted before the account can be purged",
+            )
 
 
 def _parse_product_price(price: Any) -> Decimal:
@@ -1168,57 +1218,6 @@ def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
     return delete_user_profiles(account_id, _user_profiles_for(account_id), logger)
 
 
-def _soft_delete_catalog(catalog_id: str) -> None:
-    """Soft delete a catalog by setting isDeleted = true."""
-    tables.catalogs.update_item(
-        Key={"catalogId": catalog_id},
-        UpdateExpression="SET isDeleted = :true",
-        ExpressionAttributeValues={":true": True},
-    )
-
-
-def _query_and_delete_catalogs(db_account_id: str) -> int:
-    """Query for user's catalogs via the ownerAccountId GSI and soft delete them. Returns count."""
-    catalogs = query_all_items(
-        tables.catalogs,
-        {
-            "IndexName": "ownerAccountId-index",
-            "KeyConditionExpression": "ownerAccountId = :owner",
-            "FilterExpression": "attribute_not_exists(isDeleted) OR isDeleted = :false",
-            "ExpressionAttributeValues": {":owner": db_account_id, ":false": False},
-        },
-    )
-
-    deleted_count = 0
-    for catalog in catalogs:
-        _soft_delete_catalog(catalog["catalogId"])
-        deleted_count += 1
-
-    return deleted_count
-
-
-def _delete_user_catalogs(account_id: str, logger: Any) -> int:
-    """Soft delete all catalogs owned by a user. Returns count."""
-    db_account_id = normalize_account_id(account_id)
-    deleted_count = _query_and_delete_catalogs(db_account_id)
-    logger.info("Soft-deleted user catalogs", account_id=account_id, count=deleted_count)
-    return deleted_count
-
-
-@with_error_handling(error_message="Failed to delete user catalogs")
-def admin_delete_user_catalogs(event: Dict[str, Any], context: Any) -> int:
-    """
-    Soft delete all catalogs owned by a user (admin only).
-
-    Sets isDeleted=true on each catalog instead of removing from database.
-    Returns the count of soft-deleted catalogs.
-    """
-    logger = get_logger(__name__)
-
-    account_id = _validate_admin_and_get_account_id(event)
-    return _delete_user_catalogs(account_id, logger)
-
-
 @with_error_handling(error_message="Failed to get user profiles")
 def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
     """
@@ -1274,10 +1273,6 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
     return catalogs
 
 
-# DynamoDB caps BatchGetItem at 100 keys per request.
-_CATALOG_BATCH_GET_LIMIT = 100
-
-
 def _extract_unique_catalog_ids(campaigns: list[Dict[str, Any]]) -> list[str]:
     """Extract the de-duplicated catalogIds from a campaign array, preserving first-seen order."""
     catalog_ids: list[str] = []
@@ -1290,57 +1285,25 @@ def _extract_unique_catalog_ids(campaigns: list[Dict[str, Any]]) -> list[str]:
     return catalog_ids
 
 
-def _fetch_catalog_batch_attempt(
-    keys_to_fetch: list[Dict[str, str]],
-    catalogs_table_name: str,
-    catalog_map: Dict[str, Dict[str, Any]],
-    attempt: int,
-    logger: Any,
-) -> list[Dict[str, Any]]:
-    """Run one BatchGetItem attempt; store returned items and return unprocessed keys."""
-    response = get_dynamodb_resource().batch_get_item(RequestItems={catalogs_table_name: {"Keys": keys_to_fetch}})
-    for item in response.get("Responses", {}).get(catalogs_table_name, []):
-        catalog_map[item["catalogId"]] = item
-
-    unprocessed = _batch_get_unprocessed_keys(response, catalogs_table_name)
-    if unprocessed and attempt < 2:
-        logger.warning(
-            "Unprocessed catalog keys, retrying",
-            attempt=attempt + 1,
-            count=len(unprocessed),
-        )
-        time.sleep(0.05 * (2**attempt))
-    return unprocessed
-
-
-def _fetch_catalog_keys_with_retry(
-    keys: list[Dict[str, str]], catalogs_table_name: str, catalog_map: Dict[str, Dict[str, Any]], logger: Any
-) -> list[Dict[str, Any]]:
-    """Fetch one 100-key chunk, retrying unprocessed keys for up to 3 attempts.
-
-    Returns the keys still unprocessed after the final attempt.
-    """
-    keys_to_fetch = keys
-    for attempt in range(3):
-        if not keys_to_fetch:
-            break
-        keys_to_fetch = _fetch_catalog_batch_attempt(keys_to_fetch, catalogs_table_name, catalog_map, attempt, logger)
-    return keys_to_fetch
-
-
 def _batch_get_catalog_items(
     catalog_ids: list[str], catalogs_table_name: str, logger: Any
 ) -> Dict[str, Dict[str, Any]]:
-    """Chunked BatchGetItem over catalog ids; raises AppError if keys stay unprocessed."""
+    """Batch-get the catalogs by id; the shared helper owns the 100-key chunking.
+
+    Raises AppError if keys stay unprocessed after the retries (#557).
+    """
     catalog_map: Dict[str, Dict[str, Any]] = {}
-    for i in range(0, len(catalog_ids), _CATALOG_BATCH_GET_LIMIT):
-        batch = [{"catalogId": catalog_id} for catalog_id in catalog_ids[i : i + _CATALOG_BATCH_GET_LIMIT]]
-        keys_to_fetch = _fetch_catalog_keys_with_retry(batch, catalogs_table_name, catalog_map, logger)
-        if keys_to_fetch:
-            raise AppError(
-                ErrorCode.INTERNAL_ERROR,
-                f"DynamoDB BatchGetItem failed to return {len(keys_to_fetch)} keys after retries",
-            )
+
+    def _store_catalog(item: Dict[str, Any]) -> None:
+        catalog_map[item["catalogId"]] = item
+
+    batch_get_chunked(
+        catalogs_table_name,
+        [{"catalogId": catalog_id} for catalog_id in catalog_ids],
+        _store_catalog,
+        consistent_read=False,
+        logger=logger,
+    )
     return catalog_map
 
 
@@ -1383,12 +1346,10 @@ def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_
         return
 
     catalogs_table_name = get_required_env("CATALOGS_TABLE_NAME")
-    try:
-        catalog_map = _batch_get_catalog_items(catalog_ids, catalogs_table_name, logger)
-    except AppError:
-        raise
-    except Exception as e:
-        _raise_batch_lookup_error("load campaign catalogs", logger, e)
+    # batch_get_chunked already translates every lookup failure (retryable
+    # RESOURCE_BUSY on a throttle, INTERNAL_ERROR otherwise), so the typed
+    # AppError propagates unchanged (#557).
+    catalog_map = _batch_get_catalog_items(catalog_ids, catalogs_table_name, logger)
 
     _attach_campaign_catalogs(campaigns, catalog_map, treat_deleted_as_null)
 
@@ -1637,12 +1598,11 @@ _OPERATION_HANDLERS = {
     "adminListUsers": admin_list_users,
     "adminSearchUser": admin_search_user,
     "adminResetUserPassword": admin_reset_user_password,
-    "adminDeleteUser": admin_delete_user,
+    "adminPurgeUserAccount": admin_purge_user_account,
     "adminDeleteUserOrders": admin_delete_user_orders,
     "adminDeleteUserCampaigns": admin_delete_user_campaigns,
     "adminDeleteUserShares": admin_delete_user_shares,
     "adminDeleteUserProfiles": admin_delete_user_profiles,
-    "adminDeleteUserCatalogs": admin_delete_user_catalogs,
     "createManagedCatalog": create_managed_catalog,
     "adminGetUserProfiles": admin_get_user_profiles,
     "adminGetUserCatalogs": admin_get_user_catalogs,

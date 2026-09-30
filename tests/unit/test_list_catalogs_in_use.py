@@ -1,5 +1,6 @@
 """Unit tests for list_catalogs_in_use Lambda handler."""
 
+import asyncio
 from typing import Any, Dict, List, Set
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -629,6 +630,55 @@ class TestAsyncGetSharedCampaignCatalogIds:
 
         assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
         assert isinstance(exc_info.value.__cause__, ClientError)
+
+    @pytest.mark.asyncio
+    async def test_concurrency_is_capped_and_every_profile_is_processed(self) -> None:
+        """Peak concurrent queries stay within the cap even past the chunk limit (#541).
+
+        Regression test for #541: the per-profile fan-out used to gather one
+        unbounded task per profile, so a caller with more profiles than the
+        cap issued that many concurrent DynamoDB queries (multiplied by each
+        profile's pagination loop). With more profiles than the chunk cap,
+        the peak in-flight query count must never exceed the concurrency cap
+        and every profile must still be processed and aggregated.
+        """
+        from src.handlers import list_catalogs_in_use as module
+        from src.handlers.campaign_reporting import _ORDER_QUERY_CONCURRENCY, _PROFILE_BATCH_LIMIT
+
+        profile_count = _PROFILE_BATCH_LIMIT + 25
+        cap = _ORDER_QUERY_CONCURRENCY
+
+        in_flight = 0
+        peak = 0
+        queried_profile_ids: List[str] = []
+
+        async def tracking_query(**kwargs: Any) -> Dict[str, Any]:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            profile_id = kwargs["ExpressionAttributeValues"][":profileId"]
+            queried_profile_ids.append(profile_id)
+            # Yield long enough that an unbounded fan-out would overlap fully.
+            await asyncio.sleep(0.01)
+            in_flight -= 1
+            return {"Items": [{"catalogId": f"CATALOG#{profile_id}"}]}
+
+        mock_table = AsyncMock()
+        mock_table.query.side_effect = tracking_query
+
+        mock_dynamodb = AsyncMock()
+        mock_dynamodb.Table.return_value = mock_table
+
+        profile_ids = [f"PROFILE#prof{i}" for i in range(profile_count)]
+        result = await module._async_get_shared_campaign_catalog_ids(mock_dynamodb, "campaigns-table", profile_ids)
+
+        # The cap holds even though the profile count exceeds both caps...
+        assert peak <= cap
+        # ...and no profile was dropped: every one was queried exactly once
+        # and its catalog id made it into the aggregated answer.
+        assert sorted(queried_profile_ids) == sorted(profile_ids)
+        assert mock_table.query.call_count == profile_count
+        assert result == {f"CATALOG#{pid}" for pid in profile_ids}
 
 
 class TestAsyncGetAllCatalogIds:

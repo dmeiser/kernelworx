@@ -13,7 +13,7 @@ export function request(ctx) {
         }),
         condition: {
             expression: 'profileId = :profileId',
-            expressionAttributeValues: util.dynamodb.toMapValues({ ':profileId': profileId })
+            expressionValues: util.dynamodb.toMapValues({ ':profileId': profileId })
         }
     };
 }

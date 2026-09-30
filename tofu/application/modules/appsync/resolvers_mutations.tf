@@ -709,11 +709,11 @@ resource "aws_appsync_resolver" "admin_reset_user_password" {
   code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
-# adminDeleteUser (Lambda)
-resource "aws_appsync_resolver" "admin_delete_user" {
+# adminPurgeUserAccount (Lambda)
+resource "aws_appsync_resolver" "admin_purge_user_account" {
   api_id      = aws_appsync_graphql_api.main.id
   type        = "Mutation"
-  field       = "adminDeleteUser"
+  field       = "adminPurgeUserAccount"
   data_source = aws_appsync_datasource.admin_operations.name
 
   runtime {
@@ -774,21 +774,6 @@ resource "aws_appsync_resolver" "admin_delete_user_profiles" {
   api_id      = aws_appsync_graphql_api.main.id
   type        = "Mutation"
   field       = "adminDeleteUserProfiles"
-  data_source = aws_appsync_datasource.admin_operations.name
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
-}
-
-# adminDeleteUserCatalogs (Lambda)
-resource "aws_appsync_resolver" "admin_delete_user_catalogs" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Mutation"
-  field       = "adminDeleteUserCatalogs"
   data_source = aws_appsync_datasource.admin_operations.name
 
   runtime {
