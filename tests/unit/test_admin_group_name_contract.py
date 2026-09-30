@@ -77,9 +77,7 @@ def _admin_expression(relpath: str, pattern: str) -> str:
 
 
 @pytest.mark.parametrize(("relpath", "pattern", "label"), SITES, ids=[site[2] for site in SITES])
-def test_admin_group_name_is_uppercase_admin(
-    relpath: str, pattern: str, label: str
-) -> None:
+def test_admin_group_name_is_uppercase_admin(relpath: str, pattern: str, label: str) -> None:
     """Every admin check accepts exactly the uppercase ADMIN group."""
     literal = _admin_literal(relpath, pattern)
     assert literal == ADMIN_GROUP, (
@@ -90,9 +88,7 @@ def test_admin_group_name_is_uppercase_admin(
 
 
 @pytest.mark.parametrize(("relpath", "pattern", "label"), SITES, ids=[site[2] for site in SITES])
-def test_no_site_accepts_a_lowercase_admin_spelling(
-    relpath: str, pattern: str, label: str
-) -> None:
+def test_no_site_accepts_a_lowercase_admin_spelling(relpath: str, pattern: str, label: str) -> None:
     """No pinned admin-check expression adds an extra lowercase spelling.
 
     Asserts only over the exact admin-check expressions pinned in SITES, not
