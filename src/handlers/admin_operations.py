@@ -836,14 +836,14 @@ def _delete_user_from_cognito(
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito") from e
 
 
-def _account_exists_in_dynamodb(account_id: str, logger: Any) -> bool:
+def _account_exists_in_dynamodb(account_id: str, logger: Any, actor_sub: str = "") -> bool:
     """Check whether an account record exists in DynamoDB."""
     db_account_id = normalize_account_id(account_id)
     try:
         response = tables.accounts.get_item(Key={"accountId": db_account_id}, ProjectionExpression="accountId")
         exists = "Item" in response
         if not exists:
-            logger.info("Account not found in DynamoDB", account_id=db_account_id)
+            logger.info("Account not found in DynamoDB", account_id=db_account_id, actor_sub=actor_sub)
         return exists
     except ClientError as e:
         logger.error("Failed to check account existence in DynamoDB", error=str(e), account_id=db_account_id)
@@ -996,7 +996,7 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     cognito = get_cognito_client()
 
     username, email = _find_cognito_user_by_sub(cognito, user_pool_id, account_id, logger)
-    account_exists = _account_exists_in_dynamodb(account_id, logger)
+    account_exists = _account_exists_in_dynamodb(account_id, logger, actor_sub)
 
     if not username and not account_exists:
         raise AppError(ErrorCode.NOT_FOUND, f"User not found: {account_id}")
@@ -1004,7 +1004,7 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     # The purge runs after the client's per-entity deletes (#521). It verifies
     # rather than trusts: while any supplied profile still exists the cascade
     # has not completed, so nothing is deleted and the account stays intact.
-    _assert_profiles_deleted(account_id, profile_ids, logger)
+    _assert_profiles_deleted(account_id, profile_ids, logger, actor_sub)
 
     profiles_for_sweep = [{"profileId": profile_id} for profile_id in profile_ids]
     delete_invites_for_owned_profiles(profiles_for_sweep, logger)
@@ -1045,7 +1045,7 @@ def _validate_profile_ids_argument(profile_ids: Any) -> list[str]:
     return profile_ids
 
 
-def _assert_profiles_deleted(account_id: str, profile_ids: list[str], logger: Any) -> None:
+def _assert_profiles_deleted(account_id: str, profile_ids: list[str], logger: Any, actor_sub: str = "") -> None:
     """Refuse the purge while any client-reported-deleted profile still exists (#521).
 
     The strongly consistent read is required because the profile rows were
@@ -1061,7 +1061,9 @@ def _assert_profiles_deleted(account_id: str, profile_ids: list[str], logger: An
         except ClientError as e:
             _raise_batch_lookup_error("verify profile deletion", logger, e, profile_id=profile_id)
         if "Item" in response:
-            logger.warning("Purge refused: profile still present", profile_id=profile_id)
+            logger.warning(
+                "Purge refused: profile still present", profile_id=profile_id, actor_sub=actor_sub
+            )
             raise AppError(
                 ErrorCode.CONFLICT,
                 "The account's profiles must be deleted before the account can be purged",
