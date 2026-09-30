@@ -778,7 +778,7 @@ export type GqlQuery = {
   listCampaignsByProfile: GqlCampaignConnection;
   /** Return the IDs of every catalog used by a campaign the caller owns or has access to via a share. */
   listCatalogsInUse: Array<Scalars['ID']['output']>;
-  /** List the pending invites on a profile. The caller must have write access to the profile. */
+  /** List the pending invites on a profile. Owner only: a caller whose write access comes from a share is not authorized to list invites and receives an empty list. */
   listInvitesByProfile: Array<GqlProfileInvite>;
   /** List the public, admin-managed catalogs available to all users (soft-deleted catalogs excluded). */
   listManagedCatalogs: Array<GqlCatalog>;

@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Self, Tuple
 
 from .errors import AppError, ErrorCode
+from .ids import build_unit_campaign_key as _build_unit_campaign_key
 
 # US phone number pattern: 10 digits with optional formatting
 PHONE_PATTERN = re.compile(r"^(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})$")
@@ -502,9 +503,15 @@ class CreateCampaignInput:
         """Build DynamoDB unitCampaignKey index value if unit fields are present."""
         if not self.unit_type or self.unit_number is None or not self.city or not self.state:
             return None
-        name = self.campaign_name or ""
-        year = str(self.campaign_year) if self.campaign_year is not None else ""
-        return f"{self.unit_type}#{self.unit_number}#{self.city}#{self.state}#{name}#{year}"
+        year = self.campaign_year if self.campaign_year is not None else ""
+        return _build_unit_campaign_key(
+            self.unit_type,
+            self.unit_number,
+            self.city,
+            self.state,
+            self.campaign_name or "",
+            year,
+        )
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> Self:

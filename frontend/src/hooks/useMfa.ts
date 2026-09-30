@@ -29,7 +29,6 @@ export interface UseMfaReturn {
   mfaEnabled: boolean;
   pendingConfirmation: MfaPendingConfirmation | null;
   handleSetupMFA: () => Promise<void>;
-  confirmSetupMFA: () => Promise<void>;
   handleVerifyMFA: (e: React.FormEvent) => Promise<void>;
   handleDisableMFA: () => void;
   confirmDisableMFA: () => Promise<void>;
@@ -104,11 +103,6 @@ export const useMfa = (): UseMfaReturn => {
 
   const handleSetupMFA = async () => {
     setPendingConfirmation(null);
-    await runMfaSetup(setMfaSetupCode, setQrCodeUrl, setMfaError, setMfaLoading);
-  };
-
-  const confirmSetupMFA = async () => {
-    setPendingConfirmation(null);
     setMfaError(null);
     await runMfaSetup(setMfaSetupCode, setQrCodeUrl, setMfaError, setMfaLoading);
   };
@@ -177,7 +171,6 @@ export const useMfa = (): UseMfaReturn => {
     mfaEnabled,
     pendingConfirmation,
     handleSetupMFA,
-    confirmSetupMFA,
     handleVerifyMFA,
     handleDisableMFA,
     confirmDisableMFA,
