@@ -234,6 +234,7 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     Admin checks are performed separately via is_admin(); do not add them here.
     """
     # Check ownership with a strongly consistent base-table read
+    # (utils.auth._is_profile_owner(tables.profiles, caller_account_id, db_profile_id))
     if profile_exists_for_owner(caller_account_id, profile_id):
         return True
     
