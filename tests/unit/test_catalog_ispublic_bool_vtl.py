@@ -592,44 +592,30 @@ class TestGetCatalogResponseVtl:
 
     def test_owner_passes_through_private_catalog(self):
         result = self._catalog_item()
-        output = _render_json(
-            GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OWNER_SUB)
-        )
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OWNER_SUB))
         assert output["isPublic"] is False
 
     def test_other_caller_denied_private_catalog(self):
         result = self._catalog_item()
-        output = _render_json(
-            GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OTHER_SUB)
-        )
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OTHER_SUB))
         assert output is None
 
     def test_other_caller_passes_through_public_catalog(self):
         result = self._catalog_item(isPublic=True)
-        output = _render_json(
-            GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OTHER_SUB)
-        )
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OTHER_SUB))
         assert output["isPublic"] is True
 
     def test_other_caller_passes_through_admin_managed_catalog(self):
-        result = self._catalog_item(
-            catalogType="ADMIN_MANAGED", ownerAccountId="ACCOUNT#admin-sub"
-        )
-        output = _render_json(
-            GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OTHER_SUB)
-        )
+        result = self._catalog_item(catalogType="ADMIN_MANAGED", ownerAccountId="ACCOUNT#admin-sub")
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OTHER_SUB))
         assert output["catalogType"] == "ADMIN_MANAGED"
 
     def test_missing_result_serializes_null(self):
-        output = _render_json(
-            GET_CATALOG_RESPONSE_VTL, self._context_with_result(None, sub=self.OTHER_SUB)
-        )
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(None, sub=self.OTHER_SUB))
         assert output is None
 
     def test_empty_result_serializes_null(self):
-        output = _render_json(
-            GET_CATALOG_RESPONSE_VTL, self._context_with_result({}, sub=self.OTHER_SUB)
-        )
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result({}, sub=self.OTHER_SUB))
         assert output is None
 
     def test_error_propagates(self):

@@ -1,9 +1,17 @@
 # #509 investigation record — catalog read paths and ownership checks
 
-**Status:** investigation only. The fix for #509 is **not** implemented.
-This file preserves the reachability map so a clean session can implement the fix
-without re-deriving it. The commit that adds this file is an investigation record,
-not the fix.
+**Status:** resolved. The fix for #509 landed on this branch as scope (a) from the
+"Fix scope conclusion" below — VTL response template only (firstmate decision):
+`tofu/application/appsync/mapping-templates/get_catalog_response.vtl` now returns
+the catalog only when it is public, admin-managed (`ADMIN_MANAGED`), or owned by
+the caller, and null otherwise. `get_catalog_fn.js` deliberately carries no
+ownership check (see the createOrder note below). The rule is guarded by
+`tests/unit/catalog_response_vtl.test.ts` and
+`tests/unit/test_catalog_ispublic_bool_vtl.py` (`TestGetCatalogResponseVtl`).
+The commit that adds this file is an investigation record, not the fix; the body
+below preserves the pre-fix reachability map as written, so its "no ownership
+check" wording and line references describe the code as it stood *before* the
+fix.
 
 ## The defect (issue #509, verbatim severity)
 
@@ -84,6 +92,8 @@ OR `ownerAccountId == 'ACCOUNT#' + ctx.identity.sub`; otherwise refuse (null).
   caller who is authorized via profile write access).
 - Regression test must use a **different** authenticated caller (not the owner)
   and prove the denial (null / refusal), failing before the fix and passing after.
+- **Decision (recorded):** scope (a) — VTL response template only. The ownership
+  check must NOT be added to `get_catalog_fn.js` (firstmate decision on this branch).
 
 ## Files and line references
 
@@ -101,9 +111,12 @@ OR `ownerAccountId == 'ACCOUNT#' + ctx.identity.sub`; otherwise refuse (null).
     the `+` string-concat operator, and `.isEmpty` on maps to render a
     response template)
 
-## Schema doc comment that becomes factually wrong after the fix
+## Schema doc comment updated by the fix
 
 `tofu/application/schema/schema.graphql:197` and the generated
-`frontend/src/types/graphql-generated.ts:189` both state:
-"Catalogs are visible to any authenticated user by ID (getCatalog performs no
-ownership check)." After the fix, the by-ID read enforces ownership/public.
+`frontend/src/types/graphql-generated.ts:189` were updated with the fix: they
+now state that `getCatalog` returns a catalog by ID only when it is public,
+admin-managed, or owned by the caller (null otherwise). The `getCatalog` field
+docstring (`schema.graphql:778` / `graphql-generated.ts:759`) was updated with
+the same rule. Keep the generated copy in sync by running `npm run codegen` in
+`frontend/`, not by hand-editing it.
