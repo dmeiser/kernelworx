@@ -2,13 +2,7 @@
  * Custom hook for MFA (TOTP) functionality
  */
 import { useState, useCallback } from 'react';
-import {
-  setUpTOTP,
-  verifyTOTPSetup,
-  updateMFAPreference,
-  updatePassword,
-  fetchMFAPreference,
-} from 'aws-amplify/auth';
+import { setUpTOTP, verifyTOTPSetup, updateMFAPreference, updatePassword, fetchMFAPreference } from 'aws-amplify/auth';
 import QRCode from 'qrcode';
 import { getMfaEnabledFromCognito } from '../lib/mfaStatus';
 import { checkIsFederatedSession } from '../lib/authUtils';

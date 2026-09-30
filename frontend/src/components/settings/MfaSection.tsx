@@ -169,7 +169,8 @@ const FederatedDisableNotice: React.FC = () => {
         <strong>Administrator Security Policy:</strong> Changing MFA requires a password sign-in.
       </Alert>
       <Typography variant="body2" color="text.secondary" paragraph>
-        This account signs in through a social provider which cannot present MFA. Changing MFA requires signing in with your email and password. Please sign out and sign in with your password.
+        This account signs in through a social provider which cannot present MFA. Changing MFA requires signing in with
+        your email and password. Please sign out and sign in with your password.
       </Typography>
       <Button variant="contained" color="primary" onClick={handleSignIn}>
         Sign Out
@@ -236,12 +237,14 @@ export const MfaSection: React.FC<MfaSectionProps> = ({ mfaHook, onSetupMFA, isA
     </Stack>
 
     <Typography variant="body2" color="text.secondary" paragraph>
-      Add an extra layer of security to your account with TOTP multi-factor authentication. Both an authenticator app and passkeys are supported together.
+      Add an extra layer of security to your account with TOTP multi-factor authentication. Both an authenticator app
+      and passkeys are supported together.
     </Typography>
 
     {isAdmin && (
       <Alert severity="info" sx={{ mb: 2 }}>
-        <strong>Administrator notice:</strong> Admin operations need an authenticator app (TOTP) enrolled; a passkey alone signs you in but does not grant admin.
+        <strong>Administrator notice:</strong> Admin operations need an authenticator app (TOTP) enrolled; a passkey
+        alone signs you in but does not grant admin.
       </Alert>
     )}
 
