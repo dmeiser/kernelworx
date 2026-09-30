@@ -124,7 +124,7 @@ describe('ScoutsPage helpers', () => {
     expect(deleteMock).not.toHaveBeenCalled();
   });
 
-  it('updatePreferencesWithRollback success and rollback on error', async () => {
+  it('updatePreferencesWithRollback refreshes the cache on success and rollbacks on error', async () => {
     const setShow = vi.fn();
     const client = { query: vi.fn().mockResolvedValue({ data: {} }) };
     const successFn = vi.fn().mockResolvedValue({});
@@ -136,7 +136,9 @@ describe('ScoutsPage helpers', () => {
       client as any,
     );
     expect(setShow).toHaveBeenCalledWith(false);
-    expect(client.query).not.toHaveBeenCalled();
+    // On success it should refresh the cached blob so the next toggle locks
+    // against fresh state (#510)
+    expect(client.query).toHaveBeenCalledWith(expect.objectContaining({ fetchPolicy: 'network-only' }));
 
     const failing = vi.fn().mockRejectedValue(new Error('boom'));
     await updatePreferencesWithRollback(failing as any, '{"showReadOnlyProfiles":true}', false, setShow, client as any);
