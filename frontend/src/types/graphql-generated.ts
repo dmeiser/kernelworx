@@ -2673,7 +2673,7 @@ export type GqlAdminResetUserPasswordMutation = { __typename?: 'Mutation'; admin
 
 export type GqlAdminPurgeUserAccountMutationVariables = Exact<{
   accountId: Scalars['ID']['input'];
-  profileIds: Array<Scalars['ID']['input']>;
+  profileIds: Array<Scalars['ID']['input']> | Scalars['ID']['input'];
 }>;
 
 export type GqlAdminPurgeUserAccountMutation = { __typename?: 'Mutation'; adminPurgeUserAccount: boolean };
