@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId, normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     // If already owner or profile was invalid/not found, skip this check
@@ -9,10 +10,12 @@ export function request(ctx) {
         };
     }
     
-    const profileId = ctx.stash.profileId;
-    
-    // Additional validation - if profileId is not set or invalid, skip
-    if (!profileId || !profileId.startsWith('PROFILE#')) {
+    // The stash id must already be in PROFILE# DB form (steps upstream stash
+    // only normalizeId output); a non-prefixed stash id skips, exactly as the
+    // historical startsWith check did.
+    const stashProfileId = ctx.stash.profileId;
+    const profileId = normalizeId(stashProfileId, 'PROFILE#');
+    if (!profileId || profileId !== stashProfileId) {
         ctx.stash.hasWritePermission = false;
         return {
         operation: 'GetItem',
@@ -21,7 +24,7 @@ export function request(ctx) {
     }
     
     // Get share from shares table using profileId + targetAccountId (caller's sub)
-    const targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
+    const targetAccountId = normalizeIdOrPrefix(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
     
     return {
         operation: 'GetItem',

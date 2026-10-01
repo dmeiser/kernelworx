@@ -427,6 +427,88 @@ describe('verify_profile_write_access_fn for the share/invite query resolvers (#
         assert.deepStrictEqual(invites, [], 'a former owner must not read the new owner invites');
     });
 
+    // The write-permission half of the contract, driven end to end on an
+    // UNPREFIXED profileId (the #534/#636 case): normalization is owned by
+    // lib/ids.js inside verify_profile_write_access, so the share lookup must
+    // see the same PROFILE# form the owner check used. Each case states who is
+    // denied and who is allowed.
+    function runWritePipeline(step2Items, shareResult) {
+        const ctx = queryCtx({ info: { fieldName: 'listSharesByProfile', parentTypeName: 'Query' } });
+        const stash = ctx.stash;
+
+        request(ctx); // step 1: consistent owner GetItem (miss for a non-owner)
+        response({ ...ctx, result: null });
+        request(ctx); // step 2: GSI locator
+        response({ ...ctx, result: { items: step2Items } });
+        checkWritePermission.request({ ...ctx, stash });
+        checkWritePermission.response({ ...ctx, stash, result: shareResult });
+        // The final list step keys off the verdict: a denial issues the
+        // NONEXISTENT query, so the datastore answers with an empty page.
+        queryShares.request({ ...ctx, stash });
+        const finalItems = stash.hasWritePermission && shareResult ? [shareResult] : [];
+        const shares = queryShares.response({ ...ctx, stash, result: { items: finalItems } });
+        return { ctx, shares };
+    }
+
+    it('grants a non-owner holding a WRITE share through the whole pipeline on an unprefixed profileId', () => {
+        const share = {
+            profileId: 'PROFILE#prof-456',
+            targetAccountId: 'ACCOUNT#user-123',
+            permissions: ['WRITE'],
+            ownerAccountId: 'ACCOUNT#original-owner'
+        };
+
+        const { ctx, shares } = runWritePipeline(
+            [{ profileId: 'PROFILE#prof-456', ownerAccountId: 'ACCOUNT#original-owner' }],
+            share
+        );
+
+        assert.strictEqual(ctx.stash.hasWritePermission, true);
+        assert.deepStrictEqual(shares, [{ ...share, targetAccountId: 'user-123' }]);
+    });
+
+    it('denies a caller with no share at all on an unprefixed profileId', () => {
+        const { ctx, shares } = runWritePipeline(
+            [{ profileId: 'PROFILE#prof-456', ownerAccountId: 'ACCOUNT#original-owner' }],
+            null
+        );
+
+        assert.strictEqual(ctx.stash.hasWritePermission, false);
+        assert.deepStrictEqual(shares, []);
+    });
+
+    it('denies a READ-only share holder on an unprefixed profileId', () => {
+        const { ctx, shares } = runWritePipeline(
+            [{ profileId: 'PROFILE#prof-456', ownerAccountId: 'ACCOUNT#original-owner' }],
+            {
+                profileId: 'PROFILE#prof-456',
+                targetAccountId: 'ACCOUNT#user-123',
+                permissions: ['READ'],
+                ownerAccountId: 'ACCOUNT#original-owner'
+            }
+        );
+
+        assert.strictEqual(ctx.stash.hasWritePermission, false);
+        assert.deepStrictEqual(shares, []);
+    });
+
+    it('denies a WRITE share stamped by a previous owner after an ownership transfer (#432)', () => {
+        // The share still says the former owner granted it; the GSI-located
+        // profile names the new owner, so the share is stale and must not grant.
+        const { ctx, shares } = runWritePipeline(
+            [{ profileId: 'PROFILE#prof-456', ownerAccountId: 'ACCOUNT#new-owner' }],
+            {
+                profileId: 'PROFILE#prof-456',
+                targetAccountId: 'ACCOUNT#user-123',
+                permissions: ['WRITE'],
+                ownerAccountId: 'ACCOUNT#former-owner'
+            }
+        );
+
+        assert.strictEqual(ctx.stash.hasWritePermission, false);
+        assert.deepStrictEqual(shares, []);
+    });
+
     it('keeps NOT_FOUND on the write path, where the profile must exist to mutate it', () => {
         const ctx = {
             identity: { sub: 'user-123' },
