@@ -168,6 +168,48 @@ class TestValidateQRS3Key:
         assert payment_methods.validate_qr_s3_key(s3_key, account_id) is False
 
 
+class TestGetQRCodeS3Key:
+    """Test get_qr_code_s3_key (slug-shaped, pre-UUID-migration keys).
+
+    Regression: #529 — this builder is not kept only for tests: the read
+    path's s3Key-less fallback (_find_existing_qr_s3_key) calls it, so it
+    must keep producing the same slug-shaped keys issued before the
+    UUID-key migration.
+    """
+
+    def test_builds_slug_shaped_key(self) -> None:
+        """The key is the slug of the payment method name, not a UUID."""
+        assert payment_methods.get_qr_code_s3_key("acct-1", "Venmo") == "payment-qr-codes/acct-1/venmo.png"
+
+    def test_slugifies_multiword_names(self) -> None:
+        """Multi-word / special-character names slugify to the stored slug."""
+        assert payment_methods.get_qr_code_s3_key("acct-1", "Venmo - Tom") == "payment-qr-codes/acct-1/venmo-tom.png"
+
+    def test_custom_extension(self) -> None:
+        """The file extension is honored."""
+        assert payment_methods.get_qr_code_s3_key("acct-1", "Venmo", "jpg") == "payment-qr-codes/acct-1/venmo.jpg"
+
+    def test_read_path_locates_pre_migration_slug_keyed_object(self, s3_bucket: Any, sample_account_id: str) -> None:
+        """The name-based read path finds a pre-UUID-migration slug-keyed object.
+
+        generate_presigned_get_url with no s3Key locates the object via
+        _find_existing_qr_s3_key, which builds the key with
+        get_qr_code_s3_key — the s3Key-less payload shape the handler still
+        accepts. Wired resolvers pass explicit s3Keys today, so this covers
+        that legacy shape, not the batch serving path.
+        """
+        bucket_name = os.environ.get("EXPORTS_BUCKET")
+        # A slug-keyed object as created before the UUID-key migration.
+        slug_key = payment_methods.get_qr_code_s3_key(sample_account_id, "Venmo - Tom")
+        s3_bucket.put_object(Bucket=bucket_name, Key=slug_key, Body=b"fake-qr")
+
+        # No s3Key supplied, so the name-based slug lookup must find it.
+        url = payment_methods.generate_presigned_get_url(sample_account_id, "Venmo - Tom")
+
+        assert url is not None
+        assert "venmo-tom.png" in url
+
+
 class TestGenerateQRCodeS3Key:
     """Test generate_qr_code_s3_key function (UUID-based)."""
 
@@ -774,51 +816,6 @@ class TestValidateQRFile:
         assert "PNG, JPG, or WEBP" in str(exc_info.value.message)
 
 
-class TestUploadQRToS3:
-    """Test upload_qr_to_s3 function."""
-
-    def test_upload_png(self, s3_bucket: Any, sample_account_id: str) -> None:
-        """Test uploading PNG QR code."""
-        file_bytes = b"fake-png-data" * 100
-        s3_key = payment_methods.upload_qr_to_s3(sample_account_id, "Venmo", file_bytes, "image/png")
-
-        assert s3_key == f"payment-qr-codes/{sample_account_id}/venmo.png"
-
-        # Verify S3 object exists
-        bucket_name = os.environ.get("EXPORTS_BUCKET")
-        response = s3_bucket.head_object(Bucket=bucket_name, Key=s3_key)
-        assert response["ContentType"] == "image/png"
-
-    def test_upload_jpeg(self, s3_bucket: Any, sample_account_id: str) -> None:
-        """Test uploading JPEG QR code."""
-        file_bytes = b"fake-jpeg-data" * 100
-        s3_key = payment_methods.upload_qr_to_s3(sample_account_id, "PayPal", file_bytes, "image/jpeg")
-
-        assert s3_key == f"payment-qr-codes/{sample_account_id}/paypal.jpg"
-
-    def test_upload_webp(self, s3_bucket: Any, sample_account_id: str) -> None:
-        """Test uploading WEBP QR code."""
-        file_bytes = b"fake-webp-data" * 100
-        s3_key = payment_methods.upload_qr_to_s3(sample_account_id, "Zelle", file_bytes, "image/webp")
-
-        assert s3_key == f"payment-qr-codes/{sample_account_id}/zelle.webp"
-
-    def test_upload_with_special_chars(self, s3_bucket: Any, sample_account_id: str) -> None:
-        """Test uploading with special characters in name."""
-        file_bytes = b"fake-data" * 100
-        s3_key = payment_methods.upload_qr_to_s3(sample_account_id, "Venmo - Tom", file_bytes, "image/png")
-
-        # Should slugify the name
-        assert s3_key == f"payment-qr-codes/{sample_account_id}/venmo-tom.png"
-
-    def test_upload_invalid_file(self, s3_bucket: Any, sample_account_id: str) -> None:
-        """Test uploading invalid file."""
-        file_bytes = b"x" * (6 * 1024 * 1024)  # Too large
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.upload_qr_to_s3(sample_account_id, "Venmo", file_bytes, "image/png")
-        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
-
-
 class TestDeleteQRFromS3:
     """Test delete_qr_from_s3 function."""
 
@@ -1328,24 +1325,6 @@ class TestErrorHandling:
         finally:
             override_table("accounts", None)
 
-    def test_upload_qr_s3_error(self, s3_bucket: Any, sample_account_id: str) -> None:
-        """Test upload_qr_to_s3 handles S3 errors."""
-        # Replace S3 client with mock that raises error
-
-        mock_s3 = MagicMock()
-        mock_s3.put_object.side_effect = ClientError(
-            {"Error": {"Code": "InternalServerError", "Message": "Test error"}}, "PutObject"
-        )
-
-        payment_methods.s3_client = mock_s3
-
-        with pytest.raises(AppError) as exc_info:
-            payment_methods.upload_qr_to_s3(sample_account_id, "Venmo", b"test-data", "image/png")
-        assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
-
-        # Clean up
-        payment_methods.s3_client = None
-
     def test_generate_presigned_url_s3_error(self, s3_bucket: Any, sample_account_id: str) -> None:
         """Test generate_presigned_get_url handles S3 errors."""
 
@@ -1533,9 +1512,23 @@ class TestErrorHandling:
     ) -> None:
         """Test delete_payment_method handles S3 delete warning path."""
 
-        # Create a method with a qrCodeUrl
+        # Seed the method with the slug key upload_qr_to_s3 used to write to
+        # S3 (payment-qr-codes/<acct>/<slug>.png) so deletion has a QR to
+        # remove. upload_qr_to_s3 wrote the object but never linked it to the
+        # method, so set the stored value directly to exercise the delete path.
         payment_methods.create_payment_method(sample_account_id, "Venmo")
-        payment_methods.upload_qr_to_s3(sample_account_id, "Venmo", b"fake-qr-data", "image/png")
+        accounts_table = dynamodb_tables["accounts"]
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        response = accounts_table.get_item(Key={"accountId": account_id_key})
+        methods = response["Item"]["preferences"]["paymentMethods"]
+        methods[0]["qrCodeUrl"] = f"payment-qr-codes/{sample_account_id}/venmo.png"
+        preferences = response["Item"].get("preferences", {})
+        preferences["paymentMethods"] = methods
+        accounts_table.update_item(
+            Key={"accountId": account_id_key},
+            UpdateExpression="SET preferences = :prefs",
+            ExpressionAttributeValues={":prefs": preferences},
+        )
 
         # Mock S3 to raise an error that's not NoSuchKey
         mock_s3 = MagicMock()
