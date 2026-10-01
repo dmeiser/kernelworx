@@ -1085,18 +1085,6 @@ function useUserDataData(accountId: string | undefined, isMfaRequired: boolean) 
     });
   };
 
-  const revokeShare = (profileId: string, targetAccountId: string) => {
-    void (async () => {
-      await deleteShare({
-        variables: {
-          profileId,
-          targetAccountId,
-        },
-      });
-      void refetchShares();
-    })();
-  };
-
   const handleTransferClick = (profileId: string) => {
     setTransferProfileId(profileId);
     setNewOwnerSearch('');
@@ -1129,9 +1117,15 @@ function useUserDataData(accountId: string | undefined, isMfaRequired: boolean) 
     });
   };
 
-  const handleConfirmRevokeShare = () => {
+  const handleConfirmRevokeShare = async () => {
     if (!revokeShareTarget) return;
-    revokeShare(revokeShareTarget.profileId, revokeShareTarget.targetAccountId);
+    await deleteShare({
+      variables: {
+        profileId: revokeShareTarget.profileId,
+        targetAccountId: revokeShareTarget.targetAccountId,
+      },
+    });
+    void refetchShares();
   };
 
   const handleCancelRevoke = () => {
