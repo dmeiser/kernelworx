@@ -326,6 +326,7 @@ route53
 RRule
 rtype
 runtime
+SAMEORIGIN
 SaaS
 sameSite
 Scout
