@@ -81,7 +81,7 @@ locals {
   # replace all of them. These IDs are the stable AWS-published IDs.
   managed_cache_disabled_policy_id         = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # Managed-CachingDisabled
   managed_cache_optimized_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
-  managed_all_viewer_except_host_policy_id = "b689b0a8-53d0-40ab-baf4-68788e93d257" # Managed-AllViewerExceptHostHeader
+  managed_all_viewer_except_host_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # Managed-AllViewerExceptHostHeader
   managed_security_headers_policy_id       = "67f7725c-6f97-4210-82d7-5512b31e9d03" # SecurityHeadersPolicy
 }
 
