@@ -1,14 +1,16 @@
 import { util } from '@aws-appsync/utils';
+import { validateSellerName } from './lib/validate_seller_name.js';
 
 export function request(ctx) {
     const profile = ctx.stash.profile;
     const input = ctx.args.input;
     const now = util.time.nowISO8601();
-    
+    const sellerName = validateSellerName(input.sellerName);
+
     // Build update expression dynamically to include optional unit fields
     const expressionParts = ['sellerName = :sellerName', 'updatedAt = :updatedAt'];
     const expressionValues = {
-        ':sellerName': input.sellerName,
+        ':sellerName': sellerName,
         ':updatedAt': now
     };
     
@@ -50,7 +52,7 @@ export function response(ctx) {
     // Return the updated profile with merged fields
     return {
         ...profile,
-        sellerName: input.sellerName,
+        sellerName: validateSellerName(input.sellerName),
         unitType: input.unitType !== undefined ? input.unitType : profile.unitType,
         unitNumber: input.unitNumber !== undefined ? input.unitNumber : profile.unitNumber,
         updatedAt: now
