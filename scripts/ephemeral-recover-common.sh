@@ -13,7 +13,10 @@ log() {
 }
 
 # Reject run-ids that are not plain [A-Za-z0-9._-] before they reach an S3
-# state key or a -var value. Same rule as scripts/generate_integration_env.py.
+# state key or a -var value. This function is the single owner of the rule (the
+# same rule scripts/generate_integration_env.py applies); the contract it
+# enforces and the entry points that call it are documented in the
+# "Run identifiers" section of docs/scripts/README.md.
 validate_run_id() {
   local run_id="$1"
   if ! [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
