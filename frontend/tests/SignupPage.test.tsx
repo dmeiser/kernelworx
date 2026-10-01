@@ -134,8 +134,8 @@ const fillSignupForm = (overrides?: FormOverrides) => {
   const merged = Object.assign(
     {
       email: 'user@example.com',
-      password: 'Password123!',
-      confirmPassword: 'Password123!',
+      password: 'Password123!xyz',
+      confirmPassword: 'Password123!xyz',
       ageConfirmed: true,
     },
     overrides,
@@ -260,7 +260,7 @@ describe('SignupPage', () => {
 
       expect(
         await screen.findByText(
-          'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol',
+          'Password must be at least 15 characters and include uppercase, lowercase, number, and symbol',
         ),
       ).toBeInTheDocument();
       expect(signUp).not.toHaveBeenCalled();
@@ -269,7 +269,7 @@ describe('SignupPage', () => {
     test('shows error when passwords do not match', async () => {
       renderPage();
 
-      fillSignupForm({ password: 'Password123!', confirmPassword: 'DifferentPassword123!' });
+      fillSignupForm({ password: 'Password123!xyz', confirmPassword: 'DifferentPassword123!' });
       submitForm('Create Account');
 
       expect(await screen.findByText('Passwords do not match')).toBeInTheDocument();
@@ -298,7 +298,7 @@ describe('SignupPage', () => {
 
       expect(signUp).toHaveBeenCalledWith({
         username: 'user@example.com',
-        password: 'Password123!',
+        password: 'Password123!xyz',
         options: {
           userAttributes: {
             email: 'user@example.com',
@@ -349,7 +349,7 @@ describe('SignupPage', () => {
 
       expect(
         await screen.findByText(
-          'Password does not meet requirements: minimum 8 characters with uppercase, lowercase, numbers, and symbols',
+          'Password does not meet requirements: minimum 15 characters with uppercase, lowercase, numbers, and symbols',
         ),
       ).toBeInTheDocument();
     });

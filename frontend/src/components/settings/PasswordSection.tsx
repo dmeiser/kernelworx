@@ -18,7 +18,7 @@ export const PasswordSection: React.FC<PasswordSectionProps> = ({ hook }) => {
       </Stack>
 
       <Typography variant="body2" color="text.secondary" paragraph>
-        Update your password to keep your account secure. Use a strong password with at least 8 characters.
+        Update your password to keep your account secure. Use a strong password with at least 15 characters.
       </Typography>
 
       {hook.passwordSuccess && (
@@ -58,7 +58,7 @@ export const PasswordSection: React.FC<PasswordSectionProps> = ({ hook }) => {
             fullWidth
             disabled={hook.passwordLoading}
             autoComplete="new-password"
-            helperText="At least 8 characters with uppercase, lowercase, numbers, and symbols"
+            helperText="At least 15 characters with uppercase, lowercase, numbers, and symbols"
           />
           <TextField
             label="Confirm New Password"
