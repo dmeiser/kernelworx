@@ -243,6 +243,8 @@ The dev/prod distributions are subscribed to the CloudFront **Free** pricing pla
 - WAF access logging (logging configuration, `aws-waf-logs-*` log group, log-delivery resource policy) is deleted; the #269 rate-rule tuning has no CloudWatch log evidence until Pro. WAF metrics on the visibility configs remain.
 - Cache behaviors are capped at 5 (default + `/graphql` + `/l*` + `/oauth2/*` + `/.well-known/*`); per-tier quotas are not increasable.
 
+A flat-rate plan also rejects *unsupported features* outright, so some attributes must simply be absent rather than configured. `price_class` must stay **unset** on `aws_cloudfront_distribution.site`: a plan rejects any distribution carrying one, even the previously pinned `PriceClass_100`, with `InvalidArgument: Distributions with the Free pricing plan can't have the following features: Price class` (deploy run 36811076298, job 110339824734 — the #665 migration left the attribute behind). Omitting it is the only accepted value; edge coverage is whatever the plan provides. Guarded by `test_distribution_carries_no_price_class` in `tests/unit/test_edge_security.py`. The same reasoning applies to legacy `forwarded_values`, behavior-level TTLs, and custom response headers policies above.
+
 The path back is Pro (or Business): when traffic volume forces a tier move, the full security measures — custom response headers policy with the header CSP and `frame-ancestors 'none'`, XFO DENY, per-environment HSTS, WAF access logging, and up to 10 behaviors — are reinstated at that point.
 
 ### Legacy-OAI migration complete (#335/#359/#377, scaffold removed in KW-OAI-SCAFFOLD-CLEANUP-1)
