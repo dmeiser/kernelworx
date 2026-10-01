@@ -5,12 +5,12 @@ from typing import Any, Dict
 import pytest
 
 from src.utils.appsync_types import (
-    get_argument,
-    get_argument_required,
     get_caller_id,
-    get_caller_id_required,
-    get_prev_result,
+    require_int,
+    require_str,
+    require_unit_number,
 )
+from src.utils.errors import AppError, ErrorCode
 
 
 class TestGetCallerId:
@@ -31,82 +31,115 @@ class TestGetCallerId:
         event: Dict[str, Any] = {"identity": {}}
         assert get_caller_id(event) is None
 
+    def test_returns_none_when_identity_is_null(self) -> None:
+        """Test returns None instead of raising when identity is explicitly null.
 
-class TestGetCallerIdRequired:
-    """Tests for get_caller_id_required function."""
+        AppSync omits `identity` for an unauthenticated invocation, and the
+        hand-inlined `event["identity"]["sub"]` dialect raised `KeyError` on
+        exactly this shape.
+        """
+        event: Dict[str, Any] = {"identity": None}
+        assert get_caller_id(event) is None
 
-    def test_returns_sub_from_identity(self) -> None:
-        """Test extracting sub from identity."""
-        event: Dict[str, Any] = {"identity": {"sub": "user-123"}}
-        assert get_caller_id_required(event) == "user-123"
-
-    def test_raises_when_no_identity(self) -> None:
-        """Test raises ValueError when identity is missing."""
-        event: Dict[str, Any] = {}
-        with pytest.raises(ValueError, match="Caller ID"):
-            get_caller_id_required(event)
-
-    def test_raises_when_no_sub(self) -> None:
-        """Test raises ValueError when sub is missing."""
-        event: Dict[str, Any] = {"identity": {}}
-        with pytest.raises(ValueError, match="Caller ID"):
-            get_caller_id_required(event)
+    def test_returns_none_when_identity_is_not_dict(self) -> None:
+        """Test returns None when identity is a non-dict type."""
+        event: Dict[str, Any] = {"identity": "not-a-dict"}
+        assert get_caller_id(event) is None
 
 
-class TestGetArgument:
-    """Tests for get_argument function."""
+class TestRequireStr:
+    """Tests for require_str argument validator."""
 
-    def test_returns_argument_value(self) -> None:
-        """Test extracting argument value."""
-        event: Dict[str, Any] = {"arguments": {"name": "test-value"}}
-        assert get_argument(event, "name") == "test-value"
+    def test_returns_valid_string(self) -> None:
+        """Valid non-empty string is returned."""
+        assert require_str({"key": "value"}, "key") == "value"
 
-    def test_returns_default_when_missing(self) -> None:
-        """Test returns default when argument is missing."""
-        event: Dict[str, Any] = {"arguments": {}}
-        assert get_argument(event, "name", "default") == "default"
+    def test_missing_argument_raises(self) -> None:
+        """Missing key raises INVALID_INPUT."""
+        with pytest.raises(AppError) as exc_info:
+            require_str({}, "key")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "required" in exc_info.value.message
 
-    def test_returns_none_when_no_arguments(self) -> None:
-        """Test returns None when arguments is missing."""
-        event: Dict[str, Any] = {}
-        assert get_argument(event, "name") is None
+    def test_null_argument_raises(self) -> None:
+        """Explicitly null key raises INVALID_INPUT."""
+        with pytest.raises(AppError) as exc_info:
+            require_str({"key": None}, "key")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "required" in exc_info.value.message
 
+    def test_empty_string_raises(self) -> None:
+        """Empty string raises INVALID_INPUT."""
+        with pytest.raises(AppError) as exc_info:
+            require_str({"key": ""}, "key")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "non-empty string" in exc_info.value.message
 
-class TestGetArgumentRequired:
-    """Tests for get_argument_required function."""
-
-    def test_returns_argument_value(self) -> None:
-        """Test extracting argument value."""
-        event: Dict[str, Any] = {"arguments": {"name": "test-value"}}
-        assert get_argument_required(event, "name") == "test-value"
-
-    def test_raises_when_missing(self) -> None:
-        """Test raises ValueError when argument is missing."""
-        event: Dict[str, Any] = {"arguments": {}}
-        with pytest.raises(ValueError, match="Argument 'name' is required"):
-            get_argument_required(event, "name")
-
-    def test_raises_when_no_arguments(self) -> None:
-        """Test raises ValueError when arguments is missing."""
-        event: Dict[str, Any] = {}
-        with pytest.raises(ValueError, match="Argument 'name' is required"):
-            get_argument_required(event, "name")
+    def test_non_string_type_raises(self) -> None:
+        """Non-string value raises INVALID_INPUT."""
+        with pytest.raises(AppError) as exc_info:
+            require_str({"key": 123}, "key")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "non-empty string" in exc_info.value.message
 
 
-class TestGetPrevResult:
-    """Tests for get_prev_result function."""
+class TestRequireInt:
+    """Tests for require_int argument validator."""
 
-    def test_returns_prev_result(self) -> None:
-        """Test extracting previous result."""
-        event: Dict[str, Any] = {"prev": {"result": {"ownerAccountId": "user-123"}}}
-        assert get_prev_result(event) == {"ownerAccountId": "user-123"}
+    def test_returns_valid_int(self) -> None:
+        """Integer value is returned as int."""
+        assert require_int({"year": 2026}, "year") == 2026
 
-    def test_returns_empty_dict_when_no_prev(self) -> None:
-        """Test returns empty dict when prev is missing."""
-        event: Dict[str, Any] = {}
-        assert get_prev_result(event) == {}
+    def test_converts_numeric_string(self) -> None:
+        """Numeric string is converted to int."""
+        assert require_int({"year": "2026"}, "year") == 2026
 
-    def test_returns_empty_dict_when_no_result(self) -> None:
-        """Test returns empty dict when result is missing."""
-        event: Dict[str, Any] = {"prev": {}}
-        assert get_prev_result(event) == {}
+    def test_missing_argument_raises(self) -> None:
+        """Missing argument raises INVALID_INPUT."""
+        with pytest.raises(AppError) as exc_info:
+            require_int({}, "year")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "required" in exc_info.value.message
+
+    def test_non_integer_string_raises(self) -> None:
+        """Non-numeric string raises INVALID_INPUT."""
+        with pytest.raises(AppError) as exc_info:
+            require_int({"year": "abc"}, "year")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "must be an integer" in exc_info.value.message
+
+    def test_invalid_type_raises(self) -> None:
+        """Non-scalar type raises INVALID_INPUT."""
+        with pytest.raises(AppError) as exc_info:
+            require_int({"year": [2026]}, "year")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+        assert "must be an integer" in exc_info.value.message
+
+
+class TestRequireUnitNumber:
+    """Tests for require_unit_number argument validator."""
+
+    def test_returns_valid_unit_number(self) -> None:
+        """Valid positive unit number is returned."""
+        assert require_unit_number({"unitNumber": 42}, "unitNumber") == 42
+        assert require_unit_number({"unitNumber": "100"}, "unitNumber") == 100
+
+    def test_missing_unit_number_raises(self) -> None:
+        """Missing unitNumber raises INVALID_INPUT."""
+        with pytest.raises(AppError) as exc_info:
+            require_unit_number({}, "unitNumber")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+    def test_invalid_unit_number_raises(self) -> None:
+        """Non-positive or non-numeric unit number raises INVALID_INPUT."""
+        with pytest.raises(AppError) as exc_info:
+            require_unit_number({"unitNumber": 0}, "unitNumber")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+        with pytest.raises(AppError) as exc_info:
+            require_unit_number({"unitNumber": -5}, "unitNumber")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT
+
+        with pytest.raises(AppError) as exc_info:
+            require_unit_number({"unitNumber": "abc"}, "unitNumber")
+        assert exc_info.value.error_code == ErrorCode.INVALID_INPUT

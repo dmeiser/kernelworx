@@ -43,6 +43,7 @@ from .deletion_cascade import (
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id
     from utils.auth import require_admin_mfa
     from utils.boto import get_cognito_client
     from utils.cognito_filters import cognito_user_filter
@@ -51,6 +52,7 @@ try:  # pragma: no cover
     from utils.logging import get_logger, mask_email
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id
     from ..utils.auth import require_admin_mfa
     from ..utils.boto import get_cognito_client
     from ..utils.cognito_filters import cognito_user_filter
@@ -933,7 +935,7 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     account_id = _validate_admin_and_get_account_id(event)
     profile_ids = _validate_profile_ids_argument(event.get("arguments", {}).get("profileIds"))
 
-    caller_id = event.get("identity", {}).get("sub")
+    caller_id = get_caller_id(event)
     _check_not_self_deletion(str(caller_id), account_id)
 
     user_pool_id = get_required_env("USER_POOL_ID")
@@ -1106,8 +1108,7 @@ def _validate_admin_and_get_caller_id(event: Dict[str, Any]) -> str:
     """Validate admin access and extract caller ID."""
     require_admin_mfa(event)
 
-    identity = event.get("identity", {})
-    caller_id = identity.get("sub")
+    caller_id = get_caller_id(event)
     if not caller_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 

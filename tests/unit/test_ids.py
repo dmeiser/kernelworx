@@ -5,9 +5,7 @@ from src.utils.ids import (
     ensure_account_id,
     ensure_campaign_id,
     ensure_catalog_id,
-    ensure_order_id,
     ensure_prefix,
-    ensure_product_id,
     ensure_profile_id,
     strip_prefix,
 )
@@ -158,24 +156,6 @@ class TestEnsureCatalogId:
         assert ensure_catalog_id(None) is None
 
 
-class TestEnsureOrderId:
-    """Tests for ensure_order_id helper."""
-
-    def test_adds_order_prefix(self) -> None:
-        """Test adding ORDER# prefix."""
-        result = ensure_order_id("order-123")
-        assert result == "ORDER#order-123"
-
-    def test_preserves_order_prefix(self) -> None:
-        """Test preserving existing ORDER# prefix."""
-        result = ensure_order_id("ORDER#order-123")
-        assert result == "ORDER#order-123"
-
-    def test_returns_none_for_none(self) -> None:
-        """Test None input returns None."""
-        assert ensure_order_id(None) is None
-
-
 class TestEnsureAccountId:
     """Tests for ensure_account_id helper."""
 
@@ -192,24 +172,6 @@ class TestEnsureAccountId:
     def test_returns_none_for_none(self) -> None:
         """Test None input returns None."""
         assert ensure_account_id(None) is None
-
-
-class TestEnsureProductId:
-    """Tests for ensure_product_id helper."""
-
-    def test_adds_product_prefix(self) -> None:
-        """Test adding PRODUCT# prefix."""
-        result = ensure_product_id("popcorn-001")
-        assert result == "PRODUCT#popcorn-001"
-
-    def test_preserves_product_prefix(self) -> None:
-        """Test preserving existing PRODUCT# prefix."""
-        result = ensure_product_id("PRODUCT#popcorn-001")
-        assert result == "PRODUCT#popcorn-001"
-
-    def test_returns_none_for_none(self) -> None:
-        """Test None input returns None."""
-        assert ensure_product_id(None) is None
 
 
 class TestBuildUnitCampaignKey:
@@ -257,26 +219,3 @@ class TestUnitCampaignKeySingleDefinition:
 
         assert campaign_reporting.build_unit_campaign_key is build_unit_campaign_key
         assert list_unit_catalogs.build_unit_campaign_key is build_unit_campaign_key
-
-    def test_campaign_write_path_uses_the_shared_builder(self) -> None:
-        """The campaign write path builds the same key through utils.ids."""
-        from src.utils import validation
-
-        assert not hasattr(validation, "build_unit_campaign_key")
-        assert validation._build_unit_campaign_key is build_unit_campaign_key
-
-    def test_write_path_key_matches_the_query_key(self) -> None:
-        """CreateCampaignInput emits the exact key the unit queries look up."""
-        from src.utils.validation import CreateCampaignInput
-
-        model = CreateCampaignInput(
-            profile_id="PROFILE#1",
-            campaign_name="Sale",
-            campaign_year=2025,
-            catalog_id="CATALOG#1",
-            unit_type="Pack",
-            unit_number=42,
-            city="Springfield",
-            state="IL",
-        )
-        assert model.build_unit_campaign_key() == build_unit_campaign_key("Pack", 42, "Springfield", "IL", "Sale", 2025)

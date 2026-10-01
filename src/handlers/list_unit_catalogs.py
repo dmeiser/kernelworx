@@ -6,7 +6,7 @@ from boto3.dynamodb.conditions import Key
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.appsync_types import require_int, require_str, require_unit_number
+    from utils.appsync_types import get_caller_id, require_int, require_str, require_unit_number
     from utils.auth import batch_check_profile_access
     from utils.dynamodb import batch_get_chunked, tables
     from utils.errors import AppError, ErrorCode
@@ -14,7 +14,7 @@ try:  # pragma: no cover
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.appsync_types import require_int, require_str, require_unit_number
+    from ..utils.appsync_types import get_caller_id, require_int, require_str, require_unit_number
     from ..utils.auth import batch_check_profile_access
     from ..utils.dynamodb import batch_get_chunked, tables
     from ..utils.errors import AppError, ErrorCode
@@ -115,7 +115,7 @@ def list_unit_catalogs(event: Dict[str, Any], context: Any) -> List[Dict[str, An
     unit_number = require_unit_number(arguments, "unitNumber")
     campaign_name = require_str(arguments, "campaignName")
     campaign_year = require_int(arguments, "campaignYear")
-    caller_account_id = event.get("identity", {}).get("sub")
+    caller_account_id = get_caller_id(event)
     if not caller_account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 
@@ -202,7 +202,7 @@ def list_unit_campaign_catalogs(event: Dict[str, Any], context: Any) -> List[Dic
     state = require_str(arguments, "state")
     campaign_name = require_str(arguments, "campaignName")
     campaign_year = require_int(arguments, "campaignYear")
-    caller_account_id = event.get("identity", {}).get("sub")
+    caller_account_id = get_caller_id(event)
     if not caller_account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 
