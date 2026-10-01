@@ -132,21 +132,23 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         # whose records are gone, silently re-bootstrapped on next sign-in.
         _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
 
-        try:
-            _delete_all_user_data(account_id, logger)
-        except Exception as e:
-            logger.error(
-                "Cognito user already deleted but user data cleanup failed; "
-                "leftover records are inert because the user can no longer sign in",
-                account_id=account_id,
-                error=str(e),
-                error_code=ErrorCode.INTERNAL_ERROR,
-            )
-            raise
-
-        logger.info("Account deletion completed successfully")
-        return True
-
     except ClientError as e:
         logger.error("Cognito error during account deletion", account_id=account_id, error=str(e), exc_info=True)
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
+
+    # The data phase must not be caught by the Cognito-labeled except above; a
+    # post-commit DynamoDB/S3 failure carries its own error_code-tagged log.
+    try:
+        _delete_all_user_data(account_id, logger)
+    except Exception as e:
+        logger.error(
+            "Cognito user already deleted but user data cleanup failed; "
+            "leftover records are inert because the user can no longer sign in",
+            account_id=account_id,
+            error=str(e),
+            error_code=ErrorCode.INTERNAL_ERROR,
+        )
+        raise
+
+    logger.info("Account deletion completed successfully")
+    return True
