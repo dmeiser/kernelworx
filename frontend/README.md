@@ -135,12 +135,21 @@ see `../tests/e2e/README.md` and `TESTING.md`.
 ## Lint, typecheck, format, spellcheck
 
 ```bash
-npm run lint              # ESLint (also enforces complexity <= 5, max-depth <= 3)
-npm run lint:complexity   # the two complexity rules as a one-off report
+npm run lint              # ESLint (complexity <= 5, max-depth <= 3) + the complexity-disable ratchet
+npm run lint:complexity   # the two complexity rules as a one-off report (not run in CI)
 npm run typecheck         # tsc -b --noEmit && tsc -p tsconfig.test.json --noEmit
 npm run format            # Prettier over src/**/*.{ts,tsx}
 npm run spellcheck        # cspell against the root cspell.json
 ```
+
+Because `complexity` can be switched off per function with an
+`eslint-disable` directive, `npm run lint` also runs
+`scripts/check-complexity-disables.mjs`, which fails if the total number of
+`complexity` disables exceeds the committed baseline in
+`scripts/complexity-disables.baseline` (a shrink-only work queue, issue #532).
+After removing directives, ratchet the baseline down with
+`node scripts/check-complexity-disables.mjs --update`; raising the baseline is
+refused and must be a deliberate, reviewed edit to the file.
 
 TypeScript is split across three configs: `tsconfig.app.json` (application code,
 strict), `tsconfig.node.json` (Vite config), and `tsconfig.test.json` (adds the

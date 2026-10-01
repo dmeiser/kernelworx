@@ -67,6 +67,7 @@ Ephemeral per-PR stacks live in `tofu/application/environments/ephemeral` and ar
 - `ephemeral-env.sh down` and `recover-destroy.sh` automatically empty ephemeral S3 buckets (purging all object versions and delete markers) prior to `tofu destroy` to prevent `BucketNotEmpty` errors.
 - Recovery imports in `scripts/ephemeral-recover-common.sh` continue on error across all resources and are dynamically verified against all declared OpenTofu modules in `tests/unit/test_ephemeral_reliability.py`.
 - The run-id contract (format, provenance, enforcement) is owned by the "Run identifiers" section of `docs/scripts/README.md`; `validate_run_id` in `scripts/ephemeral-recover-common.sh` is its single enforcement point, called by every run-id entry point before any AWS call. When adding an entry point that consumes a run-id, call `validate_run_id` there too.
+- `generate_password()` in `scripts/create-ephemeral-test-users.sh` builds each test user's password ONCE, before the password-set retry loop, so a generator bug fails deterministically across all five attempts with the same rejected password (a policy rejection masquerades as a flaky/quota failure). Fix generators so a policy-invalid password is impossible by construction (every character class supplied unconditionally, see the fixed `Aa1!` suffix); never paper over a generator bug with more retries.
 
 ### Recovery workflows
 
@@ -243,6 +244,8 @@ The dev/prod distributions are subscribed to the CloudFront **Free** pricing pla
 - HSTS is fixed at max-age=31536000 everywhere; the #430 per-environment ramp is gone. Raise-only from here (browsers clamp on decrease).
 - WAF access logging (logging configuration, `aws-waf-logs-*` log group, log-delivery resource policy) is deleted; the #269 rate-rule tuning has no CloudWatch log evidence until Pro. WAF metrics on the visibility configs remain.
 - Cache behaviors are capped at 5 (default + `/graphql` + `/l*` + `/oauth2/*` + `/.well-known/*`); per-tier quotas are not increasable.
+
+A flat-rate plan also rejects *unsupported features* outright, so some attributes must simply be absent rather than configured. `price_class` must stay **unset** on `aws_cloudfront_distribution.site`: a plan rejects any distribution carrying one, even the previously pinned `PriceClass_100`, with `InvalidArgument: Distributions with the Free pricing plan can't have the following features: Price class` (deploy run 36811076298, job 110339824734 — the #665 migration left the attribute behind). Omitting it is the only accepted value; edge coverage is whatever the plan provides. Guarded by `test_distribution_carries_no_price_class` in `tests/unit/test_edge_security.py`. The same reasoning applies to legacy `forwarded_values`, behavior-level TTLs, and custom response headers policies above.
 
 The path back is Pro (or Business): when traffic volume forces a tier move, the full security measures — custom response headers policy with the header CSP and `frame-ancestors 'none'`, XFO DENY, per-environment HSTS, WAF access logging, and up to 10 behaviors — are reinstated at that point.
 

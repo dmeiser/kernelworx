@@ -161,8 +161,12 @@ resource "aws_cloudfront_distribution" "site" {
   is_ipv6_enabled     = true
   default_root_object = "index.html"
   aliases             = [local.site_domain]
-  price_class         = "PriceClass_100"
-  web_acl_id          = var.web_acl_id
+  # price_class is deliberately unset: the CloudFront flat-rate Free plan
+  # (#665) rejects any distribution that carries one - UpdateDistribution
+  # fails with "Distributions with the Free pricing plan can't have the
+  # following features: Price class". Omitted is the only accepted value;
+  # edge coverage is whatever the plan provides, not a configured tier.
+  web_acl_id = var.web_acl_id
 
   origin {
     domain_name = var.static_bucket_regional_domain
