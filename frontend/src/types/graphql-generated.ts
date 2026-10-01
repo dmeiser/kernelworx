@@ -1221,7 +1221,7 @@ export type GqlUpdateOrderInput = {
   orderDate?: InputMaybe<Scalars['AWSDateTime']['input']>;
   /** The ID of the order to update. */
   orderId: Scalars['ID']['input'];
-  /** New payment method name. */
+  /** New payment method name. Omit to keep the current value; an explicit null is rejected with INVALID_INPUT. */
   paymentMethod?: InputMaybe<Scalars['String']['input']>;
 };
 

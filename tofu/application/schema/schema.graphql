@@ -600,7 +600,7 @@ input UpdateOrderInput {
   customerAddress: AddressInput
   """New order date."""
   orderDate: AWSDateTime
-  """New payment method name."""
+  """New payment method name. Omit to keep the current value; an explicit null is rejected with INVALID_INPUT."""
   paymentMethod: String
   """New line items; replaces the existing ones and recomputes the total."""
   lineItems: [LineItemInput!]
