@@ -1,5 +1,5 @@
 import { util } from '@aws-appsync/utils';
-import { stripIdPrefix } from './lib/ids.js';
+import { normalizeIdOrPrefix, stripIdPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const createdBy = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
