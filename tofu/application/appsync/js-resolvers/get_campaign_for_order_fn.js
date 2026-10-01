@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const campaignId = ctx.args.input.campaignId;
@@ -37,7 +38,7 @@ export function response(ctx) {
 
     // Normalize catalogId to DB format (ensure CATALOG# prefix) and store
     const rawCatalogId = campaign.catalogId;
-    const normalizedCatalogId = (typeof rawCatalogId === 'string' && rawCatalogId.startsWith('CATALOG#')) ? rawCatalogId : 'CATALOG#' + rawCatalogId;
+    const normalizedCatalogId = normalizeIdOrPrefix(rawCatalogId, 'CATALOG#');
 
     // Store campaign and normalized catalogId in stash for next function
     ctx.stash.campaign = campaign;

@@ -1,18 +1,17 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const profileId = ctx.args.input.profileId;
     const targetAccountId = ctx.args.input.targetAccountId;
     
     // Normalize profileId to ensure PROFILE# prefix is used in delete key
-    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeIdOrPrefix(profileId, 'PROFILE#');
     
     // Normalize targetAccountId to ensure ACCOUNT# prefix (shares are stored with prefix)
-    const dbTargetAccountId = targetAccountId && targetAccountId.startsWith('ACCOUNT#') 
-        ? targetAccountId 
-        : `ACCOUNT#${targetAccountId}`;
+    const dbTargetAccountId = normalizeIdOrPrefix(targetAccountId, 'ACCOUNT#');
 
-    const callerAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
+    const callerAccountId = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
 
     return {
         operation: 'DeleteItem',

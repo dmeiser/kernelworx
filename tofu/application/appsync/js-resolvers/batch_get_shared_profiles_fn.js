@@ -1,4 +1,5 @@
 import { util, runtime } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 /**
  * listMyShares pipeline - function 2 of 2.
@@ -28,13 +29,6 @@ import { util, runtime } from '@aws-appsync/utils';
 // than returning a truncated list (a pipeline function cannot loop chunks).
 const MAX_BATCH_KEYS = 100;
 const tableName = '${table_name}';
-
-function normalizeAccountId(accountId) {
-    if (typeof accountId !== 'string') {
-        accountId = '';
-    }
-    return accountId.startsWith('ACCOUNT#') ? accountId : 'ACCOUNT#' + accountId;
-}
 
 export function request(ctx) {
     const sharesByProfile = (ctx.stash && ctx.stash.sharesByProfile) || {};
@@ -75,7 +69,7 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
 
-    const callerAccountId = normalizeAccountId(ctx.identity && ctx.identity.sub);
+    const callerAccountId = normalizeIdOrPrefix(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
     const sharesByProfile = (ctx.stash && ctx.stash.sharesByProfile) || {};
     const sharedProfileIds = (ctx.stash && ctx.stash.sharedProfileIds) || [];
     const profiles = (ctx.result && ctx.result.data && ctx.result.data[tableName]) || [];
@@ -97,7 +91,7 @@ export function response(ctx) {
         if (hasRequiredFields) {
             result.push({
                 profileId: profile.profileId,
-                ownerAccountId: normalizeAccountId(profile.ownerAccountId),
+                ownerAccountId: normalizeIdOrPrefix(profile.ownerAccountId, 'ACCOUNT#'),
                 sellerName: profile.sellerName,
                 unitType: profile.unitType != null ? profile.unitType : null,
                 unitNumber: profile.unitNumber != null ? profile.unitNumber : null,

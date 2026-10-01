@@ -16,19 +16,16 @@ const JS_RESOLVERS_DIR = join(
 );
 const LIB_DIR = join(JS_RESOLVERS_DIR, "lib");
 
-// The write-permission pair that must resolve a profile identically (#534,
-// re-derived after #633): the two-phase verify_profile_write_access and
-// lookup_profile_for_update. The tree-wide sweep from the superseded PR
-// https://github.com/dmeiser/kernelworx/pull/636 is deliberately out of
-// scope here.
-const WRITE_PATH_RESOLVERS = [
-  "verify_profile_write_access_fn.js",
-  "lookup_profile_for_update_fn.js",
-  "check_write_permission_fn.js",
-];
+// #534: every non-test resolver in this directory. The write-permission pair
+// (#650) was the pilot; this guard now owns the tree-wide sweep so a
+// re-inlined ternary anywhere is caught.
+const ALL_RESOLVERS = readdirSync(JS_RESOLVERS_DIR).filter(
+  (f) => f.endsWith(".js") && !f.includes(".test."),
+);
 
-// The ID prefixes the profile write path uses.
-const PREFIXES = ["ACCOUNT", "PROFILE"];
+// The ID prefixes resolvers normalize. Derived from the prefixes the DynamoDB
+// tables actually use.
+const PREFIXES = ["ACCOUNT", "PROFILE", "CATALOG", "CAMPAIGN"];
 
 // Helpers that legitimately own a prefix literal as an argument. Derived from
 // the actual exports of lib/ so a new helper is covered without editing this
@@ -140,6 +137,7 @@ function findPrefixLiterals(source: string): {
   prefix: string;
   text: string;
   inHelperCall: boolean;
+  isMinting: boolean;
 }[] {
   const code = blankComments(source);
   const found: ReturnType<typeof findPrefixLiterals> = [];
@@ -216,24 +214,30 @@ function findPrefixLiterals(source: string): {
       if (SHARED_HELPERS.has(code.slice(q + 1, nameEnd + 1))) inHelperCall = true;
     }
 
+    // Is this literal minting a brand-new id (e.g. 'CAMPAIGN#' + util.autoId())
+    // rather than normalizing an existing one? Minting legitimately owns the
+    // prefix literal; only normalization must route through the helper.
+    const isMinting = text.includes("autoId(");
+
     found.push({
       line: source.slice(0, lit.start).split("\n").length,
       prefix: match[1],
       text,
       inHelperCall,
+      isMinting,
     });
   }
 
   return found;
 }
 
-describe("write-path ID-prefix normalization has a single owner", () => {
-  for (const name of WRITE_PATH_RESOLVERS) {
+describe("ID-prefix normalization has a single owner (#534)", () => {
+  for (const name of ALL_RESOLVERS) {
     const source = readFileSync(join(JS_RESOLVERS_DIR, name), "utf8");
 
     test(`${name} builds every ACCOUNT#/PROFILE# prefix through lib/ids.js`, () => {
       const offenders = findPrefixLiterals(source)
-        .filter((f) => !f.inHelperCall)
+        .filter((f) => !f.inHelperCall && !f.isMinting)
         .map((f) => `line ${f.line}: ${f.text}`);
 
       expect(

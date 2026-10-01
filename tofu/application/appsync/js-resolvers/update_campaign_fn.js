@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 function buildUnitCampaignKey(unitType, unitNumber, city, state, campaignName, campaignYear) {
     const unitNumStr = '' + unitNumber;
@@ -7,12 +8,12 @@ function buildUnitCampaignKey(unitType, unitNumber, city, state, campaignName, c
 }
 
 function normalizeCatalogId(catalogId) {
+    // null is a deliberate "clear the catalog" update and must survive as
+    // null; only non-null values are prefix-normalized (#534).
     if (catalogId === null || catalogId === undefined) {
         return null;
     }
-    return (typeof catalogId === 'string' && catalogId.startsWith('CATALOG#'))
-        ? catalogId
-        : 'CATALOG#' + catalogId;
+    return normalizeIdOrPrefix(catalogId, 'CATALOG#');
 }
 
 function hasUnitUpdate(input) {

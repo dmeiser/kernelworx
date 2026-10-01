@@ -1,5 +1,6 @@
 import { util } from '@aws-appsync/utils';
 import { validateSellerName } from './lib/validate_seller_name.js';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     if (!ctx.identity || !ctx.identity.sub) {
@@ -24,7 +25,7 @@ export function request(ctx) {
     }
 
     const profileId = 'PROFILE#' + util.autoId();
-    const ownerAccountId = 'ACCOUNT#' + ctx.identity.sub;
+    const ownerAccountId = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
     const now = util.time.nowISO8601();
 
     const item = {

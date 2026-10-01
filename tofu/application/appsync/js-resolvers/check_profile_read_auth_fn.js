@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const profile = ctx.stash.profile;
@@ -14,7 +15,7 @@ export function request(ctx) {
     // GetItem in step 1 (ctx.stash.isOwner === true).
     // If ctx.stash.isOwner is undefined (e.g. standalone test), fall back to
     // checking profile.ownerAccountId for backward compatibility.
-    const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
+    const expectedOwner = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
     const isOwner = ctx.stash.isOwner !== undefined
         ? ctx.stash.isOwner === true
         : profile.ownerAccountId === expectedOwner;
@@ -34,7 +35,7 @@ export function request(ctx) {
     // Not owner - check for share
     ctx.stash.authorized = false;
     const profileId = profile.profileId;  // Use profile.profileId which has PROFILE# prefix
-    const targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
+    const targetAccountId = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
     
     // Check for share in shares table: profileId + targetAccountId
     return {
