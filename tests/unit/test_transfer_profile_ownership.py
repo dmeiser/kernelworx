@@ -1165,6 +1165,140 @@ class TestTransferProfileOwnership:
         assert restored["Item"]["ownerAccountId"] == f"ACCOUNT#{owner_id}"
         assert restored["Item"]["permissions"] == ["READ"]
 
+    def test_rollback_does_not_clobber_concurrent_committed_share_repair(
+        self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A concurrent ownership transfer that committed while this transfer was in flight
+        must not have its share repairs overwritten by this transfer's rollback.
+
+        The rollback is conditional on the share still recording the owner this repair
+        produced, so a share already moved to a newer owner by a committed transfer
+        fails the condition and is left intact (#549).
+        """
+        from src.utils import dynamodb as db_module
+
+        owner_id = "owner-1"
+        new_owner_a = "new-owner-a"
+        new_owner_b = "new-owner-b"
+        third_party = "tp-user"
+        profile_id = "profile-race-rollback"
+
+        _seed_profile(profiles_table, owner_id, profile_id)
+        _seed_share(shares_table, profile_id, new_owner_a, owner_id)
+        _seed_share(shares_table, profile_id, third_party, owner_id)
+
+        third_party_key = {
+            "profileId": f"PROFILE#{profile_id}",
+            "targetAccountId": f"ACCOUNT#{third_party}",
+        }
+        real_update = shares_table.update_item
+        rollback_attempts: list[dict[str, Any]] = []
+
+        def intercept_update(*args: Any, **kwargs: Any) -> Any:
+            expr_vals = kwargs.get("ExpressionAttributeValues", {})
+            if ":new_owner" in expr_vals:
+                result = real_update(*args, **kwargs)
+                if kwargs.get("Key") == third_party_key:
+                    # Simulate concurrent transfer B committing: it updates the third-party share
+                    # to new_owner_b and commits the profile to new_owner_b.
+                    real_update(
+                        Key=third_party_key,
+                        UpdateExpression="SET ownerAccountId = :b_owner",
+                        ExpressionAttributeValues={":b_owner": f"ACCOUNT#{new_owner_b}"},
+                    )
+                return result
+            # Rollback write
+            try:
+                result = real_update(*args, **kwargs)
+                rollback_attempts.append({"key": kwargs.get("Key"), "status": "success", "result": result})
+                return result
+            except Exception as exc:
+                rollback_attempts.append({"key": kwargs.get("Key"), "status": "failed", "error": exc})
+                raise
+
+        class MockDynamoClient:
+            def transact_write_items(self, **kwargs: Any) -> None:
+                raise ClientError(
+                    {"Error": {"Code": "TransactionCanceledException", "Message": "Transaction cancelled"}},
+                    "TransactWriteItems",
+                )
+
+        monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: MockDynamoClient())
+
+        mock_shares = MagicMock(wraps=shares_table)
+        mock_shares.get_item = shares_table.get_item
+        mock_shares.query = shares_table.query
+        mock_shares.delete_item = shares_table.delete_item
+        mock_shares.update_item.side_effect = intercept_update
+        db_module._table_overrides["shares"] = mock_shares
+
+        event = {
+            "identity": {"sub": owner_id},
+            "arguments": {
+                "input": {
+                    "profileId": profile_id,
+                    "newOwnerAccountId": new_owner_a,
+                }
+            },
+        }
+
+        result = lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+
+        # 1. The committed concurrent repair value survives
+        third_party_share = shares_table.get_item(Key=third_party_key)["Item"]
+        assert third_party_share["ownerAccountId"] == f"ACCOUNT#{new_owner_b}"
+
+        # 2. The rollback attempt did not silently succeed on the concurrently repaired share
+        tp_rollback = [a for a in rollback_attempts if a["key"] == third_party_key]
+        assert len(tp_rollback) == 1
+        assert tp_rollback[0]["status"] == "failed"
+        assert isinstance(tp_rollback[0]["error"], ClientError)
+        assert tp_rollback[0]["error"].response["Error"]["Code"] == "ConditionalCheckFailedException"
+
+    def test_undo_share_repair_preserves_concurrently_repaired_share_directly(self, shares_table: Any) -> None:
+        """Calling _undo_share_repair directly does not overwrite a share whose owner
+        was changed after this repair."""
+        from src.handlers.transfer_profile_ownership import _ShareRepair, _undo_share_repair
+
+        profile_id = "PROFILE#direct-rollback"
+        target_account_id = "ACCOUNT#collaborator"
+        old_owner = "ACCOUNT#old-owner"
+        repair_owner = "ACCOUNT#repair-owner"
+        concurrent_owner = "ACCOUNT#concurrent-owner"
+
+        shares_table.put_item(
+            Item={
+                "profileId": profile_id,
+                "targetAccountId": target_account_id,
+                "ownerAccountId": concurrent_owner,
+                "permissions": ["READ"],
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        repair = _ShareRepair(
+            reassigned=[(target_account_id, old_owner)],
+            repaired_owner_id=repair_owner,
+        )
+
+        _undo_share_repair(profile_id, repair)
+
+        # Still holds concurrent_owner because condition ownerAccountId = :repaired_owner failed
+        item = shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": target_account_id})["Item"]
+        assert item["ownerAccountId"] == concurrent_owner
+
+        # Now when repair matches, it succeeds
+        matching_repair = _ShareRepair(
+            reassigned=[(target_account_id, old_owner)],
+            repaired_owner_id=concurrent_owner,
+        )
+        _undo_share_repair(profile_id, matching_repair)
+
+        item = shares_table.get_item(Key={"profileId": profile_id, "targetAccountId": target_account_id})["Item"]
+        assert item["ownerAccountId"] == old_owner
+
     def test_share_without_owner_rolls_back_to_the_previous_owner(
         self, profiles_table: Any, shares_table: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:

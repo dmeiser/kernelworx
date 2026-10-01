@@ -260,6 +260,7 @@ class _ShareRepair(NamedTuple):
     """
 
     reassigned: List[Tuple[str, str]]  # (targetAccountId, ownerAccountId before the repair)
+    repaired_owner_id: str
 
 
 _SHARE_REPAIR_RETRYABLE = "Temporarily unable to update profile shares. Please retry."
@@ -278,18 +279,22 @@ def _undo_share_repair(db_profile_id: str, repair: _ShareRepair) -> None:
             tables.shares.update_item(
                 Key={"profileId": db_profile_id, "targetAccountId": target_account_id},
                 UpdateExpression="SET ownerAccountId = :previous_owner",
-                ConditionExpression="attribute_exists(targetAccountId)",
-                ExpressionAttributeValues={":previous_owner": previous_owner_id},
+                ConditionExpression="attribute_exists(targetAccountId) AND ownerAccountId = :repaired_owner",
+                ExpressionAttributeValues={
+                    ":previous_owner": previous_owner_id,
+                    ":repaired_owner": repair.repaired_owner_id,
+                },
             )
         except Exception as e:
             if (
                 isinstance(e, ClientError)
                 and e.response.get("Error", {}).get("Code", "") == "ConditionalCheckFailedException"
             ):
-                # The share was revoked after the repair applied it and before the
-                # transfer failed. Its rollback target is absence, which already
-                # holds, so re-creating a ghost item would be wrong; treat the
-                # conflict as the rollback already being done.
+                # The share was revoked after the repair applied it, or a concurrent
+                # committed transfer has since repaired it to another owner.
+                # Its rollback target is no longer in the state this repair produced,
+                # so overwriting it would be wrong; treat the conflict as the
+                # rollback already being done.
                 continue
             logger.error(
                 "Failed to roll back share after aborted ownership transfer",
@@ -383,7 +388,7 @@ def _repair_shares(
                 exc_info=True,
             )
     return (
-        _ShareRepair(reassigned=reassigned),
+        _ShareRepair(reassigned=reassigned, repaired_owner_id=db_new_owner_id),
         _ShareRepairFailures(transient=transient_failures, permanent=permanent_failures),
     )
 
