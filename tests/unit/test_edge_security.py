@@ -265,7 +265,10 @@ def test_waf_access_logging_resources_absent(waf_module):
     assert resources(waf_module, "aws_cloudwatch_log_group") == []
     assert resources(waf_module, "aws_cloudwatch_log_resource_policy") == []
     assert not [
-        bodies for entry in waf_module.get("data", []) for dtype, bodies in entry.items() if dtype == "aws_iam_policy_document"
+        bodies
+        for entry in waf_module.get("data", [])
+        for dtype, bodies in entry.items()
+        if dtype == "aws_iam_policy_document"
     ]
 
 
