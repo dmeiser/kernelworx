@@ -772,6 +772,119 @@ class TestDeleteMyAccount:
             assert "InternalError" in captured
             assert "AdminDeleteUser" in captured
 
+    def test_cognito_failure_leaves_user_data_intact(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A Cognito failure must run before the data phase, so every record survives for a convergent retry (#551)."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        profiles_table = dynamodb.Table("kernelworx-profiles-v2-ue1-dev")
+
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        profile_id = "PROFILE#ordering-test"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": account_id_key,
+                "profileId": profile_id,
+                "sellerName": "Test Scout",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user"}]}
+            mock_cognito.admin_delete_user.side_effect = ClientError(
+                {"Error": {"Code": "InternalError", "Message": "Internal error"}},
+                "AdminDeleteUser",
+            )
+
+            event = {**appsync_event, "identity": {"sub": sample_account_id}}
+            result = delete_my_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        # The data phase never ran: the account and profile records both survive,
+        # so no sign-in-able user exists with deleted data and nothing re-bootstraps.
+        assert "Item" in accounts_table.get_item(Key={"accountId": account_id_key})
+        assert "Item" in profiles_table.get_item(Key={"ownerAccountId": account_id_key, "profileId": profile_id})
+
+    def test_data_failure_after_cognito_delete_is_logged_loudly(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A data-phase failure after the Cognito commit point surfaces in the logs with an errorCode (#551)."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user"}]}
+
+            with patch(
+                "src.handlers.account_operations.delete_all_user_data",
+                side_effect=ClientError(
+                    {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "throttled"}},
+                    "DeleteItem",
+                ),
+            ):
+                event = {**appsync_event, "identity": {"sub": sample_account_id}}
+                result = delete_my_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        # The Cognito commit point already fired; the leftover account record is inert
+        # because the user cannot sign in again, and a re-run of the data phase converges.
+        mock_cognito.admin_delete_user.assert_called_once_with(UserPoolId="us-east-1_test123", Username="test-user")
+
+        captured = capsys.readouterr().out
+        assert "Account data deletion failed after Cognito user was deleted" in captured
+        assert ErrorCode.INTERNAL_ERROR in captured
+
     def test_delete_account_unexpected_exception(
         self,
         dynamodb_table: Any,

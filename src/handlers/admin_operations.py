@@ -905,12 +905,16 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     BEFORE deleting the profile rows, as the ``profileIds`` argument. The purge
     first verifies each of them is actually gone with a strongly consistent
     read — a surviving profile means the client cascade has not completed, so
-    it refuses with CONFLICT and deletes nothing — then sweeps the four
-    classes the browser cannot reach, reusing the shared deletion_cascade
-    helpers: invites for the account's profiles, inbound shares on other
-    owners' profiles, S3 report objects, and payment-QR S3 objects. Invites
-    and reports are keyed by profileId, which survives the deleted profile
-    rows.
+    it refuses with CONFLICT and deletes nothing. It then deletes the Cognito
+    user — the commit point (#551): a failure afterwards leaves a user who
+    cannot sign in again, so leftover records are inert and a re-run
+    converges, whereas data-first ordering would leave a sign-in-able user
+    whose post-auth trigger re-bootstraps an empty account — and only then
+    sweeps the four classes the browser cannot reach, reusing the shared
+    deletion_cascade helpers: invites for the account's profiles, inbound
+    shares on other owners' profiles, S3 report objects, and payment-QR S3
+    objects. Invites and reports are keyed by profileId, which survives the
+    deleted profile rows.
 
     Call this after the client's per-entity deletes, so a failure there leaves
     the account intact rather than half-deleted.
@@ -950,16 +954,40 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     # has not completed, so nothing is deleted and the account stays intact.
     _assert_profiles_deleted(account_id, profile_ids, logger)
 
-    profiles_for_sweep = [{"profileId": profile_id} for profile_id in profile_ids]
-    delete_invites_for_owned_profiles(profiles_for_sweep, logger)
-    delete_inbound_shares(account_id, logger)
-    delete_user_s3_reports(profiles_for_sweep, logger)
-    delete_all_user_qr_codes(account_id, logger)
-
+    # Cognito first, data second (#551): the Cognito delete is the commit
+    # point. A sweep failure afterwards leaves a user who cannot sign in
+    # again (leftover records are inert and a re-run converges); deleting the
+    # data first would leave a sign-in-able user whose post-auth trigger
+    # re-bootstraps an empty account.
     if username:
         _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger)
     else:
         logger.info("Cognito user already absent", account_id=account_id)
+
+    profiles_for_sweep = [{"profileId": profile_id} for profile_id in profile_ids]
+    try:
+        delete_invites_for_owned_profiles(profiles_for_sweep, logger)
+        delete_inbound_shares(account_id, logger)
+        delete_user_s3_reports(profiles_for_sweep, logger)
+        delete_all_user_qr_codes(account_id, logger)
+    except AppError as e:
+        logger.error(
+            "Purge data sweep failed after Cognito user was deleted",
+            account_id=account_id,
+            error_code=e.error_code,
+            error=str(e),
+            exc_info=True,
+        )
+        raise
+    except ClientError as e:
+        logger.error(
+            "Purge data sweep failed after Cognito user was deleted",
+            account_id=account_id,
+            error_code=ErrorCode.INTERNAL_ERROR,
+            error=str(e),
+            exc_info=True,
+        )
+        raise
 
     if account_exists:
         db_account_id = normalize_account_id(account_id)
