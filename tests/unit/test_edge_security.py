@@ -440,6 +440,18 @@ def test_managed_cache_policies_and_no_legacy_settings(cloudfront_module):
             assert legacy not in behavior, f"legacy {legacy} survives on {behavior.get('path_pattern', '(default)')}"
 
 
+def test_distribution_carries_no_price_class(cloudfront_module):
+    """#665: the Free flat-rate plan rejects any distribution that carries a
+    price class. UpdateDistribution fails with "Distributions with the Free
+    pricing plan can't have the following features: Price class" (deploy run
+    36811076298), so the attribute must stay unset rather than pinned to
+    PriceClass_100."""
+    distribution = first_resource(cloudfront_module, "aws_cloudfront_distribution", "site")
+    assert "price_class" not in distribution, (
+        "price_class is unsupported on the CloudFront flat-rate plan - omit it entirely"
+    )
+
+
 def test_behavior_count_within_free_tier_cap(cloudfront_module):
     """The CloudFront Free plan caps cache behaviors at 5 (hard, not
     increasable). Realized count: default + /graphql + the auth path
