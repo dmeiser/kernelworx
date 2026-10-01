@@ -9,27 +9,35 @@ python-hcl2) and assert the *meaning* of the edge architecture contract:
 - The WAF lets GitHub Actions CI ranges skip the per-IP rate rule via a
   deploy-time IP set scoped down into it, and rate limits other traffic at
   2000 requests per IP per 300s; the AWS managed
-  core rule set is staged in Count; WAF logs land in an aws-waf-logs-*
-  CloudWatch log group. Every WAF resource no-ops when create = false so
-  ephemeral environments create zero objects.
+  core rule set is staged in Count. WAF access logging is deliberately gone
+  (#665, CloudFront pricing plans Free tier): no logging configuration, no
+  aws-waf-logs-* log group, no log-delivery resource policy. Every WAF
+  resource no-ops when create = false so ephemeral environments create zero
+  objects.
 - The existing CloudFront distribution gains /graphql and auth ordered
-  behaviors in place (prevent_destroy intact): /graphql forwards exactly
-  Authorization/Content-Type/Accept with caching disabled; the auth paths
-  forward all cookies and run the viewer-response Location-rewrite function.
-- The response headers policy on the default behavior enforces CSP including
-  frame-ancestors 'none', XFO DENY, nosniff, Referrer-Policy, and HSTS
-  with override=true on all of them. HSTS max-age/includeSubDomains are
-  module inputs: the module default keeps the 300s dev ramp, and only prod
-  passes one year + includeSubDomains (#430); preload is never set without
-  its own go/no-go.
-- #550: the Cognito hosted-UI ordered behaviors proxy the login form onto the
-  trusted site origin, so they carry their own response headers policy:
-  HSTS (same module inputs), nosniff, Referrer-Policy, XFO DENY, and a
-  deliberately narrow CSP holding only frame-ancestors 'none' — the full
-  application CSP would break Cognito's own assets/inline bootstrap scripts.
+  behaviors in place (prevent_destroy intact). #665: every behavior uses
+  AWS-managed cache/origin-request policies (Managed-CachingDisabled +
+  Managed-AllViewerExceptHostHeader on /graphql and the auth paths,
+  Managed-CachingOptimized on the default S3 behavior) — no legacy
+  forwarded_values or behavior-level TTLs anywhere; the auth paths run the
+  viewer-response Location-rewrite function.
+- Security headers come from the AWS-managed SecurityHeadersPolicy
+  (67f7725c-6f97-4210-82d7-5512b31e9d03) attached to the default behavior and
+  all auth behaviors. There is NO custom aws_cloudfront_response_headers_policy
+  resource anywhere: custom policies are a Business-tier feature and the
+  #665 Free-tier decision removed them, along with the per-environment HSTS
+  ramp (#430) — the managed policy carries fixed max-age=31536000.
+- The application CSP survives only as the <meta> tag in frontend/index.html;
+  there is no CSP response header to mirror against. Accepted #665 trade-offs
+  (managed XFO SAMEORIGIN instead of DENY, loss of frame-ancestors, meta-only
+  CSP) are recorded in AGENTS.md and are not to be re-opened.
 - Dev/prod wire the WAF into the distribution; ephemeral passes create =
   false and has no CloudFront at all. The api Route53 record is gone while
   the load-bearing login record remains.
+- Behavior count: default + /graphql + /l* + /oauth2/* + /.well-known/* = 5,
+  the CloudFront Free plan cap (hard, not increasable). /l* is a wildcard:
+  no SPA route may ever start with /l. The favicons ship from S3 via the
+  default behavior (the old /favicon.ico Cognito proxy behavior is gone).
 - The dev/prod frontend build contract: deploy-shared.yml stops exporting
   VITE_APPSYNC_ENDPOINT / VITE_COGNITO_DOMAIN, while ephemeral-env.sh keeps
   exporting both as absolute values.
@@ -141,9 +149,14 @@ def waf_module() -> dict:
 
 @pytest.fixture(scope="module")
 def cloudfront_module() -> dict:
-    doc = load_hcl(TF_APP / "modules" / "cloudfront" / "main.tf")
-    doc["response_headers"] = load_hcl(TF_APP / "modules" / "cloudfront" / "response-headers.tf")
-    return doc
+    return load_hcl(TF_APP / "modules" / "cloudfront" / "main.tf")
+
+
+# Stable AWS-published IDs of the managed policies the module pins (#665).
+MANAGED_SECURITY_HEADERS_POLICY_ID = "67f7725c-6f97-4210-82d7-5512b31e9d03"
+MANAGED_CACHE_DISABLED_POLICY_ID = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+MANAGED_CACHE_OPTIMIZED_POLICY_ID = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+MANAGED_ALL_VIEWER_EXCEPT_HOST_POLICY_ID = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
 
 
 @pytest.fixture(scope="module")
@@ -242,23 +255,21 @@ def test_waf_github_actions_ip_set_contract(waf_module):
     assert meta_doc["count"] == "${var.create ? 1 : 0}"
 
 
-def test_waf_logging_to_aws_waf_logs_log_group(waf_module):
-    log_group = first_resource(waf_module, "aws_cloudwatch_log_group", "waf")
-    assert log_group["name"].startswith("aws-waf-logs-")
-    assert log_group["retention_in_days"] == "${var.log_retention_days}"
-
-    logging = first_resource(waf_module, "aws_wafv2_web_acl_logging_configuration", "main")
-    assert logging["resource_arn"] == "${aws_wafv2_web_acl.main[0].arn}"
-    assert logging["log_destination_configs"] == ["${aws_cloudwatch_log_group.waf[0].arn}"]
-    assert "aws_cloudwatch_log_resource_policy" in logging["depends_on"][0]
-
-    data_docs = [
-        bodies for entry in waf_module["data"] for dtype, bodies in entry.items() if dtype == "aws_iam_policy_document"
+def test_waf_access_logging_resources_absent(waf_module):
+    """#665: WAF access logs are not eligible on the CloudFront Free pricing
+    plan, so the whole logging stack is gone: logging configuration,
+    aws-waf-logs-* log group, and the log-delivery resource policy (plus the
+    IAM policy document data source that only fed it). The web ACL, IP set,
+    rate rule, managed core rules, and CloudWatch metrics all stay."""
+    assert resources(waf_module, "aws_wafv2_web_acl_logging_configuration") == []
+    assert resources(waf_module, "aws_cloudwatch_log_group") == []
+    assert resources(waf_module, "aws_cloudwatch_log_resource_policy") == []
+    assert not [
+        bodies
+        for entry in waf_module.get("data", [])
+        for dtype, bodies in entry.items()
+        if dtype == "aws_iam_policy_document"
     ]
-    assert data_docs, "waf_log_delivery policy document not found"
-    doc = list(data_docs[0].values())[0]
-    principal = block(block(doc["statement"][0])["principals"][0])
-    assert principal["identifiers"] == ["delivery.logs.amazonaws.com"]
 
 
 def test_waf_create_false_zero_objects(waf_module):
@@ -310,11 +321,14 @@ def test_graphql_behavior_same_origin_no_cache(cloudfront_module):
     assert len(behaviors) == 1
     behavior = behaviors[0]
     assert behavior["target_origin_id"] == "${local.api_origin_id}"
-    assert behavior["forwarded_values"][0]["headers"] == ["Authorization", "Content-Type", "Accept"]
-    assert behavior["forwarded_values"][0]["cookies"][0]["forward"] == "none"
-    assert behavior["min_ttl"] == 0
-    assert behavior["default_ttl"] == 0
-    assert behavior["max_ttl"] == 0
+    # #665: managed policies replace forwarded_values + behavior TTLs.
+    # Managed-CachingDisabled keeps TTLs at 0; Managed-AllViewerExceptHostHeader
+    # forwards Authorization/Content-Type/Accept and all cookies.
+    assert behavior["cache_policy_id"] == "${local.managed_cache_disabled_policy_id}"
+    assert behavior["origin_request_policy_id"] == "${local.managed_all_viewer_except_host_policy_id}"
+    assert "forwarded_values" not in behavior
+    for legacy in ("min_ttl", "default_ttl", "max_ttl"):
+        assert legacy not in behavior
 
     # The API origin is the AppSync default endpoint hostname with TLS
     # protocols inside the provider-accepted enum (the TLSv1.3 plan blocker
@@ -341,7 +355,7 @@ def test_auth_behaviors_proxy_cognito_with_location_rewrite(cloudfront_module):
     assert "${local.site_domain}" in code
     assert "indexOf(prefix) === 0" in code
 
-    expected_paths = ["/login", "/logout", "/oauth2/*", "/.well-known/*", "/favicon.ico"]
+    expected_paths = ["/l*", "/oauth2/*", "/.well-known/*"]
     # The auth behaviors iterate local.auth_path_patterns; the local itself is
     # the contract (root paths, no /auth prefix).
     locals_block = block(cloudfront_module["locals"])
@@ -355,143 +369,100 @@ def test_auth_behaviors_proxy_cognito_with_location_rewrite(cloudfront_module):
     assert behavior["path_pattern"] == "${ordered_cache_behavior.value}"
     for behavior in [behavior]:
         assert behavior["target_origin_id"] == "${local.auth_origin_id}"
-        assert behavior["forwarded_values"][0]["cookies"][0]["forward"] == "all"
+        # Cookies must flow to Cognito: same managed pair as /graphql (#665).
+        assert behavior["cache_policy_id"] == "${local.managed_cache_disabled_policy_id}"
+        assert behavior["origin_request_policy_id"] == "${local.managed_all_viewer_except_host_policy_id}"
+        assert "forwarded_values" not in behavior
+        for legacy in ("min_ttl", "default_ttl", "max_ttl"):
+            assert legacy not in behavior
         assoc = behavior["function_association"][0]
         assert assoc["event_type"] == "viewer-response"
         assert assoc["function_arn"] == "${aws_cloudfront_function.auth_location_rewrite[0].arn}"
 
 
-def test_response_headers_policy_enforces_security_headers(cloudfront_module):
-    doc = cloudfront_module["response_headers"]
-    policy = first_resource(doc, "aws_cloudfront_response_headers_policy", "security")
-    sec = block(policy["security_headers_config"])
-
-    # The CSP text lives in a local; the policy references it.
-    csp = block(sec["content_security_policy"])
-    assert csp["override"] is True
-    assert csp["content_security_policy"] == "${local.csp}"
-    locals_block = block(doc["locals"])
-    csp_text = locals_block["csp"]
-    assert "frame-ancestors 'none'" in csp_text
-    assert "default-src 'self'" in csp_text
-    assert "font-src 'self'" in csp_text
-    assert "fonts.gstatic.com" not in csp_text
-    assert "fonts.googleapis.com" not in csp_text
-
-    # #440: img-src is an explicit allowlist - no bare `https:` scheme.
-    img_src = csp_text.split("img-src ")[1].split(";")[0]
-    assert "https:" not in img_src.split()
-    assert "'self'" in img_src
-    assert "data:" in img_src
-    assert "blob:" in img_src
-    # Payment QR presigned GET URLs load from the exports bucket's exact
-    # S3 virtual-hosted origins, interpolated per environment. Both the
-    # regional and legacy global styles are listed because the pinned
-    # boto3/botocore defaults to the legacy global endpoint for us-east-1.
-    assert "https://${var.exports_bucket_name}.s3.${var.aws_region}.amazonaws.com" in img_src
-    assert "https://${var.exports_bucket_name}.s3.amazonaws.com" in img_src
-
-    # #440: no WebSocket schemes in connect-src (downgrade risk; app is
-    # plain HTTPS only).
-    connect_src = csp_text.split("connect-src ")[1].split(";")[0]
-    assert "ws:" not in connect_src
-    assert "wss:" not in connect_src
-
-    frame = block(sec["frame_options"])
-    assert frame["frame_option"] == "DENY"
-    assert frame["override"] is True
-
-    cto = block(sec["content_type_options"])
-    assert cto["override"] is True
-
-    ref = block(sec["referrer_policy"])
-    assert ref["referrer_policy"] == "strict-origin-when-cross-origin"
-    assert ref["override"] is True
-
-    hsts = block(sec["strict_transport_security"])
-    assert hsts["access_control_max_age_sec"] == "${var.hsts_max_age_sec}"
-    assert hsts["include_subdomains"] == "${var.hsts_include_subdomains}"
-    assert hsts["override"] is True
-
-    # Module defaults keep the 300s dev ramp (#430); environments opt in.
-    defaults = variable_defaults(cloudfront_module["response_headers"])
-    assert defaults["hsts_max_age_sec"] == 300
-    assert defaults["hsts_include_subdomains"] is False
-
-    # The policy is attached to the default (/*) behavior.
+def _all_cache_behaviors(cloudfront_module) -> list[dict]:
+    """Every cache behavior body: the default plus each ordered behavior content."""
     dist = first_resource(cloudfront_module, "aws_cloudfront_distribution", "site")
-    default = block(dist["default_cache_behavior"])
-    assert default["response_headers_policy_id"] == ("${aws_cloudfront_response_headers_policy.security.id}")
+    behaviors = [block(dist["default_cache_behavior"])]
+    for spec in dist.get("dynamic", []):
+        if "ordered_cache_behavior" in spec:
+            behaviors.extend(spec["ordered_cache_behavior"]["content"])
+    return behaviors
 
 
-def test_auth_behaviors_carry_security_response_headers(cloudfront_module):
-    """#550: the Cognito hosted UI is first-party content on the site origin.
-
-    The login form, the hosted-UI callback pages and the .well-known discovery
-    documents are proxied from Cognito onto https://<site-host>, so without a
-    response headers policy they ship with no framing protection at all - a
-    clickjackable credential form on the domain users are trained to trust.
-    """
-    doc = cloudfront_module["response_headers"]
-    policies = resources(doc, "aws_cloudfront_response_headers_policy")
-    labels = [label for label, _ in policies]
-    assert "security" in labels
-    assert len(labels) == 2, f"expected the site policy plus one auth policy, found {labels}"
-
-    auth_label = next(label for label in labels if label != "security")
-    auth_policy = first_resource(doc, "aws_cloudfront_response_headers_policy", auth_label)
-    sec = block(auth_policy["security_headers_config"])
-
-    # Framing protection: XFO DENY for the legacy path, frame-ancestors 'none'
-    # in the CSP for the modern one.
-    frame = block(sec["frame_options"])
-    assert frame["frame_option"] == "DENY"
-    assert frame["override"] is True
-    auth_csp = block(sec["content_security_policy"])
-    assert auth_csp["override"] is True
-    auth_csp_text = block(doc["locals"])["auth_csp"]
-    assert auth_csp_text == "frame-ancestors 'none'", "auth CSP must be narrowed to framing only"
-    assert auth_csp["content_security_policy"] == "${local.auth_csp}"
-
-    assert block(sec["content_type_options"])["override"] is True
-    ref = block(sec["referrer_policy"])
-    assert ref["referrer_policy"] == "strict-origin-when-cross-origin"
-    assert ref["override"] is True
-
-    # HSTS reuses the same per-environment inputs as the site policy, so the
-    # 300s-dev / 31536000-prod split (#430) still applies to the login pages.
-    hsts = block(sec["strict_transport_security"])
-    assert hsts["access_control_max_age_sec"] == "${var.hsts_max_age_sec}"
-    assert hsts["include_subdomains"] == "${var.hsts_include_subdomains}"
-    assert hsts["override"] is True
-
-    dist = first_resource(cloudfront_module, "aws_cloudfront_distribution", "site")
-    auth_specs = [e["ordered_cache_behavior"] for e in dist.get("dynamic", []) if "ordered_cache_behavior" in e]
-    auth_spec = next(
-        s for s in auth_specs if s["for_each"] == "${var.auth_origin_domain != null ? local.auth_path_patterns : []}"
-    )
-    behavior = auth_spec["content"][0]
-    assert behavior["response_headers_policy_id"] == "${aws_cloudfront_response_headers_policy.%s.id}" % auth_label
-
-    # ...and the site policy is still the only one on the default behavior, so
-    # the two are never conflated.
-    default = block(dist["default_cache_behavior"])
-    assert default["response_headers_policy_id"] == "${aws_cloudfront_response_headers_policy.security.id}"
+def test_no_custom_response_headers_policy_anywhere(cloudfront_module):
+    """#665: custom response headers policies are a Business-tier feature, so
+    none may exist in the module - the AWS-managed SecurityHeadersPolicy is
+    the only headers mechanism."""
+    assert resources(cloudfront_module, "aws_cloudfront_response_headers_policy") == []
+    # The hsts ramp inputs (#430) died with the custom policies: the managed
+    # policy's fixed max-age=31536000 is the only HSTS now.
+    defaults = variable_defaults(cloudfront_module)
+    assert "hsts_max_age_sec" not in defaults
+    assert "hsts_include_subdomains" not in defaults
 
 
-def test_index_html_meta_csp_mirrors_headers_policy():
-    """#440: the frontend <meta> CSP stays consistent with the header CSP.
+def test_all_cache_behaviors_attach_managed_security_headers_policy(cloudfront_module):
+    """#166/#550/#665: the default behavior and every auth behavior carry the
+    AWS-managed SecurityHeadersPolicy (nosniff, Referrer-Policy, HSTS
+    max-age=31536000, XFO SAMEORIGIN). It is a managed policy, so it is
+    referenced by the stable AWS-published ID pinned in the module locals."""
+    locals_block = block(cloudfront_module["locals"])
+    assert locals_block["managed_security_headers_policy_id"] == MANAGED_SECURITY_HEADERS_POLICY_ID
+    for behavior in _all_cache_behaviors(cloudfront_module):
+        if behavior.get("path_pattern") == "/graphql":
+            # API responses never carried a headers policy and still don't.
+            assert "response_headers_policy_id" not in behavior
+            continue
+        assert behavior.get("response_headers_policy_id") == "${local.managed_security_headers_policy_id}", (
+            f"behavior {behavior.get('path_pattern', '(default)')} must attach the managed SecurityHeadersPolicy"
+        )
 
-    The meta policy is baked into one build for all environments, so it lists
-    the concrete dev/prod exports buckets instead of the terraform
-    interpolation; the effective policy on dev/prod is the intersection of
-    meta and the per-environment response header policy.
-    """
+
+def test_managed_cache_policies_and_no_legacy_settings(cloudfront_module):
+    """#665: every behavior uses managed cache policies - no legacy
+    forwarded_values, no behavior-level min/max/default TTLs anywhere.
+    /graphql and the auth behaviors pair Managed-CachingDisabled with
+    Managed-AllViewerExceptHostHeader; the default S3 behavior uses
+    Managed-CachingOptimized with no origin request policy."""
+    locals_block = block(cloudfront_module["locals"])
+    assert locals_block["managed_cache_disabled_policy_id"] == MANAGED_CACHE_DISABLED_POLICY_ID
+    assert locals_block["managed_cache_optimized_policy_id"] == MANAGED_CACHE_OPTIMIZED_POLICY_ID
+    assert locals_block["managed_all_viewer_except_host_policy_id"] == MANAGED_ALL_VIEWER_EXCEPT_HOST_POLICY_ID
+
+    default = _all_cache_behaviors(cloudfront_module)[0]
+    assert default["cache_policy_id"] == "${local.managed_cache_optimized_policy_id}"
+    assert "origin_request_policy_id" not in default
+
+    for behavior in _all_cache_behaviors(cloudfront_module):
+        assert "forwarded_values" not in behavior
+        for legacy in ("min_ttl", "default_ttl", "max_ttl"):
+            assert legacy not in behavior, f"legacy {legacy} survives on {behavior.get('path_pattern', '(default)')}"
+
+
+def test_behavior_count_within_free_tier_cap(cloudfront_module):
+    """The CloudFront Free plan caps cache behaviors at 5 (hard, not
+    increasable). Realized count: default + /graphql + the auth path
+    patterns. /l* is a wildcard covering /login and /logout - no SPA route
+    may ever start with /l."""
+    locals_block = block(cloudfront_module["locals"])
+    auth_paths = locals_block["auth_path_patterns"]
+    assert auth_paths == ["/l*", "/oauth2/*", "/.well-known/*"]
+    assert 1 + 1 + len(auth_paths) <= 5
+
+
+def test_index_html_carries_the_only_site_csp():
+    """#665: the application CSP is meta-only. The custom response headers
+    policy that used to deliver it as a header is gone (Business-tier
+    feature), so the <meta> tag in frontend/index.html is the only CSP.
+    There is no header CSP to mirror against; assert the meta tag itself."""
     html = (REPO_ROOT / "frontend" / "index.html").read_text()
     match = re.search(r'http-equiv="Content-Security-Policy"\s+content="([^"]+)"', html)
-    assert match, "index.html must carry the meta CSP"
+    assert match, "index.html must carry the meta CSP - it is the only CSP left (#665)"
     csp = match.group(1)
 
+    # The enumerated img-src and no-WebSockets connect-src invariants (#440)
+    # survive on the meta copy.
     img_src = csp.split("img-src ")[1].split(";")[0]
     assert "https:" not in img_src.split(), "img-src must not allow arbitrary https: images"
     assert "'self'" in img_src
@@ -512,15 +483,13 @@ def test_img_src_allows_real_presigned_qr_url_host(cloudfront_module):
     The pinned boto3/botocore in the Lambda layer defaults to the legacy
     global S3 endpoint for us-east-1, so presigned GET URLs carry the
     <bucket>.s3.amazonaws.com host. Generates a real presigned URL and
-    asserts its host is admitted by the rendered img-src of BOTH the
-    per-environment header CSP and the baked frontend <meta> CSP - the
-    effective policy on dev/prod is their intersection.
+    asserts its host is admitted by the baked frontend <meta> CSP - the only
+    CSP since #665 removed the header copy.
     """
     from urllib.parse import urlparse
 
     import boto3
 
-    csp_text = block(cloudfront_module["response_headers"]["locals"])["csp"]
     html = (REPO_ROOT / "frontend" / "index.html").read_text()
     meta_csp = re.search(r'http-equiv="Content-Security-Policy"\s+content="([^"]+)"', html).group(1)
 
@@ -539,10 +508,7 @@ def test_img_src_allows_real_presigned_qr_url_host(cloudfront_module):
         )
         host = urlparse(url).netloc
 
-        rendered = csp_text.replace("${var.exports_bucket_name}", bucket).replace("${var.aws_region}", "us-east-1")
-        header_img_src = rendered.split("img-src ")[1].split(";")[0]
         meta_img_src = meta_csp.split("img-src ")[1].split(";")[0]
-        assert f"https://{host}" in header_img_src.split(), f"{env} header CSP blocks presigned QR host {host}"
         assert f"https://{host}" in meta_img_src.split(), f"{env} meta CSP blocks presigned QR host {host}"
 
 
@@ -573,20 +539,6 @@ def test_env_wires_single_waf_into_distribution(env_name):
         '${replace(replace(module.appsync.api_url, "https://", ""), "/graphql", "")}'
     )
     assert cf_mods[0]["auth_origin_domain"] == "${local.login_domain}"
-
-
-def test_prod_hsts_one_year_include_subdomains_dev_keeps_ramp():
-    """#430: only prod opts into one-year HSTS with includeSubDomains."""
-    prod = modules(load_hcl(TF_APP / "environments" / "prod" / "main.tf"), "cloudfront")
-    assert len(prod) == 1
-    assert prod[0]["hsts_max_age_sec"] == 31536000
-    assert prod[0]["hsts_include_subdomains"] is True
-
-    dev = modules(load_hcl(TF_APP / "environments" / "dev" / "main.tf"), "cloudfront")
-    assert len(dev) == 1
-    # Dev stays on the module-default 300s ramp: no explicit overrides.
-    assert "hsts_max_age_sec" not in dev[0]
-    assert "hsts_include_subdomains" not in dev[0]
 
 
 def test_ephemeral_waf_noops_without_cloudfront():
