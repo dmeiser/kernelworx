@@ -190,9 +190,12 @@ resource "aws_cognito_user_pool" "main" {
   auto_verified_attributes = ["email"]
 
   # Password policy
-  # Matches client-side validation in ForgotPasswordPage.tsx and SignupPage.tsx.
+  # OWASP floor for pools where MFA is OPTIONAL: minimum 15 characters.
+  # Complexity rules are not a substitute for length. Client-side validation
+  # in ForgotPasswordPage.tsx and SignupPage.tsx mirrors this policy so
+  # users see the requirement before the pool rejects them.
   password_policy {
-    minimum_length                   = 8
+    minimum_length                   = 15
     require_lowercase                = true
     require_uppercase                = true
     require_numbers                  = true

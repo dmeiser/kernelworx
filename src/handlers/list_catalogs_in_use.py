@@ -6,7 +6,7 @@ Returns all catalog IDs used by campaigns for profiles the user owns or has acce
 This Lambda is necessary because:
 1. We need to query profiles owned by the account (1 query)
 2. We need to query campaigns for each owned profile (N queries)
-3. We need to query campaigns for shared profiles (1 shares query + N campaign queries)
+3. We need to query campaigns for shared profiles (1 shares query, N owner re-validation reads, N campaign queries)
 4. A pipeline resolver can't dynamically query N profiles
 
 Uses aioboto3 for async parallel queries:
@@ -116,23 +116,73 @@ async def _async_get_campaigns_for_profile(dynamodb: Any, campaigns_table_name: 
     return set(catalog_list)
 
 
-async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, target_account_id: str) -> List[str]:
-    """Async: Get profile IDs that are shared with this account."""
+async def _async_profile_exists(profiles_table: Any, db_profile_id: str) -> bool:
+    """Async: Check if a profile exists via the (eventually consistent) GSI."""
+    response = await profiles_table.query(
+        IndexName="profileId-index",
+        KeyConditionExpression="profileId = :profileId",
+        ExpressionAttributeValues={":profileId": db_profile_id},
+        Limit=1,
+    )
+    return bool(response.get("Items", []))
+
+
+async def _async_share_is_valid(profiles_table: Any, share: Dict[str, Any], db_profile_id: str) -> bool:
+    """Verify a share record still reflects the profile's current owner (#432).
+
+    Mirrors ``utils.auth._is_share_valid``: the transfer handler rewrites
+    third-party shares best-effort, so a stale share survives an ownership
+    transfer and keeps its old ``ownerAccountId``. A strongly consistent
+    base-table read under the share's recorded owner only succeeds while the
+    share is still valid. Shares missing ``ownerAccountId`` are accepted only
+    when the profile still exists (verified via the GSI).
+    """
+    share_owner = share.get("ownerAccountId")
+    if not share_owner:
+        return await _async_profile_exists(profiles_table, db_profile_id)
+    profile_response = await profiles_table.get_item(
+        Key={"ownerAccountId": share_owner, "profileId": db_profile_id}, ConsistentRead=True
+    )
+    return "Item" in profile_response
+
+
+async def _async_validate_shared_profiles(
+    dynamodb: Any, profiles_table_name: str, candidate_shares: List[Tuple[str, Dict[str, Any]]]
+) -> List[str]:
+    """Async: Drop stale shares whose recorded owner no longer owns the profile."""
+    if not candidate_shares:
+        return []
+    profiles_table = await dynamodb.Table(profiles_table_name)
+    # One consistent read per candidate share, run in parallel so the
+    # re-validation does not serialize the share fan-out.
+    valid = await asyncio.gather(
+        *[_async_share_is_valid(profiles_table, share, pid) for pid, share in candidate_shares]
+    )
+    return [pid for (pid, _share), valid_share in zip(candidate_shares, valid) if valid_share]
+
+
+async def _async_get_shared_profile_ids(
+    dynamodb: Any, shares_table_name: str, target_account_id: str, profiles_table_name: str
+) -> List[str]:
+    """Async: Get profile IDs that are shared with this account.
+
+    After the ``targetAccountId-index`` GSI query, each share with READ/WRITE
+    is re-validated against the profile's current owner with a strongly
+    consistent base-table read (the #432 stale-share check the other share
+    consumers run, e.g. ``utils.auth._is_share_valid``).
+    """
     table = await dynamodb.Table(shares_table_name)
+    # No ProjectionExpression: the GSI projection is ALL and the items are
+    # read whole (ownerAccountId is needed for the #432 stale-share check).
     query_params = {
         "IndexName": "targetAccountId-index",
         "KeyConditionExpression": "targetAccountId = :targetAccountId",
         "ExpressionAttributeValues": {":targetAccountId": target_account_id},
-        # "permissions" is a DynamoDB reserved word; it must be referenced via
-        # an expression attribute name or the query is rejected with a
-        # ValidationException.
-        "ProjectionExpression": "profileId, #permissions",
-        "ExpressionAttributeNames": {"#permissions": "permissions"},
     }
-    results: List[str] = []
+    candidate_shares: List[Tuple[str, Dict[str, Any]]] = []
     response = await table.query(**query_params)
-    results.extend(
-        item["profileId"]
+    candidate_shares.extend(
+        (item["profileId"], item)
         for item in response.get("Items", [])
         if item.get("profileId") and _share_item_has_accessible_permissions(item)
     )
@@ -140,13 +190,13 @@ async def _async_get_shared_profile_ids(dynamodb: Any, shares_table_name: str, t
     while response.get("LastEvaluatedKey"):
         query_params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
         response = await table.query(**query_params)
-        results.extend(
-            item["profileId"]
+        candidate_shares.extend(
+            (item["profileId"], item)
             for item in response.get("Items", [])
             if item.get("profileId") and _share_item_has_accessible_permissions(item)
         )
 
-    return results
+    return await _async_validate_shared_profiles(dynamodb, profiles_table_name, candidate_shares)
 
 
 async def _async_get_shared_campaign_catalog_ids(
@@ -220,7 +270,9 @@ async def _async_get_all_catalog_ids(
     async with session.resource("dynamodb") as dynamodb:
         # Step 1 & 2: Run owned profiles and shared profiles queries in parallel
         owned_profiles_task = _async_get_owned_profile_ids(dynamodb, profiles_table_name, account_id)
-        shared_profiles_task = _async_get_shared_profile_ids(dynamodb, shares_table_name, account_id)
+        shared_profiles_task = _async_get_shared_profile_ids(
+            dynamodb, shares_table_name, account_id, profiles_table_name
+        )
 
         owned_profile_ids, shared_profile_ids = await asyncio.gather(owned_profiles_task, shared_profiles_task)
 

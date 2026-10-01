@@ -54,6 +54,9 @@ class ErrorCode:
     INVITE_ALREADY_USED = "INVITE_ALREADY_USED"
     CAMPAIGN_READ_ONLY = "CAMPAIGN_READ_ONLY"
     INSUFFICIENT_PERMISSIONS = "INSUFFICIENT_PERMISSIONS"
+    # The resource is in a state the operation does not accept (e.g. a purge
+    # run while the per-entity cascade that must precede it is incomplete).
+    CONFLICT = "CONFLICT"
 
     # System errors
     INTERNAL_ERROR = "INTERNAL_ERROR"

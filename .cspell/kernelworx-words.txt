@@ -232,6 +232,7 @@ moto
 mktemp
 MUI
 multiline
+multiword
 mutex
 mypy
 MZXW
@@ -325,6 +326,7 @@ route53
 RRule
 rtype
 runtime
+SAMEORIGIN
 SaaS
 sameSite
 Scout
@@ -359,6 +361,7 @@ singleline
 slowmo
 slugification
 slugified
+slugifies
 slugify
 slugifying
 snackbar
@@ -371,6 +374,8 @@ stdlib
 strikethrough
 stylesheet
 subclasses
+subcomponent
+subcomponents
 submenu
 summarizer
 superadmin
@@ -464,6 +469,7 @@ wordmark
 worktree
 worx
 wrongpassword
+wxyz
 xlarge
 xlink
 xs

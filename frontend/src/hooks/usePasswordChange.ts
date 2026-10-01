@@ -45,8 +45,8 @@ export const usePasswordChange = (): UsePasswordChangeReturn => {
       return;
     }
 
-    if (newPassword.length < 8) {
-      setPasswordError('Password must be at least 8 characters');
+    if (newPassword.length < 15) {
+      setPasswordError('Password must be at least 15 characters');
       return;
     }
 

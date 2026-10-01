@@ -48,11 +48,20 @@ READONLY_EMAIL="${RUN_ID}-readonly@${TEST_DOMAIN}"
 SMOKE_EMAIL="${RUN_ID}-smoke@${TEST_DOMAIN}"
 
 # Generate a password satisfying Cognito's policy:
-# minimum 8, lowercase, uppercase, number, symbol.
+# minimum 15, lowercase, uppercase, number, symbol.
+#
+# Each required character class is guaranteed BY CONSTRUCTION, not by the
+# randomness of the prefix: hex output is [0-9a-f], so a prefix alone can never
+# provide an uppercase letter or symbol, and the fixed suffix "Aa1!" supplies
+# lowercase, uppercase, digit and symbol unconditionally. This matters because
+# the password is generated once and then retried as-is: if the generator could
+# emit a policy-rejected password (e.g. a base64 prefix whose surviving
+# characters were all non-lowercase with suffix "A1!"), every attempt would
+# fail with the same invalid password.
 generate_password() {
   local prefix
-  prefix=$(openssl rand -base64 9 | tr -d '=+/')
-  echo "${prefix}A1!"
+  prefix=$(openssl rand -hex 9)
+  echo "${prefix}Aa1!"
 }
 
 # Cognito error codes this script branches on. Both appear in the aws CLI's
