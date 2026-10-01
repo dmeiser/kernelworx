@@ -54,7 +54,7 @@ variable "api_origin_domain" {
 }
 
 variable "auth_origin_domain" {
-  description = "Cognito custom domain hostname proxied for /login, /logout, /oauth2/*, /.well-known/*, /favicon.ico (null = no auth behaviors)"
+  description = "Cognito custom domain hostname proxied for /l*, /oauth2/*, /.well-known/* (null = no auth behaviors)"
   type        = string
   default     = null
 }
@@ -67,7 +67,22 @@ locals {
 
   # Auth paths proxied to the Cognito custom domain (Amplify builds OAuth URLs
   # at root paths, so these must live at the root and not under a prefix).
-  auth_path_patterns = ["/login", "/logout", "/oauth2/*", "/.well-known/*", "/favicon.ico"]
+  # #665: /login and /logout collapsed into the /l* wildcard and the
+  # /favicon.ico behavior removed (favicons ship in frontend/public and are
+  # served by the default S3 behavior), bringing the distribution to the
+  # CloudFront Free plan's 5-behavior cap. Sharp edge: never add an SPA
+  # route starting with /l - it would be silently proxied to Cognito and 404.
+  auth_path_patterns = ["/l*", "/oauth2/*", "/.well-known/*"]
+
+  # AWS-managed cache/origin-request/response-headers policies (#665,
+  # CloudFront pricing plans Free tier): legacy forwarded_values and
+  # behavior-level TTLs are unsupported on every tier, and custom response
+  # headers policies are a Business-tier feature, so the managed policies
+  # replace all of them. These IDs are the stable AWS-published IDs.
+  managed_cache_disabled_policy_id         = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # Managed-CachingDisabled
+  managed_cache_optimized_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
+  managed_all_viewer_except_host_policy_id = "b689b0a8-53d0-40ab-baf4-68788e93d257" # Managed-AllViewerExceptHostHeader
+  managed_security_headers_policy_id       = "67f7725c-6f97-4210-82d7-5512b31e9d03" # SecurityHeadersPolicy
 }
 
 # CloudFront Function: Cognito answers with absolute redirects on its own
@@ -206,18 +221,11 @@ resource "aws_cloudfront_distribution" "site" {
       target_origin_id       = local.api_origin_id
       viewer_protocol_policy = "redirect-to-https"
 
-      forwarded_values {
-        query_string = true
-        headers      = ["Authorization", "Content-Type", "Accept"]
-
-        cookies {
-          forward = "none"
-        }
-      }
-
-      min_ttl     = 0
-      default_ttl = 0
-      max_ttl     = 0
+      # Managed-CachingDisabled (TTLs 0) + Managed-AllViewerExceptHostHeader
+      # (forwards Authorization/Content-Type/Accept and all cookies): same
+      # same-origin GraphQL semantics as the old forwarded_values block.
+      cache_policy_id          = local.managed_cache_disabled_policy_id
+      origin_request_policy_id = local.managed_all_viewer_except_host_policy_id
     }
   }
 
@@ -233,23 +241,14 @@ resource "aws_cloudfront_distribution" "site" {
       target_origin_id       = local.auth_origin_id
       viewer_protocol_policy = "redirect-to-https"
 
-      forwarded_values {
-        query_string = true
-
-        cookies {
-          forward = "all"
-        }
-      }
-
-      min_ttl     = 0
-      default_ttl = 0
-      max_ttl     = 0
-
-      # #550: these documents are served on the trusted site origin, so they
-      # need the security headers too - above all framing protection, or the
-      # login form is a clickjacking target. Narrow CSP (framing only); the
-      # full application CSP is not safe for Cognito's hosted-UI documents.
-      response_headers_policy_id = aws_cloudfront_response_headers_policy.auth_security.id
+      # Caching disabled; cookies must flow to Cognito (same managed pair as
+      # /graphql). #550 headers now come from the AWS-managed
+      # SecurityHeadersPolicy (#665): nosniff, Referrer-Policy, HSTS
+      # max-age=31536000, and XFO SAMEORIGIN. Cognito's own values win when
+      # it already sends one of these (managed policy, Override origin? = No).
+      cache_policy_id            = local.managed_cache_disabled_policy_id
+      origin_request_policy_id   = local.managed_all_viewer_except_host_policy_id
+      response_headers_policy_id = local.managed_security_headers_policy_id
 
       function_association {
         event_type   = "viewer-response"
@@ -265,19 +264,17 @@ resource "aws_cloudfront_distribution" "site" {
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
 
-    # #166: security headers (CSP incl. frame-ancestors) on all site responses.
-    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
+    # #665: Managed-CachingOptimized only (no origin request policy). Its
+    # effective default TTL is the policy's 86400s when objects carry no
+    # Cache-Control (vs the old 3600s); deploy invalidations already
+    # force-fresh index.html, so behavior is unchanged in practice.
+    cache_policy_id = local.managed_cache_optimized_policy_id
 
-    forwarded_values {
-      query_string = false
-      cookies {
-        forward = "none"
-      }
-    }
-
-    min_ttl     = 0
-    default_ttl = 3600
-    max_ttl     = 86400
+    # #166/#665: the AWS-managed SecurityHeadersPolicy replaces the custom
+    # policy (a Business-tier feature): nosniff, Referrer-Policy, HSTS
+    # max-age=31536000, XFO SAMEORIGIN. The application CSP survives only
+    # as the <meta> tag in frontend/index.html - a documented #665 trade-off.
+    response_headers_policy_id = local.managed_security_headers_policy_id
   }
 
   # SPA routing - return index.html for 404s
