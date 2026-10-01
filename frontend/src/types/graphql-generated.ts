@@ -1229,7 +1229,7 @@ export type GqlUpdateOrderInput = {
 export type GqlUpdateSellerProfileInput = {
   /** The ID of the profile to update. */
   profileId: Scalars['ID']['input'];
-  /** The seller's new display name. */
+  /** The seller's new display name (required, up to 100 characters; trimmed before storage). */
   sellerName: Scalars['String']['input'];
 };
 
