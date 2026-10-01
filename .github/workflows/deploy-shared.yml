@@ -239,6 +239,39 @@ jobs:
             -t module.appsync.aws_appsync_resolver.list_shares_by_profile \
             -t module.appsync.aws_appsync_resolver.list_invites_by_profile
 
+      # One-time migration (#665): the custom CloudFront response headers
+      # policies `security` and `auth_security` were retired in favour of the
+      # AWS-managed SecurityHeadersPolicy. CloudFront rejects deleting a
+      # response headers policy while a cache behaviour still references it
+      # (ResponseHeadersPolicyInUse), and the apply is what disassociates the
+      # behaviours, so the plan must not contain the destroy. Removing the
+      # resources from state first keeps the plan valid; the orphaned policies
+      # in AWS are deleted by the step that runs after the apply.
+      - name: Forget retired CloudFront response headers policies
+        id: forget_response_headers_policies
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_github_token: ${{ github.token }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: ${{ inputs.tofu-directory }}
+        run: |
+          retired=$(tofu state list 2>/dev/null | grep 'aws_cloudfront_response_headers_policy' || true)
+          retired_ids=""
+          if [ -z "$retired" ]; then
+            echo "No retired CloudFront response headers policies in state; nothing to forget."
+          else
+            for addr in $retired; do
+              policy_id=$(tofu state show -no-color "$addr" | awk -F'"' '/^[ \t]*id[ \t]*=/ {print $2; exit}')
+              echo "Forgetting $addr (cloudfront id: $policy_id)"
+              tofu state rm "$addr"
+              retired_ids="$retired_ids $policy_id"
+            done
+          fi
+          # Single-line space-separated ids for the post-apply cleanup step.
+          echo "retired_policy_ids=${retired_ids# }" >> "$GITHUB_OUTPUT"
+
       - name: OpenTofu plan
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
@@ -248,6 +281,32 @@ jobs:
           TF_IN_AUTOMATION: "true"
         working-directory: ${{ inputs.tofu-directory }}
         run: tofu plan -out=tfplan
+
+      # One-time migration (#665), continued: the apply above is what
+      # disassociates the cache behaviours from the retired custom response
+      # headers policies, so only now can the orphaned AWS policies be deleted
+      # (CloudFront refuses while a behaviour still references one). Ids were
+      # captured from state before the removal; empty means a previous deploy
+      # already cleaned up. Already-deleted policies are logged, not failures.
+      - name: Delete orphaned CloudFront response headers policies
+        env:
+          RETIRED_POLICY_IDS: ${{ steps.forget_response_headers_policies.outputs.retired_policy_ids }}
+        run: |
+          if [ -z "$RETIRED_POLICY_IDS" ]; then
+            echo "No retired response headers policies to delete; nothing to do."
+            exit 0
+          fi
+          for policy_id in $RETIRED_POLICY_IDS; do
+            if aws cloudfront delete-response-headers-policy --id "$policy_id" 2>aws_err.txt; then
+              echo "Deleted orphaned CloudFront response headers policy $policy_id"
+            elif grep -q 'NoSuchResponseHeadersPolicy' aws_err.txt; then
+              echo "Response headers policy $policy_id already deleted; continuing."
+            else
+              echo "::warning::Failed to delete orphaned response headers policy $policy_id; continuing."
+              cat aws_err.txt
+            fi
+          done
+          rm -f aws_err.txt
 
       # ROLLBACK: To revert this deployment, check out the previous release commit,
       # re-run `tofu plan -out=tfplan` against the previous state, and apply it with
