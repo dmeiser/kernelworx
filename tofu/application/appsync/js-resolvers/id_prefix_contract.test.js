@@ -23,6 +23,7 @@ import { request as queryCampaignsRequest } from './query_campaigns_fn.js';
 import { request as createOrderRequest } from './create_order_fn.js';
 import { request as listMyProfilesRequest } from './list_my_profiles_fn.js';
 import { request as updateCampaignRequest } from './update_campaign_fn.js';
+import { request as verifyProfileReadAccessRequest } from './verify_profile_read_access_fn.js';
 import { response as querySharesResponse } from './query_shares_fn.js';
 
 const OWNER = { sub: 'user-123' };
@@ -97,6 +98,32 @@ describe('unconditional-normalization resolvers behave identically', () => {
 
         assert.strictEqual(accountIdOf('user-123'), 'ACCOUNT#user-123');
         assert.strictEqual(accountIdOf('ACCOUNT#user-123'), 'ACCOUNT#user-123');
+    });
+
+    it('verify_profile_read_access_fn keys its step 1 GetItem byte-identically for a bare sub', () => {
+        // #508 rewrote this resolver to decide ownership from a strongly
+        // consistent base-table GetItem, and #534 routed its two prefix
+        // constructions through lib/ids.js. The GetItem key is the whole
+        // authorization signal, so the composite key must stay byte-for-byte
+        // what the pre-#534 hand-rolled ternaries emitted - a bare Cognito
+        // `sub` must still yield exactly 'ACCOUNT#<sub>'.
+        const keyOf = (sub, profileId) =>
+            verifyProfileReadAccessRequest({
+                identity: { sub },
+                args: { profileId },
+                stash: {},
+            }).key;
+
+        assert.deepStrictEqual(keyOf('user-123', 'prof-1'), {
+            ownerAccountId: 'ACCOUNT#user-123',
+            profileId: 'PROFILE#prof-1',
+        });
+        assert.deepStrictEqual(keyOf('ACCOUNT#user-123', 'PROFILE#prof-1'), {
+            ownerAccountId: 'ACCOUNT#user-123',
+            profileId: 'PROFILE#prof-1',
+        });
+        // A foreign prefix is part of the id, exactly as the old ternary treated it.
+        assert.strictEqual(keyOf('PROFILE#user-123', 'prof-1').ownerAccountId, 'ACCOUNT#PROFILE#user-123');
     });
 
     it('create_order_fn mints the same ORDER# sort key for prefixed and unprefixed campaign ids', () => {
