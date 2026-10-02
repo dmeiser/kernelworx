@@ -518,7 +518,7 @@ input CreateCampaignInput {
   shareWithCreator: Boolean
 }
 
-"""Input for updateCampaign. Only the provided fields are changed."""
+"""Input for updateCampaign. Only the provided fields are changed. An explicit null is rejected with INVALID_INPUT for campaignName, campaignYear, isActive, and catalogId, which the Campaign type declares non-null."""
 input UpdateCampaignInput {
   """The ID of the campaign to update."""
   campaignId: ID!
