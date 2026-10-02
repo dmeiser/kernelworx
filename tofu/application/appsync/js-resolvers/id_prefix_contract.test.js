@@ -153,16 +153,18 @@ describe('unconditional-normalization resolvers behave identically', () => {
     });
 });
 
-describe('update_campaign_fn keeps its deliberate null passthrough', () => {
-    it('still writes catalogId = null when the input clears the catalog', () => {
-        const request = updateCampaignRequest({
-            args: { input: { catalogId: null } },
-            stash: { campaign: { profileId: 'PROFILE#prof-1', campaignId: 'CAMPAIGN#camp-1' } },
-        });
-
-        assert.strictEqual(request.operation, 'UpdateItem');
-        assert.strictEqual(request.update.expressionValues[':catalogId'], null);
-        assert.ok(request.update.expression.includes('catalogId = :catalogId'));
+describe('update_campaign_fn catalogId null handling', () => {
+    it('rejects an explicit null catalogId instead of persisting NULL (#659)', () => {
+        // #659 (the base this sweep rebases onto) made Campaign.catalogId
+        // ID! non-nullable: an explicit null must surface as INVALID_INPUT,
+        // never as a NULL attribute, which would break every subsequent read.
+        assert.throws(
+            () => updateCampaignRequest({
+                args: { input: { catalogId: null } },
+                stash: { campaign: { profileId: 'PROFILE#prof-1', campaignId: 'CAMPAIGN#camp-1' } },
+            }),
+            (err) => err.message === 'INVALID_INPUT: catalogId cannot be null'
+        );
     });
 
     it('normalizes a non-null catalogId exactly as the old ternary did', () => {

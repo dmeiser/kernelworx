@@ -8,8 +8,9 @@ function buildUnitCampaignKey(unitType, unitNumber, city, state, campaignName, c
 }
 
 function normalizeCatalogId(catalogId) {
-    // null is a deliberate "clear the catalog" update and must survive as
-    // null; only non-null values are prefix-normalized (#534).
+    // Only non-null values reach this helper: request()/response() skip null,
+    // and rejectExplicitNulls rejects an explicit null up front because
+    // Campaign.catalogId is ID! (#659). The guard matches the pre-#534 shape.
     if (catalogId === null || catalogId === undefined) {
         return null;
     }
