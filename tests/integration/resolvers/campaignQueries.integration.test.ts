@@ -201,23 +201,31 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         });
         const campaignId = campaignData.createCampaign.campaignId;
 
-        // Act: Query campaign
-        const { data } = await ownerClient.query({
-          query: GET_CAMPAIGN,
-          variables: { campaignId: campaignId },
-          fetchPolicy: 'network-only',
-        });
+        // Act: Poll getCampaign until the campaignId-index GSI projects the
+        // newly created campaign (Bug #21 eventual consistency), then read it.
+        const campaigns = await waitForGSIConsistency(
+          async () => {
+            const res = await ownerClient.query({
+              query: GET_CAMPAIGN,
+              variables: { campaignId: campaignId },
+              fetchPolicy: 'network-only',
+            });
+            return res.data?.getCampaign ? [res.data.getCampaign] : [];
+          },
+          (items) => items.length > 0,
+          10,
+          1000
+        );
 
         // Assert
-        expect(data.getCampaign).toBeDefined();
-        expect(data.getCampaign.campaignId).toBe(campaignId);
-        expect(data.getCampaign.profileId).toBe(profileId);
-        expect(data.getCampaign.campaignName).toContain('Campaign');
-        expect(data.getCampaign.startDate).toBe('2025-01-01T00:00:00Z');
-        expect(data.getCampaign.endDate).toBe('2025-12-31T23:59:59Z');
-        expect(data.getCampaign.catalogId).toBe(catalogId);
-        expect(data.getCampaign.createdAt).toBeDefined();
-        expect(data.getCampaign.updatedAt).toBeDefined();
+        expect(campaigns[0].campaignId).toBe(campaignId);
+        expect(campaigns[0].profileId).toBe(profileId);
+        expect(campaigns[0].campaignName).toContain('Campaign');
+        expect(campaigns[0].startDate).toBe('2025-01-01T00:00:00Z');
+        expect(campaigns[0].endDate).toBe('2025-12-31T23:59:59Z');
+        expect(campaigns[0].catalogId).toBe(catalogId);
+        expect(campaigns[0].createdAt).toBeDefined();
+        expect(campaigns[0].updatedAt).toBeDefined();
         
         // Cleanup
         await deleteCampaign(ownerClient, campaignId);
@@ -344,16 +352,24 @@ describe('Campaign Query Resolvers Integration Tests', () => {
           },
         });
 
-        // Act: Readonly user queries campaign
-        const { data } = await readonlyClient.query({
-          query: GET_CAMPAIGN,
-          variables: { campaignId: campaignId },
-          fetchPolicy: 'network-only',
-        });
+        // Act: Poll getCampaign until the campaignId-index GSI projects the
+        // newly created campaign (Bug #21 eventual consistency), then read it.
+        const campaigns = await waitForGSIConsistency(
+          async () => {
+            const res = await readonlyClient.query({
+              query: GET_CAMPAIGN,
+              variables: { campaignId: campaignId },
+              fetchPolicy: 'network-only',
+            });
+            return res.data?.getCampaign ? [res.data.getCampaign] : [];
+          },
+          (items) => items.length > 0,
+          10,
+          1000
+        );
 
         // Assert
-        expect(data.getCampaign).toBeDefined();
-        expect(data.getCampaign.campaignId).toBe(campaignId);
+        expect(campaigns[0].campaignId).toBe(campaignId);
         
         // Cleanup
         await ownerClient.mutate({ mutation: REVOKE_SHARE, variables: { input: { profileId, targetAccountId: readonlyAccountId } } });
@@ -950,16 +966,25 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       );
       const campaignId = campaigns[0].campaignId;
 
-      // Act
-      const { data } = await ownerClient.query({
-        query: GET_CAMPAIGN,
-        variables: { campaignId: campaignId },
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll getCampaign until the campaignId-index GSI projects the
+      // newly created campaign (Bug #21 eventual consistency), then read it.
+      const visibleCampaigns = await waitForGSIConsistency(
+        async () => {
+          const res = await ownerClient.query({
+            query: GET_CAMPAIGN,
+            variables: { campaignId: campaignId },
+            fetchPolicy: 'network-only',
+          });
+          return res.data?.getCampaign ? [res.data.getCampaign] : [];
+        },
+        (items) => items.length > 0,
+        10,
+        1000
+      );
 
       // Assert
-      expect(data.getCampaign.endDate).toBeNull();
-      expect(data.getCampaign.startDate).toBe('2025-01-01T00:00:00Z');
+      expect(visibleCampaigns[0].endDate).toBeNull();
+      expect(visibleCampaigns[0].startDate).toBe('2025-01-01T00:00:00Z');
 
       // Cleanup
       await deleteCampaign(ownerClient, campaignId);
@@ -1002,16 +1027,25 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       });
       const campaignId = campaignData.createCampaign.campaignId;
 
-      // Act
-      const { data } = await ownerClient.query({
-        query: GET_CAMPAIGN,
-        variables: { campaignId: campaignId },
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll getCampaign until the campaignId-index GSI projects the
+      // newly created campaign (Bug #21 eventual consistency), then read it.
+      const campaigns = await waitForGSIConsistency(
+        async () => {
+          const res = await ownerClient.query({
+            query: GET_CAMPAIGN,
+            variables: { campaignId: campaignId },
+            fetchPolicy: 'network-only',
+          });
+          return res.data?.getCampaign ? [res.data.getCampaign] : [];
+        },
+        (items) => items.length > 0,
+        10,
+        1000
+      );
 
       // Assert
-      expect(data.getCampaign.startDate).toBe('2025-01-01T00:00:00Z');
-      expect(data.getCampaign.endDate).toBe('2025-06-30T23:59:59Z');
+      expect(campaigns[0].startDate).toBe('2025-01-01T00:00:00Z');
+      expect(campaigns[0].endDate).toBe('2025-06-30T23:59:59Z');
 
       // Cleanup
       await deleteCampaign(ownerClient, campaignId);
@@ -1345,16 +1379,27 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       });
       const campaignId = campaignData.createCampaign.campaignId;
 
-      // Act: Get campaign with computed fields
-      const { data } = await ownerClient.query({
-        query: GET_CAMPAIGN_WITH_COMPUTED,
-        variables: { campaignId: campaignId },
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll getCampaign until the campaignId-index GSI projects the
+      // newly created campaign (Bug #21 eventual consistency), then read its
+      // computed fields. A read straight after createCampaign can return null
+      // for a campaign that exists.
+      const campaigns = await waitForGSIConsistency(
+        async () => {
+          const res = await ownerClient.query({
+            query: GET_CAMPAIGN_WITH_COMPUTED,
+            variables: { campaignId: campaignId },
+            fetchPolicy: 'network-only',
+          });
+          return res.data?.getCampaign ? [res.data.getCampaign] : [];
+        },
+        (items) => items.length > 0,
+        10,
+        1000
+      );
 
-      // Assert: Should return 0 for both computed fields (or null)
-      expect(data.getCampaign.totalOrders).toBe(0);
-      expect(data.getCampaign.totalRevenue).toBe(0);
+      // Assert: Should return 0 for both computed fields
+      expect(campaigns[0].totalOrders).toBe(0);
+      expect(campaigns[0].totalRevenue).toBe(0);
 
       // Cleanup
       await deleteCampaign(ownerClient, campaignId);
