@@ -1854,7 +1854,7 @@ class TestAdminPurgeUserAccount:
             is not None
         )
 
-    def test_cognito_failure_leaves_user_data_intact(
+    def test_cognito_failure_after_sweep_then_retry_completes(
         self,
         dynamodb_table: Any,
         invites_table: Any,
@@ -1862,11 +1862,13 @@ class TestAdminPurgeUserAccount:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """A Cognito delete failure must not sweep any user data (#551).
+        """A Cognito delete failure after the sweep is a partial delete; a retry completes it.
 
-        The Cognito call is the commit point: if it fails, the data phase must
-        never run, so the half-deleted state (Cognito user alive, residue
-        destroyed) that the ordering fix targets cannot occur.
+        First attempt: the sweep runs, the Cognito delete fails, and the caller
+        gets the honest partial-state error while the accounts row and the
+        Cognito user survive. Second attempt: the sweep no-ops over the
+        already-swept residue, the Cognito delete succeeds, and the accounts
+        record is removed.
         """
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
@@ -1879,34 +1881,42 @@ class TestAdminPurgeUserAccount:
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
-            mock_cognito.admin_delete_user.side_effect = ClientError(
-                {"Error": {"Code": "NotAuthorizedException", "Message": "Access denied."}},
-                "AdminDeleteUser",
-            )
+            mock_cognito.admin_delete_user.side_effect = [
+                ClientError({"Error": {"Code": "InternalError", "Message": "Internal error"}}, "AdminDeleteUser"),
+                {},
+            ]
             mock_get_client.return_value = mock_cognito
 
-            result = admin_purge_user_account(event, lambda_context)
+            first = admin_purge_user_account(event, lambda_context)
 
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-        # Neither the sweep nor the account-record delete ran: the residue and
-        # the accounts row survive so the admin retry converges.
-        assert invites_table.get_item(Key={"inviteCode": "INV-OWNED"}).get("Item") is not None
-        assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+            assert first["__isError"] is True
+            assert first["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert first["message"] == (
+                "Account data was deleted but the Cognito user is still present; "
+                "retry the purge to complete the deletion"
+            )
+            # The sweep ran: the invite is gone, but the accounts row survives
+            # for the retry to remove.
+            assert invites_table.get_item(Key={"inviteCode": "INV-OWNED"}).get("Item") is None
+            assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
 
-    def test_data_failure_after_cognito_commit(
+            second = admin_purge_user_account(event, lambda_context)
+
+        assert second is True
+        assert mock_cognito.admin_delete_user.call_count == 2
+        assert "Item" not in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+
+    def test_data_sweep_failure_leaves_cognito_user_intact(
         self,
         dynamodb_table: Any,
         admin_appsync_event: Dict[str, Any],
         lambda_context: Any,
         monkeypatch: Any,
-        capsys: Any,
     ) -> None:
-        """A data-phase failure after the Cognito commit is logged loudly (#551).
+        """A sweep failure before the Cognito delete is not a partial delete.
 
-        The Cognito user is already gone, so leftover records are inert and a
-        re-run of the data phase is safe; the partial delete must be detectable
-        in post-incident review via the error_code-tagged log.
+        The Cognito user is untouched, so the retry converges once the
+        transient failure clears.
         """
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
@@ -1931,11 +1941,10 @@ class TestAdminPurgeUserAccount:
 
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-        # The commit point was reached: the Cognito user is gone.
-        mock_cognito.admin_delete_user.assert_called_once_with(UserPoolId="test-pool-id", Username=target_account_id)
-        captured = capsys.readouterr().out
-        assert "data cleanup failed" in captured
-        assert "INTERNAL_ERROR" in captured
+        assert result["message"] == "Failed to purge user account"
+        # The Cognito user was never touched: the delete never ran.
+        mock_cognito.admin_delete_user.assert_not_called()
+        assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
 
     def test_purge_deletes_s3_reports_for_the_supplied_profiles(
         self,
