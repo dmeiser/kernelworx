@@ -1,9 +1,9 @@
 """DynamoDB pagination helpers for Lambda handlers.
 
-Provides synchronous query/scan wrappers that follow LastEvaluatedKey so callers
-do not silently truncate results at DynamoDB's 1 MB page limit. All wrappers
-retry ``ProvisionedThroughputExceededException`` with exponential backoff, and
-generator variants are available to bound memory growth on large result sets.
+Provides a synchronous query wrapper that follows LastEvaluatedKey so callers
+do not silently truncate results at DynamoDB's 1 MB page limit. It retries
+``ProvisionedThroughputExceededException`` with exponential backoff, and a
+generator variant is available to bound memory growth on large result sets.
 """
 
 import time
@@ -21,9 +21,9 @@ except ModuleNotFoundError:  # pragma: no cover
 
 logger = get_logger(__name__)
 
-# Shared retry constants: every DynamoDB retry loop (the query/scan wrappers
-# below and the BatchGetItem helper in ``utils.dynamodb``) backs off identically
-# so a fix to one cannot drift from the others (#557).
+# Shared retry constants: the query wrapper below and the BatchGetItem helper
+# in ``utils.dynamodb`` back off identically so a fix to one cannot drift from
+# the others (#557).
 MAX_RETRY_ATTEMPTS: int = 3
 BASE_BACKOFF_SECONDS: float = 0.05
 _THROUGHPUT_ERROR: str = "ProvisionedThroughputExceededException"
@@ -107,15 +107,6 @@ def _paginated_query(
     yield from _paginated(table, "query", query_kwargs, max_items=max_items, log_label="query")
 
 
-def _paginated_scan(
-    table: "Table",
-    scan_kwargs: Dict[str, Any],
-    max_items: Optional[int] = None,
-) -> Iterable[Dict[str, Any]]:
-    """Yield items from a DynamoDB scan, following pagination and retrying throughput errors."""
-    yield from _paginated(table, "scan", scan_kwargs, max_items=max_items, log_label="scan")
-
-
 def query_all_items(
     table: "Table",
     query_kwargs: Dict[str, Any],
@@ -155,43 +146,3 @@ def query_all_items_iter(
         with exponential backoff.
     """
     yield from _paginated_query(table, query_kwargs, max_items=max_items)
-
-
-def scan_all_items(
-    table: "Table",
-    scan_kwargs: Dict[str, Any],
-    max_items: Optional[int] = None,
-) -> List[Dict[str, Any]]:
-    """Execute a DynamoDB scan and follow pagination to return all items.
-
-    Args:
-        table: DynamoDB table resource to scan.
-        scan_kwargs: Keyword arguments passed to ``Table.scan``.
-        max_items: Optional maximum number of items to return. If provided,
-            pagination stops once this many items have been collected, which
-            bounds memory growth for large result sets.
-
-    Returns:
-        All items matching the scan, aggregated across pages. Throughput
-        errors are retried with exponential backoff.
-    """
-    return list(_paginated_scan(table, scan_kwargs, max_items=max_items))
-
-
-def scan_all_items_iter(
-    table: "Table",
-    scan_kwargs: Dict[str, Any],
-    max_items: Optional[int] = None,
-) -> Iterable[Dict[str, Any]]:
-    """Yield items from a DynamoDB scan without loading all pages into memory.
-
-    Args:
-        table: DynamoDB table resource to scan.
-        scan_kwargs: Keyword arguments passed to ``Table.scan``.
-        max_items: Optional maximum number of items to yield.
-
-    Returns:
-        Iterable of items matching the scan. Throughput errors are retried
-        with exponential backoff.
-    """
-    yield from _paginated_scan(table, scan_kwargs, max_items=max_items)

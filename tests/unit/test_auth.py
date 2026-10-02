@@ -7,50 +7,13 @@ import pytest
 from src.utils.auth import (
     batch_check_profile_access,
     check_profile_access,
-    get_account,
     has_mfa,
     is_admin,
-    is_profile_owner,
     require_admin_mfa,
     require_profile_access,
 )
 from src.utils.dynamodb import get_dynamodb_resource, tables
 from src.utils.errors import AppError, ErrorCode
-
-
-class TestIsProfileOwner:
-    """Tests for is_profile_owner function."""
-
-    def test_owner_returns_true(
-        self,
-        dynamodb_table: Any,
-        sample_profile: Any,
-        sample_account_id: str,
-        sample_profile_id: str,
-    ) -> None:
-        """Test that owner check returns True for owner."""
-        result = is_profile_owner(sample_account_id, sample_profile_id)
-
-        assert result is True
-
-    def test_non_owner_returns_false(
-        self,
-        dynamodb_table: Any,
-        sample_profile: Any,
-        sample_profile_id: str,
-        another_account_id: str,
-    ) -> None:
-        """Test that owner check returns False for non-owner."""
-        result = is_profile_owner(another_account_id, sample_profile_id)
-
-        assert result is False
-
-    def test_nonexistent_profile_raises_error(self, dynamodb_table: Any, sample_account_id: str) -> None:
-        """Test that nonexistent profile raises NOT_FOUND."""
-        with pytest.raises(AppError) as exc_info:
-            is_profile_owner(sample_account_id, "PROFILE#nonexistent")
-
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
 
 
 class TestCheckProfileAccess:
@@ -1415,35 +1378,6 @@ class TestRequireProfileAccess:
             require_profile_access(another_account_id, sample_profile_id, "READ")
 
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
-
-
-class TestGetAccount:
-    """Tests for get_account function."""
-
-    def test_existing_account_returned(self, dynamodb_table: Any, sample_account_id: str) -> None:
-        """Test that existing account is returned."""
-        # Create account in accounts table (multi-table design)
-        import boto3
-
-        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
-        accounts_table.put_item(
-            Item={
-                "accountId": f"ACCOUNT#{sample_account_id}",
-                "email": "test@example.com",
-            }
-        )
-
-        result = get_account(sample_account_id)
-
-        assert result is not None
-        assert result["accountId"] == f"ACCOUNT#{sample_account_id}"
-
-    def test_nonexistent_account_returns_none(self, dynamodb_table: Any) -> None:
-        """Test that nonexistent account returns None."""
-        result = get_account("nonexistent-account")
-
-        assert result is None
 
 
 class TestIsAdmin:

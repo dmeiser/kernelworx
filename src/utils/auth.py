@@ -316,66 +316,6 @@ def require_profile_access(caller_account_id: str, profile_id: str, required_per
         )
 
 
-def is_profile_owner(caller_account_id: str, profile_id: str) -> bool:
-    """
-    Check if caller is the owner of a profile.
-
-    This function queries the eventually consistent ``profileId-index`` GSI to
-    locate the profile's current owner. It is suitable for non-authoritative
-    ownership checks (for example, UI hints or audit logging) but should not be
-    used as the sole security gate; prefer ``check_profile_access`` or
-    ``require_profile_access`` for access-control decisions, which perform
-    strongly consistent base-table reads where possible.
-
-    Args:
-        caller_account_id: Cognito sub (Account ID) of the caller
-        profile_id: Profile ID to check
-
-    Returns:
-        True if caller is owner, False otherwise
-
-    Raises:
-        AppError: If profile not found
-    """
-    # Normalize profile_id to PROFILE# prefix for queries
-    db_profile_id = ensure_profile_id(profile_id)
-    assert db_profile_id is not None
-
-    # Multi-table design V2: Query profileId-index GSI
-    # Profile table structure: PK=ownerAccountId, SK=profileId, GSI=profileId-index
-    response = tables.profiles.query(
-        IndexName="profileId-index",
-        KeyConditionExpression="profileId = :profileId",
-        ExpressionAttributeValues={":profileId": db_profile_id},
-        Limit=1,
-    )
-
-    items = response.get("Items", [])
-    if not items:
-        raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
-
-    profile = items[0]
-    stored_owner = profile.get("ownerAccountId", "")
-    # Handle both with and without prefix for backward compatibility
-    return stored_owner == caller_account_id or stored_owner == f"ACCOUNT#{caller_account_id}"
-
-
-def get_account(account_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get account by ID.
-
-    Args:
-        account_id: Cognito sub (Account ID)
-
-    Returns:
-        Account item or None if not found
-    """
-    # Multi-table design: accountId is the only key (format: ACCOUNT#uuid)
-    response = tables.accounts.get_item(Key={"accountId": f"ACCOUNT#{account_id}"})
-
-    return response.get("Item")
-
-
 def _get_claims(event: Any) -> Optional[Dict[str, Any]]:
     """
     Extract the JWT claims dict from a Lambda/AppSync event.

@@ -51,6 +51,7 @@ from .deletion_cascade import (
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id
     from utils.auth import require_admin_mfa
     from utils.boto import get_cognito_client
     from utils.cognito_filters import cognito_user_filter
@@ -59,6 +60,7 @@ try:  # pragma: no cover
     from utils.logging import get_logger, mask_email
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id
     from ..utils.auth import require_admin_mfa
     from ..utils.boto import get_cognito_client
     from ..utils.cognito_filters import cognito_user_filter
@@ -425,8 +427,12 @@ def _actor_sub(event: Dict[str, Any]) -> str:
     the actor can never change an authorization decision. A missing ``sub``
     yields an empty string rather than raising, so auditing can never turn a
     permitted operation into a failure.
+
+    The read goes through ``get_caller_id`` like every other caller read
+    (#660); it returns the raw ``identity.sub``, so this stays audit-only and
+    cannot influence an authorization decision.
     """
-    sub = event.get("identity", {}).get("sub")
+    sub = get_caller_id(event)
     return str(sub) if sub else ""
 
 
@@ -987,9 +993,10 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     account_id, actor_sub = _require_admin_and_get_target_account_id(event)
     profile_ids = _validate_profile_ids_argument(event.get("arguments", {}).get("profileIds"))
 
-    # The self-deletion guard keeps its own raw read of the caller's sub so its
-    # decision is bit-for-bit what it was before #507; actor_sub is audit only.
-    caller_id = event.get("identity", {}).get("sub")
+    # get_caller_id reads the raw `identity.sub` (no normalization), so this
+    # guard's decision is unchanged from the inline read it replaced; it only
+    # hardens a malformed event to None instead of raising (#660).
+    caller_id = get_caller_id(event)
     _check_not_self_deletion(str(caller_id), account_id)
 
     user_pool_id = get_required_env("USER_POOL_ID")
@@ -1166,8 +1173,7 @@ def _require_admin_and_get_actor_sub(event: Dict[str, Any]) -> str:
     """
     require_admin_mfa(event)
 
-    identity = event.get("identity", {})
-    caller_id = identity.get("sub")
+    caller_id = get_caller_id(event)
     if not caller_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 
