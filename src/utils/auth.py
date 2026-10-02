@@ -19,7 +19,12 @@ logger = get_logger(__name__)
 
 
 def _is_profile_owner(profiles_table: "Table", caller_account_id: str, db_profile_id: str) -> bool:
-    """Check if caller is the profile owner via strongly consistent base-table lookup."""
+    """Check if caller is the profile owner via strongly consistent base-table lookup.
+
+    ``caller_account_id`` is normalized with ``ensure_account_id`` here, so the raw
+    Cognito sub and the ``ACCOUNT#``-prefixed spelling both resolve to the stored
+    ``ownerAccountId`` key (#660).
+    """
     db_caller_id = ensure_account_id(caller_account_id)
     assert db_caller_id is not None
     direct_response = profiles_table.get_item(
@@ -116,7 +121,8 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     Check if caller has access to profile.
 
     Args:
-        caller_account_id: Cognito sub (Account ID) of the caller
+        caller_account_id: Cognito sub (Account ID) of the caller, in either the raw
+            sub or the ``ACCOUNT#``-prefixed spelling; normalized at this edge (#660)
         profile_id: Profile ID to check access for
         required_permission: "READ" or "WRITE" (case-insensitive)
 
