@@ -54,7 +54,7 @@ try:  # pragma: no cover
     from utils.auth import require_admin_mfa
     from utils.boto import get_cognito_client
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import EMAIL_SEARCH_KEY, batch_get_chunked, get_required_env, tables
+    from utils.dynamodb import EMAIL_SEARCH_KEY, TRANSIENT_ERROR_CODES, batch_get_chunked, get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
     from utils.payment_methods import delete_all_user_qr_codes
@@ -62,7 +62,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
     from ..utils.boto import get_cognito_client
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import EMAIL_SEARCH_KEY, batch_get_chunked, get_required_env, tables
+    from ..utils.dynamodb import EMAIL_SEARCH_KEY, TRANSIENT_ERROR_CODES, batch_get_chunked, get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
     from ..utils.payment_methods import delete_all_user_qr_codes
@@ -95,9 +95,9 @@ else:  # pragma: no cover
 # handlers import it (see _raise_gather_failures, used by #556) rather than
 # redeclaring their own copy. Only redeclare a local set when the caller's AWS
 # surface genuinely differs (e.g. the DynamoDB BatchGetItem throttle code).
-_THROTTLING_ERROR_CODES = frozenset(
-    {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
-)
+# The set itself is owned by utils.dynamodb and shared with the
+# ownership-transfer share repair (#549), so the rule has one home.
+_THROTTLING_ERROR_CODES = TRANSIENT_ERROR_CODES
 
 
 def _throttling_error_code(error: BaseException) -> str:

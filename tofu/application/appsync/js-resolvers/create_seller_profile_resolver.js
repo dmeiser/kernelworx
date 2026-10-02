@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { validateSellerName } from './lib/validate_seller_name.js';
 
 export function request(ctx) {
     if (!ctx.identity || !ctx.identity.sub) {
@@ -7,13 +8,7 @@ export function request(ctx) {
 
     const input = ctx.args.input || {};
 
-    const sellerName = input.sellerName ? input.sellerName.trim() : '';
-    if (!sellerName) {
-        util.error('sellerName is required', 'INVALID_INPUT');
-    }
-    if ([...sellerName].length > 100) {
-        util.error('sellerName cannot exceed 100 characters', 'INVALID_INPUT');
-    }
+    const sellerName = validateSellerName(input.sellerName);
 
     const validUnitTypes = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
     if (input.unitType !== undefined && input.unitType !== null) {
