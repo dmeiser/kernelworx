@@ -307,6 +307,7 @@ logs/
 *secret*
 *password*
 !tests/e2e/pages/forgot_password_page.py
+!tests/unit/test_ephemeral_password_generator.py
 *credentials*
 *api-key*
 *apikey*

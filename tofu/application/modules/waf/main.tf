@@ -96,10 +96,6 @@ locals {
   github_actions_cidrs = var.create ? [for c in try(local.github_meta_response["actions"], []) : c if !strcontains(c, ":")] : []
 }
 
-data "aws_caller_identity" "current" {}
-
-data "aws_region" "current" {}
-
 # GitHub Actions IP set (#269) built at deploy time from api.github.com/meta.
 # Scoped into the rate rule below so CI smoke test runs (peaking near 2500
 # req/5min from one shared IP) skip only the per-IP rate limit, without
@@ -218,64 +214,11 @@ resource "aws_wafv2_web_acl" "main" {
   }
 }
 
-# Sampled WAF logging per the edge-security design: enough to tune the rate
-# limit and observe rule matches. Included WAF log volume is free-tier sized.
-resource "aws_cloudwatch_log_group" "waf" {
-  count = var.create ? 1 : 0
-
-  name              = "aws-waf-logs-${local.name}"
-  retention_in_days = var.log_retention_days
-}
-
-# CloudWatch requires a log-resource policy granting the WAF log delivery
-# principal before the logging configuration can attach.
-data "aws_iam_policy_document" "waf_log_delivery" {
-  count = var.create ? 1 : 0
-
-  statement {
-    effect = "Allow"
-
-    principals {
-      type        = "Service"
-      identifiers = ["delivery.logs.amazonaws.com"]
-    }
-
-    actions = [
-      "logs:CreateLogStream",
-      "logs:PutLogEvents",
-    ]
-
-    resources = ["${aws_cloudwatch_log_group.waf[0].arn}:*"]
-
-    condition {
-      test     = "ArnLike"
-      values   = ["arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:*"]
-      variable = "aws:SourceArn"
-    }
-
-    condition {
-      test     = "StringEquals"
-      values   = [data.aws_caller_identity.current.account_id]
-      variable = "aws:SourceAccount"
-    }
-  }
-}
-
-resource "aws_cloudwatch_log_resource_policy" "waf_log_delivery" {
-  count = var.create ? 1 : 0
-
-  policy_name     = "${local.name}-log-delivery"
-  policy_document = data.aws_iam_policy_document.waf_log_delivery[0].json
-}
-
-resource "aws_wafv2_web_acl_logging_configuration" "main" {
-  count = var.create ? 1 : 0
-
-  resource_arn            = aws_wafv2_web_acl.main[0].arn
-  log_destination_configs = [aws_cloudwatch_log_group.waf[0].arn]
-
-  depends_on = [aws_cloudwatch_log_resource_policy.waf_log_delivery]
-}
+# #665: WAF access logging is not available on the CloudFront pricing plans
+# Free tier (it is included at Pro+). The web ACL, GitHub Actions IP set,
+# per-IP rate rule, and managed core rules stay; CloudWatch WAF metrics on
+# the visibility configs are the remaining observation signal until a move
+# to Pro reinstates logging.
 
 output "web_acl_id" {
   description = "ID of the CloudFront-scope web ACL (null when create = false)"
