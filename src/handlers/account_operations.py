@@ -131,8 +131,7 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
     except Exception as e:
         logger.error(
-            "Account data swept but the Cognito user is still present; "
-            "the account needs manual completion or a retry",
+            "Account data swept but the Cognito user is still present; the account needs manual completion or a retry",
             account_id=account_id,
             error=str(e),
             error_code=getattr(e, "error_code", None) or ErrorCode.INTERNAL_ERROR,
