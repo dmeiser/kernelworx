@@ -114,6 +114,50 @@ def test_two_phase_write_check_uses_distinct_functions() -> None:
         assert "${aws_appsync_function.verify_profile_write_or_owner.function_id}" not in pipeline
 
 
+def test_two_phase_read_owner_check_uses_distinct_functions() -> None:
+    # #508: the profile-scoped READ pipelines decided ownership off the
+    # eventually-consistent profileId-index GSI alone, so after an ownership
+    # transfer the former owner kept passing the gate (reading the new owner's
+    # campaigns/orders) and the new owner was refused with profileNotFound until
+    # the index caught up. They now mirror the write path: the strongly
+    # consistent base-table GetItem (step 1) before the GSI locator (step 2).
+    functions: set[str] = set()
+    for path in sorted(APPSYNC_DIR.glob("functions_*.tf")):
+        doc = load_hcl(path)
+        for resource in doc.get("resource", []):
+            for res_type, instances in resource.items():
+                if res_type == "aws_appsync_function":
+                    functions.update(instances)
+    assert "verify_profile_read_access" in functions
+    assert "verify_profile_read_access_step2" in functions
+    step1 = "${aws_appsync_function.verify_profile_read_access.function_id}"
+    step2 = "${aws_appsync_function.verify_profile_read_access_step2.function_id}"
+    # Every pipeline that used to authorize ownership from the GSI read.
+    read_queries = (
+        "get_campaign",
+        "list_campaigns_by_profile",
+        "get_order",
+        "list_orders_by_campaign",
+    )
+    resolvers = _resolver_pipelines("resolvers_queries.tf")
+    for query in read_queries:
+        pipeline = resolvers[query]
+        assert step1 in pipeline, f"{query} must keep the consistent ownership read"
+        assert step2 in pipeline, (
+            f"{query} must run the GSI locator as a second function so the owner "
+            "decision comes from the strongly consistent base-table GetItem"
+        )
+        assert pipeline.index(step1) < pipeline.index(step2), (
+            f"{query} must decide ownership before the GSI locator"
+        )
+        # The share check reads the profile the locator produced, so it must run
+        # after both phases.
+        share_check = "${aws_appsync_function.check_share_read_permissions.function_id}"
+        assert pipeline.index(step2) < pipeline.index(share_check), (
+            f"{query} must run the share check after the GSI locator"
+        )
+
+
 def test_two_phase_fetch_profile_check_uses_distinct_functions() -> None:
     functions: set[str] = set()
     for path in sorted(APPSYNC_DIR.glob("functions_*.tf")):

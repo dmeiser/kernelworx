@@ -31,6 +31,36 @@ describe('check_write_permission_fn request', () => {
         });
     });
 
+    it('prefixes an already-prefixed caller sub unchanged to its key (no double prefix)', () => {
+        const ctx = {
+            identity: { sub: 'ACCOUNT#user-123' },
+            stash: { profileId: 'PROFILE#prof-1' }
+        };
+
+        const result = request(ctx);
+
+        assert.deepStrictEqual(result.key, {
+            profileId: 'PROFILE#prof-1',
+            targetAccountId: 'ACCOUNT#user-123'
+        });
+    });
+
+    it('uses the historical fail-closed placeholder key when the caller sub is missing', () => {
+        const ctx = {
+            identity: undefined,
+            stash: { profileId: 'PROFILE#prof-1' }
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, 'GetItem');
+        assert.strictEqual(result.consistentRead, true);
+        assert.deepStrictEqual(result.key, {
+            profileId: 'PROFILE#prof-1',
+            targetAccountId: 'ACCOUNT#'
+        });
+    });
+
     it('skips when profileId is unset (skipGetItem path)', () => {
         const ctx = {
             identity: { sub: 'user-123' },
@@ -39,6 +69,18 @@ describe('check_write_permission_fn request', () => {
 
         const result = request(ctx);
 
+        assert.deepStrictEqual(result.key, { profileId: 'NOOP', targetAccountId: 'NOOP' });
+    });
+
+    it('skips when the stashed profileId is not prefixed, as the historical check did', () => {
+        const ctx = {
+            identity: { sub: 'user-123' },
+            stash: { profileId: 'prof-1' }
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(ctx.stash.hasWritePermission, false);
         assert.deepStrictEqual(result.key, { profileId: 'NOOP', targetAccountId: 'NOOP' });
     });
 });

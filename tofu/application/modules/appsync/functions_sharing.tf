@@ -146,6 +146,24 @@ resource "aws_appsync_function" "verify_profile_read_access" {
   code = file("${local.js_resolvers_dir}/verify_profile_read_access_fn.js")
 }
 
+# Second invocation in the two-phase read owner check (#508), mirroring
+# verify_profile_write_access_step2. AppSync rejects duplicate function IDs in
+# a pipeline, so the second slot needs its own resource; it points at the same
+# JS file, which branches on ctx.stash.isOwner set by the first call (Step 2
+# runs the GSI locator only for non-owners).
+resource "aws_appsync_function" "verify_profile_read_access_step2" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "VerifyProfileReadAccessStep2Fn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_profile_read_access_fn.js")
+}
+
 resource "aws_appsync_function" "check_share_read_permissions" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.shares.name

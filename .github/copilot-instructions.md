@@ -234,7 +234,8 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     Admin checks are performed separately via is_admin(); do not add them here.
     """
     # Check ownership with a strongly consistent base-table read
-    if is_profile_owner(caller_account_id, profile_id):
+    # (utils.auth._is_profile_owner(tables.profiles, caller_account_id, db_profile_id))
+    if profile_exists_for_owner(caller_account_id, profile_id):
         return True
     
     # Check shares with strongly consistent reads and validate against
@@ -254,7 +255,7 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
 - Owner checks use strongly consistent `get_item` on the profiles base table.
 - Share lookups use strongly consistent `get_item` / `BatchGetItem`.
 - A share stores the `ownerAccountId` that existed when it was created; auth validates that owner still owns the profile. After an ownership transfer, old shares become invalid automatically because the old owner's base-table record is gone.
-- Use `check_profile_access()` or `require_profile_access()` for access-control decisions. `is_profile_owner()` uses the eventually consistent GSI and is only suitable for non-authoritative hints.
+- Use `check_profile_access()` or `require_profile_access()` for access-control decisions. They read ownership from a strongly consistent base-table `get_item`; never authorize off the eventually consistent `profileId-index` GSI.
 
 ## 7. GraphQL Resolver Pattern - PREFER NON-LAMBDA
 

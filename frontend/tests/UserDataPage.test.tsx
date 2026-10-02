@@ -105,9 +105,14 @@ vi.mock('@apollo/client/react', async () => {
   const makeMutationHandler = (mockFn: any, capture: (opts: any) => void) => (opts: any) => {
     capture(opts);
     const run = async (args: any) => {
-      const res = await mockFn(args);
-      notifyMutationCallbacks(opts, res);
-      return res;
+      try {
+        const res = await mockFn(args);
+        notifyMutationCallbacks(opts, res);
+        return res;
+      } catch (err) {
+        callIfPresent(opts?.onError, err);
+        throw err;
+      }
     };
     return [run, { loading: false, data: null }];
   };
@@ -640,6 +645,14 @@ describe('UserDataPage', () => {
 
     const sharesTab = await screen.findByRole('tab', { name: 'Shares' });
     await user.click(sharesTab);
+
+    // The section heading and helper text render whenever the tab is shown,
+    // not only in the no-profiles empty state.
+    expect(await screen.findByRole('heading', { name: 'Profile Shares' })).toBeInTheDocument();
+    expect(
+      screen.getByText('Select a profile to view and manage who has access to it.'),
+    ).toBeInTheDocument();
+
     await user.click(screen.getByRole('button', { name: 'Scout Alpha' }));
 
     expect(await screen.findByText('reader@example.com')).toBeInTheDocument();
@@ -661,6 +674,112 @@ describe('UserDataPage', () => {
         variables: { profileId: profileIdA, targetAccountId: 'ACCOUNT#reader-1' },
       });
     });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Are you sure you want to revoke reader@example.com's access/i)).not.toBeInTheDocument();
+    });
+  });
+
+  test('keeps revoke dialog open with loading state while mutation is in flight, and closes on success', async () => {
+    const user = userEvent.setup();
+    state.profiles = [profile(profileIdA, 'Scout Alpha')];
+    state.shares = [
+      {
+        shareId: 'SHARE#1',
+        profileId: profileIdA,
+        targetAccountId: 'ACCOUNT#reader-1',
+        targetAccount: {
+          accountId: 'ACCOUNT#reader-1',
+          email: 'reader@example.com',
+          givenName: 'Rita',
+          familyName: 'Reader',
+        },
+        permissions: ['READ'],
+        createdAt: '2025-04-01T00:00:00Z',
+      },
+    ];
+    let resolveDelete: (value: any) => void = () => {};
+    const deletePromise = new Promise((resolve) => {
+      resolveDelete = resolve;
+    });
+    state.deleteShareMock.mockReturnValue(deletePromise);
+    renderPage();
+
+    const sharesTab = await screen.findByRole('tab', { name: 'Shares' });
+    await user.click(sharesTab);
+    await user.click(screen.getByRole('button', { name: 'Scout Alpha' }));
+
+    await user.click((await screen.findAllByRole('button', { name: /Revoke/i }))[0]);
+    expect(
+      await screen.findByText(/Are you sure you want to revoke reader@example.com's access/i),
+    ).toBeInTheDocument();
+
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Revoke' }));
+
+    // While in flight, the dialog must stay open and display the loading label
+    await waitFor(() => {
+      expect(within(dialog).getByRole('button', { name: 'Revoking...' })).toBeInTheDocument();
+    });
+    expect(within(dialog).getByRole('button', { name: 'Revoking...' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+
+    // Now resolve the mutation
+    resolveDelete({ data: {} });
+
+    // After resolution, the dialog closes
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  test('keeps revoke dialog open and surfaces error when deleteShare rejects', async () => {
+    const user = userEvent.setup();
+    state.profiles = [profile(profileIdA, 'Scout Alpha')];
+    state.shares = [
+      {
+        shareId: 'SHARE#1',
+        profileId: profileIdA,
+        targetAccountId: 'ACCOUNT#reader-1',
+        targetAccount: {
+          accountId: 'ACCOUNT#reader-1',
+          email: 'reader@example.com',
+          givenName: 'Rita',
+          familyName: 'Reader',
+        },
+        permissions: ['READ'],
+        createdAt: '2025-04-01T00:00:00Z',
+      },
+    ];
+    state.deleteShareMock.mockRejectedValue(new Error('Revoke failed: network error'));
+    renderPage();
+
+    const sharesTab = await screen.findByRole('tab', { name: 'Shares' });
+    await user.click(sharesTab);
+    await user.click(screen.getByRole('button', { name: 'Scout Alpha' }));
+
+    await user.click((await screen.findAllByRole('button', { name: /Revoke/i }))[0]);
+    expect(
+      await screen.findByText(/Are you sure you want to revoke reader@example.com's access/i),
+    ).toBeInTheDocument();
+
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Revoke' }));
+
+    await waitFor(() => {
+      expect(state.deleteShareMock).toHaveBeenCalledWith({
+        variables: { profileId: profileIdA, targetAccountId: 'ACCOUNT#reader-1' },
+      });
+    });
+
+    // The dialog must NOT close on error; it must stay open and surface the rejection message
+    await waitFor(() => {
+      expect(screen.getByText('Revoke failed: network error')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Are you sure you want to revoke reader@example.com's access/i),
+    ).toBeInTheDocument();
   });
 
   test('cancels the revoke share dialog', async () => {

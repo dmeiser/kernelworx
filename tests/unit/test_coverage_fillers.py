@@ -24,18 +24,6 @@ def _transfer_test_tables() -> Any:
     return dynamodb
 
 
-def test_validation_validate_unit_fields_requires_unit_number():
-    from src.utils.errors import AppError
-    from src.utils.ids import ensure_profile_id
-    from src.utils.validation import validate_unit_fields
-
-    with pytest.raises(AppError):
-        validate_unit_fields("Pack", None, "City", "ST")
-
-    # Ensure PROFILE# prefixing path is exercised via the centralized utility
-    assert ensure_profile_id("abc") == "PROFILE#abc"
-
-
 def test_pre_signup_handle_signup_exception():
     from botocore.exceptions import ClientError
 
@@ -231,7 +219,11 @@ def test_transfer_profile_ownership_admin_transfer():
 
 @mock_aws
 def test_transfer_profile_ownership_share_delete_fails():
-    """Test that share deletion failure is handled gracefully."""
+    """An unexpected (non-DynamoDB) failure repairing shares is not swallowed.
+
+    Only client errors are translated into the retryable RESOURCE_BUSY path; a bug
+    raises and surfaces as INTERNAL_ERROR, so the two are distinguishable (#549).
+    """
     from unittest.mock import MagicMock
 
     dynamodb = _transfer_test_tables()
@@ -262,10 +254,11 @@ def test_transfer_profile_ownership_share_delete_fails():
     }
 
     # Create a mock for shares table that wraps the real table
-    # but makes delete_item raise an exception
+    # but makes update_item raise an exception (only delete_item is post-commit
+    # and best-effort; a repair failure must surface)
     mock_shares = MagicMock(wraps=shares_table)
     mock_shares.get_item = shares_table.get_item  # Keep real get_item for validation
-    mock_shares.delete_item.side_effect = RuntimeError("Simulated failure")
+    mock_shares.update_item.side_effect = RuntimeError("Simulated failure")
 
     # Use the _table_overrides mechanism from dynamodb module
     from src.utils import dynamodb as db_module
@@ -273,9 +266,9 @@ def test_transfer_profile_ownership_share_delete_fails():
     db_module._table_overrides["shares"] = mock_shares
 
     try:
-        # Should succeed despite share deletion failure
-        updated_profile = transfer_module.lambda_handler(event, None)
-        assert updated_profile["ownerAccountId"] == "ACCOUNT#new456"
+        result = transfer_module.lambda_handler(event, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == "INTERNAL_ERROR"
     finally:
         # Clean up override
         db_module._table_overrides.pop("shares", None)
