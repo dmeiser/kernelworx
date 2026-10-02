@@ -19,9 +19,16 @@ logger = get_logger(__name__)
 
 
 def _is_profile_owner(profiles_table: "Table", caller_account_id: str, db_profile_id: str) -> bool:
-    """Check if caller is the profile owner via strongly consistent base-table lookup."""
+    """Check if caller is the profile owner via strongly consistent base-table lookup.
+
+    ``caller_account_id`` is normalized with ``ensure_account_id`` here, so the raw
+    Cognito sub and the ``ACCOUNT#``-prefixed spelling both resolve to the stored
+    ``ownerAccountId`` key (#660).
+    """
+    db_caller_id = ensure_account_id(caller_account_id)
+    assert db_caller_id is not None
     direct_response = profiles_table.get_item(
-        Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": db_profile_id},
+        Key={"ownerAccountId": db_caller_id, "profileId": db_profile_id},
         ConsistentRead=True,
     )
     return "Item" in direct_response
@@ -114,7 +121,8 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     Check if caller has access to profile.
 
     Args:
-        caller_account_id: Cognito sub (Account ID) of the caller
+        caller_account_id: Cognito sub (Account ID) of the caller, in either the raw
+            sub or the ``ACCOUNT#``-prefixed spelling; normalized at this edge (#660)
         profile_id: Profile ID to check access for
         required_permission: "READ" or "WRITE" (case-insensitive)
 
@@ -128,16 +136,16 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     db_profile_id = ensure_profile_id(profile_id)
     # ensure_profile_id returns Optional[str], but we know profile_id is not None here
     assert db_profile_id is not None
+    db_caller_id = ensure_account_id(caller_account_id)
+    # ensure_account_id returns Optional[str], but we know caller_account_id is not None here
+    assert db_caller_id is not None
 
     # Check if caller is owner (faster, strongly consistent)
-    if _is_profile_owner(tables.profiles, caller_account_id, db_profile_id):
+    if _is_profile_owner(tables.profiles, db_caller_id, db_profile_id):
         return True
 
     # Check share permissions, validating the share against the profile's
     # current owner with a strongly consistent base-table read.
-    db_caller_id = ensure_account_id(caller_account_id)
-    # ensure_account_id returns Optional[str], but we know caller_account_id is not None here
-    assert db_caller_id is not None
     if _check_share_permissions(tables.profiles, tables.shares, db_profile_id, db_caller_id, required_permission):
         return True
 
