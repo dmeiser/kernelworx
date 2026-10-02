@@ -52,7 +52,16 @@ export function request(ctx) {
         updates.push('customerAddress = :customerAddress');
         exprValues[':customerAddress'] = input.customerAddress;
     }
-    if (input.paymentMethod !== undefined) {
+    if (input && Object.hasOwn(input, 'paymentMethod')) {
+        // #506: defense in depth — the write must not persist an explicit null
+        // into the non-nullable Order.paymentMethod even if the pipeline's
+        // validation step is reordered or removed. Key presence (not the
+        // value) distinguishes an explicit null from an omitted field, whose
+        // value may read as null in this runtime.
+        if (input.paymentMethod === null) {
+            util.error('paymentMethod cannot be null; omit the field to keep the current value', 'INVALID_INPUT');
+            return;
+        }
         updates.push('paymentMethod = :paymentMethod');
         exprValues[':paymentMethod'] = input.paymentMethod;
     }

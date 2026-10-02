@@ -25,10 +25,10 @@ import aioboto3
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
-# admin_operations owns the transient/permanent lookup-error classification (its
-# `_THROTTLING_ERROR_CODES` is the canonical set), so it is imported here rather
-# than redeclared and the two copies cannot drift. One-way: admin_operations does
-# not import this module.
+# admin_operations owns the transient/permanent lookup-error classification
+# helpers (the set itself is `utils.dynamodb.TRANSIENT_ERROR_CODES`), so they are
+# imported here rather than redeclared and the two copies cannot drift. One-way:
+# admin_operations does not import this module.
 from .admin_operations import _raise_gather_failures
 
 # The query-bounding caps are owned by the sibling report module so the two

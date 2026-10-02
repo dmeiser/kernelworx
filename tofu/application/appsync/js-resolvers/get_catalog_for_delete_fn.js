@@ -39,8 +39,11 @@ export function response(ctx) {
     } else if (typeof groupsClaim === 'string') {
         groups = [groupsClaim];
     }
-    // Check for 'admin' (lowercase) - standard Cognito group name
-    const isAdmin = groups.includes('admin') || groups.includes('ADMIN');
+    // Check for the 'ADMIN' Cognito group. The group name is an undeclared,
+    // out-of-band contract; every other admin check in the codebase (is_admin
+    // in src/utils/auth.py, admin_operations, AuthContext, amrTripwire) accepts
+    // the uppercase spelling only, so this must too (#504).
+    const isAdmin = groups.includes('ADMIN');
     // MFA status from the injected JWT mfa claim (source of truth) (#336).
     // An admin may only use admin privileges after MFA.
     const hasMfa = ctx.identity && ctx.identity.claims ? ctx.identity.claims['mfa'] === true : false;

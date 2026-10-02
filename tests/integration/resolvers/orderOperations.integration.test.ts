@@ -1246,6 +1246,73 @@ describe('Order Operations Integration Tests', () => {
 
       expect(updateData.updateOrder.paymentMethod).toBe('CHECK');
     }, 10000);
+
+    // #506: UpdateOrderInput.paymentMethod is nullable in the input but
+    // Order.paymentMethod is non-nullable. Omitting the field must keep the
+    // stored value; an explicit null must be rejected, never persisted.
+    test('omitting paymentMethod keeps the current value (#506)', async () => {
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            campaignId: testCampaignId,
+            customerName: 'Omit PaymentMethod Test',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      try {
+        const { data: updateData } = await ownerClient.mutate({
+          mutation: UPDATE_ORDER,
+          variables: { input: { orderId, customerName: 'Omit PaymentMethod Updated' } },
+        });
+
+        expect(updateData.updateOrder.customerName).toBe('Omit PaymentMethod Updated');
+        expect(updateData.updateOrder.paymentMethod).toBe('CASH');
+      } finally {
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 10000);
+
+    test('rejects an explicit null paymentMethod (#506)', async () => {
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            campaignId: testCampaignId,
+            customerName: 'Null PaymentMethod Test',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      try {
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_ORDER,
+            variables: { input: { orderId, paymentMethod: null } },
+          })
+        ).rejects.toThrow(/paymentMethod cannot be null/);
+
+        // The stored value must be untouched by the rejected mutation.
+        const { data: getData } = await ownerClient.query({
+          query: GET_ORDER,
+          variables: { orderId },
+        });
+        expect(getData.getOrder.paymentMethod).toBe('CASH');
+      } finally {
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 10000);
   });
 
   describe('createOrder payment methods', () => {

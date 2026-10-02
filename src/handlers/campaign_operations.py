@@ -1,9 +1,7 @@
 """Lambda resolver for campaign order operations and deletion verification helpers."""
 
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
-
-from botocore.exceptions import ClientError
+from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Optional
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -46,13 +44,6 @@ BATCH_SIZE = 25
 MAX_BATCH_WRITE_ATTEMPTS = 5
 BATCH_WRITE_BACKOFF_SECONDS = 0.05
 
-# Intentionally mirrors admin_operations._THROTTLING_ERROR_CODES but is kept as a
-# separate copy because admin_operations imports this module at top level
-# (`from .campaign_operations import ...`), so importing back would be circular.
-_THROTTLING_ERROR_CODES = frozenset(
-    {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
-)
-
 
 def _get_campaign_by_id(campaign_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve a campaign by its campaignId via the campaignId-index GSI.
@@ -86,21 +77,23 @@ def _query_order_keys_for_campaign(campaign_id: str) -> List[Dict[str, Any]]:
     return orders
 
 
-def _raise_delete_error(table_name: str, exc: Exception, log: Any = None) -> None:
-    """Log and re-raise a batch deletion failure as an AppError."""
+def _raise_delete_error(table_name: str, exc: Exception, log: Any = None) -> NoReturn:
+    """Translate a failed batch deletion into a typed AppError via the shared classifier.
+
+    Reuses `admin_operations._raise_batch_lookup_error` (the single
+    classify-and-raise helper) instead of re-implementing the transient/permanent
+    split. The import is function-level: a top-level import would be circular
+    (`admin_operations` -> `deletion_cascade` -> `campaign_operations`).
+    """
+    from .admin_operations import _raise_batch_lookup_error
+
     target_log = log if log is not None else _default_logger
-    if isinstance(exc, ClientError):
-        error_code = exc.response.get("Error", {}).get("Code", "")
-        if error_code in _THROTTLING_ERROR_CODES:
-            target_log.warning(f"Batch delete from {table_name} throttled", error=str(exc), error_code=error_code)
-            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to delete data. Please retry.") from exc
-        target_log.error(f"Error deleting batch from {table_name}: {str(exc)}", error_code=error_code)
-    else:
-        target_log.error(f"Unexpected error deleting batch from {table_name}: {str(exc)}")
-    raise AppError(
-        ErrorCode.INTERNAL_ERROR,
-        f"Failed to delete batch from {table_name}",
-    ) from exc
+    _raise_batch_lookup_error(
+        f"delete batch from {table_name}",
+        target_log,
+        exc,
+        busy_message="Temporarily unable to delete data. Please retry.",
+    )
 
 
 def _drop_duplicate_delete_keys(keys: List[Dict[str, Any]], primary_keys: Optional[List[str]]) -> List[Dict[str, Any]]:

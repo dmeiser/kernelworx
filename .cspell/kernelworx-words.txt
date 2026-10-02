@@ -50,6 +50,7 @@ campaignId
 Campaigns
 campaignYear
 cancelable
+caplog
 capsys
 catalogId
 Catalogs
@@ -232,6 +233,7 @@ moto
 mktemp
 MUI
 multiline
+multiword
 mutex
 mypy
 MZXW
@@ -325,6 +327,7 @@ route53
 RRule
 rtype
 runtime
+SAMEORIGIN
 SaaS
 sameSite
 Scout
@@ -359,6 +362,7 @@ singleline
 slowmo
 slugification
 slugified
+slugifies
 slugify
 slugifying
 snackbar
@@ -371,6 +375,8 @@ stdlib
 strikethrough
 stylesheet
 subclasses
+subcomponent
+subcomponents
 submenu
 summarizer
 superadmin
@@ -425,6 +431,7 @@ unpadded
 unparsed
 unqueryable
 unregister
+unretryable
 unsets
 unshare
 unshift
