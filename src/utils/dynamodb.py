@@ -47,6 +47,20 @@ _THROTTLING_ERROR_CODES = frozenset(
     }
 )
 
+# AWS conditions that mean the same call may well succeed a moment later. Every
+# other condition (a failed ``ConditionExpression``, a missing table, a denied
+# permission) is permanent: retrying it produces the identical failure, so it
+# must not be reported to the caller as retryable (#549).
+TRANSIENT_ERROR_CODES = frozenset(
+    {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
+)
+
+
+def is_transient_client_error(error: ClientError) -> bool:
+    """Return True when ``error`` is a retryable DynamoDB condition (throttling)."""
+    return error.response.get("Error", {}).get("Code", "") in TRANSIENT_ERROR_CODES
+
+
 # Module-level cache for test overrides
 _table_overrides: dict[str, Optional["Table"]] = {}
 

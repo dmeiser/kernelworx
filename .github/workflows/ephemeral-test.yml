@@ -112,6 +112,20 @@ jobs:
         if: steps.ephemeral_up.outcome == 'success'
         run: uv run playwright install --with-deps chromium
 
+      # The STS session assumed at the top of the job expires after 1 hour,
+      # but ephemeral up + integration tests + build + the ~40-minute E2E
+      # suite push the strict session-scoped cleanup (E2E_FAIL_ON_CLEANUP_ERROR)
+      # past that window, failing the job with ExpiredTokenException. Re-assume
+      # the role here so the whole E2E run and its teardown hold a fresh token
+      # (same pattern as deploy-shared.yml's "Configure AWS credentials for cleanup").
+      - name: Configure AWS credentials for E2E
+        if: steps.ephemeral_up.outcome == 'success'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::750620721302:role/GitHubActionsKernelworxDev
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-session-name: github-actions-ephemeral-test
+
       - name: Run E2E smoke tests
         id: e2e
         if: steps.ephemeral_up.outcome == 'success'

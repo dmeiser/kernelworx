@@ -50,6 +50,7 @@ campaignId
 Campaigns
 campaignYear
 cancelable
+caplog
 capsys
 catalogId
 Catalogs
@@ -326,6 +327,7 @@ route53
 RRule
 rtype
 runtime
+SAMEORIGIN
 SaaS
 sameSite
 Scout
@@ -373,6 +375,8 @@ stdlib
 strikethrough
 stylesheet
 subclasses
+subcomponent
+subcomponents
 submenu
 summarizer
 superadmin
@@ -427,6 +431,7 @@ unpadded
 unparsed
 unqueryable
 unregister
+unretryable
 unsets
 unshare
 unshift
