@@ -2,7 +2,7 @@ import '../setup.ts';
 import { describe, test, expect, beforeAll, afterAll, it } from 'vitest';
 import { ApolloClient, NormalizedCacheObject, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient } from '../setup/apolloClient';
-import { deleteTestAccounts, TABLE_NAMES } from '../setup/testData';
+import { deleteTestAccounts, TABLE_NAMES, waitForGSIConsistency } from '../setup/testData';
 
 // Helper to create unauthenticated client
 const createUnauthenticatedClient = () => {
@@ -109,6 +109,41 @@ const GET_CAMPAIGN = gql`
   }
 `;
 
+/**
+ * Create a campaign and wait until it is visible through the campaignId-index
+ * GSI (Bug #21 eventual consistency). updateCampaign, deleteCampaign,
+ * getCampaign and createOrder all resolve the campaign through that
+ * eventually-consistent GSI, so a call issued straight after createCampaign can
+ * observe a stale "Campaign not found" - or, for deleteCampaign, silently skip
+ * both the delete and its authorization - purely because the new row has not
+ * projected yet. Polling getCampaign until the row shows up makes every
+ * create-then-use hand-off in this file deterministic.
+ */
+const createCampaignAndAwaitProjection = async (
+  client: ApolloClient<NormalizedCacheObject>,
+  input: Record<string, unknown>
+) => {
+  const { data } = await client.mutate({
+    mutation: CREATE_CAMPAIGN,
+    variables: { input },
+  });
+  const created = data.createCampaign;
+  await waitForGSIConsistency(
+    async () => {
+      const res = await client.query({
+        query: GET_CAMPAIGN,
+        variables: { campaignId: created.campaignId },
+        fetchPolicy: 'network-only',
+      });
+      return res.data?.getCampaign ? [res.data.getCampaign] : [];
+    },
+    (items) => items.length > 0,
+    10,
+    500
+  );
+  return created;
+};
+
 const REVOKE_SHARE = gql`
   mutation RevokeShare($input: RevokeShareInput!) {
     revokeShare(input: $input)
@@ -192,20 +227,15 @@ describe('Campaign Operations Integration Tests', () => {
     testProductId = catalogData.createCatalog.products[0].productId;
 
     // 3. Create initial campaign
-    const { data: campaignData } = await ownerClient.mutate({
-      mutation: CREATE_CAMPAIGN,
-      variables: {
-        input: {
-          profileId: testProfileId,
-          campaignName: 'Original Campaign Name',
-          campaignYear: 2025,
-          startDate: new Date('2025-01-01T00:00:00Z').toISOString(),
-          endDate: new Date('2025-12-31T23:59:59Z').toISOString(),
-          catalogId: testCatalogId,
-        },
-      },
+    const createdCampaign = await createCampaignAndAwaitProjection(ownerClient, {
+      profileId: testProfileId,
+      campaignName: 'Original Campaign Name',
+      campaignYear: 2025,
+      startDate: new Date('2025-01-01T00:00:00Z').toISOString(),
+      endDate: new Date('2025-12-31T23:59:59Z').toISOString(),
+      catalogId: testCatalogId,
     });
-    testCampaignId = campaignData.createCampaign.campaignId;
+    testCampaignId = createdCampaign.campaignId;
 
     // 4. Share profile with contributor (WRITE)
     const { data: contributorShareData }: any = await ownerClient.mutate({
@@ -381,20 +411,15 @@ describe('Campaign Operations Integration Tests', () => {
 
     test('accepts or rejects endDate before startDate (validation check)', async () => {
       // Arrange - Create a new campaign for this test
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignName: 'Date Validation Test Campaign',
-            campaignYear: 2025,
-            startDate: new Date('2030-06-01T00:00:00Z').toISOString(),
-            endDate: new Date('2030-12-31T23:59:59Z').toISOString(),
-            catalogId: testCatalogId,
-          },
-        },
+      const created = await createCampaignAndAwaitProjection(ownerClient, {
+        profileId: testProfileId,
+        campaignName: 'Date Validation Test Campaign',
+        campaignYear: 2025,
+        startDate: new Date('2030-06-01T00:00:00Z').toISOString(),
+        endDate: new Date('2030-12-31T23:59:59Z').toISOString(),
+        catalogId: testCatalogId,
       });
-      const validationTestCampaignId = createData.createCampaign.campaignId;
+      const validationTestCampaignId = created.campaignId;
 
       try {
         // Act - Try to update with endDate before startDate
@@ -427,21 +452,16 @@ describe('Campaign Operations Integration Tests', () => {
 
     test('can remove endDate (set open-ended campaign)', async () => {
       // Arrange - Create a campaign with endDate
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignName: 'Campaign To Remove EndDate',
-            campaignYear: 2025,
-            startDate: new Date('2031-01-01T00:00:00Z').toISOString(),
-            endDate: new Date('2031-12-31T23:59:59Z').toISOString(),
-            catalogId: testCatalogId,
-          },
-        },
+      const created = await createCampaignAndAwaitProjection(ownerClient, {
+        profileId: testProfileId,
+        campaignName: 'Campaign To Remove EndDate',
+        campaignYear: 2025,
+        startDate: new Date('2031-01-01T00:00:00Z').toISOString(),
+        endDate: new Date('2031-12-31T23:59:59Z').toISOString(),
+        catalogId: testCatalogId,
       });
-      const campaignToUpdate = createData.createCampaign.campaignId;
-      expect(createData.createCampaign.endDate).toBeDefined();
+      const campaignToUpdate = created.campaignId;
+      expect(created.endDate).toBeDefined();
 
       try {
         // Act - Update to remove endDate (set to null to make it open-ended)
@@ -473,21 +493,16 @@ describe('Campaign Operations Integration Tests', () => {
   describe('deleteCampaign', () => {
     test('deletes existing campaign', async () => {
       // Create a campaign to delete
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignName: 'Campaign to Delete',
-            campaignYear: 2025,
-            startDate: new Date('2026-01-01T00:00:00Z').toISOString(),
-            endDate: new Date('2026-12-31T23:59:59Z').toISOString(),
-            catalogId: testCatalogId,
-          },
-        },
+      const created = await createCampaignAndAwaitProjection(ownerClient, {
+        profileId: testProfileId,
+        campaignName: 'Campaign to Delete',
+        campaignYear: 2025,
+        startDate: new Date('2026-01-01T00:00:00Z').toISOString(),
+        endDate: new Date('2026-12-31T23:59:59Z').toISOString(),
+        catalogId: testCatalogId,
       });
 
-      const campaignIdToDelete = createData.createCampaign.campaignId;
+      const campaignIdToDelete = created.campaignId;
 
       // Delete it
       const { data: deleteData } = await ownerClient.mutate({
@@ -509,21 +524,16 @@ describe('Campaign Operations Integration Tests', () => {
 
     test('contributor with WRITE access can delete campaign', async () => {
       // Create a campaign to delete
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignName: 'Campaign for Contributor to Delete',
-            campaignYear: 2025,
-            startDate: new Date('2027-01-01T00:00:00Z').toISOString(),
-            endDate: new Date('2027-12-31T23:59:59Z').toISOString(),
-            catalogId: testCatalogId,
-          },
-        },
+      const created = await createCampaignAndAwaitProjection(ownerClient, {
+        profileId: testProfileId,
+        campaignName: 'Campaign for Contributor to Delete',
+        campaignYear: 2025,
+        startDate: new Date('2027-01-01T00:00:00Z').toISOString(),
+        endDate: new Date('2027-12-31T23:59:59Z').toISOString(),
+        catalogId: testCatalogId,
       });
 
-      const campaignIdToDelete = createData.createCampaign.campaignId;
+      const campaignIdToDelete = created.campaignId;
 
       // Contributor deletes it
       const { data: deleteData } = await contributorClient.mutate({
@@ -547,20 +557,15 @@ describe('Campaign Operations Integration Tests', () => {
       const campaignName = 'Reusable Campaign Name';
       
       // Create first campaign
-      const { data: createData1 } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignName,
-            campaignYear: 2028,
-            startDate: new Date('2028-01-01T00:00:00Z').toISOString(),
-            endDate: new Date('2028-12-31T23:59:59Z').toISOString(),
-            catalogId: testCatalogId,
-          },
-        },
+      const created1 = await createCampaignAndAwaitProjection(ownerClient, {
+        profileId: testProfileId,
+        campaignName,
+        campaignYear: 2028,
+        startDate: new Date('2028-01-01T00:00:00Z').toISOString(),
+        endDate: new Date('2028-12-31T23:59:59Z').toISOString(),
+        catalogId: testCatalogId,
       });
-      const campaignId1 = createData1.createCampaign.campaignId;
+      const campaignId1 = created1.campaignId;
 
       // Delete it
       const { data: deleteData } = await ownerClient.mutate({
@@ -570,24 +575,19 @@ describe('Campaign Operations Integration Tests', () => {
       expect(deleteData.deleteCampaign).toBe(true);
 
       // Create new campaign with same name - should succeed
-      const { data: createData2 } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            campaignName,
-            campaignYear: 2029,
-            startDate: new Date('2029-01-01T00:00:00Z').toISOString(),
-            endDate: new Date('2029-12-31T23:59:59Z').toISOString(),
-            catalogId: testCatalogId,
-          },
-        },
+      const created2 = await createCampaignAndAwaitProjection(ownerClient, {
+        profileId: testProfileId,
+        campaignName,
+        campaignYear: 2029,
+        startDate: new Date('2029-01-01T00:00:00Z').toISOString(),
+        endDate: new Date('2029-12-31T23:59:59Z').toISOString(),
+        catalogId: testCatalogId,
       });
-      const campaignId2 = createData2.createCampaign.campaignId;
+      const campaignId2 = created2.campaignId;
 
       expect(campaignId2).toBeDefined();
       expect(campaignId2).not.toBe(campaignId1); // Should be different ID
-      expect(createData2.createCampaign.campaignName).toBe(campaignName);
+      expect(created2.campaignName).toBe(campaignName);
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId2 } });
@@ -611,12 +611,8 @@ describe('Campaign Operations Integration Tests', () => {
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       };
 
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: { input: createInput },
-      });
-
-      const campaignId = createData.createCampaign.campaignId;
+      const created = await createCampaignAndAwaitProjection(ownerClient, createInput);
+      const campaignId = created.campaignId;
 
       // Readonly tries to update
       await expect(
@@ -647,12 +643,8 @@ describe('Campaign Operations Integration Tests', () => {
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       };
 
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: { input: createInput },
-      });
-
-      const campaignId = createData.createCampaign.campaignId;
+      const created = await createCampaignAndAwaitProjection(ownerClient, createInput);
+      const campaignId = created.campaignId;
 
       // Unauthenticated client tries to update
       const unauthClient = createUnauthenticatedClient();
@@ -686,12 +678,8 @@ describe('Campaign Operations Integration Tests', () => {
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       };
 
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: { input: createInput },
-      });
-
-      const campaignId = createData.createCampaign.campaignId;
+      const created = await createCampaignAndAwaitProjection(ownerClient, createInput);
+      const campaignId = created.campaignId;
 
       // Readonly tries to delete
       await expect(
@@ -716,12 +704,8 @@ describe('Campaign Operations Integration Tests', () => {
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       };
 
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: { input: createInput },
-      });
-
-      const campaignId = createData.createCampaign.campaignId;
+      const created = await createCampaignAndAwaitProjection(ownerClient, createInput);
+      const campaignId = created.campaignId;
 
       // Unauthenticated client tries to delete
       const unauthClient = createUnauthenticatedClient();
@@ -749,12 +733,8 @@ describe('Campaign Operations Integration Tests', () => {
         endDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       };
 
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: { input: createInput },
-      });
-
-      const campaignId = createData.createCampaign.campaignId;
+      const created = await createCampaignAndAwaitProjection(ownerClient, createInput);
+      const campaignId = created.campaignId;
 
       const newStartDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
       const newEndDate = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
@@ -792,12 +772,8 @@ describe('Campaign Operations Integration Tests', () => {
         startDate: new Date().toISOString(),
       };
 
-      const { data: createCampaignData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: { input: createCampaignInput },
-      });
-
-      const campaignIdToDelete = createCampaignData.createCampaign.campaignId;
+      const created = await createCampaignAndAwaitProjection(ownerClient, createCampaignInput);
+      const campaignIdToDelete = created.campaignId;
 
       // Create an order for this campaign
       const CREATE_ORDER = gql`
@@ -872,19 +848,14 @@ describe('Campaign Operations Integration Tests', () => {
 
     it('Updating campaign to reference non-existent catalog succeeds (no foreign key validation)', async () => {
       // Arrange: Create a campaign
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            catalogId: testCatalogId,
-            campaignName: 'Non-existent Catalog Test',
-            campaignYear: 2025,
-            startDate: new Date().toISOString(),
-          },
-        },
+      const created = await createCampaignAndAwaitProjection(ownerClient, {
+        profileId: testProfileId,
+        catalogId: testCatalogId,
+        campaignName: 'Non-existent Catalog Test',
+        campaignYear: 2025,
+        startDate: new Date().toISOString(),
       });
-      const campaignId = createData.createCampaign.campaignId;
+      const campaignId = created.campaignId;
 
       // Act & Assert: Try to update with non-existent catalog
       // Note: The resolver allows updating catalogId to a reference that doesn't exist.
@@ -909,39 +880,16 @@ describe('Campaign Operations Integration Tests', () => {
     }, 10000);
 
     it('Updating campaign that has existing orders preserves order data', async () => {
-      // Arrange: Create campaign and order
-      const { data: createCampaignData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            catalogId: testCatalogId,
-            campaignName: 'Campaign With Orders For Update',
-            campaignYear: 2025,
-            startDate: new Date().toISOString(),
-          },
-        },
+      // Arrange: Create campaign and order (the helper waits for campaignId-index
+      // GSI propagation before the first use, Bug #21)
+      const created = await createCampaignAndAwaitProjection(ownerClient, {
+        profileId: testProfileId,
+        catalogId: testCatalogId,
+        campaignName: 'Campaign With Orders For Update',
+        campaignYear: 2025,
+        startDate: new Date().toISOString(),
       });
-      const campaignId = createCampaignData.createCampaign.campaignId;
-
-      // Wait for campaignId-index GSI propagation before createOrder (Bug #21)
-      let retries = 0;
-      while (retries < 10) {
-        try {
-          const { data: campaignVerify } = await ownerClient.query({
-            query: GET_CAMPAIGN,
-            variables: { campaignId },
-            fetchPolicy: 'network-only',
-          });
-          if (campaignVerify?.getCampaign) {
-            break;
-          }
-        } catch {
-          // Campaign not found yet in GSI, retry
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        retries++;
-      }
+      const campaignId = created.campaignId;
 
       // Create an order
       const CREATE_ORDER = gql`
@@ -1013,19 +961,14 @@ describe('Campaign Operations Integration Tests', () => {
 
     it('Concurrent campaign updates both succeed', async () => {
       // Arrange: Create campaign
-      const { data: createData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            catalogId: testCatalogId,
-            campaignName: 'Concurrent Update Test',
-            campaignYear: 2025,
-            startDate: new Date().toISOString(),
-          },
-        },
+      const created = await createCampaignAndAwaitProjection(ownerClient, {
+        profileId: testProfileId,
+        catalogId: testCatalogId,
+        campaignName: 'Concurrent Update Test',
+        campaignYear: 2025,
+        startDate: new Date().toISOString(),
       });
-      const campaignId = createData.createCampaign.campaignId;
+      const campaignId = created.campaignId;
 
       // Act: Concurrent updates
       const [result1, result2] = await Promise.allSettled([
@@ -1060,19 +1003,14 @@ describe('Campaign Operations Integration Tests', () => {
 
     it('Data Integrity: Concurrent campaign deletion and order creation (race condition)', async () => {
       // Arrange: Create campaign
-      const { data: createCampaignData } = await ownerClient.mutate({
-        mutation: CREATE_CAMPAIGN,
-        variables: {
-          input: {
-            profileId: testProfileId,
-            catalogId: testCatalogId,
-            campaignName: 'Concurrent Delete Campaign',
-            campaignYear: 2025,
-            startDate: new Date().toISOString(),
-          },
-        },
+      const created = await createCampaignAndAwaitProjection(ownerClient, {
+        profileId: testProfileId,
+        catalogId: testCatalogId,
+        campaignName: 'Concurrent Delete Campaign',
+        campaignYear: 2025,
+        startDate: new Date().toISOString(),
       });
-      const campaignId = createCampaignData.createCampaign.campaignId;
+      const campaignId = created.campaignId;
 
       const CREATE_ORDER = gql`
         mutation CreateOrder($input: CreateOrderInput!) {

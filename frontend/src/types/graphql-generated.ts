@@ -1221,7 +1221,7 @@ export type GqlUpdateOrderInput = {
   orderDate?: InputMaybe<Scalars['AWSDateTime']['input']>;
   /** The ID of the order to update. */
   orderId: Scalars['ID']['input'];
-  /** New payment method name. */
+  /** New payment method name. Omit to keep the current value; an explicit null is rejected with INVALID_INPUT. */
   paymentMethod?: InputMaybe<Scalars['String']['input']>;
 };
 
@@ -1229,7 +1229,7 @@ export type GqlUpdateOrderInput = {
 export type GqlUpdateSellerProfileInput = {
   /** The ID of the profile to update. */
   profileId: Scalars['ID']['input'];
-  /** The seller's new display name. */
+  /** The seller's new display name (required, up to 100 characters; trimmed before storage). */
   sellerName: Scalars['String']['input'];
 };
 
