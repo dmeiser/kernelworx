@@ -12,9 +12,7 @@ from botocore.exceptions import ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
-# The delete_my_account data phase runs through this module-local name, the seam
-# where a failing cascade is substituted in tests (#551).
-from .deletion_cascade import delete_all_user_data as _delete_all_user_data
+from .deletion_cascade import delete_all_user_data
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -86,9 +84,9 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     Delete the authenticated user's account and all associated data.
 
     This is a self-service account deletion that:
-    1. Verifies Cognito credentials and connectivity before deleting data
-    2. Deletes the user from Cognito User Pool with retry on transient errors (the commit point)
-    3. Deletes all user data from DynamoDB (profiles, campaigns, orders, shares, invites; catalogs are preserved)
+    1. Verifies Cognito credentials and connectivity before deleting DynamoDB data
+    2. Deletes all user data from DynamoDB (profiles, campaigns, orders, shares, invites; catalogs are preserved)
+    3. Deletes the user from Cognito User Pool with retry on transient errors
 
     Args:
         event: AppSync event with identity
@@ -98,7 +96,9 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         True if account was deleted successfully
 
     Raises:
-        AppError: If deletion error occurs
+        AppError: If deletion error occurs. When the data sweep succeeded but
+            the Cognito delete failed, the error names the partial state so
+            the caller knows the account needs a retry to complete.
     """
     logger.info("delete_my_account handler invoked")
 
@@ -113,44 +113,35 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
 
     cognito = boto3.client("cognito-idp")
 
-    # Handler-specific Cognito error handling stays in this try block: the
-    # decorator only covers the generic unexpected-exception path, not typed
-    # ClientError mapping.
+    # Pre-check Cognito lookup to fail early on authorization/network/config issues
     try:
-        # Pre-check Cognito lookup to fail early on authorization/network/config issues
-        try:
-            username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id)
-            if not username:
-                logger.warning(f"User not found in Cognito with sub: {account_id}")
-        except ClientError as e:
-            logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(e), exc_info=True)
-            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
-
-        # Delete the Cognito user FIRST so the Cognito call is the commit point
-        # (#551): a data-phase failure afterwards leaves records the user can no
-        # longer reach (no sign-in, so no post_authentication re-bootstrap) and a
-        # re-run of the data phase is safe; a Cognito failure leaves every record
-        # intact. Deleting data first would leave a sign-in-capable Cognito user
-        # whose records are gone, silently re-bootstrapped on next sign-in.
-        _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
-
+        username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id)
+        if not username:
+            logger.warning(f"User not found in Cognito with sub: {account_id}")
     except ClientError as e:
-        logger.error("Cognito error during account deletion", account_id=account_id, error=str(e), exc_info=True)
+        logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(e), exc_info=True)
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
 
-    # The data phase must not be caught by the Cognito-labeled except above; a
-    # post-commit DynamoDB/S3 failure carries its own error_code-tagged log.
+    # The data sweep runs before the Cognito delete and is safe to re-run, so a
+    # retry after any failure below converges; a sweep failure here leaves the
+    # Cognito user untouched.
+    delete_all_user_data(account_id, logger)
+
     try:
-        _delete_all_user_data(account_id, logger)
+        _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
     except Exception as e:
         logger.error(
-            "Cognito user already deleted but user data cleanup failed; "
-            "leftover records are inert because the user can no longer sign in",
+            "Account data swept but the Cognito user is still present; "
+            "the account needs manual completion or a retry",
             account_id=account_id,
             error=str(e),
-            error_code=ErrorCode.INTERNAL_ERROR,
+            error_code=getattr(e, "error_code", None) or ErrorCode.INTERNAL_ERROR,
+            exc_info=True,
         )
-        raise
+        raise AppError(
+            ErrorCode.INTERNAL_ERROR,
+            "Account data was deleted but the Cognito user is still present; retry to complete the deletion",
+        ) from e
 
     logger.info("Account deletion completed successfully")
     return True
