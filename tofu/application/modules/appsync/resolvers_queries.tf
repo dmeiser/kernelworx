@@ -120,6 +120,9 @@ resource "aws_appsync_resolver" "get_campaign" {
     functions = [
       aws_appsync_function.query_campaign.function_id,
       aws_appsync_function.verify_profile_read_access.function_id,
+      # Step 2 of the two-phase owner check (#508): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.verify_profile_read_access_step2.function_id,
       aws_appsync_function.check_share_read_permissions.function_id,
       aws_appsync_function.return_campaign.function_id,
     ]
@@ -145,6 +148,8 @@ resource "aws_appsync_resolver" "list_campaigns_by_profile" {
   pipeline_config {
     functions = [
       aws_appsync_function.verify_profile_read_access.function_id,
+      # Step 2 of the two-phase owner check (#508).
+      aws_appsync_function.verify_profile_read_access_step2.function_id,
       aws_appsync_function.check_share_read_permissions.function_id,
       aws_appsync_function.query_campaigns.function_id,
       aws_appsync_function.batch_get_catalogs.function_id,
@@ -172,6 +177,8 @@ resource "aws_appsync_resolver" "get_order" {
     functions = [
       aws_appsync_function.query_order.function_id,
       aws_appsync_function.verify_profile_read_access.function_id,
+      # Step 2 of the two-phase owner check (#508).
+      aws_appsync_function.verify_profile_read_access_step2.function_id,
       aws_appsync_function.check_share_read_permissions.function_id,
       aws_appsync_function.return_order.function_id,
     ]
@@ -196,6 +203,8 @@ resource "aws_appsync_resolver" "list_orders_by_campaign" {
     functions = [
       aws_appsync_function.lookup_campaign_for_orders.function_id,
       aws_appsync_function.verify_profile_read_access.function_id,
+      # Step 2 of the two-phase owner check (#508).
+      aws_appsync_function.verify_profile_read_access_step2.function_id,
       aws_appsync_function.check_share_read_permissions.function_id,
       aws_appsync_function.query_orders_by_campaign.function_id,
     ]

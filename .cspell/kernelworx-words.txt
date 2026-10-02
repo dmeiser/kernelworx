@@ -50,6 +50,7 @@ campaignId
 Campaigns
 campaignYear
 cancelable
+caplog
 capsys
 catalogId
 Catalogs
