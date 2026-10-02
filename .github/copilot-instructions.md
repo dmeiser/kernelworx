@@ -233,9 +233,10 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     Raises NOT_FOUND if the profile does not exist.
     Admin checks are performed separately via is_admin(); do not add them here.
     """
-    # Check ownership with a strongly consistent base-table read
-    # (utils.auth._is_profile_owner(tables.profiles, caller_account_id, db_profile_id))
-    if profile_exists_for_owner(caller_account_id, profile_id):
+    # Check ownership with a strongly consistent base-table read; the real
+    # helper is utils.auth._is_profile_owner(tables.profiles, caller_account_id,
+    # db_profile_id) with db_profile_id normalized by ensure_profile_id().
+    if _is_profile_owner(tables.profiles, caller_account_id, db_profile_id):
         return True
     
     # Check shares with strongly consistent reads and validate against

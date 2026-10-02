@@ -1367,4 +1367,3 @@ class TestHandler:
         result_empty = handler({}, None)
         assert result_empty["__isError"] is True
         assert result_empty["errorCode"] == ErrorCode.UNAUTHORIZED
-
