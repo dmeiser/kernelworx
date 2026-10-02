@@ -1354,3 +1354,16 @@ class TestHandler:
 
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.NOT_FOUND
+
+    def test_missing_or_null_identity_returns_unauthorized(self) -> None:
+        """A missing or null identity returns UNAUTHORIZED, not KeyError generic INTERNAL_ERROR (#527)."""
+        from src.handlers.list_catalogs_in_use import handler
+        from src.utils.errors import ErrorCode
+
+        result = handler({"identity": None}, None)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
+
+        result_empty = handler({}, None)
+        assert result_empty["__isError"] is True
+        assert result_empty["errorCode"] == ErrorCode.UNAUTHORIZED

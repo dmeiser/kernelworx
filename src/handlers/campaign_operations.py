@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Optional
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id
     from utils.auth import require_profile_access
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
@@ -12,6 +13,7 @@ try:  # pragma: no cover
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id
     from ..utils.auth import require_profile_access
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
@@ -292,7 +294,7 @@ def delete_campaign_orders(event: Dict[str, Any], context: Any) -> Dict[str, Any
     if not campaign_id_arg:
         raise AppError(ErrorCode.INVALID_INPUT, "campaignId is required")
 
-    caller_account_id = event.get("identity", {}).get("sub")
+    caller_account_id = get_caller_id(event)
     if not caller_account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
 

@@ -30,7 +30,7 @@ from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.appsync_types import require_str
+    from utils.appsync_types import get_caller_id, require_str
     from utils.auth import has_mfa, is_admin
     from utils.dynamodb import is_transient_client_error, tables
     from utils.errors import AppError, ErrorCode
@@ -38,7 +38,7 @@ try:  # pragma: no cover
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.appsync_types import require_str
+    from ..utils.appsync_types import get_caller_id, require_str
     from ..utils.auth import has_mfa, is_admin
     from ..utils.dynamodb import is_transient_client_error, tables
     from ..utils.errors import AppError, ErrorCode
@@ -124,7 +124,7 @@ def _resolve_transfer_input(event: Dict[str, Any]) -> Tuple[str, str, str]:
     missing and ``AppError`` (via ``require_str``/``ensure_*``) when an argument
     is absent or malformed.
     """
-    caller_account_id = event.get("identity", {}).get("sub")
+    caller_account_id = get_caller_id(event)
     if not caller_account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
     input_args = event.get("arguments", {}).get("input", {})

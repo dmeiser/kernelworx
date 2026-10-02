@@ -15,7 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.appsync_types import require_str
+    from utils.appsync_types import get_caller_id, require_str
     from utils.auth import check_profile_access
     from utils.boto import get_s3_client
     from utils.dynamodb import get_required_env, tables
@@ -25,7 +25,7 @@ try:  # pragma: no cover
     from utils.pagination import query_all_items_iter
     from utils.report_limits import MAX_CAMPAIGN_REPORT_GRAPH_BYTES, OrderGraphBudget
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.appsync_types import require_str
+    from ..utils.appsync_types import get_caller_id, require_str
     from ..utils.auth import check_profile_access
     from ..utils.boto import get_s3_client
     from ..utils.dynamodb import get_required_env, tables
@@ -90,7 +90,7 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         args = event.get("arguments", {}).get("input", {})
         campaign_id = ensure_campaign_id(require_str(args, "campaignId"))  # Normalize CAMPAIGN# prefix
         report_format = args.get("format", "xlsx")  # xlsx or csv
-        caller_account_id = event.get("identity", {}).get("sub")
+        caller_account_id = get_caller_id(event)
         if not caller_account_id:
             raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 

@@ -73,19 +73,9 @@ def ensure_catalog_id(id_value: Optional[str]) -> Optional[str]:
     return ensure_prefix("CATALOG", id_value)
 
 
-def ensure_order_id(id_value: Optional[str]) -> Optional[str]:
-    """Normalize order ID with ORDER# prefix."""
-    return ensure_prefix("ORDER", id_value)
-
-
 def ensure_account_id(id_value: Optional[str]) -> Optional[str]:
     """Normalize account ID with ACCOUNT# prefix."""
     return ensure_prefix("ACCOUNT", id_value)
-
-
-def ensure_product_id(id_value: Optional[str]) -> Optional[str]:
-    """Normalize product ID with PRODUCT# prefix."""
-    return ensure_prefix("PRODUCT", id_value)
 
 
 def build_unit_campaign_key(

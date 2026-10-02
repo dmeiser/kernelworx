@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id
     from utils.boto import get_s3_client
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
@@ -24,6 +25,7 @@ try:  # pragma: no cover
         validate_qr_s3_key,
     )
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id
     from ..utils.boto import get_s3_client
     from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
@@ -51,8 +53,7 @@ else:  # pragma: no cover
 
 def _extract_and_validate_caller(event: Dict[str, Any]) -> str:
     """Extract and validate caller identity from event."""
-    identity = event.get("identity", {})
-    caller_id = identity.get("sub")
+    caller_id = get_caller_id(event)
     if not caller_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
     return str(caller_id)

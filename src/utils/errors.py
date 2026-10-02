@@ -1,7 +1,9 @@
 """
 Error handling utilities for Lambda functions.
 
-Provides standardized error responses with error codes.
+`AppError` carries the `ErrorCode` vocabulary that `utils.handlers` serializes
+into the GraphQL `extensions` block; the resolver layer, not this module, owns
+the response shape.
 """
 
 from typing import Any, Dict, Optional
@@ -63,54 +65,3 @@ class ErrorCode:
     DATABASE_ERROR = "DATABASE_ERROR"
     # Transient resource contention (e.g. DynamoDB/Cognito throttling); the client may retry
     RESOURCE_BUSY = "RESOURCE_BUSY"
-
-
-def handle_error(error: Exception) -> Dict[str, Any]:
-    """
-    Convert exception to standardized error response.
-
-    Args:
-        error: Exception to handle
-
-    Returns:
-        Error dictionary for GraphQL response
-    """
-    if isinstance(error, AppError):
-        return error.to_dict()
-
-    # Unexpected error - log and return generic message
-    return {
-        "errorCode": ErrorCode.INTERNAL_ERROR,
-        "message": "An unexpected error occurred. Please try again.",
-    }
-
-
-def create_error_response(error_code: str, message: str) -> Dict[str, Any]:
-    """
-    Create standardized error response dictionary.
-
-    Args:
-        error_code: Error code (use ErrorCode constants)
-        message: Human-readable error message
-
-    Returns:
-        Error dictionary for GraphQL response
-    """
-    return {
-        "errorCode": error_code,
-        "message": message,
-    }
-
-
-class ValidationError(AppError):
-    """Error raised when input validation fails."""
-
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
-        super().__init__(ErrorCode.INVALID_INPUT, message, details)
-
-
-class AuthorizationError(AppError):
-    """Error raised when user is not authorized to perform an action."""
-
-    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
-        super().__init__(ErrorCode.FORBIDDEN, message, details)

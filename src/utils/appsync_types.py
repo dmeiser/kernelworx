@@ -1,8 +1,9 @@
 """
-Type definitions for AppSync Lambda events.
+Helpers for reading AppSync Lambda events.
 
-Provides TypedDict definitions for strongly typing AppSync resolver events,
-reducing runtime errors from incorrect event structure assumptions.
+``get_caller_id`` centralizes caller-ID extraction, and the ``require_*``
+readers enforce the schema types and bounds a resolver relies on before it
+indexes into the raw event.
 """
 
 from collections.abc import Mapping
@@ -18,76 +19,29 @@ def get_caller_id(event: Dict[str, Any]) -> Optional[str]:
     """
     Extract caller's Cognito sub (user ID) from event.
 
+    Every handler reads the caller through this helper (see
+    tests/unit/test_caller_id_helper.py): hand-inlining
+    ``event["identity"]["sub"]`` raises ``KeyError`` on a malformed event,
+    where this returns None.
+
     Args:
         event: AppSync event
 
     Returns:
         Caller ID or None if not present
     """
-    identity: Dict[str, Any] = event.get("identity", {})
+    identity = event.get("identity")
+    if not isinstance(identity, dict):
+        return None
     result: Optional[str] = identity.get("sub")
     return result
 
 
-def get_caller_id_required(event: Dict[str, Any]) -> str:
-    """
-    Extract caller's Cognito sub (user ID) from event.
-
-    Args:
-        event: AppSync event
-
-    Returns:
-        Caller ID
-
-    Raises:
-        ValueError: If caller ID is not present
-    """
-    caller_id = get_caller_id(event)
-    if not caller_id:
-        raise ValueError("Caller ID (identity.sub) is required")
-    return caller_id
-
-
-def get_argument(event: Dict[str, Any], name: str, default: Any = None) -> Any:
-    """
-    Extract an argument from the event.
-
-    Args:
-        event: AppSync event
-        name: Argument name
-        default: Default value if not present
-
-    Returns:
-        Argument value or default
-    """
-    return event.get("arguments", {}).get(name, default)
-
-
-def get_argument_required(event: Dict[str, Any], name: str) -> Any:
-    """
-    Extract a required argument from the event.
-
-    Args:
-        event: AppSync event
-        name: Argument name
-
-    Returns:
-        Argument value
-
-    Raises:
-        ValueError: If argument is not present
-    """
-    value = get_argument(event, name)
-    if value is None:
-        raise ValueError(f"Argument '{name}' is required")
-    return value
-
-
-# Argument readers for the raw AppSync event. Unlike get_argument/get_argument_required
-# (which only test for presence and return whatever shape the caller sent), these enforce
-# the schema types and bounds the resolver relies on, raising a typed INVALID_INPUT AppError
-# so a malformed or missing argument surfaces to the client as INVALID_INPUT rather than the
-# generic INTERNAL_ERROR the lambda_handler decorator would otherwise produce (#552).
+# Argument readers for the raw AppSync event: they enforce the schema types and
+# bounds the resolver relies on, raising a typed INVALID_INPUT AppError so a
+# malformed or missing argument surfaces to the client as INVALID_INPUT rather
+# than the generic INTERNAL_ERROR the lambda_handler decorator would otherwise
+# produce (#552).
 
 
 def require_str(arguments: Mapping[str, Any], name: str) -> str:
@@ -154,18 +108,3 @@ def require_unit_number(arguments: Mapping[str, Any], name: str) -> int:
         AppError: INVALID_INPUT if the value is missing, empty, non-numeric, or < 1
     """
     return cast(int, validate_unit_number(arguments.get(name), required=True))
-
-
-def get_prev_result(event: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract previous pipeline step result.
-
-    Args:
-        event: AppSync pipeline event
-
-    Returns:
-        Previous result dict (empty if not present)
-    """
-    prev: Dict[str, Any] = event.get("prev", {})
-    result: Dict[str, Any] = prev.get("result", {})
-    return result
