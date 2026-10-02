@@ -49,7 +49,7 @@ init_backend() {
   echo "# placeholder" > "$ROOT_DIR/.build/lambda-layer/python/.placeholder"
 
   log "📦 Initializing OpenTofu backend..."
-  cd "$ENV_DIR"
+  cd "$ENV_DIR" || exit 1
   tofu init -input=false \
     -backend-config="key=$state_key" \
     -backend-config="bucket=$STATE_BUCKET" \
