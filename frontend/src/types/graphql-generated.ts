@@ -186,7 +186,7 @@ export type GqlCampaignReport = {
 /**
  * A catalog of products that campaigns sell from.
  *
- * Catalogs are visible to any authenticated user by ID (getCatalog performs no ownership check). `listManagedCatalogs` returns only public ADMIN_MANAGED catalogs and `listMyCatalogs` returns the caller's own catalogs; both exclude soft-deleted catalogs, which are still retrievable by ID.
+ * `getCatalog` returns a catalog by ID only when it is public, admin-managed, or owned by the caller. `listManagedCatalogs` returns only public ADMIN_MANAGED catalogs and `listMyCatalogs` returns the caller's own catalogs; both exclude soft-deleted catalogs, which remain retrievable by ID by an authorized caller.
  */
 export type GqlCatalog = {
   __typename?: 'Catalog';
@@ -756,7 +756,7 @@ export type GqlQuery = {
   findSharedCampaigns: Array<GqlSharedCampaign>;
   /** Fetch a single campaign by ID. Returns the campaign if the caller has read access to its profile, otherwise null. */
   getCampaign?: Maybe<GqlCampaign>;
-  /** Fetch a single catalog by ID. Any authenticated user may view a catalog by ID (no ownership check); returns null when not found. */
+  /** Fetch a single catalog by ID. Returns the catalog only when it is public, admin-managed (ADMIN_MANAGED), or owned by the caller; returns null otherwise. */
   getCatalog?: Maybe<GqlCatalog>;
   /** The authenticated caller's account. The row is created automatically on first read if it does not yet exist. */
   getMyAccount: GqlAccount;
