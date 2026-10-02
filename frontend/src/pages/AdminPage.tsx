@@ -229,8 +229,36 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
   onResetPassword,
   onDeleteUser,
   onViewDetails,
-  // eslint-disable-next-line complexity -- multiple conditional renders for search states
-}) => {
+}) => (
+  <>
+    <UserSearchBar
+      searchQuery={searchQuery}
+      onSearchQueryChange={onSearchQueryChange}
+      onSearch={onSearch}
+      loading={loading}
+    />
+    <UserSearchResults
+      searchQuery={searchQuery}
+      loading={loading}
+      error={error}
+      searchedUsers={searchedUsers}
+      hasSearched={hasSearched}
+      onResetPassword={onResetPassword}
+      onDeleteUser={onDeleteUser}
+      onViewDetails={onViewDetails}
+    />
+  </>
+);
+
+interface UserSearchBarProps {
+  searchQuery: string;
+  onSearchQueryChange: (query: string) => void;
+  onSearch: () => void;
+  loading: boolean;
+}
+
+const UserSearchBar: React.FC<UserSearchBarProps> = ({ searchQuery, onSearchQueryChange, onSearch, loading }) => {
+  const canSearch = !!searchQuery.trim() && !loading;
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && searchQuery.trim()) {
       onSearch();
@@ -238,81 +266,122 @@ const UsersTabContent: React.FC<UsersTabContentProps> = ({
   };
 
   return (
-    <>
-      <Box display="flex" gap={2} mb={3} sx={{ minWidth: 0 }}>
-        <TextField
-          fullWidth
-          label="Search User"
-          placeholder="Search by email, name, or account ID (3+ characters)"
-          value={searchQuery}
-          onChange={(e) => onSearchQueryChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          sx={{ flex: 1, minWidth: 0 }}
-          slotProps={{
-            input: {
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon />
-                </InputAdornment>
-              ),
-            },
-          }}
-        />
-        <Button variant="contained" onClick={onSearch} disabled={loading || !searchQuery.trim()} sx={{ minWidth: 100 }}>
-          {loading ? <CircularProgress size={24} /> : 'Search'}
-        </Button>
-      </Box>
-
-      {error && <ErrorAlert message={`Failed to load: ${error.message}`} />}
-
-      {!hasSearched && !error && (
-        <Alert severity="info">
-          Search for a user by email, name, or account ID. Queries must be at least 3 characters. Partial matches are
-          supported (e.g., &quot;john&quot; finds &quot;john.doe@example.com&quot;).
-        </Alert>
-      )}
-
-      {hasSearched && !loading && !error && searchedUsers.length === 0 && (
-        <Alert severity="warning">No user found matching &quot;{searchQuery}&quot;.</Alert>
-      )}
-
-      {searchedUsers.length > 0 && (
-        <>
-          {searchedUsers.length > 1 && (
-            <Alert severity="info" sx={{ mb: 2 }}>
-              Found {searchedUsers.length} users matching &quot;{searchQuery}&quot;
-            </Alert>
-          )}
-          <TableContainer sx={{ width: '100%', overflowX: 'auto' }}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Email</TableCell>
-                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Name</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Role</TableCell>
-                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Created</TableCell>
-                  <TableCell align="right">Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {searchedUsers.map((user) => (
-                  <UserRow
-                    key={user.accountId}
-                    user={user}
-                    onResetPassword={onResetPassword}
-                    onDeleteUser={onDeleteUser}
-                    onViewDetails={onViewDetails}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </>
-      )}
-    </>
+    <Box display="flex" gap={2} mb={3} sx={{ minWidth: 0 }}>
+      <TextField
+        fullWidth
+        label="Search User"
+        placeholder="Search by email, name, or account ID (3+ characters)"
+        value={searchQuery}
+        onChange={(e) => onSearchQueryChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        sx={{ flex: 1, minWidth: 0 }}
+        slotProps={{
+          input: {
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon />
+              </InputAdornment>
+            ),
+          },
+        }}
+      />
+      <Button variant="contained" onClick={onSearch} disabled={!canSearch} sx={{ minWidth: 100 }}>
+        {loading ? <CircularProgress size={24} /> : 'Search'}
+      </Button>
+    </Box>
   );
 };
+
+type UserSearchResultsProps = Omit<UsersTabContentProps, 'onSearchQueryChange' | 'onSearch'>;
+
+// The search-state guard: error, not-yet-searched hint, no-results warning, or the
+// results table — one early return per state instead of `&&` chains in the tab.
+const UserSearchResults: React.FC<UserSearchResultsProps> = ({
+  searchQuery,
+  loading,
+  error,
+  searchedUsers,
+  hasSearched,
+  onResetPassword,
+  onDeleteUser,
+  onViewDetails,
+}) => {
+  if (error) {
+    return <ErrorAlert message={`Failed to load: ${error.message}`} />;
+  }
+  if (!hasSearched) {
+    return (
+      <Alert severity="info">
+        Search for a user by email, name, or account ID. Queries must be at least 3 characters. Partial matches are
+        supported (e.g., &quot;john&quot; finds &quot;john.doe@example.com&quot;).
+      </Alert>
+    );
+  }
+  if (searchedUsers.length === 0) {
+    // A search is in flight: no results yet and nothing to report.
+    if (loading) return null;
+    return <Alert severity="warning">No user found matching &quot;{searchQuery}&quot;.</Alert>;
+  }
+
+  return (
+    <UserSearchResultsTable
+      searchedUsers={searchedUsers}
+      searchQuery={searchQuery}
+      onResetPassword={onResetPassword}
+      onDeleteUser={onDeleteUser}
+      onViewDetails={onViewDetails}
+    />
+  );
+};
+
+interface UserSearchResultsTableProps {
+  searchedUsers: GqlAdminUser[];
+  searchQuery: string;
+  onResetPassword: (user: GqlAdminUser) => void;
+  onDeleteUser: (user: GqlAdminUser) => void;
+  onViewDetails: (user: GqlAdminUser) => void;
+}
+
+const UserSearchResultsTable: React.FC<UserSearchResultsTableProps> = ({
+  searchedUsers,
+  searchQuery,
+  onResetPassword,
+  onDeleteUser,
+  onViewDetails,
+}) => (
+  <>
+    {searchedUsers.length > 1 && (
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Found {searchedUsers.length} users matching &quot;{searchQuery}&quot;
+      </Alert>
+    )}
+    <TableContainer sx={{ width: '100%', overflowX: 'auto' }}>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>Email</TableCell>
+            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Name</TableCell>
+            <TableCell>Status</TableCell>
+            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Role</TableCell>
+            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Created</TableCell>
+            <TableCell align="right">Actions</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {searchedUsers.map((user) => (
+            <UserRow
+              key={user.accountId}
+              user={user}
+              onResetPassword={onResetPassword}
+              onDeleteUser={onDeleteUser}
+              onViewDetails={onViewDetails}
+            />
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  </>
+);
 
 // --- Catalog Card ---
 interface CatalogCardProps {
@@ -444,8 +513,134 @@ const SystemInfoTabContent: React.FC = () => (
   </>
 );
 
+// --- Delete User Dialog ---
+interface DeleteUserProgressState {
+  step: string;
+  completed: string[];
+  error?: string;
+}
+
+interface DeleteUserDialogProps {
+  target: GqlAdminUser | null;
+  progress: DeleteUserProgressState | null;
+  deletingUser: boolean;
+  onCancel: () => void;
+  onConfirmDelete: () => void;
+}
+
+const DeleteUserDialog: React.FC<DeleteUserDialogProps> = ({
+  target,
+  progress,
+  deletingUser,
+  onCancel,
+  onConfirmDelete,
+}) => (
+  <Dialog open={!!target} onClose={onCancel} maxWidth="sm" fullWidth>
+    <DialogTitle>Delete User</DialogTitle>
+    <DialogContent>
+      {!progress ? (
+        <DialogContentText>
+          Are you sure you want to permanently delete the user <strong>{target?.email}</strong>?
+          <br />
+          <br />
+          This will delete all their data including:
+          <ul>
+            <li>Sales/orders</li>
+            <li>Campaigns</li>
+            <li>Shares</li>
+            <li>Profiles (Scouts)</li>
+            <li>User account</li>
+          </ul>
+          Their custom catalogs are preserved and will not be deleted.
+          <br />
+          This action cannot be undone.
+        </DialogContentText>
+      ) : (
+        <DeleteUserProgressView progress={progress} />
+      )}
+    </DialogContent>
+    <DeleteUserDialogActions
+      progress={progress}
+      deletingUser={deletingUser}
+      onCancel={onCancel}
+      onConfirmDelete={onConfirmDelete}
+    />
+  </Dialog>
+);
+
+// The in-progress cascade view: current step, completed steps, and any error.
+const DeleteUserProgressView: React.FC<{ progress: DeleteUserProgressState }> = ({ progress }) => (
+  <Box>
+    {/* Current step */}
+    <Box display="flex" alignItems="center" gap={2} mb={2}>
+      {!progress.error && <CircularProgress size={20} />}
+      <Typography variant="body1" color={progress.error ? 'error' : 'text.primary'} fontWeight="medium">
+        {progress.step}
+      </Typography>
+    </Box>
+
+    {/* Completed steps */}
+    {progress.completed.length > 0 && (
+      <Box sx={{ pl: 2, borderLeft: 2, borderColor: 'success.main', mb: 2 }}>
+        {progress.completed.map((msg, i) => (
+          <Typography key={i} variant="body2" color="text.secondary">
+            ✓ {msg}
+          </Typography>
+        ))}
+      </Box>
+    )}
+
+    {/* Error message */}
+    {progress.error && (
+      <Alert severity="error" sx={{ mt: 2 }}>
+        {progress.error}
+      </Alert>
+    )}
+  </Box>
+);
+
+// True when the cascade stopped on an error (the dialog then offers Close).
+const cascadeFailed = (progress: DeleteUserProgressState | null): boolean => Boolean(progress?.error);
+
+const DeleteUserDialogActions: React.FC<Omit<DeleteUserDialogProps, 'target'>> = ({
+  progress,
+  deletingUser,
+  onCancel,
+  onConfirmDelete,
+}) => (
+  <DialogActions>
+    <Button onClick={onCancel} disabled={deletingUser && !cascadeFailed(progress)}>
+      {cascadeFailed(progress) ? 'Close' : 'Cancel'}
+    </Button>
+    {!progress && (
+      <Button
+        onClick={() => {
+          void onConfirmDelete();
+        }}
+        color="error"
+      >
+        Delete User
+      </Button>
+    )}
+  </DialogActions>
+);
+
+// `error.message` when the thrown value is an Error, else a generic fallback.
+const errorMessageOf = (error: unknown): string => (error instanceof Error ? error.message : 'Unknown error');
+
+const managedCatalogsOf = (data: { listManagedCatalogs: GqlCatalog[] } | undefined): GqlCatalog[] =>
+  data?.listManagedCatalogs || [];
+
+// Signal the admin-MFA gate that a mutation was rejected for missing MFA.
+const dispatchMfaRequiredEvent = (): void => {
+  window.dispatchEvent(
+    new CustomEvent('mfa-required', {
+      detail: { errorCode: MFA_REQUIRED_ERROR_CODE, message: 'MFA required' },
+    }),
+  );
+};
+
 // --- Main Component ---
-// eslint-disable-next-line complexity -- Admin page with multiple tabs and state management
 export const AdminPage: React.FC = () => {
   const { isMfaRequired } = useAdminMfa();
   const navigate = useNavigate();
@@ -472,12 +667,8 @@ export const AdminPage: React.FC = () => {
   const [editingCatalog, setEditingCatalog] = useState<GqlCatalog | null>(null);
   const [deleteCatalogTarget, setDeleteCatalogTarget] = useState<GqlCatalog | null>(null);
 
-  // Delete progress state
-  const [deleteProgress, setDeleteProgress] = useState<{
-    step: string;
-    completed: string[];
-    error?: string;
-  } | null>(null);
+  // Cascading delete progress state
+  const [deleteProgress, setDeleteProgress] = useState<DeleteUserProgressState | null>(null);
 
   // Search users (lazy query)
   const [searchUser, { loading: usersLoading, error: usersError, data: searchUserData }] = useLazyQuery<{
@@ -502,7 +693,7 @@ export const AdminPage: React.FC = () => {
     refetch: refetchCatalogs,
   } = useQuery<{ listManagedCatalogs: GqlCatalog[] }>(LIST_MANAGED_CATALOGS);
 
-  const mfaRequired = isMfaRequired || isMfaRequiredError(usersError) || isMfaRequiredError(catalogsError);
+  const mfaRequired = isMfaRequired || [usersError, catalogsError].some(isMfaRequiredError);
 
   // Mutations
   const [resetPassword, { loading: resettingPassword }] = useMutation(ADMIN_RESET_USER_PASSWORD);
@@ -563,7 +754,28 @@ export const AdminPage: React.FC = () => {
     },
   );
 
-  const catalogs = catalogsData?.listManagedCatalogs || [];
+  const catalogs = managedCatalogsOf(catalogsData);
+
+  // The cascading-delete steps, run sequentially by confirmDeleteUser. Each step
+  // reports its deleted count so the progress view can list completed steps.
+  // Catalogs are never deleted (#521), so there is deliberately no catalog step here.
+  const cascadeSteps: Array<{ label: string; run: (accountId: string) => Promise<string> }> = [
+    {
+      label: 'Deleting sales/orders...',
+      run: async (accountId) =>
+        `Deleted ${(await deleteUserOrders({ variables: { accountId } })).data?.adminDeleteUserOrders ?? 0} orders`,
+    },
+    {
+      label: 'Deleting campaigns...',
+      run: async (accountId) =>
+        `Deleted ${(await deleteUserCampaigns({ variables: { accountId } })).data?.adminDeleteUserCampaigns ?? 0} campaigns`,
+    },
+    {
+      label: 'Deleting shares...',
+      run: async (accountId) =>
+        `Deleted ${(await deleteUserShares({ variables: { accountId } })).data?.adminDeleteUserShares ?? 0} shares`,
+    },
+  ];
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setCurrentTab(newValue);
@@ -634,48 +846,43 @@ export const AdminPage: React.FC = () => {
       showSnackbar(`Password reset email sent to ${targetEmail}`);
     } catch (error) {
       if (isMfaRequiredError(error)) {
-        window.dispatchEvent(
-          new CustomEvent('mfa-required', {
-            detail: { errorCode: MFA_REQUIRED_ERROR_CODE, message: 'MFA required' },
-          }),
-        );
+        dispatchMfaRequiredEvent();
       }
-      showSnackbar(`Error resetting password: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      showSnackbar(`Error resetting password: ${errorMessageOf(error)}`);
     }
   };
 
-  // eslint-disable-next-line complexity -- Client-side cascade requires sequential steps
+  const deleteProfiles = async (accountId: string): Promise<{ countMessage: string; profileIds: string[] }> => {
+    // The server purge sweeps the profile-keyed residue (invites, S3
+    // reports) by profile ID, so the IDs must be read while the profile
+    // rows still exist (#521).
+    const profilesData = await getUserProfilesForPurge({ variables: { accountId } });
+    const profileIds = (profilesData.data?.adminGetUserProfiles ?? []).map((profile) => profile.profileId);
+    const profilesResult = await deleteUserProfiles({ variables: { accountId } });
+    return {
+      countMessage: `Deleted ${profilesResult.data?.adminDeleteUserProfiles ?? 0} profiles`,
+      profileIds,
+    };
+  };
+
   const confirmDeleteUser = async () => {
     /* v8 ignore start -- Delete user dialog only opens when a target is selected */
     if (!deleteUserTarget) return;
     /* v8 ignore stop */
 
+    const targetEmail = deleteUserTarget.email;
     const accountId = deleteUserTarget.accountId;
     const completed: string[] = [];
 
     try {
-      // Client-side cascade (#521). Catalogs are never deleted, so there is
-      // deliberately no catalog step here.
-      setDeleteProgress({ step: 'Deleting sales/orders...', completed });
-      const ordersResult = await deleteUserOrders({ variables: { accountId } });
-      completed.push(`Deleted ${ordersResult.data?.adminDeleteUserOrders ?? 0} orders`);
-
-      setDeleteProgress({ step: 'Deleting campaigns...', completed: [...completed] });
-      const campaignsResult = await deleteUserCampaigns({ variables: { accountId } });
-      completed.push(`Deleted ${campaignsResult.data?.adminDeleteUserCampaigns ?? 0} campaigns`);
-
-      setDeleteProgress({ step: 'Deleting shares...', completed: [...completed] });
-      const sharesResult = await deleteUserShares({ variables: { accountId } });
-      completed.push(`Deleted ${sharesResult.data?.adminDeleteUserShares ?? 0} shares`);
+      for (const step of cascadeSteps) {
+        setDeleteProgress({ step: step.label, completed: [...completed] });
+        completed.push(await step.run(accountId));
+      }
 
       setDeleteProgress({ step: 'Deleting profiles...', completed: [...completed] });
-      // The server purge sweeps the profile-keyed residue (invites, S3
-      // reports) by profile ID, so the IDs must be read while the profile
-      // rows still exist (#521).
-      const profilesData = await getUserProfilesForPurge({ variables: { accountId } });
-      const profileIds = (profilesData.data?.adminGetUserProfiles ?? []).map((profile) => profile.profileId);
-      const profilesResult = await deleteUserProfiles({ variables: { accountId } });
-      completed.push(`Deleted ${profilesResult.data?.adminDeleteUserProfiles ?? 0} profiles`);
+      const { countMessage, profileIds } = await deleteProfiles(accountId);
+      completed.push(countMessage);
 
       // Last: the accounts record and the Cognito user, which a browser with
       // no AWS credentials cannot delete itself.
@@ -686,23 +893,18 @@ export const AdminPage: React.FC = () => {
       // Success!
       setDeleteProgress(null);
       setDeleteUserTarget(null);
-      showSnackbar(`User ${deleteUserTarget.email} deleted successfully`);
+      showSnackbar(`User ${targetEmail} deleted successfully`);
       // Clear the searched users since one has been deleted
       setSearchedUsers([]);
       setHasSearched(false);
     } catch (error) {
       if (isMfaRequiredError(error)) {
-        window.dispatchEvent(
-          new CustomEvent('mfa-required', {
-            detail: { errorCode: MFA_REQUIRED_ERROR_CODE, message: 'MFA required' },
-          }),
-        );
+        dispatchMfaRequiredEvent();
       }
       setDeleteProgress({
         step: 'Error occurred',
         completed,
-        /* v8 ignore next -- Throwing a non-Error value in jsdom is not practical to simulate */
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMessageOf(error),
       });
     }
   };
@@ -850,72 +1052,15 @@ export const AdminPage: React.FC = () => {
       </ConfirmDialog>
 
       {/* Delete User Confirmation Dialog */}
-      <Dialog open={!!deleteUserTarget} onClose={cancelDelete} maxWidth="sm" fullWidth>
-        <DialogTitle>Delete User</DialogTitle>
-        <DialogContent>
-          {!deleteProgress ? (
-            <DialogContentText>
-              Are you sure you want to permanently delete the user <strong>{deleteUserTarget?.email}</strong>?
-              <br />
-              <br />
-              This will delete all their data including:
-              <ul>
-                <li>Sales/orders</li>
-                <li>Campaigns</li>
-                <li>Shares</li>
-                <li>Profiles (Scouts)</li>
-                <li>User account</li>
-              </ul>
-              Their custom catalogs are preserved and will not be deleted.
-              <br />
-              This action cannot be undone.
-            </DialogContentText>
-          ) : (
-            <Box>
-              {/* Current step */}
-              <Box display="flex" alignItems="center" gap={2} mb={2}>
-                {!deleteProgress.error && <CircularProgress size={20} />}
-                <Typography variant="body1" color={deleteProgress.error ? 'error' : 'text.primary'} fontWeight="medium">
-                  {deleteProgress.step}
-                </Typography>
-              </Box>
-
-              {/* Completed steps */}
-              {deleteProgress.completed.length > 0 && (
-                <Box sx={{ pl: 2, borderLeft: 2, borderColor: 'success.main', mb: 2 }}>
-                  {deleteProgress.completed.map((msg, i) => (
-                    <Typography key={i} variant="body2" color="text.secondary">
-                      ✓ {msg}
-                    </Typography>
-                  ))}
-                </Box>
-              )}
-
-              {/* Error message */}
-              {deleteProgress.error && (
-                <Alert severity="error" sx={{ mt: 2 }}>
-                  {deleteProgress.error}
-                </Alert>
-              )}
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={cancelDelete} disabled={deletingUser && !deleteProgress?.error}>
-            {deleteProgress?.error ? 'Close' : 'Cancel'}
-          </Button>
-          {!deleteProgress && (
-            <Button
-              onClick={() => {
-                void confirmDeleteUser();
-              }}
-              color="error"
-            >
-              Delete User
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
+      <DeleteUserDialog
+        target={deleteUserTarget}
+        progress={deleteProgress}
+        deletingUser={deletingUser}
+        onCancel={cancelDelete}
+        onConfirmDelete={() => {
+          void confirmDeleteUser();
+        }}
+      />
 
       <Snackbar
         key={snackbarKey}

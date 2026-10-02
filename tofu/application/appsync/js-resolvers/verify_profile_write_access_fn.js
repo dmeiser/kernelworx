@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId, normalizeIdOrPrefix } from './lib/ids.js';
 
 // This code backs TWO aws_appsync_function resources (verify_profile_write_access
 // and verify_profile_write_access_step2 in functions_sharing.tf) that run
@@ -65,13 +66,15 @@ function resolveDbProfileId(ctx) {
         profileId = ctx.stash.campaign.profileId;
     }
 
-    if (!profileId) {
+    // Owned by lib/ids.js so both phases resolve a clean, unprefixed id to
+    // the same PROFILE# DB form (and never re-prefix an already-normalized
+    // one); a re-inlined ternary here is caught by
+    // tests/unit/check_id_prefix_normalization.test.ts.
+    if (typeof profileId !== 'string' || !profileId) {
         return null;
     }
 
-    return (typeof profileId === 'string' && profileId.startsWith('PROFILE#'))
-        ? profileId
-        : 'PROFILE#' + profileId;
+    return normalizeId(profileId, 'PROFILE#');
 }
 
 export function request(ctx) {
@@ -151,9 +154,9 @@ export function request(ctx) {
         ctx.stash.profileId = dbProfileId;
     }
 
-    const callerAccountId = ctx.identity && ctx.identity.sub && ctx.identity.sub.startsWith('ACCOUNT#')
-        ? ctx.identity.sub
-        : 'ACCOUNT#' + (ctx.identity && ctx.identity.sub ? ctx.identity.sub : '');
+    // Idempotent: a sub that already carries ACCOUNT# is left alone; the
+    // placeholder fallback matches the historical 'ACCOUNT#' + '' key.
+    const callerAccountId = normalizeIdOrPrefix(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
 
     return {
         operation: 'GetItem',
