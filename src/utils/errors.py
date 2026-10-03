@@ -48,7 +48,6 @@ class ErrorCode:
 
     # Validation errors
     INVALID_INPUT = "INVALID_INPUT"
-    INVALID_PHONE = "INVALID_PHONE"
     INVALID_ADDRESS = "INVALID_ADDRESS"
 
     # Business logic errors

@@ -31,6 +31,11 @@ def get_caller_id(event: Dict[str, Any]) -> Optional[str]:
         Caller ID or None if not present
     """
     identity = event.get("identity")
+    # Deliberate contract: this isinstance check is intentionally stricter than
+    # the old inlined ``identity.get("sub")`` dialects — a non-dict identity
+    # (a string, a list) means the event is malformed or unauthenticated, and
+    # the helper is total: it returns None where the inlined reads raised or
+    # returned nonsense. This mirrors ``_get_claims`` in ``utils.auth`` (#527).
     if not isinstance(identity, dict):
         return None
     result: Optional[str] = identity.get("sub")

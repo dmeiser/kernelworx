@@ -44,7 +44,6 @@ class TestErrorCode:
         assert ErrorCode.NOT_FOUND == "NOT_FOUND"
         assert ErrorCode.ALREADY_EXISTS == "ALREADY_EXISTS"
         assert ErrorCode.INVALID_INPUT == "INVALID_INPUT"
-        assert ErrorCode.INVALID_PHONE == "INVALID_PHONE"
         assert ErrorCode.INVALID_ADDRESS == "INVALID_ADDRESS"
         assert ErrorCode.INVITE_EXPIRED == "INVITE_EXPIRED"
         assert ErrorCode.INVITE_ALREADY_USED == "INVITE_ALREADY_USED"
