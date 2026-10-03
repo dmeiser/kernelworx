@@ -1,6 +1,6 @@
 import { util } from '@aws-appsync/utils';
 import { validatePhone, validateAddress } from './lib/validation.js';
-import { normalizeId } from './lib/ids.js';
+import { normalizeId, stripIdPrefix } from './lib/ids.js';
 import { enrichLineItems } from './lib/line_items.js';
 
 function validateCustomer(input) {
@@ -80,7 +80,7 @@ export function request(ctx) {
 
     const totalAmount = totalAmountCents / 100;
 
-    const campaignIdWithoutPrefix = campaignId.startsWith('CAMPAIGN#') ? campaignId.substring(9) : campaignId;
+    const campaignIdWithoutPrefix = stripIdPrefix(campaignId, 'CAMPAIGN#');
     const orderId = `ORDER#${campaignIdWithoutPrefix}#${util.autoId()}`;
     const now = util.time.nowISO8601();
 

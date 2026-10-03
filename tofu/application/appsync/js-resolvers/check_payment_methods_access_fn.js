@@ -5,6 +5,7 @@
  * whether they can see QR codes based on ownership/WRITE/READ permissions.
  */
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const profile = ctx.stash.profile;
@@ -23,7 +24,7 @@ export function request(ctx) {
     // GetItem in step 1 (ctx.stash.isOwner === true).
     // If ctx.stash.isOwner is undefined (e.g. standalone test), fall back to
     // checking profile.ownerAccountId for backward compatibility.
-    const callerAccountId = callerId.startsWith('ACCOUNT#') ? callerId : `ACCOUNT#${callerId}`;
+    const callerAccountId = normalizeIdOrPrefix(callerId, 'ACCOUNT#');
     const isOwner = ctx.stash.isOwner !== undefined
         ? ctx.stash.isOwner === true
         : profile.ownerAccountId === callerAccountId;
@@ -40,7 +41,7 @@ export function request(ctx) {
     
     // Check if caller has share access in the shares table
     // Shares table uses profileId (with PROFILE# prefix) and targetAccountId (with ACCOUNT# prefix)
-    const dbProfileId = profile.profileId.startsWith('PROFILE#') ? profile.profileId : `PROFILE#${profile.profileId}`;
+    const dbProfileId = normalizeIdOrPrefix(profile.profileId, 'PROFILE#');
     
     return {
         operation: 'GetItem',

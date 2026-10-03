@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 function buildUnitCampaignKey(unitType, unitNumber, city, state, campaignName, campaignYear) {
     const unitNumStr = '' + unitNumber;
@@ -7,12 +8,13 @@ function buildUnitCampaignKey(unitType, unitNumber, city, state, campaignName, c
 }
 
 function normalizeCatalogId(catalogId) {
+    // Only non-null values reach this helper: request()/response() skip null,
+    // and rejectExplicitNulls rejects an explicit null up front because
+    // Campaign.catalogId is ID! (#659). The guard matches the pre-#534 shape.
     if (catalogId === null || catalogId === undefined) {
         return null;
     }
-    return (typeof catalogId === 'string' && catalogId.startsWith('CATALOG#'))
-        ? catalogId
-        : 'CATALOG#' + catalogId;
+    return normalizeIdOrPrefix(catalogId, 'CATALOG#');
 }
 
 function hasUnitUpdate(input) {

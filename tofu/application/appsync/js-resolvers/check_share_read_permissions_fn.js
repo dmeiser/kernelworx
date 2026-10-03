@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     // If already authorized (owner), profile not found, campaign not found, or order not found, skip
@@ -12,10 +13,10 @@ export function request(ctx) {
     
     const profileId = ctx.stash.profileId;
     // Normalize profileId to ensure PROFILE# prefix
-    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeIdOrPrefix(profileId, 'PROFILE#');
     
     // Normalize targetAccountId to ensure ACCOUNT# prefix
-    const targetAccountId = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : `ACCOUNT#${ctx.identity.sub}`;
+    const targetAccountId = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
     
     // Look up share in shares table: profileId + targetAccountId
     return {

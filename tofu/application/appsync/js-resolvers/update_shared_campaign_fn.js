@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { stripIdPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const input = ctx.args.input;
@@ -52,8 +53,8 @@ export function response(ctx) {
     }
     // Normalize createdBy: strip ACCOUNT# prefix for GraphQL ID type
     const result = ctx.result;
-    if (result && result.createdBy && result.createdBy.startsWith('ACCOUNT#')) {
-        result.createdBy = result.createdBy.substring(8);
+    if (result && result.createdBy) {
+        result.createdBy = stripIdPrefix(result.createdBy, 'ACCOUNT#');
     }
     return result;
 }

@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 /**
  * Retrieves a catalog by catalogId.
@@ -13,7 +14,7 @@ export function request(ctx) {
         util.error('Catalog ID not found in stash', 'INVALID_INPUT');
     }
     // Normalize to DB format: ensure it starts with CATALOG#
-    const catalogId = (typeof rawCatalogId === 'string' && rawCatalogId.startsWith('CATALOG#')) ? rawCatalogId : 'CATALOG#' + rawCatalogId;
+    const catalogId = normalizeIdOrPrefix(rawCatalogId, 'CATALOG#');
     // Save normalized id back to stash so downstream functions see the DB key
     ctx.stash.catalogId = catalogId;
     // Direct GetItem on catalogs table

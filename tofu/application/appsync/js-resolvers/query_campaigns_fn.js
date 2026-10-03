@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 const MAX_PAGE_LIMIT = 100;
 
@@ -17,7 +18,7 @@ export function request(ctx) {
     
     const profileId = ctx.args.profileId;
     // Add PROFILE# prefix for DynamoDB query
-    const dbProfileId = profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeIdOrPrefix(profileId, 'PROFILE#');
     // V2: Direct PK query on profileId (no GSI needed)
     const request = {
         operation: 'Query',
