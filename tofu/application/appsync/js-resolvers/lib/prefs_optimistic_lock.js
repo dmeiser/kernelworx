@@ -8,6 +8,7 @@
  * the same shape unit-testable without rendering Terraform.
  */
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './ids.js';
 
 /**
  * Build the UpdateItem request for a `preferences.paymentMethods` write.
@@ -29,7 +30,7 @@ export function buildPaymentMethodWrite(accountId, readPreferencesExisted, readP
 
     return {
         operation: 'UpdateItem',
-        key: util.dynamodb.toMapValues({ accountId: `ACCOUNT#${accountId}` }),
+        key: util.dynamodb.toMapValues({ accountId: normalizeIdOrPrefix(accountId, 'ACCOUNT#') }),
         update: {
             expression: 'SET #prefs.#pm = :methods',
             expressionNames: {

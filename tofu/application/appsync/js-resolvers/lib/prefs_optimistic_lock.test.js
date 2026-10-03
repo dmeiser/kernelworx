@@ -28,6 +28,16 @@ describe('buildPaymentMethodWrite', () => {
         assert.deepStrictEqual(req.update.expressionValues, { ':methods': updatedMethods });
     });
 
+    it('leaves an already-prefixed account id alone instead of double-prefixing it', () => {
+        // The key is built through normalizeIdOrPrefix from lib/ids.js, the same
+        // owner the resolvers use, so a stash value that already carries the
+        // ACCOUNT# form (as the validation steps stash it) targets the same row
+        // rather than a phantom ACCOUNT#ACCOUNT# one.
+        const req = buildPaymentMethodWrite('ACCOUNT#user-123', true, {}, []);
+
+        assert.deepStrictEqual(req.key, { accountId: 'ACCOUNT#user-123' });
+    });
+
     it('requires the account to exist and preferences to be absent when the read found none', () => {
         const req = buildPaymentMethodWrite('user-123', false, undefined, []);
 

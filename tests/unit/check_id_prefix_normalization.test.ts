@@ -27,6 +27,36 @@ const WRITE_PATH_RESOLVERS = [
   "check_write_permission_fn.js",
 ];
 
+/**
+ * What this guard enforces, exactly: every file in SWEPT_FILES below - the named
+ * write-path resolvers AND every shared helper under lib/ - builds its
+ * ACCOUNT#/PROFILE# prefixes through lib/ids.js and never hand-rolls one. It is
+ * deliberately NOT tree-wide: resolvers outside this set (the share/invite
+ * paths, ensure_my_account_exists) still carry their own spellings, by decision.
+ *
+ * lib/ is swept by directory read rather than by name, because a helper there is
+ * imported by several resolvers at once, so a hand-rolled prefix in one is a
+ * defect at every call site at once. prefs_optimistic_lock.js carried exactly
+ * that - a `ACCOUNT#${accountId}` template literal on the payment-method write
+ * path - and survived review only because the sweep read the resolver directory
+ * alone and lib/ was invisible to it.
+ */
+
+// Shared spec/fixture modules under lib/ carry prefix literals as test data, not
+// as ID construction, so they are not normalization sites. Detected by their
+// node:test import rather than by name, so a new spec file stays covered.
+function isTestSpecModule(source: string): boolean {
+  return /from\s+['"]node:test['"]/.test(source);
+}
+
+const SWEPT_FILES = [
+  ...WRITE_PATH_RESOLVERS.map((name) => ({ name, path: join(JS_RESOLVERS_DIR, name) })),
+  ...readdirSync(LIB_DIR)
+    .filter((f) => f.endsWith(".js") && !f.endsWith(".test.js"))
+    .map((name) => ({ name, path: join(LIB_DIR, name) }))
+    .filter(({ path }) => !isTestSpecModule(readFileSync(path, "utf8"))),
+];
+
 // The ID prefixes the profile write path uses.
 const PREFIXES = ["ACCOUNT", "PROFILE"];
 
@@ -228,8 +258,8 @@ function findPrefixLiterals(source: string): {
 }
 
 describe("write-path ID-prefix normalization has a single owner", () => {
-  for (const name of WRITE_PATH_RESOLVERS) {
-    const source = readFileSync(join(JS_RESOLVERS_DIR, name), "utf8");
+  for (const { name, path } of SWEPT_FILES) {
+    const source = readFileSync(path, "utf8");
 
     test(`${name} builds every ACCOUNT#/PROFILE# prefix through lib/ids.js`, () => {
       const offenders = findPrefixLiterals(source)
@@ -300,5 +330,47 @@ describe("the guard catches the duplication it exists to prevent", () => {
   test("does not flag an ACCOUNT# prefix used in a name, not a string", () => {
     const code = "const ACCOUNT_COUNT = 3;";
     expect(findPrefixLiterals(code)).toEqual([]);
+  });
+
+  test("the sweep covers every shared helper under lib/, not just the resolvers", () => {
+    // The blind spot that let the defect through: the sweep was a single read of
+    // the resolver directory, so anything under lib/ was invisible. A helper is
+    // imported by several resolvers at once, so it must be swept by directory,
+    // and a new helper must be covered without editing a list.
+    const swept = new Set(SWEPT_FILES.map((f) => f.name));
+    const expected = readdirSync(LIB_DIR)
+      .filter((f) => f.endsWith(".js") && !f.endsWith(".test.js"))
+      .filter((f) => !isTestSpecModule(readFileSync(join(LIB_DIR, f), "utf8")));
+
+    expect(expected.length, "lib/ must contain swept helpers for this to mean anything").toBeGreaterThan(0);
+    for (const name of expected) {
+      expect(swept, `${name} under lib/ is not swept by the guard`).toContain(name);
+    }
+    for (const name of WRITE_PATH_RESOLVERS) {
+      expect(swept, `${name} is not swept by the guard`).toContain(name);
+    }
+  });
+
+  test("flags the hand-rolled ACCOUNT# key reintroduced into lib/prefs_optimistic_lock.js", () => {
+    // The exact defect this guard missed. Take the real helper source, put the
+    // concatenation back, and require the sweep to fire on it - a guard that
+    // stays green with the bug present reports safety it does not provide.
+    const real = readFileSync(
+      join(LIB_DIR, "prefs_optimistic_lock.js"),
+      "utf8",
+    );
+    const helperCall = /normalizeIdOrPrefix\(accountId, 'ACCOUNT#'\)/;
+    expect(
+      helperCall.test(real),
+      "lib/prefs_optimistic_lock.js no longer builds its key through normalizeIdOrPrefix, " +
+        "so this regression case no longer reflects the real call site",
+    ).toBe(true);
+
+    const reintroduced = real.replace(
+      helperCall,
+      "`ACCOUNT#${accountId}`",
+    );
+    const offenders = findPrefixLiterals(reintroduced).filter((f) => !f.inHelperCall);
+    expect(offenders.length).toBeGreaterThan(0);
   });
 });
