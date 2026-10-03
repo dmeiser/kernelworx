@@ -1,16 +1,15 @@
 import { util } from '@aws-appsync/utils';
 import { normalizeIdOrPrefix } from './lib/ids.js';
+import { ownerGetItemRequest } from './lib/owner_key.js';
 
 export function request(ctx) {
-    const profileId = ctx.args.profileId;
-    const dbProfileId = normalizeIdOrPrefix(profileId, 'PROFILE#');
-    const expectedOwner = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
-    ctx.stash.profileId = dbProfileId;
-    return {
-        operation: 'GetItem',
-        key: util.dynamodb.toMapValues({ ownerAccountId: expectedOwner, profileId: dbProfileId }),
-        consistentRead: true
-    };
+    // The owner-keyed strongly consistent GetItem has one owner (#438): the
+    // same helper the three verify_profile_owner_for_* resolvers use. This was
+    // the last inline copy of that key shape. The stash keeps the plain
+    // normalized id (the helper's key is already DynamoDB-mapped), built
+    // through the same ids.js owner so the two cannot drift.
+    ctx.stash.profileId = normalizeIdOrPrefix(ctx.args.profileId, 'PROFILE#');
+    return ownerGetItemRequest(ctx.identity.sub, ctx.args.profileId);
 }
 
 export function response(ctx) {
