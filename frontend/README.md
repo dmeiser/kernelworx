@@ -156,5 +156,6 @@ strict), `tsconfig.node.json` (Vite config), and `tsconfig.test.json` (adds the
 `tests/` tree and Vitest globals).
 
 CI runs the spellcheck from the repo root, then `npm run lint`, `npm run typecheck`,
-and `npm run test -- --coverage` on every PR (`.github/workflows/ci.yml`, `frontend`
-job).
+the generated-types sync gate (`npm run codegen` followed by `git diff --exit-code` on
+`src/types/graphql-generated.ts`), and `npm run test -- --coverage` on every PR
+(`.github/workflows/ci.yml`, `frontend` job).
