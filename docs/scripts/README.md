@@ -277,7 +277,7 @@ enforces and for the entry points that call it.
 
 ### GitHub Actions workflows (`.github/workflows/`)
 
-- **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + complexity + test + guards + js-resolvers + infra lint)
+- **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + codegen-sync + complexity + test + guards + js-resolvers + infra lint)
 - **`deploy-dev.yml`** / **`deploy-prod.yml`** — Environment deployment workflows
 - **`deploy-shared.yml`** — Shared infrastructure (Cognito, CloudFront, WAF) deployment
 - **`ephemeral-test.yml`** — Ephemeral environment test creation/destruction
