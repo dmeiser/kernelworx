@@ -2,8 +2,10 @@ import { util } from '@aws-appsync/utils';
 
 /**
  * Retrieves a catalog by catalogId.
- * READ ACCESS: Anyone can view catalog by ID (no authorization check).
- * Security relies on UUID obscurity - catalogIds are not guessable.
+ * INTERNAL: this is the catalog lookup step of the createOrder pipeline —
+ * it is NOT the getCatalog query resolver. Read authorization for the
+ * getCatalog query is enforced in
+ * tofu/application/appsync/mapping-templates/get_catalog_response.vtl.
  */
 export function request(ctx) {
     const rawCatalogId = ctx.stash.catalogId;
@@ -30,8 +32,6 @@ export function response(ctx) {
         util.error('Catalog not found for id: ' + ctx.stash.catalogId, 'NOT_FOUND');
     }
 
-    // READ ACCESS: Anyone can view catalog by ID (no auth check).
-    // Security relies on UUID obscurity - catalogIds are not guessable.
     // Store catalog in stash for CreateOrderFn
     ctx.stash.catalog = ctx.result;
     

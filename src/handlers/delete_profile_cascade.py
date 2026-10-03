@@ -12,6 +12,7 @@ from .campaign_operations import (
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id
     from utils.boto import get_s3_client
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
@@ -19,6 +20,7 @@ try:  # pragma: no cover
     from utils.logging import get_logger
     from utils.s3 import purge_s3_prefix
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id
     from ..utils.boto import get_s3_client
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
@@ -200,7 +202,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     # ensure_profile_id only returns None for falsy input, which is guarded above
     assert db_profile_id is not None
 
-    caller_account_id = event.get("identity", {}).get("sub")
+    caller_account_id = get_caller_id(event)
     if not caller_account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 

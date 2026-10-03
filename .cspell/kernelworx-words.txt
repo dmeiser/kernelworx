@@ -50,6 +50,7 @@ campaignId
 Campaigns
 campaignYear
 cancelable
+caplog
 capsys
 catalogId
 Catalogs
@@ -136,6 +137,7 @@ fullWidth
 getfail
 getsizeof
 getters
+getvalue
 GEZDGNBVGY
 giftcard
 GitHub

@@ -229,6 +229,9 @@ import_ephemeral_resources() {
   import_resource "$run_id" "module.s3.aws_s3_bucket_public_access_block.exports" "kernelworx-exports${suffix}"
   import_resource "$run_id" "module.s3.aws_s3_bucket_lifecycle_configuration.exports" "kernelworx-exports${suffix}"
   import_resource "$run_id" "module.s3.aws_s3_bucket_cors_configuration.exports" "kernelworx-exports${suffix}"
+  # #525: deny-insecure-transport bucket policies (import id = bucket name).
+  import_resource "$run_id" "module.s3.aws_s3_bucket_policy.exports" "kernelworx-exports${suffix}"
+  import_resource "$run_id" "module.cloudfront.aws_s3_bucket_policy.static" "kernelworx-static${suffix}"
 
   # IAM roles
   log "   Importing IAM roles..."

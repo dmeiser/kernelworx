@@ -73,6 +73,8 @@ const util = {
   error: (message: unknown, errorType: unknown) => {
     throw new VtlError(String(message), String(errorType));
   },
+  toJson: (value: unknown) =>
+    value === undefined ? '' : JSON.stringify(value),
   qr: () => QUIET,
   autoId: () => nextAutoId(),
   time: utilTime,
@@ -98,6 +100,8 @@ function callMethod(target: unknown, name: string, args: unknown[]): unknown {
     }
     if (name === 'get') return map[String(args[0])];
     if (name === 'containsKey') return Object.hasOwn(map, String(args[0]));
+    if (name === 'isEmpty') return Object.keys(map).length === 0;
+    if (name === 'size') return Object.keys(map).length;
   }
   throw new Error(`Unsupported VTL method .${name} on ${JSON.stringify(target)}`);
 }
@@ -210,6 +214,7 @@ type Expr =
   | { k: 'not'; e: Expr }
   | { k: 'num'; v: number }
   | { k: 'bool'; v: boolean }
+  | { k: 'null' }
   | { k: 'str'; parts: StrPart[] }
   | { k: 'map'; entries: Array<[string, Expr]> }
   | { k: 'list'; items: Expr[] }
@@ -375,6 +380,7 @@ function parsePrimary(cursor: Cursor): Expr {
     const word = readIdent(cursor);
     if (word === 'true') return { k: 'bool', v: true };
     if (word === 'false') return { k: 'bool', v: false };
+    if (word === 'null') return { k: 'null' };
     throw new Error(`Unexpected identifier '${word}' in expression`);
   }
   throw new Error(`Unexpected character '${char}' at offset ${cursor.index}`);
@@ -460,6 +466,8 @@ function evalExpr(expr: Expr, state: EvalState): unknown {
       return expr.v;
     case 'bool':
       return expr.v;
+    case 'null':
+      return null;
     case 'str':
       return expr.parts
         .map((part) =>

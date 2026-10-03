@@ -128,13 +128,34 @@ resource "aws_cloudfront_origin_access_control" "main" {
 
 # S3 Bucket Policy for CloudFront. Grants access to the CloudFront service
 # principal, scoped to this distribution via the SourceArn condition (the
-# OAC signing model replaces the OAI canonical-user grant).
+# OAC signing model replaces the OAI canonical-user grant). Also carries the
+# standard CIS/KICS DenyInsecureTransport statement (#525): OAC origin
+# requests are HTTPS, so the deny only blocks plaintext misconfiguration.
+# kics-scan ignore-line on the policy below: KICS cannot parse ${...}
+# interpolations inside jsonencode(), so it cannot see the deny statement
+# (the exports bucket policy is a data source, which KICS does parse). The
+# statement is contract-tested in tests/unit/test_s3_deny_insecure_transport.py.
 resource "aws_s3_bucket_policy" "static" {
   bucket = var.static_bucket_id
 
+  # kics-scan ignore-line
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      {
+        Sid    = "DenyInsecureTransport"
+        Effect = "Deny"
+        Principal = {
+          AWS = "*"
+        }
+        Action   = "s3:*"
+        Resource = [var.static_bucket_arn, "${var.static_bucket_arn}/*"]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      },
       {
         Sid    = "AllowCloudFrontAccess"
         Effect = "Allow"
