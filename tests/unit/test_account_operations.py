@@ -910,6 +910,128 @@ class TestDeleteMyAccount:
         # The retry completed the deletion: the account record is gone.
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
 
+    def test_typed_app_error_from_cognito_helper_passes_through(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An AppError from the Cognito helper keeps its own code and message.
+
+        The narrowed catch must not rewrap typed errors: a future retryable
+        RESOURCE_BUSY from the helper (issue #291) reaches the caller intact.
+        """
+        from src.handlers import account_operations
+        from src.handlers.account_operations import delete_my_account
+        from src.utils.errors import AppError
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {
+                "Users": [{"Username": "test-user", "Attributes": [{"Name": "sub", "Value": sample_account_id}]}]
+            }
+
+            def typed_failure(*args: Any, **kwargs: Any) -> None:
+                raise AppError(ErrorCode.RESOURCE_BUSY, "Cognito is throttled; retry")
+
+            monkeypatch.setattr(account_operations, "_delete_user_from_cognito", typed_failure)
+
+            event = {
+                **appsync_event,
+                "identity": {"sub": sample_account_id},
+            }
+
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+            assert result["message"] == "Cognito is throttled; retry"
+
+        # The sweep ran to completion before the typed failure.
+        assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
+
+    def test_final_accounts_row_delete_failure_is_honest(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A failure of the cascade's final accounts-row delete names the partial state.
+
+        All eight sub-cascades completed, so the message must say the user data
+        is gone and the account record (and its sign-in) survived; a throttled
+        failure is retryable.
+        """
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
+        from src.utils.dynamodb import tables
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        def fail_delete_item(*args: Any, **kwargs: Any) -> Any:
+            raise ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "throttled"}},
+                "DeleteItem",
+            )
+
+        monkeypatch.setattr(tables.accounts, "delete_item", fail_delete_item)
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {"Users": []}
+
+            event = {
+                **appsync_event,
+                "identity": {"sub": sample_account_id},
+            }
+
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+            assert result["message"] == (
+                "All user data was deleted but the account record could not be removed, "
+                "so the sign-in remains active; retry to complete the deletion"
+            )
+
+        # The account record survived the failed final delete.
+        assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is not None
+
     def test_delete_account_unexpected_exception(
         self,
         dynamodb_table: Any,
@@ -1065,7 +1187,7 @@ class TestDeleteMyAccount:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test transient Cognito errors that exhaust retries raise AppError."""
+        """Throttled Cognito errors that exhaust retries surface as retryable RESOURCE_BUSY (#291)."""
         from botocore.exceptions import ClientError
 
         from src.handlers.account_operations import delete_my_account
@@ -1109,7 +1231,7 @@ class TestDeleteMyAccount:
                 result = delete_my_account(event, lambda_context)
 
                 assert result["__isError"] is True
-                assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+                assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
                 assert result["message"] == (
                     "Account data was deleted but the Cognito user could not be confirmed deleted; "
                     "retry to complete the deletion"
@@ -1401,15 +1523,22 @@ class TestDeleteAllUserData:
         assert "Item" not in response
 
     def test_delete_all_user_data_client_error(self, dynamodb_table: Any, s3_bucket: Any) -> None:
-        """delete_all_user_data propagates ClientError on account delete."""
+        """A permanent final accounts-row delete failure raises the honest AppError."""
         from botocore.exceptions import ClientError
 
         from src.handlers.deletion_cascade import delete_all_user_data
+        from src.utils.errors import AppError
 
         with patch("src.handlers.deletion_cascade.tables.accounts.delete_item") as mock_delete:
             mock_delete.side_effect = ClientError(
                 {"Error": {"Code": "ResourceNotFoundException", "Message": "Table not found"}},
                 "DeleteItem",
             )
-            with pytest.raises(ClientError):
+            with pytest.raises(AppError) as excinfo:
                 delete_all_user_data("test-user")
+
+        assert excinfo.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert excinfo.value.message == (
+            "All user data was deleted but the account record could not be removed, "
+            "so the sign-in remains active; retry to complete the deletion"
+        )

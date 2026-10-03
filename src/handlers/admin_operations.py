@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Callable, Dict, NoReturn, Optional, cast
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
@@ -1031,13 +1031,20 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     if username:
         try:
             _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger, actor_sub)
-        except Exception as e:
+        except (ClientError, BotoCoreError, AppError) as e:
+            # A typed AppError from the Cognito helper propagates with its own
+            # code and message intact; only a raw botocore fault is attributed
+            # here. BotoCoreError stays in the catch because a transport
+            # failure after the request was sent is precisely the
+            # unknown-state case below.
+            if isinstance(e, AppError):
+                raise
             logger.error(
                 "Account data swept but the Cognito delete did not report success; "
                 "the account's Cognito state is unknown and needs a retry or manual completion",
                 account_id=account_id,
                 error=str(e),
-                error_code=getattr(e, "error_code", None) or ErrorCode.INTERNAL_ERROR,
+                error_code=ErrorCode.INTERNAL_ERROR,
                 exc_info=True,
             )
             raise AppError(

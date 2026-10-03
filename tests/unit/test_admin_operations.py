@@ -1890,11 +1890,11 @@ class TestAdminPurgeUserAccount:
             first = admin_purge_user_account(event, lambda_context)
 
             assert first["__isError"] is True
+            # The helper raises a typed AppError for the Cognito ClientError;
+            # the narrowed catch lets it pass through with its own message
+            # instead of rewrapping it into the partial-state wording.
             assert first["errorCode"] == ErrorCode.INTERNAL_ERROR
-            assert first["message"] == (
-                "Account data was deleted but the Cognito user could not be confirmed deleted; "
-                "retry the purge to complete the deletion"
-            )
+            assert first["message"] == "Failed to delete user from Cognito"
             # The sweep ran: the invite is gone, but the accounts row survives
             # for the retry to remove.
             assert invites_table.get_item(Key={"inviteCode": "INV-OWNED"}).get("Item") is None
@@ -1935,8 +1935,13 @@ class TestAdminPurgeUserAccount:
 
             def _delete_then_fail(**kwargs: Any) -> Dict[str, Any]:
                 # The delete call itself is issued; the failure arrives on the
-                # way back, so the user's state is genuinely unknown.
-                raise ConnectionResetError("connection reset after the request was sent")
+                # way back, so the user's state is genuinely unknown. Botocore
+                # raises ConnectionError for this class of transport failure.
+                from botocore.exceptions import ConnectionError as BotoConnectionError
+
+                raise BotoConnectionError(
+                    error="connection reset after the request was sent", operation_name="AdminDeleteUser"
+                )
 
             mock_cognito.admin_delete_user.side_effect = _delete_then_fail
             mock_get_client.return_value = mock_cognito
