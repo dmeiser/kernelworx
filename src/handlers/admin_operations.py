@@ -1023,16 +1023,18 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
 
     # The sweep runs before the Cognito delete and is safe to re-run, so a
     # retry after a failure below converges; a failure here leaves the Cognito
-    # user untouched. When the sweep succeeded but the Cognito delete fails,
-    # the partial state (data swept, user still present) is logged loudly with
-    # an error_code-tagged field and surfaced honestly to the caller.
+    # user untouched. When the sweep succeeded but the Cognito delete does not
+    # report success, the partial state is logged loudly with an error_code
+    # field and surfaced honestly to the caller: the Cognito user's state is
+    # unknown, not asserted to survive, because the delete may have landed and
+    # still raised afterwards.
     if username:
         try:
             _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger, actor_sub)
         except Exception as e:
             logger.error(
-                "Account data swept but the Cognito user is still present; "
-                "the account needs manual completion or a retry",
+                "Account data swept but the Cognito delete did not report success; "
+                "the account's Cognito state is unknown and needs a retry or manual completion",
                 account_id=account_id,
                 error=str(e),
                 error_code=getattr(e, "error_code", None) or ErrorCode.INTERNAL_ERROR,
@@ -1040,7 +1042,8 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
             )
             raise AppError(
                 ErrorCode.INTERNAL_ERROR,
-                "Account data was deleted but the Cognito user is still present; retry the purge to complete the deletion",
+                "Account data was deleted but the Cognito user could not be confirmed deleted; "
+                "retry the purge to complete the deletion",
             ) from e
     else:
         logger.info("Cognito user already absent", account_id=account_id, actor_sub=actor_sub)
