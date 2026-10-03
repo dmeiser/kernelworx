@@ -7,6 +7,7 @@
  * - Name is unique for this user (case-insensitive)
  */
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const name = (ctx.args.name || '').trim();
@@ -37,7 +38,7 @@ export function request(ctx) {
     ctx.stash.accountId = accountId;
     
     // Fetch existing payment methods to check uniqueness
-    const key = { accountId: `ACCOUNT#${accountId}` };
+    const key = { accountId: normalizeIdOrPrefix(accountId, 'ACCOUNT#') };
     
     return {
         operation: 'GetItem',

@@ -3,10 +3,10 @@
  *
  * The three resolvers implement one behavior: read the profile from the base
  * table under the caller's own partition key, so an item found there proves
- * ownership, and refuse everything else. Only the FORBIDDEN message and the way
- * the caller's `sub` is turned into an `ownerAccountId` differ per family, so
- * that data lives in PROFILE_OWNER_FAMILIES below and every behavioral
- * expectation is asserted once, here.
+ * ownership, and refuse everything else. Since #534 the shared key
+ * construction lives in lib/owner_key.js (ownerGetItemRequest), so the three
+ * files differ only in their FORBIDDEN message; every behavioral expectation
+ * is asserted once, here, for all families.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
@@ -21,37 +21,18 @@ export const PROFILE_OWNER_FAMILIES = {
         request: shareRequest,
         response: shareResponse,
         forbiddenMessage: 'Forbidden: Only profile owner can share profiles',
-        // Records the share path as it behaves today: it prefixes the raw sub
-        // without first checking for an existing "ACCOUNT#" prefix. invite and
-        // revoke normalize instead. The row goes away when the family is
-        // consolidated onto one owner-verification helper.
-        prefixedSub: {
-            title: 'keys the raw caller sub on the share path',
-            sub: 'ACCOUNT#user-123',
-            expectedOwnerAccountId: 'ACCOUNT#ACCOUNT#user-123',
-        },
     },
     invite: {
         resolver: 'verify_profile_owner_for_invite_fn',
         request: inviteRequest,
         response: inviteResponse,
         forbiddenMessage: 'Forbidden: Only profile owner can create invites',
-        prefixedSub: {
-            title: 'leaves an already-prefixed caller sub alone',
-            sub: 'ACCOUNT#user-123',
-            expectedOwnerAccountId: 'ACCOUNT#user-123',
-        },
     },
     revoke: {
         resolver: 'verify_profile_owner_for_revoke_fn',
         request: revokeRequest,
         response: revokeResponse,
         forbiddenMessage: 'Forbidden: Only profile owner can revoke shares',
-        prefixedSub: {
-            title: 'leaves an already-prefixed caller sub alone',
-            sub: 'ACCOUNT#user-123',
-            expectedOwnerAccountId: 'ACCOUNT#user-123',
-        },
     },
 };
 
@@ -97,15 +78,15 @@ export function describeVerifyProfileOwnerFamily(familyKey) {
             assert.strictEqual(result.consistentRead, true);
         });
 
-        it(family.prefixedSub.title, () => {
+        it('leaves an already-prefixed caller sub alone (#534)', () => {
             const result = family.request({
-                identity: { sub: family.prefixedSub.sub },
+                identity: { sub: 'ACCOUNT#user-123' },
                 args: { input: { profileId: 'PROFILE#prof-456' } },
                 stash: {},
             });
 
             assert.deepStrictEqual(result.key, {
-                ownerAccountId: family.prefixedSub.expectedOwnerAccountId,
+                ownerAccountId: 'ACCOUNT#user-123',
                 profileId: 'PROFILE#prof-456',
             });
         });

@@ -17,9 +17,12 @@ The `<run-id>` argument accepted by `scripts/ephemeral-env.sh`,
 those four per-script argument lists all point here rather than restating it:
 
 - **Format** — must match `[A-Za-z0-9._-]+`.
-- **Provenance** — the `pr-<number>` value derived from the `pull_request` /
-  `workflow_dispatch` inputs (`pr_number`) of `ephemeral-test.yml`,
-  `manual-teardown.yml`, and `recover-environment.yml`.
+- **Provenance** — the `pr-<number>` value. Every call site forms it from a PR
+  number: `pull_request` events in `ephemeral-test.yml` (`up`),
+  `ephemeral-teardown-on-merge.yml` (`down`) and the workflow's nightly `sweep`
+  job (`down`, with the number parsed back out of the S3 state key), plus the
+  `workflow_dispatch` `pr_number` input in `manual-teardown.yml` and
+  `recover-environment.yml`.
 - **Enforcement** — `validate_run_id` in
   `scripts/ephemeral-recover-common.sh` is the single owner of the rule. All four
   shell entry points call it before any AWS call, so a traversal-shaped id such
@@ -277,7 +280,7 @@ enforces and for the entry points that call it.
 
 ### GitHub Actions workflows (`.github/workflows/`)
 
-- **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + complexity + test + guards + js-resolvers + infra lint)
+- **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + codegen-sync + complexity + test + guards + js-resolvers + infra lint)
 - **`deploy-dev.yml`** / **`deploy-prod.yml`** — Environment deployment workflows
 - **`deploy-shared.yml`** — Shared infrastructure (Cognito, CloudFront, WAF) deployment
 - **`ephemeral-test.yml`** — Ephemeral environment test creation/destruction

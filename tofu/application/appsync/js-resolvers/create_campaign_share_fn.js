@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix, stripIdPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const input = ctx.args && ctx.args.input ? ctx.args.input : {};
@@ -29,15 +30,11 @@ export function request(ctx) {
         };
     }
 
-    const creatorRaw = (typeof createdBy === 'string' && createdBy.startsWith('ACCOUNT#'))
-        ? createdBy.substring(8)
-        : createdBy;
+    const creatorRaw = stripIdPrefix(createdBy, 'ACCOUNT#');
 
     const profile = ctx.stash && ctx.stash.profile ? ctx.stash.profile : {};
     const ownerAccountId = profile.ownerAccountId || (ctx.stash && ctx.stash.profileOwner) || '';
-    const ownerRaw = (typeof ownerAccountId === 'string' && ownerAccountId.startsWith('ACCOUNT#'))
-        ? ownerAccountId.substring(8)
-        : ownerAccountId;
+    const ownerRaw = stripIdPrefix(ownerAccountId, 'ACCOUNT#');
 
     if (creatorRaw === ownerRaw) {
         ctx.stash.skipShare = true;
@@ -51,14 +48,12 @@ export function request(ctx) {
     }
 
     const rawProfileId = input.profileId || profile.profileId;
-    const dbProfileId = (typeof rawProfileId === 'string' && rawProfileId.startsWith('PROFILE#'))
-        ? rawProfileId
-        : 'PROFILE#' + rawProfileId;
+    const dbProfileId = normalizeIdOrPrefix(rawProfileId, 'PROFILE#');
 
-    const targetAccountId = 'ACCOUNT#' + creatorRaw;
+    const targetAccountId = normalizeIdOrPrefix(creatorRaw, 'ACCOUNT#');
     const callerSub = ctx.identity && ctx.identity.sub ? ctx.identity.sub : '';
-    const callerAccountId = callerSub.startsWith('ACCOUNT#') ? callerSub : 'ACCOUNT#' + callerSub;
-    const dbOwnerAccountId = ownerAccountId.startsWith('ACCOUNT#') ? ownerAccountId : 'ACCOUNT#' + ownerAccountId;
+    const callerAccountId = normalizeIdOrPrefix(callerSub, 'ACCOUNT#');
+    const dbOwnerAccountId = normalizeIdOrPrefix(ownerAccountId, 'ACCOUNT#');
     const shareId = 'SHARE#' + util.autoId();
     const now = util.time.nowISO8601();
 

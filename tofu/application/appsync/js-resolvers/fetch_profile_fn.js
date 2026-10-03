@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 // This code backs TWO aws_appsync_function resources (fetch_profile and
 // fetch_profile_step2 in functions_profiles.tf) that run back-to-back in
@@ -31,7 +32,7 @@ export function request(ctx) {
     }
 
     // Add PROFILE# prefix for DynamoDB query (field resolver strips it for API responses)
-    const dbProfileId = profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeIdOrPrefix(profileId, 'PROFILE#');
 
     // Step 2 (owner confirmed in Step 1): no further read is needed.
     if (ctx.stash && ctx.stash.isOwner === true) {
@@ -56,9 +57,7 @@ export function request(ctx) {
     // Step 1: strongly consistent base-table GetItem under the caller's account
     // to confirm ownership before any eventually-consistent GSI read (#545).
     const callerId = ctx.identity && ctx.identity.sub ? ctx.identity.sub : '';
-    const callerAccountId = callerId.startsWith('ACCOUNT#')
-        ? callerId
-        : `ACCOUNT#${callerId}`;
+    const callerAccountId = normalizeIdOrPrefix(callerId, 'ACCOUNT#');
 
     return {
         operation: 'GetItem',

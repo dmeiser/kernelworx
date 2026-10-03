@@ -16,6 +16,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import React, { useEffect, useState } from 'react';
 import {
   CheckCircle as CheckIcon,
   Delete as DeleteIcon,
@@ -23,6 +24,7 @@ import {
   Security as SecurityIcon,
 } from '@mui/icons-material';
 import type { UseMfaReturn } from '../../hooks/useMfa';
+import { handleSignOutAndRedirect } from '../../lib/authUtils';
 
 interface MfaSectionProps {
   mfaHook: UseMfaReturn;
@@ -80,7 +82,7 @@ const MfaPrimaryActions: React.FC<MfaPrimaryActionsProps> = ({ hook, onSetup }) 
         variant="outlined"
         color="error"
         startIcon={<DeleteIcon />}
-        onClick={hook.handleDisableMFA}
+        onClick={() => void hook.handleDisableMFA()}
         disabled={hook.mfaLoading}
         sx={{ mt: 2 }}
       >
@@ -156,11 +158,40 @@ const MfaSetupSection: React.FC<MfaSetupSectionProps> = ({ hook }) => {
   );
 };
 
+const FederatedDisableNotice: React.FC = () => {
+  const handleSignIn = () => {
+    void handleSignOutAndRedirect();
+  };
+
+  return (
+    <Box sx={{ py: 1, mb: 2 }}>
+      <Alert severity="warning" sx={{ mb: 2 }}>
+        <strong>Administrator Security Policy:</strong> Changing MFA requires a password sign-in.
+      </Alert>
+      <Typography variant="body2" color="text.secondary" paragraph>
+        This account signs in through a social provider which cannot present MFA. Changing MFA requires signing in with
+        your email and password. Please sign out and sign in with your password.
+      </Typography>
+      <Button variant="contained" color="primary" onClick={handleSignIn}>
+        Sign Out
+      </Button>
+    </Box>
+  );
+};
+
 interface MfaConfirmDialogProps {
   hook: UseMfaReturn;
 }
 
 const MfaConfirmDialog: React.FC<MfaConfirmDialogProps> = ({ hook }) => {
+  const [password, setPassword] = useState('');
+
+  // The component stays mounted across open/close, so clear any stale entry
+  // each time the dialog opens.
+  useEffect(() => {
+    if (hook.pendingConfirmation) setPassword('');
+  }, [hook.pendingConfirmation]);
+
   if (!hook.pendingConfirmation) return null;
 
   return (
@@ -168,11 +199,30 @@ const MfaConfirmDialog: React.FC<MfaConfirmDialogProps> = ({ hook }) => {
       <DialogTitle>Disable MFA?</DialogTitle>
       <DialogContent>
         <Typography>{hook.pendingConfirmation.message}</Typography>
+        <Typography variant="body2" color="text.secondary" paragraph sx={{ mt: 2 }}>
+          Enter your password to confirm:
+        </Typography>
+        <TextField
+          label="Password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          disabled={hook.mfaLoading}
+          helperText="Enter your password"
+          sx={{ minWidth: 200 }}
+        />
       </DialogContent>
       <DialogActions>
-        <Button onClick={hook.cancelMfaConfirmation}>Cancel</Button>
-        <Button onClick={() => void hook.confirmDisableMFA()} color="error" variant="contained">
-          Disable
+        <Button onClick={hook.cancelMfaConfirmation} disabled={hook.mfaLoading}>
+          Cancel
+        </Button>
+        <Button
+          onClick={() => void hook.confirmDisableMFA(password)}
+          disabled={hook.mfaLoading || password.length === 0}
+          color="error"
+          variant="contained"
+        >
+          {hook.mfaLoading ? <CircularProgress size={24} /> : 'Disable'}
         </Button>
       </DialogActions>
     </Dialog>
@@ -187,14 +237,18 @@ export const MfaSection: React.FC<MfaSectionProps> = ({ mfaHook, onSetupMFA, isA
     </Stack>
 
     <Typography variant="body2" color="text.secondary" paragraph>
-      Add an extra layer of security to your account with TOTP multi-factor authentication. Both an authenticator app and passkeys are supported together.
+      Add an extra layer of security to your account with TOTP multi-factor authentication. Both an authenticator app
+      and passkeys are supported together.
     </Typography>
 
     {isAdmin && (
       <Alert severity="info" sx={{ mb: 2 }}>
-        <strong>Administrator notice:</strong> Admin operations need an authenticator app (TOTP) enrolled; a passkey alone signs you in but does not grant admin.
+        <strong>Administrator notice:</strong> Admin operations need an authenticator app (TOTP) enrolled; a passkey
+        alone signs you in but does not grant admin.
       </Alert>
     )}
+
+    {mfaHook.federatedNotice && <FederatedDisableNotice />}
 
     <MfaStatusAlerts hook={mfaHook} />
     <MfaPrimaryActions hook={mfaHook} onSetup={onSetupMFA} />

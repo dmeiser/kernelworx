@@ -16,11 +16,13 @@ from .deletion_cascade import delete_all_user_data
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id
     from utils.cognito import retry_on_transient_errors
     from utils.cognito_filters import cognito_user_filter
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id
     from ..utils.cognito import retry_on_transient_errors
     from ..utils.cognito_filters import cognito_user_filter
     from ..utils.errors import AppError, ErrorCode
@@ -100,7 +102,7 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     """
     logger.info("delete_my_account handler invoked")
 
-    account_id = (event.get("identity") or {}).get("sub")
+    account_id = get_caller_id(event)
     if not account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
     logger.info(f"Deleting account for: {account_id}")

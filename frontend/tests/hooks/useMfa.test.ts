@@ -12,9 +12,32 @@ vi.mock('aws-amplify/auth', () => ({
   setUpTOTP: vi.fn(),
   verifyTOTPSetup: vi.fn(),
   updateMFAPreference: vi.fn(),
+  updatePassword: vi.fn(),
   fetchMFAPreference: vi.fn(),
+  fetchAuthSession: vi.fn(),
   deleteWebAuthnCredential: vi.fn(),
 }));
+
+// Native (password) session shape by default: an idToken payload with no
+// identities claim, so the real checkIsFederatedSession detection runs.
+const nativeSession = {
+  tokens: { idToken: { payload: { sub: 'native-user' } } },
+};
+
+const federatedSession = {
+  tokens: {
+    idToken: {
+      payload: {
+        sub: 'federated-user',
+        identities: [{ providerName: 'Google' }],
+      },
+    },
+  },
+};
+
+const mockNativeSession = () => {
+  vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(nativeSession as any);
+};
 
 vi.mock('../../src/lib/mfaStatus', () => ({
   getMfaEnabledFromCognito: vi.fn(),
@@ -33,6 +56,7 @@ const mockQrDataUrl = 'data:image/png;base64,mockqrcode';
 describe('useMfa', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNativeSession();
     vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({
       sharedSecret: mockSharedSecret,
       getSetupUri: vi.fn(() => new URL('otpauth://totp/PopcornManager:user?secret=JBSWY3DPEHPK3PXP')),
@@ -40,6 +64,7 @@ describe('useMfa', () => {
     (vi.mocked(QRCode.toDataURL) as any).mockResolvedValue(mockQrDataUrl);
     vi.mocked(amplifyAuth.verifyTOTPSetup).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.updateMFAPreference).mockResolvedValue(undefined as any);
+    vi.mocked(amplifyAuth.updatePassword).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.fetchMFAPreference).mockResolvedValue({ preferred: 'TOTP' } as any);
   });
   /* cspell:enable */
@@ -179,17 +204,18 @@ describe('useMfa', () => {
   it('handles disable MFA confirmation flow', async () => {
     const { result } = renderHook(() => useMfa());
 
-    act(() => {
-      result.current.handleDisableMFA();
+    await act(async () => {
+      await result.current.handleDisableMFA();
     });
 
     expect(result.current.pendingConfirmation).toEqual({
       type: 'disable',
       message: 'Are you sure you want to disable multi-factor authentication? This will make your account less secure.',
     });
+    expect(result.current.federatedNotice).toBe(false);
 
     await act(async () => {
-      await result.current.confirmDisableMFA();
+      await result.current.confirmDisableMFA('123456');
     });
 
     expect(amplifyAuth.updateMFAPreference).toHaveBeenCalledWith({ totp: 'DISABLED' });
@@ -197,11 +223,93 @@ describe('useMfa', () => {
     expect(result.current.pendingConfirmation).toBeNull();
   });
 
-  it('cancels disable MFA confirmation without disabling', () => {
+  it('re-authenticates by re-checking the password before disabling MFA (#512)', async () => {
+    // Cognito's UpdateUserMFAPreference accepts any live session, so the
+    // disable path must first re-authenticate. The house pattern (usePasswordChange)
+    // is to re-check the current password via updatePassword: an unchanged
+    // password is a net no-op that still proves possession of the password.
+    vi.mocked(amplifyAuth.updatePassword).mockClear();
+    vi.mocked(amplifyAuth.updateMFAPreference).mockClear();
     const { result } = renderHook(() => useMfa());
 
     act(() => {
-      result.current.handleDisableMFA();
+      result.current.setMfaEnabled(true);
+    });
+
+    await act(async () => {
+      await result.current.confirmDisableMFA('correct-horse');
+    });
+
+    expect(amplifyAuth.updatePassword).toHaveBeenCalledWith({
+      oldPassword: 'correct-horse',
+      newPassword: 'correct-horse',
+    });
+    expect(amplifyAuth.updateMFAPreference).toHaveBeenCalledWith({ totp: 'DISABLED' });
+    expect(result.current.mfaEnabled).toBe(false);
+  });
+
+  it('refuses to disable MFA when the password is not verified (no re-auth, #512)', async () => {
+    // A hijacked/borrowed session that cannot supply the current password must
+    // not be able to turn MFA off: the re-auth fails, so the preference is left
+    // untouched and the account stays MFA-protected.
+    vi.mocked(amplifyAuth.updatePassword).mockRejectedValueOnce(new Error('Incorrect username or password.'));
+    const { result } = renderHook(() => useMfa());
+
+    act(() => {
+      result.current.setMfaEnabled(true);
+    });
+
+    await act(async () => {
+      await result.current.confirmDisableMFA('wrong-password');
+    });
+
+    expect(amplifyAuth.updateMFAPreference).not.toHaveBeenCalled();
+    expect(result.current.mfaEnabled).toBe(true);
+    expect(result.current.mfaError).toBe('Incorrect username or password.');
+  });
+
+  it('quits with a federated notice instead of a password prompt for a federated session', async () => {
+    // Federated session detected through the real checkIsFederatedSession logic:
+    // only the leaf fetchAuthSession is mocked with an identities claim.
+    vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(federatedSession as any);
+    const { result } = renderHook(() => useMfa());
+
+    act(() => {
+      result.current.setMfaEnabled(true);
+    });
+
+    await act(async () => {
+      await result.current.handleDisableMFA();
+    });
+
+    expect(amplifyAuth.fetchAuthSession).toHaveBeenCalledTimes(1);
+    expect(result.current.federatedNotice).toBe(true);
+    expect(result.current.pendingConfirmation).toBeNull();
+    expect(amplifyAuth.updatePassword).not.toHaveBeenCalled();
+    expect(amplifyAuth.updateMFAPreference).not.toHaveBeenCalled();
+    expect(result.current.mfaEnabled).toBe(true);
+  });
+
+  it('never shows a federated notice for a native session (disabled path)', async () => {
+    const { result } = renderHook(() => useMfa());
+
+    act(() => {
+      result.current.setMfaEnabled(true);
+    });
+
+    await act(async () => {
+      await result.current.handleDisableMFA();
+    });
+
+    expect(result.current.federatedNotice).toBe(false);
+    expect(amplifyAuth.updatePassword).not.toHaveBeenCalled();
+  });
+
+  it('cancels disable MFA confirmation without disabling', async () => {
+    const { result } = renderHook(() => useMfa());
+
+    await act(async () => {
+      await result.current.handleDisableMFA();
     });
     expect(result.current.pendingConfirmation).not.toBeNull();
 
@@ -232,6 +340,7 @@ describe('useMfa', () => {
 describe('useMfa error paths', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockNativeSession();
     vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({
       sharedSecret: mockSharedSecret,
       getSetupUri: vi.fn(() => new URL('otpauth://totp/PopcornManager:user?secret=JBSWY3DPEHPK3PXP')),
@@ -239,6 +348,7 @@ describe('useMfa error paths', () => {
     (vi.mocked(QRCode.toDataURL) as any).mockResolvedValue(mockQrDataUrl);
     vi.mocked(amplifyAuth.verifyTOTPSetup).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.updateMFAPreference).mockResolvedValue(undefined as any);
+    vi.mocked(amplifyAuth.updatePassword).mockResolvedValue(undefined as any);
     vi.mocked(amplifyAuth.fetchMFAPreference).mockResolvedValue({ preferred: 'TOTP' } as any);
   });
 
@@ -249,7 +359,10 @@ describe('useMfa error paths', () => {
 
     act(() => {
       result.current.setMfaError('stale error');
-      result.current.handleDisableMFA();
+    });
+
+    await act(async () => {
+      await result.current.handleDisableMFA();
     });
 
     await act(async () => {
@@ -313,7 +426,7 @@ describe('useMfa error paths', () => {
     const { result } = renderHook(() => useMfa());
 
     await act(async () => {
-      await result.current.confirmDisableMFA();
+      await result.current.confirmDisableMFA('123456');
     });
 
     expect(result.current.mfaError).toBe('disable exploded');
@@ -325,7 +438,7 @@ describe('useMfa error paths', () => {
     const { result } = renderHook(() => useMfa());
 
     await act(async () => {
-      await result.current.confirmDisableMFA();
+      await result.current.confirmDisableMFA('123456');
     });
 
     expect(result.current.mfaError).toBe('Failed to disable MFA');
