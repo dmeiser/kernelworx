@@ -1537,6 +1537,12 @@ class TestAdminMfaRequired:
         assert result["message"] == "Admin access required"
 
 
+PURGE_COGNITO_FAILURE_MESSAGE = (
+    "Account data swept but the Cognito delete did not report success; "
+    "the account's Cognito state is unknown and needs a retry or manual completion"
+)
+
+
 class TestAdminPurgeUserAccount:
     """Tests for admin_purge_user_account handler (#521).
 
@@ -1546,6 +1552,21 @@ class TestAdminPurgeUserAccount:
     payment-QR codes) plus the two things no browser can do itself, the
     accounts record and the Cognito user. Catalogs are never deleted.
     """
+
+    @staticmethod
+    def _audit_record(caplog: Any, message: str) -> Dict[str, Any]:
+        """Return the single structured log record whose ``message`` matches."""
+        records = []
+        for record in caplog.records:
+            emitted = record.getMessage()
+            if not emitted.startswith("{"):
+                continue
+            entry = json.loads(emitted)
+            if entry.get("message") == message:
+                records.append(entry)
+
+        assert len(records) == 1, f"expected exactly one {message!r} record, got {len(records)}"
+        return records[0]
 
     def _seed_account(self, account_id: str) -> None:
         get_accounts_table().put_item(
@@ -1764,7 +1785,7 @@ class TestAdminPurgeUserAccount:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """A real Cognito delete failure surfaces as INTERNAL_ERROR and keeps the account record."""
+        """A non-transient Cognito delete failure surfaces as INTERNAL_ERROR and keeps the account record."""
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
 
@@ -1785,8 +1806,93 @@ class TestAdminPurgeUserAccount:
 
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        # Message and code agree: INTERNAL_ERROR does not promise a retry, but
+        # names what survives so an operator cannot conclude the record is gone.
+        assert "retry" not in result["message"]
+        assert "accounts record still exists" in result["message"]
+        assert "complete the deletion manually" in result["message"]
         # The accounts row is deleted after Cognito, so the failure leaves the account retryable.
         assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+
+    def test_purge_cognito_throttle_is_retryable_and_attributes_the_actor(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        sample_account_id: str,
+        caplog: Any,
+    ) -> None:
+        """A throttled Cognito delete is RESOURCE_BUSY; the single error line names actor, account, and AWS code."""
+        caplog.set_level(logging.ERROR)
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_cognito.admin_delete_user.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Rate exceeded."}},
+                "AdminDeleteUser",
+            )
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        # The retryable code and the retry-promising message arrive together.
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+        assert "Retry the purge to complete the deletion" in result["message"]
+        assert "accounts record still exists" in result["message"]
+        assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+
+        entry = self._audit_record(caplog, PURGE_COGNITO_FAILURE_MESSAGE)
+        assert entry["actor_sub"] == sample_account_id
+        assert entry["account_id"] == target_account_id
+        assert entry["aws_error_code"] == "TooManyRequestsException"
+        # No constant placeholder: the field must carry the real AWS code.
+        assert entry["aws_error_code"] != ErrorCode.INTERNAL_ERROR
+
+    def test_purge_cognito_failure_logs_the_actor_exactly_once(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        sample_account_id: str,
+        caplog: Any,
+    ) -> None:
+        """A non-transient Cognito failure logs one error line, attributed to the actor."""
+        caplog.set_level(logging.ERROR)
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_cognito.admin_delete_user.side_effect = ClientError(
+                {"Error": {"Code": "NotAuthorizedException", "Message": "Access denied."}},
+                "AdminDeleteUser",
+            )
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+
+        entry = self._audit_record(caplog, PURGE_COGNITO_FAILURE_MESSAGE)
+        assert entry["actor_sub"] == sample_account_id
+        assert entry["account_id"] == target_account_id
+        assert entry["aws_error_code"] == "NotAuthorizedException"
 
     def test_purge_sweeps_invites_for_the_supplied_profiles(
         self,

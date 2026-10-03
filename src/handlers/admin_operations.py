@@ -55,7 +55,14 @@ try:  # pragma: no cover
     from utils.auth import require_admin_mfa
     from utils.boto import get_cognito_client
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import EMAIL_SEARCH_KEY, TRANSIENT_ERROR_CODES, batch_get_chunked, get_required_env, tables
+    from utils.dynamodb import (
+        EMAIL_SEARCH_KEY,
+        TRANSIENT_ERROR_CODES,
+        batch_get_chunked,
+        get_required_env,
+        is_transient_client_error,
+        tables,
+    )
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
     from utils.payment_methods import delete_all_user_qr_codes
@@ -64,7 +71,14 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
     from ..utils.boto import get_cognito_client
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import EMAIL_SEARCH_KEY, TRANSIENT_ERROR_CODES, batch_get_chunked, get_required_env, tables
+    from ..utils.dynamodb import (
+        EMAIL_SEARCH_KEY,
+        TRANSIENT_ERROR_CODES,
+        batch_get_chunked,
+        get_required_env,
+        is_transient_client_error,
+        tables,
+    )
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
     from ..utils.payment_methods import delete_all_user_qr_codes
@@ -818,7 +832,12 @@ def _find_cognito_user_by_sub(
 def _delete_user_from_cognito(
     cognito: Any, user_pool_id: str, username: str, email: str, logger: Any, actor_sub: str = ""
 ) -> None:
-    """Delete user from Cognito, treating UserNotFoundException as idempotent success."""
+    """Delete user from Cognito, treating UserNotFoundException as idempotent success.
+
+    Failures propagate as the raw ``ClientError`` — the caller owns failure
+    logging and typed-error mapping, so the real AWS error code survives to
+    where the context (account, actor, partial state) is added.
+    """
     masked_email = mask_email(email)
     try:
         cognito.admin_delete_user(UserPoolId=user_pool_id, Username=username)
@@ -838,8 +857,54 @@ def _delete_user_from_cognito(
                 actor_sub=actor_sub,
             )
             return
-        logger.error("Cognito admin_delete_user failed", error=str(e), error_code=error_code)
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito") from e
+        raise
+
+
+def _delete_cognito_user_after_sweep(
+    cognito: Any,
+    user_pool_id: str,
+    username: str,
+    email: str,
+    account_id: str,
+    actor_sub: str,
+    logger: Any,
+) -> None:
+    """Delete the Cognito user after the data sweep, surfacing partial state honestly.
+
+    The sweep runs before this call and is safe to re-run, so a retry after a
+    failure here converges. Only two facts are established on this failure
+    path: the sweep completed and the Cognito delete did not report success —
+    the user's Cognito state is unknown (the delete may have landed, or a
+    failed re-lookup of an absent user lands here too), and the accounts row
+    is deleted only after this step, so it survives the raise and is named in
+    the caller-facing message. A throttled delete is the retryable
+    ``RESOURCE_BUSY`` case (#291); anything else is ``INTERNAL_ERROR`` and the
+    message points at manual completion instead of promising a retry.
+    """
+    try:
+        _delete_user_from_cognito(cognito, user_pool_id, username, email, logger, actor_sub)
+    except Exception as e:
+        logger.error(
+            "Account data swept but the Cognito delete did not report success; "
+            "the account's Cognito state is unknown and needs a retry or manual completion",
+            account_id=account_id,
+            actor_sub=actor_sub,
+            error=str(e),
+            aws_error_code=e.response.get("Error", {}).get("Code", "") if isinstance(e, ClientError) else "",
+            exc_info=True,
+        )
+        if isinstance(e, ClientError) and is_transient_client_error(e):
+            raise AppError(
+                ErrorCode.RESOURCE_BUSY,
+                "Account data was swept but the Cognito user could not be confirmed deleted; "
+                "the accounts record still exists. Retry the purge to complete the deletion.",
+            ) from e
+        raise AppError(
+            ErrorCode.INTERNAL_ERROR,
+            "Account data was swept but the Cognito user could not be confirmed deleted; "
+            "the accounts record still exists and the Cognito user may also survive — "
+            "complete the deletion manually.",
+        ) from e
 
 
 def _account_exists_in_dynamodb(account_id: str, logger: Any, actor_sub: str = "") -> bool:
@@ -1020,7 +1085,7 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     delete_all_user_qr_codes(account_id, logger)
 
     if username:
-        _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger, actor_sub)
+        _delete_cognito_user_after_sweep(cognito, user_pool_id, username, email or "", account_id, actor_sub, logger)
     else:
         logger.info("Cognito user already absent", account_id=account_id, actor_sub=actor_sub)
 
