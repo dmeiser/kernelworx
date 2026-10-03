@@ -881,14 +881,13 @@ def _delete_cognito_user_after_sweep(
     The sweep runs before this call and is safe to re-run, so a retry after a
     failure here converges. Only two facts are established on this failure
     path: the sweep completed and the Cognito delete did not report success —
-    the user's Cognito state is unknown (the delete may have landed, or a
-    failed re-lookup of an absent user lands here too), and the accounts row
-    is deleted only after this step, so it survives the raise and is named in
-    the caller-facing message. A retryable Cognito fault (the same codes the
-    retry wrapper retries, including client ``InternalErrorException``)
-    becomes the retryable ``RESOURCE_BUSY`` case (#291); anything else is
-    ``INTERNAL_ERROR`` and the message points at manual completion instead of
-    promising a retry.
+    the user's Cognito state is unknown (the delete may have landed), and the
+    accounts row is deleted only after this step, so it survives the raise
+    and is named in the caller-facing message. A retryable Cognito fault (the
+    same codes the retry wrapper retries, including client
+    ``InternalErrorException``) becomes the retryable ``RESOURCE_BUSY`` case
+    (#291); anything else is ``INTERNAL_ERROR`` and the message points at
+    manual completion instead of promising a retry.
     """
     try:
         _delete_user_from_cognito(cognito, user_pool_id, username, email, logger, actor_sub)
