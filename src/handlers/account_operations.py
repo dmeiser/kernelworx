@@ -128,8 +128,13 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     try:
         _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
     except Exception as e:
+        # Only two facts are established here: the sweep completed and the
+        # Cognito delete did not report success. Whether the user survives is
+        # unknown (the delete may have landed, and a failed re-lookup of an
+        # absent user also lands here), so the message says exactly that.
         logger.error(
-            "Account data swept but the Cognito user is still present; the account needs manual completion or a retry",
+            "Account data swept but the Cognito delete did not report success; "
+            "the account's Cognito state is unknown and needs a retry or manual completion",
             account_id=account_id,
             error=str(e),
             error_code=getattr(e, "error_code", None) or ErrorCode.INTERNAL_ERROR,
@@ -137,7 +142,8 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         )
         raise AppError(
             ErrorCode.INTERNAL_ERROR,
-            "Account data was deleted but the Cognito user is still present; retry to complete the deletion",
+            "Account data was deleted but the Cognito user could not be confirmed deleted; "
+            "retry to complete the deletion",
         ) from e
 
     logger.info("Account deletion completed successfully")

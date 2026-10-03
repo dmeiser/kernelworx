@@ -1892,7 +1892,7 @@ class TestAdminPurgeUserAccount:
             assert first["__isError"] is True
             assert first["errorCode"] == ErrorCode.INTERNAL_ERROR
             assert first["message"] == (
-                "Account data was deleted but the Cognito user is still present; "
+                "Account data was deleted but the Cognito user could not be confirmed deleted; "
                 "retry the purge to complete the deletion"
             )
             # The sweep ran: the invite is gone, but the accounts row survives
@@ -1905,6 +1905,57 @@ class TestAdminPurgeUserAccount:
         assert second is True
         assert mock_cognito.admin_delete_user.call_count == 2
         assert "Item" not in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+
+    def test_cognito_delete_raising_after_success_does_not_claim_user_present(
+        self,
+        dynamodb_table: Any,
+        invites_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A failure raised after AdminDeleteUser landed must not assert the user survived.
+
+        A transport-level failure can surface after the delete request has
+        already reached Cognito, so the handler knows only that the delete did
+        not report success. Reporting the user as still present would state a
+        fact the purge never checked.
+        """
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+        invites_table.put_item(Item={"inviteCode": "INV-OWNED", "profileId": "PROFILE#p1", "status": "PENDING"})
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+
+            def _delete_then_fail(**kwargs: Any) -> Dict[str, Any]:
+                # The delete call itself is issued; the failure arrives on the
+                # way back, so the user's state is genuinely unknown.
+                raise ConnectionResetError("connection reset after the request was sent")
+
+            mock_cognito.admin_delete_user.side_effect = _delete_then_fail
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert result["message"] == (
+                "Account data was deleted but the Cognito user could not be confirmed deleted; "
+                "retry the purge to complete the deletion"
+            )
+            # The purge never re-read the user, so it must not claim survival.
+            assert "still present" not in result["message"]
+            assert mock_cognito.admin_delete_user.call_count == 1
+
+        # The sweep ran and the accounts row survives, so a retry converges.
+        assert invites_table.get_item(Key={"inviteCode": "INV-OWNED"}).get("Item") is None
+        assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
 
     def test_data_sweep_failure_leaves_cognito_user_intact(
         self,
