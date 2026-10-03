@@ -144,7 +144,9 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         if isinstance(e, AppError):
             raise
         error_code = (
-            ErrorCode.RESOURCE_BUSY if isinstance(e, ClientError) and is_transient_client_error(e) else ErrorCode.INTERNAL_ERROR
+            ErrorCode.RESOURCE_BUSY
+            if isinstance(e, ClientError) and is_transient_client_error(e)
+            else ErrorCode.INTERNAL_ERROR
         )
         logger.error(
             "Account data swept but the Cognito delete did not report success; "
