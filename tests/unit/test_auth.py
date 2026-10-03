@@ -5,12 +5,11 @@ from typing import Any, Dict
 import pytest
 
 from src.utils.auth import (
+    _is_profile_owner,
     batch_check_profile_access,
     check_profile_access,
-    get_account,
     has_mfa,
     is_admin,
-    is_profile_owner,
     require_admin_mfa,
     require_profile_access,
 )
@@ -18,39 +17,57 @@ from src.utils.dynamodb import get_dynamodb_resource, tables
 from src.utils.errors import AppError, ErrorCode
 
 
-class TestIsProfileOwner:
-    """Tests for is_profile_owner function."""
+class TestInternalIsProfileOwner:
+    """Tests for _is_profile_owner function with both ID spellings."""
 
-    def test_owner_returns_true(
+    def test_owner_returns_true_unprefixed(
         self,
         dynamodb_table: Any,
         sample_profile: Any,
         sample_account_id: str,
         sample_profile_id: str,
     ) -> None:
-        """Test that owner check returns True for owner."""
-        result = is_profile_owner(sample_account_id, sample_profile_id)
+        """Test strongly consistent owner check with unprefixed ID."""
+        assert _is_profile_owner(tables.profiles, sample_account_id, sample_profile_id) is True
 
-        assert result is True
+    def test_owner_returns_true_prefixed(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """Test strongly consistent owner check with prefixed ID."""
+        assert _is_profile_owner(tables.profiles, f"ACCOUNT#{sample_account_id}", sample_profile_id) is True
 
-    def test_non_owner_returns_false(
+    def test_non_owner_returns_false_unprefixed(
         self,
         dynamodb_table: Any,
         sample_profile: Any,
         sample_profile_id: str,
         another_account_id: str,
     ) -> None:
-        """Test that owner check returns False for non-owner."""
-        result = is_profile_owner(another_account_id, sample_profile_id)
+        """Test strongly consistent non-owner check with unprefixed ID."""
+        assert _is_profile_owner(tables.profiles, another_account_id, sample_profile_id) is False
 
-        assert result is False
+    def test_non_owner_returns_false_prefixed(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test strongly consistent non-owner check with prefixed ID."""
+        assert _is_profile_owner(tables.profiles, f"ACCOUNT#{another_account_id}", sample_profile_id) is False
 
-    def test_nonexistent_profile_raises_error(self, dynamodb_table: Any, sample_account_id: str) -> None:
-        """Test that nonexistent profile raises NOT_FOUND."""
-        with pytest.raises(AppError) as exc_info:
-            is_profile_owner(sample_account_id, "PROFILE#nonexistent")
-
-        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
+    def test_nonexistent_caller_returns_false_prefixed(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+    ) -> None:
+        """Test strongly consistent owner check with nonexistent prefixed caller ID."""
+        assert _is_profile_owner(tables.profiles, "ACCOUNT#nonexistent-caller", sample_profile_id) is False
 
 
 class TestCheckProfileAccess:
@@ -77,6 +94,30 @@ class TestCheckProfileAccess:
     ) -> None:
         """Test that owner has WRITE access."""
         result = check_profile_access(sample_account_id, sample_profile_id, "WRITE")
+
+        assert result is True
+
+    def test_owner_has_read_access_prefixed(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """Test that owner has READ access using prefixed account ID."""
+        result = check_profile_access(f"ACCOUNT#{sample_account_id}", sample_profile_id, "READ")
+
+        assert result is True
+
+    def test_owner_has_write_access_prefixed(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """Test that owner has WRITE access using prefixed account ID."""
+        result = check_profile_access(f"ACCOUNT#{sample_account_id}", sample_profile_id, "WRITE")
 
         assert result is True
 
@@ -125,6 +166,71 @@ class TestCheckProfileAccess:
         result = check_profile_access(another_account_id, sample_profile_id, "WRITE")
 
         assert result is False
+
+    def test_shared_user_with_read_has_access_prefixed(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that user with READ share has read access using prefixed ID."""
+        shares_table.put_item(
+            Item={
+                "profileId": sample_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        result = check_profile_access(f"ACCOUNT#{another_account_id}", sample_profile_id, "READ")
+
+        assert result is True
+
+    def test_shared_user_without_write_denied_prefixed(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that user with only READ is denied WRITE access using prefixed ID."""
+        shares_table.put_item(
+            Item={
+                "profileId": sample_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
+            }
+        )
+
+        result = check_profile_access(f"ACCOUNT#{another_account_id}", sample_profile_id, "WRITE")
+
+        assert result is False
+
+    def test_unauthorized_user_denied_both_spellings(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that unauthorized non-owner with no share is denied under both spellings."""
+        assert check_profile_access(another_account_id, sample_profile_id, "READ") is False
+        assert check_profile_access(f"ACCOUNT#{another_account_id}", sample_profile_id, "READ") is False
+        assert check_profile_access("ACCOUNT#nonexistent-caller", sample_profile_id, "READ") is False
+
+    def test_nonexistent_profile_raises_not_found_prefixed(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+    ) -> None:
+        """Test that nonexistent profile raises NOT_FOUND with prefixed caller ID."""
+        with pytest.raises(AppError) as exc_info:
+            check_profile_access(f"ACCOUNT#{sample_account_id}", "PROFILE#nonexistent", "READ")
+
+        assert exc_info.value.error_code == ErrorCode.NOT_FOUND
 
     def test_user_with_write_only_has_read_access(
         self,
@@ -1366,6 +1472,33 @@ class TestBatchCheckProfileAccess:
         assert result == {sample_profile_id}
         assert queries == []
 
+    def test_batch_check_with_prefixed_caller_id(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        sample_account_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test batch check with prefixed caller ID resolves owned profile and drops non-owned."""
+        result = batch_check_profile_access(
+            f"ACCOUNT#{sample_account_id}",
+            [sample_profile_id, "PROFILE#nonexistent"],
+        )
+        assert result == {sample_profile_id}
+
+        result_unowned = batch_check_profile_access(
+            f"ACCOUNT#{another_account_id}",
+            [sample_profile_id],
+        )
+        assert result_unowned == set()
+
+        result_nonexistent = batch_check_profile_access(
+            "ACCOUNT#nonexistent-caller",
+            [sample_profile_id],
+        )
+        assert result_nonexistent == set()
+
 
 class TestRequireProfileAccess:
     """Tests for require_profile_access function."""
@@ -1416,34 +1549,59 @@ class TestRequireProfileAccess:
 
         assert exc_info.value.error_code == ErrorCode.FORBIDDEN
 
+    def test_owner_allowed_prefixed(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_account_id: str,
+        sample_profile_id: str,
+    ) -> None:
+        """Test that owner is allowed using prefixed account ID."""
+        require_profile_access(f"ACCOUNT#{sample_account_id}", sample_profile_id, "READ")
+        require_profile_access(f"ACCOUNT#{sample_account_id}", sample_profile_id, "WRITE")
 
-class TestGetAccount:
-    """Tests for get_account function."""
-
-    def test_existing_account_returned(self, dynamodb_table: Any, sample_account_id: str) -> None:
-        """Test that existing account is returned."""
-        # Create account in accounts table (multi-table design)
-        import boto3
-
-        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
-        accounts_table.put_item(
+    def test_shared_user_allowed_prefixed(
+        self,
+        dynamodb_table: Any,
+        shares_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that shared user is allowed using prefixed account ID."""
+        shares_table.put_item(
             Item={
-                "accountId": f"ACCOUNT#{sample_account_id}",
-                "email": "test@example.com",
+                "profileId": sample_profile_id,
+                "targetAccountId": f"ACCOUNT#{another_account_id}",
+                "permissions": ["READ"],
             }
         )
+        require_profile_access(f"ACCOUNT#{another_account_id}", sample_profile_id, "READ")
 
-        result = get_account(sample_account_id)
+    def test_unauthorized_user_raises_forbidden_prefixed(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+        another_account_id: str,
+    ) -> None:
+        """Test that unauthorized user raises FORBIDDEN with prefixed account ID."""
+        with pytest.raises(AppError) as exc_info:
+            require_profile_access(f"ACCOUNT#{another_account_id}", sample_profile_id, "READ")
 
-        assert result is not None
-        assert result["accountId"] == f"ACCOUNT#{sample_account_id}"
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
 
-    def test_nonexistent_account_returns_none(self, dynamodb_table: Any) -> None:
-        """Test that nonexistent account returns None."""
-        result = get_account("nonexistent-account")
+    def test_nonexistent_caller_raises_forbidden_prefixed(
+        self,
+        dynamodb_table: Any,
+        sample_profile: Any,
+        sample_profile_id: str,
+    ) -> None:
+        """Test that nonexistent caller raises FORBIDDEN with prefixed account ID."""
+        with pytest.raises(AppError) as exc_info:
+            require_profile_access("ACCOUNT#nonexistent-caller", sample_profile_id, "READ")
 
-        assert result is None
+        assert exc_info.value.error_code == ErrorCode.FORBIDDEN
 
 
 class TestIsAdmin:

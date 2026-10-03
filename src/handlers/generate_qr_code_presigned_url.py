@@ -13,11 +13,13 @@ Supports two invocation shapes from AppSync:
 from typing import TYPE_CHECKING, Any, Dict, cast
 
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id
     from utils.auth import check_profile_access
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.payment_methods import generate_presigned_get_url
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id
     from ..utils.auth import check_profile_access
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
@@ -56,8 +58,7 @@ def _caller_can_access_qr(caller_id: str, owner_account_id: str, profile_id: str
 
 def _validate_and_extract_params(event: Dict[str, Any]) -> tuple[str, str, str | None]:
     """Validate event and extract required parameters."""
-    identity = event.get("identity", {})
-    caller_id = identity.get("sub")
+    caller_id = get_caller_id(event)
     if not caller_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 

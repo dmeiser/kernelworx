@@ -19,9 +19,16 @@ logger = get_logger(__name__)
 
 
 def _is_profile_owner(profiles_table: "Table", caller_account_id: str, db_profile_id: str) -> bool:
-    """Check if caller is the profile owner via strongly consistent base-table lookup."""
+    """Check if caller is the profile owner via strongly consistent base-table lookup.
+
+    ``caller_account_id`` is normalized with ``ensure_account_id`` here, so the raw
+    Cognito sub and the ``ACCOUNT#``-prefixed spelling both resolve to the stored
+    ``ownerAccountId`` key (#660).
+    """
+    db_caller_id = ensure_account_id(caller_account_id)
+    assert db_caller_id is not None
     direct_response = profiles_table.get_item(
-        Key={"ownerAccountId": f"ACCOUNT#{caller_account_id}", "profileId": db_profile_id},
+        Key={"ownerAccountId": db_caller_id, "profileId": db_profile_id},
         ConsistentRead=True,
     )
     return "Item" in direct_response
@@ -114,7 +121,8 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     Check if caller has access to profile.
 
     Args:
-        caller_account_id: Cognito sub (Account ID) of the caller
+        caller_account_id: Cognito sub (Account ID) of the caller, in either the raw
+            sub or the ``ACCOUNT#``-prefixed spelling; normalized at this edge (#660)
         profile_id: Profile ID to check access for
         required_permission: "READ" or "WRITE" (case-insensitive)
 
@@ -128,16 +136,16 @@ def check_profile_access(caller_account_id: str, profile_id: str, required_permi
     db_profile_id = ensure_profile_id(profile_id)
     # ensure_profile_id returns Optional[str], but we know profile_id is not None here
     assert db_profile_id is not None
+    db_caller_id = ensure_account_id(caller_account_id)
+    # ensure_account_id returns Optional[str], but we know caller_account_id is not None here
+    assert db_caller_id is not None
 
     # Check if caller is owner (faster, strongly consistent)
-    if _is_profile_owner(tables.profiles, caller_account_id, db_profile_id):
+    if _is_profile_owner(tables.profiles, db_caller_id, db_profile_id):
         return True
 
     # Check share permissions, validating the share against the profile's
     # current owner with a strongly consistent base-table read.
-    db_caller_id = ensure_account_id(caller_account_id)
-    # ensure_account_id returns Optional[str], but we know caller_account_id is not None here
-    assert db_caller_id is not None
     if _check_share_permissions(tables.profiles, tables.shares, db_profile_id, db_caller_id, required_permission):
         return True
 
@@ -314,66 +322,6 @@ def require_profile_access(caller_account_id: str, profile_id: str, required_per
             ErrorCode.FORBIDDEN,
             f"You do not have {required_permission} access to this profile",
         )
-
-
-def is_profile_owner(caller_account_id: str, profile_id: str) -> bool:
-    """
-    Check if caller is the owner of a profile.
-
-    This function queries the eventually consistent ``profileId-index`` GSI to
-    locate the profile's current owner. It is suitable for non-authoritative
-    ownership checks (for example, UI hints or audit logging) but should not be
-    used as the sole security gate; prefer ``check_profile_access`` or
-    ``require_profile_access`` for access-control decisions, which perform
-    strongly consistent base-table reads where possible.
-
-    Args:
-        caller_account_id: Cognito sub (Account ID) of the caller
-        profile_id: Profile ID to check
-
-    Returns:
-        True if caller is owner, False otherwise
-
-    Raises:
-        AppError: If profile not found
-    """
-    # Normalize profile_id to PROFILE# prefix for queries
-    db_profile_id = ensure_profile_id(profile_id)
-    assert db_profile_id is not None
-
-    # Multi-table design V2: Query profileId-index GSI
-    # Profile table structure: PK=ownerAccountId, SK=profileId, GSI=profileId-index
-    response = tables.profiles.query(
-        IndexName="profileId-index",
-        KeyConditionExpression="profileId = :profileId",
-        ExpressionAttributeValues={":profileId": db_profile_id},
-        Limit=1,
-    )
-
-    items = response.get("Items", [])
-    if not items:
-        raise AppError(ErrorCode.NOT_FOUND, f"Profile {profile_id} not found")
-
-    profile = items[0]
-    stored_owner = profile.get("ownerAccountId", "")
-    # Handle both with and without prefix for backward compatibility
-    return stored_owner == caller_account_id or stored_owner == f"ACCOUNT#{caller_account_id}"
-
-
-def get_account(account_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get account by ID.
-
-    Args:
-        account_id: Cognito sub (Account ID)
-
-    Returns:
-        Account item or None if not found
-    """
-    # Multi-table design: accountId is the only key (format: ACCOUNT#uuid)
-    response = tables.accounts.get_item(Key={"accountId": f"ACCOUNT#{account_id}"})
-
-    return response.get("Item")
 
 
 def _get_claims(event: Any) -> Optional[Dict[str, Any]]:

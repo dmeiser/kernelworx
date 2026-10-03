@@ -38,10 +38,14 @@ from .campaign_reporting import _ORDER_QUERY_CONCURRENCY, _PROFILE_BATCH_LIMIT
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id
     from utils.dynamodb import get_required_env
+    from utils.errors import AppError, ErrorCode
     from utils.logging import get_correlation_id, get_logger
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id
     from ..utils.dynamodb import get_required_env
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_correlation_id, get_logger
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -301,7 +305,9 @@ def handler(event: Dict[str, Any], context: Any) -> List[str]:
         List of catalog IDs (deduplicated)
     """
     request_logger = get_logger(__name__, get_correlation_id(event))
-    caller_sub = event["identity"]["sub"]
+    caller_sub = get_caller_id(event)
+    if not caller_sub:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 
     # Add ACCOUNT# prefix for consistency with data model
     account_id_with_prefix = f"ACCOUNT#{caller_sub}" if not caller_sub.startswith("ACCOUNT#") else caller_sub

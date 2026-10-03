@@ -30,10 +30,11 @@ RUN_ID="$1"
 USER_POOL_ID="$2"
 CLIENT_ID="$3"
 
-# The run-id is caller-supplied (it comes from the pr_number workflow inputs)
-# and is interpolated into the test-user emails, so reject anything outside
-# [A-Za-z0-9._-] before the first Cognito call. #568 (PR #584) owns the rule;
-# this script reuses its shared validate_run_id helper rather than repeating it.
+# The run-id is caller-supplied and is interpolated into the test-user emails,
+# so it must be validated before the first Cognito call. The contract (format,
+# provenance, enforcement) is stated once in the "Run identifiers" section of
+# docs/scripts/README.md; validate_run_id in ephemeral-recover-common.sh is its
+# single owner, and this script calls that helper rather than restating it.
 # shellcheck source=/dev/null
 source "$(cd "$(dirname "$0")" && pwd)/ephemeral-recover-common.sh"
 

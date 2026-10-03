@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId, normalizeIdOrPrefix, stripIdPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const input = ctx.args && ctx.args.input ? ctx.args.input : {};
@@ -6,22 +7,17 @@ export function request(ctx) {
     const targetAccountId = ctx.stash ? ctx.stash.targetAccountId : undefined;
     
     // Ensure targetAccountId has ACCOUNT# prefix when querying the shares table
-    const dbTargetAccountId = targetAccountId && targetAccountId.startsWith('ACCOUNT#')
-        ? targetAccountId
-        : (targetAccountId ? `ACCOUNT#${targetAccountId}` : targetAccountId);
+    const dbTargetAccountId = targetAccountId ? normalizeId(targetAccountId, 'ACCOUNT#') : targetAccountId;
     
     // Store clean ID (without ACCOUNT# prefix) for stash consistency
-    const cleanTargetAccountId = targetAccountId && targetAccountId.startsWith('ACCOUNT#')
-        ? targetAccountId.substring(8)
-        : targetAccountId;
+    const cleanTargetAccountId = stripIdPrefix(targetAccountId, 'ACCOUNT#');
     if (ctx.stash) {
         ctx.stash.cleanTargetAccountId = cleanTargetAccountId;
     }
     
-    // Normalize profileId to ensure PROFILE# prefix is used when querying shares table
-    const dbProfileId = profileId && profileId.startsWith('PROFILE#')
-        ? profileId
-        : (profileId ? `PROFILE#${profileId}` : profileId);
+    // Normalize profileId to ensure PROFILE# prefix is used when querying shares table;
+    // a missing profileId passes through untouched, exactly as before (#534).
+    const dbProfileId = profileId ? normalizeId(profileId, 'PROFILE#') : profileId;
 
     // Query shares table directly by PK+SK
     return {

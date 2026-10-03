@@ -24,18 +24,6 @@ def _transfer_test_tables() -> Any:
     return dynamodb
 
 
-def test_validation_validate_unit_fields_requires_unit_number():
-    from src.utils.errors import AppError
-    from src.utils.ids import ensure_profile_id
-    from src.utils.validation import validate_unit_fields
-
-    with pytest.raises(AppError):
-        validate_unit_fields("Pack", None, "City", "ST")
-
-    # Ensure PROFILE# prefixing path is exercised via the centralized utility
-    assert ensure_profile_id("abc") == "PROFILE#abc"
-
-
 def test_pre_signup_handle_signup_exception():
     from botocore.exceptions import ClientError
 

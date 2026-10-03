@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 /**
  * WRITE ACCESS: Only owner can delete catalog (or admin).
@@ -7,7 +8,7 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     const catalogId = ctx.args.catalogId;
     // Normalize catalogId for direct GetItem
-    const dbCatalogId = catalogId && catalogId.startsWith('CATALOG#') ? catalogId : `CATALOG#${catalogId}`;
+    const dbCatalogId = normalizeIdOrPrefix(catalogId, 'CATALOG#');
     // Store caller ID for authorization check
     ctx.stash.callerId = ctx.identity.sub;
     // Get catalog using catalogId as primary key
@@ -39,13 +40,16 @@ export function response(ctx) {
     } else if (typeof groupsClaim === 'string') {
         groups = [groupsClaim];
     }
-    // Check for 'admin' (lowercase) - standard Cognito group name
-    const isAdmin = groups.includes('admin') || groups.includes('ADMIN');
+    // Check for the 'ADMIN' Cognito group. The group name is an undeclared,
+    // out-of-band contract; every other admin check in the codebase (is_admin
+    // in src/utils/auth.py, admin_operations, AuthContext, amrTripwire) accepts
+    // the uppercase spelling only, so this must too (#504).
+    const isAdmin = groups.includes('ADMIN');
     // MFA status from the injected JWT mfa claim (source of truth) (#336).
     // An admin may only use admin privileges after MFA.
     const hasMfa = ctx.identity && ctx.identity.claims ? ctx.identity.claims['mfa'] === true : false;
     // ownerAccountId now has 'ACCOUNT#' prefix
-    const isOwner = catalog.ownerAccountId === 'ACCOUNT#' + callerId;
+    const isOwner = catalog.ownerAccountId === normalizeIdOrPrefix(callerId, 'ACCOUNT#');
     
     // Authorization logic:
     // - Owner can delete their own catalogs (no MFA needed)

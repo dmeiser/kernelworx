@@ -13,7 +13,10 @@ log() {
 }
 
 # Reject run-ids that are not plain [A-Za-z0-9._-] before they reach an S3
-# state key or a -var value. Same rule as scripts/generate_integration_env.py.
+# state key or a -var value. This function is the single owner of the rule (the
+# same rule scripts/generate_integration_env.py applies); the contract it
+# enforces and the entry points that call it are documented in the
+# "Run identifiers" section of docs/scripts/README.md.
 validate_run_id() {
   local run_id="$1"
   if ! [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -46,7 +49,7 @@ init_backend() {
   echo "# placeholder" > "$ROOT_DIR/.build/lambda-layer/python/.placeholder"
 
   log "📦 Initializing OpenTofu backend..."
-  cd "$ENV_DIR"
+  cd "$ENV_DIR" || exit 1
   tofu init -input=false \
     -backend-config="key=$state_key" \
     -backend-config="bucket=$STATE_BUCKET" \
@@ -226,6 +229,9 @@ import_ephemeral_resources() {
   import_resource "$run_id" "module.s3.aws_s3_bucket_public_access_block.exports" "kernelworx-exports${suffix}"
   import_resource "$run_id" "module.s3.aws_s3_bucket_lifecycle_configuration.exports" "kernelworx-exports${suffix}"
   import_resource "$run_id" "module.s3.aws_s3_bucket_cors_configuration.exports" "kernelworx-exports${suffix}"
+  # #525: deny-insecure-transport bucket policies (import id = bucket name).
+  import_resource "$run_id" "module.s3.aws_s3_bucket_policy.exports" "kernelworx-exports${suffix}"
+  import_resource "$run_id" "module.cloudfront.aws_s3_bucket_policy.static" "kernelworx-static${suffix}"
 
   # IAM roles
   log "   Importing IAM roles..."

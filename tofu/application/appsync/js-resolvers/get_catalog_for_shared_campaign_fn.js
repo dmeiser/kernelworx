@@ -15,8 +15,11 @@ export function response(ctx) {
         util.error('Catalog not found', 'NOT_FOUND');
     }
 
-    // READ ACCESS: Anyone can read catalog by ID (no authorization check).
-    // Security relies on UUID obscurity - catalogIds are not guessable.
+    // INTERNAL: catalog existence lookup for the createSharedCampaign pipeline —
+    // this is not the getCatalog query resolver, and the catalog is never
+    // returned to the caller (the pipeline responds with the shared campaign).
+    // Read authorization for the getCatalog query is enforced in
+    // tofu/application/appsync/mapping-templates/get_catalog_response.vtl.
     // WRITE ACCESS: Only owner can update/delete (checked in update/delete resolvers).
     const catalog = ctx.result;
     if (catalog.isDeleted === true) {

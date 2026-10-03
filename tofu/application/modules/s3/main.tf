@@ -168,6 +168,36 @@ resource "aws_s3_bucket_lifecycle_configuration" "exports" {
   }
 }
 
+# Deny any non-TLS request to the exports bucket (#525): the standard
+# CIS/KICS control. All legitimate access is already TLS (boto3 defaults and
+# browser fetches against pre-signed https:// URLs), so this only blocks a
+# future plaintext misconfiguration. Access stays via IAM roles; the policy
+# grants nothing.
+data "aws_iam_policy_document" "exports_deny_insecure_transport" {
+  statement {
+    sid       = "DenyInsecureTransport"
+    effect    = "Deny"
+    actions   = ["s3:*"]
+    resources = [aws_s3_bucket.exports.arn, "${aws_s3_bucket.exports.arn}/*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "exports" {
+  bucket = aws_s3_bucket.exports.id
+  policy = data.aws_iam_policy_document.exports_deny_insecure_transport.json
+}
+
 resource "aws_s3_bucket_cors_configuration" "exports" {
   bucket = aws_s3_bucket.exports.id
 
