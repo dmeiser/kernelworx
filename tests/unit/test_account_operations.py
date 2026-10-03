@@ -702,6 +702,65 @@ class TestDeleteMyAccount:
         # Account should NOT be deleted from DynamoDB if pre-check fails
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is not None
 
+    def test_delete_account_cognito_transport_error(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A transport-level lookup failure at the pre-check surfaces as the same typed INTERNAL_ERROR.
+
+        The pre-check catch covers the same transport class as the post-sweep
+        Cognito-delete block: a BotoCoreError (e.g. a connection failure)
+        must not escape to the decorator's far-generic wording.
+        """
+        from botocore.exceptions import ConnectionError as BotoConnectionError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.side_effect = BotoConnectionError(
+                error="connection reset", operation_name="ListUsers"
+            )
+
+            event = {
+                **appsync_event,
+                "identity": {"sub": sample_account_id},
+            }
+
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert result["message"] == "Failed to delete account"
+
+            captured = capsys.readouterr().out
+            assert "Cognito lookup failed before deletion" in captured
+        # The pre-check runs before any deletion, so the account row survives.
+        assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is not None
+
     def test_delete_account_cognito_admin_delete_error(
         self,
         dynamodb_table: Any,

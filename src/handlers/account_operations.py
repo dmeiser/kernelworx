@@ -120,9 +120,9 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id)
         if not username:
             logger.warning(f"User not found in Cognito with sub: {account_id}")
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
         logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(e), exc_info=True)
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account") from e
 
     # The data sweep runs before the Cognito delete and is safe to re-run, so a
     # retry after any failure below converges; a sweep failure here leaves the

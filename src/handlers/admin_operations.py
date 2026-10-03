@@ -838,6 +838,11 @@ def _delete_user_from_cognito(
                 actor_sub=actor_sub,
             )
             return
+        if error_code in _THROTTLING_ERROR_CODES:
+            logger.warning("Cognito admin_delete_user throttled", error=str(e), error_code=error_code)
+            # Retryable at the purge boundary, which re-raises the typed
+            # error with its code intact.
+            raise AppError(ErrorCode.RESOURCE_BUSY, "Failed to delete user from Cognito") from e
         logger.error("Cognito admin_delete_user failed", error=str(e), error_code=error_code)
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito") from e
 

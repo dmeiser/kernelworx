@@ -1862,11 +1862,11 @@ class TestAdminPurgeUserAccount:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """A Cognito delete failure after the sweep is a partial delete; a retry completes it.
+        """A throttled Cognito delete after the sweep is retryable; a retry completes it.
 
-        First attempt: the sweep runs, the Cognito delete fails, and the caller
-        gets the honest partial-state error while the accounts row and the
-        Cognito user survive. Second attempt: the sweep no-ops over the
+        First attempt: the sweep runs, the Cognito delete is throttled, and the
+        caller gets the mandated retryable RESOURCE_BUSY while the accounts row
+        and the Cognito user survive. Second attempt: the sweep no-ops over the
         already-swept residue, the Cognito delete succeeds, and the accounts
         record is removed.
         """
@@ -1881,24 +1881,31 @@ class TestAdminPurgeUserAccount:
 
         with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
-            mock_cognito.admin_delete_user.side_effect = [
-                ClientError({"Error": {"Code": "InternalError", "Message": "Internal error"}}, "AdminDeleteUser"),
-                {},
-            ]
+            # First attempt: a throttled delete surfaces as the mandated
+            # retryable RESOURCE_BUSY. Second attempt: the delete succeeds, so
+            # the helper passes and the catch's raise branch is skipped.
+            throttle = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Rate exceeded"}},
+                "AdminDeleteUser",
+            )
+            mock_cognito.admin_delete_user.side_effect = [throttle]
             mock_get_client.return_value = mock_cognito
 
             first = admin_purge_user_account(event, lambda_context)
 
             assert first["__isError"] is True
-            # The helper raises a typed AppError for the Cognito ClientError;
-            # the narrowed catch lets it pass through with its own message
-            # instead of rewrapping it into the partial-state wording.
-            assert first["errorCode"] == ErrorCode.INTERNAL_ERROR
+            # The throttled ClientError is typed at the helper boundary as the
+            # mandated retryable RESOURCE_BUSY, and it propagates through the
+            # narrowed catch with its code intact instead of surfacing as a
+            # non-retryable INTERNAL_ERROR from a generic rewrap.
+            assert first["errorCode"] == ErrorCode.RESOURCE_BUSY
             assert first["message"] == "Failed to delete user from Cognito"
             # The sweep ran: the invite is gone, but the accounts row survives
             # for the retry to remove.
             assert invites_table.get_item(Key={"inviteCode": "INV-OWNED"}).get("Item") is None
             assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+
+            mock_cognito.admin_delete_user.side_effect = None  # type: ignore[assignment]
 
             second = admin_purge_user_account(event, lambda_context)
 
