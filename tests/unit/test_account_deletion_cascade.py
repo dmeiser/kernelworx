@@ -235,6 +235,30 @@ class TestFinalAccountRecordDelete:
             delete_all_user_data(OWNER_SUB)
         return excinfo.value
 
+    def _run_with_transport_failing_account_delete(self, monkeypatch: pytest.MonkeyPatch) -> Any:
+        """Run the full cascade with the final accounts-row delete transport-failing.
+
+        A BotoCoreError (no ``.response``) from the final delete carries the
+        same swept/survived split as a ClientError, so it must surface as the
+        same honest wording rather than escape raw to the decorator.
+        """
+        from botocore.exceptions import ConnectionError as BotoConnectionError
+
+        from src.handlers.deletion_cascade import delete_all_user_data
+        from src.utils.dynamodb import tables
+
+        _seed_user_data()
+        _seed_s3_data()
+
+        def fail_delete_item(*args: Any, **kwargs: Any) -> Any:
+            raise BotoConnectionError(error="connection reset", operation_name="DeleteItem")
+
+        monkeypatch.setattr(tables.accounts, "delete_item", fail_delete_item)
+
+        with pytest.raises(AppError) as excinfo:
+            delete_all_user_data(OWNER_SUB)
+        return excinfo.value
+
     def test_throttled_final_delete_is_retryable_and_names_survivors(
         self, dynamodb_table: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -260,6 +284,25 @@ class TestFinalAccountRecordDelete:
         )
         # The sweep completed before the failure: every user datum is gone and
         # only the account record survives.
+        _assert_all_user_data_deleted()
+        assert "Item" in _table(ACCOUNTS_TABLE).get_item(Key={"accountId": OWNER_ACCOUNT_KEY})
+
+    def test_transport_failed_final_delete_names_swept_and_surviving_data(
+        self, dynamodb_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A transport failure on the final delete keeps the honest attribution.
+
+        A BotoCoreError has no ``.response``, so the classification must not
+        treat it as a ClientError; it surfaces as INTERNAL_ERROR with the same
+        swept/survived wording instead of escaping raw to the decorator.
+        """
+        error = self._run_with_transport_failing_account_delete(monkeypatch)
+
+        assert error.error_code == ErrorCode.INTERNAL_ERROR
+        assert error.message == (
+            "All user data was deleted but the account record could not be removed, "
+            "so the sign-in remains active; retry to complete the deletion"
+        )
         _assert_all_user_data_deleted()
         assert "Item" in _table(ACCOUNTS_TABLE).get_item(Key={"accountId": OWNER_ACCOUNT_KEY})
 

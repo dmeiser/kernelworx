@@ -838,6 +838,78 @@ class TestDeleteMyAccount:
         # gone while the Cognito user survives for the retry to remove.
         assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
 
+    def test_delete_account_cognito_transport_error_after_sweep_does_not_crash(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A transport failure after the sweep yields the partial-state error, not a crash.
+
+        A BotoCoreError (e.g. connection reset after the delete was sent) has
+        no ``.response``, so the classification must not touch it as a
+        ClientError: the failure surfaces as the unknown-state wording with
+        INTERNAL_ERROR instead of an AttributeError escaping to the decorator's
+        far-generic wording.
+        """
+        from botocore.exceptions import ConnectionError as BotoConnectionError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "test-user",
+                        "Attributes": [{"Name": "sub", "Value": sample_account_id}],
+                    }
+                ]
+            }
+            mock_cognito.admin_delete_user.side_effect = BotoConnectionError(
+                error="connection reset after the request was sent", operation_name="AdminDeleteUser"
+            )
+
+            event = {
+                **appsync_event,
+                "identity": {"sub": sample_account_id},
+            }
+
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert result["message"] == (
+                "Account data was deleted but the Cognito user could not be confirmed deleted; "
+                "retry to complete the deletion"
+            )
+
+            captured = capsys.readouterr().out
+            assert "Account data swept but the Cognito delete did not report success" in captured
+
+        # The sweep completed: user data is gone while the Cognito user's
+        # state is unknown, so a retry converges.
+        assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
+
     def test_missing_username_relookup_failure_does_not_claim_user_present(
         self,
         dynamodb_table: Any,

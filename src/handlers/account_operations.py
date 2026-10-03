@@ -143,7 +143,9 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         # message says exactly that.
         if isinstance(e, AppError):
             raise
-        error_code = ErrorCode.RESOURCE_BUSY if is_transient_client_error(e) else ErrorCode.INTERNAL_ERROR
+        error_code = (
+            ErrorCode.RESOURCE_BUSY if isinstance(e, ClientError) and is_transient_client_error(e) else ErrorCode.INTERNAL_ERROR
+        )
         logger.error(
             "Account data swept but the Cognito delete did not report success; "
             "the account's Cognito state is unknown and needs a retry or manual completion",

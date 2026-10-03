@@ -19,7 +19,7 @@ calls ``adminPurgeUserAccount`` — see the #521 entry in AGENTS.md.
 
 from typing import TYPE_CHECKING, Any, Dict
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
@@ -271,12 +271,19 @@ def delete_all_user_data(account_id: str, logger: Any = None) -> None:
     try:
         tables.accounts.delete_item(Key={"accountId": account_id_key})
         log.info("Deleted account from DynamoDB", account_id=account_id_key)
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
         # Every sub-cascade above completed, so this is the most likely partial
         # state of the whole cascade: all user data is gone but the account
         # record — and the Cognito sign-in that outlives it in the self-service
         # flow — survives. Say exactly that; a throttled failure is retryable.
-        error_code = ErrorCode.RESOURCE_BUSY if is_transient_client_error(e) else ErrorCode.INTERNAL_ERROR
+        # BotoCoreError joins the catch for the same transport-fault class:
+        # a failure after the request was sent leaves the same swept/survived
+        # split, and only a ClientError can be classified as throttling.
+        error_code = (
+            ErrorCode.RESOURCE_BUSY
+            if isinstance(e, ClientError) and is_transient_client_error(e)
+            else ErrorCode.INTERNAL_ERROR
+        )
         log.error(
             "All user data was swept but the account record could not be deleted; "
             "the account record and Cognito sign-in survive and need a retry or manual completion",
