@@ -8,7 +8,7 @@ from boto3.dynamodb.conditions import Key
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.appsync_types import require_int, require_str, require_unit_number
+    from utils.appsync_types import get_caller_id, require_int, require_str, require_unit_number
     from utils.auth import batch_check_profile_access
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
@@ -17,7 +17,7 @@ try:  # pragma: no cover
     from utils.pagination import query_all_items, query_all_items_iter
     from utils.report_limits import MAX_UNIT_REPORT_GRAPH_BYTES, OrderGraphBudget
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.appsync_types import require_int, require_str, require_unit_number
+    from ..utils.appsync_types import get_caller_id, require_int, require_str, require_unit_number
     from ..utils.auth import batch_check_profile_access
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
@@ -260,7 +260,7 @@ def _extract_unit_report_params(event: Dict[str, Any]) -> tuple[str, int, str, s
     campaign_name = require_str(arguments, "campaignName")
     campaign_year = require_int(arguments, "campaignYear")
     catalog_id = ensure_catalog_id(require_str(arguments, "catalogId")) or ""
-    caller_account_id = event.get("identity", {}).get("sub")
+    caller_account_id = get_caller_id(event)
     if not caller_account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
     return unit_type, unit_number, city, state, campaign_name, campaign_year, catalog_id, caller_account_id

@@ -194,7 +194,7 @@ type Campaign {
 
 """A catalog of products that campaigns sell from.
 
-Catalogs are visible to any authenticated user by ID (getCatalog performs no ownership check). `listManagedCatalogs` returns only public ADMIN_MANAGED catalogs and `listMyCatalogs` returns the caller's own catalogs; both exclude soft-deleted catalogs, which are still retrievable by ID."""
+`getCatalog` returns a catalog by ID only when it is public, admin-managed, or owned by the caller. `listManagedCatalogs` returns only public ADMIN_MANAGED catalogs and `listMyCatalogs` returns the caller's own catalogs; both exclude soft-deleted catalogs, which remain retrievable by ID by an authorized caller."""
 type Catalog @aws_cognito_user_pools {
   """The catalog's unique ID (with the CATALOG# prefix)."""
   catalogId: ID!
@@ -775,7 +775,7 @@ type Query {
   ): CampaignConnection!
 
   # Catalog queries
-  """Fetch a single catalog by ID. Any authenticated user may view a catalog by ID (no ownership check); returns null when not found."""
+  """Fetch a single catalog by ID. Returns the catalog only when it is public, admin-managed (ADMIN_MANAGED), or owned by the caller; returns null otherwise."""
   getCatalog(
     """The catalog's ID."""
     catalogId: ID!

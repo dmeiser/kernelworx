@@ -65,28 +65,26 @@ This section documents the key patterns and shared utilities used throughout the
 
 ### Backend Python Patterns
 
-#### Centralized Validation (`src/utils/validation.py`)
+#### Resolver argument and unit validation (`src/utils/appsync_types.py`, `src/utils/validation.py`)
 
-All input validation for Lambda handlers should use the centralized validation module:
+Lambda handlers that read resolver arguments should use the shared readers, which enforce the schema types and bounds before the handler indexes into the raw event, raising a typed `INVALID_INPUT` `AppError`:
 
 ```python
-from utils.validation import (
-    validate_required_fields,
-    validate_unit_number,
-    validate_unit_fields,
-)
+from utils.appsync_types import require_int, require_str, require_unit_number
 
-# Validate required fields are present
-validate_required_fields(data, ["profileId", "campaignName"])
+# Require a non-empty string argument
+profile_id = require_str(input_args, "profileId")
 
-# Validate unit number format (optional field)
-validate_unit_number(unit_number, required=False)
+# Require an integer argument
+campaign_year = require_int(arguments, "campaignYear")
 
-# Validate complete unit information
-validate_unit_fields(unit_type, unit_number, city, state)
+# Require a scout unit number (positive integer)
+unit_number = require_unit_number(arguments, "unitNumber")
 ```
 
-All validation functions raise `AppError` with `ErrorCode.INVALID_INPUT` on failure.
+The caller ID is read with `get_caller_id(event)` from the same module; never hand-inline `event["identity"]["sub"]`, which raises `KeyError` on an unauthenticated invocation (`tests/unit/test_caller_id_helper.py` guards this).
+
+Validation failures raise `AppError` with `ErrorCode.INVALID_INPUT`. The equivalent rules are also enforced in the AppSync JS resolvers in `tofu/application/appsync/js-resolvers/`.
 
 #### Cognito user filters (`src/utils/cognito_filters.py`)
 
