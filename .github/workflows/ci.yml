@@ -104,6 +104,14 @@ jobs:
       - name: TypeScript type check
         run: npm run typecheck
 
+      - name: Generated GraphQL types are in sync with the schema
+        run: |
+          npm run codegen
+          git diff --exit-code -- src/types/graphql-generated.ts || {
+            echo "::error::frontend/src/types/graphql-generated.ts is out of sync with tofu/application/schema/schema.graphql. Run 'npm run codegen' in frontend/ and commit the result."
+            exit 1
+          }
+
       - name: Vitest (coverage)
         run: npm run test -- --coverage
 
