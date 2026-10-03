@@ -160,6 +160,26 @@ function canStartRegex(last: string): boolean {
 }
 
 /**
+ * True when the prefix literal that ENDS at `litEnd` is being used to MINT a
+ * brand-new id rather than to normalize an existing one: the literal must be
+ * the left operand of a `+` whose right operand is an `autoId()` call
+ * (`'CAMPAIGN#' + util.autoId()`).
+ *
+ * This replaces a whole-line substring test (`text.includes("autoId(")`),
+ * which exempted every prefix literal sharing a line with any `autoId()` call
+ * anywhere - so a hand-rolled normalization sitting next to an unrelated
+ * minted id was silently allowed. Anchoring to the literal's own end offset
+ * makes coincidence impossible: the exemption can only fire on the
+ * concatenation itself. `code` (comments blanked) is scanned, not `source`, so
+ * a comment cannot fake the exemption either.
+ */
+function isMintingConcat(code: string, litEnd: number): boolean {
+  return /^\s*\+\s*(?:[A-Za-z_$][\w$]*\.)*autoId\s*\(\s*\)/.test(
+    code.slice(litEnd),
+  );
+}
+
+/**
  * Yields every prefix literal in `source` (comments removed) together with the
  * statement text around it, so the guard can report a usable location.
  */
@@ -247,8 +267,9 @@ function findPrefixLiterals(source: string): {
 
     // Is this literal minting a brand-new id (e.g. 'CAMPAIGN#' + util.autoId())
     // rather than normalizing an existing one? Minting legitimately owns the
-    // prefix literal; only normalization must route through the helper.
-    const isMinting = text.includes("autoId(");
+    // prefix literal; only normalization must route through the helper. The
+    // test is anchored to this literal's own end, not to its line.
+    const isMinting = isMintingConcat(code, lit.end);
 
     found.push({
       line: source.slice(0, lit.start).split("\n").length,
@@ -335,6 +356,37 @@ describe("the guard catches the duplication it exists to prevent", () => {
   test("does not flag an ACCOUNT# prefix used in a name, not a string", () => {
     const code = "const ACCOUNT_COUNT = 3;";
     expect(findPrefixLiterals(code)).toEqual([]);
+  });
+
+  // The isMinting exemption, in both directions. It exempts a prefix that
+  // mints a brand-new id ('PROFILE#' + util.autoId()) - minting legitimately
+  // owns the literal - but the exemption must not leak to a normalization
+  // that merely shares a line with an autoId() call, or any future
+  // normalization written next to a mint is silently allowed.
+  test("the minting exemption fires for a prefix concatenated with autoId", () => {
+    const code = "const profileId = 'PROFILE#' + util.autoId();";
+    const found = findPrefixLiterals(code);
+    expect(found.length).toBe(1);
+    expect(found[0].isMinting).toBe(true);
+    expect(found.filter((f) => !f.inHelperCall && !f.isMinting)).toEqual([]);
+  });
+
+  test("the minting exemption does NOT fire for a normalization merely sharing a line with autoId", () => {
+    // A hand-rolled normalization on the same statement as an unrelated
+    // minted id. The old whole-line substring test exempted every literal on
+    // this line, normalization included; the anchored test must flag the
+    // normalization while still exempting the mint itself.
+    const code =
+      "const next = { campaignId: campaignId.startsWith('CAMPAIGN#') ? campaignId : 'CAMPAIGN#' + campaignId, shareId: 'CAMPAIGN#' + util.autoId() };";
+    const found = findPrefixLiterals(code);
+
+    // Exactly one literal is the mint, and it is the one glued to autoId().
+    const minting = found.filter((f) => f.isMinting);
+    expect(minting.length).toBe(1);
+
+    // The two normalization literals are still offenders.
+    const offenders = found.filter((f) => !f.inHelperCall && !f.isMinting);
+    expect(offenders.length).toBe(2);
   });
 
   test("the sweep covers every shared helper under lib/, not just the resolvers", () => {
