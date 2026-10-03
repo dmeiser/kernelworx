@@ -47,6 +47,7 @@ from .deletion_cascade import (
     delete_user_shares,
     get_user_profiles,
     normalize_account_id,
+    run_deletion_steps,
 )
 
 # Handle both Lambda (absolute) and unit test (relative) imports
@@ -61,7 +62,6 @@ try:  # pragma: no cover
         TRANSIENT_ERROR_CODES,
         batch_get_chunked,
         get_required_env,
-        is_transient_client_error,
         tables,
     )
     from utils.errors import AppError, ErrorCode
@@ -78,7 +78,6 @@ except ModuleNotFoundError:  # pragma: no cover
         TRANSIENT_ERROR_CODES,
         batch_get_chunked,
         get_required_env,
-        is_transient_client_error,
         tables,
     )
     from ..utils.errors import AppError, ErrorCode
@@ -870,51 +869,31 @@ def _delete_user_from_cognito(
 def _delete_cognito_user_after_sweep(
     cognito: Any,
     user_pool_id: str,
-    username: str,
+    username: str | None,
     email: str,
     account_id: str,
     actor_sub: str,
     logger: Any,
 ) -> None:
-    """Delete the Cognito user after the data sweep, surfacing partial state honestly.
+    """Delete the Cognito user after the data sweep, or note it is already absent.
 
-    The sweep runs before this call and is safe to re-run, so a retry after a
-    failure here converges. Only two facts are established on this failure
-    path: the sweep completed and the Cognito delete did not report success —
-    the user's Cognito state is unknown (the delete may have landed), and the
-    accounts row is deleted only after this step, so it survives the raise
-    and is named in the caller-facing message. A retryable Cognito fault (the
-    same codes the retry wrapper retries, including client
-    ``InternalErrorException``) becomes the retryable ``RESOURCE_BUSY`` case
-    (#291); anything else is ``INTERNAL_ERROR`` and the message points at
-    manual completion instead of promising a retry.
+    Failure handling is not here: ``run_deletion_steps`` owns the
+    partial-state report for both deletion paths, logging once with the
+    caller's ``log_context`` (actor attribution included) before raising the
+    typed error whose code matches the retry guidance in its message.
     """
-    try:
+    if username:
         _delete_user_from_cognito(cognito, user_pool_id, username, email, logger, actor_sub)
-    except Exception as error:
-        # Non-ClientError faults (BotoCoreError network errors) land here too:
-        # the partial state is just as unknown, so the narration must survive.
-        logger.error(
-            "Account data swept but the Cognito delete did not report success; "
-            "the account's Cognito state is unknown and needs a retry or manual completion",
-            account_id=account_id,
-            actor_sub=actor_sub,
-            error=str(error),
-            aws_error_code=_throttling_error_code(error),
-            exc_info=True,
-        )
-        if isinstance(error, ClientError) and is_transient_cognito_error(error):
-            raise AppError(
-                ErrorCode.RESOURCE_BUSY,
-                "Account data was swept but the Cognito user could not be confirmed deleted; "
-                "the accounts record still exists. Retry the purge to complete the deletion.",
-            ) from error
-        raise AppError(
-            ErrorCode.INTERNAL_ERROR,
-            "Account data was swept but the Cognito user could not be confirmed deleted; "
-            "the accounts record still exists and the Cognito user may also survive — "
-            "complete the deletion manually.",
-        ) from error
+    else:
+        logger.info("Cognito user already absent", account_id=account_id, actor_sub=actor_sub)
+
+
+def _sweep_purge_residue(profiles_for_sweep: list[Dict[str, Any]], account_id: str, logger: Any) -> None:
+    """Sweep the four residue classes the browser cannot reach itself (#521)."""
+    delete_invites_for_owned_profiles(profiles_for_sweep, logger)
+    delete_inbound_shares(account_id, logger)
+    delete_user_s3_reports(profiles_for_sweep, logger)
+    delete_all_user_qr_codes(account_id, logger)
 
 
 def _account_exists_in_dynamodb(account_id: str, logger: Any, actor_sub: str = "") -> bool:
@@ -1089,48 +1068,38 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     _assert_profiles_deleted(account_id, profile_ids, logger, actor_sub)
 
     profiles_for_sweep = [{"profileId": profile_id} for profile_id in profile_ids]
-    try:
-        delete_invites_for_owned_profiles(profiles_for_sweep, logger)
-        delete_inbound_shares(account_id, logger)
-        delete_user_s3_reports(profiles_for_sweep, logger)
-        delete_all_user_qr_codes(account_id, logger)
-    except AppError as error:
-        # The browser's per-entity deletes already committed; a sweep failure
-        # leaves the Cognito user and the accounts row untouched and the
-        # caller's typed error (retryable RESOURCE_BUSY included) unchanged.
-        logger.error(
-            "Data sweep failed before the Cognito delete; the Cognito user and the accounts record are untouched",
-            account_id=account_id,
-            actor_sub=actor_sub,
-            error=str(error),
-            error_code=error.error_code,
-            exc_info=True,
-        )
-        raise
-    except ClientError as error:
-        logger.error(
-            "Data sweep failed before the Cognito delete; the Cognito user and the accounts record are untouched",
-            account_id=account_id,
-            actor_sub=actor_sub,
-            error=str(error),
-            aws_error_code=_throttling_error_code(error),
-            exc_info=True,
-        )
-        if is_transient_client_error(error):
-            raise AppError(
-                ErrorCode.RESOURCE_BUSY,
-                "Data sweep failed before the Cognito delete; the Cognito user and the "
-                "accounts record are untouched. Retry the purge to complete the deletion.",
-            ) from error
-        raise AppError(
-            ErrorCode.INTERNAL_ERROR,
-            "Data sweep failed before the Cognito delete; the Cognito user and the accounts record are untouched.",
-        ) from error
-
-    if username:
-        _delete_cognito_user_after_sweep(cognito, user_pool_id, username, email or "", account_id, actor_sub, logger)
-    else:
-        logger.info("Cognito user already absent", account_id=account_id, actor_sub=actor_sub)
+    # The sweep runs before the Cognito delete and before the accounts row, so
+    # a retry after any failure below converges. Both phases and their failure
+    # classification live in the shared helper so the two deletion paths report
+    # them identically; ``log_context`` carries the actor attribution every
+    # admin audit line must have (#507).
+    run_deletion_steps(
+        sweep=lambda: _sweep_purge_residue(profiles_for_sweep, account_id, logger),
+        delete_cognito=lambda: _delete_cognito_user_after_sweep(
+            cognito, user_pool_id, username, email or "", account_id, actor_sub, logger
+        ),
+        logger=logger,
+        log_context={"account_id": account_id, "actor_sub": actor_sub},
+        sweep_log_message=(
+            "Data sweep failed before the Cognito delete; the Cognito user and the accounts record are untouched"
+        ),
+        sweep_retry_message=(
+            "Data sweep failed before the Cognito delete; the Cognito user and the "
+            "accounts record are untouched. Retry the purge to complete the deletion."
+        ),
+        sweep_fatal_message=(
+            "Data sweep failed before the Cognito delete; the Cognito user and the accounts record are untouched."
+        ),
+        partial_retry_message=(
+            "Account data was swept but the Cognito user could not be confirmed deleted; "
+            "the accounts record still exists. Retry the purge to complete the deletion."
+        ),
+        partial_fatal_message=(
+            "Account data was swept but the Cognito user could not be confirmed deleted; "
+            "the accounts record still exists and the Cognito user may also survive — "
+            "complete the deletion manually."
+        ),
+    )
 
     if account_exists:
         db_account_id = normalize_account_id(account_id)
