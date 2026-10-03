@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Callable, Dict, NoReturn, Optional, cast
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
@@ -838,6 +838,11 @@ def _delete_user_from_cognito(
                 actor_sub=actor_sub,
             )
             return
+        if error_code in _THROTTLING_ERROR_CODES:
+            logger.warning("Cognito admin_delete_user throttled", error=str(e), error_code=error_code)
+            # Retryable at the purge boundary, which re-raises the typed
+            # error with its code intact.
+            raise AppError(ErrorCode.RESOURCE_BUSY, "Failed to delete user from Cognito") from e
         logger.error("Cognito admin_delete_user failed", error=str(e), error_code=error_code)
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete user from Cognito") from e
 
@@ -986,7 +991,9 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
         AppError: If not admin, self-purge is attempted, the user does not
             exist, a supplied profile still exists (CONFLICT), or a deletion
             error occurs. An absent Cognito user is treated as idempotent
-            success.
+            success. When the sweep succeeded but the Cognito delete failed,
+            the error names the partial state so the operator knows the
+            account needs a retry to complete.
     """
     logger = get_logger(__name__)
 
@@ -1019,8 +1026,37 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     delete_user_s3_reports(profiles_for_sweep, logger)
     delete_all_user_qr_codes(account_id, logger)
 
+    # The sweep runs before the Cognito delete and is safe to re-run, so a
+    # retry after a failure below converges; a failure here leaves the Cognito
+    # user untouched. When the sweep succeeded but the Cognito delete does not
+    # report success, the partial state is logged loudly with an error_code
+    # field and surfaced honestly to the caller: the Cognito user's state is
+    # unknown, not asserted to survive, because the delete may have landed and
+    # still raised afterwards.
     if username:
-        _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger, actor_sub)
+        try:
+            _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger, actor_sub)
+        except (ClientError, BotoCoreError, AppError) as e:
+            # A typed AppError from the Cognito helper propagates with its own
+            # code and message intact; only a raw botocore fault is attributed
+            # here. BotoCoreError stays in the catch because a transport
+            # failure after the request was sent is precisely the
+            # unknown-state case below.
+            if isinstance(e, AppError):
+                raise
+            logger.error(
+                "Account data swept but the Cognito delete did not report success; "
+                "the account's Cognito state is unknown and needs a retry or manual completion",
+                account_id=account_id,
+                error=str(e),
+                error_code=ErrorCode.INTERNAL_ERROR,
+                exc_info=True,
+            )
+            raise AppError(
+                ErrorCode.INTERNAL_ERROR,
+                "Account data was deleted but the Cognito user could not be confirmed deleted; "
+                "retry the purge to complete the deletion",
+            ) from e
     else:
         logger.info("Cognito user already absent", account_id=account_id, actor_sub=actor_sub)
 

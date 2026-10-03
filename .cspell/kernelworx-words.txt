@@ -117,6 +117,7 @@ EEYQ
 esac
 esbuild
 eslint
+excinfo
 exfiltration
 exportable
 falsey
@@ -313,6 +314,7 @@ refetched
 regionAbbrev
 regularuser
 relogin
+relookup
 renderer
 repo
 repr

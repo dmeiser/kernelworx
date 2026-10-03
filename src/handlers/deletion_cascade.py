@@ -19,7 +19,7 @@ calls ``adminPurgeUserAccount`` — see the #521 entry in AGENTS.md.
 
 from typing import TYPE_CHECKING, Any, Dict
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
@@ -32,11 +32,13 @@ from .delete_profile_cascade import _delete_s3_reports
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.dynamodb import tables
+    from utils.dynamodb import is_transient_client_error, tables
+    from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.dynamodb import tables
+    from ..utils.dynamodb import is_transient_client_error, tables
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
     from ..utils.payment_methods import delete_all_user_qr_codes
 
@@ -252,22 +254,48 @@ def delete_all_user_data(account_id: str, logger: Any = None) -> None:
 
     profiles = get_user_profiles(normalize_account_id(account_id))
 
-    delete_user_orders(profiles, log)
-    delete_user_campaigns(profiles, log)
-    delete_user_shares(profiles, log)
-    delete_invites_for_owned_profiles(profiles, log)
-    delete_inbound_shares(account_id, log)
-    delete_user_s3_reports(profiles, log)
-    delete_user_profiles(account_id, profiles, log)
-    # Catalogs are preserved per product design and should never be deleted.
-    # Delete payment method QR codes from S3 per captain decision
-    delete_all_user_qr_codes(account_id, log)
+    swept = {
+        "orders": delete_user_orders(profiles, log),
+        "campaigns": delete_user_campaigns(profiles, log),
+        "shares": delete_user_shares(profiles, log),
+        "invites": delete_invites_for_owned_profiles(profiles, log),
+        "inbound_shares": delete_inbound_shares(account_id, log),
+        "s3_reports": delete_user_s3_reports(profiles, log),
+        "profiles": delete_user_profiles(account_id, profiles, log),
+        # Catalogs are preserved per product design and should never be deleted.
+        # Delete payment method QR codes from S3 per captain decision
+        "qr_codes": delete_all_user_qr_codes(account_id, log),
+    }
 
     account_id_key = normalize_account_id(account_id)
     try:
         tables.accounts.delete_item(Key={"accountId": account_id_key})
         log.info("Deleted account from DynamoDB", account_id=account_id_key)
-    except ClientError as e:
-        log.error("Failed to delete account from DynamoDB", error=str(e), account_id=account_id_key)
-        raise
+    except (ClientError, BotoCoreError) as e:
+        # Every sub-cascade above completed, so this is the most likely partial
+        # state of the whole cascade: all user data is gone but the account
+        # record — and the Cognito sign-in that outlives it in the self-service
+        # flow — survives. Say exactly that; a throttled failure is retryable.
+        # BotoCoreError joins the catch for the same transport-fault class:
+        # a failure after the request was sent leaves the same swept/survived
+        # split, and only a ClientError can be classified as throttling.
+        error_code = (
+            ErrorCode.RESOURCE_BUSY
+            if isinstance(e, ClientError) and is_transient_client_error(e)
+            else ErrorCode.INTERNAL_ERROR
+        )
+        log.error(
+            "All user data was swept but the account record could not be deleted; "
+            "the account record and Cognito sign-in survive and need a retry or manual completion",
+            account_id=account_id_key,
+            swept=swept,
+            error=str(e),
+            error_code=error_code,
+            exc_info=True,
+        )
+        raise AppError(
+            error_code,
+            "All user data was deleted but the account record could not be removed, "
+            "so the sign-in remains active; retry to complete the deletion",
+        ) from e
     log.info("Deleted all user data from DynamoDB")

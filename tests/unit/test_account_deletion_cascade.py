@@ -22,6 +22,8 @@ import boto3
 import botocore.client
 import pytest
 
+from src.utils.errors import AppError, ErrorCode
+
 ACCOUNTS_TABLE = "kernelworx-accounts-ue1-dev"
 PROFILES_TABLE = "kernelworx-profiles-v2-ue1-dev"
 CAMPAIGNS_TABLE = "kernelworx-campaigns-v2-ue1-dev"
@@ -149,12 +151,16 @@ def _seed_s3_data() -> None:
 
 
 def _assert_everything_deleted() -> None:
+    _assert_all_user_data_deleted()
+    assert "Item" not in _table(ACCOUNTS_TABLE).get_item(Key={"accountId": OWNER_ACCOUNT_KEY})
+
+
+def _assert_all_user_data_deleted() -> None:
     assert _table(PROFILES_TABLE).scan()["Count"] == 0
     assert _table(CAMPAIGNS_TABLE).scan()["Count"] == 0
     assert _table(ORDERS_TABLE).scan()["Count"] == 0
     assert _table(SHARES_TABLE).scan()["Count"] == 0
     assert _table(INVITES_TABLE).scan()["Count"] == 0
-    assert "Item" not in _table(ACCOUNTS_TABLE).get_item(Key={"accountId": OWNER_ACCOUNT_KEY})
 
 
 class TestDeleteAllUserDataProfileSweep:
@@ -205,6 +211,100 @@ class TestDeleteAllUserDataProfileSweep:
         keys = _s3_keys()
         assert not [key for key in keys if key.startswith("reports/")]
         assert not [key for key in keys if key.startswith("payment-qr-codes/")]
+
+
+class TestFinalAccountRecordDelete:
+    """The accounts-row delete is the cascade's most likely partial state."""
+
+    def _run_with_failing_account_delete(self, monkeypatch: pytest.MonkeyPatch, error_code: str) -> Any:
+        """Run the full cascade with the final accounts-row delete forced to fail."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.deletion_cascade import delete_all_user_data
+        from src.utils.dynamodb import tables
+
+        _seed_user_data()
+        _seed_s3_data()
+
+        def fail_delete_item(*args: Any, **kwargs: Any) -> Any:
+            raise ClientError({"Error": {"Code": error_code, "Message": "final delete failed"}}, "DeleteItem")
+
+        monkeypatch.setattr(tables.accounts, "delete_item", fail_delete_item)
+
+        with pytest.raises(AppError) as excinfo:
+            delete_all_user_data(OWNER_SUB)
+        return excinfo.value
+
+    def _run_with_transport_failing_account_delete(self, monkeypatch: pytest.MonkeyPatch) -> Any:
+        """Run the full cascade with the final accounts-row delete transport-failing.
+
+        A BotoCoreError (no ``.response``) from the final delete carries the
+        same swept/survived split as a ClientError, so it must surface as the
+        same honest wording rather than escape raw to the decorator.
+        """
+        from botocore.exceptions import ConnectionError as BotoConnectionError
+
+        from src.handlers.deletion_cascade import delete_all_user_data
+        from src.utils.dynamodb import tables
+
+        _seed_user_data()
+        _seed_s3_data()
+
+        def fail_delete_item(*args: Any, **kwargs: Any) -> Any:
+            raise BotoConnectionError(error="connection reset", operation_name="DeleteItem")
+
+        monkeypatch.setattr(tables.accounts, "delete_item", fail_delete_item)
+
+        with pytest.raises(AppError) as excinfo:
+            delete_all_user_data(OWNER_SUB)
+        return excinfo.value
+
+    def test_throttled_final_delete_is_retryable_and_names_survivors(
+        self, dynamodb_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A throttled final delete surfaces as retryable RESOURCE_BUSY, not a generic error."""
+        error = self._run_with_failing_account_delete(monkeypatch, "ThrottlingException")
+
+        assert error.error_code == ErrorCode.RESOURCE_BUSY
+        assert error.message == (
+            "All user data was deleted but the account record could not be removed, "
+            "so the sign-in remains active; retry to complete the deletion"
+        )
+
+    def test_final_delete_failure_names_swept_and_surviving_data(
+        self, dynamodb_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A permanent final-delete failure is INTERNAL_ERROR with the same honest attribution."""
+        error = self._run_with_failing_account_delete(monkeypatch, "AccessDeniedException")
+
+        assert error.error_code == ErrorCode.INTERNAL_ERROR
+        assert error.message == (
+            "All user data was deleted but the account record could not be removed, "
+            "so the sign-in remains active; retry to complete the deletion"
+        )
+        # The sweep completed before the failure: every user datum is gone and
+        # only the account record survives.
+        _assert_all_user_data_deleted()
+        assert "Item" in _table(ACCOUNTS_TABLE).get_item(Key={"accountId": OWNER_ACCOUNT_KEY})
+
+    def test_transport_failed_final_delete_names_swept_and_surviving_data(
+        self, dynamodb_table: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A transport failure on the final delete keeps the honest attribution.
+
+        A BotoCoreError has no ``.response``, so the classification must not
+        treat it as a ClientError; it surfaces as INTERNAL_ERROR with the same
+        swept/survived wording instead of escaping raw to the decorator.
+        """
+        error = self._run_with_transport_failing_account_delete(monkeypatch)
+
+        assert error.error_code == ErrorCode.INTERNAL_ERROR
+        assert error.message == (
+            "All user data was deleted but the account record could not be removed, "
+            "so the sign-in remains active; retry to complete the deletion"
+        )
+        _assert_all_user_data_deleted()
+        assert "Item" in _table(ACCOUNTS_TABLE).get_item(Key={"accountId": OWNER_ACCOUNT_KEY})
 
 
 class TestCascadeModuleGraph:
