@@ -20,6 +20,7 @@ try:  # pragma: no cover
     from utils.cognito import retry_on_transient_errors
     from utils.cognito_filters import cognito_user_filter
     from utils.dynamodb import is_transient_client_error
+    from utils.dynamodb_exceptions import is_transient_cognito_error
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
@@ -27,6 +28,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.cognito import retry_on_transient_errors
     from ..utils.cognito_filters import cognito_user_filter
     from ..utils.dynamodb import is_transient_client_error
+    from ..utils.dynamodb_exceptions import is_transient_cognito_error
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
 
@@ -121,27 +123,52 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id)
         if not username:
             logger.warning(f"User not found in Cognito with sub: {account_id}")
-    except ClientError as e:
-        logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(e), exc_info=True)
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
+    except ClientError as error:
+        # A retryable Cognito fault is a retryable outcome even when the retry
+        # wrapper is already exhausted (#291): emit RESOURCE_BUSY, not a
+        # permanent failure.
+        error_code = ErrorCode.RESOURCE_BUSY if is_transient_cognito_error(error) else ErrorCode.INTERNAL_ERROR
+        message = (
+            "Failed to delete account. Retry to complete the deletion."
+            if error_code == ErrorCode.RESOURCE_BUSY
+            else "Failed to delete account"
+        )
+        logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(error), exc_info=True)
+        raise AppError(error_code, message) from error
 
     # The data sweep runs before the Cognito delete and is safe to re-run, so a
     # retry after any failure below converges; a sweep failure leaves the
     # Cognito user untouched.
     try:
         delete_all_user_data(account_id, logger)
-    except ClientError as e:
+    except AppError as error:
         logger.error(
             "Data sweep failed before the Cognito delete; the Cognito user is untouched",
             account_id=account_id,
-            error=str(e),
+            error=str(error),
+            error_code=error.error_code,
             exc_info=True,
         )
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account data") from e
+        raise
+    except ClientError as error:
+        logger.error(
+            "Data sweep failed before the Cognito delete; the Cognito user is untouched",
+            account_id=account_id,
+            error=str(error),
+            aws_error_code=error.response.get("Error", {}).get("Code", ""),
+            exc_info=True,
+        )
+        if is_transient_client_error(error):
+            raise AppError(
+                ErrorCode.RESOURCE_BUSY,
+                "Data sweep failed before the Cognito delete; the Cognito user is "
+                "untouched. Retry to complete the deletion.",
+            ) from error
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account data") from error
 
     try:
         _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
-    except Exception as e:
+    except ClientError as error:
         # Only two facts are established here: the sweep completed (the
         # accounts row included — self-service deletes it in the sweep, with
         # Cognito as the commit point) and the Cognito delete did not report
@@ -151,21 +178,21 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
             "Account data swept but the Cognito delete did not report success; "
             "the account's Cognito state is unknown and needs a retry or manual completion",
             account_id=account_id,
-            error=str(e),
-            aws_error_code=e.response.get("Error", {}).get("Code", "") if isinstance(e, ClientError) else "",
+            error=str(error),
+            aws_error_code=error.response.get("Error", {}).get("Code", ""),
             exc_info=True,
         )
-        if isinstance(e, ClientError) and is_transient_client_error(e):
+        if is_transient_cognito_error(error):
             raise AppError(
                 ErrorCode.RESOURCE_BUSY,
                 "Account data was deleted but the Cognito user could not be confirmed deleted; "
                 "retry to complete the deletion",
-            ) from e
+            ) from error
         raise AppError(
             ErrorCode.INTERNAL_ERROR,
             "Account data was deleted but the Cognito user could not be confirmed deleted; "
             "complete the deletion manually in Cognito",
-        ) from e
+        ) from error
 
     logger.info("Account deletion completed successfully")
     return True

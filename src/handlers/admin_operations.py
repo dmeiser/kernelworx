@@ -63,6 +63,7 @@ try:  # pragma: no cover
         is_transient_client_error,
         tables,
     )
+    from utils.dynamodb_exceptions import is_transient_cognito_error
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
     from utils.payment_methods import delete_all_user_qr_codes
@@ -79,6 +80,7 @@ except ModuleNotFoundError:  # pragma: no cover
         is_transient_client_error,
         tables,
     )
+    from ..utils.dynamodb_exceptions import is_transient_cognito_error
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
     from ..utils.payment_methods import delete_all_user_qr_codes
@@ -877,34 +879,36 @@ def _delete_cognito_user_after_sweep(
     the user's Cognito state is unknown (the delete may have landed, or a
     failed re-lookup of an absent user lands here too), and the accounts row
     is deleted only after this step, so it survives the raise and is named in
-    the caller-facing message. A throttled delete is the retryable
-    ``RESOURCE_BUSY`` case (#291); anything else is ``INTERNAL_ERROR`` and the
-    message points at manual completion instead of promising a retry.
+    the caller-facing message. A retryable Cognito fault (the same codes the
+    retry wrapper retries, including client ``InternalErrorException``)
+    becomes the retryable ``RESOURCE_BUSY`` case (#291); anything else is
+    ``INTERNAL_ERROR`` and the message points at manual completion instead of
+    promising a retry.
     """
     try:
         _delete_user_from_cognito(cognito, user_pool_id, username, email, logger, actor_sub)
-    except Exception as e:
+    except ClientError as error:
         logger.error(
             "Account data swept but the Cognito delete did not report success; "
             "the account's Cognito state is unknown and needs a retry or manual completion",
             account_id=account_id,
             actor_sub=actor_sub,
-            error=str(e),
-            aws_error_code=e.response.get("Error", {}).get("Code", "") if isinstance(e, ClientError) else "",
+            error=str(error),
+            aws_error_code=_throttling_error_code(error),
             exc_info=True,
         )
-        if isinstance(e, ClientError) and is_transient_client_error(e):
+        if is_transient_cognito_error(error):
             raise AppError(
                 ErrorCode.RESOURCE_BUSY,
                 "Account data was swept but the Cognito user could not be confirmed deleted; "
                 "the accounts record still exists. Retry the purge to complete the deletion.",
-            ) from e
+            ) from error
         raise AppError(
             ErrorCode.INTERNAL_ERROR,
             "Account data was swept but the Cognito user could not be confirmed deleted; "
             "the accounts record still exists and the Cognito user may also survive — "
             "complete the deletion manually.",
-        ) from e
+        ) from error
 
 
 def _account_exists_in_dynamodb(account_id: str, logger: Any, actor_sub: str = "") -> bool:
@@ -1079,10 +1083,43 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     _assert_profiles_deleted(account_id, profile_ids, logger, actor_sub)
 
     profiles_for_sweep = [{"profileId": profile_id} for profile_id in profile_ids]
-    delete_invites_for_owned_profiles(profiles_for_sweep, logger)
-    delete_inbound_shares(account_id, logger)
-    delete_user_s3_reports(profiles_for_sweep, logger)
-    delete_all_user_qr_codes(account_id, logger)
+    try:
+        delete_invites_for_owned_profiles(profiles_for_sweep, logger)
+        delete_inbound_shares(account_id, logger)
+        delete_user_s3_reports(profiles_for_sweep, logger)
+        delete_all_user_qr_codes(account_id, logger)
+    except AppError as error:
+        # The browser's per-entity deletes already committed; a sweep failure
+        # leaves the Cognito user and the accounts row untouched and the
+        # caller's typed error (retryable RESOURCE_BUSY included) unchanged.
+        logger.error(
+            "Data sweep failed before the Cognito delete; the Cognito user and the accounts record are untouched",
+            account_id=account_id,
+            actor_sub=actor_sub,
+            error=str(error),
+            error_code=error.error_code,
+            exc_info=True,
+        )
+        raise
+    except ClientError as error:
+        logger.error(
+            "Data sweep failed before the Cognito delete; the Cognito user and the accounts record are untouched",
+            account_id=account_id,
+            actor_sub=actor_sub,
+            error=str(error),
+            aws_error_code=_throttling_error_code(error),
+            exc_info=True,
+        )
+        if is_transient_client_error(error):
+            raise AppError(
+                ErrorCode.RESOURCE_BUSY,
+                "Data sweep failed before the Cognito delete; the Cognito user and the "
+                "accounts record are untouched. Retry the purge to complete the deletion.",
+            ) from error
+        raise AppError(
+            ErrorCode.INTERNAL_ERROR,
+            "Data sweep failed before the Cognito delete; the Cognito user and the accounts record are untouched.",
+        ) from error
 
     if username:
         _delete_cognito_user_after_sweep(cognito, user_pool_id, username, email or "", account_id, actor_sub, logger)
