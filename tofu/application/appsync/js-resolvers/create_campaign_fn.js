@@ -20,6 +20,12 @@ export function request(ctx) {
     const input = ctx.args && ctx.args.input ? ctx.args.input : {};
     const profile = ctx.stash && ctx.stash.profile ? ctx.stash.profile : {};
     const rawProfileId = input.profileId || profile.profileId;
+    // An absent profileId must not fall through to normalizeIdOrPrefix's bare
+    // 'PROFILE#': that is a valid-looking key that would be persisted onto the
+    // campaign row. Fail loudly instead.
+    if (!rawProfileId) {
+        util.error('profileId is required', 'INVALID_INPUT');
+    }
     const dbProfileId = normalizeIdOrPrefix(rawProfileId, 'PROFILE#');
 
     const sharedCampaign = ctx.stash && ctx.stash.sharedCampaign;

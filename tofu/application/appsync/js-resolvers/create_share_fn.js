@@ -1,5 +1,5 @@
 import { util } from '@aws-appsync/utils';
-import { normalizeId, normalizeIdOrPrefix, stripIdPrefix } from './lib/ids.js';
+import { normalizeIdOrPrefix, stripIdPrefix } from './lib/ids.js';
 
 function validatePermissions(permissions) {
     if (!Array.isArray(permissions) || permissions.length === 0) {
@@ -43,10 +43,11 @@ export function request(ctx) {
         util.error('Failed to determine profile owner', 'INTERNAL_ERROR');
     }
     
-    // Ensure targetAccountId has ACCOUNT# prefix
-    if (targetAccountId) {
-        targetAccountId = normalizeId(targetAccountId, 'ACCOUNT#');
-    }
+    // Owned by lib/ids.js, same non-nullable form as the sibling share
+    // resolvers. This value is PERSISTED in the share item's key and
+    // attributes, so the nullable normalizeId must not be used here: its null
+    // would land in util.dynamodb.toMapValues and then in the stored row.
+    targetAccountId = normalizeIdOrPrefix(targetAccountId, 'ACCOUNT#');
     
     // Generate shareId for backward compatibility with tests
     // Format: SHARE#{targetAccountId} (targetAccountId already has ACCOUNT# prefix)

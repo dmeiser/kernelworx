@@ -281,6 +281,27 @@ describe('create_campaign_fn request', () => {
         );
     });
 
+    it('rejects an absent profileId instead of persisting the bare PROFILE# prefix (#670)', () => {
+        // normalizeIdOrPrefix's fallback is a valid-looking key. For a GetItem
+        // miss that is harmless, but this value is written onto the campaign
+        // row, so it must fail loudly rather than store 'PROFILE#'.
+        const ctx = {
+            args: {
+                input: {
+                    campaignName: 'Popcorn Sale',
+                    campaignYear: 2025,
+                    catalogId: '22222222-2222-2222-2222-222222222222',
+                },
+            },
+            stash: {},
+        };
+
+        assert.throws(
+            () => request(ctx),
+            /INVALID_INPUT: profileId is required/
+        );
+    });
+
     it('accepts valid endDate after startDate', () => {
         const ctx = {
             args: {

@@ -246,6 +246,37 @@ describe('create_share_fn request', () => {
         );
     });
 
+    it('never persists a null targetAccountId for a truthy non-string id (#670)', () => {
+        // AppSync coerces a GraphQL ID to a string today, so this is
+        // unreachable through the schema - but it is a latent corruption path,
+        // not a guard. normalizeId returned null for this input and that null
+        // flowed into util.dynamodb.toMapValues and into the stored share row
+        // (key, attributes, and the SHARE#<id> sort key). normalizeIdOrPrefix
+        // cannot return null, so the persisted values stay non-null strings.
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                },
+            },
+            stash: {
+                targetAccountId: { nested: 'object' },
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.key.targetAccountId, 'ACCOUNT#');
+        assert.notStrictEqual(result.key.targetAccountId, null);
+        assert.strictEqual(result.attributeValues.targetAccountId, 'ACCOUNT#');
+        assert.notStrictEqual(result.attributeValues.targetAccountId, null);
+        assert.strictEqual(result.attributeValues.shareId, 'SHARE#ACCOUNT#');
+        assert.deepStrictEqual(ctx.stash.shareItem, result.attributeValues);
+    });
+
     it('accepts single WRITE permission', () => {
         const ctx = {
             args: {

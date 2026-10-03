@@ -87,7 +87,11 @@ describe('check_existing_share_fn request', () => {
         assert.strictEqual(ctx.stash.cleanTargetAccountId, 'user-456');
     });
 
-    it('handles undefined targetAccountId and profileId gracefully', () => {
+    it('keys the GetItem with bare prefixes when targetAccountId and profileId are absent', () => {
+        // #670: a DynamoDB key attribute may never be null, so the non-nullable
+        // helper yields the bare prefix instead of the old pass-through
+        // undefined. Neither key matches a real row, so the lookup still finds
+        // nothing - it just no longer sends a null key attribute.
         const ctx = {
             args: {},
             stash: {},
@@ -96,9 +100,23 @@ describe('check_existing_share_fn request', () => {
         const result = request(ctx);
 
         assert.strictEqual(result.operation, 'GetItem');
-        assert.strictEqual(result.key.profileId, undefined);
-        assert.strictEqual(result.key.targetAccountId, undefined);
+        assert.strictEqual(result.key.profileId, 'PROFILE#');
+        assert.strictEqual(result.key.targetAccountId, 'ACCOUNT#');
         assert.strictEqual(ctx.stash.cleanTargetAccountId, undefined);
+    });
+
+    it('never yields a null key for a truthy non-string id', () => {
+        // AppSync coerces a GraphQL ID to a string today, so this is
+        // unreachable through the schema - but it is a latent corruption path,
+        // not a guard. normalizeId returned null here and that null flowed
+        // into util.dynamodb.toMapValues; normalizeIdOrPrefix cannot.
+        const result = request({
+            args: { input: { profileId: 12345 } },
+            stash: { targetAccountId: { nested: 'object' } },
+        });
+
+        assert.strictEqual(result.key.profileId, 'PROFILE#');
+        assert.strictEqual(result.key.targetAccountId, 'ACCOUNT#');
     });
 });
 

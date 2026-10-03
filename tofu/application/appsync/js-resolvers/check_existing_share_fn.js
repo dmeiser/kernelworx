@@ -1,13 +1,15 @@
 import { util } from '@aws-appsync/utils';
-import { normalizeId, normalizeIdOrPrefix, stripIdPrefix } from './lib/ids.js';
+import { normalizeIdOrPrefix, stripIdPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const input = ctx.args && ctx.args.input ? ctx.args.input : {};
     const profileId = input.profileId || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
     const targetAccountId = ctx.stash ? ctx.stash.targetAccountId : undefined;
     
-    // Ensure targetAccountId has ACCOUNT# prefix when querying the shares table
-    const dbTargetAccountId = targetAccountId ? normalizeId(targetAccountId, 'ACCOUNT#') : targetAccountId;
+    // Owned by lib/ids.js, same non-nullable form as the sibling share
+    // resolvers: a missing id yields the bare 'ACCOUNT#' prefix rather than
+    // null, which a DynamoDB key attribute may never be.
+    const dbTargetAccountId = normalizeIdOrPrefix(targetAccountId, 'ACCOUNT#');
     
     // Store clean ID (without ACCOUNT# prefix) for stash consistency
     const cleanTargetAccountId = stripIdPrefix(targetAccountId, 'ACCOUNT#');
@@ -15,9 +17,8 @@ export function request(ctx) {
         ctx.stash.cleanTargetAccountId = cleanTargetAccountId;
     }
     
-    // Normalize profileId to ensure PROFILE# prefix is used when querying shares table;
-    // a missing profileId passes through untouched, exactly as before (#534).
-    const dbProfileId = profileId ? normalizeId(profileId, 'PROFILE#') : profileId;
+    // Normalize profileId to ensure PROFILE# prefix is used when querying shares table.
+    const dbProfileId = normalizeIdOrPrefix(profileId, 'PROFILE#');
 
     // Query shares table directly by PK+SK
     return {
