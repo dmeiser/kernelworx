@@ -54,6 +54,7 @@ try:  # pragma: no cover
     from utils.appsync_types import get_caller_id
     from utils.auth import require_admin_mfa
     from utils.boto import get_cognito_client
+    from utils.cognito import is_transient_cognito_error
     from utils.cognito_filters import cognito_user_filter
     from utils.dynamodb import (
         EMAIL_SEARCH_KEY,
@@ -63,7 +64,6 @@ try:  # pragma: no cover
         is_transient_client_error,
         tables,
     )
-    from utils.dynamodb_exceptions import is_transient_cognito_error
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
     from utils.payment_methods import delete_all_user_qr_codes
@@ -71,6 +71,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.appsync_types import get_caller_id
     from ..utils.auth import require_admin_mfa
     from ..utils.boto import get_cognito_client
+    from ..utils.cognito import is_transient_cognito_error
     from ..utils.cognito_filters import cognito_user_filter
     from ..utils.dynamodb import (
         EMAIL_SEARCH_KEY,
@@ -80,7 +81,6 @@ except ModuleNotFoundError:  # pragma: no cover
         is_transient_client_error,
         tables,
     )
-    from ..utils.dynamodb_exceptions import is_transient_cognito_error
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
     from ..utils.payment_methods import delete_all_user_qr_codes
@@ -827,6 +827,11 @@ def _find_cognito_user_by_sub(
             return username, email
     except ClientError as e:
         logger.error("Cognito lookup by sub failed", error=str(e), account_id=account_id)
+        if is_transient_cognito_error(e):
+            raise AppError(
+                ErrorCode.RESOURCE_BUSY,
+                "Failed to look up Cognito user. Retry the purge to complete the deletion.",
+            ) from e
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to look up Cognito user") from e
     return None, None
 
@@ -836,7 +841,7 @@ def _delete_user_from_cognito(
 ) -> None:
     """Delete user from Cognito, treating UserNotFoundException as idempotent success.
 
-    Failures propagate as the raw ``ClientError`` — the caller owns failure
+    Failures propagate unchanged — the caller owns failure
     logging and typed-error mapping, so the real AWS error code survives to
     where the context (account, actor, partial state) is added.
     """
@@ -887,7 +892,9 @@ def _delete_cognito_user_after_sweep(
     """
     try:
         _delete_user_from_cognito(cognito, user_pool_id, username, email, logger, actor_sub)
-    except ClientError as error:
+    except Exception as error:
+        # Non-ClientError faults (BotoCoreError network errors) land here too:
+        # the partial state is just as unknown, so the narration must survive.
         logger.error(
             "Account data swept but the Cognito delete did not report success; "
             "the account's Cognito state is unknown and needs a retry or manual completion",
@@ -897,7 +904,7 @@ def _delete_cognito_user_after_sweep(
             aws_error_code=_throttling_error_code(error),
             exc_info=True,
         )
-        if is_transient_cognito_error(error):
+        if isinstance(error, ClientError) and is_transient_cognito_error(error):
             raise AppError(
                 ErrorCode.RESOURCE_BUSY,
                 "Account data was swept but the Cognito user could not be confirmed deleted; "

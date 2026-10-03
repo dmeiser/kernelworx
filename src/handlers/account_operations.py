@@ -17,18 +17,16 @@ from .deletion_cascade import delete_all_user_data
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.appsync_types import get_caller_id
-    from utils.cognito import retry_on_transient_errors
+    from utils.cognito import is_transient_cognito_error, retry_on_transient_errors
     from utils.cognito_filters import cognito_user_filter
     from utils.dynamodb import is_transient_client_error
-    from utils.dynamodb_exceptions import is_transient_cognito_error
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.appsync_types import get_caller_id
-    from ..utils.cognito import retry_on_transient_errors
+    from ..utils.cognito import is_transient_cognito_error, retry_on_transient_errors
     from ..utils.cognito_filters import cognito_user_filter
     from ..utils.dynamodb import is_transient_client_error
-    from ..utils.dynamodb_exceptions import is_transient_cognito_error
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
 
@@ -168,21 +166,23 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
 
     try:
         _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
-    except ClientError as error:
+    except Exception as error:
         # Only two facts are established here: the sweep completed (the
         # accounts row included — self-service deletes it in the sweep, with
         # Cognito as the commit point) and the Cognito delete did not report
         # success. Whether the user survives is unknown (the delete may have
         # landed, and a failed re-lookup of an absent user also lands here).
+        # Non-ClientError faults (BotoCoreError network errors) land here too:
+        # the partial state is just as unknown, so the narration must survive.
         logger.error(
             "Account data swept but the Cognito delete did not report success; "
             "the account's Cognito state is unknown and needs a retry or manual completion",
             account_id=account_id,
             error=str(error),
-            aws_error_code=error.response.get("Error", {}).get("Code", ""),
+            aws_error_code=error.response.get("Error", {}).get("Code", "") if isinstance(error, ClientError) else "",
             exc_info=True,
         )
-        if is_transient_cognito_error(error):
+        if isinstance(error, ClientError) and is_transient_cognito_error(error):
             raise AppError(
                 ErrorCode.RESOURCE_BUSY,
                 "Account data was deleted but the Cognito user could not be confirmed deleted; "

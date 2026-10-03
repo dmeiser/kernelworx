@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, call, patch
 
 import boto3
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 from src.handlers.admin_operations import (
     _batch_get_campaign_catalogs,
@@ -1898,6 +1898,45 @@ class TestAdminPurgeUserAccount:
         assert entry["account_id"] == target_account_id
         assert entry["aws_error_code"] == "NotAuthorizedException"
 
+    def test_purge_cognito_network_fault_keeps_the_partial_state_narration(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        sample_account_id: str,
+        caplog: Any,
+    ) -> None:
+        """A non-ClientError network fault gets the same attributed narration and typed error."""
+        caplog.set_level(logging.ERROR)
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_cognito.admin_delete_user.side_effect = EndpointConnectionError(endpoint_url="cognito")
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+        assert "retry" not in result["message"]
+        assert "accounts record still exists" in result["message"]
+        assert "complete the deletion manually" in result["message"]
+
+        entry = self._audit_record(caplog, PURGE_COGNITO_FAILURE_MESSAGE)
+        assert entry["actor_sub"] == sample_account_id
+        assert entry["account_id"] == target_account_id
+        # No AWS code exists for a network fault; the field must be empty, not a placeholder.
+        assert entry["aws_error_code"] == ""
+        assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+
     def test_purge_sweep_apperror_is_attributed_and_re_raised_unchanged(
         self,
         dynamodb_table: Any,
@@ -1983,9 +2022,6 @@ class TestAdminPurgeUserAccount:
         assert entry["actor_sub"] == sample_account_id
         assert entry["account_id"] == target_account_id
         assert entry["aws_error_code"] == "ProvisionedThroughputExceededException"
-
-        mock_cognito.admin_delete_user.assert_not_called()
-        assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
 
         mock_cognito.admin_delete_user.assert_not_called()
         assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
@@ -3649,12 +3685,12 @@ class TestAccountDeletionHelpers:
         assert email is None
 
     def test_find_cognito_user_by_sub_client_error(self) -> None:
-        """_find_cognito_user_by_sub raises AppError when Cognito call fails."""
+        """A non-retryable lookup failure surfaces as INTERNAL_ERROR."""
         from src.handlers.admin_operations import _find_cognito_user_by_sub
 
         mock_cognito = MagicMock()
         mock_cognito.list_users.side_effect = ClientError(
-            {"Error": {"Code": "InternalErrorException", "Message": "Cognito failure"}},
+            {"Error": {"Code": "AccessDeniedException", "Message": "Cognito failure"}},
             "ListUsers",
         )
 
@@ -3664,6 +3700,25 @@ class TestAccountDeletionHelpers:
             )
 
         assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
+        assert "Retry" not in exc_info.value.message
+
+    def test_find_cognito_user_by_sub_throttle_is_retryable(self) -> None:
+        """A throttled lookup is retryable RESOURCE_BUSY with a retry-promise message."""
+        from src.handlers.admin_operations import _find_cognito_user_by_sub
+
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.side_effect = ClientError(
+            {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+            "ListUsers",
+        )
+
+        with pytest.raises(AppError) as exc_info:
+            _find_cognito_user_by_sub(
+                mock_cognito, "pool-id", "ACCOUNT#11111111-1111-1111-1111-111111111111", MagicMock()
+            )
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert "Retry the purge to complete the deletion" in exc_info.value.message
 
     def test_account_exists_in_dynamodb_unprefixed(self, dynamodb_table: Any) -> None:
         """_account_exists_in_dynamodb normalizes unprefixed account ID."""

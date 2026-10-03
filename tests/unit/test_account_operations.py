@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
+from botocore.exceptions import EndpointConnectionError
 
 from src.utils.errors import AppError, ErrorCode
 
@@ -774,6 +775,42 @@ class TestDeleteMyAccount:
             assert '"account_id": "user-123-456"' in captured
             assert '"aws_error_code": "InternalError"' in captured
             # The failure is logged exactly once on this path.
+            assert captured.count("the Cognito delete did not report success") == 1
+
+    def test_delete_account_cognito_network_fault_keeps_the_partial_state_narration(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A non-ClientError network fault gets the same narration and typed error."""
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {
+                "Users": [{"Username": "test-user", "Attributes": [{"Name": "sub", "Value": sample_account_id}]}]
+            }
+            mock_cognito.admin_delete_user.side_effect = EndpointConnectionError(endpoint_url="cognito")
+
+            event = {**appsync_event, "identity": {"sub": sample_account_id}}
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "retry" not in result["message"]
+            assert "complete the deletion manually in Cognito" in result["message"]
+
+            captured = capsys.readouterr().out
+            assert "Account data swept but the Cognito delete did not report success" in captured
+            assert '"account_id": "user-123-456"' in captured
             assert captured.count("the Cognito delete did not report success") == 1
 
     def test_delete_account_sweep_failure_keeps_account_attribution(
