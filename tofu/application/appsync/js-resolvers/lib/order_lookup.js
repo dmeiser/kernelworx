@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './ids.js';
 
 /**
  * Shared order lookup, used by the getOrder query (query_order_fn) and the
@@ -24,7 +25,11 @@ export function parseEmbeddedCampaignId(orderId) {
     if (parts.length !== 3 || !parts[1] || !parts[2]) {
         return null;
     }
-    return 'CAMPAIGN#' + parts[1];
+    // The embedded part carries no prefix (split('#') removed it), so this is
+    // the inverse of the stripIdPrefix call create_order_fn uses to build the
+    // order id. It goes through the same owner so the two directions of that
+    // round-trip cannot drift apart.
+    return normalizeIdOrPrefix(parts[1], 'CAMPAIGN#');
 }
 
 /**
