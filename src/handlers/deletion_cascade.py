@@ -17,7 +17,7 @@ client-side (#521) and reuses these per-entity sub-cascades directly, then
 calls ``adminPurgeUserAccount`` — see the #521 entry in AGENTS.md.
 """
 
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Callable, Dict
 
 from botocore.exceptions import ClientError
 
@@ -32,11 +32,15 @@ from .delete_profile_cascade import _delete_s3_reports
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.dynamodb import tables
+    from utils.cognito import is_transient_cognito_error
+    from utils.dynamodb import is_transient_client_error, tables
+    from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.dynamodb import tables
+    from ..utils.cognito import is_transient_cognito_error
+    from ..utils.dynamodb import is_transient_client_error, tables
+    from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
     from ..utils.payment_methods import delete_all_user_qr_codes
 
@@ -271,3 +275,81 @@ def delete_all_user_data(account_id: str, logger: Any = None) -> None:
         log.error("Failed to delete account from DynamoDB", error=str(e), account_id=account_id_key)
         raise
     log.info("Deleted all user data from DynamoDB")
+
+
+# The partial-state narration is identical on both deletion paths, so it is
+# defined once here: exactly one error line per failed Cognito delete.
+PARTIAL_STATE_LOG_MESSAGE = (
+    "Account data swept but the Cognito delete did not report success; "
+    "the account's Cognito state is unknown and needs a retry or manual completion"
+)
+
+
+def run_deletion_steps(
+    sweep: Callable[[], None],
+    delete_cognito: Callable[[], None],
+    *,
+    logger: Any,
+    log_context: Dict[str, Any],
+    sweep_log_message: str,
+    sweep_retry_message: str,
+    sweep_fatal_message: str,
+    partial_retry_message: str,
+    partial_fatal_message: str,
+) -> None:
+    """Run the data sweep, then the Cognito delete, with one failure classification each.
+
+    This is the single home of the sweep classification and the partial-state
+    report shared by self-service ``delete_my_account`` and the admin purge:
+    each failure is logged exactly once with ``log_context`` (``account_id`` on
+    the self path, ``account_id`` plus ``actor_sub`` on the admin path) merged
+    into the line, then raised as the typed error whose code matches the retry
+    guidance in the caller-supplied message.
+
+    The sweep runs first and is safe to re-run, so a sweep failure leaves the
+    Cognito user untouched and a retry converges. The Cognito delete runs only
+    after a successful sweep: a failure there logs the partial state
+    (``PARTIAL_STATE_LOG_MESSAGE``), maps a transient Cognito fault to the
+    retryable ``RESOURCE_BUSY`` (#291), and leaves everything else as
+    ``INTERNAL_ERROR`` pointing at manual completion.
+    """
+    try:
+        sweep()
+    except AppError as error:
+        # The caller's typed error (retryable RESOURCE_BUSY included) is
+        # re-raised unchanged after the single attributed log line.
+        logger.error(
+            sweep_log_message,
+            **log_context,
+            error=str(error),
+            error_code=error.error_code,
+            exc_info=True,
+        )
+        raise
+    except ClientError as error:
+        logger.error(
+            sweep_log_message,
+            **log_context,
+            error=str(error),
+            aws_error_code=error.response.get("Error", {}).get("Code", ""),
+            exc_info=True,
+        )
+        if is_transient_client_error(error):
+            raise AppError(ErrorCode.RESOURCE_BUSY, sweep_retry_message) from error
+        raise AppError(ErrorCode.INTERNAL_ERROR, sweep_fatal_message) from error
+
+    try:
+        delete_cognito()
+    except Exception as error:
+        # Non-ClientError faults (BotoCoreError network errors) land here too:
+        # the partial state is just as unknown, so the narration must survive.
+        logger.error(
+            PARTIAL_STATE_LOG_MESSAGE,
+            **log_context,
+            error=str(error),
+            aws_error_code=error.response.get("Error", {}).get("Code", "") if isinstance(error, ClientError) else "",
+            exc_info=True,
+        )
+        if isinstance(error, ClientError) and is_transient_cognito_error(error):
+            raise AppError(ErrorCode.RESOURCE_BUSY, partial_retry_message) from error
+        raise AppError(ErrorCode.INTERNAL_ERROR, partial_fatal_message) from error

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
+from botocore.exceptions import EndpointConnectionError
 
 from src.utils.errors import AppError, ErrorCode
 
@@ -711,7 +712,7 @@ class TestDeleteMyAccount:
         monkeypatch: Any,
         capsys: Any,
     ) -> None:
-        """Test deletion handles Cognito admin_delete_user errors (covers line 171)."""
+        """A non-transient Cognito admin_delete_user failure surfaces INTERNAL_ERROR naming the partial state."""
         from botocore.exceptions import ClientError
 
         from src.handlers.account_operations import delete_my_account
@@ -762,15 +763,187 @@ class TestDeleteMyAccount:
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-            assert result["message"] == "Failed to delete account"
+            # The message must not promise a retry the code does not support,
+            # and must not claim more than the code knows.
+            assert "retry" not in result["message"]
+            assert "complete the deletion manually in Cognito" in result["message"]
             assert "InternalError" not in result["message"]
             assert "AdminDeleteUser" not in result["message"]
-            assert "Cognito" not in result["message"]
 
             captured = capsys.readouterr().out
-            assert "Cognito error during account deletion" in captured
-            assert "InternalError" in captured
-            assert "AdminDeleteUser" in captured
+            assert "Account data swept but the Cognito delete did not report success" in captured
+            assert '"account_id": "user-123-456"' in captured
+            assert '"aws_error_code": "InternalError"' in captured
+            # The failure is logged exactly once on this path.
+            assert captured.count("the Cognito delete did not report success") == 1
+
+    def test_delete_account_cognito_network_fault_keeps_the_partial_state_narration(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A non-ClientError network fault gets the same narration and typed error."""
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {
+                "Users": [{"Username": "test-user", "Attributes": [{"Name": "sub", "Value": sample_account_id}]}]
+            }
+            mock_cognito.admin_delete_user.side_effect = EndpointConnectionError(endpoint_url="cognito")
+
+            event = {**appsync_event, "identity": {"sub": sample_account_id}}
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert "retry" not in result["message"]
+            assert "complete the deletion manually in Cognito" in result["message"]
+
+            captured = capsys.readouterr().out
+            assert "Account data swept but the Cognito delete did not report success" in captured
+            assert '"account_id": "user-123-456"' in captured
+            assert captured.count("the Cognito delete did not report success") == 1
+
+    def test_delete_account_sweep_failure_keeps_account_attribution(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A data-sweep failure is logged with the account identity and leaves Cognito untouched."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        with (
+            patch("boto3.client") as mock_boto_client,
+            patch("src.handlers.account_operations.delete_all_user_data") as mock_sweep,
+        ):
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {
+                "Users": [
+                    {
+                        "Username": "test-user",
+                        "Attributes": [{"Name": "sub", "Value": sample_account_id}],
+                    }
+                ]
+            }
+            mock_sweep.side_effect = ClientError(
+                {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}},
+                "BatchWriteItem",
+            )
+
+            event = {**appsync_event, "identity": {"sub": sample_account_id}}
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            # Message and code agree: a throttled sweep is the retryable case,
+            # the same classification the sweep's own batch deletes get.
+            assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+            assert "Retry to complete the deletion" in result["message"]
+
+            captured = capsys.readouterr().out
+            assert "Data sweep failed before the Cognito delete" in captured
+            assert '"account_id": "user-123-456"' in captured
+            # The Cognito delete never ran: the sweep failed first.
+            mock_cognito.admin_delete_user.assert_not_called()
+
+    def test_delete_account_non_transient_sweep_failure_is_permanent(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+        capsys: Any,
+    ) -> None:
+        """A non-retryable sweep failure stays INTERNAL_ERROR and does not promise a retry."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        with (
+            patch("boto3.client") as mock_boto_client,
+            patch("src.handlers.account_operations.delete_all_user_data") as mock_sweep,
+        ):
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {
+                "Users": [{"Username": "test-user", "Attributes": [{"Name": "sub", "Value": sample_account_id}]}]
+            }
+            mock_sweep.side_effect = ClientError(
+                {"Error": {"Code": "AccessDeniedException", "Message": "Denied"}},
+                "Query",
+            )
+
+            event = {**appsync_event, "identity": {"sub": sample_account_id}}
+            result = delete_my_account(event, lambda_context)
+
+            assert result["__isError"] is True
+            assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert result["message"] == "Failed to delete account data"
+            assert "retry" not in result["message"]
+
+            captured = capsys.readouterr().out
+            assert "Data sweep failed before the Cognito delete" in captured
+            assert '"account_id": "user-123-456"' in captured
+            assert '"aws_error_code": "AccessDeniedException"' in captured
+
+    def test_delete_account_cognito_lookup_throttle_is_retryable(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A lookup transient code that survives every retry is retryable RESOURCE_BUSY (#291)."""
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "ListUsers",
+            )
+
+            event = {**appsync_event, "identity": {"sub": sample_account_id}}
+
+            with patch("time.sleep") as mock_sleep:
+                result = delete_my_account(event, lambda_context)
+
+                assert result["__isError"] is True
+                # Message and code agree: the exhausted transient retry still
+                # surfaces as retryable, with only the retry promising one.
+                assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+                assert result["message"] == "Failed to delete account. Retry to complete the deletion."
+                assert mock_sleep.call_count == 2
+                assert mock_cognito.list_users.call_count == 3
 
     def test_delete_account_unexpected_exception(
         self,
@@ -927,7 +1100,7 @@ class TestDeleteMyAccount:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """Test transient Cognito errors that exhaust retries raise AppError."""
+        """A throttled Cognito delete that exhausts every retry is retryable RESOURCE_BUSY (#291)."""
         from botocore.exceptions import ClientError
 
         from src.handlers.account_operations import delete_my_account
@@ -971,11 +1144,12 @@ class TestDeleteMyAccount:
                 result = delete_my_account(event, lambda_context)
 
                 assert result["__isError"] is True
-                assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-                assert result["message"] == "Failed to delete account"
+                # Message and code agree: throttling after retry exhaustion is
+                # the retryable case, and only it promises a retry.
+                assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+                assert "retry to complete the deletion" in result["message"]
                 assert "TooManyRequestsException" not in result["message"]
                 assert "AdminDeleteUser" not in result["message"]
-                assert "Cognito" not in result["message"]
                 assert mock_sleep.call_count == 2
                 assert mock_cognito.admin_delete_user.call_count == 3
 
