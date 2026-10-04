@@ -22,6 +22,7 @@ DEFAULT_OUTPUTS: dict[str, dict[str, str]] = {
         "value": "https://test-api.appsync-api.us-east-1.amazonaws.com/graphql",
         "type": "string",
     },
+    "appsync_api_key": {"value": "0123456789abcdef0123456789abcdef01234567", "type": "string"},
     "cognito_user_pool_id": {"value": "us-east-1_TestPool", "type": "string"},
     "cognito_client_id": {"value": "0123456789abcdef0123456789ab", "type": "string"},
     "cognito_domain": {"value": "login.test.kernelworx.app", "type": "string"},
@@ -83,6 +84,7 @@ class TestGeneration:
         assert result.returncode == 0, result.stderr
         values = parse_env_file(target)
         assert values["TEST_APPSYNC_ENDPOINT"] == DEFAULT_OUTPUTS["appsync_api_url"]["value"]
+        assert values["TEST_APPSYNC_API_KEY"] == DEFAULT_OUTPUTS["appsync_api_key"]["value"]
         assert values["TEST_USER_POOL_ID"] == "us-east-1_TestPool"
         assert values["TEST_USER_POOL_CLIENT_ID"] == "0123456789abcdef0123456789ab"
         assert values["TEST_REGION"] == "us-east-1"
@@ -144,6 +146,65 @@ class TestGeneration:
         assert result.returncode == 1
         assert "cognito_client_id" in result.stderr
 
+    def test_appsync_api_key_output_written_when_present(self, script_path: Path, tmp_path: Path) -> None:
+        """A stack exposing appsync_api_key (post-public-orders deploy) writes both key vars."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json())
+        target = tmp_path / ".env"
+        frontend_target = tmp_path / "frontend.env"
+        result = run_script(
+            script_path,
+            "--outputs-json",
+            str(fixture),
+            "--out",
+            str(target),
+            "--frontend-out",
+            str(frontend_target),
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        values = parse_env_file(target)
+        assert values["TEST_APPSYNC_API_KEY"] == DEFAULT_OUTPUTS["appsync_api_key"]["value"]
+        assert parse_env_file(frontend_target)["VITE_APPSYNC_API_KEY"] == DEFAULT_OUTPUTS["appsync_api_key"]["value"]
+
+    def test_appsync_api_key_absent_output_skipped_with_diagnostic(self, script_path: Path, tmp_path: Path) -> None:
+        """A stack whose state predates the public-orders feature (no
+        appsync_api_key output) still generates both env files; the generator
+        prints a diagnostic naming the output and exit code stays 0."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        frontend_target = tmp_path / "frontend.env"
+        result = run_script(
+            script_path,
+            "--outputs-json",
+            str(fixture),
+            "--out",
+            str(target),
+            "--frontend-out",
+            str(frontend_target),
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "appsync_api_key" in result.stderr, "the diagnostic must name the missing output"
+        values = parse_env_file(target)
+        assert "TEST_APPSYNC_API_KEY" not in values
+        assert values["TEST_USER_POOL_ID"] == "us-east-1_TestPool"
+        assert parse_env_file(frontend_target).get("VITE_APPSYNC_API_KEY") is None
+
+    def test_check_mode_api_key_omitted_when_output_absent(self, script_path: Path, tmp_path: Path) -> None:
+        """--check against a pre-change stack: the API-key var is expected to be
+        absent (informational skip), so the check succeeds; other required
+        outputs still fail loudly."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        target.write_text("FOO=bar\n")
+        result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1, "the generated .env lacks the required keys, so the check must fail"
+        assert "TEST_USER_POOL_ID" in result.stderr
+        assert "appsync_api_key" in result.stderr  # diagnostic still names the missing output
+
     def test_invalid_outputs_json_fails_loudly(self, script_path: Path, tmp_path: Path) -> None:
         fixture = tmp_path / "outputs.json"
         fixture.write_text("not json")
@@ -168,6 +229,7 @@ class TestGeneration:
         assert result.returncode == 0, result.stderr
         values = parse_env_file(target)
         assert values["VITE_APPSYNC_ENDPOINT"] == DEFAULT_OUTPUTS["appsync_api_url"]["value"]
+        assert values["VITE_APPSYNC_API_KEY"] == DEFAULT_OUTPUTS["appsync_api_key"]["value"]
         assert values["VITE_APPSYNC_REGION"] == "us-east-1"
         assert values["VITE_COGNITO_USER_POOL_ID"] == "us-east-1_TestPool"
         assert values["VITE_COGNITO_USER_POOL_CLIENT_ID"] == "0123456789abcdef0123456789ab"
@@ -193,7 +255,7 @@ class TestGeneration:
 
 
 class TestCheckMode:
-    def test_check_passes_on_generated_file(self, script_path: Path, tmp_path: Path) -> None:
+    def test_check_passes_on_generated_file_with_api_key(self, script_path: Path, tmp_path: Path) -> None:
         fixture = tmp_path / "outputs.json"
         fixture.write_text(outputs_json())
         target = tmp_path / ".env"
@@ -202,6 +264,134 @@ class TestCheckMode:
         result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         assert "ok" in result.stderr
+
+    def test_check_passes_on_generated_file_without_api_key(self, script_path: Path, tmp_path: Path) -> None:
+        """A corrected env (no key, pre-change stack) must check green, not stale."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        generated = run_script(script_path, "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert generated.returncode == 0, generated.stderr
+        result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "stale" not in result.stderr
+        # A stale key value, when the output IS present, still fails loudly.
+        stale_target = tmp_path / ".env.stale"
+        stale_target.write_text(
+            "TEST_APPSYNC_ENDPOINT=" + DEFAULT_OUTPUTS["appsync_api_url"]["value"] + "\n"
+            "TEST_APPSYNC_API_KEY=stalekey\n"
+            "TEST_USER_POOL_ID=" + DEFAULT_OUTPUTS["cognito_user_pool_id"]["value"] + "\n"
+            "TEST_USER_POOL_CLIENT_ID=" + DEFAULT_OUTPUTS["cognito_client_id"]["value"] + "\n"
+            "TEST_REGION=us-east-1\n"
+        )
+        full_fixture = tmp_path / "outputs_full.json"
+        full_fixture.write_text(outputs_json())
+        stale_result = run_script(
+            script_path, "--check", "--outputs-json", str(full_fixture), "--out", str(stale_target), cwd=tmp_path
+        )
+        assert stale_result.returncode == 1
+        assert "stale" in stale_result.stderr
+
+    def test_check_fails_when_file_carries_key_but_output_absent(self, script_path: Path, tmp_path: Path) -> None:
+        """A file carrying TEST_APPSYNC_API_KEY against a stack with no
+        appsync_api_key output is stale/foreign and must fail loudly, not
+        exit 0 with a skipped note."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        target.write_text(
+            "TEST_APPSYNC_ENDPOINT=" + DEFAULT_OUTPUTS["appsync_api_url"]["value"] + "\n"
+            "TEST_APPSYNC_API_KEY=stalekey-from-a-different-stack\n"
+            "TEST_USER_POOL_ID=" + DEFAULT_OUTPUTS["cognito_user_pool_id"]["value"] + "\n"
+            "TEST_USER_POOL_CLIENT_ID=" + DEFAULT_OUTPUTS["cognito_client_id"]["value"] + "\n"
+            "TEST_REGION=us-east-1\n"
+        )
+        result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1, result.stderr
+        assert "TEST_APPSYNC_API_KEY" in result.stderr
+        assert "stale" in result.stderr
+
+    def test_check_frontend_fails_when_file_carries_key_but_output_absent(
+        self, script_path: Path, tmp_path: Path
+    ) -> None:
+        """Same contract on the frontend path: VITE_APPSYNC_API_KEY in the file
+        while the stack exposes no appsync_api_key output fails loudly."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / "frontend.env"
+        target.write_text(
+            "VITE_APPSYNC_ENDPOINT=" + DEFAULT_OUTPUTS["appsync_api_url"]["value"] + "\n"
+            "VITE_APPSYNC_REGION=us-east-1\n"
+            "VITE_COGNITO_USER_POOL_ID=" + DEFAULT_OUTPUTS["cognito_user_pool_id"]["value"] + "\n"
+            "VITE_COGNITO_USER_POOL_CLIENT_ID=" + DEFAULT_OUTPUTS["cognito_client_id"]["value"] + "\n"
+            "VITE_COGNITO_DOMAIN=" + DEFAULT_OUTPUTS["cognito_domain"]["value"] + "\n"
+            "VITE_OAUTH_REDIRECT_SIGNIN=http://localhost:5173/\n"
+            "VITE_OAUTH_REDIRECT_SIGNOUT=http://localhost:5173/\n"
+            "VITE_APPSYNC_API_KEY=foreign-key\n"
+        )
+        result = run_script(
+            script_path, "--check", "--outputs-json", str(fixture), "--frontend-out", str(target), cwd=tmp_path
+        )
+        assert result.returncode == 1, result.stderr
+        assert "VITE_APPSYNC_API_KEY" in result.stderr
+        assert "stale" in result.stderr
+
+    def test_check_fails_when_file_carries_empty_key_but_output_absent(self, script_path: Path, tmp_path: Path) -> None:
+        """A conditional key present in the file but EMPTY (KEY= with no value)
+        fails value-aware --check exactly as structural --check does
+        ('missing (empty value)'), never tolerated as a skipped pre-feature state."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        target.write_text(
+            "TEST_APPSYNC_ENDPOINT=" + DEFAULT_OUTPUTS["appsync_api_url"]["value"] + "\n"
+            "TEST_APPSYNC_API_KEY=\n"
+            "TEST_USER_POOL_ID=" + DEFAULT_OUTPUTS["cognito_user_pool_id"]["value"] + "\n"
+            "TEST_USER_POOL_CLIENT_ID=" + DEFAULT_OUTPUTS["cognito_client_id"]["value"] + "\n"
+            "TEST_REGION=us-east-1\n"
+        )
+        result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1, result.stderr
+        assert "TEST_APPSYNC_API_KEY" in result.stderr
+        assert "skipped" not in result.stderr
+
+    def test_check_frontend_fails_when_file_carries_empty_key_but_output_absent(
+        self, script_path: Path, tmp_path: Path
+    ) -> None:
+        """Same empty-value contract on the frontend path."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / "frontend.env"
+        target.write_text(
+            "VITE_APPSYNC_ENDPOINT=" + DEFAULT_OUTPUTS["appsync_api_url"]["value"] + "\n"
+            "VITE_APPSYNC_REGION=us-east-1\n"
+            "VITE_COGNITO_USER_POOL_ID=" + DEFAULT_OUTPUTS["cognito_user_pool_id"]["value"] + "\n"
+            "VITE_COGNITO_USER_POOL_CLIENT_ID=" + DEFAULT_OUTPUTS["cognito_client_id"]["value"] + "\n"
+            "VITE_COGNITO_DOMAIN=" + DEFAULT_OUTPUTS["cognito_domain"]["value"] + "\n"
+            "VITE_OAUTH_REDIRECT_SIGNIN=http://localhost:5173/\n"
+            "VITE_OAUTH_REDIRECT_SIGNOUT=http://localhost:5173/\n"
+            "VITE_APPSYNC_API_KEY=\n"
+        )
+        result = run_script(
+            script_path, "--check", "--outputs-json", str(fixture), "--frontend-out", str(target), cwd=tmp_path
+        )
+        assert result.returncode == 1, result.stderr
+        assert "VITE_APPSYNC_API_KEY" in result.stderr
+        assert "skipped" not in result.stderr
+
+    def test_structural_check_verifies_present_conditional_key(self, script_path: Path, tmp_path: Path) -> None:
+        """A file that does carry the conditional key is still checked for its
+        presence (and emptiness) in structural mode."""
+        target = tmp_path / ".env"
+        target.write_text(
+            "TEST_APPSYNC_ENDPOINT=https://x.appsync-api.us-east-1.amazonaws.com/graphql\n"
+            "TEST_USER_POOL_ID=us-east-1_TestPool\n"
+            "TEST_USER_POOL_CLIENT_ID=client\n"
+            "TEST_REGION=us-east-1\n"
+            "TEST_APPSYNC_API_KEY=whatever\n"
+        )
+        result = run_script(script_path, "--check", "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
 
     def test_check_detects_stale_value(self, script_path: Path, tmp_path: Path) -> None:
         fixture = tmp_path / "outputs.json"
@@ -212,6 +402,22 @@ class TestCheckMode:
         assert result.returncode == 1
         assert "stale" in result.stderr
         assert "TEST_USER_POOL_ID" in result.stderr
+
+    def test_stale_diagnostic_never_echoes_values(self, script_path: Path, tmp_path: Path) -> None:
+        """A stale mismatch must be reported without printing either value:
+        main() writes the status to stderr and the managed values include the
+        AppSync API key, so echoing them would log the secret (CodeQL
+        py/clear-text-logging-sensitive-data)."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json())
+        target = tmp_path / ".env"
+        target.write_text("TEST_APPSYNC_API_KEY=file-side-value\n")
+        result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1, result.stderr
+        assert "TEST_APPSYNC_API_KEY" in result.stderr  # the failing key is named
+        assert "stale" in result.stderr  # and the verdict is reported
+        assert "file-side-value" not in result.stderr
+        assert DEFAULT_OUTPUTS["appsync_api_key"]["value"] not in result.stderr
 
     def test_check_detects_missing_key(self, script_path: Path, tmp_path: Path) -> None:
         fixture = tmp_path / "outputs.json"
@@ -236,6 +442,51 @@ class TestCheckMode:
         before = target.read_text()
         run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
         assert target.read_text() == before
+
+    def test_structural_check_tolerates_missing_conditional_key(self, script_path: Path, tmp_path: Path) -> None:
+        """A .env generated against a stack that predates the appsync_api_key
+        output (generation exits 0 with the key omitted) must also pass a
+        plain --check, with the pre-feature state noted informationally."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        generated = run_script(script_path, "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert generated.returncode == 0, generated.stderr
+        assert "TEST_APPSYNC_API_KEY" not in parse_env_file(target)
+        result = run_script(script_path, "--check", "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "TEST_APPSYNC_API_KEY" in result.stderr
+        assert "skipped" in result.stderr
+
+    def test_structural_check_still_fails_on_missing_required_key(self, script_path: Path, tmp_path: Path) -> None:
+        """Only the conditional key vars are tolerated absent; a genuinely
+        missing non-conditional key still fails the structural check."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        generated = run_script(script_path, "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert generated.returncode == 0, generated.stderr
+        stripped = target.read_text().replace("TEST_REGION=us-east-1\n", "")
+        target.write_text(stripped)
+        result = run_script(script_path, "--check", "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1
+        assert "TEST_REGION" in result.stderr
+        assert "missing" in result.stderr
+
+    def test_structural_check_still_fails_on_empty_conditional_key(self, script_path: Path, tmp_path: Path) -> None:
+        """A conditional key present but empty is misconfiguration, not the
+        tolerated pre-feature state."""
+        target = tmp_path / ".env"
+        target.write_text(
+            "TEST_APPSYNC_ENDPOINT=https://x.appsync-api.us-east-1.amazonaws.com/graphql\n"
+            "TEST_USER_POOL_ID=us-east-1_TestPool\n"
+            "TEST_USER_POOL_CLIENT_ID=client\n"
+            "TEST_REGION=us-east-1\n"
+            "TEST_APPSYNC_API_KEY=\n"
+        )
+        result = run_script(script_path, "--check", "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1
+        assert "TEST_APPSYNC_API_KEY" in result.stderr
 
     def test_structural_check_passes_on_committed_root_sample(self, script_path: Path, repo_root: Path) -> None:
         """The committed .env.example must cover every structurally-checked key."""
@@ -378,6 +629,7 @@ class TestWiring:
             module.expected_integration_values(
                 {
                     "appsync_api_url": "x",
+                    "appsync_api_key": "k",
                     "cognito_user_pool_id": "y",
                     "cognito_client_id": "z",
                     "site_url": "w",

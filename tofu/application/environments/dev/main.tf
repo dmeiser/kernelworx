@@ -398,6 +398,12 @@ output "appsync_api_url" {
   value       = module.appsync.api_url
 }
 
+output "appsync_api_key" {
+  description = "API key for the AppSync API_KEY auth mode (public order surface); a transport credential, not a secret, but the provider marks it sensitive"
+  value       = module.appsync.api_key
+  sensitive   = true
+}
+
 output "cloudfront_distribution_id" {
   description = "ID of the CloudFront distribution serving the site"
   value       = module.cloudfront.distribution_id

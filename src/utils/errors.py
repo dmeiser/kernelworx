@@ -56,6 +56,10 @@ class ErrorCode:
     INVITE_ALREADY_USED = "INVITE_ALREADY_USED"
     CAMPAIGN_READ_ONLY = "CAMPAIGN_READ_ONLY"
     INSUFFICIENT_PERMISSIONS = "INSUFFICIENT_PERMISSIONS"
+    # A public order campaign hit its lifetime order cap (500). Deliberately NOT
+    # RESOURCE_BUSY: the cap is permanent for that campaign, so telling the buyer
+    # to retry would be a lie (the counter is never decremented).
+    PUBLIC_ORDER_LIMIT_EXCEEDED = "PUBLIC_ORDER_LIMIT_EXCEEDED"
     # The resource is in a state the operation does not accept (e.g. a purge
     # run while the per-entity cascade that must precede it is incomplete).
     CONFLICT = "CONFLICT"

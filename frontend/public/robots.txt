@@ -1,0 +1,8 @@
+# Capability URLs must never be indexed: the public order page
+# (/o/<profileId>/<token>) and the buyer receipt page
+# (/r/<campaignId>/<orderSuffix>/<receiptToken>) carry their authorization in
+# the path, so an indexed copy is a live order link handed to everyone.
+# The pages also carry noindex meta tags; this file is the crawler-facing half.
+User-agent: *
+Disallow: /o/
+Disallow: /r/
