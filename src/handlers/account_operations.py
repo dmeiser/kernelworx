@@ -8,7 +8,7 @@ import os
 from typing import TYPE_CHECKING, Any, Dict
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
@@ -87,10 +87,11 @@ def _lookup_cognito_user_for_deletion(cognito: Any, user_pool_id: str, account_i
     """
     try:
         username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id)
-    except ClientError as error:
+    except (ClientError, BotoCoreError) as error:
         # A retryable Cognito fault is a retryable outcome even when the retry
         # wrapper is already exhausted (#291): emit RESOURCE_BUSY, not a
-        # permanent failure.
+        # permanent failure. BotoCoreError is a transport fault, so it lands
+        # here too; nothing has been deleted yet, so the retry is safe.
         error_code = ErrorCode.RESOURCE_BUSY if is_transient_cognito_error(error) else ErrorCode.INTERNAL_ERROR
         message = (
             "Failed to delete account. Retry to complete the deletion."

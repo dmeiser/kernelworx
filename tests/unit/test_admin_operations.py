@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, call, patch
 
 import boto3
 import pytest
-from botocore.exceptions import ClientError, EndpointConnectionError
+from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
 from src.handlers.admin_operations import (
     _batch_get_campaign_catalogs,
@@ -3811,6 +3811,25 @@ class TestAccountDeletionHelpers:
             {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
             "ListUsers",
         )
+
+        with pytest.raises(AppError) as exc_info:
+            _find_cognito_user_by_sub(
+                mock_cognito, "pool-id", "ACCOUNT#11111111-1111-1111-1111-111111111111", MagicMock()
+            )
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
+        assert "Retry the purge to complete the deletion" in exc_info.value.message
+
+    def test_find_cognito_user_by_sub_transport_fault_is_retryable(self) -> None:
+        """A BotoCoreError during the lookup is retryable, not a generic INTERNAL_ERROR.
+
+        The lookup runs before the sweep and before the Cognito delete, so a
+        transport fault here has mutated nothing and a retry converges.
+        """
+        from src.handlers.admin_operations import _find_cognito_user_by_sub
+
+        mock_cognito = MagicMock()
+        mock_cognito.list_users.side_effect = BotoCoreError()
 
         with pytest.raises(AppError) as exc_info:
             _find_cognito_user_by_sub(

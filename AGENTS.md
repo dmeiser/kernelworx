@@ -194,7 +194,16 @@ This is a conscious, documented security posture. If schema-level owner authoriz
 The transient/permanent split for a failed DynamoDB lookup has one set and one classifier;
 Cognito faults are classified separately by `is_transient_cognito_error`
 (`COGNITO_TRANSIENT_ERROR_CODES`, the same set `retry_on_transient_errors` retries on) in
-`src/utils/cognito.py`. The DynamoDB set is `TRANSIENT_ERROR_CODES` in
+`src/utils/cognito.py`. That classifier takes a `BaseException` and treats a bare
+`BotoCoreError` as retryable — it is a transport fault, not a service verdict — so a
+caller inside `except Exception` need not `isinstance`-narrow before asking. One site
+deliberately stays narrower: the post-sweep Cognito delete in `run_deletion_steps`
+(`src/handlers/deletion_cascade.py`) narrows to `ClientError`, because there the delete
+request has already been sent and a transport fault leaves the Cognito state genuinely
+unknown, so it must not promise a retry. The pre-delete lookups
+(`_lookup_cognito_user_for_deletion`, `_find_cognito_user_by_sub`) are the opposite case:
+nothing is mutated yet, so a transport fault there is a plain retryable `RESOURCE_BUSY`.
+The DynamoDB set is `TRANSIENT_ERROR_CODES` in
 `src/utils/dynamodb.py` (read via
 `is_transient_client_error`, or aliased as `_THROTTLING_ERROR_CODES` in
 `src/handlers/admin_operations.py`); the classifier lives in `src/handlers/admin_operations.py`:

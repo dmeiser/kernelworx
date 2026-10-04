@@ -7,7 +7,7 @@ duplicate transient-fault backoff loops.
 import time
 from typing import Any, Callable
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 # The Cognito retryable codes — the project's single definition of a Cognito
 # fault worth retrying, used both by the retry wrapper below and by the
@@ -22,8 +22,24 @@ _RETRY_MAX_ATTEMPTS: int = 3
 _RETRY_BASE_BACKOFF_SECONDS: float = 0.1
 
 
-def is_transient_cognito_error(error: ClientError) -> bool:
-    """Return True when ``error`` is a retryable Cognito condition."""
+def is_transient_cognito_error(error: BaseException) -> bool:
+    """Return True when ``error`` is a retryable Cognito condition.
+
+    A ``ClientError`` is retryable when its code is in
+    ``COGNITO_TRANSIENT_ERROR_CODES``. A ``BotoCoreError`` is a transport fault
+    (reset connection, read timeout, unreachable endpoint) rather than a
+    service verdict, so it is always retryable -- which matters on the deletion
+    paths, where a lookup that fails this way has deleted nothing and a retry
+    converges. Anything else is permanent.
+
+    Accepting ``BaseException`` keeps this the single Cognito classifier: a
+    caller inside ``except Exception`` no longer has to ``isinstance``-narrow to
+    a ``ClientError`` before asking.
+    """
+    if isinstance(error, BotoCoreError):
+        return True
+    if not isinstance(error, ClientError):
+        return False
     return error.response.get("Error", {}).get("Code", "") in COGNITO_TRANSIENT_ERROR_CODES
 
 

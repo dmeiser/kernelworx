@@ -350,6 +350,14 @@ def run_deletion_steps(
             aws_error_code=error.response.get("Error", {}).get("Code", "") if isinstance(error, ClientError) else "",
             exc_info=True,
         )
+        # Deliberately narrower than is_transient_cognito_error, which counts a
+        # bare BotoCoreError as retryable. Here the delete request has already
+        # been sent, so a transport fault leaves the Cognito state genuinely
+        # unknown -- the delete may or may not have landed -- and promising a
+        # retry would be a claim the code cannot support. Only a service
+        # verdict that says "throttled, not done" is safe to call retryable.
+        # The pre-delete lookup catches are the opposite case (nothing mutated
+        # yet, so a transport fault there is a plain retryable failure).
         if isinstance(error, ClientError) and is_transient_cognito_error(error):
             raise AppError(ErrorCode.RESOURCE_BUSY, partial_retry_message) from error
         raise AppError(ErrorCode.INTERNAL_ERROR, partial_fatal_message) from error
