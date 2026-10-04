@@ -108,3 +108,15 @@ def test_get_caller_id_is_the_total_dialect() -> None:
     assert get_caller_id({"identity": None}) is None
     assert get_caller_id({"identity": {}}) is None
     assert get_caller_id({}) is None
+
+
+def test_get_caller_id_tolerates_a_non_mapping_identity() -> None:
+    """A present-but-non-mapping ``identity`` is None, not an AttributeError.
+
+    Reading ``sub`` off a truthy non-mapping (a string, a number, a list)
+    raises ``AttributeError``, which would surface as the decorator's generic
+    ``INTERNAL_ERROR`` instead of the typed ``UNAUTHORIZED`` the handlers raise
+    for an absent caller.
+    """
+    for identity in ("not-a-dict", 42, 0, ["sub"], object()):
+        assert get_caller_id({"identity": identity}) is None

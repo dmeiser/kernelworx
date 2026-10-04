@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Callable, Dict, NoReturn, Optional, cast
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
@@ -824,7 +824,10 @@ def _find_cognito_user_by_sub(
             attributes = {attr["Name"]: attr["Value"] for attr in users[0].get("Attributes", [])}
             email = attributes.get("email", "")
             return username, email
-    except ClientError as e:
+    except (ClientError, BotoCoreError) as e:
+        # BotoCoreError is a transport fault, not a service verdict, so it
+        # classifies as retryable below; the lookup runs before any delete, so
+        # nothing was mutated and the retry converges.
         logger.error("Cognito lookup by sub failed", error=str(e), account_id=account_id)
         if is_transient_cognito_error(e):
             raise AppError(

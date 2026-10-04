@@ -22,15 +22,19 @@ def get_caller_id(event: Dict[str, Any]) -> Optional[str]:
     Every handler reads the caller through this helper (see
     tests/unit/test_caller_id_helper.py): hand-inlining
     ``event["identity"]["sub"]`` raises ``KeyError`` on a malformed event,
-    where this returns None.
+    where this returns None. The ``isinstance`` guard covers the remaining
+    shape -- a present but non-mapping ``identity`` -- where reading ``sub``
+    would raise ``AttributeError`` instead of returning None.
 
     Args:
         event: AppSync event
 
     Returns:
-        Caller ID or None if not present
+        Caller ID or None if not present or not readable
     """
-    identity: Dict[str, Any] = event.get("identity") or {}
+    identity = event.get("identity")
+    if not isinstance(identity, Mapping):
+        return None
     result: Optional[str] = identity.get("sub")
     return result
 

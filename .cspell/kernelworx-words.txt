@@ -106,6 +106,7 @@ DynamoDB
 EFGH
 emailAddress
 emoji
+isinstance
 resends
 émoji
 emojis

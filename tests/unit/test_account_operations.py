@@ -949,6 +949,42 @@ class TestDeleteMyAccount:
                 assert mock_sleep.call_count == 2
                 assert mock_cognito.list_users.call_count == 3
 
+    def test_delete_account_cognito_lookup_transport_fault_is_retryable(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A BotoCoreError during the lookup is retryable, not a generic INTERNAL_ERROR.
+
+        The lookup precedes the sweep, so a transport fault here has deleted
+        nothing and a retry converges; without this the fault escapes to the
+        decorator's generic path, which promises no retry.
+        """
+        from botocore.exceptions import BotoCoreError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.side_effect = BotoCoreError()
+
+            event = {**appsync_event, "identity": {"sub": sample_account_id}}
+
+            with patch("time.sleep"):
+                result = delete_my_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+        assert "Retry" in result["message"]
+        # The lookup failed, so the Cognito delete was never attempted.
+        mock_cognito.admin_delete_user.assert_not_called()
 
     def test_delete_account_cognito_failure_then_retry_completes(
         self,
