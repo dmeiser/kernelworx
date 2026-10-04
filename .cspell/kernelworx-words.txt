@@ -24,6 +24,7 @@ Amplify
 anomalymonitor
 Anderson
 anytown
+apperror
 AppSync
 appworx
 aria

@@ -191,8 +191,11 @@ This is a conscious, documented security posture. If schema-level owner authoriz
 
 ### DynamoDB lookup failures: one classification, and never a silent partial answer (#291, #456, #556)
 
-The transient/permanent split for a failed DynamoDB (or Cognito) lookup has one set and one
-classifier. The set is `TRANSIENT_ERROR_CODES` in `src/utils/dynamodb.py` (read via
+The transient/permanent split for a failed DynamoDB lookup has one set and one classifier;
+Cognito faults are classified separately by `is_transient_cognito_error`
+(`COGNITO_TRANSIENT_ERROR_CODES`, the same set `retry_on_transient_errors` retries on) in
+`src/utils/cognito.py`. The DynamoDB set is `TRANSIENT_ERROR_CODES` in
+`src/utils/dynamodb.py` (read via
 `is_transient_client_error`, or aliased as `_THROTTLING_ERROR_CODES` in
 `src/handlers/admin_operations.py`); the classifier lives in `src/handlers/admin_operations.py`:
 `_raise_batch_lookup_error` classifies a single failure (throttling -> retryable `RESOURCE_BUSY`,
