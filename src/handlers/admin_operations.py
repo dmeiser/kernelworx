@@ -986,7 +986,9 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
         AppError: If not admin, self-purge is attempted, the user does not
             exist, a supplied profile still exists (CONFLICT), or a deletion
             error occurs. An absent Cognito user is treated as idempotent
-            success.
+            success. When the sweep succeeded but the Cognito delete failed,
+            the error names the partial state so the operator knows the
+            account needs a retry to complete.
     """
     logger = get_logger(__name__)
 
@@ -1019,8 +1021,27 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     delete_user_s3_reports(profiles_for_sweep, logger)
     delete_all_user_qr_codes(account_id, logger)
 
+    # The sweep runs before the Cognito delete and is safe to re-run, so a
+    # retry after a failure below converges; a failure here leaves the Cognito
+    # user untouched. When the sweep succeeded but the Cognito delete fails,
+    # the partial state (data swept, user still present) is logged loudly with
+    # an error_code-tagged field and surfaced honestly to the caller.
     if username:
-        _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger, actor_sub)
+        try:
+            _delete_user_from_cognito(cognito, user_pool_id, username, email or "", logger, actor_sub)
+        except Exception as e:
+            logger.error(
+                "Account data swept but the Cognito user is still present; "
+                "the account needs manual completion or a retry",
+                account_id=account_id,
+                error=str(e),
+                error_code=getattr(e, "error_code", None) or ErrorCode.INTERNAL_ERROR,
+                exc_info=True,
+            )
+            raise AppError(
+                ErrorCode.INTERNAL_ERROR,
+                "Account data was deleted but the Cognito user is still present; retry the purge to complete the deletion",
+            ) from e
     else:
         logger.info("Cognito user already absent", account_id=account_id, actor_sub=actor_sub)
 

@@ -762,15 +762,87 @@ class TestDeleteMyAccount:
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-            assert result["message"] == "Failed to delete account"
+            assert result["message"] == (
+                "Account data was deleted but the Cognito user is still present; retry to complete the deletion"
+            )
             assert "InternalError" not in result["message"]
             assert "AdminDeleteUser" not in result["message"]
-            assert "Cognito" not in result["message"]
 
             captured = capsys.readouterr().out
-            assert "Cognito error during account deletion" in captured
+            assert "Account data swept but the Cognito user is still present" in captured
+            assert "INTERNAL_ERROR" in captured
             assert "InternalError" in captured
             assert "AdminDeleteUser" in captured
+
+        # The sweep ran to completion before the Cognito failure: user data is
+        # gone while the Cognito user survives for the retry to remove.
+        assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
+
+    def test_delete_account_cognito_failure_then_retry_completes(
+        self,
+        dynamodb_table: Any,
+        sample_account_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A Cognito failure after a successful sweep is a partial delete; a retry completes it.
+
+        First attempt: user data is swept, the Cognito delete fails, and the
+        caller gets the honest partial-state error. Second attempt: the sweep
+        no-ops over the already-deleted rows and the Cognito delete succeeds,
+        so the deletion completes cleanly.
+        """
+        from botocore.exceptions import ClientError
+
+        from src.handlers.account_operations import delete_my_account
+
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("USER_POOL_ID", "us-east-1_test123")
+
+        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+        accounts_table = dynamodb.Table("kernelworx-accounts-ue1-dev")
+        account_id_key = f"ACCOUNT#{sample_account_id}"
+
+        accounts_table.put_item(
+            Item={
+                "accountId": account_id_key,
+                "email": "test@example.com",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        with patch("boto3.client") as mock_boto_client:
+            mock_cognito = MagicMock()
+            mock_boto_client.return_value = mock_cognito
+            mock_cognito.list_users.return_value = {
+                "Users": [{"Username": "test-user", "Attributes": [{"Name": "sub", "Value": sample_account_id}]}]
+            }
+            mock_cognito.admin_delete_user.side_effect = [
+                ClientError({"Error": {"Code": "InternalError", "Message": "Internal error"}}, "AdminDeleteUser"),
+                {},
+            ]
+
+            event = {
+                **appsync_event,
+                "identity": {"sub": sample_account_id},
+            }
+
+            first = delete_my_account(event, lambda_context)
+
+            assert first["__isError"] is True
+            assert first["errorCode"] == ErrorCode.INTERNAL_ERROR
+            assert first["message"] == (
+                "Account data was deleted but the Cognito user is still present; retry to complete the deletion"
+            )
+
+            second = delete_my_account(event, lambda_context)
+
+            assert second is True
+            assert mock_cognito.admin_delete_user.call_count == 2
+
+        # The retry completed the deletion: the account record is gone.
+        assert accounts_table.get_item(Key={"accountId": account_id_key}).get("Item") is None
 
     def test_delete_account_unexpected_exception(
         self,
@@ -972,10 +1044,11 @@ class TestDeleteMyAccount:
 
                 assert result["__isError"] is True
                 assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
-                assert result["message"] == "Failed to delete account"
+                assert result["message"] == (
+                    "Account data was deleted but the Cognito user is still present; retry to complete the deletion"
+                )
                 assert "TooManyRequestsException" not in result["message"]
                 assert "AdminDeleteUser" not in result["message"]
-                assert "Cognito" not in result["message"]
                 assert mock_sleep.call_count == 2
                 assert mock_cognito.admin_delete_user.call_count == 3
 
