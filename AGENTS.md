@@ -29,7 +29,9 @@ The root `.env` (loaded by `tests/integration/setup.ts`) and `frontend/.env` are
 hand-maintained for infrastructure values: `scripts/generate_integration_env.py` reads
 `tofu output -json` for the dev or `ephemeral/<run-id>` stack and writes the managed keys
 (`TEST_APPSYNC_ENDPOINT`, `TEST_USER_POOL_ID`, `TEST_USER_POOL_CLIENT_ID`, `TEST_REGION`,
-`E2E_BASE_URL` when `site_url` is present; `VITE_*` keys with `--frontend-out`), preserving
+`E2E_BASE_URL` when `site_url` is present; `TEST_APPSYNC_API_KEY`/`VITE_APPSYNC_API_KEY`
+when `appsync_api_key` is present — optional, see the public-order entry below;
+`VITE_*` keys with `--frontend-out`), preserving
 every unmanaged line. A missing target file is created from the committed
 `.env.example`/`frontend/.env.example` templates, so those templates must keep a
 placeholder line for every managed key (structural `--check` tests in

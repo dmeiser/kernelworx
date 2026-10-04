@@ -51,6 +51,11 @@ Integration tests validate AppSync resolvers by making real GraphQL requests aga
    export TEST_CONTRIBUTOR_PASSWORD="PermPass123!Secure"
    ```
 
+   The public auth-mode tests also need `TEST_APPSYNC_API_KEY` (tofu output
+   `appsync_api_key`, which `generate_integration_env.py` writes when the stack
+   exposes it). A stack predating the public-orders feature has no such output,
+   and those tests then fail in setup with an unset `TEST_APPSYNC_API_KEY` error.
+
    **Admin setup:** the owner test user must be a member of the Cognito `ADMIN`
    group — the resolver derives `isAdmin` from that group membership (see
    `admin_operations.py`), and several SECURITY tests rely on the owner being an

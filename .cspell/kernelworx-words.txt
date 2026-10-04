@@ -170,6 +170,7 @@ IIFE
 impls
 importPath
 inlines
+informationally
 infos
 inputRef
 inputValue
@@ -372,6 +373,7 @@ snackbar
 someoneelse
 spreadsheetml
 srcset
+stalekey
 standardly
 stateAbbrev
 stdlib

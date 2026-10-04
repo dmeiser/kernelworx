@@ -23,5 +23,5 @@ output "api_arn" {
 output "api_key" {
   value       = aws_appsync_api_key.public.key
   sensitive   = true
-  description = "API key for the API_KEY auth mode (public order surface). A transport credential shipped in the public browser bundle; the provider marks the computed key sensitive, so the output inherits that flag."
+  description = "API key for the API_KEY auth mode (public order surface). A transport credential threaded into the frontend build as VITE_APPSYNC_API_KEY for the public browser bundle (the public pages consume it in a later slice); the provider marks the computed key sensitive, so the output inherits that flag."
 }

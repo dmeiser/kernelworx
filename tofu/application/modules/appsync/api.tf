@@ -60,19 +60,23 @@ resource "aws_appsync_graphql_api" "main" {
 }
 
 # API key for the public order surface. It is a transport credential, not a
-# secret: it ships in the public browser bundle (VITE_APPSYNC_API_KEY) and grants
-# access only to the @aws_api_key fields and types; every public call still needs
-# a valid per-profile share token. AppSync allows one key per API-key mode, so
-# rotation replaces this resource.
+# secret: it is threaded into the frontend build as VITE_APPSYNC_API_KEY and
+# will ship in the public browser bundle once the public buyer and receipt pages
+# land (pages slice). No frontend source reads it yet on this branch, so a build
+# does NOT contain the key today. It grants access only to the @aws_api_key
+# fields and types; every public call still needs a valid per-profile share
+# token. AppSync allows one key per API-key mode, so rotation replaces this
+# resource.
 #
 # `expires` is load-bearing: the provider DEFAULTS TO 7 DAYS, which would
 # silently kill the public page a week after deploy. AWS caps a key at 365 days
 # and requires the timestamp rounded DOWN to the nearest hour. Renewal is a
 # manual runbook: the key VALUE is not retrievable through the AWS CLI after
 # creation (only this resource's output carries it), so any change that REPLACES
-# this resource loses the value permanently and the frontend bundle must be
-# rebuilt in the same apply - a replaced key with a stale bundle means every
-# public call fails Unauthorized until the next deploy. The ExpiredAPIKeys alarm
+# this resource loses the value permanently and, once the public pages consume
+# VITE_APPSYNC_API_KEY, the frontend bundle must be rebuilt in the same apply -
+# a replaced key with a stale bundle then means every public call fails
+# Unauthorized until the next deploy. The ExpiredAPIKeys alarm
 # is PLANNED in the public-orders spec's section 9 with the feature's ops slice
 # and is NOT deployed yet - no CloudWatch alarm watches for day-zero key expiry
 # today, so this date gate below is the only expiry check in the meantime.
