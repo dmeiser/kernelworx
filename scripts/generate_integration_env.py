@@ -431,12 +431,13 @@ def main(argv: list[str] | None = None) -> int:
     # given, so `--check --frontend-out FILE` verifies the frontend file alone.
     out_path = args.out if args.out is not None else (".env" if not args.frontend_out else None)
     all_ok = True
-    for path, expected, keys in (
-        (out_path, values, (*INTEGRATION_STRUCTURAL_KEYS, *INTEGRATION_CONDITIONAL_KEYS)),
-        (args.frontend_out, frontend_values, (*FRONTEND_STRUCTURAL_KEYS, *FRONTEND_CONDITIONAL_KEYS)),
+    for path, expected, structural, conditional in (
+        (out_path, values, INTEGRATION_STRUCTURAL_KEYS, INTEGRATION_CONDITIONAL_KEYS),
+        (args.frontend_out, frontend_values, FRONTEND_STRUCTURAL_KEYS, FRONTEND_CONDITIONAL_KEYS),
     ):
         if path is None:
             continue
+        keys = (*structural, *conditional)
         results = check_file(Path(path), expected, keys)
         # A key whose output is absent (e.g. a stack that has not deployed the
         # public-orders feature yet) is informational, not a check failure:
@@ -447,6 +448,14 @@ def main(argv: list[str] | None = None) -> int:
             results = [r for r in results if r[0] not in skipped]
             if skipped:
                 log(f"ℹ️  {path}: {', '.join(skipped)} not in the stack's outputs; skipped")
+        else:
+            tolerated = [key for key, status in results if key in conditional and status == "missing"]
+            if tolerated:
+                results = [r for r in results if r[0] not in tolerated]
+                log(
+                    f"ℹ️  {path}: {', '.join(tolerated)} absent - the checked stack may predate "
+                    "the public-orders feature; skipped"
+                )
         bad = [(key, status) for key, status in results if status != "ok"]
         if bad:
             all_ok = False

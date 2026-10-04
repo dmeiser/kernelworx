@@ -326,6 +326,51 @@ class TestCheckMode:
         run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
         assert target.read_text() == before
 
+    def test_structural_check_tolerates_missing_conditional_key(self, script_path: Path, tmp_path: Path) -> None:
+        """A .env generated against a stack that predates the appsync_api_key
+        output (generation exits 0 with the key omitted) must also pass a
+        plain --check, with the pre-feature state noted informationally."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        generated = run_script(script_path, "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert generated.returncode == 0, generated.stderr
+        assert "TEST_APPSYNC_API_KEY" not in parse_env_file(target)
+        result = run_script(script_path, "--check", "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "TEST_APPSYNC_API_KEY" in result.stderr
+        assert "skipped" in result.stderr
+
+    def test_structural_check_still_fails_on_missing_required_key(self, script_path: Path, tmp_path: Path) -> None:
+        """Only the conditional key vars are tolerated absent; a genuinely
+        missing non-conditional key still fails the structural check."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        generated = run_script(script_path, "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert generated.returncode == 0, generated.stderr
+        stripped = target.read_text().replace("TEST_REGION=us-east-1\n", "")
+        target.write_text(stripped)
+        result = run_script(script_path, "--check", "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1
+        assert "TEST_REGION" in result.stderr
+        assert "missing" in result.stderr
+
+    def test_structural_check_still_fails_on_empty_conditional_key(self, script_path: Path, tmp_path: Path) -> None:
+        """A conditional key present but empty is misconfiguration, not the
+        tolerated pre-feature state."""
+        target = tmp_path / ".env"
+        target.write_text(
+            "TEST_APPSYNC_ENDPOINT=https://x.appsync-api.us-east-1.amazonaws.com/graphql\n"
+            "TEST_USER_POOL_ID=us-east-1_TestPool\n"
+            "TEST_USER_POOL_CLIENT_ID=client\n"
+            "TEST_REGION=us-east-1\n"
+            "TEST_APPSYNC_API_KEY=\n"
+        )
+        result = run_script(script_path, "--check", "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1
+        assert "TEST_APPSYNC_API_KEY" in result.stderr
+
     def test_structural_check_passes_on_committed_root_sample(self, script_path: Path, repo_root: Path) -> None:
         """The committed .env.example must cover every structurally-checked key."""
         result = run_script(script_path, "--check", "--out", ".env.example", cwd=repo_root)
