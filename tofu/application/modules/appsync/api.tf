@@ -73,7 +73,9 @@ resource "aws_appsync_graphql_api" "main" {
 # this resource loses the value permanently and the frontend bundle must be
 # rebuilt in the same apply - a replaced key with a stale bundle means every
 # public call fails Unauthorized until the next deploy. The ExpiredAPIKeys alarm
-# on the prod AppSync API is the day-zero warning.
+# is PLANNED in the public-orders spec's section 9 with the feature's ops slice
+# and is NOT deployed yet - no CloudWatch alarm watches for day-zero key expiry
+# today, so this date gate below is the only expiry check in the meantime.
 resource "aws_appsync_api_key" "public" {
   api_id      = aws_appsync_graphql_api.main.id
   description = "Public order placement API key (public browser bundle; scoped by @aws_api_key)"

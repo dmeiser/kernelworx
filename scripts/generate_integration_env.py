@@ -27,7 +27,8 @@ Usage (run from the repo root):
 
 Managed keys in the integration test file (from OpenTofu outputs):
   TEST_APPSYNC_ENDPOINT       <- appsync_api_url
-  TEST_APPSYNC_API_KEY        <- appsync_api_key (API_KEY auth mode; public order surface)
+  TEST_APPSYNC_API_KEY        <- appsync_api_key (API_KEY auth mode; public order surface;
+                                optional: omitted when the stack has not yet deployed it)
   TEST_USER_POOL_ID           <- cognito_user_pool_id
   TEST_USER_POOL_CLIENT_ID    <- cognito_client_id
   TEST_REGION                 <- AWS_REGION env var (default us-east-1)
@@ -35,7 +36,8 @@ Managed keys in the integration test file (from OpenTofu outputs):
 
 Managed keys in the frontend file (with --frontend-out):
   VITE_APPSYNC_ENDPOINT            <- appsync_api_url
-  VITE_APPSYNC_API_KEY             <- appsync_api_key
+  VITE_APPSYNC_API_KEY             <- appsync_api_key (optional; omitted when the stack
+                                       has not yet deployed it)
   VITE_APPSYNC_REGION              <- AWS_REGION env var (default us-east-1)
   VITE_COGNITO_USER_POOL_ID        <- cognito_user_pool_id
   VITE_COGNITO_USER_POOL_CLIENT_ID <- cognito_client_id
@@ -74,21 +76,23 @@ DEFAULT_REGION = os.environ.get("AWS_REGION", "us-east-1")
 INTEGRATION_TEMPLATE = ROOT_DIR / ".env.example"
 FRONTEND_TEMPLATE = ROOT_DIR / "frontend" / ".env.example"
 
-REQUIRED_OUTPUTS = ("appsync_api_url", "appsync_api_key", "cognito_user_pool_id", "cognito_client_id")
+REQUIRED_OUTPUTS = ("appsync_api_url", "cognito_user_pool_id", "cognito_client_id")
+# The API-key output is optional: stacks whose state predates the
+# public-orders feature do not expose it, and both generated envs simply
+# omit the API-key vars then.
+OPTIONAL_OUTPUTS = ("appsync_api_key",)
 
 # Keys that must be present and non-empty in any generated integration env file,
 # regardless of which OpenTofu outputs were used (E2E_BASE_URL is conditional on
 # the site_url output, so it is only checked when values are available).
 INTEGRATION_STRUCTURAL_KEYS = (
     "TEST_APPSYNC_ENDPOINT",
-    "TEST_APPSYNC_API_KEY",
     "TEST_USER_POOL_ID",
     "TEST_USER_POOL_CLIENT_ID",
     "TEST_REGION",
 )
 FRONTEND_STRUCTURAL_KEYS = (
     "VITE_APPSYNC_ENDPOINT",
-    "VITE_APPSYNC_API_KEY",
     "VITE_APPSYNC_REGION",
     "VITE_COGNITO_USER_POOL_ID",
     "VITE_COGNITO_USER_POOL_CLIENT_ID",
@@ -96,6 +100,13 @@ FRONTEND_STRUCTURAL_KEYS = (
     "VITE_OAUTH_REDIRECT_SIGNIN",
     "VITE_OAUTH_REDIRECT_SIGNOUT",
 )
+
+# The public-order API-key vars are conditional on the stack exposing the
+# appsync_api_key output: --check treats absence from the outputs as ok
+# (not a failure) because an older stack that has not yet deployed the
+# public-orders feature is valid, and write mode omits them entirely.
+INTEGRATION_CONDITIONAL_KEYS = ("TEST_APPSYNC_API_KEY",)
+FRONTEND_CONDITIONAL_KEYS = ("VITE_APPSYNC_API_KEY",)
 
 MANAGED_MARKER = "# managed by scripts/generate_integration_env.py"
 
@@ -267,17 +278,24 @@ def load_outputs(args: argparse.Namespace) -> dict[str, str] | None:
     missing = [name for name in REQUIRED_OUTPUTS if name not in outputs]
     if missing:
         die(f"missing required OpenTofu output(s): {', '.join(missing)}")
+    if "appsync_api_key" not in outputs:
+        log(
+            "⚠️  appsync_api_key output is absent from this stack's state; "
+            "the stack has not yet deployed the public-orders feature, so "
+            "TEST_APPSYNC_API_KEY/VITE_APPSYNC_API_KEY are omitted"
+        )
     return outputs
 
 
 def expected_integration_values(outputs: dict[str, str], region: str) -> dict[str, str]:
     values = {
         "TEST_APPSYNC_ENDPOINT": outputs["appsync_api_url"],
-        "TEST_APPSYNC_API_KEY": outputs["appsync_api_key"],
         "TEST_USER_POOL_ID": outputs["cognito_user_pool_id"],
         "TEST_USER_POOL_CLIENT_ID": outputs["cognito_client_id"],
         "TEST_REGION": region,
     }
+    if "appsync_api_key" in outputs:
+        values["TEST_APPSYNC_API_KEY"] = outputs["appsync_api_key"]
     if "site_url" in outputs:
         values["E2E_BASE_URL"] = outputs["site_url"]
     return values
@@ -286,9 +304,8 @@ def expected_integration_values(outputs: dict[str, str], region: str) -> dict[st
 def expected_frontend_values(outputs: dict[str, str], region: str) -> dict[str, str]:
     if "cognito_domain" not in outputs:
         die("frontend env requires the cognito_domain OpenTofu output, which this stack does not expose")
-    return {
+    values = {
         "VITE_APPSYNC_ENDPOINT": outputs["appsync_api_url"],
-        "VITE_APPSYNC_API_KEY": outputs["appsync_api_key"],
         "VITE_APPSYNC_REGION": region,
         "VITE_COGNITO_USER_POOL_ID": outputs["cognito_user_pool_id"],
         "VITE_COGNITO_USER_POOL_CLIENT_ID": outputs["cognito_client_id"],
@@ -296,10 +313,19 @@ def expected_frontend_values(outputs: dict[str, str], region: str) -> dict[str, 
         "VITE_OAUTH_REDIRECT_SIGNIN": "http://localhost:5173/",
         "VITE_OAUTH_REDIRECT_SIGNOUT": "http://localhost:5173/",
     }
+    if "appsync_api_key" in outputs:
+        values["VITE_APPSYNC_API_KEY"] = outputs["appsync_api_key"]
+    return values
 
 
-def render_managed(existing: list[str], values: dict[str, str]) -> list[str]:
-    """Replace managed keys in-place; append any that are absent (with a marker comment)."""
+def render_managed(existing: list[str], values: dict[str, str], absent_comment_keys: tuple[str, ...] = ()) -> list[str]:
+    """Replace managed keys in-place; append any that are absent (with a marker comment).
+
+    A key in `absent_comment_keys` is conditionally managed but not available
+    from this stack's outputs (e.g. appsync_api_key predating the
+    public-orders feature): its committed-template placeholder line is
+    commented out so the generated env simply lacks the variable.
+    """
     remaining = dict(values)
     rendered: list[str] = []
     for line in existing:
@@ -307,6 +333,8 @@ def render_managed(existing: list[str], values: dict[str, str]) -> list[str]:
         if match and match.group(1) in values:
             rendered.append(f"{match.group(1)}={values[match.group(1)]}")
             remaining.pop(match.group(1))
+        elif match and match.group(1) in absent_comment_keys:
+            rendered.append(f"# {line}: not in this stack's outputs; omitted")
         else:
             rendered.append(line)
     if remaining:
@@ -317,7 +345,12 @@ def render_managed(existing: list[str], values: dict[str, str]) -> list[str]:
     return rendered
 
 
-def write_managed(path: Path, values: dict[str, str], template: Path) -> None:
+def write_managed(
+    path: Path,
+    values: dict[str, str],
+    template: Path,
+    absent_comment_keys: tuple[str, ...] = (),
+) -> None:
     if path.exists():
         existing = path.read_text().splitlines()
         log(f"📝 Updating managed keys in {path}")
@@ -326,12 +359,10 @@ def write_managed(path: Path, values: dict[str, str], template: Path) -> None:
             die(f"template not found: {template}")
         log(f"📝 Creating {path} from template {template}")
         existing = template.read_text().splitlines()
-    path.write_text("\n".join(render_managed(existing, values)) + "\n")
+    path.write_text("\n".join(render_managed(existing, values, absent_comment_keys)) + "\n")
 
 
-def check_file(
-    path: Path, values: dict[str, str] | None, structural_keys: tuple[str, ...]
-) -> list[tuple[str, str]]:
+def check_file(path: Path, values: dict[str, str] | None, structural_keys: tuple[str, ...]) -> list[tuple[str, str]]:
     """Check a file: every managed key present and non-empty; values match when given."""
     if not path.exists():
         return [(key, "missing (file does not exist)") for key in structural_keys]
@@ -373,18 +404,26 @@ def main(argv: list[str] | None = None) -> int:
 
     values = expected_integration_values(outputs, DEFAULT_REGION) if outputs is not None else None
     frontend_values = (
-        expected_frontend_values(outputs, DEFAULT_REGION)
-        if args.frontend_out and outputs is not None
-        else None
+        expected_frontend_values(outputs, DEFAULT_REGION) if args.frontend_out and outputs is not None else None
     )
 
     if not args.check:
         if values is None:  # unreachable: write mode always resolves outputs
             die("no OpenTofu outputs available")
         out_path = args.out or ".env"
-        write_managed(Path(out_path), values, INTEGRATION_TEMPLATE)
+        write_managed(
+            Path(out_path),
+            values,
+            INTEGRATION_TEMPLATE,
+            absent_comment_keys=tuple(key for key in INTEGRATION_CONDITIONAL_KEYS if key not in values),
+        )
         if args.frontend_out and frontend_values is not None:
-            write_managed(Path(args.frontend_out), frontend_values, FRONTEND_TEMPLATE)
+            write_managed(
+                Path(args.frontend_out),
+                frontend_values,
+                FRONTEND_TEMPLATE,
+                absent_comment_keys=tuple(key for key in FRONTEND_CONDITIONAL_KEYS if key not in frontend_values),
+            )
         log("✅ Integration test environment config generated")
         return 0
 
@@ -393,12 +432,21 @@ def main(argv: list[str] | None = None) -> int:
     out_path = args.out if args.out is not None else (".env" if not args.frontend_out else None)
     all_ok = True
     for path, expected, keys in (
-        (out_path, values, INTEGRATION_STRUCTURAL_KEYS),
-        (args.frontend_out, frontend_values, FRONTEND_STRUCTURAL_KEYS),
+        (out_path, values, (*INTEGRATION_STRUCTURAL_KEYS, *INTEGRATION_CONDITIONAL_KEYS)),
+        (args.frontend_out, frontend_values, (*FRONTEND_STRUCTURAL_KEYS, *FRONTEND_CONDITIONAL_KEYS)),
     ):
         if path is None:
             continue
         results = check_file(Path(path), expected, keys)
+        # A key whose output is absent (e.g. a stack that has not deployed the
+        # public-orders feature yet) is informational, not a check failure:
+        # its absence from the generated values is the correct state, so drop
+        # it from the failing set and note it.
+        if expected is not None:
+            skipped = [key for key in keys if key not in expected]
+            results = [r for r in results if r[0] not in skipped]
+            if skipped:
+                log(f"ℹ️  {path}: {', '.join(skipped)} not in the stack's outputs; skipped")
         bad = [(key, status) for key, status in results if status != "ok"]
         if bad:
             all_ok = False

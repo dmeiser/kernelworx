@@ -146,6 +146,65 @@ class TestGeneration:
         assert result.returncode == 1
         assert "cognito_client_id" in result.stderr
 
+    def test_appsync_api_key_output_written_when_present(self, script_path: Path, tmp_path: Path) -> None:
+        """A stack exposing appsync_api_key (post-public-orders deploy) writes both key vars."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json())
+        target = tmp_path / ".env"
+        frontend_target = tmp_path / "frontend.env"
+        result = run_script(
+            script_path,
+            "--outputs-json",
+            str(fixture),
+            "--out",
+            str(target),
+            "--frontend-out",
+            str(frontend_target),
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        values = parse_env_file(target)
+        assert values["TEST_APPSYNC_API_KEY"] == DEFAULT_OUTPUTS["appsync_api_key"]["value"]
+        assert parse_env_file(frontend_target)["VITE_APPSYNC_API_KEY"] == DEFAULT_OUTPUTS["appsync_api_key"]["value"]
+
+    def test_appsync_api_key_absent_output_skipped_with_diagnostic(self, script_path: Path, tmp_path: Path) -> None:
+        """A stack whose state predates the public-orders feature (no
+        appsync_api_key output) still generates both env files; the generator
+        prints a diagnostic naming the output and exit code stays 0."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        frontend_target = tmp_path / "frontend.env"
+        result = run_script(
+            script_path,
+            "--outputs-json",
+            str(fixture),
+            "--out",
+            str(target),
+            "--frontend-out",
+            str(frontend_target),
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "appsync_api_key" in result.stderr, "the diagnostic must name the missing output"
+        values = parse_env_file(target)
+        assert "TEST_APPSYNC_API_KEY" not in values
+        assert values["TEST_USER_POOL_ID"] == "us-east-1_TestPool"
+        assert parse_env_file(frontend_target).get("VITE_APPSYNC_API_KEY") is None
+
+    def test_check_mode_api_key_omitted_when_output_absent(self, script_path: Path, tmp_path: Path) -> None:
+        """--check against a pre-change stack: the API-key var is expected to be
+        absent (informational skip), so the check succeeds; other required
+        outputs still fail loudly."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        target.write_text("FOO=bar\n")
+        result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1, "the generated .env lacks the required keys, so the check must fail"
+        assert "TEST_USER_POOL_ID" in result.stderr
+        assert "appsync_api_key" in result.stderr  # diagnostic still names the missing output
+
     def test_invalid_outputs_json_fails_loudly(self, script_path: Path, tmp_path: Path) -> None:
         fixture = tmp_path / "outputs.json"
         fixture.write_text("not json")
@@ -196,7 +255,7 @@ class TestGeneration:
 
 
 class TestCheckMode:
-    def test_check_passes_on_generated_file(self, script_path: Path, tmp_path: Path) -> None:
+    def test_check_passes_on_generated_file_with_api_key(self, script_path: Path, tmp_path: Path) -> None:
         fixture = tmp_path / "outputs.json"
         fixture.write_text(outputs_json())
         target = tmp_path / ".env"
@@ -205,6 +264,33 @@ class TestCheckMode:
         result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
         assert result.returncode == 0, result.stderr
         assert "ok" in result.stderr
+
+    def test_check_passes_on_generated_file_without_api_key(self, script_path: Path, tmp_path: Path) -> None:
+        """A corrected env (no key, pre-change stack) must check green, not stale."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        generated = run_script(script_path, "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert generated.returncode == 0, generated.stderr
+        result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert "stale" not in result.stderr
+        # A stale key value, when the output IS present, still fails loudly.
+        stale_target = tmp_path / ".env.stale"
+        stale_target.write_text(
+            "TEST_APPSYNC_ENDPOINT=" + DEFAULT_OUTPUTS["appsync_api_url"]["value"] + "\n"
+            "TEST_APPSYNC_API_KEY=stalekey\n"
+            "TEST_USER_POOL_ID=" + DEFAULT_OUTPUTS["cognito_user_pool_id"]["value"] + "\n"
+            "TEST_USER_POOL_CLIENT_ID=" + DEFAULT_OUTPUTS["cognito_client_id"]["value"] + "\n"
+            "TEST_REGION=us-east-1\n"
+        )
+        full_fixture = tmp_path / "outputs_full.json"
+        full_fixture.write_text(outputs_json())
+        stale_result = run_script(
+            script_path, "--check", "--outputs-json", str(full_fixture), "--out", str(stale_target), cwd=tmp_path
+        )
+        assert stale_result.returncode == 1
+        assert "stale" in stale_result.stderr
 
     def test_check_detects_stale_value(self, script_path: Path, tmp_path: Path) -> None:
         fixture = tmp_path / "outputs.json"

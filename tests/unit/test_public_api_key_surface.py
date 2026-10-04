@@ -209,8 +209,11 @@ def test_expires_is_inside_the_service_cap_and_still_live():
     """The declared expiry must sit within AWS's 365-day cap and in the future.
 
     This test is a deliberate date gate: it starts failing when the declared key
-    would be rejected or has expired, which is the renewal runbook firing (see the
-    `expires` comment in api.tf and the ExpiredAPIKeys alarm in the spec's §9).
+    would be rejected or has expired, which is the renewal runbook firing (see
+    the `expires` comment in api.tf). The ExpiredAPIKeys CloudWatch alarm is
+    PLANNED in the public-orders spec's section 9 with the feature's later ops
+    slice and is NOT deployed yet - no alarm watches for day-zero key expiry
+    today, so this test is the only expiry check in the meantime.
     """
     value = _norm(_api_key_body()["expires"])
     parsed = datetime.strptime(value, EXPIRES_FORMAT)
@@ -258,27 +261,51 @@ def test_ephemeral_env_exports_the_key_in_both_blocks():
     """`up` and `env` each hand-write their export lines; ephemeral CI evaluates
     them, so a key missing from either block leaves every ephemeral
     integration/E2E public test running without it."""
-    script = EPHEMERAL_ENV_SCRIPT.read_text()
+    lines = EPHEMERAL_ENV_SCRIPT.read_text().splitlines()
+    label_indexes = [i for i, line in enumerate(lines) if re.match(r"^  (up|env|down)\)$", line)]
+    esac_index = next(i for i, line in enumerate(lines) if line == "esac")
+    blocks: dict[str, tuple[int, int]] = {}
+    for i, start in enumerate(label_indexes):
+        label = lines[start].strip().rstrip(")")
+        end = label_indexes[i + 1] if i + 1 < len(label_indexes) else esac_index
+        blocks[label] = (start, end)
+    assert set(blocks) == {"up", "env", "down"}, f"ephemeral-env.sh case blocks changed: {sorted(blocks)}"
     for key in ("TEST_APPSYNC_API_KEY", "VITE_APPSYNC_API_KEY"):
-        occurrences = re.findall(rf'echo "export {key}=\$\(tofu output -raw appsync_api_key\)"', script)
-        assert len(occurrences) == 2, f"{key} must be exported in both the up and env blocks of ephemeral-env.sh"
+        per_block = {}
+        for label, (start, end) in blocks.items():
+            pattern = rf'^\s*echo "export {key}=\$\(tofu output -raw appsync_api_key\)"'
+            per_block[label] = sum(1 for line in lines[start:end] if re.match(pattern, line))
+        assert per_block["up"] == 1 and per_block["env"] == 1 and per_block["down"] == 0, (
+            f"{key} must be exported exactly once in the up and env blocks and never in down; got {per_block}"
+        )
 
 
 def test_generator_manages_the_key_for_integration_and_frontend_envs():
     module = _load_generator()
-    assert "appsync_api_key" in module.REQUIRED_OUTPUTS, "a stack without the key output must fail loudly"
-    assert "TEST_APPSYNC_API_KEY" in module.INTEGRATION_STRUCTURAL_KEYS
-    assert "VITE_APPSYNC_API_KEY" in module.FRONTEND_STRUCTURAL_KEYS
+    assert "appsync_api_key" in module.OPTIONAL_OUTPUTS, (
+        "a stack without the key output (predating the public-orders feature) must still generate envs"
+    )
+    assert "appsync_api_key" not in module.REQUIRED_OUTPUTS
+    assert "TEST_APPSYNC_API_KEY" in module.INTEGRATION_CONDITIONAL_KEYS
+    assert "VITE_APPSYNC_API_KEY" in module.FRONTEND_CONDITIONAL_KEYS
 
-    outputs = {
+    present = {
         "appsync_api_url": "https://api.appsync-api.us-east-1.amazonaws.com/graphql",
         "appsync_api_key": "key123",
         "cognito_user_pool_id": "pool",
         "cognito_client_id": "client",
         "cognito_domain": "login.test.kernelworx.app",
     }
-    assert module.expected_integration_values(outputs, "us-east-1")["TEST_APPSYNC_API_KEY"] == "key123"
-    assert module.expected_frontend_values(outputs, "us-east-1")["VITE_APPSYNC_API_KEY"] == "key123"
+    integration = module.expected_integration_values(present, "us-east-1")
+    frontend = module.expected_frontend_values(present, "us-east-1")
+    assert integration["TEST_APPSYNC_API_KEY"] == "key123"
+    assert frontend["VITE_APPSYNC_API_KEY"] == "key123"
+
+    # A stack whose state predates the public-orders feature: no appsync_api_key
+    # output. The generator still succeeds and simply omits the API-key vars.
+    absent = {name: value for name, value in present.items() if name != "appsync_api_key"}
+    assert "TEST_APPSYNC_API_KEY" not in module.expected_integration_values(absent, "us-east-1")
+    assert "VITE_APPSYNC_API_KEY" not in module.expected_frontend_values(absent, "us-east-1")
 
 
 def test_committed_templates_carry_placeholders_for_the_key():
