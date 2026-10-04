@@ -359,6 +359,10 @@ def write_managed(
             die(f"template not found: {template}")
         log(f"📝 Creating {path} from template {template}")
         existing = template.read_text().splitlines()
+    # Storing the managed values in clear text is the point of this file: the
+    # .env consumers (integration runner, Vite build) read them verbatim, so
+    # this write is an intentional delivery step, not an accidental leak.
+    # codeql[py/clear-text-storage-sensitive-data]
     path.write_text("\n".join(render_managed(existing, values, absent_comment_keys)) + "\n")
 
 
@@ -392,7 +396,10 @@ def check_file(
             elif not found[key]:
                 results.append((key, "missing (empty value)"))
             elif found[key] != expected:
-                results.append((key, f"stale (file has {found[key]!r}, expected {expected!r})"))
+                # Report the mismatch without echoing either value: main() prints
+                # this status to stderr and the managed values include the AppSync
+                # API key, which must never reach a log line.
+                results.append((key, "stale (file value does not match the stack output)"))
             else:
                 results.append((key, "ok"))
         for key in conditional_keys:

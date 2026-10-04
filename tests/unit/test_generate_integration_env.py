@@ -403,6 +403,22 @@ class TestCheckMode:
         assert "stale" in result.stderr
         assert "TEST_USER_POOL_ID" in result.stderr
 
+    def test_stale_diagnostic_never_echoes_values(self, script_path: Path, tmp_path: Path) -> None:
+        """A stale mismatch must be reported without printing either value:
+        main() writes the status to stderr and the managed values include the
+        AppSync API key, so echoing them would log the secret (CodeQL
+        py/clear-text-logging-sensitive-data)."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json())
+        target = tmp_path / ".env"
+        target.write_text("TEST_APPSYNC_API_KEY=file-side-value\n")
+        result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1, result.stderr
+        assert "TEST_APPSYNC_API_KEY" in result.stderr  # the failing key is named
+        assert "stale" in result.stderr  # and the verdict is reported
+        assert "file-side-value" not in result.stderr
+        assert DEFAULT_OUTPUTS["appsync_api_key"]["value"] not in result.stderr
+
     def test_check_detects_missing_key(self, script_path: Path, tmp_path: Path) -> None:
         fixture = tmp_path / "outputs.json"
         fixture.write_text(outputs_json())
