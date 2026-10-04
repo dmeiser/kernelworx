@@ -46,6 +46,22 @@ describe('lib/apollo', () => {
       expect(msg).not.toContain('keys');
       expect(msg).toBe('This operation could not be completed right now. Please try again.');
     });
+
+    it('maps PUBLIC_ORDER_LIMIT_EXCEEDED to a non-retryable buyer message', () => {
+      // The per-campaign public order cap is permanent (the counter is never
+      // decremented), so the message must not invite a retry the way
+      // RESOURCE_BUSY does, and must not leak the cap number or server text.
+      const serverMessage = 'Public order count 500 reached for CAMPAIGN#abc';
+      const msg = mapErrorCodeToMessage('PUBLIC_ORDER_LIMIT_EXCEEDED', serverMessage);
+
+      expect(msg).not.toBe(serverMessage);
+      expect(msg).not.toContain('CAMPAIGN#');
+      expect(msg).not.toContain('500');
+      expect(msg).toBe(
+        'This campaign has received its maximum number of orders and can no longer accept new ones. Please contact the seller directly.',
+      );
+      expect(msg.toLowerCase()).not.toContain('try again');
+    });
   });
 
   describe('getAuthContext', () => {

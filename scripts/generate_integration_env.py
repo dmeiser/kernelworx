@@ -27,6 +27,7 @@ Usage (run from the repo root):
 
 Managed keys in the integration test file (from OpenTofu outputs):
   TEST_APPSYNC_ENDPOINT       <- appsync_api_url
+  TEST_APPSYNC_API_KEY        <- appsync_api_key (API_KEY auth mode; public order surface)
   TEST_USER_POOL_ID           <- cognito_user_pool_id
   TEST_USER_POOL_CLIENT_ID    <- cognito_client_id
   TEST_REGION                 <- AWS_REGION env var (default us-east-1)
@@ -34,6 +35,7 @@ Managed keys in the integration test file (from OpenTofu outputs):
 
 Managed keys in the frontend file (with --frontend-out):
   VITE_APPSYNC_ENDPOINT            <- appsync_api_url
+  VITE_APPSYNC_API_KEY             <- appsync_api_key
   VITE_APPSYNC_REGION              <- AWS_REGION env var (default us-east-1)
   VITE_COGNITO_USER_POOL_ID        <- cognito_user_pool_id
   VITE_COGNITO_USER_POOL_CLIENT_ID <- cognito_client_id
@@ -72,19 +74,21 @@ DEFAULT_REGION = os.environ.get("AWS_REGION", "us-east-1")
 INTEGRATION_TEMPLATE = ROOT_DIR / ".env.example"
 FRONTEND_TEMPLATE = ROOT_DIR / "frontend" / ".env.example"
 
-REQUIRED_OUTPUTS = ("appsync_api_url", "cognito_user_pool_id", "cognito_client_id")
+REQUIRED_OUTPUTS = ("appsync_api_url", "appsync_api_key", "cognito_user_pool_id", "cognito_client_id")
 
 # Keys that must be present and non-empty in any generated integration env file,
 # regardless of which OpenTofu outputs were used (E2E_BASE_URL is conditional on
 # the site_url output, so it is only checked when values are available).
 INTEGRATION_STRUCTURAL_KEYS = (
     "TEST_APPSYNC_ENDPOINT",
+    "TEST_APPSYNC_API_KEY",
     "TEST_USER_POOL_ID",
     "TEST_USER_POOL_CLIENT_ID",
     "TEST_REGION",
 )
 FRONTEND_STRUCTURAL_KEYS = (
     "VITE_APPSYNC_ENDPOINT",
+    "VITE_APPSYNC_API_KEY",
     "VITE_APPSYNC_REGION",
     "VITE_COGNITO_USER_POOL_ID",
     "VITE_COGNITO_USER_POOL_CLIENT_ID",
@@ -269,6 +273,7 @@ def load_outputs(args: argparse.Namespace) -> dict[str, str] | None:
 def expected_integration_values(outputs: dict[str, str], region: str) -> dict[str, str]:
     values = {
         "TEST_APPSYNC_ENDPOINT": outputs["appsync_api_url"],
+        "TEST_APPSYNC_API_KEY": outputs["appsync_api_key"],
         "TEST_USER_POOL_ID": outputs["cognito_user_pool_id"],
         "TEST_USER_POOL_CLIENT_ID": outputs["cognito_client_id"],
         "TEST_REGION": region,
@@ -283,6 +288,7 @@ def expected_frontend_values(outputs: dict[str, str], region: str) -> dict[str, 
         die("frontend env requires the cognito_domain OpenTofu output, which this stack does not expose")
     return {
         "VITE_APPSYNC_ENDPOINT": outputs["appsync_api_url"],
+        "VITE_APPSYNC_API_KEY": outputs["appsync_api_key"],
         "VITE_APPSYNC_REGION": region,
         "VITE_COGNITO_USER_POOL_ID": outputs["cognito_user_pool_id"],
         "VITE_COGNITO_USER_POOL_CLIENT_ID": outputs["cognito_client_id"],

@@ -50,5 +50,9 @@ class TestErrorCode:
         assert ErrorCode.INVITE_ALREADY_USED == "INVITE_ALREADY_USED"
         assert ErrorCode.CAMPAIGN_READ_ONLY == "CAMPAIGN_READ_ONLY"
         assert ErrorCode.INSUFFICIENT_PERMISSIONS == "INSUFFICIENT_PERMISSIONS"
+        # Public order cap (#KW-PUBLIC-ORDERS): registered here AND in
+        # frontend/src/lib/apollo.ts mapErrorCodeToMessage. A code registered in
+        # only one language surfaces to buyers as the unmapped default message.
+        assert ErrorCode.PUBLIC_ORDER_LIMIT_EXCEEDED == "PUBLIC_ORDER_LIMIT_EXCEEDED"
         assert ErrorCode.INTERNAL_ERROR == "INTERNAL_ERROR"
         assert ErrorCode.DATABASE_ERROR == "DATABASE_ERROR"

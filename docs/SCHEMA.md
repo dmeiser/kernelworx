@@ -379,6 +379,25 @@ flowchart TD
     F -->|Delete INVITE manually| G["Consumed, no TTL wait"]
 ```
 
+## API Authentication Modes
+
+The AppSync API (`tofu/application/modules/appsync/api.tf`) runs two authentication modes:
+
+| Mode | Role | Who uses it |
+|------|------|-------------|
+| `AMAZON_COGNITO_USER_POOLS` | **Primary**, `default_action = ALLOW` | The signed-in app. Unmarked fields and types are reachable only through this mode. |
+| `API_KEY` | **Additional** (`additional_authentication_provider`) | The public order pages. `x-api-key` from `VITE_APPSYNC_API_KEY`; the CloudFront `/graphql` behavior forwards it because it uses the managed `Managed-AllViewerExceptHostHeader` origin-request policy. |
+
+The key is a separate `aws_appsync_api_key` resource with an **explicit `expires`** (the provider defaults to 7 days; AWS caps a key at 365 days and requires the timestamp rounded down to the hour). It is a transport credential baked into the public bundle, not a secret - the per-profile share token in the URL is the authorization. The value flows out as the `appsync_api_key` tofu output to `VITE_APPSYNC_API_KEY` (deploy build env, `frontend/.env.example`) and `TEST_APPSYNC_API_KEY` (`.env.example`, `scripts/generate_integration_env.py`, both export blocks of `scripts/ephemeral-env.sh`).
+
+## Public Order Surface
+
+Anonymous order placement (`publicGetOrderOffer`, `publicCreateOrder`, `publicGetOrderReceipt`) is exposed through six `@aws_api_key` object types - `PublicOrderOffer`, `PublicProduct`, `PublicPaymentMethod`, `PublicLineItem`, `PublicOrderReceipt`, `PublicOrderReceiptLookup` - plus `PublicCreateOrderInput` and the `OrderSource` / `OrderStatus` enums. Dedicated public types exist because `Catalog`/`Product` carry `@aws_cognito_user_pools` and `LineItem` carries nothing, and an API-key caller can only receive types that carry `@aws_api_key` themselves.
+
+The owner-side settings pair (`getProfilePublicOrderSettings` / `updateProfilePublicOrderSettings`, returning `PublicOrderSettings`) carries an explicit `@aws_cognito_user_pools` directive and is never reachable with the API key. The settings travel as a `publicOrders` blob on the **profiles** item and a lifetime `publicOrderCount` counter on the **campaigns** item (both written by later slices); neither name is exposed on `Profile`, `SellerProfile`, `SharedProfile`, `Order`, or any report type.
+
+The resolvers, the `public-orders` Lambda, the Order-side attributes (`customerEmail`, `orderSource`, `status`, `receiptToken`), the pages, and the email path land in later slices; until they do, the public fields have no resolver binding and the `Order` type carries none of the new attributes. Pinned by `tests/unit/test_public_api_key_surface.py` (`.tf` half) and `tests/unit/check_public_api_key_surface.test.ts` (schema-directive half).
+
 ## References
 
 - **GraphQL Schema**: [tofu/application/schema/schema.graphql](../tofu/application/schema/schema.graphql)

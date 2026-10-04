@@ -371,6 +371,16 @@ import_ephemeral_resources() {
     import_resource "$run_id" "module.appsync.aws_appsync_graphql_api.main" "$appsync_id"
     import_resource "$run_id" "module.appsync.aws_cloudwatch_log_group.appsync" "/aws/appsync/apis/${appsync_id}"
 
+    # AppSync API key for the public order surface. The dynamic AppSync import
+    # below discovers datasources, functions and resolvers only, so the key
+    # needs this manual line; tests/unit/test_ephemeral_reliability.py asserts
+    # it is issued (import id is <api_id>:<key_id>).
+    local api_key_id=""
+    api_key_id=$(aws appsync list-api-keys --api-id "$appsync_id" --region "$region" --output json 2>/dev/null | python3 -c "import sys, json; d=json.load(sys.stdin); keys=d.get('apiKeys', []); print(keys[0]['id'] if keys else '')" 2>/dev/null || true)
+    if [ -n "$api_key_id" ]; then
+      import_resource "$run_id" "module.appsync.aws_appsync_api_key.public" "${appsync_id}:${api_key_id}"
+    fi
+
     # AppSync data layer (datasources, functions, resolvers).
     import_ephemeral_appsync_resources "$run_id" "$appsync_id"
   fi

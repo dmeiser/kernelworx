@@ -202,6 +202,9 @@ export function mapErrorCodeToMessage(errorCode: string | undefined, defaultMess
     // Campaign/order errors
     CAMPAIGN_LOCKED: 'This campaign is locked and cannot be modified.',
     ORDER_ALREADY_DELETED: 'This order has already been deleted.',
+    // Non-retryable on purpose: the per-campaign public order cap is permanent
+    // (the counter is never decremented), so this must not invite a retry.
+    PUBLIC_ORDER_LIMIT_EXCEEDED: 'This campaign has received its maximum number of orders and can no longer accept new ones. Please contact the seller directly.',
 
     // Generic errors
     INTERNAL_ERROR: 'An internal error occurred. Please try again.',

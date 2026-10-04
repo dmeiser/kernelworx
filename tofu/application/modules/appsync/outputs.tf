@@ -19,3 +19,9 @@ output "api_arn" {
   value       = aws_appsync_graphql_api.main.arn
   description = "AppSync GraphQL API ARN"
 }
+
+output "api_key" {
+  value       = aws_appsync_api_key.public.key
+  sensitive   = true
+  description = "API key for the API_KEY auth mode (public order surface). A transport credential shipped in the public browser bundle; the provider marks the computed key sensitive, so the output inherits that flag."
+}

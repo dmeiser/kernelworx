@@ -263,6 +263,12 @@ output "appsync_api_url" {
   value       = module.appsync.api_url
 }
 
+output "appsync_api_key" {
+  description = "API key for the AppSync API_KEY auth mode (public order surface); consumed by the ephemeral integration and E2E runs"
+  value       = module.appsync.api_key
+  sensitive   = true
+}
+
 output "cognito_user_pool_id" {
   description = "ID of the ephemeral Cognito User Pool"
   value       = module.cognito.user_pool_id

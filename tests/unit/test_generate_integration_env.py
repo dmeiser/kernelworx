@@ -22,6 +22,7 @@ DEFAULT_OUTPUTS: dict[str, dict[str, str]] = {
         "value": "https://test-api.appsync-api.us-east-1.amazonaws.com/graphql",
         "type": "string",
     },
+    "appsync_api_key": {"value": "0123456789abcdef0123456789abcdef01234567", "type": "string"},
     "cognito_user_pool_id": {"value": "us-east-1_TestPool", "type": "string"},
     "cognito_client_id": {"value": "0123456789abcdef0123456789ab", "type": "string"},
     "cognito_domain": {"value": "login.test.kernelworx.app", "type": "string"},
@@ -83,6 +84,7 @@ class TestGeneration:
         assert result.returncode == 0, result.stderr
         values = parse_env_file(target)
         assert values["TEST_APPSYNC_ENDPOINT"] == DEFAULT_OUTPUTS["appsync_api_url"]["value"]
+        assert values["TEST_APPSYNC_API_KEY"] == DEFAULT_OUTPUTS["appsync_api_key"]["value"]
         assert values["TEST_USER_POOL_ID"] == "us-east-1_TestPool"
         assert values["TEST_USER_POOL_CLIENT_ID"] == "0123456789abcdef0123456789ab"
         assert values["TEST_REGION"] == "us-east-1"
@@ -168,6 +170,7 @@ class TestGeneration:
         assert result.returncode == 0, result.stderr
         values = parse_env_file(target)
         assert values["VITE_APPSYNC_ENDPOINT"] == DEFAULT_OUTPUTS["appsync_api_url"]["value"]
+        assert values["VITE_APPSYNC_API_KEY"] == DEFAULT_OUTPUTS["appsync_api_key"]["value"]
         assert values["VITE_APPSYNC_REGION"] == "us-east-1"
         assert values["VITE_COGNITO_USER_POOL_ID"] == "us-east-1_TestPool"
         assert values["VITE_COGNITO_USER_POOL_CLIENT_ID"] == "0123456789abcdef0123456789ab"
@@ -378,6 +381,7 @@ class TestWiring:
             module.expected_integration_values(
                 {
                     "appsync_api_url": "x",
+                    "appsync_api_key": "k",
                     "cognito_user_pool_id": "y",
                     "cognito_client_id": "z",
                     "site_url": "w",
