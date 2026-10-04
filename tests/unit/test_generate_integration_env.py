@@ -336,6 +336,49 @@ class TestCheckMode:
         assert "VITE_APPSYNC_API_KEY" in result.stderr
         assert "stale" in result.stderr
 
+    def test_check_fails_when_file_carries_empty_key_but_output_absent(self, script_path: Path, tmp_path: Path) -> None:
+        """A conditional key present in the file but EMPTY (KEY= with no value)
+        fails value-aware --check exactly as structural --check does
+        ('missing (empty value)'), never tolerated as a skipped pre-feature state."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        target.write_text(
+            "TEST_APPSYNC_ENDPOINT=" + DEFAULT_OUTPUTS["appsync_api_url"]["value"] + "\n"
+            "TEST_APPSYNC_API_KEY=\n"
+            "TEST_USER_POOL_ID=" + DEFAULT_OUTPUTS["cognito_user_pool_id"]["value"] + "\n"
+            "TEST_USER_POOL_CLIENT_ID=" + DEFAULT_OUTPUTS["cognito_client_id"]["value"] + "\n"
+            "TEST_REGION=us-east-1\n"
+        )
+        result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1, result.stderr
+        assert "TEST_APPSYNC_API_KEY" in result.stderr
+        assert "skipped" not in result.stderr
+
+    def test_check_frontend_fails_when_file_carries_empty_key_but_output_absent(
+        self, script_path: Path, tmp_path: Path
+    ) -> None:
+        """Same empty-value contract on the frontend path."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / "frontend.env"
+        target.write_text(
+            "VITE_APPSYNC_ENDPOINT=" + DEFAULT_OUTPUTS["appsync_api_url"]["value"] + "\n"
+            "VITE_APPSYNC_REGION=us-east-1\n"
+            "VITE_COGNITO_USER_POOL_ID=" + DEFAULT_OUTPUTS["cognito_user_pool_id"]["value"] + "\n"
+            "VITE_COGNITO_USER_POOL_CLIENT_ID=" + DEFAULT_OUTPUTS["cognito_client_id"]["value"] + "\n"
+            "VITE_COGNITO_DOMAIN=" + DEFAULT_OUTPUTS["cognito_domain"]["value"] + "\n"
+            "VITE_OAUTH_REDIRECT_SIGNIN=http://localhost:5173/\n"
+            "VITE_OAUTH_REDIRECT_SIGNOUT=http://localhost:5173/\n"
+            "VITE_APPSYNC_API_KEY=\n"
+        )
+        result = run_script(
+            script_path, "--check", "--outputs-json", str(fixture), "--frontend-out", str(target), cwd=tmp_path
+        )
+        assert result.returncode == 1, result.stderr
+        assert "VITE_APPSYNC_API_KEY" in result.stderr
+        assert "skipped" not in result.stderr
+
     def test_structural_check_verifies_present_conditional_key(self, script_path: Path, tmp_path: Path) -> None:
         """A file that does carry the conditional key is still checked for its
         presence (and emptiness) in structural mode."""

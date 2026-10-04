@@ -398,7 +398,7 @@ def check_file(
         for key in conditional_keys:
             if key in values:
                 continue
-            if key in found and found[key]:
+            if key in found:
                 results.append((key, "stale (stack does not expose this output)"))
             else:
                 results.append((key, "skipped (not in the stack's outputs)"))
