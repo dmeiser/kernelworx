@@ -362,7 +362,12 @@ def write_managed(
     path.write_text("\n".join(render_managed(existing, values, absent_comment_keys)) + "\n")
 
 
-def check_file(path: Path, values: dict[str, str] | None, structural_keys: tuple[str, ...]) -> list[tuple[str, str]]:
+def check_file(
+    path: Path,
+    values: dict[str, str] | None,
+    structural_keys: tuple[str, ...],
+    conditional_keys: tuple[str, ...] = (),
+) -> list[tuple[str, str]]:
     """Check a file: every managed key present and non-empty; values match when given."""
     if not path.exists():
         return [(key, "missing (file does not exist)") for key in structural_keys]
@@ -390,6 +395,13 @@ def check_file(path: Path, values: dict[str, str] | None, structural_keys: tuple
                 results.append((key, f"stale (file has {found[key]!r}, expected {expected!r})"))
             else:
                 results.append((key, "ok"))
+        for key in conditional_keys:
+            if key in values:
+                continue
+            if key in found and found[key]:
+                results.append((key, "stale (stack does not expose this output)"))
+            else:
+                results.append((key, "skipped (not in the stack's outputs)"))
     return results
 
 
@@ -437,17 +449,16 @@ def main(argv: list[str] | None = None) -> int:
     ):
         if path is None:
             continue
-        keys = (*structural, *conditional)
-        results = check_file(Path(path), expected, keys)
+        results = check_file(Path(path), expected, (*structural, *conditional), conditional_keys=conditional)
         # A key whose output is absent (e.g. a stack that has not deployed the
         # public-orders feature yet) is informational, not a check failure:
         # its absence from the generated values is the correct state, so drop
         # it from the failing set and note it.
         if expected is not None:
-            skipped = [key for key in keys if key not in expected]
-            results = [r for r in results if r[0] not in skipped]
+            skipped = [f"{key} {status}" for key, status in results if status.startswith("skipped")]
+            results = [r for r in results if not r[1].startswith("skipped")]
             if skipped:
-                log(f"ℹ️  {path}: {', '.join(skipped)} not in the stack's outputs; skipped")
+                log(f"ℹ️  {path}: {', '.join(skipped)}")
         else:
             tolerated = [key for key, status in results if key in conditional and status == "missing"]
             if tolerated:

@@ -292,6 +292,64 @@ class TestCheckMode:
         assert stale_result.returncode == 1
         assert "stale" in stale_result.stderr
 
+    def test_check_fails_when_file_carries_key_but_output_absent(self, script_path: Path, tmp_path: Path) -> None:
+        """A file carrying TEST_APPSYNC_API_KEY against a stack with no
+        appsync_api_key output is stale/foreign and must fail loudly, not
+        exit 0 with a skipped note."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / ".env"
+        target.write_text(
+            "TEST_APPSYNC_ENDPOINT=" + DEFAULT_OUTPUTS["appsync_api_url"]["value"] + "\n"
+            "TEST_APPSYNC_API_KEY=stalekey-from-a-different-stack\n"
+            "TEST_USER_POOL_ID=" + DEFAULT_OUTPUTS["cognito_user_pool_id"]["value"] + "\n"
+            "TEST_USER_POOL_CLIENT_ID=" + DEFAULT_OUTPUTS["cognito_client_id"]["value"] + "\n"
+            "TEST_REGION=us-east-1\n"
+        )
+        result = run_script(script_path, "--check", "--outputs-json", str(fixture), "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 1, result.stderr
+        assert "TEST_APPSYNC_API_KEY" in result.stderr
+        assert "stale" in result.stderr
+
+    def test_check_frontend_fails_when_file_carries_key_but_output_absent(
+        self, script_path: Path, tmp_path: Path
+    ) -> None:
+        """Same contract on the frontend path: VITE_APPSYNC_API_KEY in the file
+        while the stack exposes no appsync_api_key output fails loudly."""
+        fixture = tmp_path / "outputs.json"
+        fixture.write_text(outputs_json(drop=("appsync_api_key",)))
+        target = tmp_path / "frontend.env"
+        target.write_text(
+            "VITE_APPSYNC_ENDPOINT=" + DEFAULT_OUTPUTS["appsync_api_url"]["value"] + "\n"
+            "VITE_APPSYNC_REGION=us-east-1\n"
+            "VITE_COGNITO_USER_POOL_ID=" + DEFAULT_OUTPUTS["cognito_user_pool_id"]["value"] + "\n"
+            "VITE_COGNITO_USER_POOL_CLIENT_ID=" + DEFAULT_OUTPUTS["cognito_client_id"]["value"] + "\n"
+            "VITE_COGNITO_DOMAIN=" + DEFAULT_OUTPUTS["cognito_domain"]["value"] + "\n"
+            "VITE_OAUTH_REDIRECT_SIGNIN=http://localhost:5173/\n"
+            "VITE_OAUTH_REDIRECT_SIGNOUT=http://localhost:5173/\n"
+            "VITE_APPSYNC_API_KEY=foreign-key\n"
+        )
+        result = run_script(
+            script_path, "--check", "--outputs-json", str(fixture), "--frontend-out", str(target), cwd=tmp_path
+        )
+        assert result.returncode == 1, result.stderr
+        assert "VITE_APPSYNC_API_KEY" in result.stderr
+        assert "stale" in result.stderr
+
+    def test_structural_check_verifies_present_conditional_key(self, script_path: Path, tmp_path: Path) -> None:
+        """A file that does carry the conditional key is still checked for its
+        presence (and emptiness) in structural mode."""
+        target = tmp_path / ".env"
+        target.write_text(
+            "TEST_APPSYNC_ENDPOINT=https://x.appsync-api.us-east-1.amazonaws.com/graphql\n"
+            "TEST_USER_POOL_ID=us-east-1_TestPool\n"
+            "TEST_USER_POOL_CLIENT_ID=client\n"
+            "TEST_REGION=us-east-1\n"
+            "TEST_APPSYNC_API_KEY=whatever\n"
+        )
+        result = run_script(script_path, "--check", "--out", str(target), cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+
     def test_check_detects_stale_value(self, script_path: Path, tmp_path: Path) -> None:
         fixture = tmp_path / "outputs.json"
         fixture.write_text(outputs_json())
