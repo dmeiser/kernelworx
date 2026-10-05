@@ -69,6 +69,7 @@ Global Secondary Indexes:
 | sellerName | String | Scout/seller name |
 | unitType | String | Scout unit type |
 | unitNumber | Integer | Scout unit number |
+| publicOrders | JSON | Public-order settings blob (share token, anchor campaign, allowlist, acknowledgements) — see [Public Order Surface](#public-order-surface) |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
 
@@ -95,6 +96,7 @@ Global Secondary Indexes:
 | state | String | Unit location |
 | sharedCampaignCode | String | Reference to shared template |
 | isActive | Boolean | Active/inactive flag |
+| publicOrderCount | Integer | Lifetime public-order counter — see [Public Order Surface](#public-order-surface) |
 | totalOrders | Integer | Computed count from ORDER query (Select: COUNT) |
 | totalRevenue | Float | Computed sum from ORDER query (projected totalAmount) |
 | unitCampaignKey | String | GSI - Composite lookup key |

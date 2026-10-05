@@ -14,7 +14,7 @@ reuses test_appsync_pipeline_functions.py's resolver-list extraction.
 
 from __future__ import annotations
 
-from tests.unit.test_edge_security import REPO_ROOT, TF_APP
+from tests.unit.test_edge_security import TF_APP
 
 APPSYNC_DIR = TF_APP / "modules" / "appsync"
 
@@ -115,4 +115,3 @@ def test_gate_makes_no_dynamodb_call_of_its_own() -> None:
     assert _function_datasource("verify_public_settings_owner") == "aws_appsync_datasource.none.name"
     code = _function_code("verify_public_settings_owner")
     assert "verify_public_settings_owner_fn.js" in code
-
