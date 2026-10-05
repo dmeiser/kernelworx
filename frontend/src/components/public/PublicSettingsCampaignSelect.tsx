@@ -13,9 +13,16 @@ interface PublicSettingsCampaignSelectProps {
   campaigns: GqlCampaign[];
   value: string;
   onChange: (campaignId: string) => void;
+  /** Disabled while a settings action is outstanding. */
+  disabled?: boolean;
 }
 
-export const PublicSettingsCampaignSelect: React.FC<PublicSettingsCampaignSelectProps> = ({ campaigns, value, onChange }) => (
+export const PublicSettingsCampaignSelect: React.FC<PublicSettingsCampaignSelectProps> = ({
+  campaigns,
+  value,
+  onChange,
+  disabled = false,
+}) => (
   <Box>
     <InputLabel id="public-order-campaign-label" shrink>
       Active campaign
@@ -27,6 +34,7 @@ export const PublicSettingsCampaignSelect: React.FC<PublicSettingsCampaignSelect
       label="Active campaign"
       displayEmpty
       fullWidth
+      disabled={disabled}
       data-testid="campaign-select"
     >
       <MenuItem value="">

@@ -12,6 +12,8 @@ import { Alert } from '@mui/material';
 import type { SettingsActionMessage } from '../../hooks/usePublicOrderSettings';
 import { ErrorAlert } from '../ErrorAlert';
 
+export const REFRESH_FAILED_COPY =
+  'Your settings were saved, but we could not refresh the page. Reload to see the latest values.';
 export const CAMPAIGN_MISSING_COPY =
   'The campaign this link points to no longer exists. Pick a new campaign to accept public orders again.';
 export const CAMPAIGN_INACTIVE_COPY =
@@ -26,7 +28,9 @@ export const PublicSettingsMessages: React.FC<PublicSettingsMessagesProps> = ({ 
   // A staleness flag never replaces feedback for the action the seller just
   // took: a failed save or rotate must show its error next to the warning, and
   // a successful one its confirmation. Success and failure are states of one
-  // message model, so they can never shadow each other.
+  // message model, so they can never shadow each other; a failed page refresh
+  // after a succeeded action is a separate retryable notice that never negates
+  // the success.
   const staleness =
     campaignState === 'MISSING' ? (
       <Alert severity="warning" sx={{ mb: 2 }} data-testid="campaign-missing">
@@ -42,9 +46,16 @@ export const PublicSettingsMessages: React.FC<PublicSettingsMessagesProps> = ({ 
     actionMessage.kind === 'failed' ? (
       <ErrorAlert message={actionMessage.message} />
     ) : actionMessage.kind === 'saved' ? (
-      <Alert severity="success" sx={{ mb: 2 }} data-testid="settings-saved">
-        Public order settings saved.
-      </Alert>
+      <>
+        <Alert severity="success" sx={{ mb: 2 }} data-testid="settings-saved">
+          Public order settings saved.
+        </Alert>
+        {actionMessage.refreshFailed ? (
+          <Alert severity="warning" sx={{ mb: 2 }} data-testid="refresh-failed">
+            {REFRESH_FAILED_COPY}
+          </Alert>
+        ) : null}
+      </>
     ) : null;
 
   if (!staleness) return feedback;

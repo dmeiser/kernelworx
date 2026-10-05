@@ -48,7 +48,13 @@ const SettingsFormCard: React.FC<{ settings: SettingsState }> = ({ settings }) =
   return (
     <Paper elevation={0} sx={{ p: 3, mb: 3 }}>
       <FormControlLabel
-        control={<Switch checked={settings.draft.enabled} onChange={(event) => settings.setEnabled(event.target.checked)} />}
+        control={
+          <Switch
+            checked={settings.draft.enabled}
+            disabled={settings.submitting}
+            onChange={(event) => settings.setEnabled(event.target.checked)}
+          />
+        }
         label="Accept public orders"
       />
 
@@ -58,6 +64,7 @@ const SettingsFormCard: React.FC<{ settings: SettingsState }> = ({ settings }) =
             campaigns={settings.activeCampaigns}
             value={settings.draft.campaignId}
             onChange={settings.setCampaignId}
+            disabled={settings.submitting}
           />
         </Grid>
         <Grid size={{ xs: 12, sm: 5 }}>
@@ -70,6 +77,7 @@ const SettingsFormCard: React.FC<{ settings: SettingsState }> = ({ settings }) =
         options={settings.methodOptions}
         selected={settings.draft.methods}
         onToggle={settings.toggleMethod}
+        disabled={settings.submitting}
       />
       <Divider sx={{ my: 2 }} />
 
@@ -77,6 +85,7 @@ const SettingsFormCard: React.FC<{ settings: SettingsState }> = ({ settings }) =
 
       <PublicSettingsActions
         saveDisabled={settings.saveDisabled}
+        submitting={settings.submitting}
         enabled={stored.enabled}
         hasToken={Boolean(stored.shareToken)}
         onSave={() => void settings.save()}

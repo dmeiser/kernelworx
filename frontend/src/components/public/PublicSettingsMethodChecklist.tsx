@@ -15,12 +15,15 @@ interface PublicSettingsMethodChecklistProps {
   options: string[];
   selected: string[];
   onToggle: (name: string, checked: boolean) => void;
+  /** Disabled while a settings action is outstanding. */
+  disabled?: boolean;
 }
 
 export const PublicSettingsMethodChecklist: React.FC<PublicSettingsMethodChecklistProps> = ({
   options,
   selected,
   onToggle,
+  disabled = false,
 }) => (
   <Box data-testid="method-checklist">
     <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
@@ -38,6 +41,7 @@ export const PublicSettingsMethodChecklist: React.FC<PublicSettingsMethodCheckli
           <Checkbox
             checked={methodIsAllowed(selected, name)}
             onChange={(event) => onToggle(name, event.target.checked)}
+            disabled={disabled}
           />
         }
         label={name}

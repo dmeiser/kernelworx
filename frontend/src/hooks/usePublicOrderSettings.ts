@@ -12,7 +12,7 @@
  * has gone stale.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import {
   GET_MY_PAYMENT_METHODS,
@@ -49,7 +49,10 @@ export interface SettingsSaveArgs {
 }
 
 /** The status of the last settings action, rendered by PublicSettingsMessages. */
-export type SettingsActionMessage = { kind: 'idle' } | { kind: 'saved' } | { kind: 'failed'; message: string };
+export type SettingsActionMessage =
+  | { kind: 'idle' }
+  | { kind: 'saved'; refreshFailed: boolean }
+  | { kind: 'failed'; message: string };
 
 interface ProfileView {
   profileId: string;
@@ -100,7 +103,17 @@ export function usePublicOrderSettings(profileId: string) {
   });
   const paymentMethods = useQuery<{ myPaymentMethods: GqlPaymentMethod[] }>(GET_MY_PAYMENT_METHODS, { skip });
 
-  const stored = readSettings(settings.data);
+  // The freshest settings snapshot is the stored view: a successful action's
+  // returned blob is authority until the post-action refetch lands a newer
+  // query snapshot; if that refetch fails, the returned blob keeps the page on
+  // the truth the server just confirmed.
+  const queryDataRef = useRef<unknown>(null);
+  const savedRef = useRef<PublicOrderSettingsView | null>(null);
+  if (settings.data !== queryDataRef.current) {
+    queryDataRef.current = settings.data;
+    savedRef.current = null;
+  }
+  const stored = savedRef.current ?? readSettings(settings.data);
   const [draft, setDraft] = useState<SettingsDraft>(() => draftFromSettings(stored));
   const [seededProfileId, setSeededProfileId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<SettingsActionMessage>({ kind: 'idle' });
@@ -111,9 +124,9 @@ export function usePublicOrderSettings(profileId: string) {
    * exactly the fields that action transmitted, so the form always agrees with
    * the persisted state while unrelated unsaved edits survive.
    */
-  const refreshDraft = (args: SettingsSaveArgs | null, data: SettingsQueryData) =>
+  const refreshDraft = (args: SettingsSaveArgs | null, view: PublicOrderSettingsView | null) =>
     setDraft((previous) => {
-      const settingsView = readSettings(data);
+      const settingsView = view ?? EMPTY_PUBLIC_ORDER_SETTINGS;
       if (args === null) return draftFromSettings(settingsView);
       return {
         ...previous,
@@ -128,13 +141,22 @@ export function usePublicOrderSettings(profileId: string) {
   // edits.
   if (settings.data && seededProfileId !== dbProfileId) {
     setSeededProfileId(dbProfileId);
-    refreshDraft(null, settings.data);
+    refreshDraft(null, readSettings(settings.data));
   }
 
-  const [updateSettings, { loading: submitting }] = useMutation<
+  // A hard settings error means the page never loaded; a refetch failure after
+  // a loaded page must degrade to the refresh notice, not tear the form down.
+  const loadedRef = useRef(false);
+  if (settings.data) loadedRef.current = true;
+  const settingsError = settings.error && !loadedRef.current ? settings.error : null;
+
+  const [updateSettings] = useMutation<
     GqlUpdateProfilePublicOrderSettingsMutation,
     GqlUpdateProfilePublicOrderSettingsMutationVariables
   >(UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS);
+  /** True for the whole action span: mutation + refetch + reconcile. */
+  const [submitting, setSubmitting] = useState(false);
+  const inFlightRef = useRef(false);
 
   const activeCampaigns = useMemo(() => readActiveCampaigns(campaigns.data), [campaigns.data]);
   const methodOptions = useMemo(() => buildMethodOptions(readMethodNames(paymentMethods.data)), [paymentMethods.data]);
@@ -155,21 +177,44 @@ export function usePublicOrderSettings(profileId: string) {
         : previous.methods.filter((entry) => entry.toLowerCase() !== name.toLowerCase()),
     }));
 
+  /**
+   * The serialization point for every settings action: exactly one action spans
+   * its mutation, refetch and reconcile, and a call issued while one is
+   * outstanding is dropped. Success derives from the mutation's own result; a
+   * failed refresh is a separate, retryable notice that never overwrites a
+   * success nor repaints a failure.
+   */
   const run = async (args: SettingsSaveArgs) => {
-    // Starting a new action clears any standing confirmation or failure, so a
-    // stale 'saved' can never sit on screen while the last action failed.
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    setSubmitting(true);
     setActionMessage({ kind: 'idle' });
+    let saved = false;
+    let refreshFailed = false;
     try {
-      await updateSettings({ variables: { profileId: dbProfileId, ...args } });
-      const refetched = await settings.refetch();
-      refreshDraft(args, refetched.data);
-      setActionMessage({ kind: 'saved' });
+      const result = await updateSettings({ variables: { profileId: dbProfileId, ...args } });
+      const savedView = result.data?.updateProfilePublicOrderSettings ?? null;
+      if (savedView) {
+        savedRef.current = savedView;
+        refreshDraft(args, savedView);
+      }
+      saved = true;
+      try {
+        await settings.refetch();
+      } catch {
+        refreshFailed = true;
+      }
     } catch (error) {
       setActionMessage({
         kind: 'failed',
         message: mapErrorCodeToMessage(getErrorCode(error), getErrorMessage(error)),
       });
     }
+    if (saved) {
+      setActionMessage({ kind: 'saved', refreshFailed });
+    }
+    inFlightRef.current = false;
+    setSubmitting(false);
   };
 
   // Save names campaignId only when this save enables the feature or changes
@@ -203,7 +248,7 @@ export function usePublicOrderSettings(profileId: string) {
     submitting,
     actionMessage,
     settingsLoaded: Boolean(settings.data),
-    settingsError: settings.error,
+    settingsError,
     setEnabled,
     setCampaignId,
     setAck,

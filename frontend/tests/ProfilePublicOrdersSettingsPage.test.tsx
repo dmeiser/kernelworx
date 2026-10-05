@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MockedProvider } from '@apollo/client/testing/react';
@@ -385,6 +385,86 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     await user.click(screen.getByTestId('rotate-token'));
     expect(await screen.findByText('Invalid input provided.')).toBeInTheDocument();
     expect(screen.queryByTestId('settings-saved')).not.toBeInTheDocument();
+  });
+
+  it('serializes actions: rotate cannot fire while a disable is outstanding', async () => {
+    const user = userEvent.setup();
+    const holder: SettingsHolder = {
+      current: settingsFor({ enabled: true, shareToken: 'tok', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
+    };
+    const disableMock: MockedResponse = {
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: false } },
+      delay: 300,
+      result: () => {
+        holder.current = { ...holder.current, enabled: false };
+        return { data: { updateProfilePublicOrderSettings: holder.current } };
+      },
+    };
+    // The rotate mock fails loudly if a second mutation is ever issued.
+    const rotateMock: MockedResponse = {
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      error: new Error('ROTATE_MUST_NOT_FIRE'),
+    };
+    renderPage([...baseMocksWith(holder), disableMock, rotateMock]);
+    await screen.findByTestId('share-panel');
+
+    await user.click(await screen.findByTestId('disable-public-orders'));
+    expect(screen.getByTestId('rotate-token')).toBeDisabled();
+    expect(screen.getByTestId('rotate-token')).toHaveTextContent('Working…');
+    // Fired while the disable is outstanding: the control is disabled, and the
+    // hook's in-flight guard must swallow the event either way.
+    fireEvent.click(screen.getByTestId('rotate-token'));
+    expect(screen.getByTestId('save-settings')).toHaveTextContent('Saving…');
+
+    // The disable is the accepted action: only one request may go out (a fired
+    // rotate would paint its error text), the feature ends up off, and the
+    // controls come back once the whole span settles.
+    await waitFor(() => expect(screen.queryByTestId('share-panel')).not.toBeInTheDocument());
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    expect(screen.queryByText('ROTATE_MUST_NOT_FIRE')).not.toBeInTheDocument();
+    expect(screen.getByRole('switch')).not.toBeChecked();
+    await waitFor(() => expect(screen.getByTestId('rotate-token')).toBeEnabled());
+    expect(screen.getByTestId('rotate-token')).toHaveTextContent('Rotate link');
+  });
+
+  it('derives success from the mutation result and reports a failed refresh separately', async () => {
+    const user = userEvent.setup();
+    const holder: SettingsHolder = {
+      current: settingsFor({ enabled: true, shareToken: 'old-token', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
+    };
+    const rotateMock: MockedResponse = {
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      result: () => {
+        holder.current = { ...holder.current, shareToken: 'rotated-token' };
+        return { data: { updateProfilePublicOrderSettings: holder.current } };
+      },
+    };
+    const mocks: MockedResponse[] = [
+      baseMocksWith(holder)[0],
+      // The opening read succeeds once; the action's refetch hits the failing
+      // next mock.
+      {
+        request: { query: GET_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID } },
+        maxUsageCount: 1,
+        result: () => ({ data: { getProfilePublicOrderSettings: holder.current } }),
+      },
+      { request: { query: GET_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID } }, error: new Error('refetch fault') },
+      baseMocksWith(holder)[2],
+      baseMocksWith(holder)[3],
+      rotateMock,
+    ];
+    renderPage(mocks);
+    await screen.findByTestId('share-panel');
+    expect(screen.getByTestId('share-panel')).toHaveTextContent('old-token');
+
+    await user.click(screen.getByTestId('rotate-token'));
+
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    // Even with the refetch dead, the share view re-renders from the mutation's
+    // own returned settings, and the success is not turned into a failure.
+    expect(screen.getByTestId('share-panel')).toHaveTextContent('rotated-token');
+    expect(screen.getByTestId('refresh-failed')).toBeInTheDocument();
+    expect(screen.queryByText('refetch fault')).not.toBeInTheDocument();
   });
 
   it('surfaces a rejected save with the mapped error message', async () => {

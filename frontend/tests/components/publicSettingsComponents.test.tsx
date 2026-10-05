@@ -7,7 +7,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PublicSettingsMessages, CAMPAIGN_INACTIVE_COPY, CAMPAIGN_MISSING_COPY } from '../../src/components/public/PublicSettingsMessages';
+import {
+  PublicSettingsMessages,
+  CAMPAIGN_INACTIVE_COPY,
+  CAMPAIGN_MISSING_COPY,
+  REFRESH_FAILED_COPY,
+} from '../../src/components/public/PublicSettingsMessages';
 import { PublicSettingsCapNotice } from '../../src/components/public/PublicSettingsCapNotice';
 import { PublicSettingsCampaignSelect } from '../../src/components/public/PublicSettingsCampaignSelect';
 import { PublicSettingsMethodChecklist } from '../../src/components/public/PublicSettingsMethodChecklist';
@@ -23,7 +28,7 @@ const campaign = (id: string, name: string): GqlCampaign =>
   ({ campaignId: id, campaignName: name, campaignYear: 2026 }) as GqlCampaign;
 
 const idle: SettingsActionMessage = { kind: 'idle' };
-const saved: SettingsActionMessage = { kind: 'saved' };
+const saved: SettingsActionMessage = { kind: 'saved', refreshFailed: false };
 const failed: SettingsActionMessage = { kind: 'failed', message: 'Invalid input provided.' };
 
 const messagesWith = (overrides: { campaignState?: string; actionMessage?: SettingsActionMessage } = {}) => (
@@ -56,6 +61,24 @@ describe('PublicSettingsMessages', () => {
     render(messagesWith({ campaignState: 'INACTIVE', actionMessage: failed }));
     expect(screen.getByTestId('campaign-inactive')).toBeInTheDocument();
     expect(screen.getByText('Invalid input provided.')).toBeInTheDocument();
+  });
+
+  it('shows a succeeded action as a success without a refresh notice', () => {
+    render(messagesWith({ actionMessage: saved }));
+    expect(screen.getByTestId('settings-saved')).toBeInTheDocument();
+    expect(screen.queryByTestId('refresh-failed')).not.toBeInTheDocument();
+  });
+
+  it('keeps the success visible and adds a retryable notice when the refresh failed', () => {
+    render(messagesWith({ actionMessage: { kind: 'saved', refreshFailed: true } }));
+    expect(screen.getByTestId('settings-saved')).toBeInTheDocument();
+    expect(screen.getByTestId('refresh-failed')).toHaveTextContent(REFRESH_FAILED_COPY);
+  });
+
+  it('shows a failed action without any success text', () => {
+    render(messagesWith({ campaignState: 'INACTIVE', actionMessage: failed }));
+    expect(screen.queryByTestId('settings-saved')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('refresh-failed')).not.toBeInTheDocument();
   });
 
   it('shows a save confirmation next to the staleness warning', () => {
@@ -149,6 +172,7 @@ describe('PublicSettingsActions', () => {
     render(
       <PublicSettingsActions
         saveDisabled
+        submitting={false}
         enabled={false}
         hasToken={false}
         onSave={vi.fn()}
@@ -168,6 +192,7 @@ describe('PublicSettingsActions', () => {
     render(
       <PublicSettingsActions
         saveDisabled={false}
+        submitting={false}
         enabled
         hasToken
         onSave={onSave}
@@ -181,6 +206,29 @@ describe('PublicSettingsActions', () => {
     expect(onSave).toHaveBeenCalled();
     expect(onDisable).toHaveBeenCalled();
     expect(onRotate).toHaveBeenCalled();
+  });
+
+  it('disables Disable and Rotate and shows pending labels while an action is submitting', async () => {
+    const onDisable = vi.fn();
+    const onRotate = vi.fn();
+    render(
+      <PublicSettingsActions
+        saveDisabled
+        submitting
+        enabled
+        hasToken
+        onSave={vi.fn()}
+        onDisable={onDisable}
+        onRotate={onRotate}
+      />,
+    );
+    expect(screen.getByTestId('save-settings')).toBeDisabled();
+    expect(screen.getByTestId('save-settings')).toHaveTextContent('Saving…');
+    expect(screen.getByTestId('disable-public-orders')).toBeDisabled();
+    expect(screen.getByTestId('rotate-token')).toBeDisabled();
+    expect(screen.getByTestId('rotate-token')).toHaveTextContent('Working…');
+    expect(onDisable).not.toHaveBeenCalled();
+    expect(onRotate).not.toHaveBeenCalled();
   });
 });
 
