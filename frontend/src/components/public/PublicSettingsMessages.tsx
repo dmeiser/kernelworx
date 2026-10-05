@@ -23,29 +23,36 @@ interface PublicSettingsMessagesProps {
 }
 
 export const PublicSettingsMessages: React.FC<PublicSettingsMessagesProps> = ({ campaignState, actionError, savedOnce }) => {
-  if (campaignState === 'MISSING') {
-    return (
+  // A staleness flag never replaces feedback for the action the seller just
+  // took: a failed save or rotate must show its error next to the warning, and
+  // a successful one its confirmation.
+  const staleness =
+    campaignState === 'MISSING' ? (
       <Alert severity="warning" sx={{ mb: 2 }} data-testid="campaign-missing">
         {CAMPAIGN_MISSING_COPY}
       </Alert>
-    );
-  }
-  if (campaignState === 'INACTIVE') {
-    return (
+    ) : campaignState === 'INACTIVE' ? (
       <Alert severity="warning" sx={{ mb: 2 }} data-testid="campaign-inactive">
         {CAMPAIGN_INACTIVE_COPY}
       </Alert>
-    );
-  }
-  if (actionError) return <ErrorAlert message={actionError} />;
-  if (savedOnce) {
-    return (
-      <Alert severity="success" sx={{ mb: 2 }} data-testid="settings-saved">
-        Public order settings saved.
-      </Alert>
-    );
-  }
-  return null;
+    ) : null;
+
+  const feedback = actionError ? (
+    <ErrorAlert message={actionError} />
+  ) : savedOnce ? (
+    <Alert severity="success" sx={{ mb: 2 }} data-testid="settings-saved">
+      Public order settings saved.
+    </Alert>
+  ) : null;
+
+  if (!staleness) return feedback;
+  if (!feedback) return staleness;
+  return (
+    <>
+      {staleness}
+      {feedback}
+    </>
+  );
 };
 
 export default PublicSettingsMessages;

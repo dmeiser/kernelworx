@@ -5,7 +5,11 @@
  * an OMITTED `campaignId`/`allowedPaymentMethods` keeps the stored value, while
  * an explicit `null` is rejected with INVALID_INPUT — so a save never sends a
  * null it did not mean. `rotateToken` is the only revocation path and is legal
- * while the feature is parked (disabled).
+ * while the feature is parked (disabled). Anchor enforcement only applies to
+ * enabling and to picking/re-picking a campaign, so a save only names
+ * `campaignId` when it enables the feature or changes the picked campaign —
+ * method-list edits, rotate and disable keep working while the stored anchor
+ * has gone stale.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -95,12 +99,17 @@ export function usePublicOrderSettings(profileId: string) {
 
   const stored = readSettings(settings.data);
   const [draft, setDraft] = useState<SettingsDraft>(() => draftFromSettings(stored));
+  const [seededProfileId, setSeededProfileId] = useState<string | null>(null);
   const [savedOnce, setSavedOnce] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Seed (or re-seed for another profile) from stored settings exactly once per
+  // saved profile: rotate, disable and save all refetch, and re-seeding on
+  // every refetch would silently revert unsaved draft edits.
+  if (settings.data && seededProfileId !== dbProfileId) {
+    setSeededProfileId(dbProfileId);
     setDraft(draftFromSettings(readSettings(settings.data)));
-  }, [settings.data]);
+  }
 
   const [updateSettings, { loading: submitting }] = useMutation<
     GqlUpdateProfilePublicOrderSettingsMutation,
@@ -137,13 +146,20 @@ export function usePublicOrderSettings(profileId: string) {
     }
   };
 
-  const save = async () =>
-    run({
+  // Save names campaignId only when this save enables the feature or changes
+  // the picked campaign: anchor enforcement is deliberate server-side, and a
+  // method-list edit or a disable while the anchor is stale must not be
+  // dragged into it. An omitted campaignId keeps the stored value.
+  const save = async () => {
+    const enabling = draft.enabled && !stored.enabled;
+    const repicking = Boolean(draft.campaignId) && draft.campaignId !== (stored.campaignId ?? '');
+    return run({
       enabled: draft.enabled,
-      campaignId: draft.campaignId || undefined,
+      campaignId: enabling || repicking ? draft.campaignId || undefined : undefined,
       allowedPaymentMethods: draft.methods,
       acknowledgementsAccepted: acksRequired && acksChecked ? true : undefined,
     });
+  };
 
   const rotateToken = async () => run({ enabled: stored.enabled, rotateToken: true });
   const disable = async () => run({ enabled: false });

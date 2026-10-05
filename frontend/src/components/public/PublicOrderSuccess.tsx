@@ -5,14 +5,14 @@
  * for support, and it is the only identifier they will be asked for), what was
  * actually submitted, and whether a confirmation email went out — distinguishing
  * "no email was given" from "the send failed" rather than collapsing both into a
- * generic message. The receipt link is shown in its split-segment form; a raw
- * order id contains '#', which a browser would truncate at the fragment
+ * generic message. The receipt link is rendered only through `resolveReceiptUrl`;
+ * a raw order id contains '#', which a browser would truncate at the fragment
  * delimiter, so a link carrying one is never rendered.
  */
 
 import { Alert, Box, Divider, Link, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
 import { formatCurrency } from '../../lib/api-utils';
-import { isSplitSegmentReceiptUrl } from '../../lib/publicOrders';
+import { resolveReceiptUrl } from '../../lib/publicOrders';
 
 export interface PublicOrderReceiptView {
   orderId: string;
@@ -58,12 +58,12 @@ export const PublicOrderSuccess: React.FC<PublicOrderSuccessProps> = ({ receipt,
       </Typography>
     </Box>
 
-    {receipt.buyerEmailProvided && isSplitSegmentReceiptUrl(receipt.receiptUrl) ? (
+    {receipt.buyerEmailProvided && resolveReceiptUrl(receipt.receiptUrl) ? (
       <Box sx={{ mb: 2 }}>
         <Typography variant="subtitle2">Your receipt link</Typography>
         <Typography variant="body2">
-          <Link href={receipt.receiptUrl as string} data-testid="receipt-link" rel="noreferrer">
-            {receipt.receiptUrl}
+          <Link href={resolveReceiptUrl(receipt.receiptUrl)!} data-testid="receipt-link" rel="noreferrer">
+            {resolveReceiptUrl(receipt.receiptUrl)}
           </Link>
         </Typography>
         <Typography variant="body2" color="text.secondary">

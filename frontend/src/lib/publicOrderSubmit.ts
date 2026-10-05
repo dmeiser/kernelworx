@@ -14,6 +14,13 @@ import { addressStarted, type PublicOrderFormState } from './publicOrderValidati
 import type { PublicOfferView } from '../components/public/publicOrderTypes';
 import type { PublicOrderSubmittedSummary } from '../components/public/PublicOrderSuccess';
 
+/**
+ * v1 sends the acknowledgement on the buyer's behalf: placing the order IS the
+ * acceptance, and the buyer page renders no terms text of its own. Adding
+ * buyer-facing terms is a captain product decision, not a code change.
+ */
+export const BUYER_ACKNOWLEDGEMENTS_ACCEPTED = true;
+
 /** Line items the buyer actually added (quantity > 0), in offer order. */
 export function buildPublicLineItems(form: PublicOrderFormState): { productId: string; quantity: number }[] {
   return Object.entries(form.quantities)
@@ -33,7 +40,7 @@ export function buildPublicOrderInput(args: {
     profileId,
     token,
     campaignId,
-    acknowledgementsAccepted: true,
+    acknowledgementsAccepted: BUYER_ACKNOWLEDGEMENTS_ACCEPTED,
     firstName: form.firstName.trim(),
     lastName: form.lastName.trim(),
     paymentMethod: form.paymentMethod,

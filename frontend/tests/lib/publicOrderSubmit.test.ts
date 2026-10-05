@@ -6,7 +6,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildPublicLineItems, buildPublicOrderInput, buildSubmittedSummary } from '../../src/lib/publicOrderSubmit';
+import {
+  BUYER_ACKNOWLEDGEMENTS_ACCEPTED,
+  buildPublicLineItems,
+  buildPublicOrderInput,
+  buildSubmittedSummary,
+} from '../../src/lib/publicOrderSubmit';
 import type { PublicOrderFormState } from '../../src/lib/publicOrderValidation';
 import type { PublicOfferView } from '../../src/components/public/publicOrderTypes';
 
@@ -50,6 +55,11 @@ describe('buildPublicOrderInput', () => {
     expect(input.profileId).toBe('profile-bare');
     expect(input.token).toBe('share-token');
     expect(input.campaignId).toBe('campaign-bare-id');
+    expect(input.acknowledgementsAccepted).toBe(BUYER_ACKNOWLEDGEMENTS_ACCEPTED);
+  });
+
+  it('sends the v1 buyer-behalf acknowledgement: no buyer-facing terms exist yet', () => {
+    const input = buildPublicOrderInput({ profileId: 'p', token: 't', campaignId: 'c', form: form() });
     expect(input.acknowledgementsAccepted).toBe(true);
   });
 

@@ -37,6 +37,24 @@ describe('PublicSettingsMessages', () => {
     expect(screen.getByText('Invalid input provided.')).toBeInTheDocument();
   });
 
+  it('shows a save failure next to the missing-anchor warning, not instead of it', () => {
+    render(<PublicSettingsMessages campaignState="MISSING" actionError="Campaign not found." savedOnce={false} />);
+    expect(screen.getByTestId('campaign-missing')).toBeInTheDocument();
+    expect(screen.getByText('Campaign not found.')).toBeInTheDocument();
+  });
+
+  it('shows a save failure next to the inactive-anchor warning, not instead of it', () => {
+    render(<PublicSettingsMessages campaignState="INACTIVE" actionError="Invalid input provided." savedOnce={false} />);
+    expect(screen.getByTestId('campaign-inactive')).toBeInTheDocument();
+    expect(screen.getByText('Invalid input provided.')).toBeInTheDocument();
+  });
+
+  it('shows a save confirmation next to the staleness warning', () => {
+    render(<PublicSettingsMessages campaignState="INACTIVE" actionError={null} savedOnce />);
+    expect(screen.getByTestId('campaign-inactive')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-saved')).toBeInTheDocument();
+  });
+
   it('confirms a saved change', () => {
     render(<PublicSettingsMessages campaignState="OK" actionError={null} savedOnce />);
     expect(screen.getByTestId('settings-saved')).toBeInTheDocument();

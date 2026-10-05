@@ -290,6 +290,62 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     await waitFor(() => expect(screen.getByTestId('share-panel')).toHaveTextContent('rotated-token'));
   });
 
+  it('keeps unsaved draft edits through a rotate and submits them on the next save', async () => {
+    // Anchor enforcement only applies to enabling and re-picking, so rotate
+    // and a method edit must both work while the stored anchor is stale
+    // (campaignState MISSING).
+    const user = userEvent.setup();
+    const holder: SettingsHolder = {
+      current: settingsFor({
+        enabled: true,
+        ackVersion: 1,
+        campaignId: 'CAMPAIGN#c-1',
+        shareToken: 'tok',
+        campaignState: 'MISSING',
+        allowedPaymentMethods: ['Venmo', 'Cash'],
+      }),
+    };
+    const rotateMock: MockedResponse = {
+      request: {
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true },
+      },
+      result: () => {
+        holder.current = { ...holder.current, shareToken: 'rotated-token' };
+        return { data: { updateProfilePublicOrderSettings: holder.current } };
+      },
+    };
+    const saveMock: MockedResponse = {
+      request: {
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        variables: {
+          profileId: DB_PROFILE_ID,
+          enabled: true,
+          campaignId: undefined,
+          allowedPaymentMethods: ['Venmo'],
+          acknowledgementsAccepted: undefined,
+        },
+      },
+      result: () => {
+        holder.current = { ...holder.current, allowedPaymentMethods: ['Venmo'] };
+        return { data: { updateProfilePublicOrderSettings: holder.current } };
+      },
+    };
+    renderPage([...baseMocksWith(holder), rotateMock, saveMock]);
+
+    await screen.findByTestId('campaign-missing');
+
+    await user.click(await screen.findByTestId('rotate-token'));
+    await waitFor(() => expect(screen.getByTestId('share-panel')).toHaveTextContent('rotated-token'));
+
+    // The unsaved edit (unchecking Cash) must survive the rotate's refetch,
+    // and the save must still show the staleness banner.
+    await user.click(await screen.findByRole('checkbox', { name: 'Cash' }));
+    await user.click(screen.getByTestId('save-settings'));
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    expect(screen.getByTestId('campaign-missing')).toBeInTheDocument();
+  });
+
   it('surfaces a rejected save with the mapped error message', async () => {
     const user = userEvent.setup();
     const mutationMock: MockedResponse = {
@@ -326,7 +382,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     expect(screen.queryByTestId('share-panel')).not.toBeInTheDocument();
   });
 
-  it('drops a stored method when the seller unchecks it', async () => {
+  it('drops a stored method when the seller unchecks it, naming no campaign', async () => {
     const user = userEvent.setup();
     const holder: SettingsHolder = {
       current: settingsFor({
@@ -343,7 +399,9 @@ describe('ProfilePublicOrdersSettingsPage', () => {
         variables: {
           profileId: DB_PROFILE_ID,
           enabled: true,
-          campaignId: 'CAMPAIGN#c-1',
+          // The picked campaign did not change, so the save names no anchor and
+          // stays clear of anchor enforcement.
+          campaignId: undefined,
           allowedPaymentMethods: [],
           // Acks are not re-required here, so the hook omits the flag entirely.
           acknowledgementsAccepted: undefined,
