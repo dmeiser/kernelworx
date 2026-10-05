@@ -200,3 +200,37 @@ resource "aws_appsync_function" "batch_latest_campaigns" {
     campaigns_table_name = var.dynamodb_table_names.campaigns
   })
 }
+
+# === #679 public-order settings (owner-only) ===
+
+# Owner gate for both settings pipelines. Runs after the two-phase write-access
+# pair and makes no datastore call of its own - ownership is already decided by
+# the pair's consistent base-table read - so it sits on the None datasource.
+resource "aws_appsync_function" "verify_public_settings_owner" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.none.name
+  name        = "VerifyPublicSettingsOwnerFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_public_settings_owner_fn.js")
+}
+
+# Conditioned UpdateItem writing the profile's publicOrders blob. The
+# first-enable guard (attribute_not_exists(publicOrders.token)) is what makes a
+# concurrent first-enable lose instead of overwriting the share token.
+resource "aws_appsync_function" "write_public_order_settings" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "WritePublicOrderSettingsFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/write_public_order_settings_fn.js")
+}

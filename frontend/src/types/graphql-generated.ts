@@ -659,6 +659,12 @@ export type GqlOrder = {
   createdAt: Scalars['AWSDateTime']['output'];
   /** The customer's address, if provided. */
   customerAddress?: Maybe<GqlAddress>;
+  /** The customer's email address, collected only by the public order form. Never exposed on any public type - it is visible to the seller's audience only. */
+  customerEmail?: Maybe<Scalars['String']['output']>;
+  /** The customer's first name as entered. Absent on orders created before the public order feature (no backfill), so the field is nullable. */
+  customerFirstName?: Maybe<Scalars['String']['output']>;
+  /** The customer's last name as entered. Absent on orders created before the public order feature (no backfill), so the field is nullable. */
+  customerLastName?: Maybe<Scalars['String']['output']>;
   /** The customer's name. */
   customerName: Scalars['String']['output'];
   /** The customer's phone number, if provided. */
@@ -671,10 +677,14 @@ export type GqlOrder = {
   orderDate: Scalars['AWSDateTime']['output'];
   /** The order's unique ID (with the ORDER# prefix). */
   orderId: Scalars['ID']['output'];
+  /** How the order was placed. Null for orders created through the authenticated API: the attribute is absent on those rows and is never backfilled. */
+  orderSource?: Maybe<GqlOrderSource>;
   /** The name of the payment method used for this order. */
   paymentMethod: Scalars['String']['output'];
   /** The ID of the profile the order belongs to. */
   profileId: Scalars['ID']['output'];
+  /** Seller-side payment-verification state. Null on orders created before the public order feature (no backfill), which is why the field is nullable - a non-null copy would fail every legacy row read. The seller-side transition to CONFIRMED lands with the order lifecycle slice, so no input accepts it yet. */
+  status?: Maybe<GqlOrderStatus>;
   /** The order's total amount (the sum of the line-item subtotals). */
   totalAmount: Scalars['Float']['output'];
   /** When the order was last updated. */
