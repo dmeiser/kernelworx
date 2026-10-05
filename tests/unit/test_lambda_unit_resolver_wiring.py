@@ -51,6 +51,10 @@ EXPECTED_UNIT_FIELDS = {
     "aws_appsync_datasource.transfer_ownership.name": {"transferProfileOwnership"},
     "aws_appsync_datasource.request_qr_upload.name": {"requestPaymentMethodQRCodeUpload"},
     "aws_appsync_datasource.delete_qr_code.name": {"deletePaymentMethodQRCode"},
+    # #679 offer slice: the anonymous publicGetOrderOffer read. The handler
+    # dispatches on info.fieldName, so a later public field added to this same
+    # datasource must be listed here too.
+    "aws_appsync_datasource.public_orders.name": {"publicGetOrderOffer"},
 }
 
 

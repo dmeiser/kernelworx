@@ -306,6 +306,26 @@ resource "aws_appsync_resolver" "get_profile_public_order_settings" {
   code = file("${local.js_resolvers_dir}/get_profile_public_order_settings_pipeline_resolver.js")
 }
 
+# publicGetOrderOffer (Lambda unit resolver, #679 offer slice). A direct UNIT
+# resolver on the public-orders Lambda: the offer makes six reads plus local QR
+# signing, which a Lambda can do and an APPSYNC_JS function cannot. The field
+# carries only @aws_api_key, so identity is null here; lambda_unit_resolver.js
+# forwards the whole context (the handler dispatches on info.fieldName) and maps
+# the handler's __isError payload to the GraphQL error code.
+resource "aws_appsync_resolver" "public_order_offer" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "publicGetOrderOffer"
+  data_source = aws_appsync_datasource.public_orders.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
 # === CATALOG QUERIES ===
 
 # getCatalog (VTL)

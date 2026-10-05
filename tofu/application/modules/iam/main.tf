@@ -688,6 +688,109 @@ resource "aws_iam_role_policy" "lambda_account_reporting_s3" {
 }
 
 # =============================================================================
+# Lambda Public Orders Domain Execution Role (#679 public-orders offer slice)
+# =============================================================================
+#
+# Scoped per-domain role for the public-orders Lambda, reusing the wiring
+# pattern #351 established (the lambda module's lambda_domain_role_arns map).
+# Assigned to:
+#   - public-orders  (handlers/public_orders_offer.py — publicGetOrderOffer)
+#
+# DynamoDB scope verified against the handler source including the shared
+# helpers it calls:
+#   - profiles: GetItem on the base table (the strongly consistent owner
+#     confirmation) plus Query on the table and its GSIs (the profileId-index
+#     locator). The GSI is a locator only; the URL token is the authorization.
+#   - campaigns: GetItem on the anchor campaign by canonical id, plus Query on
+#     the table and its GSIs (the campaignId-index read is this domain's other
+#     campaign lookup shape). The offer path itself issues no campaign Query.
+#   - catalogs: GetItem only (the anchor catalog).
+#   - accounts: GetItem only (preferences.paymentMethods for the allowlist
+#     intersection).
+#   - orders: deliberately NOT granted. The receipt read that needs orders is a
+#     later slice, and unused permissions on a domain role are a liability.
+#
+# S3 scope: the offer hands the buyer pre-signed QR image URLs, and signing
+# itself makes no S3 call. The grant is still load-bearing: S3 authorizes a
+# pre-signed GET against the SIGNING principal's policy at request time (#353),
+# so without s3:GetObject on the QR prefix every buyer's QR image fails with
+# 403. The behavioral role-scope test cannot observe that grant, so
+# tests/unit/test_public_orders_role_scope.py asserts it statically.
+# KICS flags any scoped s3:GetObject as data exfiltration (same treatment as the
+# #353 payment role): the keys are ownership-validated in code
+# (validate_qr_s3_key inside generate_presigned_get_url) and the prefix is
+# account-scoped, so this is expected access, not exfiltration.
+
+locals {
+  public_orders_table_keys = ["profiles", "campaigns", "catalogs", "accounts"]
+  public_orders_table_arns = [for k in local.public_orders_table_keys : var.dynamodb_table_arns[k]]
+  public_orders_query_keys = ["profiles", "campaigns"]
+  public_orders_query_arns = [for k in local.public_orders_query_keys : var.dynamodb_table_arns[k]]
+  public_orders_index_arns = [for k in local.public_orders_query_keys : "${var.dynamodb_table_arns[k]}/index/*"]
+}
+
+resource "aws_iam_role" "lambda_public_orders_execution" {
+  name = "${var.name_prefix}-lambda-public-orders-exec${local.role_suffix}"
+
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_public_orders_basic" {
+  role       = aws_iam_role.lambda_public_orders_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_public_orders_dynamodb" {
+  # GetItem on exactly the four tables the offer reads. No PutItem/UpdateItem/
+  # DeleteItem anywhere: this path is read-only.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem"]
+    resources = local.public_orders_table_arns
+  }
+
+  # Query only on profiles (the profileId-index locator) and campaigns. No
+  # Query on catalogs or accounts — the handler never looks those up by key
+  # condition.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:Query"]
+    resources = concat(local.public_orders_query_arns, local.public_orders_index_arns)
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_public_orders_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_public_orders_execution.id
+  policy = data.aws_iam_policy_document.lambda_public_orders_dynamodb.json
+}
+
+data "aws_iam_policy_document" "lambda_public_orders_s3" {
+  # Grants only what the buyer's pre-signed QR GETs need at request time. The
+  # handler itself never calls S3 (signing is local), so this statement is
+  # invisible to the behavioral scope test and is pinned statically.
+  # kics-scan disable-line
+  statement {
+    effect = "Allow"
+    # kics-scan ignore-line
+    actions = [
+      "s3:GetObject",
+    ]
+    resources = ["${var.exports_bucket_arn}/payment-qr-codes/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_public_orders_s3" {
+  name   = "s3-qr-codes"
+  role   = aws_iam_role.lambda_public_orders_execution.id
+  policy = data.aws_iam_policy_document.lambda_public_orders_s3.json
+}
+
+# =============================================================================
 # AppSync Service Role
 # =============================================================================
 
@@ -845,6 +948,11 @@ output "lambda_payment_execution_role_arn" {
 output "lambda_profile_sharing_execution_role_arn" {
   description = "ARN of the scoped Lambda execution role for the profile/sharing domain (transfer-ownership, delete-profile-cascade). Chunk 2 of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
   value       = aws_iam_role.lambda_profile_sharing_execution.arn
+}
+
+output "lambda_public_orders_execution_role_arn" {
+  description = "ARN of the scoped Lambda execution role for the public-orders domain (public-orders: the anonymous publicGetOrderOffer read). Read-only on profiles/campaigns/catalogs/accounts, no orders access, plus s3:GetObject on payment-qr-codes/* because S3 authorizes the buyer's pre-signed QR GET against the signing role at request time (#353). See lambda_domain_role_arns in the lambda module."
+  value       = aws_iam_role.lambda_public_orders_execution.arn
 }
 
 output "appsync_service_role_arn" {
