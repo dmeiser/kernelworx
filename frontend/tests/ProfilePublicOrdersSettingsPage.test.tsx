@@ -663,6 +663,50 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     await waitFor(() => expect(screen.getByTestId('rotate-token')).toBeEnabled());
   });
 
+  // A hard settings failure on a SECOND profile must surface as the error
+  // alert: profile A's success must not carry its ever-loaded marker into
+  // profile B's page, or B's failure renders an endless spinner.
+  it("shows the error alert when a later profile's settings read fails", async () => {
+    const user = userEvent.setup();
+    const PROFILE_TWO = 'PROFILE#p-2';
+    const profileTwoMocks: MockedResponse[] = [
+      {
+        request: { query: GET_PROFILE, variables: { profileId: PROFILE_TWO } },
+        maxUsageCount: 10,
+        result: {
+          data: {
+            getProfile: {
+              __typename: 'SellerProfile',
+              profileId: PROFILE_TWO,
+              ownerAccountId: 'ACCOUNT#a-1',
+              sellerName: 'Troop 99',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              isOwner: true,
+              permissions: [],
+            },
+          },
+        },
+      },
+      {
+        request: { query: GET_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: PROFILE_TWO } },
+        maxUsageCount: 10,
+        error: new Error('settings fault'),
+      },
+      {
+        request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: PROFILE_TWO, limit: 100 } },
+        maxUsageCount: 10,
+        result: { data: { listCampaignsByProfile: { __typename: 'CampaignConnection', campaigns: [], nextToken: null } } },
+      },
+    ];
+    renderPage([...baseMocks(settingsFor()), ...profileTwoMocks]);
+    await screen.findByText('Accept public orders');
+
+    await user.click(screen.getByTestId('switch-profile'));
+
+    expect(await screen.findByText(/Failed to load public order settings/)).toBeInTheDocument();
+  });
+
   // AppSync answers resolver faults over HTTP 200 + errors[], so a refresh
   // can RESOLVE with GraphQL errors under the main client's errorPolicy:'all'
   // instead of rejecting: that shape is still a failed refresh, reported as

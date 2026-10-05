@@ -305,10 +305,17 @@ export function usePublicOrderSettings(profileId: string) {
 
   // A hard settings error means the page never loaded; a refresh failure after
   // a loaded page must degrade to the refresh notice, not tear the form down.
+  // The marker is per profile identity: A's success must not suppress B's
+  // hard failure in the settings error below.
   const [everLoaded, setEverLoaded] = useState(false);
   useEffect(() => {
     if (settings.data) setEverLoaded(true);
   }, [settings.data]);
+  // Layout phase so a cache-warm identity switch (settings.data already
+  // present for the new profile) resets BEFORE the data effect re-arms it.
+  useLayoutEffect(() => {
+    setEverLoaded(false);
+  }, [dbProfileId]);
   const settingsError = loadError(settings.error, everLoaded) as Error | null;
 
   const [updateSettings] = useMutation<
