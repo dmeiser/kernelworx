@@ -701,9 +701,8 @@ resource "aws_iam_role_policy" "lambda_account_reporting_s3" {
 #   - profiles: GetItem on the base table (the strongly consistent owner
 #     confirmation) plus Query on the table and its GSIs (the profileId-index
 #     locator). The GSI is a locator only; the URL token is the authorization.
-#   - campaigns: GetItem on the anchor campaign by canonical id, plus Query on
-#     the table and its GSIs (the campaignId-index read is this domain's other
-#     campaign lookup shape). The offer path itself issues no campaign Query.
+#   - campaigns: GetItem only (the anchor campaign by canonical id). The offer
+#     path issues no campaign Query.
 #   - catalogs: GetItem only (the anchor catalog).
 #   - accounts: GetItem only (preferences.paymentMethods for the allowlist
 #     intersection).
@@ -724,7 +723,7 @@ resource "aws_iam_role_policy" "lambda_account_reporting_s3" {
 locals {
   public_orders_table_keys = ["profiles", "campaigns", "catalogs", "accounts"]
   public_orders_table_arns = [for k in local.public_orders_table_keys : var.dynamodb_table_arns[k]]
-  public_orders_query_keys = ["profiles", "campaigns"]
+  public_orders_query_keys = ["profiles"]
   public_orders_query_arns = [for k in local.public_orders_query_keys : var.dynamodb_table_arns[k]]
   public_orders_index_arns = [for k in local.public_orders_query_keys : "${var.dynamodb_table_arns[k]}/index/*"]
 }
@@ -753,9 +752,8 @@ data "aws_iam_policy_document" "lambda_public_orders_dynamodb" {
     resources = local.public_orders_table_arns
   }
 
-  # Query only on profiles (the profileId-index locator) and campaigns. No
-  # Query on catalogs or accounts — the handler never looks those up by key
-  # condition.
+  # Query only on profiles (the profileId-index locator). No Query on campaigns
+  # (the anchor campaign is resolved by canonical id), catalogs, or accounts.
   statement {
     effect    = "Allow"
     actions   = ["dynamodb:Query"]

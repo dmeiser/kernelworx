@@ -6,8 +6,8 @@ the public-orders offer slice, following the #351 pattern the other domain roles
 reuse. That role grants:
 
 - DynamoDB ``GetItem`` on exactly the four tables the offer reads — profiles,
-  campaigns, catalogs, accounts — and ``Query`` on profiles and campaigns plus
-  their GSIs (the ``profileId-index`` locator);
+  campaigns, catalogs, accounts — and ``Query`` on profiles plus its GSIs (the
+  ``profileId-index`` locator);
 - ``s3:GetObject`` on the ``payment-qr-codes/*`` prefix of the exports bucket.
 
 The S3 grant is the subtle half. Pre-signing is local signing: the handler issues
@@ -31,7 +31,7 @@ import botocore.client
 import pytest
 
 from src.handlers.public_orders_offer import handler
-from tests.unit.test_edge_security import TF_APP, block, first_resource, load_hcl
+from tests.unit.test_edge_security import TF_APP, block, first_resource, load_hcl, modules
 
 IAM_TF = TF_APP / "modules" / "iam" / "main.tf"
 
@@ -43,9 +43,10 @@ CATALOGS_TABLE = "kernelworx-catalogs-ue1-dev"
 # The four tables the #679 role grants GetItem on.
 DOMAIN_TABLES = {PROFILES_TABLE, CAMPAIGNS_TABLE, CATALOGS_TABLE, ACCOUNTS_TABLE}
 
-# Tables the role grants Query on (plus their GSIs): the profileId-index locator
-# and the campaign lookup shape. Never catalogs or accounts.
-QUERY_TABLES = {PROFILES_TABLE, CAMPAIGNS_TABLE}
+# Tables the role grants Query on (plus its GSIs): the profileId-index
+# locator. Never campaigns (the anchor campaign is resolved by canonical id),
+# catalogs, or accounts.
+QUERY_TABLES = {PROFILES_TABLE}
 
 # Read-only domain: no write action of any kind is granted or exercised.
 ALLOWED_DYNAMODB_ACTIONS = {"GetItem", "Query"}
@@ -176,7 +177,7 @@ def assert_within_public_orders_role_scope(recorder: ApiCallRecorder) -> None:
     )
     assert tables <= DOMAIN_TABLES, f"handler touched tables outside the public-orders scope: {tables - DOMAIN_TABLES}"
     query_tables = {table for operation, table in recorder.dynamodb_calls if operation == "Query"}
-    assert query_tables <= QUERY_TABLES, f"Query outside profiles/campaigns: {query_tables}"
+    assert query_tables <= QUERY_TABLES, f"Query outside profiles: {query_tables}"
     assert recorder.s3_calls == [], f"the offer handler must issue no S3 API call: {recorder.s3_calls}"
 
 
@@ -303,7 +304,6 @@ def test_dynamodb_grants_are_read_only():
     statements = _policy_document("lambda_public_orders_dynamodb")
     assert _actions(statements) == {"dynamodb:GetItem", "dynamodb:Query"}
 
-
 def test_dynamodb_grants_cover_the_four_domain_tables_and_no_orders():
     """The GetItem/Query resource lists, resolved from the locals they reference."""
     merged: Dict[str, Any] = {}
@@ -315,9 +315,9 @@ def test_dynamodb_grants_cover_the_four_domain_tables_and_no_orders():
         "catalogs",
         "accounts",
     ]
-    assert [str(key) for key in merged["public_orders_query_keys"]] == ["profiles", "campaigns"]
+    assert [str(key) for key in merged["public_orders_query_keys"]] == ["profiles"]
     # The statements reference exactly these two local lists, so the grant set
-    # is the four tables above plus the profiles/campaigns GSIs — nothing else.
+    # is the four tables above plus the profiles GSI — nothing else.
     assert sorted(_resources(_policy_document("lambda_public_orders_dynamodb"))) == [
         "${concat(local.public_orders_query_arns, local.public_orders_index_arns)}",
         "${local.public_orders_table_arns}",
@@ -339,5 +339,7 @@ def test_s3_get_object_on_the_qr_prefix_is_granted_for_the_signed_gets():
 
 def test_public_orders_is_mapped_to_the_role_in_all_three_environments():
     for env in ("dev", "prod", "ephemeral"):
-        env_text = (TF_APP / "environments" / env / "main.tf").read_text()
-        assert '"public-orders" = module.iam.lambda_public_orders_execution_role_arn' in env_text, env
+        env_doc = load_hcl(TF_APP / "environments" / env / "main.tf")
+        (lambda_block,) = modules(env_doc, "lambda")
+        domain_map = block(lambda_block["lambda_domain_role_arns"])
+        assert domain_map["public-orders"] == "${module.iam.lambda_public_orders_execution_role_arn}", env
