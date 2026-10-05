@@ -12,7 +12,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
+import { GraphQLError } from 'graphql';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { MockedResponse } from '@apollo/client/testing';
 import { ProfilePublicOrdersSettingsPage } from '../src/pages/ProfilePublicOrdersSettingsPage';
@@ -128,12 +129,26 @@ function baseMocksWith(holder: SettingsHolder): MockedResponse[] {
   ];
 }
 
+const RouteSwitcher: React.FC<{ to: string; testId: string }> = ({ to, testId }) => {
+  const navigate = useNavigate();
+  const go = () => void navigate(to);
+  return <button type="button" data-testid={testId} onClick={go} />;
+};
+
 function renderPage(mocks: MockedResponse[]) {
   return render(
     <MemoryRouter initialEntries={['/scouts/p-1/public-orders']}>
       <MockedProvider mocks={mocks}>
         <Routes>
-          <Route path="/scouts/:profileId/public-orders" element={<ProfilePublicOrdersSettingsPage />} />
+          <Route
+            path="/scouts/:profileId/public-orders"
+            element={
+              <div>
+                <RouteSwitcher to="/scouts/p-2/public-orders" testId="switch-profile" />
+                <ProfilePublicOrdersSettingsPage />
+              </div>
+            }
+          />
         </Routes>
       </MockedProvider>
     </MemoryRouter>,
@@ -381,6 +396,8 @@ describe('ProfilePublicOrdersSettingsPage', () => {
 
     await user.click(await screen.findByTestId('rotate-token'));
     expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    // One action at a time: wait for the span's controls to come back.
+    await waitFor(() => expect(screen.getByTestId('rotate-token')).toBeEnabled());
 
     await user.click(screen.getByTestId('rotate-token'));
     expect(await screen.findByText('Invalid input provided.')).toBeInTheDocument();
@@ -462,8 +479,9 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
     // Even with the refetch dead, the share view re-renders from the mutation's
     // own returned settings, and the success is not turned into a failure.
+    expect(await screen.findByTestId('refresh-failed')).toBeInTheDocument();
     expect(screen.getByTestId('share-panel')).toHaveTextContent('rotated-token');
-    expect(screen.getByTestId('refresh-failed')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('rotate-token')).toBeEnabled());
     expect(screen.queryByText('refetch fault')).not.toBeInTheDocument();
   });
 
@@ -495,6 +513,202 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     await user.click(screen.getByTestId('save-settings'));
 
     expect(await screen.findByText('Invalid input provided.')).toBeInTheDocument();
+  });
+
+  it('keeps the confirmation across the unedited post-save refetch', async () => {
+    const user = userEvent.setup();
+    const holder: SettingsHolder = {
+      current: settingsFor({
+        enabled: true,
+        ackVersion: 1,
+        campaignId: 'CAMPAIGN#c-1',
+        shareToken: 'tok',
+        allowedPaymentMethods: ['Venmo'],
+      }),
+    };
+    const mutationMock: MockedResponse = {
+      request: {
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        variables: {
+          profileId: DB_PROFILE_ID,
+          enabled: true,
+          campaignId: undefined,
+          allowedPaymentMethods: ['Venmo'],
+          acknowledgementsAccepted: undefined,
+        },
+      },
+      result: () => ({ data: { updateProfilePublicOrderSettings: holder.current } }),
+    };
+    renderPage([...baseMocksWith(holder), mutationMock]);
+
+    await user.click(await screen.findByTestId('save-settings'));
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    expect(screen.queryByTestId('unsaved-changes')).not.toBeInTheDocument();
+  });
+
+  it('replaces the confirmation with the unsaved indicator when the seller edits the draft', async () => {
+    const user = userEvent.setup();
+    const holder: SettingsHolder = {
+      current: settingsFor({
+        enabled: true,
+        ackVersion: 1,
+        campaignId: 'CAMPAIGN#c-1',
+        shareToken: 'tok',
+        allowedPaymentMethods: ['Venmo'],
+      }),
+    };
+    const mutationMock: MockedResponse = {
+      request: {
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        variables: {
+          profileId: DB_PROFILE_ID,
+          enabled: true,
+          campaignId: undefined,
+          allowedPaymentMethods: [],
+          acknowledgementsAccepted: undefined,
+        },
+      },
+      result: () => {
+        holder.current = { ...holder.current, allowedPaymentMethods: [] };
+        return { data: { updateProfilePublicOrderSettings: holder.current } };
+      },
+    };
+    renderPage([...baseMocksWith(holder), mutationMock]);
+
+    await user.click(await screen.findByRole('checkbox', { name: 'Venmo' }));
+    await user.click(await screen.findByTestId('save-settings'));
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    // Wait for the action's span to settle before the seller edits again.
+    await waitFor(() => expect(screen.getByTestId('save-settings')).toHaveTextContent('Save'));
+
+    // A later edit invalidates the confirmation and shows the indicator; undo
+    // the edit and the confirmation comes back.
+    await user.click(screen.getByRole('checkbox', { name: 'Venmo' }));
+    expect(await screen.findByTestId('unsaved-changes')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-saved')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: 'Venmo' }));
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    expect(screen.queryByTestId('unsaved-changes')).not.toBeInTheDocument();
+  });
+
+  // The route keeps one settings-page instance across profile params, so an
+  // in-flight action resolved for the previous identity must never repaint the
+  // new profile's form or share panel, and its feedback must not survive the
+  // switch.
+  it('drops an in-flight action resolved for the previous profile identity', async () => {
+    const user = userEvent.setup();
+    const holder: SettingsHolder = {
+      current: settingsFor({ enabled: true, shareToken: 'tok-1', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
+    };
+    const disableMock: MockedResponse = {
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: false } },
+      delay: 500,
+      result: () => ({ data: { updateProfilePublicOrderSettings: { ...holder.current, enabled: false } } }),
+    };
+    const PROFILE_TWO = 'PROFILE#p-2';
+    const profileTwoMocks: MockedResponse[] = [
+      {
+        request: { query: GET_PROFILE, variables: { profileId: PROFILE_TWO } },
+        maxUsageCount: 10,
+        result: {
+          data: {
+            getProfile: {
+              __typename: 'SellerProfile',
+              profileId: PROFILE_TWO,
+              ownerAccountId: 'ACCOUNT#a-1',
+              sellerName: 'Troop 99',
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              isOwner: true,
+              permissions: [],
+            },
+          },
+        },
+      },
+      {
+        request: { query: GET_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: PROFILE_TWO } },
+        maxUsageCount: 10,
+        result: {
+          data: {
+            getProfilePublicOrderSettings: settingsFor({
+              enabled: true,
+              shareToken: 'tok-2',
+              ackVersion: 1,
+              campaignId: 'CAMPAIGN#c-1',
+            }),
+          },
+        },
+      },
+      {
+        request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: { profileId: PROFILE_TWO, limit: 100 } },
+        maxUsageCount: 10,
+        result: { data: { listCampaignsByProfile: { __typename: 'CampaignConnection', campaigns: [campaign], nextToken: null } } },
+      },
+    ];
+    renderPage([...baseMocksWith(holder), disableMock, ...profileTwoMocks]);
+    await screen.findByTestId('share-panel');
+
+    await user.click(await screen.findByTestId('disable-public-orders'));
+    await user.click(await screen.findByTestId('switch-profile'));
+
+    // Profile two's own persisted truth stands: its token, its toggle, and no
+    // residue of the dropped action.
+    expect(await screen.findByText(/Troop 99/)).toBeInTheDocument();
+    expect(await screen.findByTestId('share-panel')).toHaveTextContent('tok-2');
+    expect(screen.getByRole('switch')).toBeChecked();
+    expect(screen.queryByTestId('settings-saved')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('unsaved-changes')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('refresh-failed')).not.toBeInTheDocument();
+    // The dropped span released its page-wide slot: actions work again.
+    await waitFor(() => expect(screen.getByTestId('rotate-token')).toBeEnabled());
+  });
+
+  // AppSync answers resolver faults over HTTP 200 + errors[], so a refresh
+  // can RESOLVE with GraphQL errors under the main client's errorPolicy:'all'
+  // instead of rejecting: that shape is still a failed refresh, reported as
+  // the retryable notice without negating the action's own success.
+  it('reports a refresh that resolves riding GraphQL errors', async () => {
+    const user = userEvent.setup();
+    const holder: SettingsHolder = {
+      current: settingsFor({ enabled: true, shareToken: 'old-token', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
+    };
+    const rotateMock: MockedResponse = {
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      result: () => {
+        holder.current = { ...holder.current, shareToken: 'rotated-token' };
+        return { data: { updateProfilePublicOrderSettings: holder.current } };
+      },
+    };
+    const mocks: MockedResponse[] = [
+      baseMocksWith(holder)[0],
+      {
+        request: { query: GET_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID } },
+        maxUsageCount: 1,
+        result: () => ({ data: { getProfilePublicOrderSettings: holder.current } }),
+      },
+      {
+        request: { query: GET_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID } },
+        maxUsageCount: 1,
+        result: () => ({
+          data: { getProfilePublicOrderSettings: holder.current },
+          errors: [new GraphQLError('resolver fault', { extensions: { code: 'INTERNAL_SERVER_ERROR' } })],
+        }),
+      },
+      baseMocksWith(holder)[2],
+      baseMocksWith(holder)[3],
+      rotateMock,
+    ];
+    renderPage(mocks);
+    await screen.findByTestId('share-panel');
+
+    await user.click(screen.getByTestId('rotate-token'));
+
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    expect(await screen.findByTestId('refresh-failed')).toBeInTheDocument();
+    expect(screen.getByTestId('share-panel')).toHaveTextContent('rotated-token');
+    await waitFor(() => expect(screen.getByTestId('rotate-token')).toBeEnabled());
+    expect(screen.queryByText('resolver fault')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('unsaved-changes')).not.toBeInTheDocument();
   });
 
   it('shows no share view when the token is missing despite being enabled', async () => {

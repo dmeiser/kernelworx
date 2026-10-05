@@ -12,6 +12,7 @@ import {
   CAMPAIGN_INACTIVE_COPY,
   CAMPAIGN_MISSING_COPY,
   REFRESH_FAILED_COPY,
+  UNSAVED_CHANGES_COPY,
 } from '../../src/components/public/PublicSettingsMessages';
 import { PublicSettingsCapNotice } from '../../src/components/public/PublicSettingsCapNotice';
 import { PublicSettingsCampaignSelect } from '../../src/components/public/PublicSettingsCampaignSelect';
@@ -67,6 +68,12 @@ describe('PublicSettingsMessages', () => {
     render(messagesWith({ actionMessage: saved }));
     expect(screen.getByTestId('settings-saved')).toBeInTheDocument();
     expect(screen.queryByTestId('refresh-failed')).not.toBeInTheDocument();
+  });
+
+  it('shows the unsaved-changes indicator instead of a confirmation', () => {
+    render(messagesWith({ actionMessage: { kind: 'unsaved' } }));
+    expect(screen.getByTestId('unsaved-changes')).toHaveTextContent(UNSAVED_CHANGES_COPY);
+    expect(screen.queryByTestId('settings-saved')).not.toBeInTheDocument();
   });
 
   it('keeps the success visible and adds a retryable notice when the refresh failed', () => {

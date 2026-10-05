@@ -14,6 +14,7 @@ import { ErrorAlert } from '../ErrorAlert';
 
 export const REFRESH_FAILED_COPY =
   'Your settings were saved, but we could not refresh the page. Reload to see the latest values.';
+export const UNSAVED_CHANGES_COPY = 'You have unsaved changes.';
 export const CAMPAIGN_MISSING_COPY =
   'The campaign this link points to no longer exists. Pick a new campaign to accept public orders again.';
 export const CAMPAIGN_INACTIVE_COPY =
@@ -24,39 +25,62 @@ interface PublicSettingsMessagesProps {
   actionMessage: SettingsActionMessage;
 }
 
-export const PublicSettingsMessages: React.FC<PublicSettingsMessagesProps> = ({ campaignState, actionMessage }) => {
-  // A staleness flag never replaces feedback for the action the seller just
-  // took: a failed save or rotate must show its error next to the warning, and
-  // a successful one its confirmation. Success and failure are states of one
-  // message model, so they can never shadow each other; a failed page refresh
-  // after a succeeded action is a separate retryable notice that never negates
-  // the success.
-  const staleness =
-    campaignState === 'MISSING' ? (
+/** A staleness flag must be surfaced next to any action feedback, never instead of it. */
+function stalenessNotice(campaignState: string | null | undefined) {
+  if (campaignState === 'MISSING') {
+    return (
       <Alert severity="warning" sx={{ mb: 2 }} data-testid="campaign-missing">
         {CAMPAIGN_MISSING_COPY}
       </Alert>
-    ) : campaignState === 'INACTIVE' ? (
+    );
+  }
+  if (campaignState === 'INACTIVE') {
+    return (
       <Alert severity="warning" sx={{ mb: 2 }} data-testid="campaign-inactive">
         {CAMPAIGN_INACTIVE_COPY}
       </Alert>
-    ) : null;
+    );
+  }
+  return null;
+}
 
-  const feedback =
-    actionMessage.kind === 'failed' ? (
-      <ErrorAlert message={actionMessage.message} />
-    ) : actionMessage.kind === 'saved' ? (
-      <>
-        <Alert severity="success" sx={{ mb: 2 }} data-testid="settings-saved">
-          Public order settings saved.
-        </Alert>
-        {actionMessage.refreshFailed ? (
-          <Alert severity="warning" sx={{ mb: 2 }} data-testid="refresh-failed">
-            {REFRESH_FAILED_COPY}
-          </Alert>
-        ) : null}
-      </>
-    ) : null;
+/** Success and failure are states of one message model and never shadow each other. */
+function savedFeedback(actionMessage: Extract<SettingsActionMessage, { kind: 'saved' }>) {
+  if (!actionMessage.refreshFailed) {
+    return (
+      <Alert severity="success" sx={{ mb: 2 }} data-testid="settings-saved">
+        Public order settings saved.
+      </Alert>
+    );
+  }
+  return (
+    <>
+      <Alert severity="success" sx={{ mb: 2 }} data-testid="settings-saved">
+        Public order settings saved.
+      </Alert>
+      <Alert severity="warning" sx={{ mb: 2 }} data-testid="refresh-failed">
+        {REFRESH_FAILED_COPY}
+      </Alert>
+    </>
+  );
+}
+
+function actionFeedback(actionMessage: SettingsActionMessage) {
+  if (actionMessage.kind === 'failed') return <ErrorAlert message={actionMessage.message} />;
+  if (actionMessage.kind === 'saved') return savedFeedback(actionMessage);
+  if (actionMessage.kind === 'unsaved') {
+    return (
+      <Alert severity="info" sx={{ mb: 2 }} data-testid="unsaved-changes">
+        {UNSAVED_CHANGES_COPY}
+      </Alert>
+    );
+  }
+  return null;
+}
+
+export const PublicSettingsMessages: React.FC<PublicSettingsMessagesProps> = ({ campaignState, actionMessage }) => {
+  const staleness = stalenessNotice(campaignState);
+  const feedback = actionFeedback(actionMessage);
 
   if (!staleness) return feedback;
   if (!feedback) return staleness;

@@ -10,6 +10,7 @@ import {
   GLOBAL_PAYMENT_METHODS,
   buildMethodOptions,
   draftFromSettings,
+  draftMatchesSavedView,
   methodIsAllowed,
 } from '../../src/lib/publicOrderSettings';
 import {
@@ -73,6 +74,34 @@ describe('draftFromSettings', () => {
         shareToken: null,
       } as never),
     ).toEqual({ enabled: true, campaignId: 'CAMPAIGN#c-1', methods: [], ackPayment: false, ackDisclosure: false });
+  });
+});
+
+describe('draftMatchesSavedView', () => {
+  it('matches an unchanged draft against the saved settings', () => {
+    const saved = { ...EMPTY_PUBLIC_ORDER_SETTINGS, enabled: true, campaignId: 'CAMPAIGN#c-1', allowedPaymentMethods: ['Venmo'] };
+    expect(draftMatchesSavedView({ enabled: true, campaignId: 'CAMPAIGN#c-1', methods: ['Venmo'], ackPayment: false, ackDisclosure: false }, saved)).toBe(true);
+  });
+
+  it('diverges on any persisted field the seller edited', () => {
+    const saved = { ...EMPTY_PUBLIC_ORDER_SETTINGS, enabled: true, campaignId: 'CAMPAIGN#c-1', allowedPaymentMethods: ['Venmo'] };
+    const base = { enabled: true, campaignId: 'CAMPAIGN#c-1', methods: ['Venmo'], ackPayment: false, ackDisclosure: false };
+    expect(draftMatchesSavedView({ ...base, enabled: false }, saved)).toBe(false);
+    expect(draftMatchesSavedView({ ...base, campaignId: '' }, saved)).toBe(false);
+    expect(draftMatchesSavedView({ ...base, methods: [] }, saved)).toBe(false);
+  });
+
+  it('matches methods case-insensitively but rejects a different set', () => {
+    const saved = { ...EMPTY_PUBLIC_ORDER_SETTINGS, allowedPaymentMethods: ['Venmo'] };
+    const draft = { enabled: false, campaignId: '', methods: ['venmo'], ackPayment: false, ackDisclosure: false };
+    expect(draftMatchesSavedView(draft, saved)).toBe(true);
+    expect(draftMatchesSavedView({ ...draft, methods: ['Cash'] }, saved)).toBe(false);
+  });
+
+  it('treats a null saved list as nothing selected', () => {
+    expect(
+      draftMatchesSavedView({ enabled: false, campaignId: '', methods: [], ackPayment: false, ackDisclosure: false }, null),
+    ).toBe(true);
   });
 });
 

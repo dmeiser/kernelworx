@@ -56,6 +56,26 @@ export function draftFromSettings(settings: PublicOrderSettingsView | null): Set
   };
 }
 
+/** Case-insensitive list equality: the server matches method names the same way. */
+function sameMethods(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const names = new Set(b.map((name) => name.toLowerCase()));
+  return a.every((name) => names.has(name.toLowerCase()));
+}
+
+/**
+ * True while the draft equals the state the server last confirmed: the gate
+ * that turns a 'saved' confirmation into the unsaved-changes indicator. The
+ * acknowledgement checkboxes are transient prompts and are not persisted
+ * fields, so they take no part in the comparison.
+ */
+export function draftMatchesSavedView(draft: SettingsDraft, view: PublicOrderSettingsView | null): boolean {
+  const saved = draftFromSettings(view);
+  if (draft.enabled !== saved.enabled) return false;
+  if (draft.campaignId !== saved.campaignId) return false;
+  return sameMethods(draft.methods, saved.methods);
+}
+
 /** Method options: the account's stored methods plus Cash/Check, deduped case-insensitively. */
 export function buildMethodOptions(storedNames: readonly string[]): string[] {
   const extras = GLOBAL_PAYMENT_METHODS.filter(
