@@ -15,53 +15,62 @@ import { PublicSettingsAckCheckboxes } from '../../src/components/public/PublicS
 import { PublicSettingsActions } from '../../src/components/public/PublicSettingsActions';
 import { PublicSettingsShareSection } from '../../src/components/public/PublicSettingsShareSection';
 import { PUBLIC_ORDER_ACKNOWLEDGEMENTS } from '../../src/constants/publicOrders';
+import type { SettingsActionMessage } from '../../src/hooks/usePublicOrderSettings';
 import type { SettingsDraft } from '../../src/lib/publicOrderSettings';
 import type { GqlCampaign } from '../../src/types';
 
 const campaign = (id: string, name: string): GqlCampaign =>
   ({ campaignId: id, campaignName: name, campaignYear: 2026 }) as GqlCampaign;
 
+const idle: SettingsActionMessage = { kind: 'idle' };
+const saved: SettingsActionMessage = { kind: 'saved' };
+const failed: SettingsActionMessage = { kind: 'failed', message: 'Invalid input provided.' };
+
+const messagesWith = (overrides: { campaignState?: string; actionMessage?: SettingsActionMessage } = {}) => (
+  <PublicSettingsMessages campaignState={overrides.campaignState ?? 'OK'} actionMessage={overrides.actionMessage ?? idle} />
+);
+
 describe('PublicSettingsMessages', () => {
   it('flags a missing anchor campaign', () => {
-    render(<PublicSettingsMessages campaignState="MISSING" actionError={null} savedOnce={false} />);
+    render(messagesWith({ campaignState: 'MISSING' }));
     expect(screen.getByTestId('campaign-missing')).toHaveTextContent(CAMPAIGN_MISSING_COPY);
   });
 
   it('flags a deactivated anchor campaign', () => {
-    render(<PublicSettingsMessages campaignState="INACTIVE" actionError={null} savedOnce={false} />);
+    render(messagesWith({ campaignState: 'INACTIVE' }));
     expect(screen.getByTestId('campaign-inactive')).toHaveTextContent(CAMPAIGN_INACTIVE_COPY);
   });
 
   it('surfaces a save failure', () => {
-    render(<PublicSettingsMessages campaignState="OK" actionError="Invalid input provided." savedOnce={false} />);
+    render(messagesWith({ actionMessage: failed }));
     expect(screen.getByText('Invalid input provided.')).toBeInTheDocument();
   });
 
   it('shows a save failure next to the missing-anchor warning, not instead of it', () => {
-    render(<PublicSettingsMessages campaignState="MISSING" actionError="Campaign not found." savedOnce={false} />);
+    render(messagesWith({ campaignState: 'MISSING', actionMessage: { kind: 'failed', message: 'Campaign not found.' } }));
     expect(screen.getByTestId('campaign-missing')).toBeInTheDocument();
     expect(screen.getByText('Campaign not found.')).toBeInTheDocument();
   });
 
   it('shows a save failure next to the inactive-anchor warning, not instead of it', () => {
-    render(<PublicSettingsMessages campaignState="INACTIVE" actionError="Invalid input provided." savedOnce={false} />);
+    render(messagesWith({ campaignState: 'INACTIVE', actionMessage: failed }));
     expect(screen.getByTestId('campaign-inactive')).toBeInTheDocument();
     expect(screen.getByText('Invalid input provided.')).toBeInTheDocument();
   });
 
   it('shows a save confirmation next to the staleness warning', () => {
-    render(<PublicSettingsMessages campaignState="INACTIVE" actionError={null} savedOnce />);
+    render(messagesWith({ campaignState: 'INACTIVE', actionMessage: saved }));
     expect(screen.getByTestId('campaign-inactive')).toBeInTheDocument();
     expect(screen.getByTestId('settings-saved')).toBeInTheDocument();
   });
 
   it('confirms a saved change', () => {
-    render(<PublicSettingsMessages campaignState="OK" actionError={null} savedOnce />);
+    render(messagesWith({ actionMessage: saved }));
     expect(screen.getByTestId('settings-saved')).toBeInTheDocument();
   });
 
-  it('renders nothing in the healthy state', () => {
-    const { container } = render(<PublicSettingsMessages campaignState="OK" actionError={null} savedOnce={false} />);
+  it('shows no success and no failure in the healthy state', () => {
+    const { container } = render(messagesWith());
     expect(container).toBeEmptyDOMElement();
   });
 });

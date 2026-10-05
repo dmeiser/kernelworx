@@ -357,6 +357,36 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     expect(screen.getByTestId('campaign-missing')).toBeInTheDocument();
   });
 
+  it('shows the failure and no stale success when a failed action follows a successful one', async () => {
+    const user = userEvent.setup();
+    const holder: SettingsHolder = {
+      current: settingsFor({ enabled: true, shareToken: 'tok', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
+    };
+    const rotateMock = (result: 'ok' | 'fail'): MockedResponse => ({
+      request: {
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true },
+      },
+      ...(result === 'ok'
+        ? {
+            result: () => {
+              holder.current = { ...holder.current, shareToken: 'rotated-token' };
+              return { data: { updateProfilePublicOrderSettings: holder.current } };
+            },
+          }
+        : { error: new Error('Invalid input provided.') }),
+    });
+    renderPage([...baseMocksWith(holder), rotateMock('ok'), rotateMock('fail')]);
+    await screen.findByTestId('share-panel');
+
+    await user.click(await screen.findByTestId('rotate-token'));
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('rotate-token'));
+    expect(await screen.findByText('Invalid input provided.')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-saved')).not.toBeInTheDocument();
+  });
+
   it('surfaces a rejected save with the mapped error message', async () => {
     const user = userEvent.setup();
     const mutationMock: MockedResponse = {

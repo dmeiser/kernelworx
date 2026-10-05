@@ -93,8 +93,7 @@ const SettingsContent: React.FC<{ profileId: string; settings: SettingsState }> 
 
     <PublicSettingsMessages
       campaignState={settings.stored.campaignState}
-      actionError={settings.actionError}
-      savedOnce={settings.savedOnce}
+      actionMessage={settings.actionMessage}
     />
 
     <SettingsFormCard settings={settings} />

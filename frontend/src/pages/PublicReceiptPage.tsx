@@ -3,10 +3,11 @@
  *
  * Reached from the confirmation email (or the success screen's link). The order
  * id is split across two path segments because the raw id contains '#', which a
- * browser treats as the fragment delimiter; the page reassembles
- * `ORDER#<campaignId>#<orderSuffix>` for the query. The per-order receipt token
- * in the third segment is the capability: it discloses exactly this one order
- * and is never echoed back by the API.
+ * browser treats as the fragment delimiter; the page passes the two segments
+ * through untouched and the server re-prefixes them into the
+ * `ORDER#<campaignId>#<orderSuffix>` PK/SK. The per-order receipt token in the
+ * third segment is the capability: it discloses exactly this one order and is
+ * never echoed back by the API.
  */
 
 import { useParams } from 'react-router-dom';

@@ -12,7 +12,7 @@
  * has gone stale.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import {
   GET_MY_PAYMENT_METHODS,
@@ -47,6 +47,9 @@ export interface SettingsSaveArgs {
   acknowledgementsAccepted?: boolean;
   rotateToken?: boolean;
 }
+
+/** The status of the last settings action, rendered by PublicSettingsMessages. */
+export type SettingsActionMessage = { kind: 'idle' } | { kind: 'saved' } | { kind: 'failed'; message: string };
 
 interface ProfileView {
   profileId: string;
@@ -100,15 +103,32 @@ export function usePublicOrderSettings(profileId: string) {
   const stored = readSettings(settings.data);
   const [draft, setDraft] = useState<SettingsDraft>(() => draftFromSettings(stored));
   const [seededProfileId, setSeededProfileId] = useState<string | null>(null);
-  const [savedOnce, setSavedOnce] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<SettingsActionMessage>({ kind: 'idle' });
+
+  /**
+   * The ONE place stored settings flow into the draft. `args === null` is the
+   * full first-load seed of a profile; after a successful action it reconciles
+   * exactly the fields that action transmitted, so the form always agrees with
+   * the persisted state while unrelated unsaved edits survive.
+   */
+  const refreshDraft = (args: SettingsSaveArgs | null, data: SettingsQueryData) =>
+    setDraft((previous) => {
+      const settingsView = readSettings(data);
+      if (args === null) return draftFromSettings(settingsView);
+      return {
+        ...previous,
+        enabled: settingsView.enabled === true,
+        campaignId: args.campaignId !== undefined ? settingsView.campaignId ?? '' : previous.campaignId,
+        methods: args.allowedPaymentMethods !== undefined ? settingsView.allowedPaymentMethods ?? [] : previous.methods,
+      };
+    });
 
   // Seed (or re-seed for another profile) from stored settings exactly once per
-  // saved profile: rotate, disable and save all refetch, and re-seeding on
-  // every refetch would silently revert unsaved draft edits.
+  // saved profile: an action-triggered refetch must not clobber unsaved draft
+  // edits.
   if (settings.data && seededProfileId !== dbProfileId) {
     setSeededProfileId(dbProfileId);
-    setDraft(draftFromSettings(readSettings(settings.data)));
+    refreshDraft(null, settings.data);
   }
 
   const [updateSettings, { loading: submitting }] = useMutation<
@@ -136,19 +156,19 @@ export function usePublicOrderSettings(profileId: string) {
     }));
 
   const run = async (args: SettingsSaveArgs) => {
-    setActionError(null);
+    // Starting a new action clears any standing confirmation or failure, so a
+    // stale 'saved' can never sit on screen while the last action failed.
+    setActionMessage({ kind: 'idle' });
     try {
       await updateSettings({ variables: { profileId: dbProfileId, ...args } });
-      setSavedOnce(true);
-      await settings.refetch();
-      if (args.enabled === false) {
-        // The disable is the one action that flips a field the draft also
-        // shows; every other field it writes comes from the draft itself, so
-        // only the enabled flag is reconciled here and unsaved edits survive.
-        setDraft((previous) => ({ ...previous, enabled: false }));
-      }
+      const refetched = await settings.refetch();
+      refreshDraft(args, refetched.data);
+      setActionMessage({ kind: 'saved' });
     } catch (error) {
-      setActionError(mapErrorCodeToMessage(getErrorCode(error), getErrorMessage(error)));
+      setActionMessage({
+        kind: 'failed',
+        message: mapErrorCodeToMessage(getErrorCode(error), getErrorMessage(error)),
+      });
     }
   };
 
@@ -181,8 +201,7 @@ export function usePublicOrderSettings(profileId: string) {
     acksChecked,
     saveDisabled: computeSaveDisabled({ submitting, acksRequired, acksChecked }),
     submitting,
-    savedOnce,
-    actionError,
+    actionMessage,
     settingsLoaded: Boolean(settings.data),
     settingsError: settings.error,
     setEnabled,
