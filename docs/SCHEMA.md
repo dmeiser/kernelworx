@@ -114,12 +114,15 @@ Global Secondary Indexes:
 | orderId | String | SK - Order ID, also in GSI |
 | profileId | String | Profile ID |
 | customerName | String | Customer name |
+| customerFirstName | String | Customer first name as entered; not yet written by any code path - see [Public Order Surface](#public-order-surface) |
+| customerLastName | String | Customer last name as entered; not yet written by any code path - see [Public Order Surface](#public-order-surface) |
 | customerEmail | String | Customer email |
 | customerPhone | String | Customer phone |
 | items | JSON | Line items array |
 | totalAmount | Float | Order total |
 | paymentMethod | String | Payment type |
-| deliveryStatus | String | Delivery state |
+| orderSource | String | `OrderSource` enum (`PUBLIC`); not yet written by any code path - see [Public Order Surface](#public-order-surface) |
+| status | String | `OrderStatus` enum (`NEW` / `CONFIRMED`), seller-side payment verification; not yet written by any code path - see [Public Order Surface](#public-order-surface) |
 | notes | String | Order notes |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
