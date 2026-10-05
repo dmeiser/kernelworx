@@ -71,9 +71,17 @@ describe('PublicSettingsMessages', () => {
   });
 
   it('shows the unsaved-changes indicator instead of a confirmation', () => {
-    render(messagesWith({ actionMessage: { kind: 'unsaved' } }));
+    render(messagesWith({ actionMessage: { kind: 'unsaved', refreshFailed: false } }));
     expect(screen.getByTestId('unsaved-changes')).toHaveTextContent(UNSAVED_CHANGES_COPY);
     expect(screen.queryByTestId('settings-saved')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('refresh-failed')).not.toBeInTheDocument();
+  });
+
+  it('keeps the retryable refresh notice when a diverged draft downgrades the confirmation', () => {
+    render(messagesWith({ actionMessage: { kind: 'unsaved', refreshFailed: true } }));
+    expect(screen.getByTestId('unsaved-changes')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-saved')).not.toBeInTheDocument();
+    expect(screen.getByTestId('refresh-failed')).toHaveTextContent(REFRESH_FAILED_COPY);
   });
 
   it('keeps the success visible and adds a retryable notice when the refresh failed', () => {

@@ -483,6 +483,17 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     expect(screen.getByTestId('share-panel')).toHaveTextContent('rotated-token');
     await waitFor(() => expect(screen.getByTestId('rotate-token')).toBeEnabled());
     expect(screen.queryByText('refetch fault')).not.toBeInTheDocument();
+
+    // The seller's own edit must still downgrade the confirmation to the
+    // unsaved indicator even though the refresh failed, and the retryable
+    // notice must survive the downgrade.
+    await user.click(screen.getByRole('checkbox', { name: 'Venmo' }));
+    expect(await screen.findByTestId('unsaved-changes')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-saved')).not.toBeInTheDocument();
+    expect(screen.getByTestId('refresh-failed')).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: 'Venmo' }));
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    expect(screen.queryByTestId('unsaved-changes')).not.toBeInTheDocument();
   });
 
   it('surfaces a rejected save with the mapped error message', async () => {

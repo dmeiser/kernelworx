@@ -80,7 +80,7 @@ browser). See `.env.example` for the full list:
 | --- | --- |
 | `VITE_APPSYNC_ENDPOINT` | Direct AppSync URL (`...appsync-api.us-east-1.amazonaws.com/graphql`). Required for `vite dev`; unset for dev/prod builds (same-origin `/graphql`). |
 | `VITE_APPSYNC_REGION` | AppSync region, e.g. `us-east-1`. |
-| `VITE_APPSYNC_API_KEY` | API-key auth mode credential for the public order pages (a later slice; no source reads it yet). A transport credential, not a secret — the share token in the URL is the authorization. |
+| `VITE_APPSYNC_API_KEY` | API-key auth mode credential for the public order pages, read by their key-only Apollo client (`src/lib/publicApollo.ts`). A transport credential, not a secret — the share token in the URL is the authorization. |
 | `VITE_COGNITO_USER_POOL_ID` / `VITE_COGNITO_USER_POOL_CLIENT_ID` | Cognito user pool and app client. |
 | `VITE_COGNITO_DOMAIN` | Cognito custom domain (e.g. `login.dev.kernelworx.app`). Required for `vite dev`; unset for same-origin builds. |
 | `VITE_OAUTH_REDIRECT_SIGNIN` / `VITE_OAUTH_REDIRECT_SIGNOUT` | OAuth callback URLs (e.g. `http://localhost:5173/`). |

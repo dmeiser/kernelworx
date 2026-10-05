@@ -71,7 +71,7 @@ export interface SettingsSaveArgs {
 export type SettingsActionMessage =
   | { kind: 'idle' }
   | { kind: 'saved'; refreshFailed: boolean }
-  | { kind: 'unsaved' }
+  | { kind: 'unsaved'; refreshFailed: boolean }
   | { kind: 'failed'; message: string };
 
 /** The shape a settings response is judged against, whatever way it arrives. */
@@ -222,11 +222,12 @@ function nextDraft(previous: SettingsDraft, request: DraftRequest): SettingsDraf
   };
 }
 
-/** The confirmation never survives the seller's own edit to the draft. */
+/** The confirmation never survives the seller's own edit to the draft; the
+ * retryable refresh-failed notice does. */
 function derivedActionMessage(state: SettingsActionMessage, diverged: boolean): SettingsActionMessage {
   if (state.kind !== 'saved') return state;
-  if (state.refreshFailed || !diverged) return state;
-  return { kind: 'unsaved' };
+  if (!diverged) return state;
+  return { kind: 'unsaved', refreshFailed: state.refreshFailed };
 }
 
 /** The saved blob is authority until a newer read lands; a failed refresh keeps it. */

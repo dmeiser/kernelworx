@@ -44,6 +44,15 @@ function stalenessNotice(campaignState: string | null | undefined) {
   return null;
 }
 
+/** The retryable refresh-failed notice rides every confirmation kind. */
+function refreshFailedNotice() {
+  return (
+    <Alert severity="warning" sx={{ mb: 2 }} data-testid="refresh-failed">
+      {REFRESH_FAILED_COPY}
+    </Alert>
+  );
+}
+
 /** Success and failure are states of one message model and never shadow each other. */
 function savedFeedback(actionMessage: Extract<SettingsActionMessage, { kind: 'saved' }>) {
   if (!actionMessage.refreshFailed) {
@@ -58,9 +67,7 @@ function savedFeedback(actionMessage: Extract<SettingsActionMessage, { kind: 'sa
       <Alert severity="success" sx={{ mb: 2 }} data-testid="settings-saved">
         Public order settings saved.
       </Alert>
-      <Alert severity="warning" sx={{ mb: 2 }} data-testid="refresh-failed">
-        {REFRESH_FAILED_COPY}
-      </Alert>
+      {refreshFailedNotice()}
     </>
   );
 }
@@ -70,9 +77,12 @@ function actionFeedback(actionMessage: SettingsActionMessage) {
   if (actionMessage.kind === 'saved') return savedFeedback(actionMessage);
   if (actionMessage.kind === 'unsaved') {
     return (
-      <Alert severity="info" sx={{ mb: 2 }} data-testid="unsaved-changes">
-        {UNSAVED_CHANGES_COPY}
-      </Alert>
+      <>
+        <Alert severity="info" sx={{ mb: 2 }} data-testid="unsaved-changes">
+          {UNSAVED_CHANGES_COPY}
+        </Alert>
+        {actionMessage.refreshFailed ? refreshFailedNotice() : null}
+      </>
     );
   }
   return null;
