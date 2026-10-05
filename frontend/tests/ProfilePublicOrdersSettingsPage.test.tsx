@@ -178,8 +178,13 @@ describe('ProfilePublicOrdersSettingsPage', () => {
   });
 
   it('shows the staleness flag when the anchor campaign is gone', async () => {
-    await openPage(baseMocks(settingsFor({ enabled: true, campaignState: 'MISSING', shareToken: 'tok' })));
+    await openPage(
+      baseMocks(settingsFor({ enabled: true, campaignId: 'CAMPAIGN#gone', campaignState: 'MISSING', shareToken: 'tok' })),
+    );
     expect(await screen.findByTestId('campaign-missing')).toBeInTheDocument();
+    const select = screen.getByTestId('campaign-select');
+    expect(select).toHaveTextContent('Unavailable campaign');
+    expect(select).not.toHaveTextContent('CAMPAIGN#gone');
   });
 
   it('shows the staleness flag when the anchor campaign is deactivated', async () => {

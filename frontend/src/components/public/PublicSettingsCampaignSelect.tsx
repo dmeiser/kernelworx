@@ -22,36 +22,44 @@ export const PublicSettingsCampaignSelect: React.FC<PublicSettingsCampaignSelect
   value,
   onChange,
   disabled = false,
-}) => (
-  <Box>
-    <InputLabel id="public-order-campaign-label" shrink>
-      Active campaign
-    </InputLabel>
-    <Select
-      labelId="public-order-campaign-label"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      label="Active campaign"
-      displayEmpty
-      fullWidth
-      disabled={disabled}
-      data-testid="campaign-select"
-    >
-      <MenuItem value="">
-        <em>Choose a campaign</em>
-      </MenuItem>
-      {campaigns.map((campaign) => (
-        <MenuItem key={campaign.campaignId} value={campaign.campaignId}>
-          {campaign.campaignName} ({campaign.campaignYear})
+}) => {
+  const campaignLabel = (campaign: GqlCampaign) => `${campaign.campaignName} (${campaign.campaignYear})`;
+  return (
+    <Box>
+      <InputLabel id="public-order-campaign-label" shrink>
+        Active campaign
+      </InputLabel>
+      <Select
+        labelId="public-order-campaign-label"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        label="Active campaign"
+        displayEmpty
+        fullWidth
+        disabled={disabled}
+        data-testid="campaign-select"
+        renderValue={(selected) => {
+          if (selected === '') return <em>Choose a campaign</em>;
+          const matched = campaigns.find((campaign) => campaign.campaignId === selected);
+          return matched ? campaignLabel(matched) : <em>Unavailable campaign</em>;
+        }}
+      >
+        <MenuItem value="">
+          <em>Choose a campaign</em>
         </MenuItem>
-      ))}
-    </Select>
-    <Stack sx={{ mt: 1 }}>
-      {campaigns.length === 0 ? (
-        <Box sx={{ color: 'text.secondary' }}>This profile has no active campaign to anchor public orders to.</Box>
-      ) : null}
-    </Stack>
-  </Box>
-);
+        {campaigns.map((campaign) => (
+          <MenuItem key={campaign.campaignId} value={campaign.campaignId}>
+            {campaignLabel(campaign)}
+          </MenuItem>
+        ))}
+      </Select>
+      <Stack sx={{ mt: 1 }}>
+        {campaigns.length === 0 ? (
+          <Box sx={{ color: 'text.secondary' }}>This profile has no active campaign to anchor public orders to.</Box>
+        ) : null}
+      </Stack>
+    </Box>
+  );
+};
 
 export default PublicSettingsCampaignSelect;

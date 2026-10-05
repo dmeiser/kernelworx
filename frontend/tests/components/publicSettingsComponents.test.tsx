@@ -142,6 +142,18 @@ describe('PublicSettingsCampaignSelect', () => {
     render(<PublicSettingsCampaignSelect campaigns={[]} value="" onChange={vi.fn()} />);
     expect(screen.getByText(/no active campaign to anchor public orders to/i)).toBeInTheDocument();
   });
+
+  it('labels a stored anchor that is no longer offered instead of showing the raw id', () => {
+    render(<PublicSettingsCampaignSelect campaigns={[campaign('CAMPAIGN#a', 'Fall sale')]} value="CAMPAIGN#gone" onChange={vi.fn()} />);
+    const select = screen.getByTestId('campaign-select');
+    expect(select).toHaveTextContent('Unavailable campaign');
+    expect(select).not.toHaveTextContent('CAMPAIGN#gone');
+  });
+
+  it("shows the chosen campaign's name in the closed select", () => {
+    render(<PublicSettingsCampaignSelect campaigns={[campaign('CAMPAIGN#a', 'Fall sale')]} value="CAMPAIGN#a" onChange={vi.fn()} />);
+    expect(screen.getByTestId('campaign-select')).toHaveTextContent('Fall sale (2026)');
+  });
 });
 
 describe('PublicSettingsMethodChecklist', () => {
