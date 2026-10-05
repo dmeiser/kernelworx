@@ -304,6 +304,7 @@ def test_dynamodb_grants_are_read_only():
     statements = _policy_document("lambda_public_orders_dynamodb")
     assert _actions(statements) == {"dynamodb:GetItem", "dynamodb:Query"}
 
+
 def test_dynamodb_grants_cover_the_four_domain_tables_and_no_orders():
     """The GetItem/Query resource lists, resolved from the locals they reference."""
     merged: Dict[str, Any] = {}
