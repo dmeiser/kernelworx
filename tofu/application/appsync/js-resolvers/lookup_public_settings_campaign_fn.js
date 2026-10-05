@@ -35,9 +35,6 @@ export function request(ctx) {
         return runtime.earlyReturn(null);
     }
 
-    if (ctx.stash) {
-        ctx.stash.publicSettingsAnchorCampaignId = campaignId;
-    }
 
     return {
         operation: 'GetItem',

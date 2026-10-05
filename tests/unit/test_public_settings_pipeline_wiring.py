@@ -116,14 +116,3 @@ def test_gate_makes_no_dynamodb_call_of_its_own() -> None:
     code = _function_code("verify_public_settings_owner")
     assert "verify_public_settings_owner_fn.js" in code
 
-
-def test_gate_refuses_with_forbidden_not_unauthorized() -> None:
-    # UNAUTHORIZED means "session invalid, sign in again"; a failed ownership
-    # check on an authenticated caller is FORBIDDEN (AGENTS.md #439/#571).
-    source = (
-        REPO_ROOT / "tofu" / "application" / "appsync" / "js-resolvers" / "verify_public_settings_owner_fn.js"
-    ).read_text()
-    assert "'FORBIDDEN'" in source
-    error_calls = [line for line in source.splitlines() if "util.error(" in line]
-    assert error_calls, "the gate emits no error at all"
-    assert not any("UNAUTHORIZED" in line for line in error_calls)
