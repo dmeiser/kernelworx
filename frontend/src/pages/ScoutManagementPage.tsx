@@ -639,6 +639,25 @@ export const ScoutManagementPage: React.FC = () => {
           </Stack>
         </Paper>
 
+        {/* Public Orders Section */}
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Public Orders
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Let buyers place an order from a link or QR code you share, without signing in.
+          </Typography>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              void navigate(`/scouts/${profileId}/public-orders`);
+            }}
+            data-testid="public-orders-link"
+          >
+            Manage public orders
+          </Button>
+        </Paper>
+
         {/* Invite Codes Section */}
         <Paper sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>

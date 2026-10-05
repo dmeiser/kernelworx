@@ -285,3 +285,13 @@ The path back is Pro (or Business): when traffic volume forces a tier move, the 
 
 The AWS Terraform provider (~> 6.56) lacks `factor_configuration` in `aws_cognito_user_pool.web_authn_configuration` (upstream issue #47598). Setting `FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION` is required for two-path MFA (allowing passkey sign-in for users with TOTP enrolled and letting passkey-with-UV satisfy MFA). It is applied out-of-band via `terraform_data.webauthn_factor_configuration` running AWS CLI `set-user-pool-mfa-config`. It does not fight tofu state because `factor_configuration` is absent from the provider schema. Device remembering is deliberately omitted/disabled to prevent TOTP challenge suppression on password sign-ins.
 
+
+### Public order pages: key-only Apollo client and capability URLs (#679)
+
+The buyer pages carry their authorization in the path (`/o/:profileId/:token`, `/r/:campaignId/:orderSuffix/:receiptToken`), so they must never send a session: `frontend/src/lib/publicApollo.ts` is a second Apollo client that attaches `x-api-key` (from `VITE_APPSYNC_API_KEY`) and nothing else, and `App.tsx` wraps only those routes in a nested `ApolloProvider` for it. Do not route public queries through `lib/apollo.ts` — AppSync's auth directives are an exclusive allow-list, so a *signed-in* visitor opening a share link on a field marked for the key alone is REFUSED, which is the whole reason for the separate client. AppSync's 429 carries no `Retry-After`, so the `RetryLink` backoff there is self-driven; never assume the header exists.
+
+Sharp edges:
+- Raw order ids contain `#` (fragment delimiter), so receipt URLs are three path segments and `lib/publicOrders.ts` reassembles `ORDER#<campaignId>#<orderSuffix>`; `stripPrefix`/`toUrlId` in `lib/ids.ts` cut at the first `#` and must not be used on order ids.
+- Both public routes need *both* crawler defenses: the committed `frontend/public/robots.txt` `Disallow: /o/` `/r/` and the `NoIndexMeta` component (robots is a request, the meta is the page).
+- A QR scanned by the buyer's camera is untrusted input: `lib/qrLinkSafety.ts` is the allowlist (`https:` absolute URLs and `mailto:` only) and `PaymentMethodChoice` renders a decoded link only through it, with `rel="noopener noreferrer"`. Never render a decoded payload directly.
+- `PUBLIC_ORDER_ACK_VERSION` in `frontend/src/constants/publicOrders.ts` mirrors `ACK_VERSION` in `tofu/application/appsync/js-resolvers/lib/public_settings.js`; bump both in the same change, otherwise the seller's stored acknowledgement reads as current and the liability prompt is skipped.

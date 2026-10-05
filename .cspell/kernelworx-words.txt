@@ -5,6 +5,7 @@ About
 abstractmethod
 Accept
 Account
+acks
 Actions
 addext
 addopts
@@ -107,7 +108,10 @@ EFGH
 emailAddress
 emoji
 isinstance
+jsqr
+qrdata
 resends
+spoofable
 émoji
 emojis
 Émojis
