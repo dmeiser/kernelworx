@@ -252,10 +252,16 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     expect(await screen.findByTestId('share-panel')).toHaveTextContent(`${window.location.origin}/o/p-1/share-token`);
   });
 
-  it('hides the share view once disabled', async () => {
+  it('hides the share view once disabled, toggles the switch off, and keeps unsaved edits', async () => {
     const user = userEvent.setup();
     const holder: SettingsHolder = {
-      current: settingsFor({ enabled: true, shareToken: 'share-token', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
+      current: settingsFor({
+        enabled: true,
+        shareToken: 'share-token',
+        ackVersion: 1,
+        campaignId: 'CAMPAIGN#c-1',
+        allowedPaymentMethods: ['Venmo'],
+      }),
     };
     const mutationMock: MockedResponse = {
       request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: false } },
@@ -267,8 +273,13 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     renderPage([...baseMocksWith(holder), mutationMock]);
     await screen.findByTestId('share-panel');
 
+    // An unsaved method edit made before the disable must survive it.
+    await user.click(await screen.findByRole('checkbox', { name: 'Venmo' }));
     await user.click(await screen.findByTestId('disable-public-orders'));
+
     await waitFor(() => expect(screen.queryByTestId('share-panel')).not.toBeInTheDocument());
+    expect(screen.getByRole('switch')).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Venmo' })).not.toBeChecked();
   });
 
   it('rotates the token, minting a new share URL', async () => {

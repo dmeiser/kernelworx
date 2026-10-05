@@ -141,6 +141,12 @@ export function usePublicOrderSettings(profileId: string) {
       await updateSettings({ variables: { profileId: dbProfileId, ...args } });
       setSavedOnce(true);
       await settings.refetch();
+      if (args.enabled === false) {
+        // The disable is the one action that flips a field the draft also
+        // shows; every other field it writes comes from the draft itself, so
+        // only the enabled flag is reconciled here and unsaved edits survive.
+        setDraft((previous) => ({ ...previous, enabled: false }));
+      }
     } catch (error) {
       setActionError(mapErrorCodeToMessage(getErrorCode(error), getErrorMessage(error)));
     }
