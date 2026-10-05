@@ -63,7 +63,14 @@ describe('write_public_order_settings_fn request', () => {
         assert.strictEqual(blob.enabled, true);
         assert.strictEqual(blob.campaignId, 'CAMPAIGN#c1');
         assert.deepStrictEqual(blob.allowedPaymentMethods, ['Venmo']);
-        assert.match(result.condition.expression, /attribute_not_exists\(publicOrders\.token\)/);
+        // `token` is a DynamoDB reserved word: the condition must escape the
+        // document path, or DynamoDB rejects the UpdateItem with a
+        // ValidationException before the first-enable guard can evaluate.
+        assert.strictEqual(
+            result.condition.expression,
+            'attribute_exists(ownerAccountId) AND attribute_not_exists(publicOrders.#token)'
+        );
+        assert.deepStrictEqual(result.condition.expressionNames, { '#token': 'token' });
     });
 
     it('keys the write off the stashed profile, not the caller identity', () => {
@@ -80,6 +87,11 @@ describe('write_public_order_settings_fn request', () => {
             result.condition.expression,
             'attribute_exists(ownerAccountId)',
             'a re-save must not carry the first-enable guard'
+        );
+        assert.strictEqual(
+            result.condition.expressionNames,
+            undefined,
+            'only the minting guard needs a name substitution'
         );
     });
 

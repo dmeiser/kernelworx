@@ -21,8 +21,9 @@ import {
 // edits: the surface is owner-only, so clobbering requires the same person
 // saving twice at once, and the spec accepts that trade-off. The one race that
 // does matter - two first-enables minting different tokens - is closed by the
-// attribute_not_exists(publicOrders.token) guard, so the loser fails instead of
-// silently overwriting the winner's share URL.
+// attribute_not_exists(publicOrders.#token) guard, so the loser fails instead of
+// silently overwriting the winner's share URL. `token` is a DynamoDB reserved
+// word, so the condition escapes it through condition.expressionNames.
 //
 // Argument semantics live in lib/public_settings.js so this step and the
 // CampaignsDS validation step resolve omitted-vs-explicit-null identically.
@@ -104,7 +105,14 @@ export function request(ctx) {
 
     const conditions = ['attribute_exists(ownerAccountId)'];
     if (minted) {
-        conditions.push('attribute_not_exists(publicOrders.token)');
+        conditions.push('attribute_not_exists(publicOrders.#token)');
+    }
+
+    const condition = { expression: conditions.join(' AND ') };
+    if (minted) {
+        // TOKEN is a DynamoDB reserved word: the unescaped document path is
+        // rejected with a ValidationException before the condition evaluates.
+        condition.expressionNames = { '#token': 'token' };
     }
 
     return {
@@ -117,7 +125,7 @@ export function request(ctx) {
                 ':updatedAt': util.time.nowISO8601()
             })
         },
-        condition: { expression: conditions.join(' AND ') }
+        condition
     };
 }
 
