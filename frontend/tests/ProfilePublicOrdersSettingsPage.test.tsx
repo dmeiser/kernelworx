@@ -135,10 +135,21 @@ const RouteSwitcher: React.FC<{ to: string; testId: string }> = ({ to, testId })
   return <button type="button" data-testid={testId} onClick={go} />;
 };
 
-function renderPage(mocks: MockedResponse[]) {
+type MockedProviderProps = Parameters<typeof MockedProvider>[0];
+
+// The real client's watchQuery defaults (frontend/src/lib/apollo.ts): under
+// errorPolicy 'all' a refetch that comes back with GraphQL errors RESOLVES and
+// applies its partial payload, and a rejected read clears query data the way a
+// real fault does. MockedProvider's own defaults hide both shapes, so the live
+// post-action refresh-failure contract is only reproducible with these set.
+const LIVE_QUERY_OPTIONS: MockedProviderProps['defaultOptions'] = {
+  watchQuery: { fetchPolicy: 'cache-and-network', errorPolicy: 'all' },
+};
+
+function renderPage(mocks: MockedResponse[], defaultOptions?: MockedProviderProps['defaultOptions']) {
   return render(
     <MemoryRouter initialEntries={['/scouts/p-1/public-orders']}>
-      <MockedProvider mocks={mocks}>
+      <MockedProvider mocks={mocks} defaultOptions={defaultOptions}>
         <Routes>
           <Route
             path="/scouts/:profileId/public-orders"
@@ -375,6 +386,97 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     await user.click(screen.getByTestId('save-settings'));
     expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
     expect(screen.getByTestId('campaign-missing')).toBeInTheDocument();
+  });
+
+  // The settled contract for an action that SUCCEEDED whose post-action
+  // refresh failed, in AppSync's HTTP 200 + errors[] shape: the resolver fault
+  // nulls the settings field, and under errorPolicy 'all' that payload lands on
+  // the query. The server-confirmed blob must stay authoritative — saved
+  // confirmation + retryable refresh-failed notice + share link intact — never
+  // a spurious unsaved-changes downgrade with the share panel collapsed.
+  it('keeps the confirmation and share link when the refresh resolves with a null field and GraphQL errors', async () => {
+    const user = userEvent.setup();
+    const holder: SettingsHolder = {
+      current: settingsFor({ enabled: true, shareToken: 'old-token', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
+    };
+    const rotateMock: MockedResponse = {
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      result: () => {
+        holder.current = { ...holder.current, shareToken: 'rotated-token' };
+        return { data: { updateProfilePublicOrderSettings: holder.current } };
+      },
+    };
+    const mocks: MockedResponse[] = [
+      baseMocksWith(holder)[0],
+      {
+        request: { query: GET_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID } },
+        maxUsageCount: 1,
+        result: () => ({ data: { getProfilePublicOrderSettings: holder.current } }),
+      },
+      {
+        request: { query: GET_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID } },
+        maxUsageCount: 1,
+        result: () => ({
+          data: { getProfilePublicOrderSettings: null },
+          errors: [new GraphQLError('resolver fault', { extensions: { code: 'INTERNAL_SERVER_ERROR' } })],
+        }),
+      },
+      baseMocksWith(holder)[2],
+      baseMocksWith(holder)[3],
+      rotateMock,
+    ];
+    renderPage(mocks, LIVE_QUERY_OPTIONS);
+    await screen.findByTestId('share-panel');
+
+    await user.click(screen.getByTestId('rotate-token'));
+
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    expect(await screen.findByTestId('refresh-failed')).toBeInTheDocument();
+    expect(screen.getByTestId('share-panel')).toHaveTextContent('rotated-token');
+    expect(screen.queryByTestId('unsaved-changes')).not.toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
+  // Same contract when the post-action refresh is REJECTED (HTTP 500): the
+  // failed read clears the query's data, which must not strand the page on an
+  // endless loading spinner hiding both the confirmation and the notice.
+  it('keeps the confirmation rendered when the refresh is rejected and clears the read', async () => {
+    const user = userEvent.setup();
+    const holder: SettingsHolder = {
+      current: settingsFor({ enabled: true, shareToken: 'old-token', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
+    };
+    const rotateMock: MockedResponse = {
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      result: () => {
+        holder.current = { ...holder.current, shareToken: 'rotated-token' };
+        return { data: { updateProfilePublicOrderSettings: holder.current } };
+      },
+    };
+    const mocks: MockedResponse[] = [
+      baseMocksWith(holder)[0],
+      {
+        request: { query: GET_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID } },
+        maxUsageCount: 1,
+        result: () => ({ data: { getProfilePublicOrderSettings: holder.current } }),
+      },
+      {
+        request: { query: GET_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID } },
+        error: new Error('refetch fault'),
+      },
+      baseMocksWith(holder)[2],
+      baseMocksWith(holder)[3],
+      rotateMock,
+    ];
+    renderPage(mocks, LIVE_QUERY_OPTIONS);
+    await screen.findByTestId('share-panel');
+
+    await user.click(screen.getByTestId('rotate-token'));
+
+    expect(await screen.findByTestId('settings-saved')).toBeInTheDocument();
+    expect(await screen.findByTestId('refresh-failed')).toBeInTheDocument();
+    expect(screen.getByTestId('share-panel')).toHaveTextContent('rotated-token');
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.queryByText('refetch fault')).not.toBeInTheDocument();
   });
 
   it('shows the failure and no stale success when a failed action follows a successful one', async () => {

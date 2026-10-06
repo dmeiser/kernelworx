@@ -25,7 +25,9 @@
  * blob, never from the follow-up refresh; a failed refresh is a separate
  * retryable notice that neither overwrites a true success nor repaints a
  * failed action, and the server-confirmed blob stays the authoritative stored
- * view until the query catches up. The 'saved' confirmation dies as soon as
+ * view until a clean read catches up — a refresh that fails (rejected, or
+ * resolving with a null payload plus GraphQL errors) holds it instead of
+ * letting the broken read collapse the page. The 'saved' confirmation dies as soon as
  * the seller edits the draft and an unsaved-changes indicator takes its
  * place, while an unedited refetch keeps it.
  */
@@ -96,8 +98,14 @@ interface ActionSpan {
 
 /** Keeps an action's returned blob authoritative until a newer read lands. */
 interface SavedSnapshot {
+  /** The profile identity the write was issued for (never paints another profile). */
+  profileId: string;
   /** The settings read the write raced with; a newer read wins. */
   seen: unknown;
+  /** Set when the post-action refresh failed: an errored or cleared read must
+   * not supersede the server-confirmed blob, so it stays authority until the
+   * next action or profile change. */
+  held: boolean;
   view: PublicOrderSettingsView;
 }
 
@@ -230,9 +238,15 @@ function derivedActionMessage(state: SettingsActionMessage, diverged: boolean): 
   return { kind: 'unsaved', refreshFailed: state.refreshFailed };
 }
 
-/** The saved blob is authority until a newer read lands; a failed refresh keeps it. */
-function liveSnapshot(snapshot: SavedSnapshot | null, data: unknown): PublicOrderSettingsView | null {
-  if (!snapshot) return null;
+/** The saved blob is authority until a newer read lands; a failed refresh holds it
+ * across the errored/cleared read, and a snapshot never outranks its own profile. */
+function liveSnapshot(
+  snapshot: SavedSnapshot | null,
+  profileId: string,
+  data: unknown,
+): PublicOrderSettingsView | null {
+  if (!snapshot || snapshot.profileId !== profileId) return null;
+  if (snapshot.held) return snapshot.view;
   if (snapshot.seen !== data) return null;
   return snapshot.view;
 }
@@ -282,7 +296,7 @@ export function usePublicOrderSettings(profileId: string) {
   // the one the write raced with (i.e. the post-action refresh landed); if
   // that refresh fails, the server-confirmed blob keeps the page on truth.
   const [savedSnapshot, setSavedSnapshot] = useState<SavedSnapshot | null>(null);
-  const savedActive = liveSnapshot(savedSnapshot, settings.data);
+  const savedActive = liveSnapshot(savedSnapshot, dbProfileId, settings.data);
   const stored = freshestSettings(savedActive, readSettings(settings.data));
   const [draft, setDraft] = useState<SettingsDraft>(() => draftFromSettings(stored));
   const [seededProfileId, setSeededProfileId] = useState<string | null>(null);
@@ -390,12 +404,22 @@ export function usePublicOrderSettings(profileId: string) {
       setActionState({ kind: 'failed', message: settingsFailureMessage(outcome.failure) });
       return;
     }
-    setSavedSnapshot({ seen: settings.data ?? null, view });
+    setSavedSnapshot({ profileId: span.profileId, seen: settings.data ?? null, held: false, view });
     reconcileDraft({ type: 'action', args, view });
     setActionState({ kind: 'saved', refreshFailed: false });
 
     const refreshFailed = await refreshViaQuery(span);
-    if (span.isLive()) setActionState({ kind: 'saved', refreshFailed });
+    if (!span.isLive()) return;
+    // A failed refresh (rejected, or GraphQL errors riding a null payload that
+    // replaced/cleared query data) never invalidates the action's own success:
+    // hold the confirmed blob so the stored view, share link and confirmation
+    // all stand until a later clean read or action supersedes them.
+    if (refreshFailed) {
+      setSavedSnapshot((previous) =>
+        previous && previous.profileId === span.profileId ? { ...previous, held: true } : previous,
+      );
+    }
+    setActionState({ kind: 'saved', refreshFailed });
   };
 
   /** The follow-up refresh: its failure (rejected, aborted or errored result) never invalidates the action's own success. */
@@ -444,7 +468,10 @@ export function usePublicOrderSettings(profileId: string) {
     saveDisabled: computeSaveDisabled({ submitting, acksRequired, acksChecked }),
     submitting,
     actionMessage: message,
-    settingsLoaded: Boolean(settings.data),
+    // A rejected refresh can clear the query's data entirely; the page has
+    // loaded once for this identity either way, so it must not fall back to
+    // the loading spinner (which would hide the confirmation and the notice).
+    settingsLoaded: Boolean(settings.data) || everLoaded,
     settingsError,
     setEnabled,
     setCampaignId,
