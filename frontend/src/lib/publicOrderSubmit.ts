@@ -69,10 +69,7 @@ export function buildPublicOrderInput(args: {
 }
 
 /** What the success screen echoes back, using the offer's product names. */
-export function buildSubmittedSummary(
-  form: PublicOrderFormState,
-  offer: PublicOfferView,
-): PublicOrderSubmittedSummary {
+export function buildSubmittedSummary(form: PublicOrderFormState, offer: PublicOfferView): PublicOrderSubmittedSummary {
   const nameById = new Map(offer.products.map((product) => [product.productId, product]));
   const lineItems = buildPublicLineItems(form).map((item) => {
     const product = nameById.get(item.productId);

@@ -14,7 +14,14 @@ export const GLOBAL_PAYMENT_METHODS: readonly string[] = ['Cash', 'Check'];
 /** The settings fields the page renders. */
 export type PublicOrderSettingsView = Pick<
   GqlPublicOrderSettings,
-  'enabled' | 'campaignId' | 'campaignName' | 'campaignState' | 'allowedPaymentMethods' | 'shareToken' | 'publicOrderCount' | 'ackVersion'
+  | 'enabled'
+  | 'campaignId'
+  | 'campaignName'
+  | 'campaignState'
+  | 'allowedPaymentMethods'
+  | 'shareToken'
+  | 'publicOrderCount'
+  | 'ackVersion'
 >;
 
 /** Local edit state for one profile's public order settings. */

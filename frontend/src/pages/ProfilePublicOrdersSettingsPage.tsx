@@ -100,10 +100,7 @@ const SettingsContent: React.FC<{ profileId: string; settings: SettingsState }> 
   <Box>
     <PageHeader title="Public Orders" subtitle={headerSubtitle(settings.profile)} />
 
-    <PublicSettingsMessages
-      campaignState={settings.stored.campaignState}
-      actionMessage={settings.actionMessage}
-    />
+    <PublicSettingsMessages campaignState={settings.stored.campaignState} actionMessage={settings.actionMessage} />
 
     <SettingsFormCard settings={settings} />
 

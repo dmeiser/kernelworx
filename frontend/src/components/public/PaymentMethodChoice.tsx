@@ -54,7 +54,13 @@ const QrImageBlock: React.FC<QrImageBlockProps> = ({ method, onQrExpired }) => {
         sx={{ maxWidth: 220, maxHeight: 220, display: 'block', mb: 1 }}
       />
       {decodedLink ? (
-        <Link href={decodedLink} target="_blank" rel="noopener noreferrer" underline="always" data-testid="decoded-payment-link">
+        <Link
+          href={decodedLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          underline="always"
+          data-testid="decoded-payment-link"
+        >
           {decodedLink}
         </Link>
       ) : (
@@ -74,7 +80,12 @@ interface PaymentMethodChoiceProps {
   onQrExpired?: () => void;
 }
 
-export const PaymentMethodChoice: React.FC<PaymentMethodChoiceProps> = ({ method, selected, onSelect, onQrExpired }) => (
+export const PaymentMethodChoice: React.FC<PaymentMethodChoiceProps> = ({
+  method,
+  selected,
+  onSelect,
+  onQrExpired,
+}) => (
   <Stack spacing={1} data-testid={`payment-method-${method.name}`}>
     <Box
       component="label"
@@ -85,7 +96,13 @@ export const PaymentMethodChoice: React.FC<PaymentMethodChoiceProps> = ({ method
         if (event.key === 'Enter' || event.key === ' ') onSelect(method.name);
       }}
     >
-      <Box component="input" type="radio" name="paymentMethod" checked={selected} onChange={() => onSelect(method.name)} />
+      <Box
+        component="input"
+        type="radio"
+        name="paymentMethod"
+        checked={selected}
+        onChange={() => onSelect(method.name)}
+      />
       <Typography variant="body1">{method.name}</Typography>
     </Box>
 

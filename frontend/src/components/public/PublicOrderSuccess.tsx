@@ -10,7 +10,19 @@
  * delimiter, so a link carrying one is never rendered.
  */
 
-import { Alert, Box, Divider, Link, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from '@mui/material';
+import {
+  Alert,
+  Box,
+  Divider,
+  Link,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Typography,
+} from '@mui/material';
 import { formatCurrency } from '../../lib/api-utils';
 import { resolveReceiptUrl } from '../../lib/publicOrders';
 

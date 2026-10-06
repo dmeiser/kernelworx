@@ -64,7 +64,12 @@ export const ShareQrPanel: React.FC<ShareQrPanelProps> = ({ shareUrl, onCopied }
           Copy
         </Button>
         <Tooltip title="Show the code full screen">
-          <IconButton onClick={() => setFullscreen(true)} size="small" aria-label="Show QR full screen" data-testid="fullscreen-qr">
+          <IconButton
+            onClick={() => setFullscreen(true)}
+            size="small"
+            aria-label="Show QR full screen"
+            data-testid="fullscreen-qr"
+          >
             <FullscreenIcon />
           </IconButton>
         </Tooltip>
@@ -73,10 +78,20 @@ export const ShareQrPanel: React.FC<ShareQrPanelProps> = ({ shareUrl, onCopied }
         <Box component="img" src={qrDataUrl} alt="Public order share QR code" sx={{ width: 220, height: 220 }} />
       ) : null}
 
-      <Dialog open={fullscreen} onClose={() => setFullscreen(false)} maxWidth={false} data-testid="fullscreen-qr-dialog">
+      <Dialog
+        open={fullscreen}
+        onClose={() => setFullscreen(false)}
+        maxWidth={false}
+        data-testid="fullscreen-qr-dialog"
+      >
         <DialogContent>
           {qrDataUrl ? (
-            <Box component="img" src={qrDataUrl} alt="Public order share QR code, enlarged" sx={{ width: '80vmin', height: '80vmin' }} />
+            <Box
+              component="img"
+              src={qrDataUrl}
+              alt="Public order share QR code, enlarged"
+              sx={{ width: '80vmin', height: '80vmin' }}
+            />
           ) : null}
         </DialogContent>
       </Dialog>

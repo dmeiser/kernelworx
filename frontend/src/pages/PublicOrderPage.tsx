@@ -88,7 +88,13 @@ interface SubmitButtonProps {
 
 /** Disabled in flight: v1 has no idempotency key, so a double-tap is two orders. */
 const SubmitButton: React.FC<SubmitButtonProps> = ({ submitting, disabled, onSubmit }) => (
-  <Button variant="contained" size="large" onClick={onSubmit} disabled={submitting || disabled} data-testid="submit-order">
+  <Button
+    variant="contained"
+    size="large"
+    onClick={onSubmit}
+    disabled={submitting || disabled}
+    data-testid="submit-order"
+  >
     {submitting ? 'Placing your order…' : 'Place order'}
   </Button>
 );
@@ -161,7 +167,11 @@ const FormView: React.FC<FormViewProps> = ({ offer, profileId, token, onQrExpire
       </Stack>
       <FieldError message={order.errors.paymentMethod} />
 
-      <NotesField value={order.form.notes} errorText={order.errors.notes} onChange={(value) => order.setField('notes', value)} />
+      <NotesField
+        value={order.form.notes}
+        errorText={order.errors.notes}
+        onChange={(value) => order.setField('notes', value)}
+      />
 
       <SubmitButton
         submitting={order.submitting}

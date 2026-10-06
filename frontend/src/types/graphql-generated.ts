@@ -843,7 +843,7 @@ export type GqlPublicOrderReceipt = {
   confirmationEmailSent: Scalars['Boolean']['output'];
   /** The order's full ID (ORDER#...#... form), for display and support. */
   orderId: Scalars['ID']['output'];
-  /** The composed public receipt URL (/r/<campaignId>/<orderSuffix>/<receiptToken>); the success screen shows it alongside the emailed link. */
+  /** The composed public receipt URL: an ABSOLUTE https URL (https://<site>/r/<campaignId>/<orderSuffix>/<receiptToken>); the success screen shows it alongside the emailed link. */
   receiptUrl?: Maybe<Scalars['String']['output']>;
   /** The order's total amount. */
   totalAmount: Scalars['Float']['output'];

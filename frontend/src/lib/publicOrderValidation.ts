@@ -58,7 +58,9 @@ export type PublicOrderFieldErrors = Partial<Record<PublicOrderField, string>>;
 
 /** True when the buyer typed anything into the address block. */
 export function addressStarted(address: PublicOrderAddressForm): boolean {
-  return REQUIRED_ADDRESS_FIELDS.some((field) => String(address[field as keyof PublicOrderAddressForm] || '').trim() !== '');
+  return REQUIRED_ADDRESS_FIELDS.some(
+    (field) => String(address[field as keyof PublicOrderAddressForm] || '').trim() !== '',
+  );
 }
 
 /** US phone semantics: ten digits, tolerating separators and a leading 1. */
@@ -73,7 +75,9 @@ export function validateBuyerPhone(phone: string): string | null {
 
 /** Address semantics: all four fields plus a 5- or 9-digit US ZIP. */
 export function validateBuyerAddress(address: PublicOrderAddressForm): string | null {
-  const missing = REQUIRED_ADDRESS_FIELDS.filter((field) => address[field as keyof PublicOrderAddressForm].trim() === '');
+  const missing = REQUIRED_ADDRESS_FIELDS.filter(
+    (field) => address[field as keyof PublicOrderAddressForm].trim() === '',
+  );
   if (missing.length > 0) {
     return `An address needs all four fields (missing: ${missing.join(', ')}).`;
   }

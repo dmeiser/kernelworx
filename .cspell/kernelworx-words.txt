@@ -321,6 +321,7 @@ regionAbbrev
 regularuser
 relogin
 renderer
+repicking
 repo
 repr
 reqs

@@ -139,7 +139,11 @@ function readMethodNames(data: MethodsQueryData): string[] {
 }
 
 /** Save is blocked in flight and while required acknowledgements are incomplete. */
-export function computeSaveDisabled(args: { submitting: boolean; acksRequired: boolean; acksChecked: boolean }): boolean {
+export function computeSaveDisabled(args: {
+  submitting: boolean;
+  acksRequired: boolean;
+  acksChecked: boolean;
+}): boolean {
   return args.submitting || (args.acksRequired && !args.acksChecked);
 }
 
@@ -160,7 +164,7 @@ function judgeMutation(thrown: unknown, result: SettingsResponse | null | undefi
 
 function judgeMutationPayload(result: SettingsResponse | null | undefined): SettingsOutcome {
   const data = result?.data;
-  const view = data ? data.updateProfilePublicOrderSettings ?? null : null;
+  const view = data ? (data.updateProfilePublicOrderSettings ?? null) : null;
   if (view !== null) return { failure: null, view };
   return { failure: new Error(EMPTY_SETTINGS_RESPONSE_MESSAGE), view: null };
 }
@@ -196,11 +200,7 @@ type DraftRequest =
   | { type: 'refetch' };
 
 /** Loads a transmitted field from the saved view, keeping the stored one otherwise. */
-function loadTransmitted(
-  transmitted: boolean,
-  saved: string | null | undefined,
-  fallback: string,
-): string {
+function loadTransmitted(transmitted: boolean, saved: string | null | undefined, fallback: string): string {
   if (!transmitted) return fallback;
   return saved ?? '';
 }

@@ -32,10 +32,7 @@ import { ReceiptStatusChip } from '../components/public/ReceiptStatusChip';
 import { PUBLIC_GET_ORDER_RECEIPT } from '../lib/publicOrderGraphQL';
 import { formatCurrency } from '../lib/api-utils';
 import { formatDisplayDate } from '../lib/date-utils';
-import type {
-  GqlPublicGetOrderReceiptQuery,
-  GqlPublicGetOrderReceiptQueryVariables,
-} from '../types/graphql-generated';
+import type { GqlPublicGetOrderReceiptQuery, GqlPublicGetOrderReceiptQueryVariables } from '../types/graphql-generated';
 
 type ReceiptView = GqlPublicGetOrderReceiptQuery['publicGetOrderReceipt'];
 

@@ -55,7 +55,9 @@ export function usePublicOrderForm({ profileId, token, offer }: UsePublicOrderFo
   const [receipt, setReceipt] = useState<PublicOrderReceiptView | null>(null);
   const [summary, setSummary] = useState<PublicOrderSubmittedSummary | null>(null);
 
-  const [mutate] = useMutation<GqlPublicCreateOrderMutation, GqlPublicCreateOrderMutationVariables>(PUBLIC_CREATE_ORDER);
+  const [mutate] = useMutation<GqlPublicCreateOrderMutation, GqlPublicCreateOrderMutationVariables>(
+    PUBLIC_CREATE_ORDER,
+  );
 
   const setField = (field: PublicOrderTextField, value: string) =>
     setForm((previous) => ({ ...previous, [field]: value }));

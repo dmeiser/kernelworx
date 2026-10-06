@@ -76,8 +76,12 @@ const PaymentMethodsPage = lazyRoute(() =>
 );
 const HomePage = lazyRoute(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
 const StoryPage = lazyRoute(() => import('./pages/StoryPage').then((m) => ({ default: m.StoryPage })));
-const PublicOrderPage = lazyRoute(() => import('./pages/PublicOrderPage').then((m) => ({ default: m.PublicOrderPage })));
-const PublicReceiptPage = lazyRoute(() => import('./pages/PublicReceiptPage').then((m) => ({ default: m.PublicReceiptPage })));
+const PublicOrderPage = lazyRoute(() =>
+  import('./pages/PublicOrderPage').then((m) => ({ default: m.PublicOrderPage })),
+);
+const PublicReceiptPage = lazyRoute(() =>
+  import('./pages/PublicReceiptPage').then((m) => ({ default: m.PublicReceiptPage })),
+);
 const ProfilePublicOrdersSettingsPage = lazyRoute(() =>
   import('./pages/ProfilePublicOrdersSettingsPage').then((m) => ({ default: m.ProfilePublicOrdersSettingsPage })),
 );

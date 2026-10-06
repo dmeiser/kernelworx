@@ -81,12 +81,10 @@ export function createRateLimitRetryLink(): RetryLink {
 
 /** Attaches `x-api-key` and nothing else. */
 export function createApiKeyLink() {
-  return setContext(
-    async (_operation: unknown, previousContext: Record<string, unknown>) => ({
-      ...previousContext,
-      headers: { ...(previousContext.headers as Record<string, string> | undefined), ...publicRequestHeaders() },
-    }),
-  );
+  return setContext(async (_operation: unknown, previousContext: Record<string, unknown>) => ({
+    ...previousContext,
+    headers: { ...(previousContext.headers as Record<string, string> | undefined), ...publicRequestHeaders() },
+  }));
 }
 
 /**
