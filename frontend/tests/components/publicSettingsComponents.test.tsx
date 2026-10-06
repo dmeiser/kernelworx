@@ -170,9 +170,14 @@ describe('PublicSettingsMethodChecklist', () => {
     expect(onToggle).toHaveBeenCalledWith('Venmo', true);
   });
 
-  it('explains an empty option list', () => {
+  it('renders disabled checkboxes when disabled prop is true', () => {
+    render(<PublicSettingsMethodChecklist options={['Venmo']} selected={[]} onToggle={vi.fn()} disabled />);
+    expect(screen.getByRole('checkbox', { name: 'Venmo' })).toBeDisabled();
+  });
+
+  it('renders an informational alert when no payment methods are configured', () => {
     render(<PublicSettingsMethodChecklist options={[]} selected={[]} onToggle={vi.fn()} />);
-    expect(screen.getByText(/Add a payment method under Payment Methods first/i)).toBeInTheDocument();
+    expect(screen.getByText(/Add a payment method under Payment Methods first/)).toBeInTheDocument();
   });
 });
 

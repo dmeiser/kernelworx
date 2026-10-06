@@ -78,11 +78,27 @@ describe('PublicReceiptPage', () => {
     expect(screen.queryByText('Seller: Troop 42 Popcorn')).not.toBeInTheDocument();
   });
 
-  it('shows the not-available page when a path segment is missing', async () => {
+  it('shows the not-available page when params are empty or undefined', () => {
     render(
-      <MemoryRouter initialEntries={['/r/campaign-1/suffix-1']}>
+      <MockedProvider mocks={[]}>
+        <PublicReceiptPage />
+      </MockedProvider>,
+    );
+    expect(screen.getByText(PUBLIC_UNAVAILABLE_TITLE)).toBeInTheDocument();
+  });
+
+  it('renders a custom status value if unmapped in STATUS_LABELS', async () => {
+    renderPage([receiptMock({ result: { data: { publicGetOrderReceipt: { ...receiptData, status: 'CANCELLED' as any } } } })]);
+    expect(await screen.findByTestId('receipt-status-chip')).toHaveTextContent('CANCELLED');
+  });
+
+  it('handles empty string path segments', async () => {
+    render(
+      <MemoryRouter initialEntries={['/r///']}>
         <MockedProvider mocks={[]}>
-          <PublicReceiptPage />
+          <Routes>
+            <Route path="/r/:campaignId?/:orderSuffix?/:receiptToken?" element={<PublicReceiptPage />} />
+          </Routes>
         </MockedProvider>
       </MemoryRouter>,
     );

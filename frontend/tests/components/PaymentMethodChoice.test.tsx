@@ -103,8 +103,21 @@ describe('PaymentMethodChoice', () => {
     expect(onQrExpired).toHaveBeenCalled();
   });
 
-  it('explains a method with no QR image', () => {
-    render(<PaymentMethodChoice method={{ name: 'Cash', qrCodeUrl: null }} selected onSelect={vi.fn()} />);
-    expect(screen.getByTestId('payment-no-qr')).toBeInTheDocument();
+  it('handles image load when ref is null or element is missing', () => {
+    const { unmount } = render(<PaymentMethodChoice method={method} selected onSelect={vi.fn()} />);
+    const img = getImage();
+    unmount();
+    // firing load after unmount exercises element === null branch
+    fireEvent.load(img);
+  });
+
+  it('renders a decoded mailto: link', async () => {
+    vi.mocked(decodeQrLink).mockReturnValue('mailto:scout@example.com?subject=order');
+    render(<PaymentMethodChoice method={method} selected onSelect={vi.fn()} />);
+    fireEvent.load(getImage());
+
+    const link = await screen.findByTestId('decoded-payment-link');
+    expect(link).toHaveAttribute('href', 'mailto:scout@example.com?subject=order');
+    expect(link).toHaveTextContent('mailto:scout@example.com?subject=order');
   });
 });

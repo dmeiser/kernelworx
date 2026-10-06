@@ -103,6 +103,13 @@ describe('draftMatchesSavedView', () => {
       draftMatchesSavedView({ enabled: false, campaignId: '', methods: [], ackPayment: false, ackDisclosure: false }, null),
     ).toBe(true);
   });
+
+  it('diverges when campaignId is different from null/undefined in saved view', () => {
+    const saved = { ...EMPTY_PUBLIC_ORDER_SETTINGS, campaignId: null };
+    expect(
+      draftMatchesSavedView({ enabled: false, campaignId: 'c-1', methods: [], ackPayment: false, ackDisclosure: false }, saved),
+    ).toBe(false);
+  });
 });
 
 describe('buildMethodOptions', () => {
