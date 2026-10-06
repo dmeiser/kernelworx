@@ -40,6 +40,14 @@ S3_BUCKET=$(tofu_output static_assets_bucket)
 CF_DISTRIBUTION=$(tofu_output cloudfront_distribution_id)
 APPSYNC_API_URL=$(tofu_output appsync_api_url)
 SITE_URL=$(tofu_output site_url)
+# Public-order API key (transport credential, not a secret - the share token
+# in the URL is the authorization). Optional: stacks that predate the public
+# orders feature have no such output and the key cannot be fetched any other
+# way, so an absent output only degrades the public /o/... /r/... pages.
+APPSYNC_API_KEY=$(tofu_output appsync_api_key)
+if [ "$APPSYNC_API_KEY" == "None" ]; then
+    APPSYNC_API_KEY=""
+fi
 
 # ============================================================
 # Fallbacks to AWS CLI when OpenTofu outputs are unavailable
@@ -133,6 +141,11 @@ echo "   S3 Bucket: $S3_BUCKET"
 echo "   CloudFront Distribution: $CF_DISTRIBUTION"
 echo "   Site URL: $SITE_URL"
 echo "   API Endpoint: $APPSYNC_API_URL"
+if [ -n "$APPSYNC_API_KEY" ]; then
+    echo "   API Key: set (public order pages)"
+else
+    echo "   API Key: missing - public order pages will fail (no appsync_api_key output)"
+fi
 
 # ============================================================
 # Step 2: Generate .env.production file (used by Vite for builds)
@@ -158,6 +171,13 @@ VITE_COGNITO_USER_POOL_CLIENT_ID=${CLIENT_ID}
 VITE_OAUTH_REDIRECT_SIGNIN=${SITE_URL}
 VITE_OAUTH_REDIRECT_SIGNOUT=${SITE_URL}
 EOF
+
+# Public order pages need the API key baked into the same bundle (their
+# key-only Apollo client reads it at build time); emit it only when the stack
+# provides it so pre-feature stacks keep building.
+if [ -n "$APPSYNC_API_KEY" ]; then
+    echo "VITE_APPSYNC_API_KEY=${APPSYNC_API_KEY}" >> .env.production
+fi
 
 # Refresh .env from .env.production so the build below cannot pick up
 # local-dev absolute endpoints: Vite loads .env in every mode, and

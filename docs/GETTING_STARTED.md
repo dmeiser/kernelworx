@@ -308,9 +308,10 @@ cd frontend
 # frontend/.env.example); make sure no local .env / .env.local defining them
 # is present, or Vite will bake the absolute endpoints into the bundle.
 # The public order pages DO need the AppSync API key baked in as
-# VITE_APPSYNC_API_KEY (CI's deploy-shared.yml sets it automatically; without
-# it every public /o/... /r/... call fails Unauthorized). Vite gives shell env
-# vars priority over .env files, so export it from the stack output:
+# VITE_APPSYNC_API_KEY (CI's deploy-shared.yml and frontend/deploy.sh set it
+# automatically; without it every public /o/... /r/... call fails Unauthorized).
+# Vite gives shell env vars priority over .env files, so export it from the
+# stack output:
 export VITE_APPSYNC_API_KEY=$(tofu -chdir=../tofu/application/environments/dev output -raw appsync_api_key)
 npm run build
 

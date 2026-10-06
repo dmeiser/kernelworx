@@ -118,8 +118,9 @@ npm run preview   # serve the production build locally
 ```
 
 `deploy.sh` wraps the build for the dev environment: it generates `.env.production`
-with the same-origin variables, builds, syncs `dist/` to the S3 bucket, and creates a
-CloudFront invalidation. CI builds the frontend the same way (`.github/workflows/deploy-shared.yml`).
+from the stack outputs (same-origin variables plus `VITE_APPSYNC_API_KEY`, which it
+fetches from the `appsync_api_key` output when the stack has one), builds, syncs
+`dist/` to the S3 bucket, and creates a CloudFront invalidation. CI builds the frontend the same way (`.github/workflows/deploy-shared.yml`).
 
 ## Testing
 

@@ -15,6 +15,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { GraphQLError } from 'graphql';
 import { MockedProvider } from '@apollo/client/testing/react';
+import type { MockedProviderProps } from '@apollo/client/testing/react';
 import type { MockedResponse } from '@apollo/client/testing';
 import { ProfilePublicOrdersSettingsPage } from '../src/pages/ProfilePublicOrdersSettingsPage';
 import {
@@ -135,16 +136,17 @@ const RouteSwitcher: React.FC<{ to: string; testId: string }> = ({ to, testId })
   return <button type="button" data-testid={testId} onClick={go} />;
 };
 
-type MockedProviderProps = Parameters<typeof MockedProvider>[0];
-
 // The real client's watchQuery defaults (frontend/src/lib/apollo.ts): under
 // errorPolicy 'all' a refetch that comes back with GraphQL errors RESOLVES and
 // applies its partial payload, and a rejected read clears query data the way a
 // real fault does. MockedProvider's own defaults hide both shapes, so the live
 // post-action refresh-failure contract is only reproducible with these set.
-const LIVE_QUERY_OPTIONS: MockedProviderProps['defaultOptions'] = {
+// Same double cast as src/lib/apollo.ts: Apollo v4 wants defaultOptions
+// declared in the type system (DeclareDefaultOptions), and this literal
+// satisfies the runtime contract without that declaration.
+const LIVE_QUERY_OPTIONS = {
   watchQuery: { fetchPolicy: 'cache-and-network', errorPolicy: 'all' },
-};
+} as unknown as MockedProviderProps['defaultOptions'];
 
 function renderPage(mocks: MockedResponse[], defaultOptions?: MockedProviderProps['defaultOptions']) {
   return render(
