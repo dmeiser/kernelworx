@@ -329,16 +329,42 @@ describe("public API key directive surface (schema.graphql)", () => {
     expect(sources).toEqual(["PUBLIC"]);
   });
 
-  test("the Order-side public fields are deliberately absent from this slice", () => {
-    // Order.customerEmail/customerFirstName/customerLastName/orderSource/status
-    // land with the resolvers that write them, so no input accepts a value
-    // nothing honors yet. If one of these appears here, that ordering broke.
-    const orderFields = new Set(parseFields(definition("Order").body).map((f) => f.name));
-    for (const deferred of ["customerEmail", "customerFirstName", "customerLastName", "orderSource", "status"]) {
-      expect(orderFields.has(deferred), `Order.${deferred} must land with its resolver`).toBe(false);
+  test("the Order type carries the public-order attributes, all nullable", () => {
+    // Public orders are ordinary order rows with extra attributes, and existing
+    // rows have none of them (no backfill). A non-null copy of any of these
+    // would fail every legacy row read, so each one must be nullable.
+    const body = definition("Order").body;
+    for (const name of [
+      "customerEmail",
+      "customerFirstName",
+      "customerLastName",
+      "orderSource",
+      "status",
+    ]) {
+      expect(
+        new RegExp(`^  ${name}: (String|OrderSource|OrderStatus)$`, "m").test(body),
+        `Order.${name} must exist and be nullable`,
+      ).toBe(true);
     }
+    // The enum copies are the declared enums, not free strings.
+    expect(/^ {2}status: OrderStatus$/m.test(body)).toBe(true);
+    expect(/^ {2}orderSource: OrderSource$/m.test(body)).toBe(true);
+  });
+
+  test("receiptToken is never an Order field, and status is not an update input", () => {
+    // receiptToken is a per-order capability carried only inside the buyer's
+    // email link; exposing it on Order would hand the same capability to every
+    // authenticated reader of the order.
+    const orderFields = new Set(parseFields(definition("Order").body).map((f) => f.name));
+    expect(orderFields.has("receiptToken")).toBe(false);
+
+    // The seller-side status transition lands with the order lifecycle slice,
+    // so no input may accept a value nothing honors yet.
     const updateInput = new Set(parseFields(definition("UpdateOrderInput").body).map((f) => f.name));
     expect(updateInput.has("status")).toBe(false);
+    for (const name of ["receiptToken", "orderSource"]) {
+      expect(updateInput.has(name), `UpdateOrderInput.${name} would let a client forge it`).toBe(false);
+    }
   });
 
   test("the public root fields are declared inside the root types, never via extend", () => {

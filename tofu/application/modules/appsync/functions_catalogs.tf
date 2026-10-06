@@ -155,3 +155,20 @@ resource "aws_appsync_function" "find_shared_campaigns_by_unit" {
 
   code = file("${local.js_resolvers_dir}/find_shared_campaigns_resolver.js")
 }
+
+# === #679 public-order settings (owner-only) ===
+
+# Settings write: the anchor campaign's catalog is a different table, so its
+# existence + soft-delete check is a second function on a second datasource.
+resource "aws_appsync_function" "validate_public_settings_catalog" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.catalogs.name
+  name        = "ValidatePublicSettingsCatalogFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_public_settings_catalog_fn.js")
+}
