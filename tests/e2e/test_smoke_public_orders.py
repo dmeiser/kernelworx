@@ -39,7 +39,7 @@ import re
 import urllib.error
 import urllib.request
 from collections.abc import Generator
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page, expect
@@ -335,7 +335,13 @@ def test_qr_method_renders_presigned_image_with_referrer_guard(buyer_page: Page,
     parsed = urlparse(src)
     assert parsed.scheme == "https", f"Pre-signed QR URL must be https; got: {src!r}"
     assert parsed.netloc.endswith(".amazonaws.com"), f"Pre-signed QR URL must point at S3; got: {src!r}"
-    assert "X-Amz-Signature" in src, f"Pre-signed QR URL must be signed; got: {src!r}"
+    # The pinned boto3/botocore in the Lambda layer presigns against the legacy
+    # global endpoint with query-string SigV2 (AWSAccessKeyId/Signature/Expires),
+    # not SigV4 (X-Amz-Signature) — the image loads and decodes either way, so
+    # assert the URL is *signed* without pinning one signature version's spelling.
+    query_params = dict(parse_qsl(parsed.query))
+    signed = (query_params.get("X-Amz-Signature") or query_params.get("Signature") or "").strip()
+    assert signed, f"Pre-signed QR URL must carry a signature parameter; got: {src!r}"
     assert image.get_attribute("referrerPolicy") == "no-referrer", "QR <img> must not leak the page URL as a referrer"
     assert image.get_attribute("crossOrigin") == "anonymous", "QR <img> must be CORS-readable for the decode"
 

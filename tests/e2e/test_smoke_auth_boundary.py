@@ -255,7 +255,7 @@ def _graphql_with_api_key(query: str, endpoint: str, api_key: str) -> dict[str, 
     ("query", "field"),
     [
         ('{ getProfile(profileId: "PROFILE#boundary-probe") { sellerName } }', "getProfile"),
-        ("{ listMyProfiles(limit: 1) { items { profileId } } }", "listMyProfiles"),
+        ("{ listMyProfiles(limit: 1) { profiles { profileId } } }", "listMyProfiles"),
     ],
 )
 def test_public_api_key_cannot_reach_cognito_only_fields(query: str, field: str) -> None:
