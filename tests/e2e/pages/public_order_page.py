@@ -171,12 +171,20 @@ class PublicOrderSettingsPage(BasePage):
         return self.page.get_by_test_id("disable-public-orders")
 
     def disable(self) -> None:
-        """Click *Disable* and wait for the settings to reload."""
+        """Click *Disable* and wait until the feature is off.
+
+        The disable mutation crosses the whole public-settings pipeline (owner
+        verify → campaign lookup → profiles UpdateItem) and renders no spinner,
+        so this waits on the *Share link* section unmounting (its conditional
+        render carries ``stored.enabled``) instead of
+        :meth:`BasePage.wait_for_loading`, which only covers page spinners.
+        """
         self.disable_button().click()
+        expect(self.page.get_by_role("heading", name="Share link")).to_be_hidden(timeout=20_000)
         self.wait_for_loading()
 
     def rotate_token(self) -> None:
-        """Click *Rotate link* and wait for the settings reload to repaint the share view."""
+        """Click *Rotate link*; the new URL surfaces via the caller's poller."""
         self.page.get_by_test_id("rotate-token").click()
         self.wait_for_loading()
 
@@ -206,7 +214,12 @@ class PublicOrderSettingsPage(BasePage):
     # ------------------------------------------------------------------
 
     def share_view_is_visible(self) -> bool:
-        """Return ``True`` when the *Share link* section is rendered."""
+        """Return ``True`` when the public-orders form is enabled.
+
+        Anchored on the *Share link* heading, the same element the *Disable*
+        completion wait keys on, so a disable followed by this assertion
+        observes post-mutation state rather than a mid-flight render.
+        """
         return self.page.get_by_role("heading", name="Share link").is_visible()
 
     def share_url(self) -> str:
