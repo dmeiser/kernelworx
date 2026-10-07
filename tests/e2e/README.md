@@ -42,6 +42,12 @@ TEST_READONLY_PASSWORD=<password>
 TEST_USER_POOL_ID=us-east-1_XXXXXXXXX
 TEST_REGION=us-east-1
 
+# AppSync endpoint + API_KEY-mode key (optional). Only the API-key reachability
+# check in test_smoke_auth_boundary.py needs these; the ephemeral stack exports
+# them, and the check skips with a reason when they are unset.
+# TEST_APPSYNC_ENDPOINT=https://<api-id>.appsync-api.us-east-1.amazonaws.com/graphql
+# TEST_APPSYNC_API_KEY=<key>
+
 # DynamoDB table names are resolved automatically from E2E_BASE_URL + TEST_REGION.
 # Convention: kernelworx-{type}-{region_abbrev}-{environment}
 # Example for dev: kernelworx-accounts-ue1-dev
@@ -130,12 +136,13 @@ uv run pytest tests/e2e/ --headed --slowmo=500 -v
 | File | What it covers |
 |---|---|
 | `test_smoke_auth.py` | Login / logout flow |
-| `test_smoke_auth_boundary.py` | Unauthenticated redirect; profile access control |
+| `test_smoke_auth_boundary.py` | Unauthenticated redirect; profile access control; public order route stays public; API key cannot reach Cognito-only fields |
 | `test_smoke_profile.py` | Owner dashboard shows a seller profile |
 | `test_smoke_campaign.py` | Campaign list visible; create a campaign |
 | `test_smoke_order.py` | Create an order; order persists on reload |
 | `test_smoke_sharing.py` | Invite → accept → revoke share; read-only restriction |
 | `test_smoke_signup.py` | New-user sign-up flow |
+| `test_smoke_public_orders.py` | Public order share link end to end: seller enable + acknowledgements + share view + rotate + disable, anonymous buyer offer render, QR link safety, not-available states. The buyer submit/receipt tests are skipped with a reason until the `publicCreateOrder`/`publicGetOrderReceipt` resolvers ship. |
 | `test_smoke_settings.py` | Basic settings page flow (view and update settings) |
 | `test_smoke_reports.py` | Reports page smoke: load and request/download report |
 | `test_smoke_account_deletion.py` | Account deletion flow (gated by RUN_ACCOUNT_DELETION; runs disposable-user test in CI) |

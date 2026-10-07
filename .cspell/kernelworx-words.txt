@@ -255,6 +255,7 @@ newOwnerSearch
 nocat
 nodate
 noindex
+noopener
 noname
 noout
 noreferrer

@@ -4,6 +4,10 @@ Covers issue #84: create and join a shared campaign to generate data, then
 navigate to ``/campaign-reports`` and verify Unit Summary, Seller Report, and
 Order Details render with rollup values tied to the seeded order and that both
 Excel export buttons produce downloads.
+
+Known gap: the ``customerEmail`` column assertion spec 10.4 asks this suite to
+carry is marked at its site in the Order Details step — the column does not
+exist in the report types or the export yet (slice-plan item 9).
 """
 
 import re
@@ -145,6 +149,15 @@ def test_campaign_reports_generate_and_views(
     assert customer_name in customer_cells, (
         f"Order Details must include the seeded customer {customer_name!r}; got: {customer_cells}"
     )
+
+    # TODO(spec 10.4 line 438 / 10.5, spec 11 "Reports"): the customerEmail column
+    # assertion this suite is supposed to carry is NOT here, because the column
+    # does not exist yet: UnitOrderDetail (tofu/application/schema/schema.graphql)
+    # has no customerEmail field and the Order Details export header row is
+    # ['Scout', 'Customer', ...products, 'Total']
+    # (frontend/src/pages/CampaignReportsPage.tsx:193). Slice-plan item 9 owns
+    # adding it to src/handlers/report_generation.py, src/handlers/campaign_reporting.py
+    # and the report GraphQL types; this assertion lands with that slice.
 
     # Step 8 — invoke the export helper and verify the download is a non-empty XLSX file.
     order_details_path = reports.download_order_details_to(tmp_path / "order_details.xlsx")
