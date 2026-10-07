@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { MockedResponse } from '@apollo/client/testing';
 import { GraphQLError } from 'graphql';
@@ -9,7 +9,7 @@ import {
   GET_PROFILE,
   GET_PROFILE_PUBLIC_ORDER_SETTINGS,
   LIST_CAMPAIGNS_BY_PROFILE,
-  UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+  UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED,
 } from '../../src/lib/graphql';
 
 const PROFILE_ID = 'p-1';
@@ -56,7 +56,7 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
 
     const slowMutation: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED,
         variables: { profileId: DB_PROFILE_ID, enabled: false },
       },
       result: () => mutationPromise as any,
@@ -70,9 +70,9 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
 
     const { result } = renderHook(() => usePublicOrderSettings(PROFILE_ID), { wrapper });
 
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
+    // The reads must land before the action: the seed effect that arms the
+    // form also resets the action message, so a fixed sleep races it.
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
 
     // First action starts and remains in flight
     act(() => {
@@ -96,16 +96,15 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
           },
         },
       });
-      await new Promise((r) => setTimeout(r, 50));
     });
 
-    expect(result.current.submitting).toBe(false);
+    await waitFor(() => expect(result.current.submitting).toBe(false));
   });
 
   it('handles empty update response data returning error message', async () => {
     const emptyResponseMutation: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED,
         variables: { profileId: DB_PROFILE_ID, enabled: false },
       },
       result: { data: { updateProfilePublicOrderSettings: null } },
@@ -119,9 +118,9 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
 
     const { result } = renderHook(() => usePublicOrderSettings(PROFILE_ID), { wrapper });
 
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
+    // The reads must land before the action: the seed effect that arms the
+    // form also resets the action message, so a fixed sleep races it.
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
 
     await act(async () => {
       await result.current.disable();
@@ -136,7 +135,7 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
   it('handles graphQL error in update response without thrown exception', async () => {
     const errorResponseMutation: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED,
         variables: { profileId: DB_PROFILE_ID, enabled: false },
       },
       result: {
@@ -152,9 +151,9 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
 
     const { result } = renderHook(() => usePublicOrderSettings(PROFILE_ID), { wrapper });
 
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
+    // The reads must land before the action: the seed effect that arms the
+    // form also resets the action message, so a fixed sleep races it.
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
 
     await act(async () => {
       await result.current.disable();
@@ -194,9 +193,9 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
 
     const { result } = renderHook(() => usePublicOrderSettings(PROFILE_ID), { wrapper });
 
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
+    // The reads must land before the action: the seed effect that arms the
+    // form also resets the action message, so a fixed sleep races it.
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
 
     expect(result.current.stored.enabled).toBe(false);
     expect(result.current.stored.campaignId).toBe(null);
@@ -205,7 +204,7 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
   it('sets held snapshot when post-save refetch rejects', async () => {
     const successMutation: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED,
         variables: { profileId: DB_PROFILE_ID, enabled: false },
       },
       result: {
@@ -246,9 +245,9 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
 
     const { result } = renderHook(() => usePublicOrderSettings(PROFILE_ID), { wrapper });
 
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
+    // The reads must land before the action: the seed effect that arms the
+    // form also resets the action message, so a fixed sleep races it.
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
 
     await act(async () => {
       await result.current.disable();
@@ -268,7 +267,7 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
 
     const slowMutation: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED,
         variables: { profileId: DB_PROFILE_ID, enabled: false },
       },
       result: () => mutationPromise as any,
@@ -282,9 +281,9 @@ describe('usePublicOrderSettings unit tests for internal branches', () => {
 
     const { result, unmount } = renderHook(() => usePublicOrderSettings(PROFILE_ID), { wrapper });
 
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
+    // The reads must land before the action: the seed effect that arms the
+    // form also resets the action message, so a fixed sleep races it.
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
 
     act(() => {
       void result.current.disable();
