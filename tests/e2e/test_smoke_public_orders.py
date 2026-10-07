@@ -33,7 +33,11 @@ exists (item 7); the report types and exports carry no ``customerEmail`` column
 deleted when the resolvers land, and each skip reason says so.
 """
 
+import json
+import os
 import re
+import urllib.error
+import urllib.request
 from collections.abc import Generator
 from urllib.parse import urlparse
 
@@ -226,6 +230,89 @@ def test_offer_renders_seller_products_and_only_allowed_methods(buyer_page: Page
     assert NEVER_ALLOWED_METHOD not in methods, (
         f"A method the seller never allowlisted must not reach the buyer; got: {methods}"
     )
+
+
+@pytest.mark.smoke
+def test_public_graphql_call_reaches_the_api_through_the_public_client(
+    buyer_page: Page,
+    _po_state: dict[str, str],
+) -> None:
+    """The public client's own GraphQL call carries the key, no session, and succeeds.
+
+    This is the browser-level half of spec 10.4's scripted API-key assertions:
+    the request headers are asserted on the wire, not on the client's config.
+    On dev/prod the frontend leaves ``VITE_APPSYNC_ENDPOINT`` unset, so the call
+    goes to ``/graphql`` on the site origin and therefore crosses CloudFront —
+    which is what proves ``Managed-AllViewerExceptHostHeader`` forwards the
+    ``Authorization``-free, ``x-api-key``-bearing request. On ephemeral the
+    preview server has no distribution in front of it, so the endpoint is the
+    AppSync hostname and the header assertions are the part that still holds.
+    """
+    graphql_requests = []
+    graphql_responses = []
+    buyer_page.on("request", lambda request: graphql_requests.append(request) if "/graphql" in request.url else None)
+    buyer_page.on(
+        "response", lambda response: graphql_responses.append(response) if "/graphql" in response.url else None
+    )
+
+    offer = PublicOrderPage(buyer_page)
+    offer.goto_share_url(_po_state["share_url"])
+
+    expect(buyer_page.locator("h4").first).to_be_visible(timeout=20_000)
+    assert graphql_requests, "the public page must issue a GraphQL request"
+
+    site_netloc = urlparse(base_url()).netloc
+    request = graphql_requests[0]
+    if is_site_origin():
+        assert urlparse(request.url).netloc == site_netloc, (
+            f"On a site origin the public call must go through it, not the AppSync hostname; got: {request.url}"
+        )
+
+    headers = request.headers
+    assert headers.get("x-api-key"), f"the public client must send x-api-key; headers: {sorted(headers)}"
+    assert "authorization" not in headers, f"the public client must never attach a session; headers: {sorted(headers)}"
+
+    succeeded = [response for response in graphql_responses if response.status == 200]
+    assert succeeded, f"the public GraphQL call must succeed; statuses: {[r.status for r in graphql_responses]}"
+    body = succeeded[0].json()
+    offer_payload = (body.get("data") or {}).get("publicGetOrderOffer")
+    assert offer_payload, f"the public offer query must return data through this path; got: {body}"
+
+
+@pytest.mark.smoke
+def test_api_key_call_through_the_site_origin_reaches_appsync(_po_state: dict[str, str]) -> None:
+    """A scripted ``x-api-key`` call succeeds against the **site origin** ``/graphql``.
+
+    Spec 10.4 asks for this specifically as the CloudFront forwarding proof: the
+    integration suite hits the AppSync hostname directly, so only this call
+    exercises the distribution's origin-request policy. Skipped on ephemeral,
+    where there is no distribution in front of the preview server, and on the dev
+    deploy smoke, which does not export the key.
+    """
+    api_key = os.environ.get("TEST_APPSYNC_API_KEY", "")
+    if not is_site_origin() or not api_key:
+        pytest.skip(
+            "the through-site-origin API-key call needs a CloudFront-served origin and TEST_APPSYNC_API_KEY; "
+            f"base URL {base_url()!r}, key {'set' if api_key else 'unset'}"
+        )
+
+    query = '{ publicGetOrderOffer(profileId: "PROFILE#origin-probe", token: "none") { sellerName } }'
+    request = urllib.request.Request(
+        f"{base_url()}/graphql",
+        data=json.dumps({"query": query}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-api-key": api_key},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            status, payload = response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        status, payload = exc.code, json.loads(exc.read().decode("utf-8"))
+
+    assert status == 200, f"the site origin must forward the GraphQL call, not reject it; status {status}: {payload}"
+    errors = payload.get("errors") or []
+    refused = [error for error in errors if isinstance(error, dict) and error.get("errorType") == "Unauthorized"]
+    assert not refused, f"the API key must be admitted through the site origin; got: {refused}"
 
 
 @pytest.mark.smoke
