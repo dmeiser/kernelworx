@@ -582,7 +582,7 @@ type PublicLineItem @aws_api_key {
 type PublicOrderReceipt @aws_api_key {
   """The order's full ID (ORDER#...#... form), for display and support."""
   orderId: ID!
-  """The composed public receipt URL: an ABSOLUTE https URL (https://<site>/r/<campaignId>/<orderSuffix>/<receiptToken>); the success screen shows it alongside the emailed link."""
+  """The buyer's receipt link as a site-relative path (/r/<campaignId>/<orderSuffix>/<receiptToken>): a resolver has no site origin, so the success screen resolves it against its own origin. The emailed copy is composed absolutely in the email slice."""
   receiptUrl: String
   """The order's total amount."""
   totalAmount: Float!
