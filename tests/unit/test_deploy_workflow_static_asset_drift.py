@@ -11,7 +11,7 @@ gate stayed green while the brand assets were broken on dev and prod.
 
 The "Assert static brand assets are served" step in ``deploy-shared.yml`` turns
 that into a red deploy. These tests run the step's real script against a mock
-``curl`` so the assertions are behavioural: the step must pass only on a genuine
+``curl`` so the assertions are behavioral: the step must pass only on a genuine
 SVG and fail on each drift shape.
 """
 
