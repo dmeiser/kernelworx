@@ -2,10 +2,12 @@
 
 On 2026-10-06 the deployed ``logo.svg`` / ``logo-rotating.svg`` were deleted
 out-of-band from both static buckets after deploys that verifiably uploaded
-them (dev run 37525653122, prod run 37178810183). Nothing in the repo deletes
-those keys, so the loss was invisible: CloudFront answered ``/logo.svg`` with
-the SPA ``index.html`` fallback - HTTP 200, ``text/html`` - and every other
-deploy gate stayed green while the brand assets were broken on dev and prod.
+them (dev run 37525653122, prod run 37178810183). No CI path deletes those
+keys (the deploy's ``s3 sync`` omits ``--delete``; the only ``--delete`` sync
+against the static bucket is the manual ``frontend/deploy.sh`` one), so the
+loss was invisible: CloudFront answered ``/logo.svg`` with the SPA
+``index.html`` fallback - HTTP 200, ``text/html`` - and every other deploy
+gate stayed green while the brand assets were broken on dev and prod.
 
 The "Assert static brand assets are served" step in ``deploy-shared.yml`` turns
 that into a red deploy. These tests run the step's real script against a mock

@@ -466,13 +466,20 @@ jobs:
           # Static-object drift assertion. On 2026-10-06 the deployed logo.svg and
           # logo-rotating.svg were deleted out-of-band from BOTH static buckets
           # after deploys that verifiably uploaded them (dev run 37525653122, prod
-          # run 37178810183). The repo contains no deleter - no `s3 sync --delete`,
-          # no lifecycle expiration, no `aws_s3_object` for those keys - so the
-          # breakage was silent: CloudFront served the SPA index.html fallback for
-          # /logo.svg (HTTP 200, text/html) on dev and prod and every other gate
-          # stayed green. Every deploy re-uploads all of frontend/public/, so a
-          # failure here means the objects vanished at the origin again since the
-          # last deploy - it turns that silent breakage into a red deploy.
+          # run 37178810183). No CI path deletes them: this workflow's `s3 sync`
+          # runs without `--delete`, and there is no lifecycle expiration or
+          # `aws_s3_object` for those keys. The only `s3 sync --delete` against
+          # the static bucket is manual (`frontend/deploy.sh`, the
+          # `docs/GETTING_STARTED.md` command), so a manual sync from a partial
+          # tree is the one repo-side candidate for the loss. Either way the
+          # breakage was silent: CloudFront served the SPA index.html fallback
+          # for /logo.svg (HTTP 200, text/html) on dev and prod and every other
+          # gate stayed green. Every deploy re-uploads all of frontend/public/,
+          # so a failure here means the objects vanished at the origin again
+          # since the last deploy - it turns that silent breakage into a red
+          # deploy.
+          tmpreq="$(mktemp -d)"
+          trap 'rm -rf "$tmpreq"' EXIT
           for path in /logo.svg /logo-rotating.svg /favicon.svg; do
             url="$E2E_BASE_URL$path"
             if ! code=$(curl -sS --max-time 30 -o asset.body -D asset.headers -w '%{http_code}' "$url"); then
