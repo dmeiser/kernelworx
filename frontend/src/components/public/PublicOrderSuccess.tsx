@@ -70,7 +70,7 @@ export const PublicOrderSuccess: React.FC<PublicOrderSuccessProps> = ({ receipt,
       </Typography>
     </Box>
 
-    {receipt.buyerEmailProvided && resolveReceiptUrl(receipt.receiptUrl) ? (
+    {resolveReceiptUrl(receipt.receiptUrl) ? (
       <Box sx={{ mb: 2 }}>
         <Typography variant="subtitle2">Your receipt link</Typography>
         <Typography variant="body2">

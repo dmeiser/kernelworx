@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  MAX_ADDRESS_FIELD_LENGTH,
   MAX_BUYER_EMAIL_LENGTH,
   MAX_BUYER_NAME_LENGTH,
   MAX_BUYER_NOTES_LENGTH,
@@ -97,6 +98,21 @@ describe('validateBuyerAddress', () => {
   it('rejects a ZIP that is neither 5 nor 9 digits', () => {
     expect(validateBuyerAddress({ ...fullAddress, zipCode: '7501' })).toBe('ZIP code must be 5 or 9 digits.');
     expect(validateBuyerAddress({ ...fullAddress, zipCode: 'SW1A 1AA' })).toBe('ZIP code must be 5 or 9 digits.');
+  });
+
+  it('accepts fields at the per-field length cap and rejects one over', () => {
+    const atCap = 'a'.repeat(MAX_ADDRESS_FIELD_LENGTH);
+    expect(validateBuyerAddress({ ...fullAddress, street: atCap })).toBeNull();
+    expect(validateBuyerAddress({ ...fullAddress, city: 'a'.repeat(MAX_ADDRESS_FIELD_LENGTH + 1) })).toBe(
+      `Address fields must be at most ${MAX_ADDRESS_FIELD_LENGTH} characters (too long: city).`,
+    );
+  });
+
+  it('names every over-long field at once', () => {
+    const long = 'a'.repeat(MAX_ADDRESS_FIELD_LENGTH + 1);
+    expect(validateBuyerAddress({ ...fullAddress, state: long, zipCode: long })).toBe(
+      `Address fields must be at most ${MAX_ADDRESS_FIELD_LENGTH} characters (too long: state, zipCode).`,
+    );
   });
 });
 

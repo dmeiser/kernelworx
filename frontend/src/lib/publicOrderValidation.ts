@@ -18,6 +18,9 @@ export const MAX_BUYER_NOTES_LENGTH = 500;
 /** Max length of the buyer's email address. */
 export const MAX_BUYER_EMAIL_LENGTH = 254;
 
+/** Max length of one address field, matching the server cap. */
+export const MAX_ADDRESS_FIELD_LENGTH = 400;
+
 /** Max line items in one public order. */
 export const MAX_PUBLIC_LINE_ITEMS = 20;
 
@@ -80,6 +83,12 @@ export function validateBuyerAddress(address: PublicOrderAddressForm): string | 
   );
   if (missing.length > 0) {
     return `An address needs all four fields (missing: ${missing.join(', ')}).`;
+  }
+  const tooLong = REQUIRED_ADDRESS_FIELDS.filter(
+    (field) => address[field as keyof PublicOrderAddressForm].trim().length > MAX_ADDRESS_FIELD_LENGTH,
+  );
+  if (tooLong.length > 0) {
+    return `Address fields must be at most ${MAX_ADDRESS_FIELD_LENGTH} characters (too long: ${tooLong.join(', ')}).`;
   }
   const zipDigits = address.zipCode.trim().replace(/\D/g, '');
   if (zipDigits.length !== 5 && zipDigits.length !== 9) {
