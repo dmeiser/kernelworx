@@ -5,9 +5,10 @@ The ``public-orders`` Lambda (``handlers/public_orders_offer.py``, wired through
 the public-orders offer slice, following the #351 pattern the other domain roles
 reuse. That role grants:
 
-- DynamoDB ``GetItem`` on exactly the four tables the offer reads — profiles,
-  campaigns, catalogs, accounts — and ``Query`` on profiles plus its GSIs (the
-  ``profileId-index`` locator);
+- DynamoDB ``GetItem`` on the five tables the two public reads touch —
+  profiles, campaigns, catalogs, accounts (the offer read) and orders (the
+  ``publicGetOrderReceipt`` read only) — and ``Query`` on profiles plus its
+  GSIs (the ``profileId-index`` locator);
 - ``s3:GetObject`` on the ``payment-qr-codes/*`` prefix of the exports bucket.
 
 The S3 grant is the subtle half. Pre-signing is local signing: the handler issues
@@ -17,11 +18,12 @@ role's policy at request time (#353) — without it every buyer's QR image fails
 with 403. So the grant is asserted statically against the OpenTofu source here,
 and the zero-call behavior is asserted separately.
 
-Orders access is deliberately absent: the receipt read that needs orders is a
-later slice, and unused permissions on a domain role are a liability. These
-tests record every botocore call while invoking the real handler against moto,
-then fail if the handler escapes the four tables, issues a write, or touches
-orders or S3.
+Order WRITES never touch this role: the ``publicCreateOrder`` write runs
+through the AppSync OrdersDS datasource under the AppSync service role, so
+PutItem/UpdateItem/DeleteItem would be unused permissions on an
+anonymous-facing role. These tests record every botocore call while invoking
+the real handler against moto, then fail if the handler escapes the five
+tables, issues a write, or touches S3.
 """
 
 from typing import Any, Dict, List, Tuple
@@ -407,7 +409,7 @@ def test_dynamodb_grants_cover_the_five_domain_tables_including_orders():
     ]
     assert [str(key) for key in merged["public_orders_query_keys"]] == ["profiles"]
     # The statements reference exactly these two local lists, so the grant set
-    # is the four tables above plus the profiles GSI — nothing else.
+    # is the five tables above plus the profiles GSI — nothing else.
     assert sorted(_resources(_policy_document("lambda_public_orders_dynamodb"))) == [
         "${concat(local.public_orders_query_arns, local.public_orders_index_arns)}",
         "${local.public_orders_table_arns}",

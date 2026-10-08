@@ -953,7 +953,7 @@ output "lambda_profile_sharing_execution_role_arn" {
 }
 
 output "lambda_public_orders_execution_role_arn" {
-  description = "ARN of the scoped Lambda execution role for the public-orders domain (public-orders: the anonymous publicGetOrderOffer read). Read-only on profiles/campaigns/catalogs/accounts, no orders access, plus s3:GetObject on payment-qr-codes/* because S3 authorizes the buyer's pre-signed QR GET against the signing role at request time (#353). See lambda_domain_role_arns in the lambda module."
+  description = "ARN of the scoped Lambda execution role for the public-orders domain (public-orders: the anonymous publicGetOrderOffer read + publicCreateOrder pipeline support and the publicGetOrderReceipt read). Read-only dynamodb:GetItem on profiles/campaigns/catalogs/accounts plus the receipt-read GetItem on orders (order WRITES run through the AppSync OrdersDS datasource, never this role), plus s3:GetObject on payment-qr-codes/* because S3 authorizes the buyer's pre-signed QR GET against the signing role at request time (#353). See lambda_domain_role_arns in the lambda module."
   value       = aws_iam_role.lambda_public_orders_execution.arn
 }
 
