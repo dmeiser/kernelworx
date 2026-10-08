@@ -192,5 +192,3 @@ def test_order_details_exposes_the_buyer_email_column() -> None:
     :func:`test_campaign_reports_generate_and_views` and the in-code TODO packet.
     """
     pytest.skip(_CUSTOMER_EMAIL_COLUMN_MISSING)
-
-
