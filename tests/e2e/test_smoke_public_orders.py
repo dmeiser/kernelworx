@@ -335,7 +335,7 @@ def test_qr_method_renders_presigned_image_with_referrer_guard(buyer_page: Page,
     parsed = urlparse(src)
     assert parsed.scheme == "https", f"Pre-signed QR URL must be https; got: {src!r}"
     assert parsed.netloc.endswith(".amazonaws.com"), f"Pre-signed QR URL must point at S3; got: {src!r}"
-    # The pinned boto3/botocore in the Lambda layer presigns against the legacy
+    # The pinned boto3/botocore in the Lambda layer pre-signs against the legacy
     # global endpoint with query-string SigV2 (AWSAccessKeyId/Signature/Expires),
     # not SigV4 (X-Amz-Signature) — the image loads and decodes either way, so
     # assert the URL is *signed* without pinning one signature version's spelling.

@@ -102,12 +102,9 @@ tests/integration/
 │   ├── cognitoAuth.ts                  # Cognito authentication
 │   └── testData.ts                     # Test data cleanup utilities
 ├── resolvers/
-│   ├── profileSharing.integration.test.ts    # Share/invite/revoke tests
-│   ├── orderOperations.integration.test.ts   # Create/update/delete order
-│   ├── campaignOperations.integration.test.ts  # Update/delete campaign
-│   └── queries.integration.test.ts           # List queries (VTL resolvers)
-└── workflows/
-    └── completeWorkflow.integration.test.ts  # End-to-end scenarios
+│   └── <name>.integration.test.ts   # One suite per resolver/surface (e.g. publicAuthModes —
+│                                    # API-key vs Cognito auth-mode exclusivity)
+└── setup.ts / globalTeardown.ts     # Session setup and test-data teardown
 ```
 
 ## Writing Tests

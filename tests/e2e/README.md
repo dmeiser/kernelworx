@@ -143,6 +143,7 @@ uv run pytest tests/e2e/ --headed --slowmo=500 -v
 | `test_smoke_sharing.py` | Invite → accept → revoke share; read-only restriction |
 | `test_smoke_signup.py` | New-user sign-up flow |
 | `test_smoke_public_orders.py` | Public order share link end to end: seller enable + acknowledgements + share view + rotate + disable, anonymous buyer offer render, QR link safety, not-available states. The buyer submit/receipt tests are skipped with a reason until the `publicCreateOrder`/`publicGetOrderReceipt` resolvers ship. |
+| `test_smoke_campaign_reports.py` | Shared-campaign report views + Excel exports; carries a skip-marked placeholder for the pending `customerEmail` Order Details column (slice-plan item 9) |
 | `test_smoke_settings.py` | Basic settings page flow (view and update settings) |
 | `test_smoke_reports.py` | Reports page smoke: load and request/download report |
 | `test_smoke_account_deletion.py` | Account deletion flow (gated by RUN_ACCOUNT_DELETION; runs disposable-user test in CI) |
@@ -153,23 +154,12 @@ uv run pytest tests/e2e/ --headed --slowmo=500 -v
 
 ```
 tests/e2e/
-├── conftest.py               # Session fixtures; test-user loading; post-suite cleanup
+├── conftest.py               # Session fixtures (incl. public_orders_setup); test-user loading; post-suite cleanup
 ├── pytest.ini                # strict-markers, no-randomly, screenshot/video on failure
-├── test_smoke_settings.py    # Smoke tests for settings flows
-├── test_smoke_reports.py     # Smoke tests for reports flows
-├── pages/
-│   ├── base_page.py
-│   ├── login_page.py
-│   ├── dashboard_page.py
-│   ├── campaign_page.py
-│   ├── campaign_settings_page.py
-│   ├── manage_page.py
-│   ├── order_page.py
-│   ├── payment_page.py
-│   ├── reports_page.py
-│   └── share_page.py
-└── utils/
-    └── auth.py               # login / logout helpers
+├── test_smoke_*.py           # One suite per flow — see the "Test file overview" table above
+├── fixtures/                 # Static assets uploaded during tests (QR images)
+├── pages/                    # One page object per app surface (e.g. public_order_page.py)
+└── utils/                    # Shared helpers (auth.py, public_orders.py, ...)
 ```
 
 ---
