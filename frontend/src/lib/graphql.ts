@@ -3,6 +3,7 @@
  */
 
 import { gql } from '@apollo/client';
+import type { DocumentNode } from 'graphql';
 
 // ============================================================================
 // Fragments
@@ -369,12 +370,24 @@ export const GET_PROFILE_PUBLIC_ORDER_SETTINGS = gql`
   }
 `;
 
-export const UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS = gql`
+// `campaignId` and `allowedPaymentMethods` are omit-to-keep inputs: the
+// resolver keeps the stored value only when the ARGUMENT IS ABSENT from the
+// request (`Object.hasOwn` on ctx.args) and rejects an explicit null with
+// INVALID_INPUT. AppSync binds a declared-but-unprovided nullable variable as
+// an explicit null, so "keep" cannot be expressed by leaving a variable out —
+// the argument line has to be missing from the document. One document cannot
+// express both shapes, so each save shape is its own document and
+// `pickUpdateProfilePublicOrderSettingsDoc` chooses it. `rotateToken` and
+// `acknowledgementsAccepted` stay in every shape: the resolver treats a null
+// flag as a no-op, so they are never omit-to-keep.
+
+// Enable and campaign re-pick: publishes the anchor campaign and the methods.
+export const UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_ANCHOR = gql`
   ${PUBLIC_ORDER_SETTINGS_FIELDS}
-  mutation UpdateProfilePublicOrderSettings(
+  mutation UpdateProfilePublicOrderSettingsAnchor(
     $profileId: ID!
     $enabled: Boolean!
-    $campaignId: ID
+    $campaignId: ID!
     $allowedPaymentMethods: [String!]
     $rotateToken: Boolean
     $acknowledgementsAccepted: Boolean
@@ -391,6 +404,74 @@ export const UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS = gql`
     }
   }
 `;
+
+// Method-list save: names the methods, keeps the stored anchor campaign.
+export const UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_METHODS = gql`
+  ${PUBLIC_ORDER_SETTINGS_FIELDS}
+  mutation UpdateProfilePublicOrderSettingsMethods(
+    $profileId: ID!
+    $enabled: Boolean!
+    $allowedPaymentMethods: [String!]
+    $rotateToken: Boolean
+    $acknowledgementsAccepted: Boolean
+  ) {
+    updateProfilePublicOrderSettings(
+      profileId: $profileId
+      enabled: $enabled
+      allowedPaymentMethods: $allowedPaymentMethods
+      rotateToken: $rotateToken
+      acknowledgementsAccepted: $acknowledgementsAccepted
+    ) {
+      ...PublicOrderSettingsFields
+    }
+  }
+`;
+
+// Parked save (rotate-token / disable): names neither the anchor nor the
+// methods, so a stale or missing anchor campaign can never block revocation or
+// the off switch.
+export const UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED = gql`
+  ${PUBLIC_ORDER_SETTINGS_FIELDS}
+  mutation UpdateProfilePublicOrderSettingsParked(
+    $profileId: ID!
+    $enabled: Boolean!
+    $rotateToken: Boolean
+    $acknowledgementsAccepted: Boolean
+  ) {
+    updateProfilePublicOrderSettings(
+      profileId: $profileId
+      enabled: $enabled
+      rotateToken: $rotateToken
+      acknowledgementsAccepted: $acknowledgementsAccepted
+    ) {
+      ...PublicOrderSettingsFields
+    }
+  }
+`;
+
+/** The two omit-to-keep inputs of a settings save, as the caller will send them. */
+export interface PublicOrderSettingsKeepArgs {
+  campaignId?: string | null;
+  allowedPaymentMethods?: readonly string[] | null;
+}
+
+/**
+ * The settings-mutation document a save transmits. The two omit-to-keep inputs
+ * decide the shape: a named campaign publishes (enable or re-pick), a supplied
+ * method list without one is a method-list save, and neither is a parked save
+ * (rotate / disable) that must stay out of anchor enforcement. The caller
+ * builds the variables object first and hands that same object here, so the
+ * document shape and the transmitted values cannot disagree.
+ */
+export function pickUpdateProfilePublicOrderSettingsDoc(args: PublicOrderSettingsKeepArgs): DocumentNode {
+  if (typeof args.campaignId === 'string' && args.campaignId !== '') {
+    return UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_ANCHOR;
+  }
+  if (Array.isArray(args.allowedPaymentMethods)) {
+    return UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_METHODS;
+  }
+  return UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED;
+}
 
 export const DELETE_SELLER_PROFILE = gql`
   mutation DeleteSellerProfile($profileId: ID!) {
