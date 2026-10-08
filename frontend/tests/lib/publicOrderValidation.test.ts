@@ -134,6 +134,22 @@ describe('validateBuyerContact', () => {
       'An address needs all four fields (missing: zipCode).',
     );
   });
+
+  it('requires a complete address when one was started alongside a valid phone', () => {
+    expect(validateBuyerContact('555-867-5309', { ...emptyAddress, city: 'Anytown' })).toBe(
+      'An address needs all four fields (missing: street, state, zipCode).',
+    );
+  });
+
+  it('reports a malformed phone first when it is paired with a started address', () => {
+    expect(validateBuyerContact('12345', { ...fullAddress, zipCode: '' })).toBe(
+      'Phone number must be a valid 10-digit US number.',
+    );
+  });
+
+  it('accepts a phone plus a complete address', () => {
+    expect(validateBuyerContact('555-867-5309', fullAddress)).toBeNull();
+  });
 });
 
 describe('validateBuyerEmail', () => {
@@ -199,5 +215,10 @@ describe('validatePublicOrderForm', () => {
   it('passes when a complete address stands in for a phone number', () => {
     const errors = validatePublicOrderForm(formState({ phone: '', address: { ...fullAddress } }));
     expect(errors.contact).toBeUndefined();
+  });
+
+  it('rejects a partial address even when a valid phone is present', () => {
+    const errors = validatePublicOrderForm(formState({ address: { ...emptyAddress, street: '1 Main St' } }));
+    expect(errors.contact).toBe('An address needs all four fields (missing: city, state, zipCode).');
   });
 });

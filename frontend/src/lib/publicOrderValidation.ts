@@ -94,6 +94,11 @@ export function validateBuyerContact(phone: string, address: PublicOrderAddressF
   if (!trimmedPhone && !addressStarted(address)) {
     return 'Enter a phone number or a complete address so the seller can reach you.';
   }
+  if (trimmedPhone && addressStarted(address)) {
+    const phoneFailure = validateBuyerPhone(trimmedPhone);
+    if (phoneFailure) return phoneFailure;
+    return validateBuyerAddress(address);
+  }
   if (trimmedPhone) return validateBuyerPhone(trimmedPhone);
   return validateBuyerAddress(address);
 }
