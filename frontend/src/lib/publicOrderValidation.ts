@@ -100,16 +100,15 @@ export function validateBuyerAddress(address: PublicOrderAddressForm): string | 
 /** Phone OR a complete address is required; the error is reported once. */
 export function validateBuyerContact(phone: string, address: PublicOrderAddressForm): string | null {
   const trimmedPhone = phone.trim();
-  if (!trimmedPhone && !addressStarted(address)) {
-    return 'Enter a phone number or a complete address so the seller can reach you.';
+  const started = addressStarted(address);
+  if (!trimmedPhone) {
+    return started
+      ? validateBuyerAddress(address)
+      : 'Enter a phone number or a complete address so the seller can reach you.';
   }
-  if (trimmedPhone && addressStarted(address)) {
-    const phoneFailure = validateBuyerPhone(trimmedPhone);
-    if (phoneFailure) return phoneFailure;
-    return validateBuyerAddress(address);
-  }
-  if (trimmedPhone) return validateBuyerPhone(trimmedPhone);
-  return validateBuyerAddress(address);
+  const phoneFailure = validateBuyerPhone(trimmedPhone);
+  if (phoneFailure) return phoneFailure;
+  return started ? validateBuyerAddress(address) : null;
 }
 
 /** Email is optional but must look like an address when present. */
