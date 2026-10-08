@@ -53,8 +53,8 @@ EXPECTED_UNIT_FIELDS = {
     "aws_appsync_datasource.delete_qr_code.name": {"deletePaymentMethodQRCode"},
     # #679 offer slice: the anonymous publicGetOrderOffer read. The handler
     # dispatches on info.fieldName, so a later public field added to this same
-    # datasource must be listed here too.
-    "aws_appsync_datasource.public_orders.name": {"publicGetOrderOffer"},
+    # datasource must be listed here too - the write slice added the second one.
+    "aws_appsync_datasource.public_orders.name": {"publicGetOrderOffer", "publicGetOrderReceipt"},
 }
 
 

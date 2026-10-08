@@ -39,9 +39,17 @@ ACCOUNTS_TABLE = "kernelworx-accounts-ue1-dev"
 PROFILES_TABLE = "kernelworx-profiles-v2-ue1-dev"
 CAMPAIGNS_TABLE = "kernelworx-campaigns-v2-ue1-dev"
 CATALOGS_TABLE = "kernelworx-catalogs-ue1-dev"
+ORDERS_TABLE = "kernelworx-orders-v2-ue1-dev"
 
-# The four tables the #679 role grants GetItem on.
-DOMAIN_TABLES = {PROFILES_TABLE, CAMPAIGNS_TABLE, CATALOGS_TABLE, ACCOUNTS_TABLE}
+# The five tables the #679 role grants GetItem on: the four the offer reads plus
+# orders, which only publicGetOrderReceipt touches (the order WRITE runs through
+# the AppSync OrdersDS datasource, never this role).
+ROLE_GETITEM_TABLES = {PROFILES_TABLE, CAMPAIGNS_TABLE, CATALOGS_TABLE, ACCOUNTS_TABLE, ORDERS_TABLE}
+
+# What the OFFER path may actually touch. The orders grant exists for the
+# receipt read only, so an offer that reached the orders table has escaped its
+# own read contract even though the role would allow the call.
+OFFER_TABLES = ROLE_GETITEM_TABLES - {ORDERS_TABLE}
 
 # Tables the role grants Query on (plus its GSIs): the profileId-index
 # locator. Never campaigns (the anchor campaign is resolved by canonical id),
@@ -58,6 +66,11 @@ CAMPAIGN_ID = "CAMPAIGN#campaign-123"
 CATALOG_ID = "CATALOG#catalog-123"
 TOKEN = "6f1c1f0a-2f6e-4c1a-9b4f-7d2c0a5e8b11"
 QR_KEY = f"payment-qr-codes/{OWNER_SUB}/9b1c2d3e4f5045a6b7c8d9e0f1a2b3c4.png"
+
+# Receipt-read fixtures: the split order id segments and the per-order token.
+ORDER_SUFFIX = "0f1e2d3c-4b5a-4678-9abc-def012345678"
+ORDER_ID = f"ORDER#campaign-123#{ORDER_SUFFIX}"
+RECEIPT_TOKEN = "9a8b7c6d-5e4f-4a3b-8c7d-6e5f4a3b2c1d"
 
 
 class ApiCallRecorder:
@@ -168,6 +181,17 @@ def offer_event() -> Dict[str, Any]:
     }
 
 
+def receipt_event() -> Dict[str, Any]:
+    """The API-key-mode payload for one receipt request (``identity`` is null)."""
+    return {
+        "arguments": {"campaignId": "campaign-123", "orderSuffix": ORDER_SUFFIX, "receiptToken": RECEIPT_TOKEN},
+        "identity": None,
+        "info": {"fieldName": "publicGetOrderReceipt"},
+        "prev": {},
+        "stash": {},
+    }
+
+
 def assert_within_public_orders_role_scope(recorder: ApiCallRecorder) -> None:
     """Assert recorded calls stay inside the public-orders role's grants."""
     operations = {operation for operation, _ in recorder.dynamodb_calls}
@@ -175,10 +199,12 @@ def assert_within_public_orders_role_scope(recorder: ApiCallRecorder) -> None:
     assert operations <= ALLOWED_DYNAMODB_ACTIONS, (
         f"unexpected DynamoDB actions: {operations - ALLOWED_DYNAMODB_ACTIONS}"
     )
-    assert tables <= DOMAIN_TABLES, f"handler touched tables outside the public-orders scope: {tables - DOMAIN_TABLES}"
+    assert tables <= ROLE_GETITEM_TABLES, (
+        f"handler touched tables outside the public-orders scope: {tables - ROLE_GETITEM_TABLES}"
+    )
     query_tables = {table for operation, table in recorder.dynamodb_calls if operation == "Query"}
     assert query_tables <= QUERY_TABLES, f"Query outside profiles: {query_tables}"
-    assert recorder.s3_calls == [], f"the offer handler must issue no S3 API call: {recorder.s3_calls}"
+    assert recorder.s3_calls == [], f"the public handlers must issue no S3 API call: {recorder.s3_calls}"
 
 
 class TestOfferRoleScope:
@@ -254,6 +280,62 @@ class TestOfferRoleScope:
         assert_within_public_orders_role_scope(api_calls)
 
 
+class TestReceiptRoleScope:
+    """The receipt read's scope: one orders GetItem, nothing else.
+
+    The orders grant exists for exactly this read. The seller name rides the
+    order row (the create pipeline denormalizes it), so the receipt path issues
+    no profile read, and pre-signing is not on this path at all.
+    """
+
+    def test_receipt_reads_the_orders_table_only(
+        self,
+        dynamodb_table: Any,
+        api_calls: ApiCallRecorder,
+    ) -> None:
+        orders_table = boto3.resource("dynamodb", region_name="us-east-1").Table(ORDERS_TABLE)
+        orders_table.put_item(
+            Item={
+                "campaignId": CAMPAIGN_ID,
+                "orderId": ORDER_ID,
+                "profileId": PROFILE_ID,
+                "sellerName": "Test Seller",
+                "customerFirstName": "Ada",
+                "customerLastName": "Lovelace",
+                "orderDate": "2026-01-02T10:00:00Z",
+                "paymentMethod": "Venmo",
+                "lineItems": [
+                    {"productId": "PRODUCT#a", "productName": "First", "quantity": 1, "pricePerUnit": 1, "subtotal": 1}
+                ],
+                "totalAmount": 1,
+                "status": "NEW",
+                "orderSource": "PUBLIC",
+                "receiptToken": RECEIPT_TOKEN,
+            }
+        )
+        api_calls.attach()
+
+        result = handler(receipt_event(), None)
+
+        assert result["orderId"] == ORDER_ID
+        assert api_calls.dynamodb_calls == [("GetItem", ORDERS_TABLE)], api_calls.dynamodb_calls
+        assert_within_public_orders_role_scope(api_calls)
+
+    def test_receipt_negative_stays_on_the_orders_table(
+        self,
+        dynamodb_table: Any,
+        api_calls: ApiCallRecorder,
+    ) -> None:
+        api_calls.attach()
+
+        event = receipt_event()
+        event["arguments"]["receiptToken"] = "wrong"
+
+        assert handler(event, None)["errorCode"] == "NOT_FOUND"
+        assert {table for _, table in api_calls.dynamodb_calls} == {ORDERS_TABLE}
+        assert_within_public_orders_role_scope(api_calls)
+
+
 # ---------------------------------------------------------------------------
 # Static IAM policy contract (the behavioral test cannot see these grants)
 # ---------------------------------------------------------------------------
@@ -305,8 +387,14 @@ def test_dynamodb_grants_are_read_only():
     assert _actions(statements) == {"dynamodb:GetItem", "dynamodb:Query"}
 
 
-def test_dynamodb_grants_cover_the_four_domain_tables_and_no_orders():
-    """The GetItem/Query resource lists, resolved from the locals they reference."""
+def test_dynamodb_grants_cover_the_five_domain_tables_including_orders():
+    """The GetItem/Query resource lists, resolved from the locals they reference.
+
+    Orders joined the list with the #679 write slice: publicGetOrderReceipt is
+    one strongly consistent orders GetItem. The grant stays GetItem-only — the
+    public order WRITE runs through the AppSync OrdersDS datasource under the
+    AppSync service role, so this anonymous-facing role never writes.
+    """
     merged: Dict[str, Any] = {}
     for entry in IAM_DOC.get("locals", []):
         merged.update(entry)
@@ -315,6 +403,7 @@ def test_dynamodb_grants_cover_the_four_domain_tables_and_no_orders():
         "campaigns",
         "catalogs",
         "accounts",
+        "orders",
     ]
     assert [str(key) for key in merged["public_orders_query_keys"]] == ["profiles"]
     # The statements reference exactly these two local lists, so the grant set
