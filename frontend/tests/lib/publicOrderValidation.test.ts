@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  MAX_ADDRESS_FIELD_LENGTH,
   MAX_BUYER_EMAIL_LENGTH,
   MAX_BUYER_NAME_LENGTH,
   MAX_BUYER_NOTES_LENGTH,
@@ -98,6 +99,21 @@ describe('validateBuyerAddress', () => {
     expect(validateBuyerAddress({ ...fullAddress, zipCode: '7501' })).toBe('ZIP code must be 5 or 9 digits.');
     expect(validateBuyerAddress({ ...fullAddress, zipCode: 'SW1A 1AA' })).toBe('ZIP code must be 5 or 9 digits.');
   });
+
+  it('accepts fields at the per-field length cap and rejects one over', () => {
+    const atCap = 'a'.repeat(MAX_ADDRESS_FIELD_LENGTH);
+    expect(validateBuyerAddress({ ...fullAddress, street: atCap })).toBeNull();
+    expect(validateBuyerAddress({ ...fullAddress, city: 'a'.repeat(MAX_ADDRESS_FIELD_LENGTH + 1) })).toBe(
+      `Address fields must be at most ${MAX_ADDRESS_FIELD_LENGTH} characters (too long: city).`,
+    );
+  });
+
+  it('names every over-long field at once', () => {
+    const long = 'a'.repeat(MAX_ADDRESS_FIELD_LENGTH + 1);
+    expect(validateBuyerAddress({ ...fullAddress, state: long, zipCode: long })).toBe(
+      `Address fields must be at most ${MAX_ADDRESS_FIELD_LENGTH} characters (too long: state, zipCode).`,
+    );
+  });
 });
 
 describe('addressStarted', () => {
@@ -133,6 +149,22 @@ describe('validateBuyerContact', () => {
     expect(validateBuyerContact('', { ...fullAddress, zipCode: '' })).toBe(
       'An address needs all four fields (missing: zipCode).',
     );
+  });
+
+  it('requires a complete address when one was started alongside a valid phone', () => {
+    expect(validateBuyerContact('555-867-5309', { ...emptyAddress, city: 'Anytown' })).toBe(
+      'An address needs all four fields (missing: street, state, zipCode).',
+    );
+  });
+
+  it('reports a malformed phone first when it is paired with a started address', () => {
+    expect(validateBuyerContact('12345', { ...fullAddress, zipCode: '' })).toBe(
+      'Phone number must be a valid 10-digit US number.',
+    );
+  });
+
+  it('accepts a phone plus a complete address', () => {
+    expect(validateBuyerContact('555-867-5309', fullAddress)).toBeNull();
   });
 });
 
@@ -199,5 +231,10 @@ describe('validatePublicOrderForm', () => {
   it('passes when a complete address stands in for a phone number', () => {
     const errors = validatePublicOrderForm(formState({ phone: '', address: { ...fullAddress } }));
     expect(errors.contact).toBeUndefined();
+  });
+
+  it('rejects a partial address even when a valid phone is present', () => {
+    const errors = validatePublicOrderForm(formState({ address: { ...emptyAddress, street: '1 Main St' } }));
+    expect(errors.contact).toBe('An address needs all four fields (missing: city, state, zipCode).');
   });
 });

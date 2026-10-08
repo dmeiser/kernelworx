@@ -234,3 +234,39 @@ resource "aws_appsync_function" "write_public_order_settings" {
 
   code = file("${local.js_resolvers_dir}/write_public_order_settings_fn.js")
 }
+
+# === #679 public-order write path (anonymous, API-key auth mode) ===
+
+# Step 1 of publicCreateOrder: locate the profile through the profileId-index
+# GSI. The public pipeline replaces the write-access pair (there is no caller
+# identity under API_KEY), and the GSI stays a locator only - step 2 re-reads
+# the row consistently and the share token is the authorization (#545).
+resource "aws_appsync_function" "validate_public_token" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "ValidatePublicTokenFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_public_token_fn.js")
+}
+
+# Step 2 of publicCreateOrder: the consistent base-table read that decides the
+# token, the campaign echo, the payment-method allowlist, the acknowledgement,
+# and every input bound. A SECOND aws_appsync_function resource (not a reuse of
+# step 1) because an AppSync pipeline may list a function id only once (#438).
+resource "aws_appsync_function" "validate_public_token_step2" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "ValidatePublicTokenStep2Fn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_public_token_step2_fn.js")
+}

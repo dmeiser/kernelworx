@@ -130,6 +130,43 @@ resource "aws_appsync_function" "create_order" {
   code = file("${local.js_resolvers_dir}/create_order_fn.js")
 }
 
+# === #679 public-order write path (anonymous, API-key auth mode) ===
+
+# Step 5 of publicCreateOrder: a CLONE of validate_payment_method_fn.js, not a
+# reuse. The authenticated original embeds the submitted method name in its
+# rejection, which would let an anonymous caller iterate publicCreateOrder to
+# enumerate the owner's stored method names; the clone answers both negative
+# branches with one indistinguishable message and never names the method.
+resource "aws_appsync_function" "validate_payment_method_public" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.accounts.name
+  name        = "ValidatePaymentMethodPublicFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_payment_method_public_fn.js")
+}
+
+# Step 7 of publicCreateOrder: the order PutItem. Shares the pricing core
+# (lib/line_items.js) with create_order_fn.js but reads the stash rather than
+# ctx.args.input, and adds the public-order attributes (orderSource, status,
+# receiptToken, split customer names, customerEmail).
+resource "aws_appsync_function" "create_public_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.orders.name
+  name        = "CreatePublicOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/create_public_order_fn.js")
+}
+
 resource "aws_appsync_function" "query_order" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.orders.name

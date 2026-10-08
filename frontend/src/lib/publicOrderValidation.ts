@@ -18,6 +18,9 @@ export const MAX_BUYER_NOTES_LENGTH = 500;
 /** Max length of the buyer's email address. */
 export const MAX_BUYER_EMAIL_LENGTH = 254;
 
+/** Max length of one address field, matching the server cap. */
+export const MAX_ADDRESS_FIELD_LENGTH = 400;
+
 /** Max line items in one public order. */
 export const MAX_PUBLIC_LINE_ITEMS = 20;
 
@@ -81,6 +84,12 @@ export function validateBuyerAddress(address: PublicOrderAddressForm): string | 
   if (missing.length > 0) {
     return `An address needs all four fields (missing: ${missing.join(', ')}).`;
   }
+  const tooLong = REQUIRED_ADDRESS_FIELDS.filter(
+    (field) => address[field as keyof PublicOrderAddressForm].trim().length > MAX_ADDRESS_FIELD_LENGTH,
+  );
+  if (tooLong.length > 0) {
+    return `Address fields must be at most ${MAX_ADDRESS_FIELD_LENGTH} characters (too long: ${tooLong.join(', ')}).`;
+  }
   const zipDigits = address.zipCode.trim().replace(/\D/g, '');
   if (zipDigits.length !== 5 && zipDigits.length !== 9) {
     return 'ZIP code must be 5 or 9 digits.';
@@ -91,11 +100,15 @@ export function validateBuyerAddress(address: PublicOrderAddressForm): string | 
 /** Phone OR a complete address is required; the error is reported once. */
 export function validateBuyerContact(phone: string, address: PublicOrderAddressForm): string | null {
   const trimmedPhone = phone.trim();
-  if (!trimmedPhone && !addressStarted(address)) {
-    return 'Enter a phone number or a complete address so the seller can reach you.';
+  const started = addressStarted(address);
+  if (!trimmedPhone) {
+    return started
+      ? validateBuyerAddress(address)
+      : 'Enter a phone number or a complete address so the seller can reach you.';
   }
-  if (trimmedPhone) return validateBuyerPhone(trimmedPhone);
-  return validateBuyerAddress(address);
+  const phoneFailure = validateBuyerPhone(trimmedPhone);
+  if (phoneFailure) return phoneFailure;
+  return started ? validateBuyerAddress(address) : null;
 }
 
 /** Email is optional but must look like an address when present. */
