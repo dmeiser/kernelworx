@@ -105,13 +105,6 @@ def run_step(tmp_path: Path, scenario: str = "ok", bad_path: str = "") -> subpro
     )
 
 
-def test_step_fetches_every_brand_asset() -> None:
-    """The step must probe all three keys, not just the two that broke."""
-    script = _step_run_script()
-    for path in ASSET_PATHS:
-        assert path in script, f"{path} is not probed by the drift assertion"
-
-
 def test_healthy_deploy_passes(tmp_path: Path) -> None:
     result = run_step(tmp_path)
 

@@ -482,7 +482,7 @@ jobs:
           trap 'rm -rf "$tmpreq"' EXIT
           for path in /logo.svg /logo-rotating.svg /favicon.svg; do
             url="$E2E_BASE_URL$path"
-            if ! code=$(curl -sS --max-time 30 -o asset.body -D asset.headers -w '%{http_code}' "$url"); then
+            if ! code=$(curl -sS --max-time 30 -o "$tmpreq/asset.body" -D "$tmpreq/asset.headers" -w '%{http_code}' "$url"); then
               echo "::error::GET $url failed (transport error) - the site is unreachable"
               exit 1
             fi
@@ -490,7 +490,7 @@ jobs:
               echo "::error::$url returned HTTP $code - the static object is missing at the origin"
               exit 1
             fi
-            content_type=$(tr -d '\r' < asset.headers | awk '{ if (tolower($1) == "content-type:") print tolower($2) }')
+            content_type=$(tr -d '\r' < "$tmpreq/asset.headers" | awk '{ if (tolower($1) == "content-type:") print tolower($2) }')
             case "$content_type" in
               image/svg+xml*) ;;
               *)
@@ -498,11 +498,11 @@ jobs:
                 exit 1
                 ;;
             esac
-            if ! grep -qi '<svg' asset.body; then
+            if ! grep -qi '<svg' "$tmpreq/asset.body"; then
               echo "::error::$url served content-type image/svg+xml but a body with no <svg element"
               exit 1
             fi
-            echo "OK: $url ($content_type, $(wc -c < asset.body) bytes)"
+            echo "OK: $url ($content_type, $(wc -c < "$tmpreq/asset.body") bytes)"
           done
 
       - name: Validate test users
