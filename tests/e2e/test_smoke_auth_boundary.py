@@ -6,6 +6,12 @@ Verifies that:
   protected route.
 * A contributor cannot access an owner's profile that has not been shared with
   them.
+* The public order routes (``/o/<profileId>/<token>``) stay reachable without a
+  session while every protected route — including the new
+  ``/scouts/<profileId>/public-orders`` settings page — still redirects
+  (spec 10.5 item 12).
+* The public API key cannot reach the Cognito-only profile fields
+  (``getProfile`` / ``listMyProfiles``).
 
 Test ordering
 -------------
@@ -32,15 +38,19 @@ test (``test_owner_profile_id_for_boundary``) and passed to the contributor
 test via the module-scoped ``_auth_boundary_state`` dict.
 """
 
+import json
 import os
 import re
+import urllib.error
 import urllib.parse
+import urllib.request
 
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page
 
 from tests.e2e.pages.campaign_page import CampaignPage
 from tests.e2e.pages.dashboard_page import DashboardPage
+from tests.e2e.pages.public_order_page import PublicOrderPage
 from tests.e2e.pages.share_page import SharePage
 from tests.e2e.utils.auth import login_as_owner
 
@@ -161,3 +171,116 @@ def test_contributor_cannot_access_unshared_profile(
         "the 'New Campaign' page should display "
         "'Profile not found or you don't have access to this profile.'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Public order routes vs. protected routes (spec 10.5 item 12)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.smoke
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/home",
+        "/catalogs",
+        "/payment-methods",
+        # The public-order settings page added by this feature is a protected
+        # route: the share token authorizes the buyer page, never this one.
+        # The '#' is percent-encoded so it stays a path character instead of
+        # starting a URL fragment.
+        "/scouts/PROFILE%23boundary-probe/public-orders",
+    ],
+)
+def test_protected_routes_still_redirect(page: Page, path: str) -> None:
+    """Every protected route still redirects an anonymous visitor to ``/login``.
+
+    Args:
+        page: Unauthenticated Playwright page.
+        path: Protected path to navigate to directly.
+    """
+    page.goto(f"{_base_url()}{path}")
+    page.wait_for_url("**/login**", timeout=10_000)
+    assert "/login" in page.url, f"Unauthenticated access to {path} must redirect to /login; current URL: {page.url}"
+
+
+@pytest.mark.smoke
+def test_anonymous_public_order_route_stays_accessible(page: Page, public_orders_setup: dict[str, str]) -> None:
+    """``/o/<profileId>/<token>`` stays reachable with no session at all.
+
+    The token in the path is the whole authorization, so this route must not
+    redirect, must not require a session, and must render the offer.
+    """
+    offer = PublicOrderPage(page)
+    offer.goto_share_url(public_orders_setup["share_url"])
+
+    assert "/login" not in page.url, f"The public order route must not redirect; current URL: {page.url}"
+    assert not offer.is_unavailable(), f"Valid share URL must render the offer at {page.url}"
+    assert offer.seller_name() == public_orders_setup["seller_name"], (
+        f"Anonymous offer must show the seller name; got {offer.seller_name()!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# API-key reachability (spec 10.5 item 12, scripted half)
+# ---------------------------------------------------------------------------
+
+
+def _graphql_with_api_key(query: str, endpoint: str, api_key: str) -> dict[str, object]:
+    """POST one GraphQL query with ``x-api-key`` and return the decoded body.
+
+    Args:
+        query: GraphQL query text.
+        endpoint: AppSync GraphQL endpoint URL.
+        api_key: The stack's API_KEY-mode key.
+
+    Returns:
+        Decoded JSON response body.
+    """
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps({"query": query}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-api-key": api_key},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return json.loads(exc.read().decode("utf-8"))
+
+
+@pytest.mark.smoke
+@pytest.mark.parametrize(
+    ("query", "field"),
+    [
+        ('{ getProfile(profileId: "PROFILE#boundary-probe") { sellerName } }', "getProfile"),
+        ("{ listMyProfiles(limit: 1) { profiles { profileId } } }", "listMyProfiles"),
+    ],
+)
+def test_public_api_key_cannot_reach_cognito_only_fields(query: str, field: str) -> None:
+    """The public API key must not reach the profile fields the app reads with a session.
+
+    These fields carry no auth directive, which in AppSync multi-auth means they
+    are reachable only through the DEFAULT (Cognito) mode — that exclusivity is
+    what keeps the public key out of every non-public field. The scripted
+    counterpart of this check for ``getMyAccount`` lives in
+    ``tests/integration/resolvers/publicAuthModes.integration.test.ts``.
+    """
+    endpoint = os.environ.get("TEST_APPSYNC_ENDPOINT", "")
+    api_key = os.environ.get("TEST_APPSYNC_API_KEY", "")
+    if not endpoint or not api_key:
+        pytest.skip(
+            "TEST_APPSYNC_ENDPOINT / TEST_APPSYNC_API_KEY are only exported by the ephemeral stack "
+            "(scripts/ephemeral-env.sh); the dev deploy smoke run does not carry them"
+        )
+
+    body = _graphql_with_api_key(query, endpoint, api_key)
+
+    errors = body.get("errors") or []
+    assert errors, f"An API-key caller must not reach {field}"
+    assert any("Unauthorized" in str(error.get("errorType", "")) for error in errors if isinstance(error, dict)), (
+        f"{field} must be refused at the auth layer; got: {errors}"
+    )
+    data = body.get("data") or {}
+    assert data.get(field) is None, f"{field} must return no value to an API-key caller; got: {data.get(field)!r}"

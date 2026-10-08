@@ -4,6 +4,12 @@ Covers issue #84: create and join a shared campaign to generate data, then
 navigate to ``/campaign-reports`` and verify Unit Summary, Seller Report, and
 Order Details render with rollup values tied to the seeded order and that both
 Excel export buttons produce downloads.
+
+Known gap: the ``customerEmail`` column assertion spec 10.4 asks this suite to
+carry is marked at its site in the Order Details step — the column does not
+exist in the report types or the export yet (slice-plan item 9). The
+skip-marked placeholder test at the bottom of this module keeps that gap
+visible in every pytest/CI report until the real assertion lands.
 """
 
 import re
@@ -146,6 +152,16 @@ def test_campaign_reports_generate_and_views(
         f"Order Details must include the seeded customer {customer_name!r}; got: {customer_cells}"
     )
 
+    # TODO(spec 10.4 line 438 / 10.5, spec 11 "Reports"): the customerEmail column
+    # assertion this suite is supposed to carry is NOT here, because the column
+    # does not exist yet: UnitOrderDetail (tofu/application/schema/schema.graphql)
+    # has no customerEmail field and the Order Details export header row is
+    # ['Scout', 'Customer', ...products, 'Total']
+    # (frontend/src/pages/CampaignReportsPage.tsx:193). Slice-plan item 9 owns
+    # adding it to src/handlers/report_generation.py, src/handlers/campaign_reporting.py
+    # and the report GraphQL types; the placeholder test below keeps that gap
+    # visible in every pytest/CI report until then.
+
     # Step 8 — invoke the export helper and verify the download is a non-empty XLSX file.
     order_details_path = reports.download_order_details_to(tmp_path / "order_details.xlsx")
     assert order_details_path.suffix == ".xlsx", f"Expected .xlsx order details; got: {order_details_path}"
@@ -153,3 +169,26 @@ def test_campaign_reports_generate_and_views(
     order_workbook = load_workbook(order_details_path)
     assert order_workbook.active is not None, "Order Details workbook must have an active worksheet"
     assert order_workbook.active.max_row >= 2, "Order Details must contain header and at least one data row"
+
+
+_CUSTOMER_EMAIL_COLUMN_MISSING = (
+    "spec 10.4 line 438 / 11 'Reports' asks the Order Details view to expose the "
+    "buyer email collected by the public order form, but UnitOrderDetail has no "
+    "customerEmail field (tofu/application/schema/schema.graphql) and the Order "
+    "Details export header row is ['Scout', 'Customer', ...products, 'Total'] "
+    "(frontend/src/pages/CampaignReportsPage.tsx:193). Slice-plan item 9 owns "
+    "adding it — delete this skip when the column and its assertion land."
+)
+
+
+@pytest.mark.smoke
+@pytest.mark.slow
+def test_order_details_exposes_the_buyer_email_column() -> None:
+    """Order Details carries the public-order buyer email in the table and export.
+
+    Placeholder: real, executable coverage lands with slice-plan item 9, which
+    ships the ``customerEmail`` column on UnitOrderDetail, the Order Details
+    export header and the assertion; see the TODO at the Order Details step of
+    :func:`test_campaign_reports_generate_and_views` and the in-code TODO packet.
+    """
+    pytest.skip(_CUSTOMER_EMAIL_COLUMN_MISSING)
