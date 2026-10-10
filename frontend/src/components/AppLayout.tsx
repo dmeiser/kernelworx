@@ -346,7 +346,7 @@ const AppLayoutView: React.FC<{
           >
             <Box
               component="img"
-              src="/logo.svg"
+              src="/kernelworx-logo.svg"
               alt="KernelWorx mark"
               sx={{
                 width: { xs: 28, sm: 32, md: 36 },

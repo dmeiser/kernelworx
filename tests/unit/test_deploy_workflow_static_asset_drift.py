@@ -1,13 +1,15 @@
 """Contract test for the post-deploy static-asset drift assertion.
 
-On 2026-10-06 the deployed ``logo.svg`` / ``logo-rotating.svg`` were deleted
-out-of-band from both static buckets after deploys that verifiably uploaded
-them (dev run 37525653122, prod run 37178810183). No CI path deletes those
-keys (the deploy's ``s3 sync`` omits ``--delete``; the only ``--delete`` sync
-against the static bucket is the manual ``frontend/deploy.sh`` one), so the
-loss was invisible: CloudFront answered ``/logo.svg`` with the SPA
-``index.html`` fallback - HTTP 200, ``text/html`` - and every other deploy
-gate stayed green while the brand assets were broken on dev and prod.
+On 2026-10-06 ``logo.svg`` / ``logo-rotating.svg`` broke on both dev and prod
+after deploys that verifiably uploaded them (dev run 37525653122, prod run
+37178810183). The 2026-10-10 root-cause proof (issue #689) showed the objects
+were never deleted: the #665 ``/l*`` ordered cache behavior (Cognito auth
+origin) shadows every root path starting with ``/l``, so CloudFront sent
+``/logo.svg`` to Cognito, got a 404, and served the SPA ``index.html``
+fallback - HTTP 200, ``text/html`` - while every other deploy gate stayed
+green. The assets were renamed to ``kernelworx-logo*.svg`` (KW-LOGO-PATHFIX-1)
+off the wildcard; the step still guards against the objects actually vanishing
+at the origin.
 
 The "Assert static brand assets are served" step in ``deploy-shared.yml`` turns
 that into a red deploy. These tests run the step's real script against a mock
@@ -27,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "deploy-shared.yml"
 STEP_NAME = "Assert static brand assets are served"
 SITE_URL = "https://dev.kernelworx.app"
-ASSET_PATHS = ("/logo.svg", "/logo-rotating.svg", "/favicon.svg")
+ASSET_PATHS = ("/kernelworx-logo.svg", "/kernelworx-logo-rotating.svg", "/favicon.svg")
 
 # The mock stands in for curl: it honours -o/-D/-w and answers each path from
 # the scenario variables, so the test observes the step's decisions rather than
@@ -48,7 +50,7 @@ while [ $# -gt 0 ]; do
 done
 path="${url#https://dev.kernelworx.app}"
 scenario="${SCENARIO:-ok}"
-bad="${BAD_PATH:-/logo.svg}"
+bad="${BAD_PATH:-/kernelworx-logo.svg}"
 if [ "$scenario" = "transport" ] && { [ -z "$bad" ] || [ "$path" = "$bad" ]; }; then
   exit 22
 fi
@@ -115,16 +117,16 @@ def test_healthy_deploy_passes(tmp_path: Path) -> None:
 
 def test_index_html_fallback_fails_loudly(tmp_path: Path) -> None:
     """The exact 2026-10-06 shape: HTTP 200, text/html, the SPA document."""
-    result = run_step(tmp_path, scenario="fallback", bad_path="/logo.svg")
+    result = run_step(tmp_path, scenario="fallback", bad_path="/kernelworx-logo.svg")
 
     assert result.returncode != 0
     assert "::error::" in result.stdout + result.stderr
-    assert f"{SITE_URL}/logo.svg" in result.stdout + result.stderr
+    assert f"{SITE_URL}/kernelworx-logo.svg" in result.stdout + result.stderr
     assert "text/html" in result.stdout + result.stderr
 
 
 def test_missing_object_fails_loudly(tmp_path: Path) -> None:
-    result = run_step(tmp_path, scenario="gone", bad_path="/logo-rotating.svg")
+    result = run_step(tmp_path, scenario="gone", bad_path="/kernelworx-logo-rotating.svg")
 
     assert result.returncode != 0
     assert "404" in result.stdout + result.stderr
@@ -138,7 +140,7 @@ def test_svg_content_type_with_no_svg_body_fails(tmp_path: Path) -> None:
 
 
 def test_unreachable_site_fails_loudly(tmp_path: Path) -> None:
-    result = run_step(tmp_path, scenario="transport", bad_path="/logo.svg")
+    result = run_step(tmp_path, scenario="transport", bad_path="/kernelworx-logo.svg")
 
     assert result.returncode != 0
     assert "::error::" in result.stdout + result.stderr

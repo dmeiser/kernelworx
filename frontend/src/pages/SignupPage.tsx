@@ -408,7 +408,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({ maxWidth = 500, children }) => 
         <Box
           sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5, mb: 3, flexWrap: 'wrap' }}
         >
-          <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
+          <Box component="img" src="/kernelworx-logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
           <Typography
             variant="h5"
             sx={{

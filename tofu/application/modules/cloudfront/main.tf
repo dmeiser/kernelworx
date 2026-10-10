@@ -72,6 +72,14 @@ locals {
   # served by the default S3 behavior), bringing the distribution to the
   # CloudFront Free plan's 5-behavior cap. Sharp edge: never add an SPA
   # route starting with /l - it would be silently proxied to Cognito and 404.
+  # The same shadowing hit ROOT STATIC ASSETS: /logo.svg and
+  # logo-rotating.svg in frontend/public matched /l*, were proxied to
+  # Cognito (404), and the 403/404 custom error response served index.html
+  # as a 200 - the broken-logo incident of 2026-10-06 (issue #689, proven
+  # 2026-10-10). They were renamed kernelworx-logo*.svg (KW-LOGO-PATHFIX-1);
+  # tests/unit/test_frontend_public_path_shadowing.py guards every root file
+  # in frontend/public against auth_path_patterns, so any new shadowed asset
+  # fails CI before it ships.
   auth_path_patterns = ["/l*", "/oauth2/*", "/.well-known/*"]
 
   # AWS-managed cache/origin-request/response-headers policies (#665,

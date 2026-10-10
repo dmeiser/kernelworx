@@ -559,7 +559,7 @@ export const LoginPage: React.FC = () => {
                 flexWrap: 'wrap',
               }}
             >
-              <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
+              <Box component="img" src="/kernelworx-logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
               <Typography
                 variant="h5"
                 sx={{
