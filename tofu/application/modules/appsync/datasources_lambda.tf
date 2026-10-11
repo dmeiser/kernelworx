@@ -158,3 +158,18 @@ resource "aws_appsync_datasource" "admin_operations" {
     function_arn = var.lambda_function_arns["admin-operations"]
   }
 }
+
+# public-orders (#679 public-orders offer slice): the anonymous
+# publicGetOrderOffer read. A Lambda rather than a pipeline because the offer
+# needs six datastore reads plus local QR signing, and one APPSYNC_JS function
+# gets exactly one datastore call.
+resource "aws_appsync_datasource" "public_orders" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "PublicOrdersDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["public-orders"]
+  }
+}

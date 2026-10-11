@@ -162,6 +162,14 @@ locals {
         USER_POOL_ID = var.user_pool_id
       }
     }
+    # #679 public-orders offer slice: the anonymous publicGetOrderOffer read.
+    # No caller identity exists on this auth mode, so no USER_POOL_ID; the
+    # EXPORTS_BUCKET already in common_env is what the QR pre-signing needs.
+    "public-orders" = {
+      handler     = "handlers.public_orders_offer.handler"
+      timeout     = 15
+      memory_size = 256
+    }
   }
 
   # Cognito trigger functions are kept separate to avoid module-level dependency

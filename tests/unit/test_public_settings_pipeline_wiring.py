@@ -43,29 +43,10 @@ def _index_of(functions: list[str], ref: str) -> int:
     raise AssertionError(f"{ref} is not in the pipeline: {functions}")
 
 
-def _function_datasource(name: str) -> str:
-    import re
+def _function_attrs(name: str) -> dict:
+    from tests.unit.test_edge_security import first_resource, load_hcl
 
-    content = (APPSYNC_DIR / "functions_profiles.tf").read_text()
-    match = re.search(
-        rf'resource "aws_appsync_function" "{name}" \{{[^}}]*data_source = ([^\n]+)',
-        content,
-    )
-    assert match, f"aws_appsync_function.{name} is not declared in functions_profiles.tf"
-    return match.group(1).strip()
-
-
-def _function_code(name: str) -> str:
-    import re
-
-    content = (APPSYNC_DIR / "functions_profiles.tf").read_text()
-    match = re.search(
-        rf'resource "aws_appsync_function" "{name}" \{{.*?code = ([^\n]+)',
-        content,
-        re.DOTALL,
-    )
-    assert match, f"aws_appsync_function.{name} declares no code"
-    return match.group(1).strip()
+    return first_resource(load_hcl(APPSYNC_DIR / "functions_profiles.tf"), "aws_appsync_function", name)
 
 
 def test_both_settings_pipelines_exist() -> None:
@@ -112,6 +93,6 @@ def test_write_pipeline_order_is_campaign_then_catalog_then_write() -> None:
 def test_gate_makes_no_dynamodb_call_of_its_own() -> None:
     # The pair already decided ownership; a gate that issued its own read would
     # be a second, eventually-consistent authority on who the owner is.
-    assert _function_datasource("verify_public_settings_owner") == "aws_appsync_datasource.none.name"
-    code = _function_code("verify_public_settings_owner")
-    assert "verify_public_settings_owner_fn.js" in code
+    gate = _function_attrs("verify_public_settings_owner")
+    assert gate["data_source"] == "${aws_appsync_datasource.none.name}"
+    assert "verify_public_settings_owner_fn.js" in gate["code"]
