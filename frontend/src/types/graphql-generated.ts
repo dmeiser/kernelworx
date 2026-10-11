@@ -843,7 +843,7 @@ export type GqlPublicOrderReceipt = {
   confirmationEmailSent: Scalars['Boolean']['output'];
   /** The order's full ID (ORDER#...#... form), for display and support. */
   orderId: Scalars['ID']['output'];
-  /** The composed public receipt URL (/r/<campaignId>/<orderSuffix>/<receiptToken>); the success screen shows it alongside the emailed link. */
+  /** The composed public receipt URL: an ABSOLUTE https URL (https://<site>/r/<campaignId>/<orderSuffix>/<receiptToken>); the success screen shows it alongside the emailed link. */
   receiptUrl?: Maybe<Scalars['String']['output']>;
   /** The order's total amount. */
   totalAmount: Scalars['Float']['output'];
@@ -1513,6 +1513,9 @@ export type GqlOrderFieldsFragment = {
   notes?: string | null | undefined;
   createdAt: string;
   updatedAt: string;
+  customerEmail?: string | null | undefined;
+  orderSource?: GqlOrderSource | null | undefined;
+  status?: GqlOrderStatus | null | undefined;
   customerAddress?:
     | {
         __typename?: 'Address';
@@ -1784,6 +1787,9 @@ export type GqlListOrdersByCampaignQuery = {
       notes?: string | null | undefined;
       createdAt: string;
       updatedAt: string;
+      customerEmail?: string | null | undefined;
+      orderSource?: GqlOrderSource | null | undefined;
+      status?: GqlOrderStatus | null | undefined;
       customerAddress?:
         | {
             __typename?: 'Address';
@@ -1826,6 +1832,9 @@ export type GqlGetOrderQuery = {
         notes?: string | null | undefined;
         createdAt: string;
         updatedAt: string;
+        customerEmail?: string | null | undefined;
+        orderSource?: GqlOrderSource | null | undefined;
+        status?: GqlOrderStatus | null | undefined;
         customerAddress?:
           | {
               __typename?: 'Address';
@@ -2007,6 +2016,67 @@ export type GqlUpdateSellerProfileMutation = {
   };
 };
 
+export type GqlPublicOrderSettingsFieldsFragment = {
+  __typename?: 'PublicOrderSettings';
+  enabled: boolean;
+  campaignId?: string | null | undefined;
+  campaignName?: string | null | undefined;
+  campaignState?: string | null | undefined;
+  allowedPaymentMethods: Array<string>;
+  shareToken?: string | null | undefined;
+  publicOrderCount?: number | null | undefined;
+  acknowledgedAt?: string | null | undefined;
+  ackVersion?: number | null | undefined;
+};
+
+export type GqlGetProfilePublicOrderSettingsQueryVariables = Exact<{
+  profileId: Scalars['ID']['input'];
+}>;
+
+export type GqlGetProfilePublicOrderSettingsQuery = {
+  __typename?: 'Query';
+  getProfilePublicOrderSettings?:
+    | {
+        __typename?: 'PublicOrderSettings';
+        enabled: boolean;
+        campaignId?: string | null | undefined;
+        campaignName?: string | null | undefined;
+        campaignState?: string | null | undefined;
+        allowedPaymentMethods: Array<string>;
+        shareToken?: string | null | undefined;
+        publicOrderCount?: number | null | undefined;
+        acknowledgedAt?: string | null | undefined;
+        ackVersion?: number | null | undefined;
+      }
+    | null
+    | undefined;
+};
+
+export type GqlUpdateProfilePublicOrderSettingsMutationVariables = Exact<{
+  profileId: Scalars['ID']['input'];
+  enabled: Scalars['Boolean']['input'];
+  campaignId?: InputMaybe<Scalars['ID']['input']>;
+  allowedPaymentMethods?: InputMaybe<Array<Scalars['String']['input']> | Scalars['String']['input']>;
+  rotateToken?: InputMaybe<Scalars['Boolean']['input']>;
+  acknowledgementsAccepted?: InputMaybe<Scalars['Boolean']['input']>;
+}>;
+
+export type GqlUpdateProfilePublicOrderSettingsMutation = {
+  __typename?: 'Mutation';
+  updateProfilePublicOrderSettings: {
+    __typename?: 'PublicOrderSettings';
+    enabled: boolean;
+    campaignId?: string | null | undefined;
+    campaignName?: string | null | undefined;
+    campaignState?: string | null | undefined;
+    allowedPaymentMethods: Array<string>;
+    shareToken?: string | null | undefined;
+    publicOrderCount?: number | null | undefined;
+    acknowledgedAt?: string | null | undefined;
+    ackVersion?: number | null | undefined;
+  };
+};
+
 export type GqlDeleteSellerProfileMutationVariables = Exact<{
   profileId: Scalars['ID']['input'];
 }>;
@@ -2094,6 +2164,9 @@ export type GqlCreateOrderMutation = {
     notes?: string | null | undefined;
     createdAt: string;
     updatedAt: string;
+    customerEmail?: string | null | undefined;
+    orderSource?: GqlOrderSource | null | undefined;
+    status?: GqlOrderStatus | null | undefined;
     customerAddress?:
       | {
           __typename?: 'Address';
@@ -2134,6 +2207,9 @@ export type GqlUpdateOrderMutation = {
     notes?: string | null | undefined;
     createdAt: string;
     updatedAt: string;
+    customerEmail?: string | null | undefined;
+    orderSource?: GqlOrderSource | null | undefined;
+    status?: GqlOrderStatus | null | undefined;
     customerAddress?:
       | {
           __typename?: 'Address';
@@ -2952,6 +3028,75 @@ export type GqlCreateManagedCatalogMutation = {
       description?: string | null | undefined;
       price: number;
       sortOrder: number;
+    }>;
+  };
+};
+
+export type GqlPublicGetOrderOfferQueryVariables = Exact<{
+  profileId: Scalars['ID']['input'];
+  token: Scalars['String']['input'];
+}>;
+
+export type GqlPublicGetOrderOfferQuery = {
+  __typename?: 'Query';
+  publicGetOrderOffer: {
+    __typename?: 'PublicOrderOffer';
+    sellerName: string;
+    campaignId: string;
+    campaignName: string;
+    products: Array<{
+      __typename?: 'PublicProduct';
+      productId: string;
+      productName: string;
+      price: number;
+      description?: string | null | undefined;
+      sortOrder?: number | null | undefined;
+    }>;
+    paymentMethods: Array<{ __typename?: 'PublicPaymentMethod'; name: string; qrCodeUrl?: string | null | undefined }>;
+  };
+};
+
+export type GqlPublicCreateOrderMutationVariables = Exact<{
+  input: GqlPublicCreateOrderInput;
+}>;
+
+export type GqlPublicCreateOrderMutation = {
+  __typename?: 'Mutation';
+  publicCreateOrder: {
+    __typename?: 'PublicOrderReceipt';
+    orderId: string;
+    receiptUrl?: string | null | undefined;
+    totalAmount: number;
+    buyerEmailProvided: boolean;
+    confirmationEmailSent: boolean;
+  };
+};
+
+export type GqlPublicGetOrderReceiptQueryVariables = Exact<{
+  campaignId: Scalars['ID']['input'];
+  orderSuffix: Scalars['ID']['input'];
+  receiptToken: Scalars['String']['input'];
+}>;
+
+export type GqlPublicGetOrderReceiptQuery = {
+  __typename?: 'Query';
+  publicGetOrderReceipt: {
+    __typename?: 'PublicOrderReceiptLookup';
+    sellerName: string;
+    orderId: string;
+    orderDate: string;
+    totalAmount: number;
+    paymentMethodName: string;
+    status: GqlOrderStatus;
+    buyerFirstName: string;
+    buyerLastName: string;
+    lineItems: Array<{
+      __typename?: 'PublicLineItem';
+      productId: string;
+      productName: string;
+      quantity: number;
+      pricePerUnit: number;
+      subtotal: number;
     }>;
   };
 };

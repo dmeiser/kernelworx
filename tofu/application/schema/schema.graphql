@@ -582,7 +582,7 @@ type PublicLineItem @aws_api_key {
 type PublicOrderReceipt @aws_api_key {
   """The order's full ID (ORDER#...#... form), for display and support."""
   orderId: ID!
-  """The composed public receipt URL (/r/<campaignId>/<orderSuffix>/<receiptToken>); the success screen shows it alongside the emailed link."""
+  """The composed public receipt URL: an ABSOLUTE https URL (https://<site>/r/<campaignId>/<orderSuffix>/<receiptToken>); the success screen shows it alongside the emailed link."""
   receiptUrl: String
   """The order's total amount."""
   totalAmount: Float!

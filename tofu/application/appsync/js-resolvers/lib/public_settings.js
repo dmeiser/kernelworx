@@ -89,13 +89,21 @@ export function resolveAllowedPaymentMethods(ctx) {
     return list;
 }
 
-// True when the request is publishing or re-pointing the public surface: it is
-// enabling, or it is explicitly re-picking the anchor campaign. Only those
-// saves get the campaign/catalog enforcement - a seller whose anchor already
-// went stale must still be able to disable the feature.
+// True when the request is publishing or re-pointing the public surface: it
+// turns the feature ON from an off state, or it explicitly picks/re-picks the
+// anchor campaign by carrying campaignId. Only those saves get the
+// campaign/catalog enforcement. Rotate-token, disable and method-list saves
+// keep working over a stale anchor (campaign deleted or deactivated) - none of
+// them changes what is published, so none must be able to strand the seller
+// over a dead campaign.
 export function settingsWriteIsEnforcing(ctx) {
     const args = ctx.args || {};
-    return args.enabled === true || Object.hasOwn(args, 'campaignId');
+    const stored = storedPublicOrders(ctx);
+    const rePicking = Object.hasOwn(args, 'campaignId');
+    if (rePicking) {
+        return true;
+    }
+    return args.enabled === true && !(stored && stored.enabled === true);
 }
 
 // True when the stored acknowledgement is missing or predates ACK_VERSION, in

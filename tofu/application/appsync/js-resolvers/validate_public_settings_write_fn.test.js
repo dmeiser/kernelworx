@@ -206,6 +206,63 @@ describe('validate_public_settings_write_fn response', () => {
         assert.strictEqual(ctx.stash.publicSettingsCampaignState, 'MISSING');
     });
 
+    it('lets a rotate-token save stand over a missing anchor and flags MISSING', () => {
+        // enabled=true alone is not enforcing: a rotate-only save must not be
+        // dragged into anchor validation, or token revocation is blocked
+        // exactly when the stored anchor is out of sync.
+        const ctx = ctxFor({ profileId: 'PROFILE#p1', enabled: true, rotateToken: true }, {
+            enabled: true,
+            token: 'token-abc123',
+            campaignId: 'CAMPAIGN#c-gone'
+        });
+        ctx.result = null;
+
+        assert.strictEqual(response(ctx), null);
+        assert.strictEqual(ctx.stash.publicSettingsCampaignState, 'MISSING');
+        assert.strictEqual(ctx.stash.publicSettingsCatalogId, undefined);
+    });
+
+    it('lets a method-list change stand over an inactive anchor and flags INACTIVE', () => {
+        const ctx = ctxFor({ profileId: 'PROFILE#p1', enabled: true, allowedPaymentMethods: ['Venmo'] }, {
+            enabled: true,
+            token: 'token-abc123',
+            campaignId: 'CAMPAIGN#c1'
+        });
+        ctx.result = { campaignId: 'CAMPAIGN#c1', campaignName: 'Fall', isActive: false, catalogId: 'CATALOG#cat1' };
+
+        const campaign = response(ctx);
+        assert.strictEqual(campaign.campaignId, 'CAMPAIGN#c1');
+        assert.strictEqual(ctx.stash.publicSettingsCampaignState, 'INACTIVE');
+        assert.strictEqual(ctx.stash.publicSettingsCatalogId, undefined);
+    });
+
+    it('rejects a save that enables over an inactive stored anchor without re-picking', () => {
+        // The disabled->enabled transition is publishing: the stored anchor is
+        // validated again even when the request does not name it.
+        const ctx = ctxFor({ profileId: 'PROFILE#p1', enabled: true, allowedPaymentMethods: ['Venmo'] }, {
+            enabled: false,
+            token: 'token-abc123',
+            campaignId: 'CAMPAIGN#c1'
+        });
+        ctx.result = { campaignId: 'CAMPAIGN#c1', isActive: false, catalogId: 'CATALOG#cat1' };
+
+        assert.throws(
+            () => response(ctx),
+            /INVALID_INPUT: Public orders can only be anchored to an active campaign/
+        );
+    });
+
+    it('rejects a save that enables over a missing stored anchor without re-picking', () => {
+        const ctx = ctxFor({ profileId: 'PROFILE#p1', enabled: true, allowedPaymentMethods: ['Venmo'] }, {
+            enabled: false,
+            token: 'token-abc123',
+            campaignId: 'CAMPAIGN#c-gone'
+        });
+        ctx.result = null;
+
+        assert.throws(() => response(ctx), /NOT_FOUND: Campaign not found/);
+    });
+
     it('enforces again when a parked save re-picks the anchor campaign', () => {
         const ctx = ctxFor({ profileId: 'PROFILE#p1', enabled: false, campaignId: 'CAMPAIGN#c2' }, {
             enabled: false,

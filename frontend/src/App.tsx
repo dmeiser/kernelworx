@@ -13,6 +13,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DevFooter } from './components/DevFooter';
 import { apolloClient } from './lib/apollo';
+import { publicApolloClient } from './lib/publicApollo';
 import { theme } from './lib/theme';
 import { AppLayout } from './components/AppLayout';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary';
@@ -75,6 +76,25 @@ const PaymentMethodsPage = lazyRoute(() =>
 );
 const HomePage = lazyRoute(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
 const StoryPage = lazyRoute(() => import('./pages/StoryPage').then((m) => ({ default: m.StoryPage })));
+const PublicOrderPage = lazyRoute(() =>
+  import('./pages/PublicOrderPage').then((m) => ({ default: m.PublicOrderPage })),
+);
+const PublicReceiptPage = lazyRoute(() =>
+  import('./pages/PublicReceiptPage').then((m) => ({ default: m.PublicReceiptPage })),
+);
+const ProfilePublicOrdersSettingsPage = lazyRoute(() =>
+  import('./pages/ProfilePublicOrdersSettingsPage').then((m) => ({ default: m.ProfilePublicOrdersSettingsPage })),
+);
+
+/**
+ * Public order routes run on their own Apollo client: AppSync's auth directives
+ * are an exclusive allow-list, so a signed-in visitor opening a share link must
+ * still make an anonymous (x-api-key only) call - a stray Authorization header
+ * is refused outright on a key-only field.
+ */
+function PublicOrderApollo({ children }: { children: React.ReactNode }) {
+  return <ApolloProvider client={publicApolloClient}>{children}</ApolloProvider>;
+}
 
 function ScrollToHash() {
   const { pathname, hash } = useLocation();
@@ -183,6 +203,28 @@ function App() {
                   }
                 />
 
+                {/* Public order pages (API-key auth mode; the URL token is the authorization) */}
+                <Route
+                  path="/o/:profileId/:token"
+                  element={
+                    <PublicRoute>
+                      <PublicOrderApollo>
+                        <PublicOrderPage />
+                      </PublicOrderApollo>
+                    </PublicRoute>
+                  }
+                />
+                <Route
+                  path="/r/:campaignId/:orderSuffix/:receiptToken"
+                  element={
+                    <PublicRoute>
+                      <PublicOrderApollo>
+                        <PublicReceiptPage />
+                      </PublicOrderApollo>
+                    </PublicRoute>
+                  }
+                />
+
                 {/* Shared Campaign short-link route */}
                 <Route
                   path="/c/:sharedCampaignCode"
@@ -245,6 +287,15 @@ function App() {
                   element={
                     <ProtectedAppRoute>
                       <ScoutManagementPage />
+                    </ProtectedAppRoute>
+                  }
+                />
+
+                <Route
+                  path="/scouts/:profileId/public-orders"
+                  element={
+                    <ProtectedAppRoute>
+                      <ProfilePublicOrdersSettingsPage />
                     </ProtectedAppRoute>
                   }
                 />

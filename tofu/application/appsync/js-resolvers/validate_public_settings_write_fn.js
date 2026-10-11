@@ -14,11 +14,13 @@ import {
 // read and never an existence oracle for other accounts' campaigns.
 //
 // The read runs whenever an anchor is in play, but it ENFORCES only when the
-// request is enabling or re-picking the anchor. A seller whose anchor has gone
-// missing or inactive must still be able to turn the feature off: rejecting
-// that save would strand them over a dead anchor with no working off switch.
-// A non-enforcing read just fills the campaignState staleness flag the write
-// then persists nothing about - the settings read recomputes it anyway.
+// request switches the feature on from an off state or picks/re-picks the
+// anchor campaign (see settingsWriteIsEnforcing). Rotate-token, disable and
+// method-list saves keep working over an anchor that has gone missing or
+// inactive: rejecting them would strand the seller over a dead anchor with no
+// working off switch or token revocation. A non-enforcing read just fills the
+// campaignState staleness flag the write then persists nothing about - the
+// settings read recomputes it anyway.
 export function request(ctx) {
     const campaignId = resolveCampaignId(ctx);
     // resolveCampaignId already rejected an explicit null; a null here means

@@ -61,6 +61,14 @@ const getTotalItems = (lineItems: GqlLineItem[]): number => {
   return lineItems.reduce((sum, item) => sum + item.quantity, 0);
 };
 
+// Public orders arrive with orderSource PUBLIC and status NEW; authenticated
+// orders carry neither (no backfill), so both render only when present.
+const isPublicOrder = (order: GqlOrder): boolean => order.orderSource === 'PUBLIC';
+
+const statusChipColor = (status: string): 'warning' | 'success' => (status === 'CONFIRMED' ? 'success' : 'warning');
+
+const statusChipLabel = (status: string): string => (status === 'CONFIRMED' ? 'Payment confirmed' : 'New');
+
 const checkWritePermission = (profile: ProfilePermissions | undefined): boolean => {
   if (!profile) return false;
   return profile.isOwner || (profile.permissions?.includes('WRITE') ?? false);
@@ -121,16 +129,48 @@ interface OrderRowProps {
   onDelete: (orderId: string) => void;
 }
 
+// Public orders carry orderSource PUBLIC and (until the seller confirms
+// payment) status NEW; authenticated orders carry neither, so both cells render
+// only what the row actually has.
+const CustomerCell: React.FC<{ order: GqlOrder }> = ({ order }) => (
+  <TableCell>
+    <Typography variant="body2" fontWeight="medium">
+      {order.customerName}
+    </Typography>
+    {isPublicOrder(order) ? (
+      <Chip label="Public order" size="small" color="info" variant="outlined" data-testid="public-order-badge" />
+    ) : null}
+    {order.customerEmail ? (
+      <Typography variant="body2" color="text.secondary" data-testid="buyer-email">
+        {order.customerEmail}
+      </Typography>
+    ) : null}
+  </TableCell>
+);
+
+const StatusCell: React.FC<{ order: GqlOrder }> = ({ order }) => (
+  <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+    {order.status ? (
+      <Chip
+        label={statusChipLabel(order.status)}
+        size="small"
+        color={statusChipColor(order.status)}
+        data-testid="order-status-chip"
+      />
+    ) : (
+      <Typography variant="body2" color="text.secondary">
+        —
+      </Typography>
+    )}
+  </TableCell>
+);
+
 const OrderRow: React.FC<OrderRowProps> = ({ order, hasWritePermission, onEdit, onDelete }) => (
   <TableRow key={order.orderId} hover>
     <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
       {formatDisplayDate(order.orderDate, { year: 'numeric', month: 'short', day: 'numeric' }) || '—'}
     </TableCell>
-    <TableCell>
-      <Typography variant="body2" fontWeight="medium">
-        {order.customerName}
-      </Typography>
-    </TableCell>
+    <CustomerCell order={order} />
     <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
       <Typography variant="body2" color="text.secondary">
         {order.customerPhone ? formatPhoneNumber(order.customerPhone) : '—'}
@@ -146,6 +186,7 @@ const OrderRow: React.FC<OrderRowProps> = ({ order, hasWritePermission, onEdit, 
         color={getPaymentMethodColor(order.paymentMethod)}
       />
     </TableCell>
+    <StatusCell order={order} />
     <TableCell align="right">
       <Typography variant="body2" fontWeight="medium">
         {formatCurrency(order.totalAmount)}
@@ -201,6 +242,7 @@ const OrdersTable: React.FC<OrdersTableProps> = ({ orders, hasWritePermission, o
           <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Phone</TableCell>
           <TableCell>Items</TableCell>
           <TableCell>Payment</TableCell>
+          <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Status</TableCell>
           <TableCell align="right">Total</TableCell>
           {hasWritePermission && <TableCell align="right">Actions</TableCell>}
         </TableRow>

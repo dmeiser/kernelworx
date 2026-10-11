@@ -351,11 +351,11 @@ jobs:
           # The public-order API key is a Terraform output threaded into the
           # frontend build environment as VITE_APPSYNC_API_KEY (it grants only
           # the @aws_api_key fields; the share token in the URL is the
-          # authorization), so it is not a secret here. The Vite path is proven
-          # to reach the build (a referenced VITE_* var such as
-          # VITE_APPSYNC_ENDPOINT bakes into dist/), but no frontend source
-          # consumes this key yet: the public buyer and receipt pages land in a
-          # later slice and will pick it up automatically.
+          # authorization), so it is not a secret here. The public buyer and
+          # receipt pages read it from the build via their key-only Apollo
+          # client, so a build MUST pick up this value in the same run: a
+          # replaced key with a stale bundle fails every public call
+          # Unauthorized until the next deploy.
           echo "appsync_api_key=$(tofu output -raw appsync_api_key)" >> $GITHUB_OUTPUT
 
       - name: Build and deploy frontend

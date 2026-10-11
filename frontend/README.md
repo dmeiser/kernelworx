@@ -23,17 +23,19 @@ npm ci
 | Path | Contents |
 | --- | --- |
 | `src/App.tsx` | Router and provider wiring. Every route is lazy-loaded via `lazyRoute()` (React.lazy + a per-route `ErrorBoundary`). Public routes render bare; everything else goes through `ProtectedAppRoute`, which nests `ProtectedRoute` (auth, optional `requireAdmin`) → `AppLayout` → `ErrorBoundary`. Campaign tabs live under the `/scouts/:profileId/campaigns/:campaignId/*` wildcard rendered by `CampaignLayout`. |
-| `src/pages/` | One file per route page (27 pages, flat, plus `CampaignLayout.tsx`). |
-| `src/components/` | Shared UI components (flat), plus `components/settings/` for the settings feature. |
+| `src/pages/` | One file per route page (30 pages, flat, plus `CampaignLayout.tsx`). |
+| `src/components/` | Shared UI components (flat), plus `components/settings/` for the settings feature and `components/public/` for the public order surfaces. |
 | `src/contexts/AuthContext.tsx` | `AuthProvider`/`useAuth`: Amplify session handling, OAuth redirect restore, and the admin flag from the Cognito `cognito:groups` claim. |
 | `src/hooks/` | Form and feature hooks (campaign form state machine, order form, MFA, passkeys, snackbar, ...), with an `index.ts` barrel for the user-settings hooks. |
-| `src/lib/` | Infrastructure and utilities: the Apollo client (`apollo.ts`), Amplify/Cognito configuration (`amplify.ts`, `cognitoDomain.ts`), the GraphQL operations (`graphql.ts`), the MUI theme (`theme.ts`), and assorted helpers (dates, ids, report export, error handling, ...). |
-| `src/constants/` | Shared enums/constants (campaign, unit types). |
+| `src/lib/` | Infrastructure and utilities: the Apollo clients (`apollo.ts`, plus the key-only `publicApollo.ts` for the public order routes), Amplify/Cognito configuration (`amplify.ts`, `cognitoDomain.ts`), the GraphQL operations (`graphql.ts`, `publicOrderGraphQL.ts`), the MUI theme (`theme.ts`), and assorted helpers (dates, ids, report export, error handling, ...). |
+| `src/constants/` | Shared enums/constants (campaign, unit types, public orders). |
 | `src/types/` | `auth.ts` (hand-maintained types), `graphql-generated.ts` (generated — see below), re-exported from `index.ts`. |
 
 State management is Apollo's normalized cache plus React context; there is no Redux or
 similar store. The provider nesting in `App.tsx` is:
-`ThemeProvider` → `ApolloProvider` → `BrowserRouter` → `AuthProvider`.
+`ThemeProvider` → `ApolloProvider` → `BrowserRouter` → `AuthProvider`. The public
+order routes (`/o/:profileId/:token`, `/r/...`) nest a second, key-only
+`ApolloProvider` (`publicApollo.ts`) inside that chain — see below.
 
 ### GraphQL client
 
@@ -50,11 +52,18 @@ similar store. The provider nesting in `App.tsx` is:
   `listMyProfiles`, `listMyShares`, `listCampaignsByProfile`, and `listOrdersByCampaign`
   queries; default fetch policies are `cache-and-network` (watch queries) and
   `cache-first` (one-shot queries).
+- **Second client (public order pages)**: `src/lib/publicApollo.ts` builds a key-only
+  client used exclusively by the `/o/...` and `/r/...` routes: it attaches `x-api-key`
+  (`VITE_APPSYNC_API_KEY`) and never the Amplify session, and its 429 backoff is
+  self-driven (AppSync sends no `Retry-After`). Why that client must exist and the
+  key's ops lifecycle live in AGENTS.md (“Public order pages: key-only Apollo client
+  and capability URLs (#679)”).
 
 ### Generated types (codegen)
 
-GraphQL operations are written inline in `src/lib/graphql.ts` (and co-located in
-components) as `gql` tags. TypeScript types for the schema and for every operation are
+GraphQL operations are written inline in `src/lib/graphql.ts` (session client) and
+`src/lib/publicOrderGraphQL.ts` (public order pages), plus co-located in components,
+as `gql` tags. TypeScript types for the schema and for every operation are
 generated with GraphQL Code Generator:
 
 ```bash
@@ -80,7 +89,7 @@ browser). See `.env.example` for the full list:
 | --- | --- |
 | `VITE_APPSYNC_ENDPOINT` | Direct AppSync URL (`...appsync-api.us-east-1.amazonaws.com/graphql`). Required for `vite dev`; unset for dev/prod builds (same-origin `/graphql`). |
 | `VITE_APPSYNC_REGION` | AppSync region, e.g. `us-east-1`. |
-| `VITE_APPSYNC_API_KEY` | API-key auth mode credential for the public order pages (a later slice; no source reads it yet). A transport credential, not a secret — the share token in the URL is the authorization. |
+| `VITE_APPSYNC_API_KEY` | API-key auth mode credential for the public order pages, read by their key-only Apollo client (`src/lib/publicApollo.ts`). A transport credential, not a secret — the share token in the URL is the authorization. |
 | `VITE_COGNITO_USER_POOL_ID` / `VITE_COGNITO_USER_POOL_CLIENT_ID` | Cognito user pool and app client. |
 | `VITE_COGNITO_DOMAIN` | Cognito custom domain (e.g. `login.dev.kernelworx.app`). Required for `vite dev`; unset for same-origin builds. |
 | `VITE_OAUTH_REDIRECT_SIGNIN` / `VITE_OAUTH_REDIRECT_SIGNOUT` | OAuth callback URLs (e.g. `http://localhost:5173/`). |
@@ -109,8 +118,9 @@ npm run preview   # serve the production build locally
 ```
 
 `deploy.sh` wraps the build for the dev environment: it generates `.env.production`
-with the same-origin variables, builds, syncs `dist/` to the S3 bucket, and creates a
-CloudFront invalidation. CI builds the frontend the same way (`.github/workflows/deploy-shared.yml`).
+from the stack outputs (same-origin variables plus `VITE_APPSYNC_API_KEY`, which it
+fetches from the `appsync_api_key` output when the stack has one), builds, syncs
+`dist/` to the S3 bucket, and creates a CloudFront invalidation. CI builds the frontend the same way (`.github/workflows/deploy-shared.yml`).
 
 ## Testing
 

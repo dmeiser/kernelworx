@@ -86,6 +86,9 @@ export const ORDER_FRAGMENT = gql`
     notes
     createdAt
     updatedAt
+    customerEmail
+    orderSource
+    status
   }
 `;
 
@@ -339,6 +342,52 @@ export const UPDATE_SELLER_PROFILE = gql`
   mutation UpdateSellerProfile($profileId: ID!, $sellerName: String!) {
     updateSellerProfile(input: { profileId: $profileId, sellerName: $sellerName }) {
       ...SellerProfileFields
+    }
+  }
+`;
+
+export const PUBLIC_ORDER_SETTINGS_FIELDS = gql`
+  fragment PublicOrderSettingsFields on PublicOrderSettings {
+    enabled
+    campaignId
+    campaignName
+    campaignState
+    allowedPaymentMethods
+    shareToken
+    publicOrderCount
+    acknowledgedAt
+    ackVersion
+  }
+`;
+
+export const GET_PROFILE_PUBLIC_ORDER_SETTINGS = gql`
+  ${PUBLIC_ORDER_SETTINGS_FIELDS}
+  query GetProfilePublicOrderSettings($profileId: ID!) {
+    getProfilePublicOrderSettings(profileId: $profileId) {
+      ...PublicOrderSettingsFields
+    }
+  }
+`;
+
+export const UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS = gql`
+  ${PUBLIC_ORDER_SETTINGS_FIELDS}
+  mutation UpdateProfilePublicOrderSettings(
+    $profileId: ID!
+    $enabled: Boolean!
+    $campaignId: ID
+    $allowedPaymentMethods: [String!]
+    $rotateToken: Boolean
+    $acknowledgementsAccepted: Boolean
+  ) {
+    updateProfilePublicOrderSettings(
+      profileId: $profileId
+      enabled: $enabled
+      campaignId: $campaignId
+      allowedPaymentMethods: $allowedPaymentMethods
+      rotateToken: $rotateToken
+      acknowledgementsAccepted: $acknowledgementsAccepted
+    ) {
+      ...PublicOrderSettingsFields
     }
   }
 `;
