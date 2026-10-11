@@ -152,6 +152,41 @@ resource "aws_appsync_resolver" "update_campaign" {
   code = file("${local.js_resolvers_dir}/update_campaign_pipeline_resolver_v2.js")
 }
 
+# updateProfilePublicOrderSettings Pipeline (#679 settings slice). Owner-only
+# (D8): the pair decides ownership, verify_public_settings_owner refuses a
+# WRITE-share collaborator and a stranger with FORBIDDEN, then the anchor
+# campaign and its catalog are confirmed before the conditioned write.
+resource "aws_appsync_resolver" "update_profile_public_order_settings" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "updateProfilePublicOrderSettings"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      # Two-phase owner check (#438): ownership comes from the strongly
+      # consistent base-table GetItem, never the eventually-consistent GSI.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
+      aws_appsync_function.verify_public_settings_owner.function_id,
+      # CampaignsDS: the chosen campaign exists, belongs to this profile, and is
+      # active (isActive absent means active, the pre-attribute back-compat).
+      aws_appsync_function.validate_public_settings_write.function_id,
+      # CatalogsDS: a different table, so a second function - the catalog must
+      # exist and not be soft-deleted before an offer can publish over it.
+      aws_appsync_function.validate_public_settings_catalog.function_id,
+      aws_appsync_function.write_public_order_settings.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/update_profile_public_order_settings_pipeline_resolver.js")
+}
+
 # deleteCampaign Pipeline
 resource "aws_appsync_resolver" "delete_campaign" {
   api_id = aws_appsync_graphql_api.main.id

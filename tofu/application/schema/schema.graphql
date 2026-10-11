@@ -292,6 +292,12 @@ type Order {
   campaignId: ID!
   """The customer's name."""
   customerName: String!
+  """The customer's first name as entered. Absent on orders created before the public order feature (no backfill), so the field is nullable."""
+  customerFirstName: String
+  """The customer's last name as entered. Absent on orders created before the public order feature (no backfill), so the field is nullable."""
+  customerLastName: String
+  """The customer's email address, collected only by the public order form. Never exposed on any public type - it is visible to the seller's audience only."""
+  customerEmail: String
   """The customer's phone number, if provided."""
   customerPhone: String
   """The customer's address, if provided."""
@@ -306,6 +312,10 @@ type Order {
   totalAmount: Float!
   """Free-text notes about the order."""
   notes: String
+  """How the order was placed. Null for orders created through the authenticated API: the attribute is absent on those rows and is never backfilled."""
+  orderSource: OrderSource
+  """Seller-side payment-verification state. Null on orders created before the public order feature (no backfill), which is why the field is nullable - a non-null copy would fail every legacy row read. The seller-side transition to CONFIRMED lands with the order lifecycle slice, so no input accepts it yet."""
+  status: OrderStatus
   """When the order was created."""
   createdAt: AWSDateTime!
   """When the order was last updated."""

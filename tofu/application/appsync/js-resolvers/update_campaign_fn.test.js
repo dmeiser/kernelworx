@@ -906,3 +906,76 @@ describe('update_campaign_fn response', () => {
     assert.strictEqual(result.unitCampaignKey, 'Pack#158#Springfield#IN#Fall#2024');
   });
 });
+
+// #679 settings slice, spec §4.3: publicOrderCount is a lifetime counter on the
+// campaign item, created only by the public write path (a later slice). Nothing
+// on the ordinary campaign edit path may touch it - update_campaign_fn builds
+// its SET/REMOVE lists from named input fields only, so an attribute no input
+// names can never be clobbered. Pinned here because a future "copy the whole
+// input over" refactor would silently reset a seller's order cap.
+describe('update_campaign_fn publicOrderCount preservation', () => {
+  it('never names publicOrderCount in a SET or REMOVE that edits other attributes', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+          isActive: true,
+          catalogId: 'CATALOG#cat1',
+          city: 'Springfield',
+          publicOrderCount: 42,
+        },
+      },
+      args: {
+        input: {
+          campaignName: 'Spring',
+          isActive: false,
+          city: null,
+        },
+      },
+      error: null,
+    };
+
+    const result = request(ctx);
+
+    assert.strictEqual(result.operation, 'UpdateItem');
+    assert.match(result.update.expression, /SET /);
+    assert.match(result.update.expression, /REMOVE city/);
+    assert.ok(
+      !result.update.expression.includes('publicOrderCount'),
+      `update expression must not touch the counter: ${result.update.expression}`
+    );
+    assert.ok(!Object.keys(result.update.expressionValues).some((k) => k.includes('publicOrderCount')));
+  });
+
+  it('carries the counter through the response copy', () => {
+    const ctx = {
+      stash: {
+        campaign: {
+          profileId: 'PROFILE#scout',
+          campaignId: 'CAMPAIGN#c1',
+          campaignName: 'Fall',
+          campaignYear: 2024,
+          isActive: true,
+          catalogId: 'CATALOG#cat1',
+          publicOrderCount: 42,
+        },
+      },
+      args: {
+        input: {
+          campaignName: 'Spring',
+          isActive: false,
+        },
+      },
+      error: null,
+    };
+
+    const result = response(ctx);
+
+    assert.strictEqual(result.campaignName, 'Spring');
+    assert.strictEqual(result.isActive, false);
+    assert.strictEqual(result.publicOrderCount, 42);
+  });
+});

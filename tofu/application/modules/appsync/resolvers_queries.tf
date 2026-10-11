@@ -274,6 +274,38 @@ resource "aws_appsync_resolver" "list_invites_by_profile" {
   code = file("${local.js_resolvers_dir}/list_invites_by_profile_pipeline_resolver.js")
 }
 
+# === PUBLIC ORDER SETTINGS QUERIES ===
+
+# getProfilePublicOrderSettings Pipeline (#679 settings slice). Owner-only:
+# the pair decides ownership, verify_public_settings_owner refuses everyone else
+# with FORBIDDEN (its own message, because the pair's Query silent-deny branch
+# leaves a null stash for a stranger and for a nonexistent profile alike), and
+# one CampaignsDS GetItem supplies the counter, name and staleness flag.
+resource "aws_appsync_resolver" "get_profile_public_order_settings" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Query"
+  field  = "getProfilePublicOrderSettings"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      # Two-phase owner check (#438): the strongly consistent base-table GetItem
+      # decides ownership, the GSI runs only for non-owners.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
+      aws_appsync_function.verify_public_settings_owner.function_id,
+      aws_appsync_function.lookup_public_settings_campaign.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_profile_public_order_settings_pipeline_resolver.js")
+}
+
 # === CATALOG QUERIES ===
 
 # getCatalog (VTL)

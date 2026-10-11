@@ -354,3 +354,36 @@ resource "aws_appsync_function" "refresh_latest_campaign_write" {
 
   code = file("${local.js_resolvers_dir}/refresh_latest_campaign_write_fn.js")
 }
+
+# === #679 public-order settings (owner-only) ===
+
+# Settings read: one GetItem on the anchor campaign for publicOrderCount,
+# campaignName and the OK / MISSING / INACTIVE staleness flag. Keyed by the
+# stashed profile's partition key, so a foreign anchor is a miss.
+resource "aws_appsync_function" "lookup_public_settings_campaign" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "LookupPublicSettingsCampaignFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lookup_public_settings_campaign_fn.js")
+}
+
+# Settings write: the chosen anchor campaign must exist, belong to this
+# profile, and be active. Same key shape as the read step.
+resource "aws_appsync_function" "validate_public_settings_write" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "ValidatePublicSettingsWriteFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_public_settings_write_fn.js")
+}

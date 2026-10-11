@@ -69,6 +69,7 @@ Global Secondary Indexes:
 | sellerName | String | Scout/seller name |
 | unitType | String | Scout unit type |
 | unitNumber | Integer | Scout unit number |
+| publicOrders | JSON | Public-order settings blob (share token, anchor campaign, allowlist, acknowledgements) — see [Public Order Surface](#public-order-surface) |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
 
@@ -95,6 +96,7 @@ Global Secondary Indexes:
 | state | String | Unit location |
 | sharedCampaignCode | String | Reference to shared template |
 | isActive | Boolean | Active/inactive flag |
+| publicOrderCount | Integer | Lifetime public-order counter — see [Public Order Surface](#public-order-surface) |
 | totalOrders | Integer | Computed count from ORDER query (Select: COUNT) |
 | totalRevenue | Float | Computed sum from ORDER query (projected totalAmount) |
 | unitCampaignKey | String | GSI - Composite lookup key |
@@ -112,12 +114,15 @@ Global Secondary Indexes:
 | orderId | String | SK - Order ID, also in GSI |
 | profileId | String | Profile ID |
 | customerName | String | Customer name |
+| customerFirstName | String | Customer first name as entered; not yet written by any code path - see [Public Order Surface](#public-order-surface) |
+| customerLastName | String | Customer last name as entered; not yet written by any code path - see [Public Order Surface](#public-order-surface) |
 | customerEmail | String | Customer email |
 | customerPhone | String | Customer phone |
 | items | JSON | Line items array |
 | totalAmount | Float | Order total |
 | paymentMethod | String | Payment type |
-| deliveryStatus | String | Delivery state |
+| orderSource | String | `OrderSource` enum (`PUBLIC`); not yet written by any code path - see [Public Order Surface](#public-order-surface) |
+| status | String | `OrderStatus` enum (`NEW` / `CONFIRMED`), seller-side payment verification; not yet written by any code path - see [Public Order Surface](#public-order-surface) |
 | notes | String | Order notes |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
@@ -394,9 +399,13 @@ The key is a separate `aws_appsync_api_key` resource with an **explicit `expires
 
 Anonymous order placement (`publicGetOrderOffer`, `publicCreateOrder`, `publicGetOrderReceipt`) is exposed through six `@aws_api_key` object types - `PublicOrderOffer`, `PublicProduct`, `PublicPaymentMethod`, `PublicLineItem`, `PublicOrderReceipt`, `PublicOrderReceiptLookup` - plus `PublicCreateOrderInput` and the `OrderSource` / `OrderStatus` enums. Dedicated public types exist because `Catalog`/`Product` carry `@aws_cognito_user_pools` and `LineItem` carries nothing, and an API-key caller can only receive types that carry `@aws_api_key` themselves.
 
-The owner-side settings pair (`getProfilePublicOrderSettings` / `updateProfilePublicOrderSettings`, returning `PublicOrderSettings`) carries an explicit `@aws_cognito_user_pools` directive and is never reachable with the API key. The settings travel as a `publicOrders` blob on the **profiles** item and a lifetime `publicOrderCount` counter on the **campaigns** item (both written by later slices); neither name is exposed on `Profile`, `SellerProfile`, `SharedProfile`, `Order`, or any report type.
+The owner-side settings pair (`getProfilePublicOrderSettings` / `updateProfilePublicOrderSettings`, returning `PublicOrderSettings`) carries an explicit `@aws_cognito_user_pools` directive and is never reachable with the API key. The settings travel as a `publicOrders` blob on the **profiles** item; the lifetime `publicOrderCount` counter lives on the **campaigns** item and is created only by the public write path (a later slice - `update_campaign_fn.js` builds its SET/REMOVE lists from named input fields only, so an ordinary campaign edit can never clobber it, pinned in `update_campaign_fn.test.js`). Neither name is exposed on `Profile`, `SellerProfile`, `SharedProfile`, `Order`, or any report type.
 
-The resolvers, the `public-orders` Lambda, the Order-side attributes (`customerEmail`, `orderSource`, `status`, `receiptToken`), the pages, and the email path land in later slices; until they do, the public fields have no resolver binding and the `Order` type carries none of the new attributes. Pinned by `tests/unit/test_public_api_key_surface.py` (`.tf` half) and `tests/unit/check_public_api_key_surface.test.ts` (schema-directive half).
+Both settings fields are bound to JS pipelines. Each reuses the two-phase write-access pair (#438) and then a `verify_public_settings_owner` gate that refuses everyone but the profile owner - a WRITE-share collaborator included - with `FORBIDDEN`. The gate emits that code itself because the pair's Query silent-deny branch (#547) leaves a null stash for a stranger and a nonexistent profile alike, so the settings read is not a profile-existence oracle. The read adds one CampaignsDS GetItem for `publicOrderCount`, `campaignName`, and the `campaignState` staleness flag (`OK` / `MISSING` / `INACTIVE`); a profile that never enabled the feature answers `enabled: false` with nulls rather than an error. The write validates the anchor campaign (exists, belongs to this profile, active - `isActive` absent means active, the pre-attribute back-compat) and then its catalog (exists, not soft-deleted) before a conditioned UpdateItem. The share token is minted by `util.autoId()` on first enable only, guarded by `attribute_not_exists(publicOrders.token)` so a concurrent first-enable fails with `CONFLICT` instead of overwriting the winner's URL; `rotateToken` replaces it (allowed while disabled), and disabling keeps it so the share URL stays stable. Omitted `campaignId` / `allowedPaymentMethods` keep the stored values while an explicit `null` is `INVALID_INPUT` (the #506 `Object.hasOwn` distinction). There is deliberately no optimistic lock against concurrent owner edits - the surface is owner-only.
+
+The `Order` type carries the public-order attributes: `customerEmail`, `customerFirstName`, `customerLastName`, `orderSource`, and **nullable** `status`. Existing rows have none of them and are never backfilled, which is exactly why `status` is nullable - a non-null copy would fail every legacy row read. `receiptToken` is deliberately not an `Order` field (it is a per-order capability carried only in the buyer's email link), and `status` is not in `UpdateOrderInput`: the seller-side transition lands with the order lifecycle slice, so no input accepts a value nothing honors yet.
+
+Still landing in later slices: the three `@aws_api_key` resolvers, the `public-orders` Lambda, the campaign-delete auto-disable step, the pages, and the email path - until then those public fields have no resolver binding. Pinned by `tests/unit/test_public_api_key_surface.py` (`.tf` half) and `tests/unit/check_public_api_key_surface.test.ts` (schema-directive half).
 
 ## References
 
