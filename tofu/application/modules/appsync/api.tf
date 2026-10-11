@@ -15,7 +15,17 @@ resource "aws_appsync_graphql_api" "main" {
   # Owner/share/admin authorization lives entirely in resolvers, not in schema-level
   # directives. See AGENTS.md ## AppSync resolver-only authorization posture (#71).
 
-  # Only Amazon Cognito User Pools authentication is used by the frontend.
+  # The public order surface (KW-PUBLIC-ORDERS) adds API_KEY as an ADDITIONAL mode:
+  # Cognito stays the PRIMARY/default mode, and the schema's @aws_api_key directives
+  # are what confine an API-key caller to the public fields and types. The block
+  # accepts only authentication_type (plus openid_connect_config / user_pool_config /
+  # lambda_authorizer_config) - the key's description and expires live on the
+  # separate aws_appsync_api_key resource below; there is no api_key_config block in
+  # the provider schema. Verified against `tofu providers schema -json`.
+  additional_authentication_provider {
+    authentication_type = "API_KEY"
+  }
+
   # AppSync service roles for DynamoDB/Lambda data sources are configured
   # separately as IAM assume-role policies; they are not additional auth providers.
 
@@ -47,6 +57,33 @@ resource "aws_appsync_graphql_api" "main" {
   lifecycle {
     prevent_destroy = var.prevent_destroy
   }
+}
+
+# API key for the public order surface. It is a transport credential, not a
+# secret: it is threaded into the frontend build as VITE_APPSYNC_API_KEY and
+# will ship in the public browser bundle once the public buyer and receipt pages
+# land (pages slice). No frontend source reads it yet on this branch, so a build
+# does NOT contain the key today. It grants access only to the @aws_api_key
+# fields and types; every public call still needs a valid per-profile share
+# token. AppSync allows one key per API-key mode, so rotation replaces this
+# resource.
+#
+# `expires` is load-bearing: the provider DEFAULTS TO 7 DAYS, which would
+# silently kill the public page a week after deploy. AWS caps a key at 365 days
+# and requires the timestamp rounded DOWN to the nearest hour. Renewal is a
+# manual runbook: the key VALUE is not retrievable through the AWS CLI after
+# creation (only this resource's output carries it), so any change that REPLACES
+# this resource loses the value permanently and, once the public pages consume
+# VITE_APPSYNC_API_KEY, the frontend bundle must be rebuilt in the same apply -
+# a replaced key with a stale bundle then means every public call fails
+# Unauthorized until the next deploy. The ExpiredAPIKeys alarm
+# is PLANNED in the public-orders spec's section 9 with the feature's ops slice
+# and is NOT deployed yet - no CloudWatch alarm watches for day-zero key expiry
+# today, so this date gate below is the only expiry check in the meantime.
+resource "aws_appsync_api_key" "public" {
+  api_id      = aws_appsync_graphql_api.main.id
+  description = "Public order placement API key (public browser bundle; scoped by @aws_api_key)"
+  expires     = "2027-10-03T00:00:00Z"
 }
 
 # AppSync-managed CloudWatch log group with explicit retention.

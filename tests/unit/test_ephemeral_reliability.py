@@ -665,6 +665,9 @@ class TestImportEphemeralResources:
               "appsync list-graphql-apis")
                 echo '{"graphqlApis": [{"name": "kernelworx-api-ue1-pr-999", "apiId": "api123"}]}'
                 ;;
+              "appsync list-api-keys")
+                echo '{"apiKeys": [{"id": "key123", "description": "Public order placement API key"}]}'
+                ;;
               "appsync list-data-sources" | "appsync list-functions")
                 echo '{"dataSources": [], "functions": []}'
                 ;;
@@ -716,6 +719,10 @@ class TestImportEphemeralResources:
         assert "module.cognito.aws_iam_role_policy.lambda_cognito_admin" in calls
         assert "kernelworx-lambda-admin-exec-ue1-pr-999:cognito-admin" in calls
         assert "module.appsync.aws_iam_role_policy.appsync_logging" in calls
+        # The public-order API key is NOT covered by the dynamic AppSync discovery
+        # (datasources/functions/resolvers only), so its import line is manual.
+        assert "module.appsync.aws_appsync_api_key.public" in calls
+        assert "api123:key123" in calls, "the key import id must be <api_id>:<key_id>"
         assert "module.s3.aws_s3_bucket_versioning.static" in calls
         assert "module.s3.aws_s3_bucket_cors_configuration.exports" in calls
 
