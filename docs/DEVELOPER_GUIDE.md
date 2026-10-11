@@ -36,7 +36,7 @@ uv run pytest tests/e2e/ --ignore=tests/unit -v
 uv run pytest tests/e2e/test_smoke_auth.py -v
 ```
 
-**Test coverage**: auth (login/logout), authorization boundaries (unauthenticated redirect, access control), profile viewing, campaign creation and listing, order creation and listing, profile sharing (invite/accept/revoke/read-only), and signup flow.
+**Test coverage**: see the *Test file overview* table in [`tests/e2e/README.md`](../tests/e2e/README.md) — the per-suite list is maintained there, not duplicated here.
 
 **Cleanup**: after each run, a `global_cleanup` fixture deletes all DynamoDB records owned by the test users (profiles, campaigns, orders, shares, invites) while preserving Cognito users and Account records.
 

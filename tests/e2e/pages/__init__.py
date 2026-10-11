@@ -12,6 +12,7 @@ from .login_page import LoginPage
 from .manage_page import ManagePage
 from .order_page import OrderPage
 from .payment_page import PaymentPage
+from .public_order_page import PublicOrderPage, PublicOrderSettingsPage, PublicReceiptPage
 from .public_pages import PublicPages
 from .reports_page import ReportsPage
 from .share_page import SharePage
@@ -32,7 +33,10 @@ __all__ = [
     "ManagePage",
     "OrderPage",
     "PaymentPage",
+    "PublicOrderPage",
+    "PublicOrderSettingsPage",
     "PublicPages",
+    "PublicReceiptPage",
     "ReportsPage",
     "SharePage",
     "SharedCampaignsPage",

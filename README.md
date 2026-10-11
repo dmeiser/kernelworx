@@ -10,7 +10,7 @@ KernelWorx is an open-source, serverless application designed for Scouting Ameri
 
 - **Seller Profile Management**: Create and manage multiple seller profiles (for families with multiple Scouts)
 - **Campaign Tracking**: Organize sales by yearly campaigns with automatic metadata inheritance
-- **Order Management**: Track customer orders with payment methods, delivery status, and line items
+- **Order Management**: Track customer orders with payment methods and line items
 - **Catalog Support**: Use admin-managed catalogs or create custom product catalogs
 - **Sharing & Collaboration**: Share profiles with trusted adults (READ or WRITE permissions)
 - **Reports**: Generate CSV/XLSX reports for unit submission and personal tracking

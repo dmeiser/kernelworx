@@ -50,6 +50,7 @@ from tests.e2e.pages.catalogs_page import CatalogsPage
 from tests.e2e.pages.dashboard_page import DashboardPage
 from tests.e2e.pages.share_page import SharePage
 from tests.e2e.utils.auth import login_as_contributor, login_as_owner, login_as_readonly
+from tests.e2e.utils.public_orders import setup_public_orders
 
 # ---------------------------------------------------------------------------
 # Environment setup
@@ -470,6 +471,29 @@ def readonly_page(page: Page) -> Generator[Page, None, None]:
     """Yield a browser Page already logged in as the read-only test user."""
     login_as_readonly(page)
     yield page
+
+
+@pytest.fixture(scope="session")
+def public_orders_setup(browser: Browser, ensure_owner_catalog: None) -> dict[str, str]:
+    """Public-order fixture data: a dedicated profile, anchor campaign and share URL.
+
+    Scope
+    -----
+    ``session`` — the profile, campaign, QR payment method and enablement are
+    created once per run and shared by every suite that needs a live share URL
+    (``test_smoke_public_orders`` and the ``test_smoke_auth_boundary``
+    extension).  The enable-time acknowledgements are therefore accepted exactly
+    once per run, which is what lets the acknowledgement UI be asserted at all.
+
+    autouse
+    -------
+    ``False`` — opt in by declaring ``public_orders_setup`` as a parameter.
+
+    Returns:
+        The dict described by
+        :func:`tests.e2e.utils.public_orders.setup_public_orders`.
+    """
+    return setup_public_orders(browser)
 
 
 # ---------------------------------------------------------------------------
