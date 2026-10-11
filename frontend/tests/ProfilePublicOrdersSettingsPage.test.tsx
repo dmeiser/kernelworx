@@ -23,7 +23,9 @@ import {
   GET_PROFILE,
   GET_PROFILE_PUBLIC_ORDER_SETTINGS,
   LIST_CAMPAIGNS_BY_PROFILE,
-  UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+  UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_ANCHOR,
+  UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_METHODS,
+  UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED,
 } from '../src/lib/graphql';
 import { PUBLIC_ORDER_CAP } from '../src/constants/publicOrders';
 
@@ -241,7 +243,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     const user = userEvent.setup();
     const mutationMock: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_ANCHOR,
         variables: {
           profileId: DB_PROFILE_ID,
           enabled: true,
@@ -297,7 +299,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
       }),
     };
     const mutationMock: MockedResponse = {
-      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: false } },
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED, variables: { profileId: DB_PROFILE_ID, enabled: false } },
       result: () => {
         holder.current = { ...holder.current, enabled: false };
         return { data: { updateProfilePublicOrderSettings: holder.current } };
@@ -321,7 +323,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
       current: settingsFor({ enabled: true, shareToken: 'old-token', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
     };
     const mutationMock: MockedResponse = {
-      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
       result: () => {
         holder.current = { ...holder.current, shareToken: 'rotated-token' };
         return { data: { updateProfilePublicOrderSettings: holder.current } };
@@ -351,7 +353,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     };
     const rotateMock: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED,
         variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true },
       },
       result: () => {
@@ -361,11 +363,10 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     };
     const saveMock: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_METHODS,
         variables: {
           profileId: DB_PROFILE_ID,
           enabled: true,
-          campaignId: undefined,
           allowedPaymentMethods: ['Venmo'],
           acknowledgementsAccepted: undefined,
         },
@@ -402,7 +403,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
       current: settingsFor({ enabled: true, shareToken: 'old-token', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
     };
     const rotateMock: MockedResponse = {
-      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
       result: () => {
         holder.current = { ...holder.current, shareToken: 'rotated-token' };
         return { data: { updateProfilePublicOrderSettings: holder.current } };
@@ -448,7 +449,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
       current: settingsFor({ enabled: true, shareToken: 'old-token', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
     };
     const rotateMock: MockedResponse = {
-      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
       result: () => {
         holder.current = { ...holder.current, shareToken: 'rotated-token' };
         return { data: { updateProfilePublicOrderSettings: holder.current } };
@@ -488,7 +489,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     };
     const rotateMock = (result: 'ok' | 'fail'): MockedResponse => ({
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED,
         variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true },
       },
       ...(result === 'ok'
@@ -519,7 +520,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
       current: settingsFor({ enabled: true, shareToken: 'tok', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
     };
     const disableMock: MockedResponse = {
-      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: false } },
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED, variables: { profileId: DB_PROFILE_ID, enabled: false } },
       delay: 300,
       result: () => {
         holder.current = { ...holder.current, enabled: false };
@@ -528,7 +529,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     };
     // The rotate mock fails loudly if a second mutation is ever issued.
     const rotateMock: MockedResponse = {
-      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
       error: new Error('ROTATE_MUST_NOT_FIRE'),
     };
     renderPage([...baseMocksWith(holder), disableMock, rotateMock]);
@@ -559,7 +560,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
       current: settingsFor({ enabled: true, shareToken: 'old-token', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
     };
     const rotateMock: MockedResponse = {
-      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
       result: () => {
         holder.current = { ...holder.current, shareToken: 'rotated-token' };
         return { data: { updateProfilePublicOrderSettings: holder.current } };
@@ -609,7 +610,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     const user = userEvent.setup();
     const mutationMock: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_ANCHOR,
         variables: {
           profileId: DB_PROFILE_ID,
           enabled: true,
@@ -648,11 +649,10 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     };
     const mutationMock: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_METHODS,
         variables: {
           profileId: DB_PROFILE_ID,
           enabled: true,
-          campaignId: undefined,
           allowedPaymentMethods: ['Venmo'],
           acknowledgementsAccepted: undefined,
         },
@@ -679,11 +679,10 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     };
     const mutationMock: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_METHODS,
         variables: {
           profileId: DB_PROFILE_ID,
           enabled: true,
-          campaignId: undefined,
           allowedPaymentMethods: [],
           acknowledgementsAccepted: undefined,
         },
@@ -721,7 +720,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
       current: settingsFor({ enabled: true, shareToken: 'tok-1', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
     };
     const disableMock: MockedResponse = {
-      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: false } },
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED, variables: { profileId: DB_PROFILE_ID, enabled: false } },
       delay: 500,
       result: () => ({ data: { updateProfilePublicOrderSettings: { ...holder.current, enabled: false } } }),
     };
@@ -837,7 +836,7 @@ describe('ProfilePublicOrdersSettingsPage', () => {
       current: settingsFor({ enabled: true, shareToken: 'old-token', ackVersion: 1, campaignId: 'CAMPAIGN#c-1' }),
     };
     const rotateMock: MockedResponse = {
-      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
+      request: { query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_PARKED, variables: { profileId: DB_PROFILE_ID, enabled: true, rotateToken: true } },
       result: () => {
         holder.current = { ...holder.current, shareToken: 'rotated-token' };
         return { data: { updateProfilePublicOrderSettings: holder.current } };
@@ -894,13 +893,12 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     };
     const mutationMock: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_METHODS,
         variables: {
           profileId: DB_PROFILE_ID,
           enabled: true,
           // The picked campaign did not change, so the save names no anchor and
           // stays clear of anchor enforcement.
-          campaignId: undefined,
           allowedPaymentMethods: [],
           // Acks are not re-required here, so the hook omits the flag entirely.
           acknowledgementsAccepted: undefined,
@@ -919,11 +917,10 @@ describe('ProfilePublicOrdersSettingsPage', () => {
     const user = userEvent.setup();
     const mutationMock: MockedResponse = {
       request: {
-        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+        query: UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS_METHODS,
         variables: {
           profileId: DB_PROFILE_ID,
           enabled: true,
-          campaignId: undefined,
           allowedPaymentMethods: [],
           acknowledgementsAccepted: true,
         },

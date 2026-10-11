@@ -2052,16 +2052,63 @@ export type GqlGetProfilePublicOrderSettingsQuery = {
     | undefined;
 };
 
-export type GqlUpdateProfilePublicOrderSettingsMutationVariables = Exact<{
+export type GqlUpdateProfilePublicOrderSettingsAnchorMutationVariables = Exact<{
   profileId: Scalars['ID']['input'];
   enabled: Scalars['Boolean']['input'];
-  campaignId?: InputMaybe<Scalars['ID']['input']>;
+  campaignId: Scalars['ID']['input'];
   allowedPaymentMethods?: InputMaybe<Array<Scalars['String']['input']> | Scalars['String']['input']>;
   rotateToken?: InputMaybe<Scalars['Boolean']['input']>;
   acknowledgementsAccepted?: InputMaybe<Scalars['Boolean']['input']>;
 }>;
 
-export type GqlUpdateProfilePublicOrderSettingsMutation = {
+export type GqlUpdateProfilePublicOrderSettingsAnchorMutation = {
+  __typename?: 'Mutation';
+  updateProfilePublicOrderSettings: {
+    __typename?: 'PublicOrderSettings';
+    enabled: boolean;
+    campaignId?: string | null | undefined;
+    campaignName?: string | null | undefined;
+    campaignState?: string | null | undefined;
+    allowedPaymentMethods: Array<string>;
+    shareToken?: string | null | undefined;
+    publicOrderCount?: number | null | undefined;
+    acknowledgedAt?: string | null | undefined;
+    ackVersion?: number | null | undefined;
+  };
+};
+
+export type GqlUpdateProfilePublicOrderSettingsMethodsMutationVariables = Exact<{
+  profileId: Scalars['ID']['input'];
+  enabled: Scalars['Boolean']['input'];
+  allowedPaymentMethods?: InputMaybe<Array<Scalars['String']['input']> | Scalars['String']['input']>;
+  rotateToken?: InputMaybe<Scalars['Boolean']['input']>;
+  acknowledgementsAccepted?: InputMaybe<Scalars['Boolean']['input']>;
+}>;
+
+export type GqlUpdateProfilePublicOrderSettingsMethodsMutation = {
+  __typename?: 'Mutation';
+  updateProfilePublicOrderSettings: {
+    __typename?: 'PublicOrderSettings';
+    enabled: boolean;
+    campaignId?: string | null | undefined;
+    campaignName?: string | null | undefined;
+    campaignState?: string | null | undefined;
+    allowedPaymentMethods: Array<string>;
+    shareToken?: string | null | undefined;
+    publicOrderCount?: number | null | undefined;
+    acknowledgedAt?: string | null | undefined;
+    ackVersion?: number | null | undefined;
+  };
+};
+
+export type GqlUpdateProfilePublicOrderSettingsParkedMutationVariables = Exact<{
+  profileId: Scalars['ID']['input'];
+  enabled: Scalars['Boolean']['input'];
+  rotateToken?: InputMaybe<Scalars['Boolean']['input']>;
+  acknowledgementsAccepted?: InputMaybe<Scalars['Boolean']['input']>;
+}>;
+
+export type GqlUpdateProfilePublicOrderSettingsParkedMutation = {
   __typename?: 'Mutation';
   updateProfilePublicOrderSettings: {
     __typename?: 'PublicOrderSettings';

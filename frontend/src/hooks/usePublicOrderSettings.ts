@@ -4,7 +4,11 @@
  * The mutation's argument semantics are pinned server-side and mirrored here:
  * an OMITTED `campaignId`/`allowedPaymentMethods` keeps the stored value, while
  * an explicit `null` is rejected with INVALID_INPUT — so a save never sends a
- * null it did not mean. `rotateToken` is the only revocation path and is legal
+ * null it did not mean. "Omitted" is a property of the transmitted DOCUMENT
+ * (AppSync binds an unprovided nullable variable as an explicit null), so each
+ * save shape sends its own mutation document via
+ * `pickUpdateProfilePublicOrderSettingsDoc` instead of varying variables.
+ * `rotateToken` is the only revocation path and is legal
  * while the feature is parked (disabled). Anchor enforcement only applies to
  * enabling and to picking/re-picking a campaign, so a save only names
  * `campaignId` when it enables the feature or changes the picked campaign —
@@ -33,13 +37,13 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery } from '@apollo/client/react';
+import { useApolloClient, useQuery } from '@apollo/client/react';
 import {
   GET_MY_PAYMENT_METHODS,
   GET_PROFILE,
   GET_PROFILE_PUBLIC_ORDER_SETTINGS,
   LIST_CAMPAIGNS_BY_PROFILE,
-  UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS,
+  pickUpdateProfilePublicOrderSettingsDoc,
 } from '../lib/graphql';
 import { ensureProfileId } from '../lib/ids';
 import { getErrorCode, getErrorMessage } from '../lib/api-utils';
@@ -56,8 +60,7 @@ import { acknowledgementIsBehind } from '../constants/publicOrders';
 import type {
   GqlCampaign,
   GqlPaymentMethod,
-  GqlUpdateProfilePublicOrderSettingsMutation,
-  GqlUpdateProfilePublicOrderSettingsMutationVariables,
+  GqlUpdateProfilePublicOrderSettingsAnchorMutation,
 } from '../types/graphql-generated';
 
 /** Variables for one settings save; omitted fields keep their stored value. */
@@ -68,6 +71,19 @@ export interface SettingsSaveArgs {
   acknowledgementsAccepted?: boolean;
   rotateToken?: boolean;
 }
+
+/**
+ * The variables object a save transmits. Which keys the DOCUMENT names is
+ * decided by `pickUpdateProfilePublicOrderSettingsDoc`; a key this object
+ * carries but the document does not is never sent as an argument.
+ */
+type SettingsMutationVariables = SettingsSaveArgs & { profileId: string };
+
+/**
+ * Every settings document selects the identical `PublicOrderSettingsFields`
+ * set, so one generated result type describes all three shapes.
+ */
+type SettingsMutationResult = GqlUpdateProfilePublicOrderSettingsAnchorMutation;
 
 /** The status of the last settings action, rendered by PublicSettingsMessages. */
 export type SettingsActionMessage =
@@ -333,10 +349,7 @@ export function usePublicOrderSettings(profileId: string) {
   }, [dbProfileId]);
   const settingsError = loadError(settings.error, everLoaded) as Error | null;
 
-  const [updateSettings] = useMutation<
-    GqlUpdateProfilePublicOrderSettingsMutation,
-    GqlUpdateProfilePublicOrderSettingsMutationVariables
-  >(UPDATE_PROFILE_PUBLIC_ORDER_SETTINGS);
+  const client = useApolloClient();
 
   const activeCampaigns = useMemo(() => readActiveCampaigns(campaigns.data), [campaigns.data]);
   const methodOptions = useMemo(() => buildMethodOptions(readMethodNames(paymentMethods.data)), [paymentMethods.data]);
@@ -392,7 +405,16 @@ export function usePublicOrderSettings(profileId: string) {
     setSubmitting(true);
     setActionState({ kind: 'idle' });
 
-    const outcome = await saveOutcome(() => updateSettings({ variables: { profileId: span.profileId, ...args } }));
+    const variables: SettingsMutationVariables = { profileId: span.profileId, ...args };
+    // The document is picked from the SAME variables object that is
+    // transmitted, so a keep-case save carries no campaignId/methods argument
+    // line at all — the only way AppSync sees an omitted argument.
+    const outcome = await saveOutcome(() =>
+      client.mutate<SettingsMutationResult, SettingsMutationVariables>({
+        mutation: pickUpdateProfilePublicOrderSettingsDoc(variables),
+        variables,
+      }),
+    );
     if (span.isLive()) await applyOutcome(span, args, outcome);
     span.release();
   };
@@ -438,7 +460,8 @@ export function usePublicOrderSettings(profileId: string) {
   // Save names campaignId only when this save enables the feature or changes
   // the picked campaign: anchor enforcement is deliberate server-side, and a
   // method-list edit or a disable while the anchor is stale must not be
-  // dragged into it. An omitted campaignId keeps the stored value.
+  // dragged into it. An undefined campaignId makes the save pick the document
+  // variant that omits the argument entirely, which keeps the stored value.
   const save = async () => {
     const enabling = draft.enabled && !stored.enabled;
     const repicking = Boolean(draft.campaignId) && draft.campaignId !== (stored.campaignId ?? '');
