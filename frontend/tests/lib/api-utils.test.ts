@@ -15,6 +15,7 @@ import {
   parseInt as safeParseInt,
 } from '../../src/lib/api-utils';
 import type { ApolloLikeError } from '../../src/lib/api-utils';
+import { CombinedGraphQLErrors } from '@apollo/client/errors';
 
 describe('lib/api-utils', () => {
   describe('ok / err result helpers', () => {
@@ -168,6 +169,50 @@ describe('lib/api-utils', () => {
         graphQLErrors: [{ message: 'x', extensions: {} }],
       };
       expect(getErrorCode(error)).toBeUndefined();
+    });
+  });
+
+  describe('Apollo Client v4 error shape', () => {
+    // Apollo Client v4 throws CombinedGraphQLErrors (an `errors` array), not the
+    // v3 `graphQLErrors` shape; the buyer submit path reads its code from here.
+    const v4Error = () =>
+      new CombinedGraphQLErrors({
+        errors: [
+          {
+            message: 'This campaign has reached its public order limit',
+            extensions: { errorCode: 'PUBLIC_ORDER_LIMIT_EXCEEDED' },
+          },
+        ],
+      });
+
+    it('recognizes a thrown v4 error as Apollo-like', () => {
+      expect(isApolloLikeError(v4Error())).toBe(true);
+    });
+
+    it('extracts the error code from the v4 errors array', () => {
+      expect(getErrorCode(v4Error())).toBe('PUBLIC_ORDER_LIMIT_EXCEEDED');
+    });
+
+    it('extracts extensions.code and extensions.errorType too', () => {
+      const withCode = new CombinedGraphQLErrors({
+        errors: [{ message: 'x', extensions: { code: 'FORBIDDEN' } }],
+      });
+      const withErrorType = new CombinedGraphQLErrors({
+        errors: [{ message: 'x', extensions: { errorType: 'NOT_FOUND' } }],
+      });
+      expect(getErrorCode(withCode)).toBe('FORBIDDEN');
+      expect(getErrorCode(withErrorType)).toBe('NOT_FOUND');
+    });
+
+    it('returns the server message from the v4 errors array', () => {
+      expect(getErrorMessage(v4Error())).toBe('This campaign has reached its public order limit');
+    });
+
+    it('reports a v4 UNAUTHORIZED error as an auth failure', () => {
+      const unauthed = new CombinedGraphQLErrors({
+        errors: [{ message: 'x', extensions: { errorCode: 'UNAUTHORIZED' } }],
+      });
+      expect(isAuthError(unauthed)).toBe(true);
     });
   });
 

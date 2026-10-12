@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple, ca
 from boto3.dynamodb.conditions import Key
 
 try:  # pragma: no cover
+    from handlers.public_orders_receipt import RECEIPT_FIELD, handle_receipt
     from utils import payment_methods as _payment_methods
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
@@ -65,6 +66,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.ids import ensure_campaign_id, ensure_catalog_id, ensure_profile_id, strip_prefix
     from ..utils.logging import get_logger
     from ..utils.payment_methods import RESERVED_NAMES, generate_presigned_get_url
+    from .public_orders_receipt import RECEIPT_FIELD, handle_receipt
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -87,8 +89,10 @@ QR_URL_EXPIRY_SECONDS = 900
 # feature.
 OFFER_UNAVAILABLE_MESSAGE = "Offer not available"
 
-# The only field name this Lambda answers. The receipt read (a later slice)
-# dispatches on its own field name through the same unit resolver.
+# The field this module answers. The public-orders Lambda routes every public
+# field through the same unit resolver, so a new public field means a new branch
+# in ``handler`` below AND a matching entry in the hand-maintained
+# EXPECTED_UNIT_FIELDS map of tests/unit/test_lambda_unit_resolver_wiring.py.
 OFFER_FIELD = "publicGetOrderOffer"
 
 
@@ -507,13 +511,21 @@ def _run_guarded(event: Dict[str, Any]) -> Dict[str, Any]:
 
 @with_error_handling(error_message=OFFER_UNAVAILABLE_MESSAGE)
 def handler(event: Dict[str, Any], context: Any) -> Any:
-    """Unit-resolver entry point: dispatch on ``info.fieldName``.
+    """Unit-resolver entry point of the public-orders Lambda: dispatch on ``info.fieldName``.
 
     ``lambda_unit_resolver.js`` forwards the whole AppSync context, so the field
     name is the discriminator (the pipeline invoke's ``operation`` field does not
     exist here). Identity is null on this auth mode and is never read.
+
+    Each public field carries its own decorated entry so the generic-failure
+    message names its own surface ("Offer not available" vs "Receipt not
+    available"). The inner handler has already turned an ``AppError`` into the
+    ``__isError`` payload the unit resolver maps to a GraphQL error code, so this
+    dispatcher passes that payload straight through.
     """
     field_name = (event.get("info") or {}).get("fieldName", "")
+    if field_name == RECEIPT_FIELD:
+        return handle_receipt(event, context)
     if field_name != OFFER_FIELD:
         raise AppError(ErrorCode.INTERNAL_ERROR, f"Unsupported operation: {field_name}")
     return _run_guarded(event)

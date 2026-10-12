@@ -13,6 +13,7 @@ import { renderHook, act } from '@testing-library/react';
 import { MockedProvider } from '@apollo/client/testing/react';
 import type { ReactNode } from 'react';
 import { usePublicOrderForm } from '../../src/hooks/usePublicOrderForm';
+import { PUBLIC_CREATE_ORDER } from '../../src/lib/publicOrderGraphQL';
 import type { PublicOfferView } from '../../src/components/public/publicOrderTypes';
 
 const offer: PublicOfferView = {
@@ -80,5 +81,58 @@ describe('usePublicOrderForm', () => {
     });
     expect(result.current.noEmailPrompt).toBe(false);
     expect(result.current.errors.firstName).toBeTruthy();
+  });
+
+  it('shows the designed copy when the server rejects the cap (Apollo v4 error shape)', async () => {
+    // The server answers with a GraphQL error carrying extensions.errorCode;
+    // Apollo Client v4 wraps it in CombinedGraphQLErrors (an `errors` array),
+    // and the buyer must see the mapped copy, not the raw server message.
+    const mocks = [
+      {
+        request: {
+          query: PUBLIC_CREATE_ORDER,
+          variables: {
+            input: {
+              profileId: 'p-1',
+              token: 't',
+              campaignId: 'campaign-1',
+              acknowledgementsAccepted: true,
+              firstName: 'Ada',
+              lastName: 'Lovelace',
+              paymentMethod: 'Cash',
+              lineItems: [{ productId: 'p-1', quantity: 1 }],
+              phone: '5558675309',
+              email: 'buyer@example.com',
+            },
+          },
+        },
+        result: {
+          errors: [
+            {
+              message: 'This campaign has reached its public order limit',
+              extensions: { errorCode: 'PUBLIC_ORDER_LIMIT_EXCEEDED' },
+            },
+          ],
+        },
+      },
+    ];
+    const { result } = renderHook(() => usePublicOrderForm({ profileId: 'p-1', token: 't', offer }), {
+      wrapper: ({ children }: { children: ReactNode }) => <MockedProvider mocks={mocks}>{children}</MockedProvider>,
+    });
+    act(() => {
+      result.current.setField('firstName', 'Ada');
+      result.current.setField('lastName', 'Lovelace');
+      result.current.setField('phone', '5558675309');
+      result.current.setField('email', 'buyer@example.com');
+      result.current.setField('paymentMethod', 'Cash');
+      result.current.setQuantity('p-1', 1);
+    });
+    await act(async () => {
+      await result.current.submit();
+    });
+    expect(result.current.submitError).toBe(
+      'This campaign has received its maximum number of orders and can no longer accept new ones. Please contact the seller directly.',
+    );
+    expect(result.current.receipt).toBeNull();
   });
 });

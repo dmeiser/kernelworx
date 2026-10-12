@@ -6,14 +6,25 @@
  */
 
 import type { GraphQLFormattedError } from 'graphql';
+import { CombinedGraphQLErrors } from '@apollo/client/errors';
 
 /**
  * Error type compatible with Apollo Client errors.
  * Apollo Client v4 removed ApolloLikeError export, so we define our own compatible type.
+ *
+ * Apollo Client v3 exposed the server's GraphQL errors as `graphQLErrors`; v4
+ * throws `CombinedGraphQLErrors`, which carries the same array as `errors`.
+ * Both spellings are read so error codes reach the message mapping either way.
  */
 export interface ApolloLikeError extends Error {
   graphQLErrors?: ReadonlyArray<GraphQLFormattedError>;
+  errors?: ReadonlyArray<GraphQLFormattedError>;
   networkError?: Error | null;
+}
+
+/** The server's first GraphQL error, in either Apollo spelling. */
+function firstGraphQLError(error: ApolloLikeError): GraphQLFormattedError | undefined {
+  return error.graphQLErrors?.[0] ?? error.errors?.[0];
 }
 
 /**
@@ -54,8 +65,8 @@ export function getErrorMessage(
   // Handle ApolloLikeError
   if (isApolloLikeError(error)) {
     // Check for GraphQL errors first
-    if (error.graphQLErrors && error.graphQLErrors.length > 0) {
-      const firstError = error.graphQLErrors[0];
+    const firstError = firstGraphQLError(error);
+    if (firstError) {
       return firstError.message || defaultMessage;
     }
 
@@ -91,6 +102,9 @@ export function getErrorMessage(
  * Type guard to check if an error is an ApolloLikeError.
  */
 export function isApolloLikeError(error: unknown): error is ApolloLikeError {
+  if (CombinedGraphQLErrors.is(error)) {
+    return true;
+  }
   return (
     error !== null &&
     typeof error === 'object' &&
@@ -116,7 +130,7 @@ export function getErrorCode(error: ApolloLikeError | unknown): string | undefin
     return undefined;
   }
 
-  const firstError = error.graphQLErrors?.[0];
+  const firstError = firstGraphQLError(error);
   if (!firstError) {
     return undefined;
   }

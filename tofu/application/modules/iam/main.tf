@@ -706,8 +706,11 @@ resource "aws_iam_role_policy" "lambda_account_reporting_s3" {
 #   - catalogs: GetItem only (the anchor catalog).
 #   - accounts: GetItem only (preferences.paymentMethods for the allowlist
 #     intersection).
-#   - orders: deliberately NOT granted. The receipt read that needs orders is a
-#     later slice, and unused permissions on a domain role are a liability.
+#   - orders: GetItem only, and only for the publicGetOrderReceipt read (the
+#     #679 write slice). Order WRITES never touch this role: they run through
+#     the AppSync OrdersDS datasource under the AppSync service role, so a
+#     PutItem/UpdateItem grant here would be an unused permission on an
+#     anonymous-facing role.
 #
 # S3 scope: the offer hands the buyer pre-signed QR image URLs, and signing
 # itself makes no S3 call. The grant is still load-bearing: S3 authorizes a
@@ -721,7 +724,7 @@ resource "aws_iam_role_policy" "lambda_account_reporting_s3" {
 # account-scoped, so this is expected access, not exfiltration.
 
 locals {
-  public_orders_table_keys = ["profiles", "campaigns", "catalogs", "accounts"]
+  public_orders_table_keys = ["profiles", "campaigns", "catalogs", "accounts", "orders"]
   public_orders_table_arns = [for k in local.public_orders_table_keys : var.dynamodb_table_arns[k]]
   public_orders_query_keys = ["profiles"]
   public_orders_query_arns = [for k in local.public_orders_query_keys : var.dynamodb_table_arns[k]]
@@ -744,8 +747,9 @@ resource "aws_iam_role_policy_attachment" "lambda_public_orders_basic" {
 }
 
 data "aws_iam_policy_document" "lambda_public_orders_dynamodb" {
-  # GetItem on exactly the four tables the offer reads. No PutItem/UpdateItem/
-  # DeleteItem anywhere: this path is read-only.
+  # GetItem on exactly the five tables the two public reads touch. No
+  # PutItem/UpdateItem/DeleteItem anywhere: this path is read-only, and the
+  # public order write runs through the AppSync datasources instead.
   statement {
     effect    = "Allow"
     actions   = ["dynamodb:GetItem"]
@@ -949,7 +953,7 @@ output "lambda_profile_sharing_execution_role_arn" {
 }
 
 output "lambda_public_orders_execution_role_arn" {
-  description = "ARN of the scoped Lambda execution role for the public-orders domain (public-orders: the anonymous publicGetOrderOffer read). Read-only on profiles/campaigns/catalogs/accounts, no orders access, plus s3:GetObject on payment-qr-codes/* because S3 authorizes the buyer's pre-signed QR GET against the signing role at request time (#353). See lambda_domain_role_arns in the lambda module."
+  description = "ARN of the scoped Lambda execution role for the public-orders domain (public-orders: the anonymous publicGetOrderOffer and publicGetOrderReceipt reads). Read-only dynamodb:GetItem on profiles/campaigns/catalogs/accounts plus the receipt-read GetItem on orders (order WRITES run through the AppSync OrdersDS datasource, never this role), plus s3:GetObject on payment-qr-codes/* because S3 authorizes the buyer's pre-signed QR GET against the signing role at request time (#353). See lambda_domain_role_arns in the lambda module."
   value       = aws_iam_role.lambda_public_orders_execution.arn
 }
 

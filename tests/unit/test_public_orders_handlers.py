@@ -738,8 +738,14 @@ class TestOfferNegative:
         assert TOKEN not in caplog.text
 
     def test_unsupported_field_is_an_internal_error(self, profiles_table: Any) -> None:
+        """A field the Lambda does not serve is a wiring fault, not a caller error.
+
+        ``publicGetOrderReceipt`` used to be the example here; the #679 write
+        slice made it a served field, so the placeholder is now a name no slice
+        has claimed.
+        """
         event = offer_event()
-        event["info"]["fieldName"] = "publicGetOrderReceipt"
+        event["info"]["fieldName"] = "publicGetOrderStatus"
 
         result = call(event)
 

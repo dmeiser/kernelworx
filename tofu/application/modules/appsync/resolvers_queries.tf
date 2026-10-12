@@ -326,6 +326,27 @@ resource "aws_appsync_resolver" "public_order_offer" {
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
+# publicGetOrderReceipt (Lambda unit resolver, #679 write slice). The second
+# field on the same public-orders Lambda: the receipt read is one strongly
+# consistent orders GetItem plus the seller-name read, and the handler
+# dispatches on info.fieldName exactly as the offer does. The per-order receipt
+# token in the argument is the capability - identity is null under API_KEY, and
+# unknown order, absent token, mismatched token, and an embedded-campaign
+# mismatch all answer the identical NOT_FOUND.
+resource "aws_appsync_resolver" "public_order_receipt" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "publicGetOrderReceipt"
+  data_source = aws_appsync_datasource.public_orders.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
 # === CATALOG QUERIES ===
 
 # getCatalog (VTL)

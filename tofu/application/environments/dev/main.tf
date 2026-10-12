@@ -251,10 +251,12 @@ module "lambda" {
     # trigger uses its own scoped role (accounts table only). The monolithic
     # shared role is retired.
     "post-auth" = module.iam.lambda_post_auth_execution_role_arn
-    # #679 public-orders offer slice: the anonymous publicGetOrderOffer read
-    # runs on its own scoped role (read-only on profiles/campaigns/catalogs/
-    # accounts, no orders access, s3:GetObject on the QR prefix for the
-    # pre-signed buyer GETs).
+    # #679 public-orders slices: the anonymous publicGetOrderOffer read and
+    # publicGetOrderReceipt read run on their own scoped role (read-only
+    # dynamodb:GetItem on profiles/campaigns/catalogs/accounts plus the
+    # receipt-read GetItem on orders — order WRITES run through the AppSync
+    # OrdersDS datasource, never this role — and s3:GetObject on the QR prefix
+    # for the pre-signed buyer GETs).
     "public-orders" = module.iam.lambda_public_orders_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name

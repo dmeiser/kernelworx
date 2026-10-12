@@ -189,6 +189,17 @@ describe('PublicOrderSuccess', () => {
     expect(screen.queryByTestId('receipt-link')).not.toBeInTheDocument();
   });
 
+  it('shows the receipt link for a no-email buyer when the server composed one', () => {
+    render(
+      <PublicOrderSuccess
+        receipt={{ ...receipt, buyerEmailProvided: false, confirmationEmailSent: false }}
+        summary={{ ...summary, email: undefined }}
+      />,
+    );
+    expect(screen.getByText('No confirmation email was sent, because no email address was given.')).toBeInTheDocument();
+    expect(screen.getByTestId('receipt-link')).toHaveAttribute('href', 'https://dev.kernelworx.app/r/c-1/s-1/token');
+  });
+
   it('distinguishes a failed send from no email given', () => {
     render(<PublicOrderSuccess receipt={{ ...receipt, confirmationEmailSent: false }} summary={summary} />);
     expect(screen.getByText(/could not send the confirmation email/i)).toBeInTheDocument();

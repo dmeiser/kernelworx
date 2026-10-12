@@ -187,6 +187,51 @@ resource "aws_appsync_resolver" "update_profile_public_order_settings" {
   code = file("${local.js_resolvers_dir}/update_profile_public_order_settings_pipeline_resolver.js")
 }
 
+# publicCreateOrder Pipeline (#679 write slice). The anonymous write behind the
+# share URL. It replaces the write-access pair with its own two-step token
+# authorization (there is no caller identity under the API_KEY mode), and the
+# 500-order cap is enforced by the increment's ConditionExpression rather than
+# by any read-side check, so concurrent writers cannot overshoot and the loser
+# of the race writes no order row. The SES send step the spec's step 8 reserves
+# slots in after create_public_order; the root's pass-through shape is what
+# makes that insertion a pipeline-order change rather than a reshaping.
+resource "aws_appsync_resolver" "public_create_order" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "publicCreateOrder"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      # ProfilesDS: GSI locator, then the consistent read that carries every
+      # authorization and input check. Two function resources over two files
+      # because a pipeline may list a function id only once (#438).
+      aws_appsync_function.validate_public_token.function_id,
+      aws_appsync_function.validate_public_token_step2.function_id,
+      # CampaignsDS: the anchor campaign by strong GetItem, plus the cheap
+      # cap pre-check.
+      aws_appsync_function.get_campaign_for_public_order.function_id,
+      # CatalogsDS: reused as-is from the authenticated createOrder pipeline.
+      # It reads ctx.stash.catalogId, which the step above stashes.
+      aws_appsync_function.get_catalog.function_id,
+      # AccountsDS: the no-oracle payment-method clone.
+      aws_appsync_function.validate_payment_method_public.function_id,
+      # CampaignsDS: the cap gate, BEFORE the write. A condition failure here
+      # aborts the pipeline with PUBLIC_ORDER_LIMIT_EXCEEDED and no row.
+      aws_appsync_function.increment_public_order_count.function_id,
+      # OrdersDS: the order write, the receipt-token mint, and the receipt.
+      aws_appsync_function.create_public_order.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/public_create_order_pipeline_resolver.js")
+}
+
 # deleteCampaign Pipeline
 resource "aws_appsync_resolver" "delete_campaign" {
   api_id = aws_appsync_graphql_api.main.id

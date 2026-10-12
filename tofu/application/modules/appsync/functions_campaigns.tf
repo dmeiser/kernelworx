@@ -387,3 +387,41 @@ resource "aws_appsync_function" "validate_public_settings_write" {
 
   code = file("${local.js_resolvers_dir}/validate_public_settings_write_fn.js")
 }
+
+# === #679 public-order write path (anonymous, API-key auth mode) ===
+
+# Step 3 of publicCreateOrder: read the anchor campaign by strong GetItem under
+# the stashed profile's own partition key (an improvement over the
+# campaignId-index GSI read the authenticated createOrder path uses) and
+# pre-check the order cap. The pre-check is a cheap early reject only; the
+# authoritative bound is the increment step's condition below.
+resource "aws_appsync_function" "get_campaign_for_public_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "GetCampaignForPublicOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_campaign_for_public_order_fn.js")
+}
+
+# Step 6 of publicCreateOrder: the cap gate. ADD publicOrderCount 1 with the
+# bound carried in the ConditionExpression, so the counter itself enforces the
+# 500-order lifetime cap and a losing concurrent writer writes no order row.
+# Runs BEFORE the order PutItem; a failed write afterwards leaves an overcount
+# (no compensation is implementable in a pipeline - see the resolver comment).
+resource "aws_appsync_function" "increment_public_order_count" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "IncrementPublicOrderCountFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/increment_public_order_count_fn.js")
+}
