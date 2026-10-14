@@ -398,6 +398,17 @@ output "appsync_api_url" {
   value       = module.appsync.api_url
 }
 
+# The public-orders API key (#679 rev 7). Read by
+# scripts/generate_integration_env.py to write the TEST_APPSYNC_API_KEY and
+# VITE_APPSYNC_API_KEY managed keys, and by the deploy build to bake
+# VITE_APPSYNC_API_KEY into the frontend bundle. Not a secret: it is shipped in
+# the public bundle and only reaches the @aws_api_key fields, each of which also
+# requires a valid per-campaign bearer token.
+output "appsync_api_key" {
+  description = "AppSync API key for the public-orders (@aws_api_key) fields"
+  value       = module.appsync.api_key
+}
+
 output "cloudfront_distribution_id" {
   description = "ID of the CloudFront distribution serving the site"
   value       = module.cloudfront.distribution_id

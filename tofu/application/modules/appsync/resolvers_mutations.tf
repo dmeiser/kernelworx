@@ -219,6 +219,49 @@ resource "aws_appsync_resolver" "create_campaign" {
   code = file("${local.js_resolvers_dir}/create_campaign_pipeline_resolver.js")
 }
 
+# updateCampaignPublicOrderSettings Pipeline (#679 rev 7, campaign-keyed).
+# Owner-only: the pair decides ownership over the campaign's own profileId,
+# verify_public_settings_owner refuses a WRITE-share collaborator and a stranger
+# with FORBIDDEN, then the campaign and its catalog are confirmed before the
+# conditioned write. Rev 7 writes the settings onto the campaign item, so
+# deleting the campaign destroys the settings, the share token and the counter
+# with it - no auto-disable hook and no dangling-anchor recovery anywhere in the
+# deleteCampaign pipeline.
+resource "aws_appsync_resolver" "update_campaign_public_order_settings" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "updateCampaignPublicOrderSettings"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      # CampaignsDS GSI locator: campaignId -> profileId, for the pair below.
+      aws_appsync_function.locate_campaign_public_settings.function_id,
+      # Two-phase owner check (#438): ownership comes from the strongly
+      # consistent base-table read, never the eventually-consistent GSI.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
+      # Gate: isOwner === true, else FORBIDDEN (share collaborators included).
+      aws_appsync_function.verify_public_settings_owner.function_id,
+      # CampaignsDS: the campaign exists under this profile's partition key and,
+      # when the save is publishing, is active and carries a catalog.
+      aws_appsync_function.validate_campaign_settings_write.function_id,
+      # CatalogsDS: a different table, so a second function - the catalog must
+      # exist and not be soft-deleted before an offer can publish over it.
+      aws_appsync_function.validate_public_settings_catalog.function_id,
+      # CampaignsDS: the conditioned UpdateItem writing the publicOrders map.
+      aws_appsync_function.write_campaign_public_order_settings.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/update_campaign_public_order_settings_pipeline_resolver.js")
+}
+
 # === ORDER MUTATIONS ===
 
 # updateOrder Pipeline

@@ -95,6 +95,7 @@ Global Secondary Indexes:
 | state | String | Unit location |
 | sharedCampaignCode | String | Reference to shared template |
 | isActive | Boolean | Active/inactive flag |
+| publicOrders | Map | Public-orders settings for this campaign (enabled flag, share token, allowed payment methods, acknowledgement stamp); written whole by `updateCampaignPublicOrderSettings`, deleted with the campaign |
 | totalOrders | Integer | Computed count from ORDER query (Select: COUNT) |
 | totalRevenue | Float | Computed sum from ORDER query (projected totalAmount) |
 | unitCampaignKey | String | GSI - Composite lookup key |

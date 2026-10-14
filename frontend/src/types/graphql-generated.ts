@@ -413,6 +413,8 @@ export type GqlMutation = {
   transferProfileOwnership: GqlSellerProfile;
   /** Update a campaign on a profile the caller has write access to. Only provided fields change. Returns the updated campaign. */
   updateCampaign: GqlCampaign;
+  /** Enable, configure, or disable one campaign's public order surface. Owner only (share collaborators are FORBIDDEN). Enabling requires the campaign to be active, its catalog to exist and not be soft-deleted, and a non-empty method list, and re-requires the acknowledgements when the stored version is behind. Disabling keeps the share token so the URL stays stable; rotateToken mints a replacement. */
+  updateCampaignPublicOrderSettings: GqlPublicOrderSettings;
   /** Update a catalog the caller owns, replacing its name, visibility, and products. Returns the updated catalog. */
   updateCatalog: GqlCatalog;
   /** Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account. */
@@ -595,6 +597,11 @@ export type GqlMutation_UpdateCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateCampaignPublicOrderSettingsArgs = {
+  input: GqlUpdateCampaignPublicOrderSettingsInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpdateCatalogArgs = {
   catalogId: Scalars['ID']['input'];
   input: GqlCreateCatalogInput;
@@ -735,6 +742,74 @@ export type GqlProfileInvite = {
   profileId: Scalars['ID']['output'];
 };
 
+/** Input for publicCreateOrder, submitted anonymously from the public order page. Input types carry no auth directive: AppSync field-level authorization does not govern inputs. */
+export type GqlPublicCreateOrderInput = {
+  acknowledgementsAccepted: Scalars['Boolean']['input'];
+  address?: InputMaybe<GqlAddressInput>;
+  campaignId: Scalars['ID']['input'];
+  email?: InputMaybe<Scalars['AWSEmail']['input']>;
+  firstName: Scalars['String']['input'];
+  lastName: Scalars['String']['input'];
+  lineItems: Array<GqlLineItemInput>;
+  notes?: InputMaybe<Scalars['String']['input']>;
+  paymentMethod: Scalars['String']['input'];
+  phone?: InputMaybe<Scalars['String']['input']>;
+  token: Scalars['String']['input'];
+};
+
+/** What the public order page shows a buyer. Served to an API-key caller; the share token in the page URL is the authorization. */
+export type GqlPublicOrderOffer = {
+  __typename?: 'PublicOrderOffer';
+  /** The campaign's ID in bare (unprefixed) form. Echo it back on publicCreateOrder. */
+  campaignId: Scalars['ID']['output'];
+  /** The campaign's display name. */
+  campaignName: Scalars['String']['output'];
+  /** The allowlisted payment methods that still exist on the account, each with a short-lived pre-signed QR image URL when a QR was uploaded. */
+  paymentMethods: Array<GqlPublicPaymentMethod>;
+  /** The campaign's catalog's products in catalog order (v1: the full active catalog, unpaginated). */
+  products: Array<GqlPublicProduct>;
+  /** The seller profile's display name. */
+  sellerName: Scalars['String']['output'];
+};
+
+/** Owner-facing settings for one campaign's public order surface. Owner-only on read and write. */
+export type GqlPublicOrderSettings = {
+  __typename?: 'PublicOrderSettings';
+  ackVersion?: Maybe<Scalars['Int']['output']>;
+  acknowledgedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  allowedPaymentMethods: Array<Scalars['String']['output']>;
+  campaignId: Scalars['ID']['output'];
+  campaignName: Scalars['String']['output'];
+  campaignState: Scalars['String']['output'];
+  enabled: Scalars['Boolean']['output'];
+  publicOrderCount?: Maybe<Scalars['Int']['output']>;
+  shareToken?: Maybe<Scalars['String']['output']>;
+};
+
+/** A payment method a buyer may select on the public order page. */
+export type GqlPublicPaymentMethod = {
+  __typename?: 'PublicPaymentMethod';
+  /** The method's display name. */
+  name: Scalars['String']['output'];
+  /** Pre-signed S3 GET URL for the seller's uploaded QR image (valid for 15 minutes), or null when the method has no QR. */
+  qrCodeUrl?: Maybe<Scalars['String']['output']>;
+};
+
+/** A catalog product as the public order page sees it. Mirrors Product's field names verbatim: Product itself carries @aws_cognito_user_pools and cannot be returned to an API-key caller. */
+export type GqlPublicProduct = {
+  __typename?: 'PublicProduct';
+  /** The product's description. */
+  description?: Maybe<Scalars['String']['output']>;
+  /** The product's unit price. */
+  price: Scalars['Float']['output'];
+  /** The product's ID within its catalog. */
+  productId: Scalars['ID']['output'];
+  /** The product's display name. */
+  productName: Scalars['String']['output'];
+  /** The product's position in the catalog; the offer is ordered by it. */
+  sortOrder?: Maybe<Scalars['Int']['output']>;
+};
+
 /** The root query object for the KernelWorx API. */
 export type GqlQuery = {
   __typename?: 'Query';
@@ -756,6 +831,8 @@ export type GqlQuery = {
   findSharedCampaigns: Array<GqlSharedCampaign>;
   /** Fetch a single campaign by ID. Returns the campaign if the caller has read access to its profile, otherwise null. */
   getCampaign?: Maybe<GqlCampaign>;
+  /** Owner-facing settings for one campaign's public order surface. Owner-only on read and write. */
+  getCampaignPublicOrderSettings?: Maybe<GqlPublicOrderSettings>;
   /** Fetch a single catalog by ID. Returns the catalog only when it is public, admin-managed (ADMIN_MANAGED), or owned by the caller; returns null otherwise. */
   getCatalog?: Maybe<GqlCatalog>;
   /** The authenticated caller's account. The row is created automatically on first read if it does not yet exist. */
@@ -796,6 +873,8 @@ export type GqlQuery = {
   myPaymentMethods: Array<GqlPaymentMethod>;
   /** The payment methods stored for a profile's owner. The caller must have access to the profile; READ-only callers see the method names but not their QR codes (qrCodeUrl is null). */
   paymentMethodsForProfile: Array<GqlPaymentMethod>;
+  /** Fetch the public order page's offer: seller, campaign, catalog products, and allowed payment methods. A campaign that never enabled public orders, is disabled, or carries a token mismatch all return the same NOT_FOUND, so probing cannot distinguish them. */
+  publicGetOrderOffer: GqlPublicOrderOffer;
 };
 
 /** The root query object for the KernelWorx API. */
@@ -846,6 +925,11 @@ export type GqlQuery_FindSharedCampaignsArgs = {
 
 /** The root query object for the KernelWorx API. */
 export type GqlQuery_GetCampaignArgs = {
+  campaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_GetCampaignPublicOrderSettingsArgs = {
   campaignId: Scalars['ID']['input'];
 };
 
@@ -931,6 +1015,12 @@ export type GqlQuery_ListUnitCatalogsArgs = {
 /** The root query object for the KernelWorx API. */
 export type GqlQuery_PaymentMethodsForProfileArgs = {
   profileId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_PublicGetOrderOfferArgs = {
+  campaignId: Scalars['ID']['input'];
+  token: Scalars['String']['input'];
 };
 
 /** Input for redeemProfileInvite. Redeems an invite code to gain access to a profile. */
@@ -1187,6 +1277,20 @@ export type GqlUpdateCampaignInput = {
   unitNumber?: InputMaybe<Scalars['Int']['input']>;
   /** New scout unit type. */
   unitType?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** Input for updateCampaignPublicOrderSettings. Owner-only; the campaign is identified by its canonical (CAMPAIGN# prefixed) ID. */
+export type GqlUpdateCampaignPublicOrderSettingsInput = {
+  /** Must be true when enabling and the stored acknowledgement version is behind the current one. */
+  acknowledgementsAccepted?: InputMaybe<Scalars['Boolean']['input']>;
+  /** Payment method names buyers may select. Omit to keep the stored value; an explicit null is rejected. */
+  allowedPaymentMethods?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Canonical ID of the campaign whose public-order settings are being written. */
+  campaignId: Scalars['ID']['input'];
+  /** Whether public orders should be enabled for this campaign. */
+  enabled: Scalars['Boolean']['input'];
+  /** Mint a replacement share token (the only revocation path). Allowed while disabled. */
+  rotateToken?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 /** Input for updateMyAccount. Updates profile fields on the caller's own account; at least one field must be provided. */

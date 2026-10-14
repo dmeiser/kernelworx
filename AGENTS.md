@@ -29,7 +29,8 @@ The root `.env` (loaded by `tests/integration/setup.ts`) and `frontend/.env` are
 hand-maintained for infrastructure values: `scripts/generate_integration_env.py` reads
 `tofu output -json` for the dev or `ephemeral/<run-id>` stack and writes the managed keys
 (`TEST_APPSYNC_ENDPOINT`, `TEST_USER_POOL_ID`, `TEST_USER_POOL_CLIENT_ID`, `TEST_REGION`,
-`E2E_BASE_URL` when `site_url` is present; `VITE_*` keys with `--frontend-out`), preserving
+`TEST_APPSYNC_API_KEY` when `appsync_api_key` is present, `E2E_BASE_URL` when `site_url`
+is present; `VITE_*` keys with `--frontend-out`), preserving
 every unmanaged line. A missing target file is created from the committed
 `.env.example`/`frontend/.env.example` templates, so those templates must keep a
 placeholder line for every managed key (structural `--check` tests in
@@ -170,7 +171,7 @@ The APPSYNC_JS 1.0.0 runtime rejects resolver/function code at `CreateFunction`/
 
 ### AppSync resolver-only authorization posture (#71)
 
-KernelWorx uses Amazon Cognito User Pools for AppSync authentication and `default_action = "ALLOW"` on the user pool config. AppSync therefore admits any authenticated Cognito user to every field by default; schema-level directives do not enforce ownership or share-based access control.
+KernelWorx uses Amazon Cognito User Pools as AppSync's default authentication mode (`default_action = "ALLOW"` on the user pool config), plus an additional API-key mode whose `@aws_api_key` fields are reachable with the API key alone and are authorized by the per-campaign share token, not by any Cognito identity. AppSync therefore admits any authenticated Cognito user to every default-mode field; schema-level directives do not enforce ownership or share-based access control.
 
 The schema currently uses `@aws_cognito_user_pools` only to require Cognito authentication on selected types and fields (for example `Catalog`, `Product`, and a few queries). It does not perform owner, share, or admin authorization. All such authorization is implemented in resolvers:
 

@@ -41,12 +41,42 @@ resource "aws_appsync_graphql_api" "main" {
     exclude_verbose_content  = true
   }
 
+  # Additional authentication mode for the public-orders surface (#679 rev 7).
+  # The provider takes ONLY authentication_type here: an API key carries no
+  # inline configuration block, and the key itself is the separate
+  # aws_appsync_api_key resource below. The Cognito user-pool config above stays
+  # the PRIMARY mode, so every existing field keeps its current auth; a field is
+  # reachable with the key only when it carries @aws_api_key, and the key alone
+  # is not enough for the public fields, which also require a valid bearer token.
+  additional_authentication_provider {
+    authentication_type = "API_KEY"
+  }
+
   # Schema loaded from file
   schema = file("${path.module}/../../schema/schema.graphql")
 
   lifecycle {
     prevent_destroy = var.prevent_destroy
   }
+}
+
+# The public-orders API key (#679 rev 7). It is baked into the frontend bundle
+# (VITE_APPSYNC_API_KEY), so it is expected to be public: it grants access only
+# to the @aws_api_key root fields, and every one of those still requires a valid
+# per-campaign bearer token.
+#
+# `expires` is an explicit RFC3339 value at hour granularity. Omitting it is a
+# trap: the provider defaults to 7 days, which would silently kill the public
+# order page a week after every deploy. The value is a literal rather than
+# timeadd(timestamp(), ...) on purpose - a computed expiry changes on every plan
+# and would rotate the key (and break every open tab holding the old bundle) on
+# each deploy. Renewal is a deliberate, manual edit plus frontend redeploy.
+# The service caps a key at 365 days from creation, so this date must stay
+# within a year of the deploy that creates the key.
+resource "aws_appsync_api_key" "public_orders" {
+  api_id      = aws_appsync_graphql_api.main.id
+  description = "Public orders (campaign-scoped share tokens)"
+  expires     = "2027-10-01T00:00:00Z"
 }
 
 # AppSync-managed CloudWatch log group with explicit retention.

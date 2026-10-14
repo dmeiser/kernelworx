@@ -200,3 +200,25 @@ resource "aws_appsync_function" "batch_latest_campaigns" {
     campaigns_table_name = var.dynamodb_table_names.campaigns
   })
 }
+
+# === #679 rev 7 public-order settings (campaign-keyed, owner-only) ===
+
+# Owner gate for both settings pipelines. Runs after the two-phase write-access
+# pair, which the campaign-keyed pipelines reach through the campaign's own
+# profileId, and refuses everyone else with FORBIDDEN - including a WRITE-share
+# collaborator and a caller who cannot resolve the profile at all, which is the
+# same answer for both so the settings query stays no existence oracle. It makes
+# no datastore call of its own (ownership is already decided by the pair's
+# consistent base-table read), so it sits on the None datasource.
+resource "aws_appsync_function" "verify_public_settings_owner" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.none.name
+  name        = "VerifyPublicSettingsOwnerFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_public_settings_owner_fn.js")
+}

@@ -155,3 +155,24 @@ resource "aws_appsync_function" "find_shared_campaigns_by_unit" {
 
   code = file("${local.js_resolvers_dir}/find_shared_campaigns_resolver.js")
 }
+
+# === #679 rev 7 public-order settings (campaign-keyed, owner-only) ===
+
+# Catalog gate of updateCampaignPublicOrderSettings (#679 rev 7). The campaign's
+# catalog lives in a different table, so this is its own function on its own
+# datasource: a public buyer picks products from it, so enabling over a missing
+# or soft-deleted catalog would publish an offer with nothing buyable. The
+# previous step sets publicSettingsCatalogId only when the save is publishing,
+# so a disable / rotate / method-list save makes no read at all.
+resource "aws_appsync_function" "validate_public_settings_catalog" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.catalogs.name
+  name        = "ValidatePublicSettingsCatalogFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_public_settings_catalog_fn.js")
+}
