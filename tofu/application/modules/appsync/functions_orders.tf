@@ -181,3 +181,36 @@ resource "aws_appsync_function" "query_orders_by_campaign" {
 
   code = file("${local.js_resolvers_dir}/query_orders_by_campaign_fn.js")
 }
+
+# publicCreateOrder pipeline step 5 (#679): the no-oracle payment-method clone.
+# CLONE of validate_payment_method_fn.js: both rejections (off the allowlist,
+# no longer on the account) share one message and never echo the submitted
+# name, so the mutation cannot enumerate the owner's stored method names.
+resource "aws_appsync_function" "validate_payment_method_public" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.accounts.name
+  name        = "ValidatePaymentMethodPublicFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_payment_method_public_fn.js")
+}
+
+# publicCreateOrder pipeline step 7 (#679): the order write. A CLONE of
+# create_order_fn.js that reads the stash (not ctx.args.input) and adds
+# orderSource, status, and the minted receiptToken.
+resource "aws_appsync_function" "create_public_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.orders.name
+  name        = "CreatePublicOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/create_public_order_fn.js")
+}

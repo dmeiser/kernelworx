@@ -222,3 +222,20 @@ resource "aws_appsync_function" "verify_public_settings_owner" {
 
   code = file("${local.js_resolvers_dir}/verify_public_settings_owner_fn.js")
 }
+
+# publicCreateOrder pipeline step 3 (#679): fetch the campaign's profile for
+# the owner account id (the payment-method account read) and the seller display
+# name (denormalized into the order row). The profileId-index GSI is a locator
+# only; a transfer-window second projection is refused, never guessed (#438).
+resource "aws_appsync_function" "get_profile_for_public_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "GetProfileForPublicOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_profile_for_public_order_fn.js")
+}

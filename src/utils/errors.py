@@ -52,6 +52,8 @@ class ErrorCode:
     INVALID_ADDRESS = "INVALID_ADDRESS"
 
     # Business logic errors
+    # A campaign's lifetime public-order cap is spent; the buyer must not retry.
+    PUBLIC_ORDER_LIMIT_EXCEEDED = "PUBLIC_ORDER_LIMIT_EXCEEDED"
     INVITE_EXPIRED = "INVITE_EXPIRED"
     INVITE_ALREADY_USED = "INVITE_ALREADY_USED"
     CAMPAIGN_READ_ONLY = "CAMPAIGN_READ_ONLY"

@@ -292,6 +292,8 @@ type Order {
   totalAmount: Float!
   """Free-text notes about the order."""
   notes: String
+  """The order's payment-verification state. Absent on pre-feature rows; the public path always writes NEW."""
+  status: OrderStatus
   """When the order was created."""
   createdAt: AWSDateTime!
   """When the order was last updated."""
@@ -530,6 +532,64 @@ type PublicPaymentMethod @aws_api_key {
   name: String!
   """Pre-signed S3 GET URL for the seller's uploaded QR image (valid for 15 minutes), or null when the method has no QR."""
   qrCodeUrl: String
+}
+
+"""The payment-verification state of an order. Authenticated orders leave this absent; the public path always writes NEW."""
+enum OrderStatus {
+  """Created, awaiting the seller's off-platform payment verification."""
+  NEW
+  """The seller confirmed the buyer paid."""
+  CONFIRMED
+}
+
+"""A line item on the buyer's receipt: the product and price captured at order time."""
+type PublicLineItem @aws_api_key {
+  """The ID of the product."""
+  productId: ID!
+  """The product's display name as captured at order time."""
+  productName: String!
+  """The quantity ordered."""
+  quantity: Int!
+  """The product's unit price captured from the catalog at order time."""
+  pricePerUnit: Float!
+  """quantity times pricePerUnit."""
+  subtotal: Float!
+}
+
+"""The receipt returned when publicCreateOrder succeeds."""
+type PublicOrderReceipt @aws_api_key {
+  """The order's full ID (ORDER#...#... form), for display and support."""
+  orderId: ID!
+  """The buyer's receipt link as a site-relative path (/r/<campaignId>/<orderSuffix>/<receiptToken>): a resolver has no site origin, so the success screen resolves it against its own origin. The emailed copy is composed absolutely in the email slice."""
+  receiptUrl: String
+  """The order's total amount."""
+  totalAmount: Float!
+  """Whether the buyer supplied an email address."""
+  buyerEmailProvided: Boolean!
+  """Whether the confirmation email was sent. false also honestly covers \"not configured\" and \"send failed\"; email failure never fails the order."""
+  confirmationEmailSent: Boolean!
+}
+
+"""The buyer's receipt for a public order, served to the receipt link's API-key caller. The receipt token in the URL is the authorization."""
+type PublicOrderReceiptLookup @aws_api_key {
+  """The seller profile's display name."""
+  sellerName: String!
+  """The order's full ID (ORDER#...#... form)."""
+  orderId: ID!
+  """When the order was placed."""
+  orderDate: AWSDateTime!
+  """The ordered products and quantities."""
+  lineItems: [PublicLineItem!]!
+  """The order's total amount."""
+  totalAmount: Float!
+  """The name of the payment method the buyer selected."""
+  paymentMethodName: String!
+  """The order's payment-verification state (NEW until the seller confirms payment)."""
+  status: OrderStatus!
+  """The buyer's first name as submitted."""
+  buyerFirstName: String!
+  """The buyer's last name as submitted."""
+  buyerLastName: String!
 }
 
 # ============================================================================
@@ -907,6 +967,15 @@ type Query {
     """The share token from the public URL."""
     token: String!
   ): PublicOrderOffer! @aws_api_key
+  """Fetch the buyer's receipt for a public order. Served to an API-key caller; the receipt token in the URL is the authorization. An unknown campaign/suffix, an absent or mismatched token, and a token that does not match the order all return the same NOT_FOUND."""
+  publicGetOrderReceipt(
+    """The campaign's ID in bare (unprefixed) form."""
+    campaignId: ID!,
+    """The order's suffix (the third and final segment of the order's full ID)."""
+    orderSuffix: String!,
+    """The receipt token from the receipt URL."""
+    receiptToken: String!
+  ): PublicOrderReceiptLookup! @aws_api_key
 
   # Share queries
   """List the shares (access grants) on a profile. The caller must have write access to the profile."""
@@ -1095,6 +1164,13 @@ type Mutation {
     """The campaign and the public-order settings to apply."""
     input: UpdateCampaignPublicOrderSettingsInput!
   ): PublicOrderSettings! @aws_cognito_user_pools
+
+  # Public order mutations (API key auth mode; anonymous)
+  """Place a public order on a campaign whose share token is in the request. Returns the buyer's receipt. A never-enabled campaign, a disabled campaign, and a bad token all return NOT_FOUND so probing cannot distinguish them; a campaign at its order cap returns PUBLIC_ORDER_LIMIT_EXCEEDED."""
+  publicCreateOrder(
+    """The anonymous order input, carrying the campaign's share token."""
+    input: PublicCreateOrderInput!
+  ): PublicOrderReceipt! @aws_api_key
 
   # Catalog mutations
   """Create a catalog owned by the caller. Returns the created catalog."""

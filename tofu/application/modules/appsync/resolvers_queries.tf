@@ -626,3 +626,41 @@ resource "aws_appsync_resolver" "admin_get_profile_shares" {
 
   code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
+
+# publicGetOrderOffer (Lambda unit resolver, #679). Anonymous API-key read; the
+# share token in the argument is the authorization. The offer is six datastore
+# reads plus QR pre-signing, which exceeds one APPSYNC_JS function's single
+# datastore call, so it is a Lambda, not a pipeline. The handler dispatches on
+# info.fieldName; identity is null under API_KEY and is never read.
+resource "aws_appsync_resolver" "public_order_offer" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "publicGetOrderOffer"
+  data_source = aws_appsync_datasource.public_orders.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# publicGetOrderReceipt (Lambda unit resolver, #679). The second field on the
+# same public-orders Lambda: the receipt read is one strongly consistent orders
+# GetItem, and the per-order receipt token in the argument is the capability.
+# Unknown campaign/suffix, absent or mismatched token, and a campaign mismatch
+# all answer the identical NOT_FOUND.
+resource "aws_appsync_resolver" "public_order_receipt" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "publicGetOrderReceipt"
+  data_source = aws_appsync_datasource.public_orders.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

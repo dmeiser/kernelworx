@@ -871,3 +871,43 @@ resource "aws_appsync_resolver" "admin_update_campaign_shared_code" {
 
   code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
+
+# publicCreateOrder (#679 write slice, campaign-keyed rework): a pure
+# APPSYNC_JS pipeline on the DynamoDB datasources (no Lambda). Order:
+#   1 validate_public_token            (CampaignsDS, campaignId-index locator)
+#   2 validate_public_token_step2      (CampaignsDS, strong read + all checks)
+#   3 get_profile_for_public_order    (ProfilesDS, owner + seller name)
+#   4 get_catalog                     (CatalogsDS, reused as-is)
+#   5 validate_payment_method_public  (AccountsDS, no-oracle clone)
+#   6 increment_public_order_count    (CampaignsDS, the cap CONDITION)
+#   7 create_public_order             (OrdersDS, the PutItem + receipt mint)
+resource "aws_appsync_resolver" "public_create_order" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "publicCreateOrder"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      # Two function resources over two files because a pipeline may list a
+      # function id only once (#438).
+      aws_appsync_function.validate_public_token.function_id,
+      aws_appsync_function.validate_public_token_step2.function_id,
+      aws_appsync_function.get_profile_for_public_order.function_id,
+      # CatalogsDS: reused as-is; reads ctx.stash.catalogId stashed in step 2.
+      aws_appsync_function.get_catalog.function_id,
+      aws_appsync_function.validate_payment_method_public.function_id,
+      # CampaignsDS: the cap gate, BEFORE the write (condition failure aborts
+      # the pipeline with PUBLIC_ORDER_LIMIT_EXCEEDED and no row).
+      aws_appsync_function.increment_public_order_count.function_id,
+      aws_appsync_function.create_public_order.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/public_create_order_pipeline_resolver.js")
+}

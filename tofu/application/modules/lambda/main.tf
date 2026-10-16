@@ -162,6 +162,14 @@ locals {
         USER_POOL_ID = var.user_pool_id
       }
     }
+    # Public buyer order offer + receipt (API key auth, #679). One Lambda serves
+    # both public read fields; the handler dispatches on info.fieldName. No
+    # extra_env: the offer/receipt need no Cognito or env-specific values.
+    "public-orders" = {
+      handler     = "handlers.public_orders_offer.handler"
+      timeout     = 15
+      memory_size = 256
+    }
   }
 
   # Cognito trigger functions are kept separate to avoid module-level dependency

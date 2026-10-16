@@ -41,6 +41,8 @@ awsjson
 awsurl
 AYFK
 backend
+behaviour
+behaviours
 boto
 botocore
 Bricolage
@@ -104,6 +106,7 @@ dotenv
 DPEHPK
 DynamoDB
 EFGH
+elif
 emailAddress
 emoji
 isinstance
@@ -137,6 +140,7 @@ fullname
 fromisoformat
 fullWidth
 getfail
+getobject
 getsizeof
 getters
 getvalue
@@ -327,6 +331,7 @@ reinstantiating
 reusability
 rname
 rollup
+rtok
 route53
 RRule
 rtype
@@ -407,10 +412,12 @@ thead
 timeframe
 timeoutId
 titleText
+tmpreq
 toastMessage
 TOFUDIR
 toggleable
 tooltip
+tolower
 totp
 TQOJQ
 TQOJQGEZDGNBVGY

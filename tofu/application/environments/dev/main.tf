@@ -251,6 +251,9 @@ module "lambda" {
     # trigger uses its own scoped role (accounts table only). The monolithic
     # shared role is retired.
     "post-auth" = module.iam.lambda_post_auth_execution_role_arn
+    # #679 (public-orders offer slice): the public buyer order offer + receipt
+    # Lambda uses its own scoped role (the anonymous-facing read path).
+    "public-orders" = module.iam.lambda_public_orders_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name
 

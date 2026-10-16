@@ -433,3 +433,52 @@ resource "aws_appsync_function" "write_campaign_public_order_settings" {
 
   code = file("${local.js_resolvers_dir}/write_campaign_public_order_settings_fn.js")
 }
+
+# =============================================================================
+# publicCreateOrder pipeline functions - campaign locator + cap gate (#679)
+# =============================================================================
+
+# Step 1: locate the campaign through the campaignId-index GSI. A GSI locator
+# only; the consistent read in step 2 is what authorizes (#545). A pipeline may
+# list a function id only once (#438), so each step is its own function resource.
+resource "aws_appsync_function" "validate_public_token" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "ValidatePublicTokenFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_public_token_fn.js")
+}
+
+# Step 2: the strong campaign read carrying the token, active, cap pre-check,
+# allowlist, ack, and input-bound checks; stashes the campaign + catalogId.
+resource "aws_appsync_function" "validate_public_token_step2" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "ValidatePublicTokenStep2Fn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_public_token_step2_fn.js")
+}
+
+# Step 6: the cap CONDITION (atomic ADD on the campaign). Runs before the write.
+resource "aws_appsync_function" "increment_public_order_count" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "IncrementPublicOrderCountFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/increment_public_order_count_fn.js")
+}

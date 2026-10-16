@@ -27,9 +27,9 @@ import { fileURLToPath } from "url";
  * no-directive field or type is reachable only through the default Cognito mode),
  * and the rule that marking the ROOT FIELD is not sufficient - a marked root
  * returning an unmarked object type resolves the root but DENIES its sub-fields.
- * The live assertions for the first two live in
- * `tests/integration/resolvers/publicAuthModes.integration.test.ts`; the closure
- * walk below is what makes the third rule enforced statically.
+ * The live assertions for the first two are deferred to the later
+ * integration/E2E slice of the public-orders plan (no such file exists yet);
+ * the closure walk below is what makes the third rule enforced statically now.
  */
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
@@ -38,19 +38,29 @@ const SCHEMA_PATH = join(__dirname, "..", "..", "tofu", "application", "schema",
 const API_KEY = "aws_api_key";
 const COGNITO = "aws_cognito_user_pools";
 
-/** The root fields an API-key caller may invoke (slice 1: the offer read only).
- * The create and receipt roots arrive with the order write and receipt slices:
- * a root field declared without a resolver fails every query against it, so
- * declaring them early would be a defect, not a head start. */
-const PUBLIC_ROOT_FIELDS = new Set(["publicGetOrderOffer"]);
+/** The root fields an API-key caller may invoke. The offer read is slice 1;
+ * the create and receipt roots arrive with the order write and receipt slices
+ * (this slice adds the create root; the receipt root is wired to the Lambda
+ * handler the same way). Every root carries a resolver; a root declared
+ * without one would fail every query against it, so the set stays exact. */
+const PUBLIC_ROOT_FIELDS = new Set(["publicGetOrderOffer", "publicGetOrderReceipt", "publicCreateOrder"]);
 
 /**
  * Every object type reachable from a public root field must carry the directive
- * at TYPE level - that is the rule, not a hand-listed count. PublicProduct and
- * PublicLineItem exist precisely because Catalog/Product carry
- * `@aws_cognito_user_pools` and LineItem carries nothing.
+ * at TYPE level - that is the rule, not a hand-listed count. PublicProduct,
+ * PublicLineItem, PublicOrderReceipt and PublicOrderReceiptLookup exist precisely
+ * because Catalog/Product and the authenticated Order type carry
+ * `@aws_cognito_user_pools` (or nothing) and cannot be returned to an API-key
+ * caller.
  */
-const PUBLIC_TYPES = new Set(["PublicOrderOffer", "PublicProduct", "PublicPaymentMethod"]);
+const PUBLIC_TYPES = new Set([
+  "PublicOrderOffer",
+  "PublicProduct",
+  "PublicPaymentMethod",
+  "PublicLineItem",
+  "PublicOrderReceipt",
+  "PublicOrderReceiptLookup",
+]);
 
 /** Owner-only settings fields: explicit Cognito directive so a future third auth
  * mode cannot silently widen them. Campaign-keyed (#679 rev 7). */
@@ -332,8 +342,8 @@ describe("public API key directive surface (schema.graphql)", () => {
   });
 
   // GAP - do not fill in with an assumption. The multi-auth spike measured the
-  // field and type rules (pinned above and in
-  // tests/integration/resolvers/publicAuthModes.integration.test.ts) but NOT the
+  // field and type rules (pinned above; live-run assertions are deferred to the
+  // later integration/E2E slice of the public-orders plan) but NOT the
   // input-type rule, so it stays unpinned until someone verifies it.
   test.skip("input types need no auth directive (still unverified)", () => {});
 });
