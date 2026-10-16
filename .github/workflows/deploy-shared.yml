@@ -234,6 +234,7 @@ jobs:
             -t module.appsync.aws_appsync_function.validate_payment_method_appsync \
             -t module.appsync.aws_appsync_resolver.create_seller_profile \
             -t module.appsync.aws_appsync_resolver.create_campaign \
+            -t module.appsync.aws_appsync_resolver.public_create_order \
             -t module.appsync.aws_appsync_resolver.update_my_account \
             -t module.appsync.aws_appsync_resolver.list_my_shares \
             -t module.appsync.aws_appsync_resolver.list_shares_by_profile \

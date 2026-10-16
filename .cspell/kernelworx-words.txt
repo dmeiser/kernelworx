@@ -8,6 +8,7 @@ Account
 Actions
 addext
 addopts
+acks
 Admin
 AdminDeleteUser
 AdminLinkProviderForUser
@@ -19,6 +20,7 @@ affordances
 aioboto
 aiobotocore
 Alina
+allowlistable
 America
 Amplify
 anomalymonitor
@@ -190,6 +192,7 @@ José
 José's
 jsonencode
 jsonify
+jsqr
 kaushan
 kernelworx
 KernelWorx
@@ -495,3 +498,4 @@ yearRange
 YTBOIJKMZG
 zelle
 zod
+zxing

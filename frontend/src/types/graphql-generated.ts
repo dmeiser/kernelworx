@@ -2929,3 +2929,115 @@ export type GqlCreateManagedCatalogMutation = {
     }>;
   };
 };
+
+export type GqlGetCampaignPublicOrderSettingsQueryVariables = Exact<{
+  campaignId: Scalars['ID']['input'];
+}>;
+
+export type GqlGetCampaignPublicOrderSettingsQuery = {
+  __typename?: 'Query';
+  getCampaignPublicOrderSettings?:
+    | {
+        __typename?: 'PublicOrderSettings';
+        enabled: boolean;
+        shareToken?: string | null | undefined;
+        allowedPaymentMethods: Array<string>;
+        acknowledgedAt?: string | null | undefined;
+        ackVersion?: number | null | undefined;
+        publicOrderCount?: number | null | undefined;
+        campaignId: string;
+        campaignName: string;
+        campaignState: string;
+      }
+    | null
+    | undefined;
+};
+
+export type GqlUpdateCampaignPublicOrderSettingsMutationVariables = Exact<{
+  input: GqlUpdateCampaignPublicOrderSettingsInput;
+}>;
+
+export type GqlUpdateCampaignPublicOrderSettingsMutation = {
+  __typename?: 'Mutation';
+  updateCampaignPublicOrderSettings: {
+    __typename?: 'PublicOrderSettings';
+    enabled: boolean;
+    shareToken?: string | null | undefined;
+    allowedPaymentMethods: Array<string>;
+    acknowledgedAt?: string | null | undefined;
+    ackVersion?: number | null | undefined;
+    publicOrderCount?: number | null | undefined;
+    campaignId: string;
+    campaignName: string;
+    campaignState: string;
+  };
+};
+
+export type GqlPublicGetOrderOfferQueryVariables = Exact<{
+  campaignId: Scalars['ID']['input'];
+  token: Scalars['String']['input'];
+}>;
+
+export type GqlPublicGetOrderOfferQuery = {
+  __typename?: 'Query';
+  publicGetOrderOffer: {
+    __typename?: 'PublicOrderOffer';
+    sellerName: string;
+    campaignId: string;
+    campaignName: string;
+    products: Array<{
+      __typename?: 'PublicProduct';
+      productId: string;
+      productName: string;
+      price: number;
+      description?: string | null | undefined;
+      sortOrder?: number | null | undefined;
+    }>;
+    paymentMethods: Array<{ __typename?: 'PublicPaymentMethod'; name: string; qrCodeUrl?: string | null | undefined }>;
+  };
+};
+
+export type GqlPublicCreateOrderMutationVariables = Exact<{
+  input: GqlPublicCreateOrderInput;
+}>;
+
+export type GqlPublicCreateOrderMutation = {
+  __typename?: 'Mutation';
+  publicCreateOrder: {
+    __typename?: 'PublicOrderReceipt';
+    orderId: string;
+    receiptUrl?: string | null | undefined;
+    totalAmount: number;
+    buyerEmailProvided: boolean;
+    confirmationEmailSent: boolean;
+  };
+};
+
+export type GqlPublicGetOrderReceiptQueryVariables = Exact<{
+  campaignId: Scalars['ID']['input'];
+  orderSuffix: Scalars['String']['input'];
+  receiptToken: Scalars['String']['input'];
+}>;
+
+export type GqlPublicGetOrderReceiptQuery = {
+  __typename?: 'Query';
+  publicGetOrderReceipt: {
+    __typename?: 'PublicOrderReceiptLookup';
+    sellerName: string;
+    orderId: string;
+    orderDate: string;
+    totalAmount: number;
+    paymentMethodName: string;
+    status: GqlOrderStatus;
+    buyerFirstName: string;
+    buyerLastName: string;
+    lineItems: Array<{
+      __typename?: 'PublicLineItem';
+      productId: string;
+      productName: string;
+      quantity: number;
+      pricePerUnit: number;
+      subtotal: number;
+    }>;
+  };
+};
