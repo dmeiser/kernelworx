@@ -167,14 +167,19 @@ case "$ACTION" in
     log ""
     TEST_REGION="${AWS_REGION:-us-east-1}"
     COGNITO_DOMAIN=$(tofu output -raw cognito_domain)
+    APPSYNC_API_KEY=$(tofu output -raw appsync_api_key 2>/dev/null) || true
     echo "export TEST_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    echo "export TEST_APPSYNC_API_KEY=$(tofu output -raw appsync_api_key)"
+    if [ -n "$APPSYNC_API_KEY" ]; then
+      echo "export TEST_APPSYNC_API_KEY=$APPSYNC_API_KEY"
+    fi
     echo "export TEST_USER_POOL_ID=$USER_POOL_ID"
     echo "export TEST_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
     echo "export TEST_REGION=$TEST_REGION"
     echo "export E2E_BASE_URL=http://localhost:4173"
     echo "export VITE_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    echo "export VITE_APPSYNC_API_KEY=$(tofu output -raw appsync_api_key)"
+    if [ -n "$APPSYNC_API_KEY" ]; then
+      echo "export VITE_APPSYNC_API_KEY=$APPSYNC_API_KEY"
+    fi
     echo "export VITE_APPSYNC_REGION=$TEST_REGION"
     echo "export VITE_COGNITO_USER_POOL_ID=$USER_POOL_ID"
     echo "export VITE_COGNITO_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
@@ -194,16 +199,23 @@ case "$ACTION" in
   env)
     TEST_REGION="${AWS_REGION:-us-east-1}"
     COGNITO_DOMAIN=$(tofu output -raw cognito_domain)
+    APPSYNC_API_KEY=$(tofu output -raw appsync_api_key 2>/dev/null) || true
     log "📤 Environment exports for existing stack: $RUN_ID"
     log ""
     echo "export TEST_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    echo "export TEST_APPSYNC_API_KEY=$(tofu output -raw appsync_api_key)"
+    if [ -n "$APPSYNC_API_KEY" ]; then
+      echo "export TEST_APPSYNC_API_KEY=$APPSYNC_API_KEY"
+    else
+      log "⚠️  appsync_api_key output is absent from this stack's state; the stack has not yet deployed the public-orders feature, so TEST_APPSYNC_API_KEY/VITE_APPSYNC_API_KEY are omitted"
+    fi
     echo "export TEST_USER_POOL_ID=$(tofu output -raw cognito_user_pool_id)"
     echo "export TEST_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
     echo "export TEST_REGION=$TEST_REGION"
     echo "export E2E_BASE_URL=http://localhost:4173"
     echo "export VITE_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    echo "export VITE_APPSYNC_API_KEY=$(tofu output -raw appsync_api_key)"
+    if [ -n "$APPSYNC_API_KEY" ]; then
+      echo "export VITE_APPSYNC_API_KEY=$APPSYNC_API_KEY"
+    fi
     echo "export VITE_APPSYNC_REGION=$TEST_REGION"
     echo "export VITE_COGNITO_USER_POOL_ID=$(tofu output -raw cognito_user_pool_id)"
     echo "export VITE_COGNITO_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"

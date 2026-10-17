@@ -11,12 +11,17 @@ export const MAX_BUYER_NOTES_LENGTH = 500;
 /**
  * Check if an address has been started (at least one field filled).
  */
-export function addressStarted(address: {
-  street?: string;
-  city?: string;
-  state?: string;
-  zipCode?: string;
-} | null | undefined): boolean {
+export function addressStarted(
+  address:
+    | {
+        street?: string;
+        city?: string;
+        state?: string;
+        zipCode?: string;
+      }
+    | null
+    | undefined,
+): boolean {
   if (!address) {
     return false;
   }

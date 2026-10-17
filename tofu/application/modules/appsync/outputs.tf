@@ -23,7 +23,8 @@ output "api_arn" {
 # The public-orders API key (#679 rev 7). Deliberately NOT sensitive: it is
 # baked into the public frontend bundle (VITE_APPSYNC_API_KEY) by design, and it
 # grants access only to the @aws_api_key root fields, each of which still
-# requires a valid per-campaign bearer token. It must be readable from
+# requires the per-campaign share token, a plain GraphQL argument checked
+# inside the resolver (NOT_FOUND when absent). It must be readable from
 # `tofu output -json` so scripts/generate_integration_env.py can write the
 # TEST_APPSYNC_API_KEY / VITE_APPSYNC_API_KEY managed keys.
 #

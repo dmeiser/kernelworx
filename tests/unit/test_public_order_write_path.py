@@ -26,6 +26,7 @@ CATALOG = "aws_appsync_function.get_catalog"
 PAYMENT = "aws_appsync_function.validate_payment_method_public"
 INCREMENT = "aws_appsync_function.increment_public_order_count"
 WRITE = "aws_appsync_function.create_public_order"
+EMAIL = "aws_appsync_function.send_public_order_emails"
 
 
 def test_public_create_order_pipeline_order() -> None:
@@ -38,6 +39,9 @@ def test_public_create_order_pipeline_order() -> None:
         PAYMENT,
         INCREMENT,
         WRITE,
+        # The best-effort email step runs AFTER the order write: it must never
+        # abort the committed order, and its own failure is swallowed by design.
+        EMAIL,
     ], "publicCreateOrder's step order is the cap-burn contract; do not reorder"
 
 

@@ -120,6 +120,10 @@ Global Secondary Indexes:
 | paymentMethod | String | Payment type |
 | deliveryStatus | String | Delivery state |
 | notes | String | Order notes |
+| status | String | Payment-verification state (`NEW`/`CONFIRMED`, `OrderStatus`). Absent on pre-feature and authenticated rows; the public path always writes `NEW` |
+| orderSource | String | `PUBLIC` for orders placed via the public order page; absent on authenticated orders |
+| sellerName | String | Denormalized seller display name captured at public order time; not an `Order` GraphQL field |
+| receiptToken | String | Public receipt capability token from the `/r/` URL; not an `Order` GraphQL field |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
 

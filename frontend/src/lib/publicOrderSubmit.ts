@@ -89,17 +89,14 @@ function buildPublicLineItems(form: PublicOrderFormState): {
 /**
  * Build the success-screen summary from the form and the offer.
  */
-export function buildSubmittedSummary(
-  form: PublicOrderFormState,
-  offer: PublicOfferView,
-): PublicOrderSubmittedSummary {
-    const paymentMethod = offer.paymentMethods[0]?.name ?? form.paymentMethod;
-    return {
-      firstName: form.firstName.trim(),
-      lastName: form.lastName.trim(),
-      paymentMethod,
-      phone: form.phone.trim() || undefined,
-      email: form.email.trim() || undefined,
-      lineItems: [],
-    };
-  }
+export function buildSubmittedSummary(form: PublicOrderFormState, offer: PublicOfferView): PublicOrderSubmittedSummary {
+  const paymentMethod = offer.paymentMethods[0]?.name ?? form.paymentMethod;
+  return {
+    firstName: form.firstName.trim(),
+    lastName: form.lastName.trim(),
+    paymentMethod,
+    phone: form.phone.trim() || undefined,
+    email: form.email.trim() || undefined,
+    lineItems: [],
+  };
+}

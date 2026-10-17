@@ -78,9 +78,11 @@ const HomePage = lazyRoute(() => import('./pages/HomePage').then((m) => ({ defau
 const StoryPage = lazyRoute(() => import('./pages/StoryPage').then((m) => ({ default: m.StoryPage })));
 
 const PublicOrderPage = lazyRoute(() =>
-  import('./pages/PublicOrderPage').then((m) => ({ default: m.PublicOrderPage })));
+  import('./pages/PublicOrderPage').then((m) => ({ default: m.PublicOrderPage })),
+);
 const PublicReceiptPage = lazyRoute(() =>
-  import('./pages/PublicReceiptPage').then((m) => ({ default: m.PublicReceiptPage })));
+  import('./pages/PublicReceiptPage').then((m) => ({ default: m.PublicReceiptPage })),
+);
 
 function ScrollToHash() {
   const { pathname, hash } = useLocation();

@@ -285,6 +285,10 @@ import_ephemeral_resources() {
   import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_public_orders_basic" "${lambda_public_orders_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_public_orders_dynamodb" "${lambda_public_orders_exec_role}:dynamodb-access"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_public_orders_s3" "${lambda_public_orders_exec_role}:s3-qr-codes"
+  # KW-PUBLIC-ORDERS-SES-1: exists only where the SES module is instantiated
+  # (dev); count is zero on ephemeral, so this import is expected to fail there
+  # and import_resource tolerates that.
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_public_orders_ses[0]" "${lambda_public_orders_exec_role}:ses-order-emails"
 
   import_resource "$run_id" "module.iam.aws_iam_role_policy.cognito_sms" "${cognito_sms_role}:sns-publish"
   import_resource "$run_id" "module.appsync.aws_iam_role_policy.appsync_logging" "${appsync_logging_role}:appsync-logging"

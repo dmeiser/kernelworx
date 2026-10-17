@@ -2,6 +2,8 @@
 # Keep one word per line, sorted alphabetically.
 
 About
+absolutized
+absolutizes
 abstractmethod
 Accept
 Account
@@ -21,6 +23,7 @@ aioboto
 aiobotocore
 Alina
 allowlistable
+amazonses
 America
 Amplify
 anomalymonitor
@@ -48,6 +51,7 @@ behaviours
 boto
 botocore
 Bricolage
+brien
 bucketName
 Bundler
 Camelize
@@ -102,6 +106,8 @@ dev
 Device
 desyncs
 dialogProps
+domainkey
+dkim
 dmeiser
 DOTALL
 dotenv
@@ -121,6 +127,7 @@ endswith
 env
 errorMessage
 EEYQ
+elif
 esac
 esbuild
 eslint
@@ -233,6 +240,7 @@ metacharacter
 metacharacters
 metachars
 middleware
+miswired
 millis
 minLength
 mtimes
@@ -351,6 +359,8 @@ secondaryText
 segoe
 Seller
 sendgrid
+sesv
+sesv2
 serializers
 serialise
 serialised
@@ -433,6 +443,7 @@ unaccented
 unassociate
 unauthenticate
 uncompiled
+unconfigured
 unfollow
 unhit
 unindexed

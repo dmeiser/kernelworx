@@ -20,10 +20,10 @@ import { util } from '@aws-appsync/utils';
 // receipt token, and the honest email flags are composed there and surfaced
 // here.
 //
-// The SES slice inserts its best-effort send step between the write and this
-// root; that step will return the same receipt with confirmationEmailSent
-// updated, and this root's pass-through shape is what makes that insertion a
-// one-line pipeline change rather than a reshaping.
+// The SES slice's best-effort send step sits between the write and this root
+// (KW-PUBLIC-ORDERS-SES-1): it returns the same receipt with
+// confirmationEmailSent updated and swallows every email failure, and this
+// root's pass-through shape keeps that insertion invisible here.
 export function request(ctx) {
     return {};
 }

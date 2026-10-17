@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple, ca
 from boto3.dynamodb.conditions import Key
 
 try:  # pragma: no cover
+    from handlers.public_order_emails import SEND_ORDER_EMAILS_OPERATION, handle_send_order_emails
     from handlers.public_orders_receipt import RECEIPT_FIELD, handle_receipt
     from utils import payment_methods as _payment_methods
     from utils.dynamodb import tables
@@ -55,6 +56,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.ids import ensure_campaign_id, ensure_catalog_id, ensure_profile_id, strip_prefix
     from ..utils.logging import get_logger
     from ..utils.payment_methods import RESERVED_NAMES, generate_presigned_get_url
+    from .public_order_emails import SEND_ORDER_EMAILS_OPERATION, handle_send_order_emails
     from .public_orders_receipt import RECEIPT_FIELD, handle_receipt
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -521,18 +523,26 @@ def _run_guarded(event: Dict[str, Any]) -> Dict[str, Any]:
 
 @with_error_handling(error_message=OFFER_UNAVAILABLE_MESSAGE)
 def handler(event: Dict[str, Any], context: Any) -> Any:
-    """Unit-resolver entry point of the public-orders Lambda: dispatch on ``info.fieldName``.
+    """Entry point of the public-orders Lambda: route the email operation, then
+    dispatch the public read fields on ``info.fieldName``.
 
     ``lambda_unit_resolver.js`` forwards the whole AppSync context, so the field
-    name is the discriminator (the pipeline invoke's ``operation`` field does not
-    exist here). Identity is null on this auth mode and is never read.
+    name is the discriminator for the reads (the pipeline invoke's ``operation``
+    field does not exist there). Identity is null on this auth mode and is never
+    read.
 
-    Each public field carries its own decorated entry so the generic-failure
-    message names its own surface ("Offer not available" vs "Receipt not
-    available"). The inner handler has already turned an ``AppError`` into the
-    ``__isError`` payload the unit resolver maps to a GraphQL error code, so this
-    dispatcher passes that payload straight through.
+    The pipeline's email invoke carries an explicit ``operation`` discriminator
+    instead of ``info`` (there is no field name in an Invoke payload); it
+    routes ahead of the unit-resolver fields. Each public field carries its own
+    decorated entry so the generic-failure message names its own surface
+    ("Offer not available" vs "Receipt not available"); the inner handler has
+    already turned an ``AppError`` into the ``__isError`` payload the unit
+    resolver maps to a GraphQL error code, so this dispatcher passes that
+    payload straight through.
     """
+    if event.get("operation") == SEND_ORDER_EMAILS_OPERATION:
+        return handle_send_order_emails(event, context)
+
     field_name = (event.get("info") or {}).get("fieldName", "")
     if field_name == RECEIPT_FIELD:
         return handle_receipt(event, context)

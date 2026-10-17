@@ -46,8 +46,10 @@ resource "aws_appsync_graphql_api" "main" {
   # inline configuration block, and the key itself is the separate
   # aws_appsync_api_key resource below. The Cognito user-pool config above stays
   # the PRIMARY mode, so every existing field keeps its current auth; a field is
-  # reachable with the key only when it carries @aws_api_key, and the key alone
-  # is not enough for the public fields, which also require a valid bearer token.
+  # reachable with the key only when it carries @aws_api_key. At transport level
+  # the key alone suffices to reach those fields; the per-campaign share token
+  # is not a bearer header but a plain GraphQL argument each resolver checks
+  # itself, answering NOT_FOUND when absent.
   additional_authentication_provider {
     authentication_type = "API_KEY"
   }
@@ -63,7 +65,8 @@ resource "aws_appsync_graphql_api" "main" {
 # The public-orders API key (#679 rev 7). It is baked into the frontend bundle
 # (VITE_APPSYNC_API_KEY), so it is expected to be public: it grants access only
 # to the @aws_api_key root fields, and every one of those still requires a valid
-# per-campaign bearer token.
+# per-campaign share token, which is a plain GraphQL argument checked inside
+# the resolver (NOT_FOUND when absent).
 #
 # `expires` is an explicit RFC3339 value at hour granularity. Omitting it is a
 # trap: the provider defaults to 7 days, which would silently kill the public

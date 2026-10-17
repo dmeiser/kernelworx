@@ -41,7 +41,13 @@ import {
   pickUpdateCampaignPublicOrderSettingsDoc,
 } from '../lib/graphql';
 import { ensureCampaignId } from '../lib/ids';
-import type { GqlGetCampaignPublicOrderSettingsQuery, GqlGetMyPaymentMethodsQuery, GqlUpdateCampaignPublicOrderSettingsInput, GqlUpdateCampaignPublicOrderSettingsMutation, GqlCampaign } from '../types/graphql-generated';
+import type {
+  GqlGetCampaignPublicOrderSettingsQuery,
+  GqlGetMyPaymentMethodsQuery,
+  GqlUpdateCampaignPublicOrderSettingsInput,
+  GqlUpdateCampaignPublicOrderSettingsMutation,
+  GqlCampaign,
+} from '../types/graphql-generated';
 
 export const PUBLIC_ORDER_ACK_VERSION = 1;
 
@@ -124,7 +130,7 @@ const emptySettings: PublicOrderSettingsView = {
 };
 
 const emptyDraft: PublicOrderSettingsView = {
-  ...emptySettings
+  ...emptySettings,
 };
 
 interface UseCampaignPublicOrderSettingsArgs {
@@ -216,11 +222,14 @@ export function useCampaignPublicOrderSettings({ campaignId }: UseCampaignPublic
   });
 
   // Fetch settings
-  const { data: settingsData, loading } = useQuery<GqlGetCampaignPublicOrderSettingsQuery>(GET_CAMPAIGN_PUBLIC_ORDER_SETTINGS, {
-    variables: { campaignId: dbCampaignId },
-    fetchPolicy: 'network-only',
-    skip: !dbCampaignId,
-  });
+  const { data: settingsData, loading } = useQuery<GqlGetCampaignPublicOrderSettingsQuery>(
+    GET_CAMPAIGN_PUBLIC_ORDER_SETTINGS,
+    {
+      variables: { campaignId: dbCampaignId },
+      fetchPolicy: 'network-only',
+      skip: !dbCampaignId,
+    },
+  );
 
   // Fetch payment methods
   const { data: paymentMethodsData } = useQuery<GqlGetMyPaymentMethodsQuery>(GET_MY_PAYMENT_METHODS, {
@@ -301,42 +310,58 @@ export function useCampaignPublicOrderSettings({ campaignId }: UseCampaignPublic
 
   const save = async () => {
     if (!dbCampaignId) return;
-    await mutateSettings(dbCampaignId, (id) => ({
-      campaignId: id,
-      enabled: draft.enabled,
-      allowedPaymentMethods: draft.allowedPaymentMethods,
-      acknowledgementsAccepted: acknowledgementsAccepted,
-    } as GqlUpdateCampaignPublicOrderSettingsInput));
+    await mutateSettings(
+      dbCampaignId,
+      (id) =>
+        ({
+          campaignId: id,
+          enabled: draft.enabled,
+          allowedPaymentMethods: draft.allowedPaymentMethods,
+          acknowledgementsAccepted: acknowledgementsAccepted,
+        }) as GqlUpdateCampaignPublicOrderSettingsInput,
+    );
   };
 
   const rotateToken = async () => {
     if (!dbCampaignId) return;
-    await mutateSettings(dbCampaignId, (id) => ({
-      campaignId: id,
-      enabled: draft.enabled,
-      allowedPaymentMethods: draft.allowedPaymentMethods,
-      acknowledgementsAccepted: acknowledgementsAccepted,
-      rotateToken: true,
-    } as GqlUpdateCampaignPublicOrderSettingsInput));
+    await mutateSettings(
+      dbCampaignId,
+      (id) =>
+        ({
+          campaignId: id,
+          enabled: draft.enabled,
+          allowedPaymentMethods: draft.allowedPaymentMethods,
+          acknowledgementsAccepted: acknowledgementsAccepted,
+          rotateToken: true,
+        }) as GqlUpdateCampaignPublicOrderSettingsInput,
+    );
   };
 
   const disable = async () => {
     if (!dbCampaignId) return;
-    await mutateSettings(dbCampaignId, (id) => ({
-      campaignId: id,
-      enabled: false,
-      allowedPaymentMethods: draft.allowedPaymentMethods,
-    } as GqlUpdateCampaignPublicOrderSettingsInput));
+    await mutateSettings(
+      dbCampaignId,
+      (id) =>
+        ({
+          campaignId: id,
+          enabled: false,
+          allowedPaymentMethods: draft.allowedPaymentMethods,
+        }) as GqlUpdateCampaignPublicOrderSettingsInput,
+    );
   };
 
   const enable = async () => {
     if (!dbCampaignId) return;
-    await mutateSettings(dbCampaignId, (id) => ({
-      campaignId: id,
-      enabled: true,
-      allowedPaymentMethods: draft.allowedPaymentMethods,
-      acknowledgementsAccepted: acknowledgementsAccepted,
-    } as GqlUpdateCampaignPublicOrderSettingsInput));
+    await mutateSettings(
+      dbCampaignId,
+      (id) =>
+        ({
+          campaignId: id,
+          enabled: true,
+          allowedPaymentMethods: draft.allowedPaymentMethods,
+          acknowledgementsAccepted: acknowledgementsAccepted,
+        }) as GqlUpdateCampaignPublicOrderSettingsInput,
+    );
   };
   return {
     settings,

@@ -26,6 +26,7 @@ import {
 } from '@mui/material';
 import {
   Add as AddIcon,
+  CheckCircleOutline as ConfirmPaymentIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
   ExpandMore as ExpandMoreIcon,
@@ -34,7 +35,8 @@ import {
 import { CampaignSummaryTiles } from '../components/CampaignSummaryTiles';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
-import { LIST_ORDERS_BY_CAMPAIGN, DELETE_ORDER, GET_PROFILE } from '../lib/graphql';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { LIST_ORDERS_BY_CAMPAIGN, DELETE_ORDER, GET_PROFILE, UPDATE_ORDER } from '../lib/graphql';
 import { ensureProfileId, ensureCampaignId, ensureOrderId, toUrlId } from '../lib/ids';
 import { formatCurrency, formatPhoneNumber } from '../lib/api-utils';
 import { formatDisplayDate } from '../lib/date-utils';
@@ -60,6 +62,16 @@ const getPaymentMethodColor = (method: string): 'default' | 'primary' | 'seconda
 const getTotalItems = (lineItems: GqlLineItem[]): number => {
   return lineItems.reduce((sum, item) => sum + item.quantity, 0);
 };
+
+// Only the public order path writes a lifecycle status, so a row carrying NEW
+// is exactly the order awaiting the seller's confirmation. Authenticated and
+// pre-feature rows carry no status at all, and a CONFIRMED row has no path
+// back, so neither gets the action.
+const canConfirmPayment = (order: GqlOrder): boolean => order.status === 'NEW';
+
+const statusChipColor = (status: string): 'warning' | 'success' => (status === 'CONFIRMED' ? 'success' : 'warning');
+
+const statusChipLabel = (status: string): string => (status === 'CONFIRMED' ? 'Payment confirmed' : 'New');
 
 const checkWritePermission = (profile: ProfilePermissions | undefined): boolean => {
   if (!profile) return false;
@@ -119,9 +131,45 @@ interface OrderRowProps {
   hasWritePermission: boolean;
   onEdit: (orderId: string) => void;
   onDelete: (orderId: string) => void;
+  onConfirmPayment: (order: GqlOrder) => void;
 }
 
-const OrderRow: React.FC<OrderRowProps> = ({ order, hasWritePermission, onEdit, onDelete }) => (
+// Its own component so the row does not grow a second conditional layer (and a
+// second eslint complexity branch) for the lifecycle action.
+const ConfirmPaymentAction: React.FC<{ order: GqlOrder; onConfirmPayment: (order: GqlOrder) => void }> = ({
+  order,
+  onConfirmPayment,
+}) =>
+  canConfirmPayment(order) ? (
+    <IconButton
+      size="small"
+      color="success"
+      onClick={() => onConfirmPayment(order)}
+      aria-label={`Confirm payment for ${order.customerName}`}
+      data-testid="confirm-payment-button"
+    >
+      <ConfirmPaymentIcon fontSize="small" />
+    </IconButton>
+  ) : null;
+
+const StatusCell: React.FC<{ order: GqlOrder }> = ({ order }) => (
+  <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+    {order.status ? (
+      <Chip
+        label={statusChipLabel(order.status)}
+        size="small"
+        color={statusChipColor(order.status)}
+        data-testid="order-status-chip"
+      />
+    ) : (
+      <Typography variant="body2" color="text.secondary">
+        —
+      </Typography>
+    )}
+  </TableCell>
+);
+
+const OrderRow: React.FC<OrderRowProps> = ({ order, hasWritePermission, onEdit, onDelete, onConfirmPayment }) => (
   <TableRow key={order.orderId} hover>
     <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
       {formatDisplayDate(order.orderDate, { year: 'numeric', month: 'short', day: 'numeric' }) || '—'}
@@ -146,6 +194,7 @@ const OrderRow: React.FC<OrderRowProps> = ({ order, hasWritePermission, onEdit, 
         color={getPaymentMethodColor(order.paymentMethod)}
       />
     </TableCell>
+    <StatusCell order={order} />
     <TableCell align="right">
       <Typography variant="body2" fontWeight="medium">
         {formatCurrency(order.totalAmount)}
@@ -154,6 +203,7 @@ const OrderRow: React.FC<OrderRowProps> = ({ order, hasWritePermission, onEdit, 
     {hasWritePermission && (
       <TableCell align="right">
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={0.5}>
+          <ConfirmPaymentAction order={order} onConfirmPayment={onConfirmPayment} />
           <IconButton
             size="small"
             onClick={() => onEdit(order.orderId)}
@@ -181,9 +231,16 @@ interface OrdersTableProps {
   hasWritePermission: boolean;
   onEdit: (orderId: string) => void;
   onDelete: (orderId: string) => void;
+  onConfirmPayment: (order: GqlOrder) => void;
 }
 
-const OrdersTable: React.FC<OrdersTableProps> = ({ orders, hasWritePermission, onEdit, onDelete }) => (
+const OrdersTable: React.FC<OrdersTableProps> = ({
+  orders,
+  hasWritePermission,
+  onEdit,
+  onDelete,
+  onConfirmPayment,
+}) => (
   <TableContainer component={Paper}>
     <Table
       size="small"
@@ -201,6 +258,7 @@ const OrdersTable: React.FC<OrdersTableProps> = ({ orders, hasWritePermission, o
           <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Phone</TableCell>
           <TableCell>Items</TableCell>
           <TableCell>Payment</TableCell>
+          <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Status</TableCell>
           <TableCell align="right">Total</TableCell>
           {hasWritePermission && <TableCell align="right">Actions</TableCell>}
         </TableRow>
@@ -213,6 +271,7 @@ const OrdersTable: React.FC<OrdersTableProps> = ({ orders, hasWritePermission, o
             hasWritePermission={hasWritePermission}
             onEdit={onEdit}
             onDelete={onDelete}
+            onConfirmPayment={onConfirmPayment}
           />
         ))}
       </TableBody>
@@ -258,12 +317,22 @@ const useOrdersData = ({ profileId, campaignId }: UseOrdersDataParams) => {
     },
   });
 
+  // The lifecycle write: status CONFIRMED on a public order. The list is
+  // refetched rather than patched locally, so the chip flips from the server's
+  // authoritative row.
+  const [updateOrder] = useMutation(UPDATE_ORDER, {
+    onCompleted: () => {
+      void refetchOrders();
+    },
+  });
+
   return {
     orders: ordersData?.listOrdersByCampaign.orders ?? [],
     profile: profileData?.getProfile,
     loading: ordersLoading,
     error: ordersError,
     deleteOrder,
+    updateOrder,
   };
 };
 
@@ -278,6 +347,7 @@ interface OrdersContentProps {
   onCreateOrder: () => void;
   onEditOrder: (orderId: string) => void;
   onDeleteOrder: (orderId: string) => void;
+  onConfirmPayment: (order: GqlOrder) => void;
 }
 
 const OrdersContent: React.FC<OrdersContentProps> = ({
@@ -289,6 +359,7 @@ const OrdersContent: React.FC<OrdersContentProps> = ({
   onCreateOrder,
   onEditOrder,
   onDeleteOrder,
+  onConfirmPayment,
 }) => (
   <Box>
     <SummarySection summaryExpanded={summaryExpanded} onToggle={onToggleSummary} campaignId={campaignId} />
@@ -299,6 +370,7 @@ const OrdersContent: React.FC<OrdersContentProps> = ({
         hasWritePermission={hasWritePermission}
         onEdit={onEditOrder}
         onDelete={onDeleteOrder}
+        onConfirmPayment={onConfirmPayment}
       />
     ) : (
       <Alert severity="info">No orders yet. Click "New Order" to add your first customer order!</Alert>
@@ -323,10 +395,14 @@ export const OrdersPage: React.FC = () => {
     setSummaryExpanded(!isMobile);
   }, [isMobile]);
 
-  const { orders, profile, loading, error, deleteOrder } = useOrdersData({
+  const { orders, profile, loading, error, deleteOrder, updateOrder } = useOrdersData({
     profileId,
     campaignId,
   });
+
+  // The order awaiting the seller's confirmation, or null when the dialog is
+  // closed. The action is permanent, so it always goes through the dialog.
+  const [confirmTarget, setConfirmTarget] = React.useState<GqlOrder | null>(null);
 
   const hasWritePermission = checkWritePermission(profile);
 
@@ -353,6 +429,19 @@ export const OrdersPage: React.FC = () => {
     setSummaryExpanded(!summaryExpanded);
   };
 
+  const handleConfirmPayment = (order: GqlOrder) => {
+    setConfirmTarget(order);
+  };
+
+  // ConfirmDialog awaits this, shows the rejection inside the dialog, and only
+  // closes it on success.
+  const submitPaymentConfirmation = async () => {
+    if (!confirmTarget) return;
+    await updateOrder({
+      variables: { input: { orderId: ensureOrderId(confirmTarget.orderId), status: 'CONFIRMED' } },
+    });
+  };
+
   if (loading) {
     return <LoadingState minHeight="200px" />;
   }
@@ -362,17 +451,34 @@ export const OrdersPage: React.FC = () => {
   }
 
   return (
-    <OrdersContent
-      orders={orders}
-      hasWritePermission={hasWritePermission}
-      summaryExpanded={summaryExpanded}
-      onToggleSummary={handleToggleSummary}
-      campaignId={campaignId}
-      onCreateOrder={handleCreateOrder}
-      onEditOrder={handleEditOrder}
-      onDeleteOrder={(orderId) => {
-        void handleDeleteOrder(orderId);
-      }}
-    />
+    <>
+      <OrdersContent
+        orders={orders}
+        hasWritePermission={hasWritePermission}
+        summaryExpanded={summaryExpanded}
+        onToggleSummary={handleToggleSummary}
+        campaignId={campaignId}
+        onCreateOrder={handleCreateOrder}
+        onEditOrder={handleEditOrder}
+        onDeleteOrder={(orderId) => {
+          void handleDeleteOrder(orderId);
+        }}
+        onConfirmPayment={handleConfirmPayment}
+      />
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        title="Confirm payment?"
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={submitPaymentConfirmation}
+        confirmLabel="Confirm payment"
+        confirmColor="success"
+        loadingLabel="Confirming..."
+      >
+        <Typography>
+          Mark the payment for {confirmTarget?.customerName} as received? This is permanent: a confirmed order cannot be
+          moved back to pending.
+        </Typography>
+      </ConfirmDialog>
+    </>
   );
 };

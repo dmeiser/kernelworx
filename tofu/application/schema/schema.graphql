@@ -728,6 +728,8 @@ input UpdateOrderInput {
   lineItems: [LineItemInput!]
   """New notes."""
   notes: String
+  """Seller-side payment confirmation. Only `CONFIRMED` is accepted in v1, only on an order placed through the public order page (the public create path stamps the row's `orderSource` attribute), and only by the profile owner or a WRITE-share collaborator. The transition is one-way: an order already `CONFIRMED` rejects it, and there is no path back. Omit the field to leave the status untouched - an explicit null is rejected with INVALID_INPUT."""
+  status: OrderStatus
 }
 
 """Input for a product line within an order; the price is looked up from the catalog."""

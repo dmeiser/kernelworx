@@ -171,6 +171,31 @@ module "iam" {
   lambda_function_arns = module.lambda.function_arns
 
   cloudfront_distribution_arn = module.cloudfront.distribution_arn
+
+  # KW-PUBLIC-ORDERS-SES-1: the public-orders confirmation mailer sends from
+  # the dev-owned subdomain identity. Prod and ephemeral pass nothing (the
+  # static enabled flag defaults false = no SES grant; the arn itself is
+  # apply-time-unknown on the creating apply, so counts key off the flag).
+  ses_order_emails_enabled = true
+  ses_order_identity_arn   = module.ses.identity_arn
+  ses_order_template_arns  = module.ses.template_arns
+}
+
+# SES sending identity for application transactional mail (public-order
+# confirmations, KW-PUBLIC-ORDERS-SES-1). The identity lives on a DEV-OWNED
+# SUBDOMAIN (orders.dev.kernelworx.app) of the dev zone; the apex
+# kernelworx.app zone (prod account, live MX/SPF) is never touched. DKIM
+# CNAME records are created in the dev zone only. The account stays in the
+# SES sandbox (sending to verified recipients only) until the production
+# access request lands as its named pre-launch gate.
+module "ses" {
+  source = "../../modules/ses"
+
+  name_prefix    = local.name_prefix
+  environment    = var.environment
+  zone_domain    = local.zone_domain
+  mail_subdomain = "orders"
+  subject_prefix = "[DEV] "
 }
 
 module "certificates" {
@@ -269,6 +294,15 @@ module "lambda" {
   }
 
   user_pool_id = module.cognito.user_pool_id
+
+  # KW-PUBLIC-ORDERS-SES-1: order-confirmation mailer env from the dev SES
+  # module. Ephemeral and prod pass nothing, so the public-orders Lambda
+  # carries no SES env vars and the mailer honestly reports
+  # "not configured".
+  ses_order_from_address         = module.ses.from_address
+  ses_order_template_name        = module.ses.order_template_name
+  ses_order_seller_template_name = module.ses.order_seller_template_name
+  public_site_url                = "https://${local.site_domain}"
 }
 
 module "appsync" {
@@ -405,8 +439,9 @@ output "appsync_api_url" {
 # scripts/generate_integration_env.py to write the TEST_APPSYNC_API_KEY and
 # VITE_APPSYNC_API_KEY managed keys, and by the deploy build to bake
 # VITE_APPSYNC_API_KEY into the frontend bundle. Not a secret: it is shipped in
-# the public bundle and only reaches the @aws_api_key fields, each of which also
-# requires a valid per-campaign bearer token.
+# the public bundle and only reaches the @aws_api_key fields, each of which
+# also requires the per-campaign share token, a GraphQL argument checked
+# inside the resolver (NOT_FOUND when absent).
 output "appsync_api_key" {
   description = "AppSync API key for the public-orders (@aws_api_key) fields"
   value       = module.appsync.api_key
@@ -430,4 +465,9 @@ output "exports_bucket" {
 output "site_url" {
   description = "Public URL of the application site"
   value       = "https://${local.site_domain}"
+}
+
+output "ses_from_address" {
+  description = "Sending address of the public-orders confirmation mailer (dev SES identity)"
+  value       = module.ses.from_address
 }

@@ -604,10 +604,7 @@ export const CampaignSettingsPage: React.FC = () => {
                 />
                 <PublicSettingsActions
                   enabled={publicOrderSettings.enabled}
-                  canEnable={
-                    publicOrderAcknowledgementsAccepted &&
-                    publicOrderDraft.allowedPaymentMethods.length > 0
-                  }
+                  canEnable={publicOrderAcknowledgementsAccepted && publicOrderDraft.allowedPaymentMethods.length > 0}
                   onRotate={() => {
                     void rotatePublicOrderToken();
                   }}

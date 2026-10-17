@@ -34,9 +34,7 @@ export function sanitizeQrLink(raw: string | null | undefined): string | null {
 }
 
 /** The image's natural dimensions, or null when absent or above the decode bound. */
-function naturalDimensionsWithinBound(
-  element: HTMLImageElement,
-): { width: number; height: number } | null {
+function naturalDimensionsWithinBound(element: HTMLImageElement): { width: number; height: number } | null {
   const width = element.naturalWidth;
   const height = element.naturalHeight;
   if (!width || !height) return null;

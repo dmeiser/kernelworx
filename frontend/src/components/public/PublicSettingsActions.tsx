@@ -22,14 +22,8 @@ interface PublicSettingsActionsProps {
 type SettingsAction = 'save' | 'enable' | 'disable';
 
 /** The save/enable/disable actions share one disable rule: pending, or already in the target state. */
-const actionDisabled = (
-  action: SettingsAction,
-  saving: boolean,
-  enabled: boolean,
-  canEnable: boolean,
-): boolean =>
-  saving ||
-  (action === 'enable' ? enabled || !canEnable : action === 'disable' ? !enabled : !enabled);
+const actionDisabled = (action: SettingsAction, saving: boolean, enabled: boolean, canEnable: boolean): boolean =>
+  saving || (action === 'enable' ? enabled || !canEnable : action === 'disable' ? !enabled : !enabled);
 
 const rotateDisabled = (saving: boolean, enabled: boolean): boolean => !enabled || saving;
 
@@ -56,7 +50,11 @@ export const PublicSettingsActions: React.FC<PublicSettingsActionsProps> = ({
         <Button variant="contained" onClick={onEnable} disabled={actionDisabled('enable', saving, enabled, canEnable)}>
           {actionLabel(saving, 'Enable')}
         </Button>
-        <Button variant="contained" onClick={onDisable} disabled={actionDisabled('disable', saving, enabled, canEnable)}>
+        <Button
+          variant="contained"
+          onClick={onDisable}
+          disabled={actionDisabled('disable', saving, enabled, canEnable)}
+        >
           {actionLabel(saving, 'Disable')}
         </Button>
         <Button variant="outlined" onClick={onRotate} disabled={rotateDisabled(saving, enabled)}>

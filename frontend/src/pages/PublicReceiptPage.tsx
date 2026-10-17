@@ -73,8 +73,7 @@ const ReceiptBody: React.FC<{ receipt: ReceiptView }> = ({ receipt }) => (
               <TableCell>{item.productName}</TableCell>
               <TableCell align="right">{item.quantity}</TableCell>
               <TableCell align="right">{formatCurrency(item.pricePerUnit)}</TableCell>
-              <TableCell align="right">{formatCurrency(item.subtotal)}
-              </TableCell>
+              <TableCell align="right">{formatCurrency(item.subtotal)}</TableCell>
             </TableRow>
           ))}
         </TableBody>

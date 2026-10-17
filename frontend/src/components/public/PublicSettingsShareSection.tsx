@@ -82,12 +82,7 @@ const ShareLinkView: React.FC<{ shareUrl: string; qrDataUrl: string | null; camp
           Could not copy the link. Copy it manually above.
         </Typography>
       ) : null}
-      <Dialog
-        open={fullscreenOpen}
-        onClose={() => setFullscreenOpen(false)}
-        fullWidth
-        maxWidth="xs"
-      >
+      <Dialog open={fullscreenOpen} onClose={() => setFullscreenOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ pr: 6 }}>
           {campaignName} — public order link
           <IconButton
@@ -125,9 +120,7 @@ export const PublicSettingsShareSection: React.FC<PublicSettingsShareSectionProp
   shareToken,
   campaignName,
 }) => {
-  const shareUrl = shareToken
-    ? `${window.location.origin}/o/${toUrlId(campaignId)}/${shareToken}`
-    : null;
+  const shareUrl = shareToken ? `${window.location.origin}/o/${toUrlId(campaignId)}/${shareToken}` : null;
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   // Regenerate the QR whenever the share URL changes (fresh enable, rotation).

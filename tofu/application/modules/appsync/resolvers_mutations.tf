@@ -872,8 +872,8 @@ resource "aws_appsync_resolver" "admin_update_campaign_shared_code" {
   code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
 }
 
-# publicCreateOrder (#679 write slice, campaign-keyed rework): a pure
-# APPSYNC_JS pipeline on the DynamoDB datasources (no Lambda). Order:
+# publicCreateOrder (#679 write slice, campaign-keyed rework): an APPSYNC_JS
+# pipeline on the DynamoDB datasources plus one Lambda invoke. Order:
 #   1 validate_public_token            (CampaignsDS, campaignId-index locator)
 #   2 validate_public_token_step2      (CampaignsDS, strong read + all checks)
 #   3 get_profile_for_public_order    (ProfilesDS, owner + seller name)
@@ -881,6 +881,9 @@ resource "aws_appsync_resolver" "admin_update_campaign_shared_code" {
 #   5 validate_payment_method_public  (AccountsDS, no-oracle clone)
 #   6 increment_public_order_count    (CampaignsDS, the cap CONDITION)
 #   7 create_public_order             (OrdersDS, the PutItem + receipt mint)
+#   8 send_public_order_emails        (PublicOrdersDS, best-effort; failures
+#                                     are swallowed so email never fails the
+#                                     committed order)
 resource "aws_appsync_resolver" "public_create_order" {
   api_id = aws_appsync_graphql_api.main.id
   type   = "Mutation"
@@ -901,6 +904,9 @@ resource "aws_appsync_resolver" "public_create_order" {
       # the pipeline with PUBLIC_ORDER_LIMIT_EXCEEDED and no row).
       aws_appsync_function.increment_public_order_count.function_id,
       aws_appsync_function.create_public_order.function_id,
+      # Best-effort email, AFTER the write: the function and the handler both
+      # swallow failures and only update confirmationEmailSent.
+      aws_appsync_function.send_public_order_emails.function_id,
     ]
   }
 

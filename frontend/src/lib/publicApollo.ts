@@ -14,7 +14,7 @@ import {
 } from '@apollo/client';
 import { ErrorLink } from '@apollo/client/link/error';
 import { CombinedGraphQLErrors } from '@apollo/client/errors';
-import { setContext } from "@apollo/client/link/context";
+import { setContext } from '@apollo/client/link/context';
 import type { GraphQLFormattedError } from 'graphql';
 
 /**
@@ -30,27 +30,25 @@ const httpLink = createHttpLink({
 /**
  * API key link - adds x-api-key header
  */
-const apiKeyLink = setContext(
-  async (_prevContext: DefaultContext) => {
-    const apiKey = import.meta.env.VITE_APPSYNC_API_KEY;
-    if (!apiKey) {
-      throw new Error('VITE_APPSYNC_API_KEY is not defined');
-    }
-    return {
-      headers: {
-        ..._prevContext.headers,
-        'x-api-key': apiKey,
-      },
-    };
-  },
-);
+const apiKeyLink = setContext(async (_prevContext: DefaultContext) => {
+  const apiKey = import.meta.env.VITE_APPSYNC_API_KEY;
+  if (!apiKey) {
+    throw new Error('VITE_APPSYNC_API_KEY is not defined');
+  }
+  return {
+    headers: {
+      ..._prevContext.headers,
+      'x-api-key': apiKey,
+    },
+  };
+});
 
 /**
  * GraphQL error with extensions
  */
 interface GraphQLErrorWithExtensions extends GraphQLFormattedError {
   extensions?: { errorCode?: string; code?: string; errorType?: string };
-};
+}
 
 /**
  * Extract error code from extensions
@@ -105,7 +103,7 @@ export function mapErrorCodeToMessage(errorCode: string | undefined, defaultMess
   };
 
   return errorMessages[errorCode] || defaultMessage;
-};
+}
 
 /**
  * Process GraphQL error

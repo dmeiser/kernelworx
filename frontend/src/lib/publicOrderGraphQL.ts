@@ -66,4 +66,4 @@ export const PUBLIC_GET_ORDER_RECEIPT = gql`
       buyerLastName
     }
   }
-`
+`;

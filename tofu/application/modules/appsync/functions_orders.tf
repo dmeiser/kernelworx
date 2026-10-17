@@ -214,3 +214,22 @@ resource "aws_appsync_function" "create_public_order" {
 
   code = file("${local.js_resolvers_dir}/create_public_order_fn.js")
 }
+
+# publicCreateOrder pipeline step 8 (KW-PUBLIC-ORDERS-SES-1): the best-effort
+# order-confirmation email invoke on the public-orders Lambda. Runs AFTER the
+# order write; both the handler and this function's response() swallow every
+# failure so an email problem can never fail a committed order. The payload
+# carries the explicit "send_order_emails" operation discriminator (there is
+# no info.fieldName in an Invoke payload).
+resource "aws_appsync_function" "send_public_order_emails" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.public_orders.name
+  name        = "SendPublicOrderEmailsFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/send_public_order_emails_fn.js")
+}

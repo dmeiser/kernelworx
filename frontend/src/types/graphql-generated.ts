@@ -1405,6 +1405,8 @@ export type GqlUpdateOrderInput = {
   orderId: Scalars['ID']['input'];
   /** New payment method name. Omit to keep the current value; an explicit null is rejected with INVALID_INPUT. */
   paymentMethod?: InputMaybe<Scalars['String']['input']>;
+  /** Seller-side payment confirmation. Only `CONFIRMED` is accepted in v1, only on an order placed through the public order page (the public create path stamps the row's `orderSource` attribute), and only by the profile owner or a WRITE-share collaborator. The transition is one-way: an order already `CONFIRMED` rejects it, and there is no path back. Omit the field to leave the status untouched - an explicit null is rejected with INVALID_INPUT. */
+  status?: InputMaybe<GqlOrderStatus>;
 };
 
 /** Input for updateSellerProfile. */
@@ -1487,6 +1489,7 @@ export type GqlOrderFieldsFragment = {
   notes?: string | null | undefined;
   createdAt: string;
   updatedAt: string;
+  status?: GqlOrderStatus | null | undefined;
   customerAddress?:
     | {
         __typename?: 'Address';
@@ -1758,6 +1761,7 @@ export type GqlListOrdersByCampaignQuery = {
       notes?: string | null | undefined;
       createdAt: string;
       updatedAt: string;
+      status?: GqlOrderStatus | null | undefined;
       customerAddress?:
         | {
             __typename?: 'Address';
@@ -1800,6 +1804,7 @@ export type GqlGetOrderQuery = {
         notes?: string | null | undefined;
         createdAt: string;
         updatedAt: string;
+        status?: GqlOrderStatus | null | undefined;
         customerAddress?:
           | {
               __typename?: 'Address';
@@ -2068,6 +2073,7 @@ export type GqlCreateOrderMutation = {
     notes?: string | null | undefined;
     createdAt: string;
     updatedAt: string;
+    status?: GqlOrderStatus | null | undefined;
     customerAddress?:
       | {
           __typename?: 'Address';
@@ -2108,6 +2114,7 @@ export type GqlUpdateOrderMutation = {
     notes?: string | null | undefined;
     createdAt: string;
     updatedAt: string;
+    status?: GqlOrderStatus | null | undefined;
     customerAddress?:
       | {
           __typename?: 'Address';

@@ -15,9 +15,10 @@ import { composePublicOrderReceipt } from './lib/public_order.js';
 //                            not validate enum OUTPUT, so a lowercase stored
 //                            value would flow to clients as an invalid enum
 //                            literal and break codegen.
-//   status: "NEW"          - the seller marks CONFIRMED in the lifecycle slice;
-//                            authenticated orders leave the attribute absent,
-//                            which is why Order.status is nullable.
+//   status: "NEW"          - the seller marks CONFIRMED through updateOrder
+//                            (one-way, public orders only); authenticated
+//                            orders leave the attribute absent, which is why
+//                            Order.status is nullable.
 //   receiptToken           - a 128-bit random capability (util.autoId; the
 //                            version nibble may be nonstandard, ~122 bits of
 //                            entropy is the claim) minted for public orders
@@ -116,6 +117,15 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
         return null;
+    }
+
+    // Stash the exact stored row for the best-effort email step (spec §5.3
+    // step 8): the mailer is payload-driven and never re-reads orders, so the
+    // enriched line items, totals, buyer contact, and the minted receiptToken
+    // travel to it through the stash. The receipt composed below stays the
+    // step result (it is what the pipeline root passes through).
+    if (ctx.stash) {
+        ctx.stash.orderItem = ctx.result;
     }
 
     // PutItem returns the written item, so the receipt is composed from what was

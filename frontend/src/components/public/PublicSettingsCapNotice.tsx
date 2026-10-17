@@ -8,10 +8,7 @@ interface PublicSettingsCapNoticeProps {
   maxOrders: number;
 }
 
-export const PublicSettingsCapNotice: React.FC<PublicSettingsCapNoticeProps> = ({
-  publicOrderCount,
-  maxOrders,
-}) => {
+export const PublicSettingsCapNotice: React.FC<PublicSettingsCapNoticeProps> = ({ publicOrderCount, maxOrders }) => {
   const remaining = maxOrders - publicOrderCount;
   const percentage = (publicOrderCount / maxOrders) * 100;
 
@@ -25,9 +22,7 @@ export const PublicSettingsCapNotice: React.FC<PublicSettingsCapNoticeProps> = (
       </Typography>
       {remaining > 0 ? (
         <Typography variant="body2" color="success">
-          {remaining} orders remaining before reaching capacity ({percentage.toFixed(
-            0
-          )}% used)
+          {remaining} orders remaining before reaching capacity ({percentage.toFixed(0)}% used)
         </Typography>
       ) : (
         <Typography variant="body2" color="error">
