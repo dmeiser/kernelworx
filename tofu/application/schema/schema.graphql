@@ -292,6 +292,8 @@ type Order {
   totalAmount: Float!
   """Free-text notes about the order."""
   notes: String
+  """The order's payment-verification state. Absent on pre-feature rows; the public path always writes NEW."""
+  status: OrderStatus
   """When the order was created."""
   createdAt: AWSDateTime!
   """When the order was last updated."""
@@ -444,6 +446,8 @@ type UnitOrderDetail {
   orderId: ID!
   """The order's customer name."""
   customerName: String!
+  """The buyer's email address, present only on orders that carry one (public order-page orders); null on authenticated and pre-feature orders. Unit reports carry it so the enable-time disclosure about buyer contact details appearing in reports and exports is true of the report itself."""
+  customerEmail: String
   """When the order was placed."""
   orderDate: AWSDateTime!
   """The order's total amount."""
@@ -468,6 +472,126 @@ type CampaignReport {
   createdAt: AWSDateTime!
   """When the pre-signed download URL expires."""
   expiresAt: AWSDateTime
+}
+
+# ============================================================================
+# Public Order Placement Types
+# ============================================================================
+
+# Multi-auth rule: every object type reachable from an @aws_api_key root field
+# must itself carry @aws_api_key at type level; types with no directive are
+# reachable only through the API's default (Cognito) auth mode. Catalog and
+# Product carry type-level @aws_cognito_user_pools and can never be returned to
+# an API-key caller, so the offer exposes PublicProduct (field names verbatim).
+# Enums and input types need no directive. Slice 1 exposes the offer only: the
+# receipt types and their root fields arrive with the order write and receipt
+# slices, and a root field with no resolver would fail every query against it.
+
+"""Owner-facing settings for one campaign's public order surface. Owner-only on read and write."""
+type PublicOrderSettings {
+  enabled: Boolean!
+  campaignId: ID!
+  campaignName: String!
+  campaignState: String!              # "OK" | "INACTIVE"
+  allowedPaymentMethods: [String!]!
+  shareToken: String                  # Exposed only to the profile owner
+  publicOrderCount: Int               # Lifetime count (includes deleted orders)
+  acknowledgedAt: AWSDateTime
+  ackVersion: Int
+}
+
+"""What the public order page shows a buyer. Served to an API-key caller; the share token in the page URL is the authorization."""
+type PublicOrderOffer @aws_api_key {
+  """The seller profile's display name."""
+  sellerName: String!
+  """The campaign's ID in bare (unprefixed) form. Echo it back on publicCreateOrder."""
+  campaignId: ID!
+  """The campaign's display name."""
+  campaignName: String!
+  """The campaign's catalog's products in catalog order (v1: the full active catalog, unpaginated)."""
+  products: [PublicProduct!]!
+  """The allowlisted payment methods that still exist on the account, each with a short-lived pre-signed QR image URL when a QR was uploaded."""
+  paymentMethods: [PublicPaymentMethod!]!
+}
+
+"""A catalog product as the public order page sees it. Mirrors Product's field names verbatim: Product itself carries @aws_cognito_user_pools and cannot be returned to an API-key caller."""
+type PublicProduct @aws_api_key {
+  """The product's ID within its catalog."""
+  productId: ID!
+  """The product's display name."""
+  productName: String!
+  """The product's unit price."""
+  price: Float!
+  """The product's description."""
+  description: String
+  """The product's position in the catalog; the offer is ordered by it."""
+  sortOrder: Int
+}
+
+"""A payment method a buyer may select on the public order page."""
+type PublicPaymentMethod @aws_api_key {
+  """The method's display name."""
+  name: String!
+  """Pre-signed S3 GET URL for the seller's uploaded QR image (valid for 15 minutes), or null when the method has no QR."""
+  qrCodeUrl: String
+}
+
+"""The payment-verification state of an order. Authenticated orders leave this absent; the public path always writes NEW."""
+enum OrderStatus {
+  """Created, awaiting the seller's off-platform payment verification."""
+  NEW
+  """The seller confirmed the buyer paid."""
+  CONFIRMED
+}
+
+"""A line item on the buyer's receipt: the product and price captured at order time."""
+type PublicLineItem @aws_api_key {
+  """The ID of the product."""
+  productId: ID!
+  """The product's display name as captured at order time."""
+  productName: String!
+  """The quantity ordered."""
+  quantity: Int!
+  """The product's unit price captured from the catalog at order time."""
+  pricePerUnit: Float!
+  """quantity times pricePerUnit."""
+  subtotal: Float!
+}
+
+"""The receipt returned when publicCreateOrder succeeds."""
+type PublicOrderReceipt @aws_api_key {
+  """The order's full ID (ORDER#...#... form), for display and support."""
+  orderId: ID!
+  """The buyer's receipt link as a site-relative path (/r/<campaignId>/<orderSuffix>/<receiptToken>): a resolver has no site origin, so the success screen resolves it against its own origin. The emailed copy is composed absolutely in the email slice."""
+  receiptUrl: String
+  """The order's total amount."""
+  totalAmount: Float!
+  """Whether the buyer supplied an email address."""
+  buyerEmailProvided: Boolean!
+  """Whether the confirmation email was sent. false also honestly covers \"not configured\" and \"send failed\"; email failure never fails the order."""
+  confirmationEmailSent: Boolean!
+}
+
+"""The buyer's receipt for a public order, served to the receipt link's API-key caller. The receipt token in the URL is the authorization."""
+type PublicOrderReceiptLookup @aws_api_key {
+  """The seller profile's display name."""
+  sellerName: String!
+  """The order's full ID (ORDER#...#... form)."""
+  orderId: ID!
+  """When the order was placed."""
+  orderDate: AWSDateTime!
+  """The ordered products and quantities."""
+  lineItems: [PublicLineItem!]!
+  """The order's total amount."""
+  totalAmount: Float!
+  """The name of the payment method the buyer selected."""
+  paymentMethodName: String!
+  """The order's payment-verification state (NEW until the seller confirms payment)."""
+  status: OrderStatus!
+  """The buyer's first name as submitted."""
+  buyerFirstName: String!
+  """The buyer's last name as submitted."""
+  buyerLastName: String!
 }
 
 # ============================================================================
@@ -606,6 +730,8 @@ input UpdateOrderInput {
   lineItems: [LineItemInput!]
   """New notes."""
   notes: String
+  """Seller-side payment confirmation. Only `CONFIRMED` is accepted in v1, only on an order placed through the public order page (the public create path stamps the row's `orderSource` attribute), and only by the profile owner or a WRITE-share collaborator. The transition is one-way: an order already `CONFIRMED` rejects it, and there is no path back. Omit the field to leave the status untouched - an explicit null is rejected with INVALID_INPUT."""
+  status: OrderStatus
 }
 
 """Input for a product line within an order; the price is looked up from the catalog."""
@@ -732,6 +858,35 @@ input RequestCampaignReportInput {
   format: String
 }
 
+"""Input for updateCampaignPublicOrderSettings. Owner-only; the campaign is identified by its canonical (CAMPAIGN# prefixed) ID."""
+input UpdateCampaignPublicOrderSettingsInput {
+  """Canonical ID of the campaign whose public-order settings are being written."""
+  campaignId: ID!
+  """Whether public orders should be enabled for this campaign."""
+  enabled: Boolean!
+  """Payment method names buyers may select. Omit to keep the stored value; an explicit null is rejected."""
+  allowedPaymentMethods: [String!]
+  """Mint a replacement share token (the only revocation path). Allowed while disabled."""
+  rotateToken: Boolean
+  """Must be true when enabling and the stored acknowledgement version is behind the current one."""
+  acknowledgementsAccepted: Boolean
+}
+
+"""Input for publicCreateOrder, submitted anonymously from the public order page. Input types carry no auth directive: AppSync field-level authorization does not govern inputs."""
+input PublicCreateOrderInput {
+  campaignId: ID!                    # Bare ID; identifies the campaign
+  token: String!                     # Campaign's rotatable public share token
+  acknowledgementsAccepted: Boolean! # Must be true
+  firstName: String!                 # Max length 100
+  lastName: String!                  # Max length 100
+  phone: String                      # US 10-digit format
+  address: AddressInput              # All 4 fields if provided
+  email: AWSEmail                    # Valid format
+  paymentMethod: String!             # Must be on campaign's public allowlist
+  lineItems: [LineItemInput!]!       # 1..20 items, qty 1..999
+  notes: String                      # Max length 500
+}
+
 # ============================================================================
 # Query Root
 # ============================================================================
@@ -757,6 +912,11 @@ type Query {
   ): SellerProfileConnection!
   """List seller profiles that have been shared to the caller, each annotated with the caller's permissions."""
   listMyShares: [SharedProfile!]!
+  """Owner-facing settings for one campaign's public order surface. Owner-only on read and write."""
+  getCampaignPublicOrderSettings(
+    """The campaign's ID."""
+    campaignId: ID!
+  ): PublicOrderSettings @aws_cognito_user_pools
 
   # Campaign queries
   """Fetch a single campaign by ID. Returns the campaign if the caller has read access to its profile, otherwise null."""
@@ -802,6 +962,24 @@ type Query {
     """Opaque cursor from a previous page; omit to start from the first page."""
     nextToken: String
   ): OrderConnection!
+
+  # Public order queries (API key auth mode; the token argument is the authorization)
+  """Fetch the public order page's offer: seller, campaign, catalog products, and allowed payment methods. A campaign that never enabled public orders, is disabled, or carries a token mismatch all return the same NOT_FOUND, so probing cannot distinguish them."""
+  publicGetOrderOffer(
+    """The campaign's ID in bare (unprefixed) form."""
+    campaignId: ID!,
+    """The share token from the public URL."""
+    token: String!
+  ): PublicOrderOffer! @aws_api_key
+  """Fetch the buyer's receipt for a public order. Served to an API-key caller; the receipt token in the URL is the authorization. An unknown campaign/suffix, an absent or mismatched token, and a token that does not match the order all return the same NOT_FOUND."""
+  publicGetOrderReceipt(
+    """The campaign's ID in bare (unprefixed) form."""
+    campaignId: ID!,
+    """The order's suffix (the third and final segment of the order's full ID)."""
+    orderSuffix: String!,
+    """The receipt token from the receipt URL."""
+    receiptToken: String!
+  ): PublicOrderReceiptLookup! @aws_api_key
 
   # Share queries
   """List the shares (access grants) on a profile. The caller must have write access to the profile."""
@@ -969,7 +1147,6 @@ type Mutation {
     """The profile's ID."""
     profileId: ID!
   ): Boolean!
-
   # Campaign mutations
   """Create a new active campaign on a profile the caller has write access to. Returns the created campaign."""
   createCampaign(
@@ -986,6 +1163,18 @@ type Mutation {
     """The campaign's ID."""
     campaignId: ID!
   ): Boolean!
+  """Enable, configure, or disable one campaign's public order surface. Owner only (share collaborators are FORBIDDEN). Enabling requires the campaign to be active, its catalog to exist and not be soft-deleted, and a non-empty method list, and re-requires the acknowledgements when the stored version is behind. Disabling keeps the share token so the URL stays stable; rotateToken mints a replacement."""
+  updateCampaignPublicOrderSettings(
+    """The campaign and the public-order settings to apply."""
+    input: UpdateCampaignPublicOrderSettingsInput!
+  ): PublicOrderSettings! @aws_cognito_user_pools
+
+  # Public order mutations (API key auth mode; anonymous)
+  """Place a public order on a campaign whose share token is in the request. Returns the buyer's receipt. A never-enabled campaign, a disabled campaign, and a bad token all return NOT_FOUND so probing cannot distinguish them; a campaign at its order cap returns PUBLIC_ORDER_LIMIT_EXCEEDED."""
+  publicCreateOrder(
+    """The anonymous order input, carrying the campaign's share token."""
+    input: PublicCreateOrderInput!
+  ): PublicOrderReceipt! @aws_api_key
 
   # Catalog mutations
   """Create a catalog owned by the caller. Returns the created catalog."""
@@ -1022,6 +1211,7 @@ type Mutation {
     """The order's ID."""
     orderId: ID!
   ): Boolean!
+
 
   # Shared campaign mutations
   """Create a shared campaign so other units can find and clone it. Returns the created shared campaign."""

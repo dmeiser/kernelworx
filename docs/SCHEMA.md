@@ -95,6 +95,7 @@ Global Secondary Indexes:
 | state | String | Unit location |
 | sharedCampaignCode | String | Reference to shared template |
 | isActive | Boolean | Active/inactive flag |
+| publicOrders | Map | Public-orders settings for this campaign (enabled flag, share token, allowed payment methods, acknowledgement stamp); written whole by `updateCampaignPublicOrderSettings`, deleted with the campaign |
 | totalOrders | Integer | Computed count from ORDER query (Select: COUNT) |
 | totalRevenue | Float | Computed sum from ORDER query (projected totalAmount) |
 | unitCampaignKey | String | GSI - Composite lookup key |
@@ -119,6 +120,10 @@ Global Secondary Indexes:
 | paymentMethod | String | Payment type |
 | deliveryStatus | String | Delivery state |
 | notes | String | Order notes |
+| status | String | Payment-verification state (`NEW`/`CONFIRMED`, `OrderStatus`). Absent on pre-feature and authenticated rows; the public path always writes `NEW` |
+| orderSource | String | `PUBLIC` for orders placed via the public order page; absent on authenticated orders |
+| sellerName | String | Denormalized seller display name captured at public order time; not an `Order` GraphQL field |
+| receiptToken | String | Public receipt capability token from the `/r/` URL; not an `Order` GraphQL field |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
 

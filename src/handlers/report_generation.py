@@ -50,6 +50,14 @@ else:  # pragma: no cover
 # Report pre-signed URL lifetime in seconds (3 hours)
 REPORT_URL_EXPIRATION_SECONDS = 3 * 60 * 60
 
+# Contact columns written before the per-product columns, in both report formats.
+# Email is one of them: the enable-time disclosure tells the seller that public
+# buyers' contact details "appear in unit reports/exports", and that is only
+# true of the report itself once this column carries the buyer's email address
+# (public-orders spec §9 D5 / §11). Orders placed without one - every
+# authenticated order and every pre-feature row - leave the cell empty.
+REPORT_CONTACT_HEADERS = ["Name", "Phone", "Email", "Address"]
+
 # Module-level proxy that tests can monkeypatch
 s3_client: "S3Client | None" = None
 
@@ -248,6 +256,20 @@ def _sanitize_report_value(value: Any) -> Any:
     return value
 
 
+def _get_contact_cells(order: Dict[str, Any]) -> list[Any]:
+    """Return the order's contact cells in ``REPORT_CONTACT_HEADERS`` order.
+
+    Both report formats read their leading columns here, so the CSV header and
+    the XLSX header cannot drift from the values either format writes.
+    """
+    return [
+        order.get("customerName", ""),
+        order.get("customerPhone", ""),
+        order.get("customerEmail", ""),
+        _format_address(order.get("customerAddress", {})),
+    ]
+
+
 def _get_product_quantities(order: Dict[str, Any]) -> dict[str, int]:
     """Get product quantities for an order, summing duplicates."""
     quantities: dict[str, int] = {}
@@ -267,15 +289,11 @@ def _generate_csv_report(orders: list[Dict[str, Any]]) -> bytes:
     writer = csv.writer(output)
 
     all_products = _get_unique_products(orders)
-    headers = [_sanitize_report_value(h) for h in (["Name", "Phone", "Address"] + all_products + ["Total"])]
+    headers = [_sanitize_report_value(h) for h in (REPORT_CONTACT_HEADERS + all_products + ["Total"])]
     writer.writerow(headers)
 
     for order in orders:
-        row = [
-            _sanitize_report_value(order.get("customerName", "")),
-            _sanitize_report_value(order.get("customerPhone", "")),
-            _sanitize_report_value(_format_address(order.get("customerAddress", {}))),
-        ]
+        row = [_sanitize_report_value(cell) for cell in _get_contact_cells(order)]
         quantities = _get_product_quantities(order)
         for product in all_products:
             row.append(_sanitize_report_value(quantities.get(product, "")))
@@ -301,12 +319,12 @@ def _write_excel_order_row(
     ws: Any, row_idx: int, order: Dict[str, Any], all_products: list[str], headers: list[str]
 ) -> None:
     """Write a single order row to Excel worksheet."""
-    ws.cell(row=row_idx, column=1, value=_sanitize_report_value(order.get("customerName", "")))
-    ws.cell(row=row_idx, column=2, value=_sanitize_report_value(order.get("customerPhone", "")))
-    ws.cell(row=row_idx, column=3, value=_sanitize_report_value(_format_address(order.get("customerAddress", {}))))
+    contact_cells = _get_contact_cells(order)
+    for col_idx, cell in enumerate(contact_cells, start=1):
+        ws.cell(row=row_idx, column=col_idx, value=_sanitize_report_value(cell))
 
     quantities = _get_product_quantities(order)
-    for col_idx, product in enumerate(all_products, start=4):
+    for col_idx, product in enumerate(all_products, start=len(contact_cells) + 1):
         ws.cell(row=row_idx, column=col_idx, value=_sanitize_report_value(quantities.get(product, "")))
     ws.cell(row=row_idx, column=len(headers), value=float(order.get("totalAmount", 0)))
 
@@ -332,7 +350,7 @@ def _generate_excel_report(orders: list[Dict[str, Any]]) -> bytes:
     ws.title = "Orders"
 
     all_products = _get_unique_products(orders)
-    headers = ["Name", "Phone", "Address"] + all_products + ["Total"]
+    headers = REPORT_CONTACT_HEADERS + all_products + ["Total"]
 
     _write_excel_headers(ws, headers)
     for row_idx, order in enumerate(orders, start=2):

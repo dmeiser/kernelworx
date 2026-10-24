@@ -37,6 +37,24 @@ variable "cloudfront_distribution_arn" {
   default     = null
 }
 
+variable "ses_order_identity_arn" {
+  description = "ARN of the SES identity the public-orders confirmation mailer sends from. When null (ephemeral, and prod until its SES slice lands), the public-orders role carries no SES grant."
+  type        = string
+  default     = null
+}
+
+variable "ses_order_template_arns" {
+  description = "ARNs of the SES order-confirmation templates the public-orders mailer may send. Empty when no SES module is instantiated."
+  type        = list(string)
+  default     = []
+}
+
+variable "ses_order_emails_enabled" {
+  description = "Static toggle for the SES order-confirmation grant. Must be known at plan time: the identity arn is apply-time-unknown on the creating apply, so count cannot key off it. true only where the SES module is instantiated (dev)."
+  type        = bool
+  default     = false
+}
+
 variable "prevent_destroy" {
   description = "Set to false for ephemeral environments that must be destroyed after use."
   type        = bool
@@ -688,6 +706,170 @@ resource "aws_iam_role_policy" "lambda_account_reporting_s3" {
 }
 
 # =============================================================================
+# Lambda Public Orders Domain Execution Role (#679 public-orders offer slice)
+# =============================================================================
+#
+# Scoped per-domain role for the public-orders Lambda, reusing the wiring
+# pattern #351 established (the lambda module's lambda_domain_role_arns map).
+# Assigned to:
+#   - public-orders  (handlers/public_orders_offer.py — publicGetOrderOffer and
+#                     publicGetOrderReceipt)
+#
+# DynamoDB scope verified against the handler source including the shared
+# helpers it calls:
+#   - campaigns: GetItem on the base table (the strongly consistent anchor read)
+#     plus Query on the table and its GSIs (the campaignId-index locator, the
+#     campaign-keyed rework of the offer). The GSI is a locator only; the
+#     consistent read + share token are what authorize (#545).
+#   - profiles: GetItem on the base table (the owner-confirmation read for the
+#     owner account id + seller name) plus Query on the table and its GSIs (the
+#     profileId-index locator).
+#   - catalogs: GetItem only (the anchor catalog).
+#   - accounts: GetItem only (preferences.paymentMethods for the allowlist
+#     intersection).
+#   - orders: GetItem only, for the publicGetOrderReceipt read. Order WRITES
+#     never touch this role: they run through the AppSync OrdersDS datasource
+#     under the AppSync service role, so a PutItem/UpdateItem grant here would
+#     be an unused permission on an anonymous-facing role.
+#
+# SES scope (KW-PUBLIC-ORDERS-SES-1): ses:SendTemplatedEmail on the
+# environment's order-confirmation identity + templates + the account's own
+# SES identities as recipients (SES authorizes the sandbox-verified recipient
+# identity on every send), and only where the SES module is instantiated. The
+# mailer is best-effort and the sandbox recipient set is verification-gated,
+# so this grant deliberately cannot read or mutate identities, templates, or
+# suppression lists.
+#
+# S3 scope: the offer hands the buyer pre-signed QR image URLs, and signing
+# itself makes no S3 call. The grant is still load-bearing: S3 authorizes a
+# pre-signed GET against the SIGNING principal's policy at request time (#353),
+# so without s3:GetObject on the QR prefix every buyer's QR image fails with
+# 403. The behavioral role-scope test cannot observe that grant, so
+# tests/unit/test_public_orders_role_scope.py asserts it statically.
+# KICS flags any scoped s3:GetObject as data exfiltration (same treatment as the
+# #353 payment role): the keys are ownership-validated in code
+# (validate_qr_s3_key inside generate_presigned_get_url) and the prefix is
+# account-scoped, so this is expected access, not exfiltration.
+
+locals {
+  public_orders_table_keys = ["profiles", "campaigns", "catalogs", "accounts", "orders"]
+  public_orders_table_arns = [for k in local.public_orders_table_keys : var.dynamodb_table_arns[k]]
+  # The offer locates the campaign by its campaignId-index GSI (the campaign-
+  # keyed rework) and the profile by its profileId-index GSI; both need Query
+  # on the table plus its GSIs.
+  public_orders_query_keys = ["profiles", "campaigns"]
+  public_orders_query_arns = [for k in local.public_orders_query_keys : var.dynamodb_table_arns[k]]
+  public_orders_index_arns = [for k in local.public_orders_query_keys : "${var.dynamodb_table_arns[k]}/index/*"]
+}
+
+resource "aws_iam_role" "lambda_public_orders_execution" {
+  name = "${var.name_prefix}-lambda-public-orders-exec${local.role_suffix}"
+
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_public_orders_basic" {
+  role       = aws_iam_role.lambda_public_orders_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_public_orders_dynamodb" {
+  # GetItem on exactly the five tables the two public reads touch. No
+  # PutItem/UpdateItem/DeleteItem anywhere: this path is read-only, and the
+  # public order write runs through the AppSync datasources instead.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem"]
+    resources = local.public_orders_table_arns
+  }
+
+  # Query on profiles (profileId-index locator) and campaigns (campaignId-index
+  # locator). No Query on catalogs or accounts.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:Query"]
+    resources = concat(local.public_orders_query_arns, local.public_orders_index_arns)
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_public_orders_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_public_orders_execution.id
+  policy = data.aws_iam_policy_document.lambda_public_orders_dynamodb.json
+}
+
+data "aws_iam_policy_document" "lambda_public_orders_s3" {
+  # Grants only what the buyer's pre-signed QR GETs need at request time. The
+  # handler itself never calls S3 (signing is local), so this statement is
+  # invisible to the behavioral scope test and is pinned statically.
+  # kics-scan disable-line
+  statement {
+    effect = "Allow"
+    # kics-scan ignore-line
+    actions = [
+      "s3:GetObject",
+    ]
+    resources = ["${var.exports_bucket_arn}/payment-qr-codes/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_public_orders_s3" {
+  name   = "s3-qr-codes"
+  role   = aws_iam_role.lambda_public_orders_execution.id
+  policy = data.aws_iam_policy_document.lambda_public_orders_s3.json
+}
+
+# SES order-confirmation mailer grant (KW-PUBLIC-ORDERS-SES-1, spec §6): the
+# best-effort email step of the publicCreateOrder pipeline sends through
+# ses:SendTemplatedEmail, scoped to the environment's sending identity, its
+# two namespaced templates, and the account's SES identities as recipients.
+# Present only where the SES module is instantiated (dev); ephemeral and
+# prod-until-its-slice pass null and the whole statement is omitted, matching
+# the handler's "no SES env vars -> no client" branch.
+#
+# The recipient scope is load-bearing, not belt-and-braces (dev deploy proof,
+# 2026-10-17): SES evaluates ses:SendTemplatedEmail against EVERY identity in
+# the call, including the sandbox-verified RECIPIENT email-address identity —
+# an AccessDenied names arn:...:identity/<buyer-address> even though the buyer
+# never configured anything. Buyer addresses are arbitrary per order, so the
+# only stable scope is the account's own identity namespace (identity/*);
+# send-only, and in the sandbox the recipient set is still gated by
+# verification, so this grants no access to third parties' mail.
+data "aws_partition" "ses_recipients" {}
+data "aws_region" "ses_recipients" {}
+data "aws_caller_identity" "ses_recipients" {}
+
+locals {
+  ses_account_identity_arns = [
+    "arn:${data.aws_partition.ses_recipients.partition}:ses:${data.aws_region.ses_recipients.name}:${data.aws_caller_identity.ses_recipients.account_id}:identity/*"
+  ]
+}
+
+data "aws_iam_policy_document" "lambda_public_orders_ses" {
+  count = var.ses_order_emails_enabled ? 1 : 0
+
+  statement {
+    effect = "Allow"
+    actions = ["ses:SendTemplatedEmail"]
+    # The sending identity is inside the account identity wildcard; it is
+    # listed explicitly so the send source stays self-documenting.
+    resources = concat([var.ses_order_identity_arn], local.ses_account_identity_arns, var.ses_order_template_arns)
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_public_orders_ses" {
+  count = var.ses_order_emails_enabled ? 1 : 0
+
+  name   = "ses-order-emails"
+  role   = aws_iam_role.lambda_public_orders_execution.id
+  policy = data.aws_iam_policy_document.lambda_public_orders_ses[0].json
+}
+
+# =============================================================================
 # AppSync Service Role
 # =============================================================================
 
@@ -845,6 +1027,11 @@ output "lambda_payment_execution_role_arn" {
 output "lambda_profile_sharing_execution_role_arn" {
   description = "ARN of the scoped Lambda execution role for the profile/sharing domain (transfer-ownership, delete-profile-cascade). Chunk 2 of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
   value       = aws_iam_role.lambda_profile_sharing_execution.arn
+}
+
+output "lambda_public_orders_execution_role_arn" {
+  description = "ARN of the scoped Lambda execution role for the public-orders domain (public-orders). #679 public-orders offer slice; see lambda_domain_role_arns in the lambda module."
+  value       = aws_iam_role.lambda_public_orders_execution.arn
 }
 
 output "appsync_service_role_arn" {

@@ -200,6 +200,7 @@ export function mapErrorCodeToMessage(errorCode: string | undefined, defaultMess
     ALREADY_SHARED: 'This profile is already shared with this user.',
 
     // Campaign/order errors
+    PUBLIC_ORDER_LIMIT_EXCEEDED: 'This campaign has reached its public order limit.',
     CAMPAIGN_LOCKED: 'This campaign is locked and cannot be modified.',
     ORDER_ALREADY_DELETED: 'This order has already been deleted.',
 

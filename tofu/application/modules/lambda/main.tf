@@ -51,6 +51,36 @@ variable "user_pool_id" {
   type        = string
 }
 
+# SES order-confirmation mailer env (KW-PUBLIC-ORDERS-SES-1). All four values
+# come from the SES module; they are empty on every environment without one
+# (ephemeral, and prod until its SES slice lands), so the public-orders Lambda
+# carries NO SES env vars there and the handler's "no SES env vars -> no
+# client, honestly not configured" branch is exactly the ephemeral shape.
+variable "ses_order_from_address" {
+  description = "Sending address for the public-orders confirmation mailer (empty = SES not configured)"
+  type        = string
+  default     = ""
+}
+
+variable "ses_order_template_name" {
+  description = "Namespaced buyer confirmation template (empty = SES not configured)"
+  type        = string
+  default     = ""
+}
+
+variable "ses_order_seller_template_name" {
+  description = "Namespaced seller notification template (empty = SES not configured)"
+  type        = string
+  default     = ""
+}
+
+variable "public_site_url" {
+  description = "Public site origin used to compose absolute receipt links in the buyer email (empty = SES not configured)"
+  type        = string
+  default     = ""
+}
+
+
 variable "lambda_src_dir" {
   type        = string
   description = "Path to Lambda source code directory"
@@ -65,6 +95,16 @@ variable "lambda_payload_dir" {
 
 locals {
   func_suffix = "-${var.region_abbrev}-${var.environment}"
+
+  # SES slice env for the public-orders mailer: present only when the from
+  # address is configured; the three other values are set together with it by
+  # every environment that instantiates the SES module.
+  ses_env = var.ses_order_from_address != "" ? {
+    SES_ORDER_FROM_ADDRESS    = var.ses_order_from_address
+    SES_ORDER_TEMPLATE        = var.ses_order_template_name
+    SES_ORDER_SELLER_TEMPLATE = var.ses_order_seller_template_name
+    SITE_URL                  = var.public_site_url
+  } : {}
 
   # Use provided paths or default to relative paths from module
   src_dir     = var.lambda_src_dir != "" ? var.lambda_src_dir : "${path.module}/../../../../src"
@@ -161,6 +201,18 @@ locals {
       extra_env = {
         USER_POOL_ID = var.user_pool_id
       }
+    }
+    # Public buyer order offer + receipt (API key auth, #679) and the
+    # best-effort order-confirmation mailer (KW-PUBLIC-ORDERS-SES-1). One
+    # Lambda serves all three surfaces; the handler dispatches on
+    # info.fieldName for the reads and on the explicit operation
+    # discriminator for the pipeline's email invoke. The SES env arrives via
+    # local.ses_env and is absent entirely where no SES module exists.
+    "public-orders" = {
+      handler     = "handlers.public_orders_offer.handler"
+      timeout     = 15
+      memory_size = 256
+      extra_env   = local.ses_env
     }
   }
 

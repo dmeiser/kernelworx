@@ -228,6 +228,9 @@ credentials, comments) is preserved. A missing target file is created from the m
 committed template (`.env.example` / `frontend/.env.example`). Managed keys:
 `TEST_APPSYNC_ENDPOINT`, `TEST_USER_POOL_ID`, `TEST_USER_POOL_CLIENT_ID`, `TEST_REGION`,
 `E2E_BASE_URL` (when the stack exposes `site_url`), and the `VITE_*` frontend keys.
+The public-orders API-key vars (`TEST_APPSYNC_API_KEY`, `VITE_APPSYNC_API_KEY`) are
+managed only when the stack exposes the `appsync_api_key` output; on an older stack
+they are omitted and the template placeholder line is commented out instead.
 
 **Key flags/arguments:**
 
@@ -237,7 +240,10 @@ committed template (`.env.example` / `frontend/.env.example`). Managed keys:
 - `--outputs-json <file>` — Read a captured `tofu output -json` document instead of the
   live stack (no AWS access needed).
 - `--check` — Verify the existing file(s) without writing: managed keys must be present
-  and non-empty; with `--outputs-json`, values must also match the OpenTofu outputs.
+  and non-empty; with `--outputs-json`, values must also match the OpenTofu outputs. The
+  conditional API-key vars are the exception both ways: absent from both stack and file
+  they are reported as skipped, present in the file while absent from the stack they
+  count as stale.
 
 The live stack path sources `./.env` for `TF_VAR_encryption_passphrase` and AWS
 credentials and only runs `tofu init` (ephemeral backend selection) and

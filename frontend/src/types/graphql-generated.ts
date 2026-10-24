@@ -399,6 +399,8 @@ export type GqlMutation = {
   deleteSellerProfile: Scalars['Boolean']['output'];
   /** Delete a shared campaign the caller created. Returns true on success. */
   deleteSharedCampaign: Scalars['Boolean']['output'];
+  /** Place a public order on a campaign whose share token is in the request. Returns the buyer's receipt. A never-enabled campaign, a disabled campaign, and a bad token all return NOT_FOUND so probing cannot distinguish them; a campaign at its order cap returns PUBLIC_ORDER_LIMIT_EXCEEDED. */
+  publicCreateOrder: GqlPublicOrderReceipt;
   /** Redeem an invite code to grant the caller access to a profile. Returns the created share. */
   redeemProfileInvite: GqlShare;
   /** Generate an Excel or CSV report for a campaign and store it in S3. Returns the report with a pre-signed download URL. */
@@ -413,6 +415,8 @@ export type GqlMutation = {
   transferProfileOwnership: GqlSellerProfile;
   /** Update a campaign on a profile the caller has write access to. Only provided fields change. Returns the updated campaign. */
   updateCampaign: GqlCampaign;
+  /** Enable, configure, or disable one campaign's public order surface. Owner only (share collaborators are FORBIDDEN). Enabling requires the campaign to be active, its catalog to exist and not be soft-deleted, and a non-empty method list, and re-requires the acknowledgements when the stored version is behind. Disabling keeps the share token so the URL stays stable; rotateToken mints a replacement. */
+  updateCampaignPublicOrderSettings: GqlPublicOrderSettings;
   /** Update a catalog the caller owns, replacing its name, visibility, and products. Returns the updated catalog. */
   updateCatalog: GqlCatalog;
   /** Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account. */
@@ -560,6 +564,11 @@ export type GqlMutation_DeleteSharedCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_PublicCreateOrderArgs = {
+  input: GqlPublicCreateOrderInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_RedeemProfileInviteArgs = {
   input: GqlRedeemProfileInviteInput;
 };
@@ -592,6 +601,11 @@ export type GqlMutation_TransferProfileOwnershipArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpdateCampaignArgs = {
   input: GqlUpdateCampaignInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateCampaignPublicOrderSettingsArgs = {
+  input: GqlUpdateCampaignPublicOrderSettingsInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -656,6 +670,8 @@ export type GqlOrder = {
   paymentMethod: Scalars['String']['output'];
   /** The ID of the profile the order belongs to. */
   profileId: Scalars['ID']['output'];
+  /** The order's payment-verification state. Absent on pre-feature rows; the public path always writes NEW. */
+  status?: Maybe<GqlOrderStatus>;
   /** The order's total amount (the sum of the line-item subtotals). */
   totalAmount: Scalars['Float']['output'];
   /** When the order was last updated. */
@@ -670,6 +686,13 @@ export type GqlOrderConnection = {
   /** The orders on this page. */
   orders: Array<GqlOrder>;
 };
+
+/** The payment-verification state of an order. Authenticated orders leave this absent; the public path always writes NEW. */
+export type GqlOrderStatus =
+  /** The seller confirmed the buyer paid. */
+  | 'CONFIRMED'
+  /** Created, awaiting the seller's off-platform payment verification. */
+  | 'NEW';
 
 /**
  * A named payment method a seller can assign to orders.
@@ -735,6 +758,127 @@ export type GqlProfileInvite = {
   profileId: Scalars['ID']['output'];
 };
 
+/** Input for publicCreateOrder, submitted anonymously from the public order page. Input types carry no auth directive: AppSync field-level authorization does not govern inputs. */
+export type GqlPublicCreateOrderInput = {
+  acknowledgementsAccepted: Scalars['Boolean']['input'];
+  address?: InputMaybe<GqlAddressInput>;
+  campaignId: Scalars['ID']['input'];
+  email?: InputMaybe<Scalars['AWSEmail']['input']>;
+  firstName: Scalars['String']['input'];
+  lastName: Scalars['String']['input'];
+  lineItems: Array<GqlLineItemInput>;
+  notes?: InputMaybe<Scalars['String']['input']>;
+  paymentMethod: Scalars['String']['input'];
+  phone?: InputMaybe<Scalars['String']['input']>;
+  token: Scalars['String']['input'];
+};
+
+/** A line item on the buyer's receipt: the product and price captured at order time. */
+export type GqlPublicLineItem = {
+  __typename?: 'PublicLineItem';
+  /** The product's unit price captured from the catalog at order time. */
+  pricePerUnit: Scalars['Float']['output'];
+  /** The ID of the product. */
+  productId: Scalars['ID']['output'];
+  /** The product's display name as captured at order time. */
+  productName: Scalars['String']['output'];
+  /** The quantity ordered. */
+  quantity: Scalars['Int']['output'];
+  /** quantity times pricePerUnit. */
+  subtotal: Scalars['Float']['output'];
+};
+
+/** What the public order page shows a buyer. Served to an API-key caller; the share token in the page URL is the authorization. */
+export type GqlPublicOrderOffer = {
+  __typename?: 'PublicOrderOffer';
+  /** The campaign's ID in bare (unprefixed) form. Echo it back on publicCreateOrder. */
+  campaignId: Scalars['ID']['output'];
+  /** The campaign's display name. */
+  campaignName: Scalars['String']['output'];
+  /** The allowlisted payment methods that still exist on the account, each with a short-lived pre-signed QR image URL when a QR was uploaded. */
+  paymentMethods: Array<GqlPublicPaymentMethod>;
+  /** The campaign's catalog's products in catalog order (v1: the full active catalog, unpaginated). */
+  products: Array<GqlPublicProduct>;
+  /** The seller profile's display name. */
+  sellerName: Scalars['String']['output'];
+};
+
+/** The receipt returned when publicCreateOrder succeeds. */
+export type GqlPublicOrderReceipt = {
+  __typename?: 'PublicOrderReceipt';
+  /** Whether the buyer supplied an email address. */
+  buyerEmailProvided: Scalars['Boolean']['output'];
+  /** Whether the confirmation email was sent. false also honestly covers \"not configured\" and \"send failed\"; email failure never fails the order. */
+  confirmationEmailSent: Scalars['Boolean']['output'];
+  /** The order's full ID (ORDER#...#... form), for display and support. */
+  orderId: Scalars['ID']['output'];
+  /** The buyer's receipt link as a site-relative path (/r/<campaignId>/<orderSuffix>/<receiptToken>): a resolver has no site origin, so the success screen resolves it against its own origin. The emailed copy is composed absolutely in the email slice. */
+  receiptUrl?: Maybe<Scalars['String']['output']>;
+  /** The order's total amount. */
+  totalAmount: Scalars['Float']['output'];
+};
+
+/** The buyer's receipt for a public order, served to the receipt link's API-key caller. The receipt token in the URL is the authorization. */
+export type GqlPublicOrderReceiptLookup = {
+  __typename?: 'PublicOrderReceiptLookup';
+  /** The buyer's first name as submitted. */
+  buyerFirstName: Scalars['String']['output'];
+  /** The buyer's last name as submitted. */
+  buyerLastName: Scalars['String']['output'];
+  /** The ordered products and quantities. */
+  lineItems: Array<GqlPublicLineItem>;
+  /** When the order was placed. */
+  orderDate: Scalars['AWSDateTime']['output'];
+  /** The order's full ID (ORDER#...#... form). */
+  orderId: Scalars['ID']['output'];
+  /** The name of the payment method the buyer selected. */
+  paymentMethodName: Scalars['String']['output'];
+  /** The seller profile's display name. */
+  sellerName: Scalars['String']['output'];
+  /** The order's payment-verification state (NEW until the seller confirms payment). */
+  status: GqlOrderStatus;
+  /** The order's total amount. */
+  totalAmount: Scalars['Float']['output'];
+};
+
+/** Owner-facing settings for one campaign's public order surface. Owner-only on read and write. */
+export type GqlPublicOrderSettings = {
+  __typename?: 'PublicOrderSettings';
+  ackVersion?: Maybe<Scalars['Int']['output']>;
+  acknowledgedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  allowedPaymentMethods: Array<Scalars['String']['output']>;
+  campaignId: Scalars['ID']['output'];
+  campaignName: Scalars['String']['output'];
+  campaignState: Scalars['String']['output'];
+  enabled: Scalars['Boolean']['output'];
+  publicOrderCount?: Maybe<Scalars['Int']['output']>;
+  shareToken?: Maybe<Scalars['String']['output']>;
+};
+
+/** A payment method a buyer may select on the public order page. */
+export type GqlPublicPaymentMethod = {
+  __typename?: 'PublicPaymentMethod';
+  /** The method's display name. */
+  name: Scalars['String']['output'];
+  /** Pre-signed S3 GET URL for the seller's uploaded QR image (valid for 15 minutes), or null when the method has no QR. */
+  qrCodeUrl?: Maybe<Scalars['String']['output']>;
+};
+
+/** A catalog product as the public order page sees it. Mirrors Product's field names verbatim: Product itself carries @aws_cognito_user_pools and cannot be returned to an API-key caller. */
+export type GqlPublicProduct = {
+  __typename?: 'PublicProduct';
+  /** The product's description. */
+  description?: Maybe<Scalars['String']['output']>;
+  /** The product's unit price. */
+  price: Scalars['Float']['output'];
+  /** The product's ID within its catalog. */
+  productId: Scalars['ID']['output'];
+  /** The product's display name. */
+  productName: Scalars['String']['output'];
+  /** The product's position in the catalog; the offer is ordered by it. */
+  sortOrder?: Maybe<Scalars['Int']['output']>;
+};
+
 /** The root query object for the KernelWorx API. */
 export type GqlQuery = {
   __typename?: 'Query';
@@ -756,6 +900,8 @@ export type GqlQuery = {
   findSharedCampaigns: Array<GqlSharedCampaign>;
   /** Fetch a single campaign by ID. Returns the campaign if the caller has read access to its profile, otherwise null. */
   getCampaign?: Maybe<GqlCampaign>;
+  /** Owner-facing settings for one campaign's public order surface. Owner-only on read and write. */
+  getCampaignPublicOrderSettings?: Maybe<GqlPublicOrderSettings>;
   /** Fetch a single catalog by ID. Returns the catalog only when it is public, admin-managed (ADMIN_MANAGED), or owned by the caller; returns null otherwise. */
   getCatalog?: Maybe<GqlCatalog>;
   /** The authenticated caller's account. The row is created automatically on first read if it does not yet exist. */
@@ -796,6 +942,10 @@ export type GqlQuery = {
   myPaymentMethods: Array<GqlPaymentMethod>;
   /** The payment methods stored for a profile's owner. The caller must have access to the profile; READ-only callers see the method names but not their QR codes (qrCodeUrl is null). */
   paymentMethodsForProfile: Array<GqlPaymentMethod>;
+  /** Fetch the public order page's offer: seller, campaign, catalog products, and allowed payment methods. A campaign that never enabled public orders, is disabled, or carries a token mismatch all return the same NOT_FOUND, so probing cannot distinguish them. */
+  publicGetOrderOffer: GqlPublicOrderOffer;
+  /** Fetch the buyer's receipt for a public order. Served to an API-key caller; the receipt token in the URL is the authorization. An unknown campaign/suffix, an absent or mismatched token, and a token that does not match the order all return the same NOT_FOUND. */
+  publicGetOrderReceipt: GqlPublicOrderReceiptLookup;
 };
 
 /** The root query object for the KernelWorx API. */
@@ -846,6 +996,11 @@ export type GqlQuery_FindSharedCampaignsArgs = {
 
 /** The root query object for the KernelWorx API. */
 export type GqlQuery_GetCampaignArgs = {
+  campaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_GetCampaignPublicOrderSettingsArgs = {
   campaignId: Scalars['ID']['input'];
 };
 
@@ -931,6 +1086,19 @@ export type GqlQuery_ListUnitCatalogsArgs = {
 /** The root query object for the KernelWorx API. */
 export type GqlQuery_PaymentMethodsForProfileArgs = {
   profileId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_PublicGetOrderOfferArgs = {
+  campaignId: Scalars['ID']['input'];
+  token: Scalars['String']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_PublicGetOrderReceiptArgs = {
+  campaignId: Scalars['ID']['input'];
+  orderSuffix: Scalars['String']['input'];
+  receiptToken: Scalars['String']['input'];
 };
 
 /** Input for redeemProfileInvite. Redeems an invite code to gain access to a profile. */
@@ -1117,6 +1285,8 @@ export type GqlTransferProfileOwnershipInput = {
 /** An individual order within a unit report. */
 export type GqlUnitOrderDetail = {
   __typename?: 'UnitOrderDetail';
+  /** The buyer's email address, present only on orders that carry one (public order-page orders); null on authenticated and pre-feature orders. Unit reports carry it so the enable-time disclosure about buyer contact details appearing in reports and exports is true of the report itself. */
+  customerEmail?: Maybe<Scalars['String']['output']>;
   /** The order's customer name. */
   customerName: Scalars['String']['output'];
   /** The order's product lines. */
@@ -1189,6 +1359,20 @@ export type GqlUpdateCampaignInput = {
   unitType?: InputMaybe<Scalars['String']['input']>;
 };
 
+/** Input for updateCampaignPublicOrderSettings. Owner-only; the campaign is identified by its canonical (CAMPAIGN# prefixed) ID. */
+export type GqlUpdateCampaignPublicOrderSettingsInput = {
+  /** Must be true when enabling and the stored acknowledgement version is behind the current one. */
+  acknowledgementsAccepted?: InputMaybe<Scalars['Boolean']['input']>;
+  /** Payment method names buyers may select. Omit to keep the stored value; an explicit null is rejected. */
+  allowedPaymentMethods?: InputMaybe<Array<Scalars['String']['input']>>;
+  /** Canonical ID of the campaign whose public-order settings are being written. */
+  campaignId: Scalars['ID']['input'];
+  /** Whether public orders should be enabled for this campaign. */
+  enabled: Scalars['Boolean']['input'];
+  /** Mint a replacement share token (the only revocation path). Allowed while disabled. */
+  rotateToken?: InputMaybe<Scalars['Boolean']['input']>;
+};
+
 /** Input for updateMyAccount. Updates profile fields on the caller's own account; at least one field must be provided. */
 export type GqlUpdateMyAccountInput = {
   /** New city. */
@@ -1223,6 +1407,8 @@ export type GqlUpdateOrderInput = {
   orderId: Scalars['ID']['input'];
   /** New payment method name. Omit to keep the current value; an explicit null is rejected with INVALID_INPUT. */
   paymentMethod?: InputMaybe<Scalars['String']['input']>;
+  /** Seller-side payment confirmation. Only `CONFIRMED` is accepted in v1, only on an order placed through the public order page (the public create path stamps the row's `orderSource` attribute), and only by the profile owner or a WRITE-share collaborator. The transition is one-way: an order already `CONFIRMED` rejects it, and there is no path back. Omit the field to leave the status untouched - an explicit null is rejected with INVALID_INPUT. */
+  status?: InputMaybe<GqlOrderStatus>;
 };
 
 /** Input for updateSellerProfile. */
@@ -1305,6 +1491,7 @@ export type GqlOrderFieldsFragment = {
   notes?: string | null | undefined;
   createdAt: string;
   updatedAt: string;
+  status?: GqlOrderStatus | null | undefined;
   customerAddress?:
     | {
         __typename?: 'Address';
@@ -1576,6 +1763,7 @@ export type GqlListOrdersByCampaignQuery = {
       notes?: string | null | undefined;
       createdAt: string;
       updatedAt: string;
+      status?: GqlOrderStatus | null | undefined;
       customerAddress?:
         | {
             __typename?: 'Address';
@@ -1618,6 +1806,7 @@ export type GqlGetOrderQuery = {
         notes?: string | null | undefined;
         createdAt: string;
         updatedAt: string;
+        status?: GqlOrderStatus | null | undefined;
         customerAddress?:
           | {
               __typename?: 'Address';
@@ -1886,6 +2075,7 @@ export type GqlCreateOrderMutation = {
     notes?: string | null | undefined;
     createdAt: string;
     updatedAt: string;
+    status?: GqlOrderStatus | null | undefined;
     customerAddress?:
       | {
           __typename?: 'Address';
@@ -1926,6 +2116,7 @@ export type GqlUpdateOrderMutation = {
     notes?: string | null | undefined;
     createdAt: string;
     updatedAt: string;
+    status?: GqlOrderStatus | null | undefined;
     customerAddress?:
       | {
           __typename?: 'Address';
@@ -2744,6 +2935,118 @@ export type GqlCreateManagedCatalogMutation = {
       description?: string | null | undefined;
       price: number;
       sortOrder: number;
+    }>;
+  };
+};
+
+export type GqlGetCampaignPublicOrderSettingsQueryVariables = Exact<{
+  campaignId: Scalars['ID']['input'];
+}>;
+
+export type GqlGetCampaignPublicOrderSettingsQuery = {
+  __typename?: 'Query';
+  getCampaignPublicOrderSettings?:
+    | {
+        __typename?: 'PublicOrderSettings';
+        enabled: boolean;
+        shareToken?: string | null | undefined;
+        allowedPaymentMethods: Array<string>;
+        acknowledgedAt?: string | null | undefined;
+        ackVersion?: number | null | undefined;
+        publicOrderCount?: number | null | undefined;
+        campaignId: string;
+        campaignName: string;
+        campaignState: string;
+      }
+    | null
+    | undefined;
+};
+
+export type GqlUpdateCampaignPublicOrderSettingsMutationVariables = Exact<{
+  input: GqlUpdateCampaignPublicOrderSettingsInput;
+}>;
+
+export type GqlUpdateCampaignPublicOrderSettingsMutation = {
+  __typename?: 'Mutation';
+  updateCampaignPublicOrderSettings: {
+    __typename?: 'PublicOrderSettings';
+    enabled: boolean;
+    shareToken?: string | null | undefined;
+    allowedPaymentMethods: Array<string>;
+    acknowledgedAt?: string | null | undefined;
+    ackVersion?: number | null | undefined;
+    publicOrderCount?: number | null | undefined;
+    campaignId: string;
+    campaignName: string;
+    campaignState: string;
+  };
+};
+
+export type GqlPublicGetOrderOfferQueryVariables = Exact<{
+  campaignId: Scalars['ID']['input'];
+  token: Scalars['String']['input'];
+}>;
+
+export type GqlPublicGetOrderOfferQuery = {
+  __typename?: 'Query';
+  publicGetOrderOffer: {
+    __typename?: 'PublicOrderOffer';
+    sellerName: string;
+    campaignId: string;
+    campaignName: string;
+    products: Array<{
+      __typename?: 'PublicProduct';
+      productId: string;
+      productName: string;
+      price: number;
+      description?: string | null | undefined;
+      sortOrder?: number | null | undefined;
+    }>;
+    paymentMethods: Array<{ __typename?: 'PublicPaymentMethod'; name: string; qrCodeUrl?: string | null | undefined }>;
+  };
+};
+
+export type GqlPublicCreateOrderMutationVariables = Exact<{
+  input: GqlPublicCreateOrderInput;
+}>;
+
+export type GqlPublicCreateOrderMutation = {
+  __typename?: 'Mutation';
+  publicCreateOrder: {
+    __typename?: 'PublicOrderReceipt';
+    orderId: string;
+    receiptUrl?: string | null | undefined;
+    totalAmount: number;
+    buyerEmailProvided: boolean;
+    confirmationEmailSent: boolean;
+  };
+};
+
+export type GqlPublicGetOrderReceiptQueryVariables = Exact<{
+  campaignId: Scalars['ID']['input'];
+  orderSuffix: Scalars['String']['input'];
+  receiptToken: Scalars['String']['input'];
+}>;
+
+export type GqlPublicGetOrderReceiptQuery = {
+  __typename?: 'Query';
+  publicGetOrderReceipt: {
+    __typename?: 'PublicOrderReceiptLookup';
+    sellerName: string;
+    orderId: string;
+    orderDate: string;
+    totalAmount: number;
+    paymentMethodName: string;
+    status: GqlOrderStatus;
+    buyerFirstName: string;
+    buyerLastName: string;
+    lineItems: Array<{
+      __typename?: 'PublicLineItem';
+      productId: string;
+      productName: string;
+      quantity: number;
+      pricePerUnit: number;
+      subtotal: number;
     }>;
   };
 };

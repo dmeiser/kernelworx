@@ -79,6 +79,7 @@ browser). See `.env.example` for the full list:
 | Variable | Purpose |
 | --- | --- |
 | `VITE_APPSYNC_ENDPOINT` | Direct AppSync URL (`...appsync-api.us-east-1.amazonaws.com/graphql`). Required for `vite dev`; unset for dev/prod builds (same-origin `/graphql`). |
+| `VITE_APPSYNC_API_KEY` | AppSync API key for the API-key public order pages (`/o/...`, `/r/...`); read from `tofu output appsync_api_key`. Transport credential, not a secret — the share/receipt token in the page URL is the authorization. Must be baked into dev/prod builds. |
 | `VITE_APPSYNC_REGION` | AppSync region, e.g. `us-east-1`. |
 | `VITE_COGNITO_USER_POOL_ID` / `VITE_COGNITO_USER_POOL_CLIENT_ID` | Cognito user pool and app client. |
 | `VITE_COGNITO_DOMAIN` | Cognito custom domain (e.g. `login.dev.kernelworx.app`). Required for `vite dev`; unset for same-origin builds. |

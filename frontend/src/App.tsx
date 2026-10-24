@@ -13,6 +13,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DevFooter } from './components/DevFooter';
 import { apolloClient } from './lib/apollo';
+import { publicApolloClient } from './lib/publicApollo';
 import { theme } from './lib/theme';
 import { AppLayout } from './components/AppLayout';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary';
@@ -76,6 +77,13 @@ const PaymentMethodsPage = lazyRoute(() =>
 const HomePage = lazyRoute(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
 const StoryPage = lazyRoute(() => import('./pages/StoryPage').then((m) => ({ default: m.StoryPage })));
 
+const PublicOrderPage = lazyRoute(() =>
+  import('./pages/PublicOrderPage').then((m) => ({ default: m.PublicOrderPage })),
+);
+const PublicReceiptPage = lazyRoute(() =>
+  import('./pages/PublicReceiptPage').then((m) => ({ default: m.PublicReceiptPage })),
+);
+
 function ScrollToHash() {
   const { pathname, hash } = useLocation();
 
@@ -105,6 +113,10 @@ function PageLoader() {
       <CircularProgress />
     </Box>
   );
+}
+
+function PublicOrderApollo({ children }: { children: React.ReactNode }) {
+  return <ApolloProvider client={publicApolloClient}>{children}</ApolloProvider>;
 }
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
@@ -209,6 +221,28 @@ function App() {
                     <ProtectedAppRoute>
                       <AcceptInvitePage />
                     </ProtectedAppRoute>
+                  }
+                />
+
+                {/* Public order pages (API-key auth mode; the URL token is the authorization) */}
+                <Route
+                  path="/o/:campaignId/:token"
+                  element={
+                    <PublicRoute>
+                      <PublicOrderApollo>
+                        <PublicOrderPage />
+                      </PublicOrderApollo>
+                    </PublicRoute>
+                  }
+                />
+                <Route
+                  path="/r/:campaignId/:orderSuffix/:receiptToken"
+                  element={
+                    <PublicRoute>
+                      <PublicOrderApollo>
+                        <PublicReceiptPage />
+                      </PublicOrderApollo>
+                    </PublicRoute>
                   }
                 />
 

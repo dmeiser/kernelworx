@@ -38,6 +38,64 @@ interface AuthConfig {
   accessToken: string;
 }
 
+/**
+ * Create an Apollo Client for the API_KEY auth mode — the anonymous buyer's mode.
+ *
+ * The public order surface (`publicGetOrderOffer`, `publicCreateOrder`,
+ * `publicGetOrderReceipt`) carries `@aws_api_key`, and a Cognito caller is
+ * refused on those fields (directive exclusivity, measured in the KW-PUBLIC-
+ * ORDERS-SPIKE-1 spike). So the integration suite needs a client that sends
+ * ONLY `x-api-key` and never an `Authorization` header — attaching a session
+ * would change which auth mode AppSync resolves and make the test prove
+ * nothing about the anonymous path.
+ *
+ * The key comes from `TEST_APPSYNC_API_KEY`, written by
+ * `scripts/generate_integration_env.py` and exported by
+ * `scripts/ephemeral-env.sh` (both omit it when the stack predates the
+ * public-orders auth-mode change).
+ */
+export function createApiKeyClient(): ApolloClient<any> {
+  const apiKey = process.env.TEST_APPSYNC_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      'TEST_APPSYNC_API_KEY is not set; the stack has no API_KEY auth mode (see scripts/generate_integration_env.py)'
+    );
+  }
+
+  const endpoint = process.env.TEST_APPSYNC_ENDPOINT!;
+  const httpLink = new HttpLink({ uri: endpoint });
+  const keyLink = setContext((_, { headers }) => ({
+    headers: { ...headers, 'x-api-key': apiKey },
+  }));
+
+  return new ApolloClient({
+    link: keyLink.concat(transportRetryLink).concat(httpLink),
+    cache: new InMemoryCache(),
+    defaultOptions: {
+      query: { fetchPolicy: 'no-cache' },
+      mutate: { fetchPolicy: 'no-cache' },
+    },
+  });
+}
+
+/**
+ * Create an Apollo Client that sends NO credentials at all.
+ *
+ * Used to pin that the public fields are not open to the world: with neither a
+ * Cognito token nor an API key, AppSync must refuse the call.
+ */
+export function createUnauthenticatedClient(): ApolloClient<any> {
+  const httpLink = new HttpLink({ uri: process.env.TEST_APPSYNC_ENDPOINT! });
+  return new ApolloClient({
+    link: transportRetryLink.concat(httpLink),
+    cache: new InMemoryCache(),
+    defaultOptions: {
+      query: { fetchPolicy: 'no-cache' },
+      mutate: { fetchPolicy: 'no-cache' },
+    },
+  });
+}
+
 export interface AuthenticatedClientResult {
   client: ApolloClient<any>;
   accountId: string;

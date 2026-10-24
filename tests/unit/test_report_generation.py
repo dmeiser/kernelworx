@@ -3,10 +3,11 @@
 Updated for multi-table design (campaigns, orders tables).
 """
 
+import csv
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import Any, Dict
 from unittest.mock import patch
 
@@ -169,11 +170,17 @@ class TestRequestCampaignReport:
         # Check headers (row 1 - new format without title row)
         assert ws.cell(row=1, column=1).value == "Name"
         assert ws.cell(row=1, column=2).value == "Phone"
-        assert ws.cell(row=1, column=3).value == "Address"
+        assert ws.cell(row=1, column=3).value == "Email"
+        assert ws.cell(row=1, column=4).value == "Address"
 
         # Check data rows (starting at row 2)
         assert ws.cell(row=2, column=1).value == "John Doe"
         assert ws.cell(row=3, column=1).value == "Jane Smith"
+
+        # The buyer email column is honest both ways: the order that carries one
+        # shows it, the order that does not leaves the cell empty (#D5).
+        assert ws.cell(row=3, column=3).value == "jane@example.com"
+        assert ws.cell(row=2, column=3).value in (None, "")
 
     def test_owner_can_generate_csv_report(
         self,
@@ -211,9 +218,10 @@ class TestRequestCampaignReport:
         csv_content = obj["Body"].read().decode("utf-8")
 
         # Check headers and data
-        assert "Name,Phone,Address" in csv_content
+        assert "Name,Phone,Email,Address" in csv_content
         assert "John Doe" in csv_content
         assert "Jane Smith" in csv_content
+        assert "jane@example.com" in csv_content
 
     def test_contributor_with_read_can_generate_report(
         self,
@@ -375,8 +383,8 @@ class TestRequestCampaignReport:
         obj = s3_bucket.get_object(Bucket=bucket_name, Key=objects["Contents"][0]["Key"])
         csv_content = obj["Body"].read().decode("utf-8")
 
-        # Should have headers but no data rows (just Name,Phone,Address,Total)
-        assert "Name,Phone,Address,Total" in csv_content
+        # Should have headers but no data rows (just Name,Phone,Email,Address,Total)
+        assert "Name,Phone,Email,Address,Total" in csv_content
         lines = csv_content.strip().split("\n")
         assert len(lines) == 1  # Only header row
 
@@ -656,6 +664,7 @@ class TestSanitizeReportValue:
                 "orderId": "ORDER#1",
                 "customerName": "=cmd|'/C calc'!A0",
                 "customerPhone": "+1234567890",
+                "customerEmail": "=HYPERLINK(http://evil)",
                 "customerAddress": {"street": "@SUM(A:A)"},
                 "paymentMethod": "CASH",
                 "totalAmount": Decimal("10.00"),
@@ -666,6 +675,7 @@ class TestSanitizeReportValue:
         csv_content = csv_bytes.decode("utf-8")
         assert "'=cmd|'/C calc'!A0" in csv_content
         assert "'+1234567890" in csv_content
+        assert "'=HYPERLINK(http://evil)" in csv_content
         assert "'@SUM(A:A)" in csv_content
 
     def test_formula_injection_neutralized_in_xlsx(self) -> None:
@@ -677,6 +687,7 @@ class TestSanitizeReportValue:
                 "orderId": "ORDER#1",
                 "customerName": "=cmd|'/C calc'!A0",
                 "customerPhone": "+1234567890",
+                "customerEmail": "=HYPERLINK(http://evil)",
                 "customerAddress": {"street": "@SUM(A:A)"},
                 "paymentMethod": "CASH",
                 "totalAmount": Decimal("10.00"),
@@ -688,7 +699,78 @@ class TestSanitizeReportValue:
         ws = wb.active
         assert ws.cell(row=2, column=1).value == "'=cmd|'/C calc'!A0"
         assert ws.cell(row=2, column=2).value == "'+1234567890"
-        assert ws.cell(row=2, column=3).value == "'@SUM(A:A)"
+        assert ws.cell(row=2, column=3).value == "'=HYPERLINK(http://evil)"
+        assert ws.cell(row=2, column=4).value == "'@SUM(A:A)"
+
+
+class TestReportBuyerEmailColumn:
+    """Tests for the buyer ``customerEmail`` column of the campaign report.
+
+    The enable-time disclosure tells the seller that a public buyer's contact
+    details - email included - appear in unit reports and exports, so the
+    report must actually carry the address (public-orders spec §9 D5, §11).
+    Orders that carry no email must leave the cell empty rather than invent one.
+    """
+
+    @staticmethod
+    def _orders() -> list[Dict[str, Any]]:
+        return [
+            {
+                "orderId": "ORDER#public",
+                "customerName": "Ada Lovelace",
+                "customerPhone": "555-0100",
+                "customerEmail": "ada@example.com",
+                "customerAddress": {"street": "1 Analytical Way", "city": "London"},
+                "paymentMethod": "CASH",
+                "totalAmount": Decimal("12.00"),
+                "lineItems": [{"productName": "Product A", "quantity": 1}],
+            },
+            {
+                "orderId": "ORDER#authenticated",
+                "customerName": "No Email Buyer",
+                "customerPhone": "555-0101",
+                "customerAddress": {},
+                "paymentMethod": "CHECK",
+                "totalAmount": Decimal("3.00"),
+                "lineItems": [{"productName": "Product A", "quantity": 1}],
+            },
+        ]
+
+    def test_csv_carries_the_email_column_in_its_own_column(self) -> None:
+        """The Email column sits between Phone and Address and carries the buyer address."""
+        from src.handlers.report_generation import _generate_csv_report
+
+        rows = list(csv.reader(StringIO(_generate_csv_report(self._orders()).decode("utf-8"))))
+        assert rows[0] == ["Name", "Phone", "Email", "Address", "Product A", "Total"]
+        assert rows[1][:4] == ["Ada Lovelace", "555-0100", "ada@example.com", "1 Analytical Way, London"]
+        assert rows[2][:4] == ["No Email Buyer", "555-0101", "", ""]
+
+    def test_xlsx_carries_the_email_column_in_its_own_column(self) -> None:
+        """The XLSX header and row cells agree with the CSV column order."""
+        from src.handlers.report_generation import _generate_excel_report
+
+        wb = openpyxl.load_workbook(BytesIO(_generate_excel_report(self._orders())))
+        ws = wb.active
+        assert [ws.cell(row=1, column=col).value for col in range(1, 7)] == [
+            "Name",
+            "Phone",
+            "Email",
+            "Address",
+            "Product A",
+            "Total",
+        ]
+        assert ws.cell(row=2, column=3).value == "ada@example.com"
+        assert ws.cell(row=3, column=3).value in (None, "")
+        assert ws.cell(row=2, column=4).value == "1 Analytical Way, London"
+
+    def test_product_columns_stay_aligned_after_the_new_column(self) -> None:
+        """The per-product columns and the Total column shift right by exactly one."""
+        from src.handlers.report_generation import _generate_excel_report
+
+        wb = openpyxl.load_workbook(BytesIO(_generate_excel_report(self._orders())))
+        ws = wb.active
+        assert ws.cell(row=2, column=5).value == 1
+        assert ws.cell(row=2, column=6).value == 12.0
 
 
 class TestCampaignReportOrderGraphCeiling:

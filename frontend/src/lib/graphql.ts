@@ -86,6 +86,7 @@ export const ORDER_FRAGMENT = gql`
     notes
     createdAt
     updatedAt
+    status
   }
 `;
 
@@ -958,3 +959,37 @@ export const CREATE_MANAGED_CATALOG = gql`
     }
   }
 `;
+
+export const GET_CAMPAIGN_PUBLIC_ORDER_SETTINGS = gql`
+  query GetCampaignPublicOrderSettings($campaignId: ID!) {
+    getCampaignPublicOrderSettings(campaignId: $campaignId) {
+      enabled
+      shareToken
+      allowedPaymentMethods
+      acknowledgedAt
+      ackVersion
+      publicOrderCount
+      campaignId
+      campaignName
+      campaignState
+    }
+  }
+`;
+
+export const UPDATE_CAMPAIGN_PUBLIC_ORDER_SETTINGS = gql`
+  mutation UpdateCampaignPublicOrderSettings($input: UpdateCampaignPublicOrderSettingsInput!) {
+    updateCampaignPublicOrderSettings(input: $input) {
+      enabled
+      shareToken
+      allowedPaymentMethods
+      acknowledgedAt
+      ackVersion
+      publicOrderCount
+      campaignId
+      campaignName
+      campaignState
+    }
+  }
+`;
+
+export const pickUpdateCampaignPublicOrderSettingsDoc = () => UPDATE_CAMPAIGN_PUBLIC_ORDER_SETTINGS;

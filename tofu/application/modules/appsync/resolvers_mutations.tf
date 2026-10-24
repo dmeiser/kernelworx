@@ -219,6 +219,49 @@ resource "aws_appsync_resolver" "create_campaign" {
   code = file("${local.js_resolvers_dir}/create_campaign_pipeline_resolver.js")
 }
 
+# updateCampaignPublicOrderSettings Pipeline (#679 rev 7, campaign-keyed).
+# Owner-only: the pair decides ownership over the campaign's own profileId,
+# verify_public_settings_owner refuses a WRITE-share collaborator and a stranger
+# with FORBIDDEN, then the campaign and its catalog are confirmed before the
+# conditioned write. Rev 7 writes the settings onto the campaign item, so
+# deleting the campaign destroys the settings, the share token and the counter
+# with it - no auto-disable hook and no dangling-anchor recovery anywhere in the
+# deleteCampaign pipeline.
+resource "aws_appsync_resolver" "update_campaign_public_order_settings" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "updateCampaignPublicOrderSettings"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      # CampaignsDS GSI locator: campaignId -> profileId, for the pair below.
+      aws_appsync_function.locate_campaign_public_settings.function_id,
+      # Two-phase owner check (#438): ownership comes from the strongly
+      # consistent base-table read, never the eventually-consistent GSI.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
+      # Gate: isOwner === true, else FORBIDDEN (share collaborators included).
+      aws_appsync_function.verify_public_settings_owner.function_id,
+      # CampaignsDS: the campaign exists under this profile's partition key and,
+      # when the save is publishing, is active and carries a catalog.
+      aws_appsync_function.validate_campaign_settings_write.function_id,
+      # CatalogsDS: a different table, so a second function - the catalog must
+      # exist and not be soft-deleted before an offer can publish over it.
+      aws_appsync_function.validate_public_settings_catalog.function_id,
+      # CampaignsDS: the conditioned UpdateItem writing the publicOrders map.
+      aws_appsync_function.write_campaign_public_order_settings.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/update_campaign_public_order_settings_pipeline_resolver.js")
+}
+
 # === ORDER MUTATIONS ===
 
 # updateOrder Pipeline
@@ -827,4 +870,50 @@ resource "aws_appsync_resolver" "admin_update_campaign_shared_code" {
   }
 
   code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
+}
+
+# publicCreateOrder (#679 write slice, campaign-keyed rework): an APPSYNC_JS
+# pipeline on the DynamoDB datasources plus one Lambda invoke. Order:
+#   1 validate_public_token            (CampaignsDS, campaignId-index locator)
+#   2 validate_public_token_step2      (CampaignsDS, strong read + all checks)
+#   3 get_profile_for_public_order    (ProfilesDS, owner + seller name)
+#   4 get_catalog                     (CatalogsDS, reused as-is)
+#   5 validate_payment_method_public  (AccountsDS, no-oracle clone)
+#   6 increment_public_order_count    (CampaignsDS, the cap CONDITION)
+#   7 create_public_order             (OrdersDS, the PutItem + receipt mint)
+#   8 send_public_order_emails        (PublicOrdersDS, best-effort; failures
+#                                     are swallowed so email never fails the
+#                                     committed order)
+resource "aws_appsync_resolver" "public_create_order" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "publicCreateOrder"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      # Two function resources over two files because a pipeline may list a
+      # function id only once (#438).
+      aws_appsync_function.validate_public_token.function_id,
+      aws_appsync_function.validate_public_token_step2.function_id,
+      aws_appsync_function.get_profile_for_public_order.function_id,
+      # CatalogsDS: reused as-is; reads ctx.stash.catalogId stashed in step 2.
+      aws_appsync_function.get_catalog.function_id,
+      aws_appsync_function.validate_payment_method_public.function_id,
+      # CampaignsDS: the cap gate, BEFORE the write (condition failure aborts
+      # the pipeline with PUBLIC_ORDER_LIMIT_EXCEEDED and no row).
+      aws_appsync_function.increment_public_order_count.function_id,
+      aws_appsync_function.create_public_order.function_id,
+      # Best-effort email, AFTER the write: the function and the handler both
+      # swallow failures and only update confirmationEmailSent.
+      aws_appsync_function.send_public_order_emails.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/public_create_order_pipeline_resolver.js")
 }

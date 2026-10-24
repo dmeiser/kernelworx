@@ -111,6 +111,12 @@ variable "github_token" {
   description = "Optional GitHub token for authenticating calls to api.github.com/meta"
 }
 
+variable "alert_email" {
+  type        = string
+  default     = "dave@repeatersolutions.com"
+  description = "Ops address the CloudWatch alarms notify (same address the bootstrap cost budgets notify). The SNS email subscription needs a one-time confirmation."
+}
+
 # Local computed values
 locals {
   name_prefix  = "kernelworx"
@@ -171,6 +177,31 @@ module "iam" {
   lambda_function_arns = module.lambda.function_arns
 
   cloudfront_distribution_arn = module.cloudfront.distribution_arn
+
+  # KW-PUBLIC-ORDERS-SES-1: the public-orders confirmation mailer sends from
+  # the dev-owned subdomain identity. Prod and ephemeral pass nothing (the
+  # static enabled flag defaults false = no SES grant; the arn itself is
+  # apply-time-unknown on the creating apply, so counts key off the flag).
+  ses_order_emails_enabled = true
+  ses_order_identity_arn   = module.ses.identity_arn
+  ses_order_template_arns  = module.ses.template_arns
+}
+
+# SES sending identity for application transactional mail (public-order
+# confirmations, KW-PUBLIC-ORDERS-SES-1). The identity lives on a DEV-OWNED
+# SUBDOMAIN (orders.dev.kernelworx.app) of the dev zone; the apex
+# kernelworx.app zone (prod account, live MX/SPF) is never touched. DKIM
+# CNAME records are created in the dev zone only. The account stays in the
+# SES sandbox (sending to verified recipients only) until the production
+# access request lands as its named pre-launch gate.
+module "ses" {
+  source = "../../modules/ses"
+
+  name_prefix    = local.name_prefix
+  environment    = var.environment
+  zone_domain    = local.zone_domain
+  mail_subdomain = "orders"
+  subject_prefix = "[DEV] "
 }
 
 module "certificates" {
@@ -251,6 +282,9 @@ module "lambda" {
     # trigger uses its own scoped role (accounts table only). The monolithic
     # shared role is retired.
     "post-auth" = module.iam.lambda_post_auth_execution_role_arn
+    # #679 (public-orders offer slice): the public buyer order offer + receipt
+    # Lambda uses its own scoped role (the anonymous-facing read path).
+    "public-orders" = module.iam.lambda_public_orders_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name
 
@@ -266,6 +300,15 @@ module "lambda" {
   }
 
   user_pool_id = module.cognito.user_pool_id
+
+  # KW-PUBLIC-ORDERS-SES-1: order-confirmation mailer env from the dev SES
+  # module. Ephemeral and prod pass nothing, so the public-orders Lambda
+  # carries no SES env vars and the mailer honestly reports
+  # "not configured".
+  ses_order_from_address         = module.ses.from_address
+  ses_order_template_name        = module.ses.order_template_name
+  ses_order_seller_template_name = module.ses.order_seller_template_name
+  public_site_url                = "https://${local.site_domain}"
 }
 
 module "appsync" {
@@ -283,6 +326,24 @@ module "appsync" {
 
   dynamodb_table_names = module.dynamodb.table_names
   lambda_function_arns = module.lambda.function_arns
+}
+
+# Operational alarms for the public-orders surface (spec §9, slice 10). Dev runs
+# the AppSync 4xx/throttle alarm so the wiring is proven on the dev stack before
+# prod (the feature's dev-first posture). The SES reputation alarms are prod-only
+# (reputation is account-level) and the API-key expiry reminder is prod-only too:
+# `expires` is one module-level literal shared by every environment, so one named
+# reminder covers the fleet. Ephemeral does not instantiate this module at all.
+module "alarms" {
+  source = "../../modules/alarms"
+
+  name_prefix                     = local.name_prefix
+  environment                     = var.environment
+  appsync_api_id                  = module.appsync.api_id
+  alert_email                     = var.alert_email
+  api_key_expiry                  = module.appsync.api_key_expires
+  ses_reputation_enabled          = false
+  api_key_expiry_reminder_enabled = false
 }
 
 module "cloudfront" {
@@ -398,6 +459,23 @@ output "appsync_api_url" {
   value       = module.appsync.api_url
 }
 
+# The public-orders API key (#679 rev 7). Read by
+# scripts/generate_integration_env.py to write the TEST_APPSYNC_API_KEY and
+# VITE_APPSYNC_API_KEY managed keys, and by the deploy build to bake
+# VITE_APPSYNC_API_KEY into the frontend bundle. Not a secret: it is shipped in
+# the public bundle and only reaches the @aws_api_key fields, each of which
+# also requires the per-campaign share token, a GraphQL argument checked
+# inside the resolver (NOT_FOUND when absent).
+output "appsync_api_key" {
+  description = "AppSync API key for the public-orders (@aws_api_key) fields"
+  value       = module.appsync.api_key
+}
+
+output "appsync_api_key_expires" {
+  description = "RFC3339 expiry of the public-orders AppSync API key (renewal runbook: docs/PUBLIC_API_KEY_RUNBOOK.md)"
+  value       = module.appsync.api_key_expires
+}
+
 output "cloudfront_distribution_id" {
   description = "ID of the CloudFront distribution serving the site"
   value       = module.cloudfront.distribution_id
@@ -416,4 +494,9 @@ output "exports_bucket" {
 output "site_url" {
   description = "Public URL of the application site"
   value       = "https://${local.site_domain}"
+}
+
+output "ses_from_address" {
+  description = "Sending address of the public-orders confirmation mailer (dev SES identity)"
+  value       = module.ses.from_address
 }

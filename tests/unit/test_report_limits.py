@@ -226,6 +226,21 @@ class TestCeilingsCarryTheApprovedOrderCount:
         for _ in range(_APPROVED_REPORT_ORDERS):
             budget.admit(detail)
 
+    def test_the_buyer_email_column_costs_only_the_orders_that_have_one(self) -> None:
+        """The unit report's ``customerEmail`` does not re-price the approved contract.
+
+        Only public order-page orders carry a buyer email, and the projected
+        detail omits the key when the row has none, so the pinned realistic
+        order - and with it the 5,000-order contract above - measures what it
+        measured before the column existed. An order that does carry one pays
+        its real bytes, because the response really does return them.
+        """
+        without = _build_order_detail(_stored_order(1))
+        with_email = _build_order_detail({**_stored_order(1), "customerEmail": "buyer@example.com"})
+
+        assert "customerEmail" not in without
+        assert order_graph_bytes(with_email) > order_graph_bytes(without)
+
     def test_unit_ceiling_refuses_the_same_count_when_the_orders_are_wide(self) -> None:
         """The same order count of 20-line-item orders is refused, which is the point of bytes.
 

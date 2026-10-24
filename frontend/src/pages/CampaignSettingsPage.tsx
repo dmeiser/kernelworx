@@ -33,12 +33,19 @@ import {
   LIST_MY_CATALOGS,
   LIST_CAMPAIGNS_BY_PROFILE,
 } from '../lib/graphql';
+import { useCampaignPublicOrderSettings } from '../hooks/useCampaignPublicOrderSettings';
 import { LoadingState } from '../components/LoadingState';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { UnitInfoSection } from '../components/UnitInfoSection';
+import { PublicSettingsShareSection } from '../components/public/PublicSettingsShareSection';
+import { PublicSettingsCapNotice } from '../components/public/PublicSettingsCapNotice';
+import { PublicSettingsAckCheckboxes } from '../components/public/PublicSettingsAckCheckboxes';
+import { PublicSettingsMethodChecklist } from '../components/public/PublicSettingsMethodChecklist';
+import { PublicSettingsActions } from '../components/public/PublicSettingsActions';
 import { ensureCampaignId, ensureCatalogId, ensureProfileId, toUrlId } from '../lib/ids';
 import { dateToISO } from '../lib/date-utils';
 import type { GqlCampaign, GqlCatalog } from '../types';
+const PUBLIC_ORDER_CAP = 500;
 
 /* eslint-disable complexity */
 
@@ -318,6 +325,25 @@ export const CampaignSettingsPage: React.FC = () => {
   const myCatalogs = getMyCatalogs(myCatalogsData);
   const allCatalogs = getAllCatalogs(publicCatalogs, myCatalogs);
 
+  // Fetch public order settings
+  const {
+    settings: publicOrderSettings,
+    loading: publicOrderLoading,
+    updating: publicOrderUpdating,
+    setField: setPublicOrderField,
+    save: savePublicOrderSettings,
+    rotateToken: rotatePublicOrderToken,
+    disable: disablePublicOrderSettings,
+    enable: enablePublicOrderSettings,
+    draft: publicOrderDraft,
+    availablePaymentMethods: publicOrderAvailablePaymentMethods,
+    setPaymentAckAccepted: setPublicOrderPaymentAck,
+    setDisclosureAckAccepted: setPublicOrderDisclosureAck,
+    paymentAckAccepted: publicOrderPaymentAck,
+    disclosureAckAccepted: publicOrderDisclosureAck,
+    acknowledgementsAccepted: publicOrderAcknowledgementsAccepted,
+  } = useCampaignPublicOrderSettings({ campaignId: dbCampaignId });
+
   // Initialize form when campaign loads
   React.useEffect(() => {
     const c = getCampaign(campaignData);
@@ -543,6 +569,61 @@ export const CampaignSettingsPage: React.FC = () => {
           onExpandChange={setUnitExpanded}
           readOnly={hasSharedCampaignCode(campaign)}
         />
+      </Paper>
+
+      {/* Public Orders */}
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Public Orders
+        </Typography>
+        <>
+          {publicOrderSettings && !publicOrderLoading && (
+            <>
+              <PublicSettingsShareSection
+                campaignId={publicOrderSettings.campaignId}
+                shareToken={publicOrderSettings.token}
+                campaignName={publicOrderSettings.campaignName}
+              />
+              <PublicSettingsCapNotice
+                publicOrderCount={publicOrderSettings.publicOrderCount}
+                maxOrders={PUBLIC_ORDER_CAP}
+              />
+              <Stack spacing={3}>
+                <PublicSettingsAckCheckboxes
+                  paymentAckAccepted={publicOrderPaymentAck}
+                  disclosureAckAccepted={publicOrderDisclosureAck}
+                  onPaymentAckChange={setPublicOrderPaymentAck}
+                  onDisclosureAckChange={setPublicOrderDisclosureAck}
+                  disabled={publicOrderUpdating}
+                />
+                <PublicSettingsMethodChecklist
+                  availablePaymentMethods={publicOrderAvailablePaymentMethods}
+                  allowedPaymentMethods={publicOrderDraft.allowedPaymentMethods}
+                  onChange={(methods) => setPublicOrderField('allowedPaymentMethods', methods)}
+                  disabled={publicOrderUpdating}
+                />
+                <PublicSettingsActions
+                  enabled={publicOrderSettings.enabled}
+                  canEnable={publicOrderAcknowledgementsAccepted && publicOrderDraft.allowedPaymentMethods.length > 0}
+                  onRotate={() => {
+                    void rotatePublicOrderToken();
+                  }}
+                  onDisable={() => {
+                    void disablePublicOrderSettings();
+                  }}
+                  onEnable={() => {
+                    void enablePublicOrderSettings();
+                  }}
+                  saving={publicOrderUpdating}
+                  onSave={() => {
+                    void savePublicOrderSettings();
+                  }}
+                />
+              </Stack>
+            </>
+          )}
+          {!publicOrderSettings && publicOrderLoading && <LoadingState minHeight="200px" />}
+        </>
       </Paper>
 
       {/* Danger Zone */}

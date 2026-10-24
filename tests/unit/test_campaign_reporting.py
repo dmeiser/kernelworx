@@ -120,6 +120,7 @@ class TestGetUnitReport:
                     "orderId": "ORDER#order1",
                     "campaignId": "CAMPAIGN#campaign1",
                     "customerName": "Customer 1",
+                    "customerEmail": "buyer1@example.com",
                     "orderDate": "2024-10-01T12:00:00Z",
                     "totalAmount": Decimal("100.00"),
                     "lineItems": [
@@ -195,6 +196,12 @@ class TestGetUnitReport:
             assert len(result["sellers"]) == 2
             assert result["totalSales"] == 300.0
             assert result["totalOrders"] == 2
+
+            # The buyer email rides along in the order details, and its absence
+            # on an order that never carried one stays an absence (#D5).
+            details = {d["orderId"]: d for s in result["sellers"] for d in s["orders"]}
+            assert details["ORDER#order1"]["customerEmail"] == "buyer1@example.com"
+            assert "customerEmail" not in details["ORDER#order2"]
 
             # Verify unitCampaignKey-index query was called correctly
             mock_campaigns_table.query.assert_called_once()
@@ -1206,6 +1213,50 @@ class TestUnitReportOrderGraphCeiling:
         # One page is enough to reach the ceiling; the handler does not keep
         # following LastEvaluatedKey through the rest of the table.
         assert orders_table.query.call_count == 1
+
+
+class TestUnitReportBuyerEmailColumn:
+    """Tests for the buyer ``customerEmail`` on the unit report's order details.
+
+    The enable-time disclosure tells the seller that a public buyer's contact
+    details - email included - appear in unit reports and exports, so the unit
+    report must actually carry the address (public-orders spec §9 D5, §11).
+    Orders that carry no email - every authenticated order and every
+    pre-feature row - must report that honestly as a null rather than an
+    invented value.
+    """
+
+    @staticmethod
+    def _order(**overrides: Any) -> Dict[str, Any]:
+        order: Dict[str, Any] = {
+            "orderId": "ORDER#order1",
+            "campaignId": "CAMPAIGN#campaign1",
+            "customerName": "Ada Lovelace",
+            "orderDate": "2024-10-01T12:00:00Z",
+            "totalAmount": Decimal("12.00"),
+            "lineItems": [],
+        }
+        order.update(overrides)
+        return order
+
+    def test_public_order_detail_carries_the_buyer_email(self) -> None:
+        """A row with a ``customerEmail`` attribute surfaces it in the detail."""
+        detail = _build_order_detail(self._order(customerEmail="ada@example.com"))
+        assert detail["customerEmail"] == "ada@example.com"
+
+    def test_order_without_an_email_reports_no_email(self) -> None:
+        """A row with no ``customerEmail`` attribute carries no key, so the field is null.
+
+        Omitting rather than emitting an explicit null is also what keeps the
+        report's byte ceiling unchanged for orders that have no buyer email.
+        """
+        detail = _build_order_detail(self._order())
+        assert "customerEmail" not in detail
+        assert detail["customerName"] == "Ada Lovelace"
+
+    def test_empty_email_is_not_reported_as_an_email(self) -> None:
+        """A blank stored email is no address to disclose."""
+        assert "customerEmail" not in _build_order_detail(self._order(customerEmail=""))
 
 
 class TestUnitReportOrderQueryConcurrency:

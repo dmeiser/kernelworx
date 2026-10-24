@@ -164,6 +164,45 @@ resource "aws_appsync_resolver" "list_campaigns_by_profile" {
   code = file("${local.js_resolvers_dir}/list_campaigns_by_profile_resolver.js")
 }
 
+# === PUBLIC ORDER SETTINGS QUERIES (#679 rev 7, campaign-keyed) ===
+
+# getCampaignPublicOrderSettings Pipeline. Rev 7 keys the public-order settings
+# by campaign, so the pipeline starts by locating the campaign (the base table
+# is keyed {profileId, campaignId} and the client only knows the campaign id),
+# then authorizes through the campaign's own profileId with the two-phase
+# write-access pair (#438: ownership comes from the strongly consistent
+# base-table read, never the eventually-consistent GSI), refuses everyone but the
+# profile owner, and finally re-reads the campaign consistently so the settings
+# the owner just saved are what comes back rather than a lagging GSI projection.
+resource "aws_appsync_resolver" "get_campaign_public_order_settings" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Query"
+  field  = "getCampaignPublicOrderSettings"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      # CampaignsDS GSI locator: campaignId -> profileId, for the pair below.
+      aws_appsync_function.locate_campaign_public_settings.function_id,
+      # Two-phase owner check (#438) over the campaign's own profileId.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
+      # Gate: isOwner === true, else FORBIDDEN (share collaborators included).
+      aws_appsync_function.verify_public_settings_owner.function_id,
+      # CampaignsDS consistent read: the publicOrders map, the counter, and the
+      # campaign's name and active state, all off one item.
+      aws_appsync_function.lookup_campaign_public_settings.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_campaign_public_order_settings_pipeline_resolver.js")
+}
+
 # === ORDER QUERIES ===
 
 # getOrder Pipeline
@@ -586,4 +625,42 @@ resource "aws_appsync_resolver" "admin_get_profile_shares" {
   }
 
   code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
+}
+
+# publicGetOrderOffer (Lambda unit resolver, #679). Anonymous API-key read; the
+# share token in the argument is the authorization. The offer is six datastore
+# reads plus QR pre-signing, which exceeds one APPSYNC_JS function's single
+# datastore call, so it is a Lambda, not a pipeline. The handler dispatches on
+# info.fieldName; identity is null under API_KEY and is never read.
+resource "aws_appsync_resolver" "public_order_offer" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "publicGetOrderOffer"
+  data_source = aws_appsync_datasource.public_orders.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# publicGetOrderReceipt (Lambda unit resolver, #679). The second field on the
+# same public-orders Lambda: the receipt read is one strongly consistent orders
+# GetItem, and the per-order receipt token in the argument is the capability.
+# Unknown campaign/suffix, absent or mismatched token, and a campaign mismatch
+# all answer the identical NOT_FOUND.
+resource "aws_appsync_resolver" "public_order_receipt" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "publicGetOrderReceipt"
+  data_source = aws_appsync_datasource.public_orders.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }

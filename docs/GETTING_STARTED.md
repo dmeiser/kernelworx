@@ -307,6 +307,11 @@ cd frontend
 # They are only for local `vite dev` and ephemeral environments (see
 # frontend/.env.example); make sure no local .env / .env.local defining them
 # is present, or Vite will bake the absolute endpoints into the bundle.
+#
+# The public order pages (API-key auth) instead need the AppSync API key baked
+# into the same build — a replaced key with a stale bundle fails every public
+# call with Unauthorized until the next deploy:
+export VITE_APPSYNC_API_KEY=$(tofu -chdir=../tofu/application/environments/dev output -raw appsync_api_key)
 npm run build
 
 # Upload to S3

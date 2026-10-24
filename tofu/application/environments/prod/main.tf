@@ -111,6 +111,12 @@ variable "github_token" {
   description = "Optional GitHub token for authenticating calls to api.github.com/meta"
 }
 
+variable "alert_email" {
+  type        = string
+  default     = "dave@repeatersolutions.com"
+  description = "Ops address the CloudWatch alarms notify (same address the bootstrap cost budgets notify). The SNS email subscription needs a one-time confirmation."
+}
+
 # Local computed values
 locals {
   name_prefix  = "kernelworx"
@@ -242,6 +248,9 @@ module "lambda" {
     # trigger uses its own scoped role (accounts table only). The monolithic
     # shared role is retired.
     "post-auth" = module.iam.lambda_post_auth_execution_role_arn
+    # #679 (public-orders offer slice): the public buyer order offer + receipt
+    # Lambda uses its own scoped role (the anonymous-facing read path).
+    "public-orders" = module.iam.lambda_public_orders_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name
 
@@ -274,6 +283,24 @@ module "appsync" {
 
   dynamodb_table_names = module.dynamodb.table_names
   lambda_function_arns = module.lambda.function_arns
+}
+
+# Operational alarms for the public-orders surface (spec §9, slice 10). Prod
+# carries the full set: the AppSync 4xx/throttle alarm, the SES reputation
+# alarms (account-level reputation, so prod only — Q3), and the scheduled
+# public-orders API-key expiry reminder (the spec's ExpiredAPIKeys alarm; see
+# docs/PUBLIC_API_KEY_RUNBOOK.md for why it is a scheduled reminder rather than
+# a metric alarm).
+module "alarms" {
+  source = "../../modules/alarms"
+
+  name_prefix                     = local.name_prefix
+  environment                     = var.environment
+  appsync_api_id                  = module.appsync.api_id
+  alert_email                     = var.alert_email
+  api_key_expiry                  = module.appsync.api_key_expires
+  ses_reputation_enabled          = true
+  api_key_expiry_reminder_enabled = true
 }
 
 module "cloudfront" {
@@ -388,6 +415,23 @@ output "cognito_domain" {
 output "appsync_api_url" {
   description = "GraphQL API URL for the AppSync API"
   value       = module.appsync.api_url
+}
+
+# The public-orders API key (#679 rev 7). Read by
+# scripts/generate_integration_env.py to write the TEST_APPSYNC_API_KEY and
+# VITE_APPSYNC_API_KEY managed keys, and by the deploy build to bake
+# VITE_APPSYNC_API_KEY into the frontend bundle. Not a secret: it is shipped in
+# the public bundle and only reaches the @aws_api_key fields, each of which
+# also requires the per-campaign share token, a GraphQL argument checked
+# inside the resolver (NOT_FOUND when absent).
+output "appsync_api_key" {
+  description = "AppSync API key for the public-orders (@aws_api_key) fields"
+  value       = module.appsync.api_key
+}
+
+output "appsync_api_key_expires" {
+  description = "RFC3339 expiry of the public-orders AppSync API key (renewal runbook: docs/PUBLIC_API_KEY_RUNBOOK.md)"
+  value       = module.appsync.api_key_expires
 }
 
 output "cloudfront_distribution_id" {

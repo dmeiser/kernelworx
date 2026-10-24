@@ -134,8 +134,17 @@ def _quantize_money(value: Any) -> Decimal:
 
 
 def _build_order_detail(order: Dict[str, Any]) -> Dict[str, Any]:
-    """Build order detail from an order item using Decimal for monetary values."""
-    return {
+    """Build order detail from an order item using Decimal for monetary values.
+
+    ``customerEmail`` is carried only when the order actually has one. Only
+    public order-page orders do, the report's order-graph ceiling charges the
+    serialised detail, and the ceiling's approved order contract is sized on the
+    realistic order shape - so emitting an explicit null on every authenticated
+    and pre-feature row would tax that contract for data no order carries
+    (public-orders spec §9 D5, §11). A missing key resolves to null on the
+    nullable report field, so the disclosure is no less honest for it.
+    """
+    detail: Dict[str, Any] = {
         "orderId": cast(str, order["orderId"]),
         "customerName": cast(str, order["customerName"]),
         "orderDate": cast(str, order["orderDate"]),
@@ -151,6 +160,10 @@ def _build_order_detail(order: Dict[str, Any]) -> Dict[str, Any]:
             for item in cast(List[Dict[str, Any]], order.get("lineItems", []))
         ],
     }
+    customer_email = order.get("customerEmail")
+    if customer_email:
+        detail["customerEmail"] = customer_email
+    return detail
 
 
 def _fetch_campaign_order_details(campaign_id: str, budget: OrderGraphBudget) -> List[Dict[str, Any]]:
