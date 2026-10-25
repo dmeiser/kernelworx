@@ -40,14 +40,11 @@ if user_pool_id:
         if not email:
             continue
         try:
-            response = cognito.admin_get_user(
-                UserPoolId=user_pool_id,
-                Username=email
-            )
+            response = cognito.admin_get_user(UserPoolId=user_pool_id, Username=email)
             sub = None
-            for attr in response['UserAttributes']:
-                if attr['Name'] == 'sub':
-                    sub = attr['Value']
+            for attr in response["UserAttributes"]:
+                if attr["Name"] == "sub":
+                    sub = attr["Value"]
                     break
             if sub:
                 test_subs.append(sub)
@@ -65,28 +62,23 @@ print(f"\nSearching for catalogs in DynamoDB table: {TABLE_NAME}")
 deleted_count = 0
 for sub in test_subs:
     print(f"\nScanning for catalogs owned by: {sub}")
-    
+
     # Scan for catalogs with this owner (GSI1PK = MANAGED_CATALOG#{sub})
     response = table.scan(
         FilterExpression="begins_with(PK, :pk_prefix) AND GSI1PK = :gsi1pk",
-        ExpressionAttributeValues={
-            ":pk_prefix": "CATALOG#",
-            ":gsi1pk": f"MANAGED_CATALOG#{sub}"
-        }
+        ExpressionAttributeValues={":pk_prefix": "CATALOG#", ":gsi1pk": f"MANAGED_CATALOG#{sub}"},
     )
-    
+
     catalogs = response.get("Items", [])
     print(f"  Found {len(catalogs)} catalogs")
-    
+
     for catalog in catalogs:
         catalog_id = catalog["PK"].replace("CATALOG#", "")
         catalog_name = catalog.get("catalogName", "Unknown")
-        
+
         try:
             # Delete METADATA item
-            table.delete_item(
-                Key={"PK": catalog["PK"], "SK": "METADATA"}
-            )
+            table.delete_item(Key={"PK": catalog["PK"], "SK": "METADATA"})
             print(f"    ✓ Deleted: {catalog_name} ({catalog_id})")
             deleted_count += 1
         except Exception as e:

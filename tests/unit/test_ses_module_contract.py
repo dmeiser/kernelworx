@@ -49,9 +49,7 @@ def _module_blocks(env_main: Path) -> Dict[str, Any]:
 
 def test_dev_and_prod_instantiate_the_ses_module_and_ephemeral_does_not() -> None:
     assert "ses" in _module_blocks(DEV_MAIN), "dev must instantiate the SES module"
-    assert "ses" in _module_blocks(PROD_MAIN), (
-        "prod must instantiate the SES module (apex identity kernelworx.app)"
-    )
+    assert "ses" in _module_blocks(PROD_MAIN), "prod must instantiate the SES module (apex identity kernelworx.app)"
     assert "ses" not in _module_blocks(EPHEMERAL_MAIN), (
         "ephemeral must not instantiate the SES module (zero-cost opt-out)"
     )

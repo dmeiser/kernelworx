@@ -32,6 +32,7 @@ class Color:
     @property
     def luminance(self) -> float:
         r, g, b = self.rgb
+
         # sRGB to linear
         def linear(c: float) -> float:
             return c / 12.92 if c <= 0.03928 else math.pow((c + 0.055) / 1.055, 2.4)
