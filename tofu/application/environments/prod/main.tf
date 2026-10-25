@@ -170,6 +170,30 @@ module "iam" {
   lambda_function_arns = module.lambda.function_arns
 
   cloudfront_distribution_arn = module.cloudfront.distribution_arn
+
+  # KW-PROD-MAIL-ENABLE: the public-orders confirmation mailer sends from the
+  # prod-owned identity. Same shape as dev (see environments/dev/main.tf), but
+  # the identity is the apex kernelworx.app zone itself and the sender is
+  # orders@kernelworx.app. The apex zone is looked up, never owned: the module
+  # only creates its three Easy DKIM CNAMEs (additive new names) — the zone's
+  # existing records (live MX/SPF, site records) are never read or modified,
+  # and the SPF update was made by hand outside this stack.
+  ses_order_emails_enabled = true
+  ses_order_identity_arn   = module.ses.identity_arn
+  ses_order_template_arns  = module.ses.template_arns
+}
+
+# SES sending identity for application transactional mail in prod
+# (KW-PROD-MAIL-ENABLE). No subject_prefix: prod subjects carry no environment
+# marker (the module default "" is correct; dev passes "[DEV] "). The account
+# stays in the SES sandbox until the production-access request lands as the
+# named pre-launch gate (docs/PUBLIC_ORDERS_PRELAUNCH.md).
+module "ses" {
+  source = "../../modules/ses"
+
+  name_prefix = local.name_prefix
+  environment = var.environment
+  zone_domain = local.zone_domain
 }
 
 module "certificates" {
@@ -268,6 +292,13 @@ module "lambda" {
   }
 
   user_pool_id = module.cognito.user_pool_id
+
+  # KW-PROD-MAIL-ENABLE: order-confirmation mailer env from the prod SES
+  # module (apex identity kernelworx.app, sender orders@kernelworx.app).
+  ses_order_from_address         = module.ses.from_address
+  ses_order_template_name        = module.ses.order_template_name
+  ses_order_seller_template_name = module.ses.order_seller_template_name
+  public_site_url                = "https://${local.site_domain}"
 }
 
 module "appsync" {

@@ -1,16 +1,19 @@
-"""Static contract for the dev SES slice (KW-PUBLIC-ORDERS-SES-1).
+"""Static contract for the SES mail slice (KW-PUBLIC-ORDERS-SES-1, prod wiring
+in KW-PROD-MAIL-ENABLE).
 
 The settled design makes the SES sending identity the environment's own zone
-(``dev.kernelworx.app`` on dev) with the from-address ``orders@{zone}``
-(``orders@dev.kernelworx.app`` on dev); the apex ``kernelworx.app`` zone (prod
-account, live MX/SPF) is NEVER touched. These guards pin:
+(``dev.kernelworx.app`` on dev, the apex ``kernelworx.app`` on prod) with the
+from-address ``orders@{zone}``. On prod the apex zone is LOOKED UP, never
+owned: the module only creates its three Easy DKIM CNAMEs there (additive new
+names) and never reads, modifies or deletes an existing record (the apex SPF
+update was made by hand outside this stack). These guards pin:
 
-- only the dev environment instantiates the SES module; prod and ephemeral do
-  not reference it at all;
+- dev and prod instantiate the SES module; ephemeral does not (zero-cost
+  opt-out);
 - the SES identity IS ``var.zone_domain`` and the from-address is
   ``orders@${var.zone_domain}`` — no ``mail_subdomain`` variable survives;
-- the module's DNS records land in ``var.zone_domain`` (dev passes its own
-  zone, never the apex) and only ever create the three new Easy DKIM CNAME
+- the module's DNS records land in ``var.zone_domain`` (the environment's own
+  zone) and only ever create the three new Easy DKIM CNAME
   names — no TXT/MX/SPF record exists in the module;
 - templates interpolate buyer data through SES Handlebars auto-escaping only
   (no ``{{{ }}}`` unescaped interpolation anywhere) and are namespaced per
@@ -44,10 +47,10 @@ def _module_blocks(env_main: Path) -> Dict[str, Any]:
     return modules
 
 
-def test_only_dev_instantiates_the_ses_module() -> None:
+def test_dev_and_prod_instantiate_the_ses_module_and_ephemeral_does_not() -> None:
     assert "ses" in _module_blocks(DEV_MAIN), "dev must instantiate the SES module"
-    assert "ses" not in _module_blocks(PROD_MAIN), (
-        "prod must not instantiate the SES module (apex zone is out of bounds)"
+    assert "ses" in _module_blocks(PROD_MAIN), (
+        "prod must instantiate the SES module (apex identity kernelworx.app)"
     )
     assert "ses" not in _module_blocks(EPHEMERAL_MAIN), (
         "ephemeral must not instantiate the SES module (zero-cost opt-out)"
@@ -56,10 +59,18 @@ def test_only_dev_instantiates_the_ses_module() -> None:
 
 def test_dev_ses_module_is_scoped_to_the_dev_owned_zone() -> None:
     ses = _module_blocks(DEV_MAIN)["ses"]
-    # The dev zone — never the apex kernelworx.app zone, which lives in the
-    # prod account with live MX/SPF mail routing.
+    # The dev zone — the DKIM records land in the environment's own zone.
     assert ses["zone_domain"] == "${local.zone_domain}"
     assert ses["subject_prefix"] == "[DEV] "
+
+
+def test_prod_ses_module_is_the_apex_identity_without_a_subject_prefix() -> None:
+    ses = _module_blocks(PROD_MAIN)["ses"]
+    # prod's local.zone_domain IS the apex kernelworx.app zone (var.domain);
+    # the zone is looked up by the module, never created by it.
+    assert ses["zone_domain"] == "${local.zone_domain}"
+    # No environment marker on prod subjects — the module default "" applies.
+    assert "subject_prefix" not in ses
 
 
 def test_identity_is_the_environment_zone_and_from_address_is_orders_at_zone() -> None:
@@ -203,10 +214,11 @@ def test_iam_ses_grant_is_conditional_on_the_identity_arn() -> None:
     assert "var.ses_order_identity_arn != null ? 1 : 0" not in source
 
 
-def test_dev_wires_ses_outputs_into_iam_and_lambda() -> None:
-    source = DEV_MAIN.read_text()
-    assert "ses_order_emails_enabled = true" in source
-    assert "ses_order_identity_arn   = module.ses.identity_arn" in source
-    assert "ses_order_template_arns  = module.ses.template_arns" in source
-    assert "ses_order_from_address         = module.ses.from_address" in source
-    assert '"https://${local.site_domain}"' in source
+def test_dev_and_prod_wire_ses_outputs_into_iam_and_lambda() -> None:
+    for env_main in (DEV_MAIN, PROD_MAIN):
+        source = env_main.read_text()
+        assert "ses_order_emails_enabled = true" in source
+        assert "ses_order_identity_arn   = module.ses.identity_arn" in source
+        assert "ses_order_template_arns  = module.ses.template_arns" in source
+        assert "ses_order_from_address         = module.ses.from_address" in source
+        assert '"https://${local.site_domain}"' in source
