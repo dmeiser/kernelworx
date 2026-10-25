@@ -2808,6 +2808,70 @@ class TestCreateManagedCatalog:
         assert result["errorCode"] == ErrorCode.INVALID_INPUT
         assert "Product price must be a valid number" in result["message"]
 
+    @pytest.mark.parametrize(
+        "price",
+        [
+            "Infinity",
+            "inf",
+            "+inf",
+            "-Infinity",
+            "-inf",
+            "NaN",
+            "nan",
+            float("inf"),
+            float("-inf"),
+            float("nan"),
+        ],
+    )
+    def test_product_non_finite_price_raises_error(
+        self,
+        price: Any,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that a non-finite price (Infinity/inf/NaN) returns INVALID_INPUT."""
+        event = {
+            **admin_appsync_event,
+            "arguments": {
+                "input": {
+                    "catalogName": "Test Catalog",
+                    "products": [{"productName": "Test", "price": price}],
+                }
+            },
+        }
+
+        result = create_managed_catalog(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "Product price must be a valid number" in result["message"]
+
+    def test_product_finite_price_still_accepted(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Test that finite prices are unaffected by the non-finite check."""
+        monkeypatch.setenv("CATALOGS_TABLE_NAME", "kernelworx-catalogs-ue1-dev")
+
+        event = {
+            **admin_appsync_event,
+            "arguments": {
+                "input": {
+                    "catalogName": "Test Catalog",
+                    "products": [{"productName": "Test", "price": "0"}],
+                }
+            },
+        }
+
+        result = create_managed_catalog(event, lambda_context)
+
+        assert result["products"][0]["price"] == Decimal("0")
+
     def test_missing_caller_id_raises_error(
         self,
         dynamodb_table: Any,
