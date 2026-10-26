@@ -375,9 +375,22 @@ def _filter_matching_accounts(
             matches.append(item)
 
 
-def _scan_accounts_page(paginator_params: Dict[str, Any]) -> tuple[list[Dict[str, Any]], Dict[str, Any] | None]:
-    """Scan one page of accounts. Returns (items, last_evaluated_key)."""
-    response = tables.accounts.scan(**paginator_params)
+def _scan_accounts_page(
+    paginator_params: Dict[str, Any], page_size: int
+) -> tuple[list[Dict[str, Any]], Dict[str, Any] | None]:
+    """Scan one bounded page of accounts. Returns (items, last_evaluated_key).
+
+    ``Limit`` caps how many items this request reads and ``ProjectionExpression``
+    caps what each read item costs on the wire, so no single request can pull a
+    whole 1 MB page of full account items (``preferences`` included) into the
+    Lambda. The projection carries every attribute ``_matches_query`` reads plus
+    the ``accountId`` the caller reads, so the match result is unchanged.
+    """
+    response = tables.accounts.scan(
+        ProjectionExpression=_ACCOUNT_SCAN_PROJECTION,
+        Limit=page_size,
+        **paginator_params,
+    )
     items = response.get("Items", [])
     last_key = response.get("LastEvaluatedKey")
     return items, last_key
@@ -387,6 +400,22 @@ def _scan_accounts_page(paginator_params: Dict[str, Any]) -> tuple[list[Dict[str
 _ACCOUNT_SEARCH_MAX_RESULTS = 50
 # Safety limit on how many account items a search scan may read.
 _ACCOUNTS_SCAN_SAFETY_LIMIT = 1000
+# Items one Scan request may read. DynamoDB already stops a page at 1 MB of raw
+# item data, but that cap is in bytes, not items: with no explicit ``Limit`` a
+# single request can return several times the safety limit below, so the budget
+# was only ever enforced between pages (#775).
+_ACCOUNTS_SCAN_PAGE_SIZE = 250
+# Hard cap on Scan requests one search may issue. The item budget alone does not
+# guarantee termination: a page that returns no items but does return a
+# ``LastEvaluatedKey`` advances the scan position without advancing the count.
+# At the page size above the budget needs 4 pages, so 20 leaves room for
+# DynamoDB's byte-capped pages while still bounding the round trips.
+_ACCOUNTS_SCAN_MAX_PAGES = 20
+# The only account attributes a search reads or returns: the three it matches on
+# plus the key the caller consumes. Scan read cost is unchanged by a projection
+# (DynamoDB bills a scan on the full item size either way); what it bounds is the
+# bytes and memory one page moves (#775).
+_ACCOUNT_SCAN_PROJECTION = "accountId, email, givenName, familyName"
 # Shortest query an admin may search for. The only way to match a partial query
 # is a full accounts-table scan, and a one or two character query can match
 # most of the table while telling the admin nothing, so it is rejected outright
@@ -454,19 +483,34 @@ def _query_email_search_index(
 
 
 def _scan_accounts_page_into(
-    paginator_params: Dict[str, Any], query_lower: str, matches: list[Dict[str, Any]], max_results: int
+    paginator_params: Dict[str, Any],
+    query_lower: str,
+    matches: list[Dict[str, Any]],
+    max_results: int,
+    page_size: int,
 ) -> tuple[int, Dict[str, Any] | None]:
     """Scan one page and append its matching accounts to matches. Returns (page_size, last_key)."""
-    items, last_key = _scan_accounts_page(paginator_params)
+    items, last_key = _scan_accounts_page(paginator_params, page_size)
     _filter_matching_accounts(items, query_lower, matches, max_results)
     return len(items), last_key
 
 
+def _scan_is_truncated(scanned_count: int, pages: int, last_count: int, last_key: Dict[str, Any] | None) -> bool:
+    """Return True when the scan stopped with pages left unread.
+
+    A page that returned no items while handing back a ``LastEvaluatedKey``
+    stopped the walk without consuming the item budget, so it is truncation too.
+    """
+    if not last_key:
+        return False
+    return scanned_count >= _ACCOUNTS_SCAN_SAFETY_LIMIT or pages >= _ACCOUNTS_SCAN_MAX_PAGES or last_count == 0
+
+
 def _warn_if_accounts_scan_truncated(
-    scanned_count: int, last_key: Dict[str, Any] | None, query: str, logger: Any
+    scanned_count: int, pages: int, last_count: int, last_key: Dict[str, Any] | None, query: str, logger: Any
 ) -> None:
-    """Warn when the account scan stopped at the safety limit with more pages left."""
-    if scanned_count >= _ACCOUNTS_SCAN_SAFETY_LIMIT and last_key:
+    """Warn when the account scan stopped with more pages left."""
+    if _scan_is_truncated(scanned_count, pages, last_count, last_key):
         logger.warning(
             "DynamoDB accounts search reached max scan limit; results may be truncated",
             query=mask_email(query),
@@ -475,18 +519,34 @@ def _warn_if_accounts_scan_truncated(
 
 
 def _scan_accounts_matches(query: str, query_lower: str, max_results: int, logger: Any) -> list[Dict[str, Any]]:
-    """Scan the Accounts table, collecting matches until the result/scan limits are hit."""
+    """Scan the Accounts table in bounded pages, collecting matches until a limit is hit.
+
+    A name fragment is a substring search, so no index on this table can answer
+    it and the scan is required (#775). What is bounded is its cost: each page
+    asks DynamoDB for at most what the item budget still allows, so the scan
+    never reads more than `_ACCOUNTS_SCAN_SAFETY_LIMIT` items and never issues
+    more than `_ACCOUNTS_SCAN_MAX_PAGES` requests, whatever page shape the
+    service returns. The previous loop only checked the budget between pages,
+    so one unbounded 1 MB page could overshoot it several times over.
+    """
     matches: list[Dict[str, Any]] = []
     scanned_count = 0
+    pages = 0
+    last_count = 0
     paginator_params: Dict[str, Any] = {}
     last_key: Dict[str, Any] | None = None
     while scanned_count < _ACCOUNTS_SCAN_SAFETY_LIMIT and len(matches) < max_results:
-        count, last_key = _scan_accounts_page_into(paginator_params, query_lower, matches, max_results)
+        if pages >= _ACCOUNTS_SCAN_MAX_PAGES:
+            break
+        page_size = min(_ACCOUNTS_SCAN_PAGE_SIZE, _ACCOUNTS_SCAN_SAFETY_LIMIT - scanned_count)
+        count, last_key = _scan_accounts_page_into(paginator_params, query_lower, matches, max_results, page_size)
         scanned_count += count
-        if not last_key:
+        last_count = count
+        pages += 1
+        if not last_key or count == 0:
             break
         paginator_params["ExclusiveStartKey"] = last_key
-    _warn_if_accounts_scan_truncated(scanned_count, last_key, query, logger)
+    _warn_if_accounts_scan_truncated(scanned_count, pages, last_count, last_key, query, logger)
     return matches
 
 
@@ -498,9 +558,10 @@ def _search_accounts_in_dynamodb(query: str, logger: Any) -> list[Dict[str, Any]
     RANGE key make a ``begins_with`` key condition legal: one index query, no
     table scan (#586). A name fragment is a substring search that no prefix
     index can answer, so it is still served by a full scan of the accounts
-    table, bounded by the `_ACCOUNTS_SCAN_SAFETY_LIMIT` safety limit and
-    truncated at `_ACCOUNT_SEARCH_MAX_RESULTS` matches. Either path falls back
-    to the scan when the index has no answer.
+    table, paginated with `LastEvaluatedKey` and bounded per request by
+    `_ACCOUNTS_SCAN_PAGE_SIZE` items up to the `_ACCOUNTS_SCAN_SAFETY_LIMIT`
+    item budget, then truncated at `_ACCOUNT_SEARCH_MAX_RESULTS` matches. Either
+    path falls back to the scan when the index has no answer.
 
     Returns all matching accounts (up to max_results limit).
     """

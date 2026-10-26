@@ -24,9 +24,6 @@ import pytest
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
 from src.handlers.admin_operations import (
-    _ACCOUNT_SCAN_PROJECTION,
-    _ACCOUNTS_SCAN_MAX_PAGES,
-    _ACCOUNTS_SCAN_PAGE_SIZE,
     _batch_get_campaign_catalogs,
     _extract_unique_catalog_ids,
     admin_purge_user_account,
@@ -35,6 +32,9 @@ from src.handlers.admin_operations import (
     lambda_handler,
 )
 from src.handlers.admin_user_operations import (
+    _ACCOUNT_SCAN_PROJECTION,
+    _ACCOUNTS_SCAN_MAX_PAGES,
+    _ACCOUNTS_SCAN_PAGE_SIZE,
     _batch_get_display_names,
     _batch_get_user_groups,
     _search_user_by_sub,
@@ -7184,10 +7184,10 @@ class TestAdminOperationExceptionHandlers:
         }
 
         with (
-            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
-            patch("src.handlers.admin_operations.tables") as mock_tables,
-            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
-            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+            patch("src.handlers.admin_user_operations.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_user_operations.tables") as mock_tables,
+            patch("src.handlers.admin_user_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_user_operations._batch_get_user_groups") as mock_batch_groups,
         ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
@@ -7232,10 +7232,10 @@ class TestAdminOperationExceptionHandlers:
         }
 
         with (
-            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
-            patch("src.handlers.admin_operations.tables") as mock_tables,
-            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
-            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+            patch("src.handlers.admin_user_operations.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_user_operations.tables") as mock_tables,
+            patch("src.handlers.admin_user_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_user_operations._batch_get_user_groups") as mock_batch_groups,
         ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
@@ -7270,10 +7270,10 @@ class TestAdminOperationExceptionHandlers:
         }
 
         with (
-            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
-            patch("src.handlers.admin_operations.tables") as mock_tables,
-            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
-            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+            patch("src.handlers.admin_user_operations.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_user_operations.tables") as mock_tables,
+            patch("src.handlers.admin_user_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_user_operations._batch_get_user_groups") as mock_batch_groups,
         ):
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
