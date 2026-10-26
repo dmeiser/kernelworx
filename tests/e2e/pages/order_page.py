@@ -19,13 +19,12 @@ class OrderPage(BasePage):
     Selector notes:
 
     * Customer names appear in ``<TableCell>`` elements in the orders table.
+      Table rows are targeted via ``get_by_role("row").filter(has_text=...)``.
+    * Form fields use accessible labels via ``get_by_label(...)``.
     * The *New Order* button uses visible text (MUI Button).
     * The ``OrderEditorPage`` heading is ``<Typography variant="h4">`` with
       the text ``"Create Order"``; :meth:`create_order` navigates there,
       fills the form, and submits.
-
-    TODO: add ``data-testid`` attributes to the order table and form fields
-    once the smoke-test suite is validated against the running app.
     """
 
     _ORDERS_SUFFIX: str = "/orders"
