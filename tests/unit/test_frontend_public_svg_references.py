@@ -40,13 +40,13 @@ def _local_href_targets(svg_path: Path) -> list[str]:
     return targets
 
 
-def test_all_relative_svg_hrefs_resolve() -> None:
+def test_all_relative_svg_href_targets_resolve() -> None:
     missing: list[str] = []
     for svg_path in sorted(FRONTEND_PUBLIC.rglob("*.svg")):
         for target in _local_href_targets(svg_path):
             if not (svg_path.parent / target).is_file():
                 missing.append(f"{svg_path.relative_to(REPO_ROOT)} -> {target}")
     assert not missing, (
-        "frontend/public SVGs embed relative hrefs whose target does not exist "
+        "frontend/public SVGs embed relative references whose target does not exist "
         f"(renders blank while still served 200): {missing}"
     )
