@@ -23,10 +23,10 @@ import boto3
 import pytest
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
+from src.handlers.admin_account_purge import admin_purge_user_account
 from src.handlers.admin_operations import (
     _batch_get_campaign_catalogs,
     _extract_unique_catalog_ids,
-    admin_purge_user_account,
     admin_reset_user_password,
     create_managed_catalog,
     lambda_handler,
@@ -182,7 +182,7 @@ class TestLambdaHandler:
             "arguments": {"accountId": target_account_id, "profileIds": []},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": target_account_id}]}
             mock_cognito.admin_delete_user.return_value = {}
@@ -1605,7 +1605,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
@@ -1631,11 +1631,11 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
+            with patch("src.handlers.admin_account_purge.tables") as mock_tables:
                 mock_tables.accounts.get_item.return_value = {"Item": {"accountId": "ACCOUNT#target-user-123"}}
                 mock_tables.profiles.get_item.return_value = {}
                 result = admin_purge_user_account(event, lambda_context)
@@ -1680,7 +1680,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
@@ -1716,7 +1716,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
@@ -1745,7 +1745,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
@@ -1771,7 +1771,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_cognito.admin_delete_user.side_effect = ClientError(
                 {"Error": {"Code": "UserNotFoundException", "Message": "User does not exist."}},
@@ -1800,7 +1800,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_cognito.admin_delete_user.side_effect = ClientError(
                 {"Error": {"Code": "NotAuthorizedException", "Message": "Access denied."}},
@@ -1839,7 +1839,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_cognito.admin_delete_user.side_effect = ClientError(
                 {"Error": {"Code": "TooManyRequestsException", "Message": "Rate exceeded."}},
@@ -1882,7 +1882,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_cognito.admin_delete_user.side_effect = ClientError(
                 {"Error": {"Code": "NotAuthorizedException", "Message": "Access denied."}},
@@ -1919,7 +1919,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_cognito.admin_delete_user.side_effect = EndpointConnectionError(endpoint_url="cognito")
             mock_get_client.return_value = mock_cognito
@@ -1959,8 +1959,8 @@ class TestAdminPurgeUserAccount:
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
         with (
-            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
-            patch("src.handlers.admin_operations.delete_all_user_qr_codes") as mock_qr,
+            patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_account_purge.delete_all_user_qr_codes") as mock_qr,
         ):
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
@@ -2003,8 +2003,8 @@ class TestAdminPurgeUserAccount:
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
         with (
-            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
-            patch("src.handlers.admin_operations.delete_user_s3_reports") as mock_reports,
+            patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_account_purge.delete_user_s3_reports") as mock_reports,
         ):
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
@@ -2048,8 +2048,8 @@ class TestAdminPurgeUserAccount:
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
         with (
-            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
-            patch("src.handlers.admin_operations.delete_user_s3_reports") as mock_reports,
+            patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_account_purge.delete_user_s3_reports") as mock_reports,
         ):
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
@@ -2094,7 +2094,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_get_client.return_value = self._mock_cognito(target_account_id)
             assert admin_purge_user_account(event, lambda_context) is True
 
@@ -2123,7 +2123,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_get_client.return_value = self._mock_cognito(target_account_id)
             assert admin_purge_user_account(event, lambda_context) is True
 
@@ -2165,7 +2165,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_cognito.admin_delete_user.side_effect = [
                 ClientError({"Error": {"Code": "InternalError", "Message": "Internal error"}}, "AdminDeleteUser"),
@@ -2215,12 +2215,12 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
             with patch(
-                "src.handlers.admin_operations.delete_invites_for_owned_profiles",
+                "src.handlers.admin_account_purge.delete_invites_for_owned_profiles",
                 side_effect=ClientError(
                     {"Error": {"Code": "InternalServerError", "Message": "DynamoDB exploded"}},
                     "DeleteItem",
@@ -2265,7 +2265,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_get_client.return_value = self._mock_cognito(target_account_id)
             assert admin_purge_user_account(event, lambda_context) is True
 
@@ -2302,7 +2302,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_get_client.return_value = self._mock_cognito(target_account_id)
             assert admin_purge_user_account(event, lambda_context) is True
 
@@ -2331,7 +2331,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": "target-user-123", "profileIds": bad_profile_ids}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -2357,11 +2357,11 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["PROFILE#p1"]}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
+            with patch("src.handlers.admin_account_purge.tables") as mock_tables:
                 mock_tables.accounts.get_item.return_value = {"Item": {"accountId": "ACCOUNT#target-user-123"}}
                 mock_tables.profiles.get_item.side_effect = ClientError(
                     {"Error": {"Code": "ProvisionedThroughputExceededException"}}, "GetItem"
@@ -2387,7 +2387,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
@@ -2412,7 +2412,7 @@ class TestAdminPurgeUserAccount:
             "arguments": {"accountId": admin_appsync_event["identity"]["sub"], "profileIds": []},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_get_client.return_value = MagicMock()
             result = admin_purge_user_account(event, lambda_context)
 
@@ -2432,7 +2432,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": "ghost-user", "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -2459,7 +2459,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -2484,11 +2484,11 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
+            with patch("src.handlers.admin_account_purge.tables") as mock_tables:
                 mock_tables.accounts.get_item.return_value = {"Item": {"accountId": "ACCOUNT#target-user-123"}}
                 mock_tables.profiles.get_item.return_value = {}
                 mock_tables.accounts.delete_item.side_effect = ClientError(
@@ -2513,7 +2513,7 @@ class TestAdminPurgeUserAccount:
 
         event = {**admin_appsync_event, "arguments": {"accountId": bad_account_id, "profileIds": []}}
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -3716,7 +3716,7 @@ class TestAccountDeletionHelpers:
 
     def test_find_cognito_user_by_sub_unprefixed(self) -> None:
         """_find_cognito_user_by_sub queries Cognito with raw sub."""
-        from src.handlers.admin_operations import _find_cognito_user_by_sub
+        from src.handlers.admin_account_purge import _find_cognito_user_by_sub
 
         mock_cognito = MagicMock()
         mock_cognito.list_users.return_value = {
@@ -3745,7 +3745,7 @@ class TestAccountDeletionHelpers:
 
     def test_find_cognito_user_by_sub_prefixed(self) -> None:
         """_find_cognito_user_by_sub strips ACCOUNT# prefix before querying Cognito."""
-        from src.handlers.admin_operations import _find_cognito_user_by_sub
+        from src.handlers.admin_account_purge import _find_cognito_user_by_sub
 
         mock_cognito = MagicMock()
         mock_cognito.list_users.return_value = {
@@ -3774,7 +3774,7 @@ class TestAccountDeletionHelpers:
 
     def test_find_cognito_user_by_sub_not_found(self) -> None:
         """_find_cognito_user_by_sub returns (None, None) when user not found."""
-        from src.handlers.admin_operations import _find_cognito_user_by_sub
+        from src.handlers.admin_account_purge import _find_cognito_user_by_sub
 
         mock_cognito = MagicMock()
         mock_cognito.list_users.return_value = {"Users": []}
@@ -3788,7 +3788,7 @@ class TestAccountDeletionHelpers:
 
     def test_find_cognito_user_by_sub_client_error(self) -> None:
         """A non-retryable lookup failure surfaces as INTERNAL_ERROR."""
-        from src.handlers.admin_operations import _find_cognito_user_by_sub
+        from src.handlers.admin_account_purge import _find_cognito_user_by_sub
 
         mock_cognito = MagicMock()
         mock_cognito.list_users.side_effect = ClientError(
@@ -3806,7 +3806,7 @@ class TestAccountDeletionHelpers:
 
     def test_find_cognito_user_by_sub_throttle_is_retryable(self) -> None:
         """A throttled lookup is retryable RESOURCE_BUSY with a retry-promise message."""
-        from src.handlers.admin_operations import _find_cognito_user_by_sub
+        from src.handlers.admin_account_purge import _find_cognito_user_by_sub
 
         mock_cognito = MagicMock()
         mock_cognito.list_users.side_effect = ClientError(
@@ -3828,7 +3828,7 @@ class TestAccountDeletionHelpers:
         The lookup runs before the sweep and before the Cognito delete, so a
         transport fault here has mutated nothing and a retry converges.
         """
-        from src.handlers.admin_operations import _find_cognito_user_by_sub
+        from src.handlers.admin_account_purge import _find_cognito_user_by_sub
 
         mock_cognito = MagicMock()
         mock_cognito.list_users.side_effect = BotoCoreError()
@@ -3843,7 +3843,7 @@ class TestAccountDeletionHelpers:
 
     def test_account_exists_in_dynamodb_unprefixed(self, dynamodb_table: Any) -> None:
         """_account_exists_in_dynamodb normalizes unprefixed account ID."""
-        from src.handlers.admin_operations import _account_exists_in_dynamodb
+        from src.handlers.admin_account_purge import _account_exists_in_dynamodb
 
         accounts_table = get_accounts_table()
         target_account_id = "11111111-1111-1111-1111-111111111111"
@@ -3858,7 +3858,7 @@ class TestAccountDeletionHelpers:
 
     def test_account_exists_in_dynamodb_prefixed(self, dynamodb_table: Any) -> None:
         """_account_exists_in_dynamodb normalizes ACCOUNT#-prefixed account ID."""
-        from src.handlers.admin_operations import _account_exists_in_dynamodb
+        from src.handlers.admin_account_purge import _account_exists_in_dynamodb
 
         accounts_table = get_accounts_table()
         target_account_id = "11111111-1111-1111-1111-111111111111"
@@ -3873,15 +3873,15 @@ class TestAccountDeletionHelpers:
 
     def test_account_exists_in_dynamodb_not_found(self, dynamodb_table: Any) -> None:
         """_account_exists_in_dynamodb returns False when account not in DynamoDB."""
-        from src.handlers.admin_operations import _account_exists_in_dynamodb
+        from src.handlers.admin_account_purge import _account_exists_in_dynamodb
 
         assert _account_exists_in_dynamodb("non-existent-user", MagicMock()) is False
 
     def test_account_exists_in_dynamodb_client_error(self) -> None:
         """_account_exists_in_dynamodb propagates ClientError."""
-        from src.handlers.admin_operations import _account_exists_in_dynamodb
+        from src.handlers.admin_account_purge import _account_exists_in_dynamodb
 
-        with patch("src.handlers.admin_operations.tables.accounts.get_item") as mock_get:
+        with patch("src.handlers.admin_account_purge.tables.accounts.get_item") as mock_get:
             mock_get.side_effect = ClientError(
                 {"Error": {"Code": "ResourceNotFoundException", "Message": "Table not found"}},
                 "GetItem",
@@ -7199,7 +7199,7 @@ class TestAdminAuditActorLogging:
         mock_cognito.list_users.return_value = {"Users": [{"Username": target_account_id}]}
         mock_cognito.admin_delete_user.return_value = {}
 
-        with patch("src.handlers.admin_operations.get_cognito_client", return_value=mock_cognito):
+        with patch("src.handlers.admin_account_purge.get_cognito_client", return_value=mock_cognito):
             assert admin_purge_user_account(event, lambda_context) is True
 
         for message in ("Deleted user from Cognito", "Deleted account record", "User account purged"):
