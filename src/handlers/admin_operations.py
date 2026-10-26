@@ -1,14 +1,13 @@
 """
-Admin operations handlers for superadmin functionality.
+Shared helpers for the admin-operations handlers.
 
-Provides:
-- adminResetUserPassword: Send password reset email to user
-
-The adminListUsers / adminSearchUser handlers live in ``admin_user_operations``,
-the adminPurgeUserAccount handler lives in ``admin_account_purge``, the
-createManagedCatalog handler lives in ``admin_catalog_operations``, and the
-per-entity adminDeleteUser* handlers live in ``admin_user_deletion`` (#773);
-all four are imported below so the dispatcher map stays the single registry.
+The #773 split moved every admin operation handler out of this module into
+its own module; what remains here is what those modules import from it — the
+admin auth/audit helpers and the throttling/batch-lookup-error classifiers —
+plus the dispatcher re-export. ``admin_dispatcher`` owns the operation map
+and ``lambda_handler``; this module re-exports it so the Terraform-wired
+Lambda entry point (``handlers.admin_operations.lambda_handler``) is
+unchanged.
 
 User deletion is client-side by decision (#521). The client issues the
 per-entity ``adminDeleteUser*`` mutations it can reach, reads the profile IDs
@@ -29,7 +28,7 @@ campaign the request names, the actor is the caller, and they are different
 principals.
 """
 
-from typing import TYPE_CHECKING, Any, Dict, NoReturn
+from typing import Any, Dict, NoReturn
 
 from botocore.exceptions import ClientError
 
@@ -45,67 +44,10 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import TRANSIENT_ERROR_CODES
     from ..utils.errors import AppError, ErrorCode
 
-# The decorator stays typed for mypy via the relative import below; at runtime
-# the absolute import resolves in the Lambda zip (package `utils`) and the
-# relative fallback resolves in unit tests (package `src.handlers`).
-if TYPE_CHECKING:  # pragma: no cover
-    from ..utils.handlers import lambda_handler as with_error_handling
-else:  # pragma: no cover
-    try:
-        from utils.handlers import lambda_handler as with_error_handling
-    except ModuleNotFoundError:
-        from ..utils.handlers import lambda_handler as with_error_handling
-
-
-# The account purge handler was extracted to its own module (#773) but stays
-# registered on this Lambda. The import is safe at module load because
-# `admin_account_purge` only imports from this module inside functions.
-from .admin_account_purge import admin_purge_user_account
-
-# The managed-catalog handler was extracted to its own module (#773) but stays
-# registered on this Lambda. The import is safe at module load because
-# `admin_catalog_operations` does not import from this module at all.
-from .admin_catalog_operations import create_managed_catalog
-
-# The password-reset handler was extracted to its own module (#773) but stays
-# registered on this Lambda. The import is safe at module load because
-# `admin_credential_reset` only imports from this module inside functions.
-from .admin_credential_reset import admin_reset_user_password
-
-# The profile-share and campaign shared-code handlers were extracted to their
-# own module (#773) but stay registered on this Lambda. The import is safe at
-# module load because `admin_share_campaign_ops` only imports from this module
-# inside functions.
-from .admin_share_campaign_ops import (
-    admin_delete_share,
-    admin_get_profile_shares,
-    admin_update_campaign_shared_code,
-)
-
-# The per-entity user deletion handlers were extracted to their own module (#773)
-# but stay registered on this Lambda. The import is safe at module load because
-# `admin_user_deletion` only imports from this module inside functions.
-from .admin_user_deletion import (
-    admin_delete_user_campaigns,
-    admin_delete_user_orders,
-    admin_delete_user_profiles,
-    admin_delete_user_shares,
-)
-
-# The user listing & search handlers were extracted to their own module (#773) but
-# stay registered on this Lambda. The import is safe at module load because
-# `admin_user_operations` only imports from this module inside functions.
-from .admin_user_operations import admin_list_users, admin_search_user
-
-# The account-scoped admin user read handlers were extracted to their own module
-# (#773) but stay registered on this Lambda. The import is safe at module load
-# because `admin_user_reads` only imports from this module inside functions.
-from .admin_user_reads import (
-    admin_get_user_campaigns,
-    admin_get_user_catalogs,
-    admin_get_user_profiles,
-    admin_get_user_shared_campaigns,
-)
+# The dispatcher was extracted to ``admin_dispatcher`` (#773). The Lambda
+# entry point stays ``handlers.admin_operations.lambda_handler`` (wired in
+# ``tofu/application/modules/lambda/main.tf``), so it is re-exported here.
+from .admin_dispatcher import lambda_handler  # noqa: F401
 
 # DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
 # RESOURCE_BUSY error instead of silently incomplete admin data (#291, #456).
@@ -222,50 +164,3 @@ def _require_admin_and_get_target_account_id(event: Dict[str, Any]) -> tuple[str
         raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
 
     return account_id, actor_sub
-
-
-# Operation dispatcher map
-_OPERATION_HANDLERS = {
-    "adminListUsers": admin_list_users,
-    "adminSearchUser": admin_search_user,
-    "adminResetUserPassword": admin_reset_user_password,
-    "adminPurgeUserAccount": admin_purge_user_account,
-    "adminDeleteUserOrders": admin_delete_user_orders,
-    "adminDeleteUserCampaigns": admin_delete_user_campaigns,
-    "adminDeleteUserShares": admin_delete_user_shares,
-    "adminDeleteUserProfiles": admin_delete_user_profiles,
-    "createManagedCatalog": create_managed_catalog,
-    "adminGetUserProfiles": admin_get_user_profiles,
-    "adminGetUserCatalogs": admin_get_user_catalogs,
-    "adminGetUserCampaigns": admin_get_user_campaigns,
-    "adminGetUserSharedCampaigns": admin_get_user_shared_campaigns,
-    "adminGetProfileShares": admin_get_profile_shares,
-    "adminDeleteShare": admin_delete_share,
-    "adminUpdateCampaignSharedCode": admin_update_campaign_shared_code,
-}
-
-
-@with_error_handling(error_message="Failed to execute admin operation")
-def lambda_handler(event: Dict[str, Any], context: Any) -> Any:
-    """
-    Main Lambda handler that dispatches to specific admin operations.
-
-    Determines which operation to call based on the GraphQL field name.
-    Wrapped in ``with_error_handling`` (#329) so dispatch-level errors also
-    return the structured ``__isError`` payload instead of raising.
-
-    Args:
-        event: AppSync event
-        context: Lambda context
-
-    Returns:
-        Result from the specific operation handler, or a structured error
-        payload when the operation fails.
-    """
-    field_name = event.get("info", {}).get("fieldName", "")
-    handler = _OPERATION_HANDLERS.get(field_name)
-
-    if not handler:
-        raise AppError(ErrorCode.INVALID_INPUT, f"Unknown admin operation: {field_name}")
-
-    return handler(event, context)
