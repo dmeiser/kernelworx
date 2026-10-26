@@ -20,12 +20,8 @@ export function response(ctx) {
         return null;
     }
     
-    // Map DynamoDB field campaignId to GraphQL field campaignId
     const order = ctx.stash.order;
-    if (order && order.campaignId) {
-        order.campaignId = order.campaignId;
-    }
-    
+
     // Return the order
     return order;
 }
