@@ -3224,10 +3224,7 @@ class TestAdminDeleteUserCampaigns:
             "arguments": {"accountId": target_account_id},
         }
 
-        with (
-            patch("src.handlers.deletion_cascade.tables") as mock_tables,
-            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
-        ):
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             # Mock profiles query
             mock_tables.profiles.query.return_value = {
                 "Items": [
@@ -3235,16 +3232,17 @@ class TestAdminDeleteUserCampaigns:
                 ]
             }
 
-            # Mock campaigns query - campaigns for the profile
-            mock_tables.campaigns.query.return_value = {
-                "Items": [
-                    {"campaignId": "campaign-1", "profileId": "profile-1"},
-                    {"campaignId": "campaign-2", "profileId": "profile-1"},
-                ]
-            }
-
-            # Delete verification helpers use campaign_operations.tables
-            mock_campaign_tables.campaigns.get_item.return_value = {}
+            # Campaigns query, then the strongly consistent verification
+            # re-query, which must come back empty for the delete to pass.
+            mock_tables.campaigns.query.side_effect = [
+                {
+                    "Items": [
+                        {"campaignId": "campaign-1", "profileId": "profile-1"},
+                        {"campaignId": "campaign-2", "profileId": "profile-1"},
+                    ]
+                },
+                {"Items": []},
+            ]
 
             accept_batch_deletes(mock_tables.campaigns)
 
