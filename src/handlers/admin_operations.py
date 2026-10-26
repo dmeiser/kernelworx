@@ -5,9 +5,10 @@ Provides:
 - adminResetUserPassword: Send password reset email to user
 
 The adminListUsers / adminSearchUser handlers live in ``admin_user_operations``,
-the adminPurgeUserAccount handler lives in ``admin_account_purge``, and the
-createManagedCatalog handler lives in ``admin_catalog_operations`` (#773); all
-three are imported below so the dispatcher map stays the single registry.
+the adminPurgeUserAccount handler lives in ``admin_account_purge``, the
+createManagedCatalog handler lives in ``admin_catalog_operations``, and the
+per-entity adminDeleteUser* handlers live in ``admin_user_deletion`` (#773);
+all four are imported below so the dispatcher map stays the single registry.
 
 User deletion is client-side by decision (#521). The client issues the
 per-entity ``adminDeleteUser*`` mutations it can reach, reads the profile IDs
@@ -36,10 +37,6 @@ from botocore.exceptions import ClientError
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
 from .deletion_cascade import (
-    delete_user_campaigns,
-    delete_user_orders,
-    delete_user_profiles,
-    delete_user_shares,
     get_user_profiles,
     normalize_account_id,
 )
@@ -93,6 +90,16 @@ from .admin_account_purge import admin_purge_user_account
 # registered on this Lambda. The import is safe at module load because
 # `admin_catalog_operations` does not import from this module at all.
 from .admin_catalog_operations import create_managed_catalog
+
+# The per-entity user deletion handlers were extracted to their own module (#773)
+# but stay registered on this Lambda. The import is safe at module load because
+# `admin_user_deletion` only imports from this module inside functions.
+from .admin_user_deletion import (
+    admin_delete_user_campaigns,
+    admin_delete_user_orders,
+    admin_delete_user_profiles,
+    admin_delete_user_shares,
+)
 
 # The user listing & search handlers were extracted to their own module (#773) but
 # stay registered on this Lambda. The import is safe at module load because
@@ -307,77 +314,6 @@ def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
         actor_sub=actor_sub,
     )
     return True
-
-
-def _user_profiles_for(account_id: str) -> list[Dict[str, Any]]:
-    """Sweep the profiles table once for a per-domain admin deletion."""
-    return get_user_profiles(normalize_account_id(account_id))
-
-
-@with_error_handling(error_message="Failed to delete user orders")
-def admin_delete_user_orders(event: Dict[str, Any], context: Any) -> int:
-    """
-    Delete all orders for all campaigns of all profiles owned by a user (admin only).
-
-    Verifies with strongly consistent reads that each deleted order is gone
-    from the orders table before returning success.
-
-    Returns the count of deleted orders.
-    """
-    logger = get_logger(__name__)
-
-    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    deleted_count = delete_user_orders(_user_profiles_for(account_id), logger)
-    logger.info("Admin deleted user orders", account_id=account_id, count=deleted_count, actor_sub=actor_sub)
-    return deleted_count
-
-
-@with_error_handling(error_message="Failed to delete user campaigns")
-def admin_delete_user_campaigns(event: Dict[str, Any], context: Any) -> int:
-    """
-    Delete all campaigns for all profiles owned by a user (admin only).
-
-    Verifies with strongly consistent reads that each deleted campaign is gone
-    from the campaigns table before returning success.
-
-    Returns the count of deleted campaigns.
-    """
-    logger = get_logger(__name__)
-
-    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    deleted_count = delete_user_campaigns(_user_profiles_for(account_id), logger)
-    logger.info("Admin deleted user campaigns", account_id=account_id, count=deleted_count, actor_sub=actor_sub)
-    return deleted_count
-
-
-@with_error_handling(error_message="Failed to delete user shares")
-def admin_delete_user_shares(event: Dict[str, Any], context: Any) -> int:
-    """
-    Delete all shares for all profiles owned by a user (admin only).
-
-    Returns the count of deleted shares.
-    """
-    logger = get_logger(__name__)
-
-    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    deleted_count = delete_user_shares(_user_profiles_for(account_id), logger)
-    logger.info("Admin deleted user shares", account_id=account_id, count=deleted_count, actor_sub=actor_sub)
-    return deleted_count
-
-
-@with_error_handling(error_message="Failed to delete user profiles")
-def admin_delete_user_profiles(event: Dict[str, Any], context: Any) -> int:
-    """
-    Delete all profiles owned by a user (admin only).
-
-    Returns the count of deleted profiles.
-    """
-    logger = get_logger(__name__)
-
-    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    deleted_count = delete_user_profiles(account_id, _user_profiles_for(account_id), logger)
-    logger.info("Admin deleted user profiles", account_id=account_id, count=deleted_count, actor_sub=actor_sub)
-    return deleted_count
 
 
 @with_error_handling(error_message="Failed to get user profiles")

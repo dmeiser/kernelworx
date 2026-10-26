@@ -2979,7 +2979,7 @@ class TestAdminDeleteUserOrders:
         monkeypatch.setenv("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-ue1-dev")
         monkeypatch.setenv("ORDERS_TABLE_NAME", "kernelworx-orders-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_orders
+        from src.handlers.admin_user_deletion import admin_delete_user_orders
 
         target_account_id = "target-user-123"
         db_account_id = f"ACCOUNT#{target_account_id}"
@@ -3047,7 +3047,7 @@ class TestAdminDeleteUserOrders:
         monkeypatch.setenv("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-ue1-dev")
         monkeypatch.setenv("ORDERS_TABLE_NAME", "kernelworx-orders-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_orders
+        from src.handlers.admin_user_deletion import admin_delete_user_orders
 
         target_account_id = "target-user-123"
         db_account_id = f"ACCOUNT#{target_account_id}"
@@ -3112,7 +3112,7 @@ class TestAdminDeleteUserOrders:
 
         from botocore.exceptions import ClientError
 
-        from src.handlers.admin_operations import admin_delete_user_orders
+        from src.handlers.admin_user_deletion import admin_delete_user_orders
 
         target_account_id = "target-user-123"
         db_account_id = f"ACCOUNT#{target_account_id}"
@@ -3152,7 +3152,7 @@ class TestAdminDeleteUserOrders:
         lambda_context: Any,
     ) -> None:
         """Test that non-admin users cannot delete user orders."""
-        from src.handlers.admin_operations import admin_delete_user_orders
+        from src.handlers.admin_user_deletion import admin_delete_user_orders
 
         event = {
             **non_admin_appsync_event,
@@ -3171,7 +3171,7 @@ class TestAdminDeleteUserOrders:
         lambda_context: Any,
     ) -> None:
         """Test that missing account ID raises error."""
-        from src.handlers.admin_operations import admin_delete_user_orders
+        from src.handlers.admin_user_deletion import admin_delete_user_orders
 
         event = {
             **admin_appsync_event,
@@ -3193,7 +3193,7 @@ class TestAdminDeleteUserOrders:
         """Test that unexpected exceptions are handled."""
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_orders
+        from src.handlers.admin_user_deletion import admin_delete_user_orders
 
         event = {
             **admin_appsync_event,
@@ -3223,7 +3223,7 @@ class TestAdminDeleteUserCampaigns:
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
         monkeypatch.setenv("CAMPAIGNS_TABLE_NAME", "kernelworx-campaigns-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_campaigns
+        from src.handlers.admin_user_deletion import admin_delete_user_campaigns
 
         target_account_id = "target-user-123"
         db_account_id = f"ACCOUNT#{target_account_id}"
@@ -3278,7 +3278,7 @@ class TestAdminDeleteUserCampaigns:
 
         from botocore.exceptions import ClientError
 
-        from src.handlers.admin_operations import admin_delete_user_campaigns
+        from src.handlers.admin_user_deletion import admin_delete_user_campaigns
 
         target_account_id = "target-user-123"
         db_account_id = f"ACCOUNT#{target_account_id}"
@@ -3312,7 +3312,7 @@ class TestAdminDeleteUserCampaigns:
         lambda_context: Any,
     ) -> None:
         """Test that non-admin users cannot delete user campaigns."""
-        from src.handlers.admin_operations import admin_delete_user_campaigns
+        from src.handlers.admin_user_deletion import admin_delete_user_campaigns
 
         event = {
             **non_admin_appsync_event,
@@ -3331,7 +3331,7 @@ class TestAdminDeleteUserCampaigns:
         lambda_context: Any,
     ) -> None:
         """Test that missing account ID raises error."""
-        from src.handlers.admin_operations import admin_delete_user_campaigns
+        from src.handlers.admin_user_deletion import admin_delete_user_campaigns
 
         event = {
             **admin_appsync_event,
@@ -3357,7 +3357,7 @@ class TestAdminDeleteUserCampaigns:
         """
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_campaigns
+        from src.handlers.admin_user_deletion import admin_delete_user_campaigns
 
         event = {
             **admin_appsync_event,
@@ -3389,7 +3389,7 @@ class TestAdminDeleteUserCampaigns:
         """Test that unexpected exceptions are handled."""
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_campaigns
+        from src.handlers.admin_user_deletion import admin_delete_user_campaigns
 
         event = {
             **admin_appsync_event,
@@ -3419,7 +3419,7 @@ class TestAdminDeleteUserShares:
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
         monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_shares
+        from src.handlers.admin_user_deletion import admin_delete_user_shares
 
         target_account_id = "target-user-123"
         db_account_id = f"ACCOUNT#{target_account_id}"
@@ -3467,7 +3467,7 @@ class TestAdminDeleteUserShares:
         """
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_shares
+        from src.handlers.admin_user_deletion import admin_delete_user_shares
 
         event = {
             **admin_appsync_event,
@@ -3493,7 +3493,7 @@ class TestAdminDeleteUserShares:
         lambda_context: Any,
     ) -> None:
         """Test that non-admin users cannot delete user shares."""
-        from src.handlers.admin_operations import admin_delete_user_shares
+        from src.handlers.admin_user_deletion import admin_delete_user_shares
 
         event = {
             **non_admin_appsync_event,
@@ -3512,7 +3512,7 @@ class TestAdminDeleteUserShares:
         lambda_context: Any,
     ) -> None:
         """Test that missing account ID raises error."""
-        from src.handlers.admin_operations import admin_delete_user_shares
+        from src.handlers.admin_user_deletion import admin_delete_user_shares
 
         event = {
             **admin_appsync_event,
@@ -3534,7 +3534,7 @@ class TestAdminDeleteUserShares:
         """Test that unexpected exceptions are handled."""
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_shares
+        from src.handlers.admin_user_deletion import admin_delete_user_shares
 
         event = {
             **admin_appsync_event,
@@ -3563,7 +3563,7 @@ class TestAdminDeleteUserProfiles:
         """Test successful deletion of all profiles for a user."""
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_profiles
+        from src.handlers.admin_user_deletion import admin_delete_user_profiles
 
         target_account_id = "target-user-123"
         db_account_id = f"ACCOUNT#{target_account_id}"
@@ -3598,7 +3598,7 @@ class TestAdminDeleteUserProfiles:
         lambda_context: Any,
     ) -> None:
         """Test that non-admin users cannot delete user profiles."""
-        from src.handlers.admin_operations import admin_delete_user_profiles
+        from src.handlers.admin_user_deletion import admin_delete_user_profiles
 
         event = {
             **non_admin_appsync_event,
@@ -3617,7 +3617,7 @@ class TestAdminDeleteUserProfiles:
         lambda_context: Any,
     ) -> None:
         """Test that missing account ID raises error."""
-        from src.handlers.admin_operations import admin_delete_user_profiles
+        from src.handlers.admin_user_deletion import admin_delete_user_profiles
 
         event = {
             **admin_appsync_event,
@@ -3639,7 +3639,7 @@ class TestAdminDeleteUserProfiles:
         """Test that unexpected exceptions are handled."""
         monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-ue1-dev")
 
-        from src.handlers.admin_operations import admin_delete_user_profiles
+        from src.handlers.admin_user_deletion import admin_delete_user_profiles
 
         event = {
             **admin_appsync_event,
