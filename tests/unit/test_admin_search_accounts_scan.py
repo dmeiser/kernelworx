@@ -25,7 +25,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from src.handlers.admin_user_operations import admin_search_user
+from src.handlers.admin_user_operations import _search_accounts_in_dynamodb, admin_search_user
 from src.utils.errors import ErrorCode
 from src.utils.logging import get_logger
 from tests.unit.table_schemas import create_accounts_table_schema
@@ -218,7 +218,7 @@ class TestAdminSearchScanPagination:
     @pytest.fixture
     def scan_tables(self, accounts_table: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
         """Point the handler's table accessor at the moto table so its client records."""
-        monkeypatch.setattr("src.handlers.admin_operations.tables", SimpleNamespace(accounts=accounts_table))
+        monkeypatch.setattr("src.handlers.admin_user_operations.tables", SimpleNamespace(accounts=accounts_table))
         return accounts_table
 
     def test_match_on_a_later_page_is_still_found(
