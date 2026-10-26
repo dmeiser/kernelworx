@@ -1,31 +1,21 @@
 import { util } from '@aws-appsync/utils';
 
 export function request(ctx) {
-    // Forward context to Lambda including previous result and stash
-    // Lambda data sources require operation: 'Invoke' and a payload
-    
-    // Get ownerAccountId from multiple possible stash locations:
-    // 1. ctx.stash.profileOwner (set by verify_profile_write_access_fn)
-    // 2. ctx.stash.profile.ownerAccountId (from the profile record)
-    // 3. ctx.stash.ownerAccountId (set by other resolvers)
-    const ownerAccountId = ctx.stash.profileOwner || 
-                           (ctx.stash.profile && ctx.stash.profile.ownerAccountId) ||
-                           ctx.stash.ownerAccountId || 
-                           null;
-    
+    // Forward the AppSync context to the Lambda handler: the admin
+    // dispatcher needs info.fieldName and is_admin needs identity.claims.
+    // Lambda data sources require operation: 'Invoke' and a payload.
+    // #748: no fabricated prev/stash payload — this resolver backs only
+    // unit resolvers, which never run pipeline functions, so the old
+    // payment-methods stash reads were dead code. Forward requestId so
+    // handlers can correlate with AppSync logs.
     return {
         operation: 'Invoke',
         payload: {
             arguments: ctx.arguments,
             identity: ctx.identity,
             info: ctx.info,
-            prev: {
-                result: {
-                    paymentMethods: ctx.stash.customPaymentMethods || [],
-                    ownerAccountId: ownerAccountId
-                }
-            },
-            stash: ctx.stash
+            stash: ctx.stash,
+            requestId: ctx.request?.headers?.['x-amzn-requestid'],
         }
     };
 }
