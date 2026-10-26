@@ -932,6 +932,83 @@ class TestEphemeralEnvDown:
         assert "Building Lambda layer" not in result.stderr
 
 
+class TestInitReconfigure:
+    """The sweep tears down many run-ids from one runner workspace, so every
+    ``tofu init`` after the first passes a state key that differs from the backend
+    config the previous init saved. OpenTofu aborts with ``Backend configuration
+    changed`` unless init re-configures, which failed 29 of the 30 teardown attempts
+    in sweep run 40170048037."""
+
+    def test_down_inits_the_backend_with_reconfigure(self, repo_root: Path, tmp_env: Path, tmp_path: Path) -> None:
+        recorded = tmp_env / "tofu_calls.txt"
+        build_dir = tmp_path / "lambda-layer"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            case "$1 $2" in
+              "s3api head-object")
+                exit 1
+                ;;
+              "s3api list-object-versions")
+                echo 'None'
+                ;;
+              "s3api head-bucket")
+                exit 1
+                ;;
+              "s3 rm")
+                exit 0
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "tofu",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            exit 0
+            """,
+        )
+
+        script = f"""
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
+            scripts/ephemeral-env.sh down pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        init_calls = [c for c in recorded.read_text().splitlines() if c.startswith("init ")]
+        assert len(init_calls) == 1, f"down must init the backend exactly once, got: {init_calls}"
+        init = shlex.split(init_calls[0])
+        assert "-reconfigure" in init, f"down init must re-configure the backend, got: {init}"
+        # -migrate-state would copy the state to the new key instead of re-pointing
+        # the backend at this run's own state object.
+        assert "-migrate-state" not in init, f"down init must not migrate state, got: {init}"
+        assert "-backend-config=key=application/ephemeral/pr-999/terraform.tfstate" in init, (
+            f"backend-config overrides must be unchanged, got: {init}"
+        )
+        assert "-backend-config=bucket=test-bucket" in init, f"got: {init}"
+        assert "-backend-config=region=us-east-1" in init, f"got: {init}"
+
+    def test_every_tofu_init_in_ephemeral_env_reconfigures(self, repo_root: Path) -> None:
+        """Both entry points (up and down) can follow an init for a different run-id
+        in the same workspace, so both must pass -reconfigure."""
+        source = (repo_root / "scripts" / "ephemeral-env.sh").read_text()
+        joined = re.sub(r"\\\n\s*", " ", source)
+        init_calls = [line.strip() for line in joined.splitlines() if "tofu init " in line]
+        assert len(init_calls) == 2, f"expected the up and down init calls, got: {init_calls}"
+        for call in init_calls:
+            assert "-reconfigure" in call, f"tofu init must pass -reconfigure: {call}"
+            assert "-migrate-state" not in call, f"tofu init must not migrate state: {call}"
+
+
 class TestWorkflowDispatchSurface:
     def _load_workflow(self, repo_root: Path, filename: str = "ephemeral-test.yml") -> dict:
         """Load workflow YAML preserving the ``on`` key as a string."""

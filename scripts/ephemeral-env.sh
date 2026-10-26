@@ -121,7 +121,8 @@ case "$ACTION" in
     build_lambda_layer
 
     log "📦 Initializing OpenTofu backend..."
-    tofu init -input=false \
+    # -reconfigure: a prior init in this workspace may have saved another run-id's state key.
+    tofu init -input=false -reconfigure \
       -backend-config="key=$STATE_KEY" \
       -backend-config="bucket=$STATE_BUCKET" \
       -backend-config="region=$STATE_REGION"
@@ -250,7 +251,11 @@ case "$ACTION" in
     echo "# placeholder" > "$LAYER_DIR/python/.placeholder"
 
     # Re-init is required in case the workspace was cleaned since the up run.
-    tofu init -input=false \
+    # -reconfigure is required because the sweep tears down many run-ids from one
+    # workspace: each passes a different state key, and OpenTofu treats that saved
+    # backend-config difference as a backend change. Re-configuring from the flags
+    # below points the backend at this run's own state object; no state migration.
+    tofu init -input=false -reconfigure \
       -backend-config="key=$STATE_KEY" \
       -backend-config="bucket=$STATE_BUCKET" \
       -backend-config="region=$STATE_REGION"
