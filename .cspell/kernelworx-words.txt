@@ -529,3 +529,4 @@ zod
 zxing
 hookwrapper
 makereport
+koalaman
