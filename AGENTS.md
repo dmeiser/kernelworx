@@ -108,7 +108,7 @@ Cognito's `ListUsers` `Filter` is the only string-interpolated query language th
 
 ### Pre-token-generation Cognito trigger: custom `mfa` claim (#336)
 
-The `pre-token-generation` trigger (`src/handlers/pre_token_generation.py`; IaC in `tofu/application/modules/{lambda,cognito}/main.tf`) injects a custom **boolean** `mfa` claim (true only when the user's `PreferredMfaSetting` is `SOFTWARE_TOKEN_MFA`) into BOTH the ID and access tokens at issuance. It is the stack base for #336; the enforcement guard lands in #406 and the frontend in #405 (both read `mfa` from the ID token). Sharp edges:
+The `pre-token-generation` trigger (`src/handlers/pre_token_generation.py`; IaC in `tofu/application/modules/{lambda,cognito}/main.tf`) injects a custom **boolean** `mfa` claim (true when the user's `PreferredMfaSetting` is `SOFTWARE_TOKEN_MFA`, `SMS_MFA`, or `WEB_AUTHN_MFA`, or `UserMFASettingList` is non-empty) into BOTH the ID and access tokens at issuance. It is the stack base for #336; the enforcement guard lands in #406 and the frontend in #405 (both read `mfa` from the ID token). Sharp edges:
 
 - **`amr` is NOT injectable** — Cognito owns the `amr` claim and rejects overrides; the feature ships a custom `mfa` claim instead. A missing `mfa` claim unambiguously means the trigger is not in the token path.
 - **Provider 6.56 shape is a nested block, not a plain attribute.** Inside `lambda_config` the trigger is `pre_token_generation_config { lambda_arn, lambda_version }` — BOTH are required. The `pre_token_generation = <arn>` form in older docs/versions is wrong for 6.56; verify with `tofu providers schema -json`.
