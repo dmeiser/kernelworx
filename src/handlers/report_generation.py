@@ -164,8 +164,9 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         return result
 
     except AppError as e:
-        # Typed AppError logging stays: the decorator re-raises AppError
-        # unchanged but does not log it.
+        # Typed AppError logging stays: the decorator does not log AppErrors
+        # and converts the raised AppError to the __isError payload returned
+        # to AppSync instead of re-raising (#329), so this raise must stay.
         logger.error("AppError in request_campaign_report", error_code=e.error_code, error_message=e.message)
         raise
 
