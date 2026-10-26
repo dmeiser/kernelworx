@@ -46,7 +46,7 @@ else:  # pragma: no cover
 def _parse_product_price(price: Any) -> Decimal:
     """Convert a product price (number or numeric string) to a validated Decimal.
 
-    A missing price, a non-numeric/unparsable value, or a negative price
+    A missing price, a non-numeric/unparsable value, a non-finite value (Infinity/inf/NaN), or a negative price
     raises INVALID_INPUT.
     """
     if price is None:
@@ -55,6 +55,9 @@ def _parse_product_price(price: Any) -> Decimal:
     try:
         price_decimal = Decimal(str(price))
     except InvalidOperation, ValueError, TypeError:
+        raise AppError(ErrorCode.INVALID_INPUT, "Product price must be a valid number")
+
+    if not price_decimal.is_finite():
         raise AppError(ErrorCode.INVALID_INPUT, "Product price must be a valid number")
 
     if price_decimal < 0:
