@@ -24,7 +24,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from src.handlers.admin_operations import admin_search_user
+from src.handlers.admin_user_operations import admin_search_user
 from src.utils.errors import ErrorCode
 from tests.unit.table_schemas import create_accounts_table_schema
 
@@ -118,13 +118,13 @@ def search(accounts_table: Any, monkeypatch: Any) -> Any:
     cognito_users = [_cognito_user(item["accountId"].removeprefix("ACCOUNT#"), item["email"]) for item in ACCOUNT_ITEMS]
     cognito = _FakeCognito(cognito_users)
 
-    monkeypatch.setattr("src.handlers.admin_operations.tables", SimpleNamespace(accounts=accounts_table))
-    monkeypatch.setattr("src.handlers.admin_operations.get_cognito_client", lambda: cognito)
+    monkeypatch.setattr("src.handlers.admin_user_operations.tables", SimpleNamespace(accounts=accounts_table))
+    monkeypatch.setattr("src.handlers.admin_user_operations.get_cognito_client", lambda: cognito)
     monkeypatch.setattr(
-        "src.handlers.admin_operations._batch_get_display_names",
+        "src.handlers.admin_user_operations._batch_get_display_names",
         lambda account_ids, logger: {i: "Alice Anderson" for i in account_ids},
     )
-    monkeypatch.setattr("src.handlers.admin_operations._batch_get_user_groups", lambda *args, **kwargs: {})
+    monkeypatch.setattr("src.handlers.admin_user_operations._batch_get_user_groups", lambda *args, **kwargs: {})
 
     def call(query: str) -> Any:
         event = {

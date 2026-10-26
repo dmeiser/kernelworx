@@ -19,7 +19,7 @@ from typing import Any, Dict, Generator, List, Tuple
 import pytest
 from botocore.exceptions import ClientError
 
-from src.handlers.admin_operations import _search_accounts_in_dynamodb, admin_search_user
+from src.handlers.admin_user_operations import _search_accounts_in_dynamodb, admin_search_user
 from src.handlers.post_authentication import lambda_handler as post_auth_lambda_handler
 from src.utils.dynamodb import EMAIL_SEARCH_KEY, tables
 from src.utils.logging import get_logger
@@ -300,7 +300,7 @@ def test_admin_search_user_uses_the_index_for_a_partial_email(
         "Enabled": True,
         "UserStatus": "CONFIRMED",
     }
-    monkeypatch.setattr("src.handlers.admin_operations.get_cognito_client", lambda: _FakeCognito([cognito_user]))
+    monkeypatch.setattr("src.handlers.admin_user_operations.get_cognito_client", lambda: _FakeCognito([cognito_user]))
     dynamodb_calls.clear()
 
     results = admin_search_user(event, lambda_context)

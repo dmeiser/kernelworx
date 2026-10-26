@@ -41,7 +41,7 @@ SITES = [
         "is_admin() (Python)",
     ),
     (
-        "src/handlers/admin_operations.py",
+        "src/handlers/admin_user_operations.py",
         r'"isAdmin": "([^"]+)" in groups',
         "admin list-users (Python)",
     ),
