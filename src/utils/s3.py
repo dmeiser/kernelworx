@@ -11,10 +11,7 @@ from typing import Any
 from botocore.exceptions import ClientError
 from botocore.exceptions import ConnectionError as BotoConnectionError
 
-try:  # pragma: no cover
-    from utils.logging import get_logger
-except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.logging import get_logger
+from .logging import get_logger
 
 _logger = get_logger(__name__)
 

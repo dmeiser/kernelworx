@@ -14,10 +14,7 @@ from botocore.exceptions import ClientError
 if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_dynamodb.service_resource import Table
 
-try:  # pragma: no cover
-    from utils.logging import get_logger
-except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.logging import get_logger
+from .logging import get_logger
 
 logger = get_logger(__name__)
 
