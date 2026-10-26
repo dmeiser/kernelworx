@@ -2986,7 +2986,6 @@ class TestAdminDeleteUserOrders:
 
         with (
             patch("src.handlers.deletion_cascade.tables") as mock_tables,
-            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
             mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
@@ -3054,7 +3053,6 @@ class TestAdminDeleteUserOrders:
 
         with (
             patch("src.handlers.deletion_cascade.tables") as mock_tables,
-            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
             mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
@@ -3230,7 +3228,6 @@ class TestAdminDeleteUserCampaigns:
 
         with (
             patch("src.handlers.deletion_cascade.tables") as mock_tables,
-            patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
             mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
