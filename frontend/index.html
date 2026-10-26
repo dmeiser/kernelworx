@@ -23,10 +23,9 @@
     <meta name="twitter:image" content="https://kernelworx.app/og-image.png" />
     
     <!--
-      CSP (#440, meta-only since #665): this tag is the only copy of the
-      policy - the CloudFront response headers policy was removed, so there
-      is no header CSP to keep in sync with. img-src is an explicit
-      allowlist, not a wildcard: payment QR codes load from the exports
+      CSP (#440): meta-only - since #665 this tag is the only CSP; there is no
+      CloudFront response-headers copy. img-src is
+      an explicit allowlist, not a wildcard: payment QR codes load from the exports
       bucket's S3 virtual-hosted origins (presigned GET URLs - both the
       regional and the legacy global s3.amazonaws.com styles, since the
       pinned boto3 defaults to the legacy global endpoint), the MFA TOTP QR
@@ -38,7 +37,7 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob: https://kernelworx-exports-ue1-dev.s3.us-east-1.amazonaws.com https://kernelworx-exports-ue1-dev.s3.amazonaws.com https://kernelworx-exports-ue1-prod.s3.us-east-1.amazonaws.com https://kernelworx-exports-ue1-prod.s3.amazonaws.com; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://api.kernelworx.app https://api.dev.kernelworx.app https://login.dev.kernelworx.app https://login.kernelworx.app;"
+      content="default-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob: https://kernelworx-exports-ue1-dev.s3.us-east-1.amazonaws.com https://kernelworx-exports-ue1-dev.s3.amazonaws.com https://kernelworx-exports-ue1-prod.s3.us-east-1.amazonaws.com https://kernelworx-exports-ue1-prod.s3.amazonaws.com; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://login.dev.kernelworx.app https://login.kernelworx.app;"
     />
   </head>
   <body>
