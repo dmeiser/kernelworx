@@ -119,7 +119,7 @@ class TestCampaignDeleteVerification:
         ]
         log.info.assert_any_call("Deleted user campaigns", count=2)
 
-    def test_verification_requeries_the_base_table_strongly_consistently(self) -> None:
+    def test_verification_queries_the_base_table_again_strongly_consistently(self) -> None:
         """The verification is a second, strongly consistent Query on the base table."""
         log = MagicMock()
 
