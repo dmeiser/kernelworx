@@ -14,6 +14,7 @@ Tests for:
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List
@@ -24,10 +25,13 @@ import pytest
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
 from src.handlers.admin_operations import (
+    _CAMPAIGN_QUERY_CONCURRENCY,
+    _add_dynamodb_users_to_map,
     _batch_get_campaign_catalogs,
     _batch_get_display_names,
     _batch_get_user_groups,
     _extract_unique_catalog_ids,
+    _get_campaigns_for_profiles,
     _search_user_by_sub,
     _search_users_in_cognito_by_email_prefix,
     admin_list_users,
@@ -1726,6 +1730,90 @@ class TestAdminPurgeUserAccount:
         mock_cognito.admin_delete_user.assert_not_called()
         assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
 
+    def test_profile_verification_reads_the_whole_set_in_one_batch(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """The purge verifies every supplied profileId in one strongly consistent BatchGetItem (#747).
+
+        One ``GetItem`` per profile made the verification's round trips grow with
+        the account's profile count. The batch call answers the whole set in a
+        single request, and ``ConsistentRead`` stays set because the rows were
+        just deleted by a different writer (#521).
+        """
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+
+        target_account_id = "target-user-123"
+        db_account_id = f"ACCOUNT#{target_account_id}"
+        self._seed_account(target_account_id)
+        profile_ids = [f"PROFILE#p{index}" for index in range(1, 6)]
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": profile_ids}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_get_client.return_value = mock_cognito
+
+            with (
+                patch("src.handlers.admin_operations.tables") as mock_tables,
+                patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource,
+            ):
+                mock_tables.accounts.get_item.return_value = {"Item": {"accountId": db_account_id}}
+                mock_resource = mock_get_resource.return_value
+                mock_resource.batch_get_item.return_value = {"Responses": {"kernelworx-profiles-v2-ue1-dev": []}}
+
+                assert admin_purge_user_account(event, lambda_context) is True
+
+        mock_resource.batch_get_item.assert_called_once()
+        request = mock_resource.batch_get_item.call_args.kwargs["RequestItems"]["kernelworx-profiles-v2-ue1-dev"]
+        assert request["ConsistentRead"] is True
+        assert request["Keys"] == [{"ownerAccountId": db_account_id, "profileId": pid} for pid in profile_ids]
+        mock_tables.profiles.get_item.assert_not_called()
+
+    def test_profile_verification_ignores_a_row_without_a_profile_id(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A batch row carrying no ``profileId`` matches no requested profile (#747).
+
+        DynamoDB always returns key attributes, so this only arises on a
+        malformed response: the row must neither crash the verification nor
+        refuse the purge for a profile that is actually gone.
+        """
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
+
+        target_account_id = "target-user-123"
+        db_account_id = f"ACCOUNT#{target_account_id}"
+        self._seed_account(target_account_id)
+        profile_ids = ["PROFILE#p1"]
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": profile_ids}}
+
+        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_get_client.return_value = mock_cognito
+
+            with (
+                patch("src.handlers.admin_operations.tables") as mock_tables,
+                patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource,
+            ):
+                mock_tables.accounts.get_item.return_value = {"Item": {"accountId": db_account_id}}
+                mock_get_resource.return_value.batch_get_item.return_value = {
+                    "Responses": {"kernelworx-profiles-v2-ue1-dev": [{"sellerName": "No key attributes"}]}
+                }
+
+                assert admin_purge_user_account(event, lambda_context) is True
+
     def test_succeeds_once_the_profiles_are_gone(
         self,
         dynamodb_table: Any,
@@ -2346,9 +2434,15 @@ class TestAdminPurgeUserAccount:
         lambda_context: Any,
         monkeypatch: Any,
     ) -> None:
-        """A throttled verification read is retryable and deletes nothing (#291)."""
+        """A throttled verification read is retryable and deletes nothing (#291).
+
+        The verification is one chunked ``BatchGetItem`` over the whole
+        ``profileIds`` set, not one ``GetItem`` per id (#747), so the throttle is
+        injected on the batch call.
+        """
         monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
         monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+        monkeypatch.setenv("PROFILES_TABLE_NAME", "kernelworx-profiles-v2-ue1-dev")
 
         target_account_id = "target-user-123"
         self._seed_account(target_account_id)
@@ -2359,10 +2453,13 @@ class TestAdminPurgeUserAccount:
             mock_cognito = self._mock_cognito(target_account_id)
             mock_get_client.return_value = mock_cognito
 
-            with patch("src.handlers.admin_operations.tables") as mock_tables:
+            with (
+                patch("src.handlers.admin_operations.tables") as mock_tables,
+                patch("src.utils.dynamodb.get_dynamodb_resource") as mock_get_resource,
+            ):
                 mock_tables.accounts.get_item.return_value = {"Item": {"accountId": "ACCOUNT#target-user-123"}}
-                mock_tables.profiles.get_item.side_effect = ClientError(
-                    {"Error": {"Code": "ProvisionedThroughputExceededException"}}, "GetItem"
+                mock_get_resource.return_value.batch_get_item.side_effect = ClientError(
+                    {"Error": {"Code": "ProvisionedThroughputExceededException"}}, "BatchGetItem"
                 )
                 result = admin_purge_user_account(event, lambda_context)
 
@@ -5664,6 +5761,165 @@ class TestAdminGetUserCatalogs:
             mock_query_all.assert_called_once()
             call_kwargs = mock_query_all.call_args[0][1]
             assert call_kwargs["IndexName"] == "ownerAccountId-index"
+
+
+class TestAdminUserCampaignReadConcurrency:
+    """Tests for how ``adminGetUserCampaigns`` reads the campaigns table (#747).
+
+    The handler used to issue one campaigns Query per profile, one after the
+    other, so an account with N profiles paid N serial round trips. The reads
+    now run concurrently in capped chunks. A serial implementation fails the
+    overlap assertion by blocking on the barrier rather than by matching any
+    source text, and the ordering test pins that the concurrent read returns the
+    same list the serial one did.
+    """
+
+    def _profiles(self, count: int) -> list[Dict[str, Any]]:
+        """Build ``count`` profiles with stable profileIds."""
+        return [{"profileId": f"PROFILE#p{index}"} for index in range(count)]
+
+    def _campaigns_query(self, expected_in_flight: int) -> tuple[Any, Dict[str, int]]:
+        """Return a campaigns ``query`` stand-in that only answers when reads overlap."""
+        barrier = threading.Barrier(expected_in_flight, timeout=10)
+        state = {"queries": 0, "in_flight": 0, "max_in_flight": 0}
+        lock = threading.Lock()
+
+        def query(**kwargs: Any) -> Dict[str, Any]:
+            profile_id = kwargs["ExpressionAttributeValues"][":pid"]
+            with lock:
+                state["queries"] += 1
+                state["in_flight"] += 1
+                state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+            try:
+                barrier.wait()
+            finally:
+                with lock:
+                    state["in_flight"] -= 1
+            return {"Items": [{"campaignId": f"CAMPAIGN#{profile_id}", "profileId": profile_id}]}
+
+        return query, state
+
+    def test_profile_campaign_reads_run_concurrently_and_capped(self) -> None:
+        """Twenty profiles read their campaigns at the cap, not one at a time."""
+        query, state = self._campaigns_query(_CAMPAIGN_QUERY_CONCURRENCY)
+        campaigns_table = MagicMock()
+        campaigns_table.query.side_effect = query
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.campaigns = campaigns_table
+            campaigns = _get_campaigns_for_profiles(self._profiles(20), MagicMock(), "actor-sub")
+
+        assert state["queries"] == 20
+        assert state["max_in_flight"] == _CAMPAIGN_QUERY_CONCURRENCY
+        assert len(campaigns) == 20
+
+    def test_concurrent_reads_keep_the_serial_read_order(self) -> None:
+        """The campaign list still comes back in profile order, chunk by chunk."""
+        campaigns_table = MagicMock()
+        campaigns_table.query.side_effect = lambda **kwargs: {
+            "Items": [
+                {
+                    "campaignId": f"CAMPAIGN#{kwargs['ExpressionAttributeValues'][':pid']}",
+                    "profileId": kwargs["ExpressionAttributeValues"][":pid"],
+                }
+            ]
+        }
+        profiles = self._profiles(25)
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.campaigns = campaigns_table
+            campaigns = _get_campaigns_for_profiles(profiles, MagicMock(), "actor-sub")
+
+        assert [campaign["profileId"] for campaign in campaigns] == [profile["profileId"] for profile in profiles]
+
+    def test_profiles_without_a_profile_id_are_skipped(self) -> None:
+        """A malformed profile row still costs no campaign read."""
+        campaigns_table = MagicMock()
+        campaigns_table.query.return_value = {"Items": []}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.campaigns = campaigns_table
+            _get_campaigns_for_profiles([{"sellerName": "Malformed"}], MagicMock(), "actor-sub")
+
+        campaigns_table.query.assert_not_called()
+
+
+class TestAdminSearchSubLookupConcurrency:
+    """Tests for how a user search resolves DynamoDB matches to Cognito users (#747).
+
+    Each matched account used to cost one serial Cognito ``ListUsers`` call, so a
+    search hitting the result cap paid up to 50 round trips in a row. Cognito has
+    no batch lookup by sub, so the calls now run through the same parallel gather
+    the group lookups use, de-duplicated by sub and merged back in DynamoDB match
+    order.
+    """
+
+    def _accounts(self, subs: list[str]) -> list[Dict[str, Any]]:
+        """Build the DynamoDB account rows a search matched, in scan order."""
+        return [{"accountId": f"ACCOUNT#{sub}", "email": f"{sub}@example.com"} for sub in subs]
+
+    def test_sub_lookups_overlap_and_keep_match_order(self) -> None:
+        """Ten matched accounts resolve their Cognito users at once, in match order."""
+        subs = [f"sub-{index}" for index in range(10)]
+        barrier = threading.Barrier(len(subs), timeout=10)
+        state = {"calls": 0, "in_flight": 0, "max_in_flight": 0}
+        lock = threading.Lock()
+
+        def list_users(**kwargs: Any) -> Dict[str, Any]:
+            sub = kwargs["Filter"].split('"')[1]
+            with lock:
+                state["calls"] += 1
+                state["in_flight"] += 1
+                state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+            try:
+                barrier.wait()
+            finally:
+                with lock:
+                    state["in_flight"] -= 1
+            return {"Users": [{"Username": sub, "Attributes": [{"Name": "sub", "Value": sub}]}]}
+
+        cognito = MagicMock()
+        cognito.list_users.side_effect = list_users
+        accounts_table = MagicMock()
+        accounts_table.scan.return_value = {"Items": self._accounts(subs)}
+        results_map: dict[str, Dict[str, Any]] = {}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.accounts = accounts_table
+            _add_dynamodb_users_to_map(results_map, "sub", cognito, "pool-id", MagicMock())
+
+        assert state["calls"] == len(subs)
+        assert state["max_in_flight"] == len(subs)
+        assert list(results_map) == subs
+
+    def test_duplicate_subs_are_resolved_once(self) -> None:
+        """Two account rows carrying the same sub cost one Cognito lookup."""
+        cognito = MagicMock()
+        cognito.list_users.return_value = {
+            "Users": [{"Username": "dup", "Attributes": [{"Name": "sub", "Value": "dup"}]}]
+        }
+        accounts_table = MagicMock()
+        accounts_table.scan.return_value = {"Items": self._accounts(["dup", "dup"])}
+        results_map: dict[str, Dict[str, Any]] = {}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.accounts = accounts_table
+            _add_dynamodb_users_to_map(results_map, "dup", cognito, "pool-id", MagicMock())
+
+        assert cognito.list_users.call_count == 1
+        assert list(results_map) == ["dup"]
+
+    def test_no_matched_accounts_makes_no_cognito_call(self) -> None:
+        """A search with no DynamoDB match still makes no sub lookup."""
+        cognito = MagicMock()
+        accounts_table = MagicMock()
+        accounts_table.scan.return_value = {"Items": []}
+
+        with patch("src.handlers.admin_operations.tables") as mock_tables:
+            mock_tables.accounts = accounts_table
+            _add_dynamodb_users_to_map({}, "nobody", cognito, "pool-id", MagicMock())
+
+        cognito.list_users.assert_not_called()
 
 
 class TestAdminGetUserCampaigns:

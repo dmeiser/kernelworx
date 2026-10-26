@@ -1,11 +1,17 @@
 """Unit tests for list_unit_catalogs Lambda handler."""
 
+import threading
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers.list_unit_catalogs import _fetch_catalogs, _get_catalogs_table_name, list_unit_catalogs
+from src.handlers.list_unit_catalogs import (
+    _CAMPAIGN_QUERY_CONCURRENCY,
+    _fetch_catalogs,
+    _get_catalogs_table_name,
+    list_unit_catalogs,
+)
 from src.utils.errors import AppError, ErrorCode
 
 
@@ -869,6 +875,85 @@ class TestListUnitCampaignCatalogs:
 
         # Assert - No catalogs returned since none found
         assert result == []
+
+
+class TestUnitCatalogsCampaignReadConcurrency:
+    """Tests for how ``listUnitCatalogs`` reads the campaigns table (#747).
+
+    The resolver used to issue one campaigns Query per accessible profile, one
+    after the other, so a unit of N scouts paid N serial round trips and the
+    resolver's wall clock grew linearly with the unit's size. The reads now run
+    concurrently in capped chunks. A serial implementation fails the overlap
+    assertion by blocking on the barrier, not by matching any source text.
+    """
+
+    @pytest.fixture
+    def event(self) -> Dict[str, Any]:
+        """AppSync event for a unit catalog listing."""
+        return {
+            "arguments": {
+                "unitType": "Pack",
+                "unitNumber": 158,
+                "campaignName": "Fall",
+                "campaignYear": 2024,
+            },
+            "identity": {"sub": "test-account-123"},
+        }
+
+    def _profiles(self, count: int) -> list[Dict[str, Any]]:
+        """Build ``count`` profiles of the unit."""
+        return [{"profileId": f"PROFILE#profile{index}"} for index in range(count)]
+
+    def _run(self, event: Dict[str, Any], profile_count: int, overlap: int) -> Dict[str, int]:
+        """Run the resolver over a unit, with campaign reads that only answer when ``overlap`` of them overlap."""
+        barrier = threading.Barrier(overlap, timeout=10)
+        state = {"queries": 0, "in_flight": 0, "max_in_flight": 0}
+        lock = threading.Lock()
+
+        def campaigns_query(**kwargs: Any) -> Dict[str, Any]:
+            profile_id = kwargs["KeyConditionExpression"].get_expression()["values"][1]
+            with lock:
+                state["queries"] += 1
+                state["in_flight"] += 1
+                state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+            try:
+                barrier.wait()
+            finally:
+                with lock:
+                    state["in_flight"] -= 1
+            return {"Items": [{"campaignId": f"CAMPAIGN#{profile_id}", "profileId": profile_id}]}
+
+        profiles_table = MagicMock()
+        profiles_table.query.return_value = {"Items": self._profiles(profile_count)}
+        campaigns_table = MagicMock()
+        campaigns_table.query.side_effect = campaigns_query
+
+        with (
+            patch("src.handlers.list_unit_catalogs.tables") as mock_tables,
+            patch("src.handlers.list_unit_catalogs.batch_check_profile_access") as mock_check_access,
+        ):
+            mock_tables.profiles = profiles_table
+            mock_tables.campaigns = campaigns_table
+            mock_check_access.side_effect = lambda caller_account_id, profile_ids, required_permission="READ": set(
+                profile_ids
+            )
+            result = list_unit_catalogs(event, MagicMock())
+
+        assert result == []
+        return state
+
+    def test_profile_campaign_reads_run_concurrently_and_capped(self, event: Dict[str, Any]) -> None:
+        """Twenty accessible profiles read their campaigns at the cap, not one at a time."""
+        state = self._run(event, 20, _CAMPAIGN_QUERY_CONCURRENCY)
+
+        assert state["queries"] == 20
+        assert state["max_in_flight"] == _CAMPAIGN_QUERY_CONCURRENCY
+
+    def test_one_campaign_read_per_profile_not_per_campaign(self, event: Dict[str, Any]) -> None:
+        """The fan-out is the accessible-profile count, never a second round per campaign."""
+        state = self._run(event, 3, 3)
+
+        assert state["queries"] == 3
 
 
 class TestFetchCatalogsBatching:

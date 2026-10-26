@@ -1,5 +1,6 @@
 """Lambda resolver for listing catalogs used in a unit."""
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Dict, List, Set, cast
 
 from boto3.dynamodb.conditions import Key
@@ -44,23 +45,51 @@ def _filter_accessible_profiles(profiles: List[Dict[str, Any]], caller_account_i
     return [profile for profile in profiles if profile["profileId"] in accessible_ids]
 
 
+# Campaigns-table Queries cannot be batched (DynamoDB has no batch Query API),
+# so the per-profile fan-out is bounded by concurrency instead. The cap matches
+# the one campaign_reporting puts on its per-campaign order reads (#747).
+_CAMPAIGN_QUERY_CONCURRENCY = 10
+
+
+def _query_campaigns_for_profile(profile_id: str, campaign_name: str, campaign_year: int) -> List[Dict[str, Any]]:
+    """Query one profile's campaigns matching the campaign name and year."""
+    campaigns: List[Dict[str, Any]] = query_all_items(
+        tables.campaigns,
+        {
+            "KeyConditionExpression": Key("profileId").eq(profile_id),
+            "FilterExpression": "campaignName = :name AND campaignYear = :year",
+            "ExpressionAttributeValues": {":name": campaign_name, ":year": campaign_year},
+        },
+    )
+    return campaigns
+
+
 def _collect_catalog_ids(profiles: List[Dict[str, Any]], campaign_name: str, campaign_year: int) -> Set[str]:
-    """Collect unique catalog IDs from campaigns matching criteria."""
+    """Collect unique catalog IDs from campaigns matching criteria.
+
+    The per-profile campaign Query used to run one after another: a unit of N
+    accessible profiles paid N serial DynamoDB round trips, so the resolver's
+    wall clock grew linearly with the unit's size (#747). The reads now run
+    concurrently in chunks no larger than ``_CAMPAIGN_QUERY_CONCURRENCY``, the
+    same shape ``campaign_reporting._fetch_orders_for_campaigns`` uses. The
+    result is a set of catalog ids, so no caller sees an ordering difference.
+    """
+    profile_ids = [profile["profileId"] for profile in profiles]
     catalog_ids: Set[str] = set()
-    for profile in profiles:
-        profile_id = profile["profileId"]
-        campaigns = query_all_items(
-            tables.campaigns,
-            {
-                "KeyConditionExpression": Key("profileId").eq(profile_id),
-                "FilterExpression": "campaignName = :name AND campaignYear = :year",
-                "ExpressionAttributeValues": {":name": campaign_name, ":year": campaign_year},
-            },
-        )
-        for campaign in campaigns:
-            catalog_id = campaign.get("catalogId")
-            if catalog_id is not None and isinstance(catalog_id, str):
-                catalog_ids.add(catalog_id)
+
+    def _fetch(profile_id: str) -> List[Dict[str, Any]]:
+        return _query_campaigns_for_profile(profile_id, campaign_name, campaign_year)
+
+    for start in range(0, len(profile_ids), _CAMPAIGN_QUERY_CONCURRENCY):
+        chunk = profile_ids[start : start + _CAMPAIGN_QUERY_CONCURRENCY]
+        max_workers = min(_CAMPAIGN_QUERY_CONCURRENCY, len(chunk))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            campaigns_by_profile = list(executor.map(_fetch, chunk))
+        for campaigns in campaigns_by_profile:
+            for campaign in campaigns:
+                catalog_id = campaign.get("catalogId")
+                if catalog_id is not None and isinstance(catalog_id, str):
+                    catalog_ids.add(catalog_id)
     return catalog_ids
 
 

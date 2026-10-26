@@ -477,17 +477,36 @@ def _require_admin_and_get_target_account_id(event: Dict[str, Any]) -> tuple[str
 def _add_dynamodb_users_to_map(
     results_map: dict[str, Dict[str, Any]], query: str, cognito: Any, user_pool_id: str, logger: Any
 ) -> None:
-    """Search DynamoDB and add matching Cognito users to results map."""
+    """Search DynamoDB and add matching Cognito users to results map.
+
+    The per-account Cognito ``sub`` lookup used to run one after another: a
+    search matching the ``_ACCOUNT_SEARCH_MAX_RESULTS`` cap paid up to 50 serial
+    ``ListUsers`` round trips (#747). Cognito has no batch lookup by sub, so the
+    lookups now run through the same parallel gather ``_batch_get_user_groups``
+    uses, de-duplicated by sub. ``executor.map`` yields in input order, so the
+    results map keeps the DynamoDB match order.
+    """
     accounts = _search_accounts_in_dynamodb(query, logger)
-    for account in accounts:
-        account_id = account.get("accountId", "")
-        if account_id.startswith("ACCOUNT#"):
-            sub_value = account_id[8:]
-            cognito_user = _search_user_by_sub(cognito, user_pool_id, sub_value, logger)
-            if cognito_user:
-                attributes = {attr["Name"]: attr["Value"] for attr in cognito_user.get("Attributes", [])}
-                key = attributes.get("sub", cognito_user.get("Username", ""))
-                results_map[key] = cognito_user
+    subs = list(
+        dict.fromkeys(
+            account_id[8:]
+            for account_id in (account.get("accountId", "") for account in accounts)
+            if account_id.startswith("ACCOUNT#")
+        )
+    )
+    if not subs:
+        return
+
+    def _fetch(sub: str) -> tuple[str, Optional[Dict[str, Any]]]:
+        return sub, _search_user_by_sub(cognito, user_pool_id, sub, logger)
+
+    users_by_sub = _collect_parallel_keyed_results(_fetch, subs, "load Cognito users by sub", logger)
+    for sub in subs:
+        cognito_user = users_by_sub.get(sub)
+        if cognito_user:
+            attributes = {attr["Name"]: attr["Value"] for attr in cognito_user.get("Attributes", [])}
+            key = attributes.get("sub", cognito_user.get("Username", ""))
+            results_map[key] = cognito_user
 
 
 def _add_cognito_users_to_map(
@@ -1139,17 +1158,31 @@ def _assert_profiles_deleted(account_id: str, profile_ids: list[str], logger: An
 
     The strongly consistent read is required because the profile rows were
     just deleted by a different writer (the client's cascade moments earlier).
+    The verification used to pay one ``GetItem`` per profile id; ``BatchGetItem``
+    answers the whole set in one call per 100 keys with ``ConsistentRead`` still
+    set (#747). The shared helper owns the lookup-failure classification, so a
+    throttled verification stays a retryable RESOURCE_BUSY (#291).
     """
     db_account_id = normalize_account_id(account_id)
+    keys = [{"ownerAccountId": db_account_id, "profileId": profile_id} for profile_id in profile_ids]
+
+    surviving: set[str] = set()
+
+    def _note_surviving_profile(item: Dict[str, Any]) -> None:
+        profile_id = item.get("profileId")
+        if profile_id is not None:
+            surviving.add(str(profile_id))
+
+    batch_get_chunked(
+        get_required_env("PROFILES_TABLE_NAME"),
+        keys,
+        _note_surviving_profile,
+        consistent_read=True,
+        logger=logger,
+    )
+
     for profile_id in profile_ids:
-        try:
-            response = tables.profiles.get_item(
-                Key={"ownerAccountId": db_account_id, "profileId": profile_id},
-                ConsistentRead=True,
-            )
-        except ClientError as e:
-            _raise_batch_lookup_error("verify profile deletion", logger, e, profile_id=profile_id)
-        if "Item" in response:
+        if profile_id in surviving:
             logger.warning("Purge refused: profile still present", profile_id=profile_id, actor_sub=actor_sub)
             raise AppError(
                 ErrorCode.CONFLICT,
@@ -1515,21 +1548,45 @@ def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_
     _attach_campaign_catalogs(campaigns, catalog_map, treat_deleted_as_null)
 
 
+# Campaigns-table Queries cannot be batched (DynamoDB has no batch Query API),
+# so the per-profile fan-out in adminGetUserCampaigns is bounded by concurrency
+# instead. The cap matches the one campaign_reporting puts on its per-campaign
+# order reads (#747).
+_CAMPAIGN_QUERY_CONCURRENCY = 10
+
+
+def _query_profile_campaigns(profile_id: Any) -> list[Dict[str, Any]]:
+    """Query one profile's campaigns by its profileId."""
+    return query_all_items(
+        tables.campaigns,
+        {
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": profile_id},
+        },
+    )
+
+
 def _get_campaigns_for_profiles(profiles: list[Dict[str, Any]], logger: Any, actor_sub: str) -> list[Dict[str, Any]]:
-    """Query campaigns for each profile."""
-    all_campaigns = []
-    for profile in profiles:
-        profile_id = profile.get("profileId")
-        if profile_id:
-            campaigns = query_all_items(
-                tables.campaigns,
-                {
-                    "KeyConditionExpression": "profileId = :pid",
-                    "ExpressionAttributeValues": {":pid": profile_id},
-                },
-            )
+    """Query campaigns for each profile, concurrently and capped (#747).
+
+    The per-profile campaigns Query used to run one after another, so an account
+    with N profiles paid N serial round trips. The reads now run in chunks no
+    larger than ``_CAMPAIGN_QUERY_CONCURRENCY`` — the same shape
+    ``campaign_reporting._fetch_orders_for_campaigns`` uses — and
+    ``executor.map`` yields each chunk in profile order, so the campaign list is
+    identical to the serial read. The per-profile line is debug-level: it fires
+    once per profile, and the caller already logs the aggregate at info.
+    """
+    profile_ids = [profile["profileId"] for profile in profiles if profile.get("profileId")]
+    all_campaigns: list[Dict[str, Any]] = []
+    for start in range(0, len(profile_ids), _CAMPAIGN_QUERY_CONCURRENCY):
+        chunk = profile_ids[start : start + _CAMPAIGN_QUERY_CONCURRENCY]
+        max_workers = min(_CAMPAIGN_QUERY_CONCURRENCY, len(chunk))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            campaigns_by_profile = list(executor.map(_query_profile_campaigns, chunk))
+        for profile_id, campaigns in zip(chunk, campaigns_by_profile):
             all_campaigns.extend(campaigns)
-            logger.info(
+            logger.debug(
                 "Retrieved campaigns for profile",
                 profile_id=profile_id,
                 count=len(campaigns),
