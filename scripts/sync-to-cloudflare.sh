@@ -35,6 +35,7 @@ echo ""
 
 # Fetch all Route53 records
 echo "📋 Fetching Route53 records..."
+# shellcheck disable=SC2016  # JMESPath literal: the backticks are aws CLI syntax, not shell command substitution
 RECORDS=$(aws route53 list-resource-record-sets \
     --hosted-zone-id "$ROUTE53_ZONE_ID" \
     --query 'ResourceRecordSets[?Type!=`NS` && Type!=`SOA`]' \

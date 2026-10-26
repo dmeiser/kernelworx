@@ -7,7 +7,7 @@ fi
 ENV="${1:-dev}"
 ACTION="${2:-plan}"
 shift 2 2>/dev/null || shift $#  # Remove first two args, keep rest as extra flags
-EXTRA_FLAGS="$@"
+EXTRA_FLAGS=("$@")
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -20,6 +20,7 @@ LAYER_REQ="$LAYER_DIR/requirements.txt"
 if [ -f "$ROOT_DIR/.env" ]; then
     echo "📂 Loading environment from $ROOT_DIR/.env"
     set -a
+    # shellcheck source=/dev/null
     source "$ROOT_DIR/.env"
     set +a
 fi
@@ -88,25 +89,25 @@ main() {
     init)
         echo "📦 Initializing OpenTofu..."
         build_resolvers
-        tofu init -upgrade $EXTRA_FLAGS
+        tofu init -upgrade "${EXTRA_FLAGS[@]}"
         ;;
     plan)
         echo "📋 Planning changes..."
         build_lambda_layer
         build_resolvers
-        tofu plan -out=tfplan $EXTRA_FLAGS
+        tofu plan -out=tfplan "${EXTRA_FLAGS[@]}"
         ;;
     apply)
-        AUTO_APPROVE_FLAG=""
+        AUTO_APPROVE_FLAGS=()
         if [ "${AUTO_APPROVE:-}" = "1" ]; then
-            AUTO_APPROVE_FLAG="-auto-approve"
+            AUTO_APPROVE_FLAGS=("-auto-approve")
         fi
 
         build_lambda_layer
         build_resolvers
         if [ -f tfplan ] && plan_is_fresh tfplan; then
             echo "🚀 Applying saved plan..."
-            tofu apply $AUTO_APPROVE_FLAG $EXTRA_FLAGS tfplan
+            tofu apply "${AUTO_APPROVE_FLAGS[@]}" "${EXTRA_FLAGS[@]}" tfplan
             rm tfplan
         else
             if [ -f tfplan ]; then
@@ -114,18 +115,18 @@ main() {
                 rm tfplan
             fi
             echo "📋 Re-planning changes before apply..."
-            tofu plan -out=tfplan $EXTRA_FLAGS
+            tofu plan -out=tfplan "${EXTRA_FLAGS[@]}"
             echo "🚀 Applying changes..."
-            tofu apply $AUTO_APPROVE_FLAG $EXTRA_FLAGS tfplan
+            tofu apply "${AUTO_APPROVE_FLAGS[@]}" "${EXTRA_FLAGS[@]}" tfplan
             rm tfplan
         fi
         ;;
     destroy)
         echo "⚠️  Are you sure? This will destroy all resources!"
-        read -p "Type 'yes' to confirm: " confirm
+        read -r -p "Type 'yes' to confirm: " confirm
         if [ "$confirm" == "yes" ]; then
             build_resolvers
-            tofu destroy $EXTRA_FLAGS
+            tofu destroy "${EXTRA_FLAGS[@]}"
         else
             echo "Aborted."
         fi
@@ -133,7 +134,7 @@ main() {
     validate)
         echo "✅ Validating configuration..."
         build_resolvers
-        tofu validate $EXTRA_FLAGS
+        tofu validate "${EXTRA_FLAGS[@]}"
         ;;
     fmt)
         echo "🎨 Formatting configuration..."

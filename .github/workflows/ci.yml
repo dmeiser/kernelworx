@@ -147,6 +147,49 @@ jobs:
       - name: Guard tests
         run: npm run test:guards
 
+  shellcheck:
+    name: Shell script linting
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Shellcheck (deploy, recovery, and test-user scripts)
+        # Every tracked repo-owned shell script is listed explicitly. The image
+        # tag is pinned (same convention as the KICS step below) so the finding
+        # set cannot drift with the runner image's apt shellcheck. tests/unit/
+        # check_shellcheck_coverage.test.ts (guards job) fails when a new .sh
+        # is added without being added here, so the gate cannot be bypassed by
+        # omission.
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/src:ro" -w /src \
+            koalaman/shellcheck:v0.11.0 \
+            frontend/deploy.sh \
+            frontend/setup-local-dev.sh \
+            scripts/appsync-ensure-resolver-order.sh \
+            scripts/create-ephemeral-test-users.sh \
+            scripts/create-screenshot-user.sh \
+            scripts/create-test-users.sh \
+            scripts/delete-screenshot-user.sh \
+            scripts/ephemeral-env.sh \
+            scripts/ephemeral-recover-common.sh \
+            scripts/provision-user-totp.sh \
+            scripts/recover-deploy.sh \
+            scripts/recover-destroy.sh \
+            scripts/sync-to-cloudflare.sh \
+            tests/integration/refactor-cleanup.sh \
+            tofu/application/scripts/deploy.sh
+
+      - name: Generate job summary
+        if: success()
+        run: |
+          echo "## ✅ Shell Script Lint Passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Shellcheck 0.11.0 over every tracked repo-owned \`*.sh\` script" >> $GITHUB_STEP_SUMMARY
+
   js-resolvers:
     name: AppSync JS resolver tests
     runs-on: ubuntu-latest
