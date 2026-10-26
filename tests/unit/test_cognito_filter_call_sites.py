@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers import account_operations, admin_operations, pre_signup
+from src.handlers import account_operations, admin_operations, admin_user_operations, pre_signup
 from src.utils.errors import AppError, ErrorCode
 
 POOL = "us-east-1_TEST123"
@@ -34,14 +34,14 @@ UUID = "2b0e7f1a-9c3d-4f5e-8a7b-1d2c3b4a5e6f"
 FILTER_SITES: List[Tuple[str, Callable[..., Any], str, str, str]] = [
     (
         "admin _search_user_by_sub",
-        admin_operations._search_user_by_sub,
+        admin_user_operations._search_user_by_sub,
         "sub",
         UUID,
         f'sub = "{UUID}"',
     ),
     (
         "admin _search_users_in_cognito_by_email_prefix",
-        admin_operations._search_users_in_cognito_by_email_prefix,
+        admin_user_operations._search_users_in_cognito_by_email_prefix,
         "query",
         "user@exa",
         'email ^= "user@exa"',
