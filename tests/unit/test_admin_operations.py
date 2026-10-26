@@ -24,6 +24,9 @@ import pytest
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
 from src.handlers.admin_operations import (
+    _ACCOUNT_SCAN_PROJECTION,
+    _ACCOUNTS_SCAN_MAX_PAGES,
+    _ACCOUNTS_SCAN_PAGE_SIZE,
     _batch_get_campaign_catalogs,
     _extract_unique_catalog_ids,
     admin_purge_user_account,
@@ -7153,6 +7156,141 @@ class TestAdminOperationExceptionHandlers:
 
             # Should have 50 results (max_results limit)
             assert len(result) == 50
+
+    def test_search_user_scan_pages_are_capped_and_resumed(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """Every Scan request carries a page cap; the next one resumes on the key (#775)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "needle"},
+        }
+
+        cognito_user = {
+            "Username": "needle@example.com",
+            "Attributes": [
+                {"Name": "sub", "Value": "needle-sub"},
+                {"Name": "email", "Value": "needle@example.com"},
+            ],
+            "Enabled": True,
+            "UserStatus": "CONFIRMED",
+            "UserCreateDate": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        }
+
+        with (
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            # Page one holds no match and hands back a resume key; page two matches.
+            mock_tables.accounts.scan.side_effect = [
+                {
+                    "Items": [{"accountId": "ACCOUNT#page-one", "email": "one@example.com"}],
+                    "LastEvaluatedKey": {"accountId": "ACCOUNT#page-one"},
+                },
+                {"Items": [{"accountId": "ACCOUNT#needle-sub", "email": "needle@example.com"}]},
+            ]
+            mock_client.list_users.return_value = {"Users": [cognito_user]}
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
+
+            result = admin_search_user(event, lambda_context)
+
+            scan_calls = mock_tables.accounts.scan.call_args_list
+            assert [params.kwargs["Limit"] for params in scan_calls] == [
+                _ACCOUNTS_SCAN_PAGE_SIZE,
+                _ACCOUNTS_SCAN_PAGE_SIZE,
+            ]
+            assert scan_calls[0].kwargs["ProjectionExpression"] == _ACCOUNT_SCAN_PROJECTION
+            assert "ExclusiveStartKey" not in scan_calls[0].kwargs
+            assert scan_calls[1].kwargs["ExclusiveStartKey"] == {"accountId": "ACCOUNT#page-one"}
+            assert len(result) == 1
+
+    def test_search_user_scan_stops_on_an_empty_page_with_a_resume_key(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A page with no items but a resume key must not spin the scan loop (#775)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "needle"},
+        }
+
+        with (
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            # The item budget never advances, so only a page cap stops the walk.
+            mock_tables.accounts.scan.return_value = {
+                "Items": [],
+                "LastEvaluatedKey": {"accountId": "ACCOUNT#empty-page"},
+            }
+            mock_client.list_users.return_value = {"Users": []}
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
+
+            result = admin_search_user(event, lambda_context)
+
+            assert result == []
+            assert mock_tables.accounts.scan.call_count == 1
+
+    def test_search_user_scan_stops_at_the_page_cap(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A service that keeps handing back one item and a key is still bounded (#775)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "needle"},
+        }
+
+        with (
+            patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            # One item per page: the 1000-item budget would need 1000 requests.
+            mock_tables.accounts.scan.return_value = {
+                "Items": [{"accountId": "ACCOUNT#tiny", "email": "tiny@example.com"}],
+                "LastEvaluatedKey": {"accountId": "ACCOUNT#tiny"},
+            }
+            mock_client.list_users.return_value = {"Users": []}
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
+
+            result = admin_search_user(event, lambda_context)
+
+            assert result == []
+            assert mock_tables.accounts.scan.call_count == _ACCOUNTS_SCAN_MAX_PAGES
 
 
 class TestAdminAuditActorLogging:
