@@ -283,9 +283,6 @@ locals {
   }
 }
 
-# Note: Lambda layer and functions would be created here
-# For now, we're importing existing functions
-
 # Archive the Lambda source code
 data "archive_file" "lambda_payload" {
   type       = "zip"

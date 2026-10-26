@@ -434,7 +434,8 @@ resource "aws_iam_role_policy" "lambda_cognito_admin" {
   policy = data.aws_iam_policy_document.lambda_cognito_admin.json
 }
 
-# Google Identity Provider (optional - not currently configured)
+# Google Identity Provider (enabled in dev and prod via var.enable_google_idp;
+# omitted only in ephemeral, where it is false)
 resource "aws_cognito_identity_provider" "google" {
   count = var.enable_google_idp ? 1 : 0
 

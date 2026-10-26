@@ -361,7 +361,7 @@ module "cloudfront" {
 # The only WAF in the design: CLOUDFRONT scope, attached to the site
 # distribution. Rate rule blocks at 2000 req/300s per IP (GitHub Actions CI
 # ranges skip only the rate rule via a deploy-time IP set); the AWS managed
-# core rule set runs in Count until tuned.
+# core rule set blocks (#429; dev stays on the module's Count default).
 module "waf" {
   source = "../../modules/waf"
 
