@@ -11,9 +11,14 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Load environment variables from .env
+# Load environment variables from .env (same set -a/source pattern as
+# scripts/ephemeral-env.sh; the old `export $(grep ... | xargs)` split values on
+# whitespace and mangled quoted values).
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  set -a
+  # shellcheck source=/dev/null
+  source "./.env"
+  set +a
 else
   echo "Error: .env file not found"
   exit 1
