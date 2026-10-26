@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers import account_operations, admin_operations, admin_user_operations, pre_signup
+from src.handlers import account_operations, admin_account_purge, admin_operations, admin_user_operations, pre_signup
 from src.utils.errors import AppError, ErrorCode
 
 POOL = "us-east-1_TEST123"
@@ -48,7 +48,7 @@ FILTER_SITES: List[Tuple[str, Callable[..., Any], str, str, str]] = [
     ),
     (
         "admin _find_cognito_user_by_sub",
-        admin_operations._find_cognito_user_by_sub,
+        admin_account_purge._find_cognito_user_by_sub,
         "account_id",
         f"ACCOUNT#{UUID}",
         f'sub = "{UUID}"',
@@ -183,7 +183,7 @@ def test_find_cognito_user_by_sub_resolves_not_found_for_a_safe_non_uuid() -> No
     cognito = MagicMock()
     cognito.list_users.return_value = {"Users": []}
 
-    result: Optional[Tuple[None, None]] = admin_operations._find_cognito_user_by_sub(
+    result: Optional[Tuple[None, None]] = admin_account_purge._find_cognito_user_by_sub(
         cognito, POOL, "ACCOUNT#definitely-not-a-uuid", MagicMock()
     )
 
