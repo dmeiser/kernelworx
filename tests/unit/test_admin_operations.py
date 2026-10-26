@@ -24,11 +24,11 @@ import pytest
 from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
 from src.handlers.admin_account_purge import admin_purge_user_account
+from src.handlers.admin_catalog_operations import create_managed_catalog
 from src.handlers.admin_operations import (
     _batch_get_campaign_catalogs,
     _extract_unique_catalog_ids,
     admin_reset_user_password,
-    create_managed_catalog,
     lambda_handler,
 )
 from src.handlers.admin_user_operations import (
@@ -2857,7 +2857,7 @@ class TestCreateManagedCatalog:
             },
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_catalog_operations.tables") as mock_tables:
             mock_catalogs = MagicMock()
             mock_catalogs.put_item.side_effect = ClientError(
                 {"Error": {"Code": "InternalServerError", "Message": "DB error"}},
@@ -2888,7 +2888,7 @@ class TestCreateManagedCatalog:
             },
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_catalog_operations.tables") as mock_tables:
             mock_tables.catalogs.put_item.side_effect = RuntimeError("Unexpected")
 
             result = create_managed_catalog(event, lambda_context)
