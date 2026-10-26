@@ -367,33 +367,95 @@ class TestVerifyOrderKeysDeleted:
 
     def test_returns_when_all_order_keys_are_absent(self) -> None:
         """Test that verification succeeds when every deleted order is gone."""
-        mock_table = MagicMock()
-        mock_table.get_item.return_value = {}
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {"Responses": {"kernelworx-orders-v2-ue1-dev": []}}
 
         order_keys = [
             {"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#1"},
             {"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#2"},
         ]
 
-        with patch("src.handlers.campaign_operations.tables") as mock_tables:
-            mock_tables.orders = mock_table
+        with patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource):
             _verify_order_keys_deleted(order_keys)
 
-        assert mock_table.get_item.call_count == 2
-        for call, key in zip(mock_table.get_item.call_args_list, order_keys):
-            assert call.kwargs["Key"] == {"campaignId": key["campaignId"], "orderId": key["orderId"]}
-            assert call.kwargs["ConsistentRead"] is True
+        mock_resource.batch_get_item.assert_called_once()
+        req = mock_resource.batch_get_item.call_args.kwargs["RequestItems"]["kernelworx-orders-v2-ue1-dev"]
+        assert req["ConsistentRead"] is True
+        assert req["Keys"] == order_keys
+
+    def test_chunks_order_keys_at_100_keys_per_call(self) -> None:
+        """Test that keys are split into chunks of at most 100 per BatchGetItem call."""
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {"Responses": {"kernelworx-orders-v2-ue1-dev": []}}
+
+        order_keys = [{"campaignId": "CAMPAIGN#batch", "orderId": f"ORDER#{i}"} for i in range(250)]
+
+        with patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource):
+            _verify_order_keys_deleted(order_keys)
+
+        assert mock_resource.batch_get_item.call_count == 3
+        sizes = [
+            len(call.kwargs["RequestItems"]["kernelworx-orders-v2-ue1-dev"]["Keys"])
+            for call in mock_resource.batch_get_item.call_args_list
+        ]
+        assert sizes == [100, 100, 50]
+        for call in mock_resource.batch_get_item.call_args_list:
+            assert call.kwargs["RequestItems"]["kernelworx-orders-v2-ue1-dev"]["ConsistentRead"] is True
+
+    def test_retries_unprocessed_keys_with_backoff(self) -> None:
+        """Test that unprocessed keys are retried with backoff and succeed."""
+        table_name = "kernelworx-orders-v2-ue1-dev"
+        mock_resource = MagicMock()
+        unprocessed_key = {"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#2"}
+        mock_resource.batch_get_item.side_effect = [
+            {"Responses": {table_name: []}, "UnprocessedKeys": {table_name: {"Keys": [unprocessed_key]}}},
+            {"Responses": {table_name: []}, "UnprocessedKeys": {}},
+        ]
+
+        order_keys = [
+            {"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#1"},
+            unprocessed_key,
+        ]
+
+        with (
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
+            patch("src.utils.dynamodb.time.sleep") as mock_sleep,
+        ):
+            _verify_order_keys_deleted(order_keys)
+
+        assert mock_resource.batch_get_item.call_count == 2
+        assert mock_sleep.call_count == 1
+
+    def test_raises_when_unprocessed_keys_exceed_retry_cap(self) -> None:
+        """Test that persistent unprocessed keys raise RESOURCE_BUSY after retry cap."""
+        table_name = "kernelworx-orders-v2-ue1-dev"
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {
+            "Responses": {table_name: []},
+            "UnprocessedKeys": {table_name: {"Keys": [{"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#1"}]}},
+        }
+
+        with (
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
+            patch("src.utils.dynamodb.time.sleep"),
+            pytest.raises(AppError) as exc_info,
+        ):
+            _verify_order_keys_deleted([{"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#1"}])
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
 
     def test_raises_when_an_order_key_persists(self) -> None:
         """Test that verification raises INTERNAL_ERROR when an order persists."""
-        mock_table = MagicMock()
-        mock_table.get_item.side_effect = [{}, {"Item": {"campaignId": "CAMPAIGN#x", "orderId": "ORDER#2"}}]
+        table_name = "kernelworx-orders-v2-ue1-dev"
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {
+            "Responses": {table_name: [{"campaignId": "CAMPAIGN#x", "orderId": "ORDER#2"}]}
+        }
 
         with (
-            patch("src.handlers.campaign_operations.tables") as mock_tables,
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
             pytest.raises(AppError) as exc_info,
         ):
-            mock_tables.orders = mock_table
             _verify_order_keys_deleted(
                 [
                     {"campaignId": "CAMPAIGN#x", "orderId": "ORDER#1"},
@@ -404,38 +466,132 @@ class TestVerifyOrderKeysDeleted:
         assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
         assert "Failed to delete order" in str(exc_info.value.message)
 
+    def test_empty_keys_makes_no_api_call(self) -> None:
+        """Test that empty order keys list performs no API call."""
+        mock_resource = MagicMock()
+        with patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource):
+            _verify_order_keys_deleted([])
+
+        mock_resource.batch_get_item.assert_not_called()
+
+    def test_uses_custom_table_name_from_table_attribute(self) -> None:
+        """Test that custom table name is read from tables.orders.name when set."""
+        mock_table = MagicMock()
+        mock_table.name = "custom-orders-table"
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {"Responses": {"custom-orders-table": []}}
+
+        with (
+            patch("src.handlers.campaign_operations.tables") as mock_tables,
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
+        ):
+            mock_tables.orders = mock_table
+            _verify_order_keys_deleted([{"campaignId": "C", "orderId": "O1"}])
+
+        assert "custom-orders-table" in mock_resource.batch_get_item.call_args.kwargs["RequestItems"]
+
+    def test_falls_back_to_env_var_when_table_has_no_name(self, monkeypatch: Any) -> None:
+        """Test fallback to environment variable when table object lacks name."""
+        monkeypatch.setenv("ORDERS_TABLE_NAME", "env-orders-table")
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {"Responses": {"env-orders-table": []}}
+
+        with (
+            patch("src.handlers.campaign_operations.tables") as mock_tables,
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
+        ):
+            mock_tables.orders = object()
+            _verify_order_keys_deleted([{"campaignId": "C", "orderId": "O1"}])
+
+        assert "env-orders-table" in mock_resource.batch_get_item.call_args.kwargs["RequestItems"]
+
 
 class TestVerifyCampaignDeleted:
     """Tests for the base-table campaign deletion verification helper."""
 
     def test_returns_when_campaign_is_absent(self) -> None:
         """Test that verification succeeds when the deleted campaign is gone."""
-        mock_table = MagicMock()
-        mock_table.get_item.return_value = {}
+        table_name = "kernelworx-campaigns-v2-ue1-dev"
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {"Responses": {table_name: []}}
 
-        with patch("src.handlers.campaign_operations.tables") as mock_tables:
-            mock_tables.campaigns = mock_table
+        with patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource):
             _verify_campaign_deleted("PROFILE#1", "CAMPAIGN#gone")
 
-        mock_table.get_item.assert_called_once_with(
-            Key={"profileId": "PROFILE#1", "campaignId": "CAMPAIGN#gone"},
-            ConsistentRead=True,
-        )
+        mock_resource.batch_get_item.assert_called_once()
+        req = mock_resource.batch_get_item.call_args.kwargs["RequestItems"][table_name]
+        assert req["ConsistentRead"] is True
+        assert req["Keys"] == [{"profileId": "PROFILE#1", "campaignId": "CAMPAIGN#gone"}]
+
+    def test_retries_unprocessed_keys_with_backoff(self) -> None:
+        """Test that unprocessed keys are retried with backoff and succeed."""
+        table_name = "kernelworx-campaigns-v2-ue1-dev"
+        mock_resource = MagicMock()
+        unprocessed_key = {"profileId": "PROFILE#1", "campaignId": "CAMPAIGN#retry"}
+        mock_resource.batch_get_item.side_effect = [
+            {"Responses": {table_name: []}, "UnprocessedKeys": {table_name: {"Keys": [unprocessed_key]}}},
+            {"Responses": {table_name: []}, "UnprocessedKeys": {}},
+        ]
+
+        with (
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
+            patch("src.utils.dynamodb.time.sleep") as mock_sleep,
+        ):
+            _verify_campaign_deleted("PROFILE#1", "CAMPAIGN#retry")
+
+        assert mock_resource.batch_get_item.call_count == 2
+        assert mock_sleep.call_count == 1
+
+    def test_raises_when_unprocessed_keys_exceed_retry_cap(self) -> None:
+        """Test that persistent unprocessed keys raise RESOURCE_BUSY after retry cap."""
+        table_name = "kernelworx-campaigns-v2-ue1-dev"
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {
+            "Responses": {table_name: []},
+            "UnprocessedKeys": {table_name: {"Keys": [{"profileId": "PROFILE#1", "campaignId": "CAMPAIGN#busy"}]}},
+        }
+
+        with (
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
+            patch("src.utils.dynamodb.time.sleep"),
+            pytest.raises(AppError) as exc_info,
+        ):
+            _verify_campaign_deleted("PROFILE#1", "CAMPAIGN#busy")
+
+        assert exc_info.value.error_code == ErrorCode.RESOURCE_BUSY
 
     def test_raises_when_campaign_persists(self) -> None:
         """Test that verification raises INTERNAL_ERROR when the campaign persists."""
-        mock_table = MagicMock()
-        mock_table.get_item.return_value = {"Item": {"profileId": "PROFILE#1", "campaignId": "CAMPAIGN#stuck"}}
+        table_name = "kernelworx-campaigns-v2-ue1-dev"
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {
+            "Responses": {table_name: [{"profileId": "PROFILE#1", "campaignId": "CAMPAIGN#stuck"}]}
+        }
 
         with (
-            patch("src.handlers.campaign_operations.tables") as mock_tables,
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
             pytest.raises(AppError) as exc_info,
         ):
-            mock_tables.campaigns = mock_table
             _verify_campaign_deleted("PROFILE#1", "CAMPAIGN#stuck")
 
         assert exc_info.value.error_code == ErrorCode.INTERNAL_ERROR
         assert "Failed to delete campaign" in str(exc_info.value.message)
+
+    def test_uses_custom_table_name_from_table_attribute(self) -> None:
+        """Test that custom table name is read from tables.campaigns.name when set."""
+        mock_table = MagicMock()
+        mock_table.name = "custom-campaigns-table"
+        mock_resource = MagicMock()
+        mock_resource.batch_get_item.return_value = {"Responses": {"custom-campaigns-table": []}}
+
+        with (
+            patch("src.handlers.campaign_operations.tables") as mock_tables,
+            patch("src.utils.dynamodb.get_dynamodb_resource", return_value=mock_resource),
+        ):
+            mock_tables.campaigns = mock_table
+            _verify_campaign_deleted("PROFILE#1", "CAMPAIGN#gone")
+
+        assert "custom-campaigns-table" in mock_resource.batch_get_item.call_args.kwargs["RequestItems"]
 
 
 class TestQueryOrderKeysForCampaign:
