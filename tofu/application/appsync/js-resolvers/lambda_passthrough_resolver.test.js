@@ -3,12 +3,13 @@ import assert from 'node:assert';
 import { request, response } from './lambda_passthrough_resolver.js';
 
 describe('lambda_passthrough_resolver request', () => {
-    it('invokes Lambda with arguments, identity, info, prev, and stash', () => {
+    it('invokes Lambda with arguments, identity, info, stash, and requestId', () => {
         const ctx = {
             arguments: { limit: 10 },
             identity: { sub: 'user-123' },
             info: { fieldName: 'adminListUsers', parentTypeName: 'Query' },
-            stash: { profileOwner: 'ACCOUNT#1' },
+            stash: {},
+            request: { headers: { 'x-amzn-requestid': 'req-abc-123' } },
         };
 
         const result = request(ctx);
@@ -17,7 +18,15 @@ describe('lambda_passthrough_resolver request', () => {
         assert.deepStrictEqual(result.payload.arguments, { limit: 10 });
         assert.deepStrictEqual(result.payload.identity, { sub: 'user-123' });
         assert.deepStrictEqual(result.payload.info, { fieldName: 'adminListUsers', parentTypeName: 'Query' });
-        assert.deepStrictEqual(result.payload.stash, { profileOwner: 'ACCOUNT#1' });
+        assert.deepStrictEqual(result.payload.stash, {});
+        assert.strictEqual(result.payload.requestId, 'req-abc-123');
+    });
+
+    it('passes requestId as undefined when ctx.request is absent (#748)', () => {
+        const result = request({ arguments: {}, identity: {}, stash: {} });
+
+        assert.strictEqual(result.payload.requestId, undefined);
+        assert.strictEqual('requestId' in result.payload, true);
     });
 
     it('passes info through so the admin dispatcher can read info.fieldName', () => {
@@ -33,26 +42,14 @@ describe('lambda_passthrough_resolver request', () => {
         assert.strictEqual(result.payload.info.fieldName, 'adminResetUserPassword');
     });
 
-    it('resolves ownerAccountId from stash.profileOwner', () => {
-        const result = request({ arguments: {}, identity: {}, stash: { profileOwner: 'ACCOUNT#1' } });
-
-        assert.strictEqual(result.payload.prev.result.ownerAccountId, 'ACCOUNT#1');
-    });
-
-    it('falls back to stash.profile.ownerAccountId then stash.ownerAccountId', () => {
-        const fromProfile = request({
+    it('does not fabricate a prev.result payload (#748)', () => {
+        const result = request({
             arguments: {},
             identity: {},
-            stash: { profile: { ownerAccountId: 'ACCOUNT#2' } },
+            stash: { profileOwner: 'ACCOUNT#1', customPaymentMethods: [{ id: 'pm-1' }] },
         });
-        assert.strictEqual(fromProfile.payload.prev.result.ownerAccountId, 'ACCOUNT#2');
 
-        const fromStash = request({
-            arguments: {},
-            identity: {},
-            stash: { ownerAccountId: 'ACCOUNT#3' },
-        });
-        assert.strictEqual(fromStash.payload.prev.result.ownerAccountId, 'ACCOUNT#3');
+        assert.strictEqual('prev' in result.payload, false);
     });
 });
 
