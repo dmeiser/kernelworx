@@ -144,6 +144,7 @@ unparseable
 émoji
 esbuild
 eslint
+excinfo
 exfiltration
 exportable
 falsey

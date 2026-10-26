@@ -24,7 +24,6 @@ from botocore.exceptions import ClientError
 # Sibling handler modules use a same-package relative import, which resolves both
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
 from .campaign_operations import (
-    _verify_campaign_deleted,
     batch_delete_keys,
     delete_orders_for_campaign,
 )
@@ -99,11 +98,42 @@ def delete_user_orders(profiles: list[Dict[str, Any]], logger: Any) -> int:
     return deleted_count
 
 
+def _verify_no_campaigns_remain(profile_id: str, logger: Any) -> None:
+    """Verify the campaigns table holds no campaign row for this profile.
+
+    The check measures the settled table, not the in-memory list the delete
+    keys were filtered from (#765): a strongly consistent Query on the base
+    table reflects every acknowledged delete, so a row the key filter skipped
+    cannot pass verification by never having been deleted, and an empty key
+    list cannot make the check vacuous. The campaignId-index GSI is not used
+    here: it is eventually consistent and can keep showing deleted rows for an
+    unbounded time. Raises AppError if any row persists.
+    """
+    remaining = query_all_items(
+        tables.campaigns,
+        {
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": profile_id},
+            "ConsistentRead": True,
+        },
+        max_items=1,
+    )
+    if remaining:
+        logger.error(
+            "Campaign still present after delete verification",
+            profile_id=profile_id,
+            campaign_id=remaining[0].get("campaignId"),
+        )
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete campaign")
+
+
 def delete_user_campaigns(profiles: list[Dict[str, Any]], logger: Any) -> int:
     """Delete all campaigns for the given profiles.
 
-    Verifies with strongly consistent reads that each deleted campaign is gone
-    from the campaigns table before returning. Raises AppError if a deleted
+    Verifies with a strongly consistent re-query of the campaigns table that no
+    campaign row remains for the profile before returning. The verification
+    runs per profile whether or not any delete key was built, so it cannot be
+    satisfied by the filtered key list it audits (#765). Raises AppError if any
     campaign is still present.
 
     Returns:
@@ -129,8 +159,7 @@ def delete_user_campaigns(profiles: list[Dict[str, Any]], logger: Any) -> int:
             deleted_count += batch_delete_keys(
                 tables.campaigns, campaign_keys, ["profileId", "campaignId"], logger=logger
             )
-            for campaign in campaigns:
-                _verify_campaign_deleted(profile_id, campaign["campaignId"])
+        _verify_no_campaigns_remain(profile_id, logger=logger)
 
     logger.info("Deleted user campaigns", count=deleted_count)
     return deleted_count
