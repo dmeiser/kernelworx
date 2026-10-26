@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Python 3.14+** with `uv` package manager
+- **Python 3.14** with `uv` package manager — pinned in `.python-version`, so `uv` provisions and uses the same interpreter CI and AWS Lambda run (3.14); `requires-python = ">=3.14"` is a floor, not a license to develop on a newer minor.
 - **Node.js 24+** with `npm`
 - **AWS CLI v2** configured with appropriate credentials
 - **AWS Account** with permissions for IAM, DynamoDB, S3, Cognito, AppSync, ACM, Route 53, CloudFront, Lambda, SNS, CloudFormation, and CloudWatch/Billing
@@ -81,7 +81,7 @@ export TF_VAR_encryption_passphrase='your-passphrase'
 
 ```bash
 # Check Python version
-python --version  # Should be 3.14+
+python --version  # Should be 3.14 (the .python-version pin)
 
 # Check uv
 uv --version
