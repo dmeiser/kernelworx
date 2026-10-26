@@ -25,12 +25,8 @@ from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionEr
 
 from src.handlers.admin_account_purge import admin_purge_user_account
 from src.handlers.admin_catalog_operations import create_managed_catalog
-from src.handlers.admin_operations import (
-    _batch_get_campaign_catalogs,
-    _extract_unique_catalog_ids,
-    admin_reset_user_password,
-    lambda_handler,
-)
+from src.handlers.admin_credential_reset import admin_reset_user_password
+from src.handlers.admin_operations import lambda_handler
 from src.handlers.admin_user_operations import (
     _batch_get_display_names,
     _batch_get_user_groups,
@@ -39,6 +35,7 @@ from src.handlers.admin_user_operations import (
     admin_list_users,
     admin_search_user,
 )
+from src.handlers.admin_user_reads import _batch_get_campaign_catalogs, _extract_unique_catalog_ids
 from src.utils.errors import AppError, ErrorCode
 from tests.unit.fixtures import accept_batch_deletes
 
@@ -145,7 +142,7 @@ class TestLambdaHandler:
         }
 
         # Mock Cognito
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.return_value = {}
@@ -963,7 +960,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.return_value = {}
@@ -992,7 +989,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "  TEST@EXAMPLE.COM  "},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.return_value = {}
@@ -1064,7 +1061,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "notfound@example.com"},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": []}
             mock_get_client.return_value = mock_cognito
@@ -1109,7 +1106,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.side_effect = ClientError(
                 {"Error": {"Code": "InternalErrorException", "Message": "Test error"}},
@@ -1137,7 +1134,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.side_effect = ClientError(
@@ -1166,7 +1163,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.side_effect = ClientError(
@@ -1195,7 +1192,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.side_effect = ClientError(
@@ -1224,7 +1221,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.side_effect = RuntimeError("Unexpected error")
             mock_get_client.return_value = mock_cognito
@@ -1249,7 +1246,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": 'evil"@example.com'},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -1274,7 +1271,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "evil\\@example.com\\"},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -1299,7 +1296,7 @@ class TestAdminResetUserPassword:
             "arguments": {"email": "not-an-email"},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_get_client.return_value = mock_cognito
 
@@ -1364,7 +1361,7 @@ class TestAdminMfaRequired:
             "arguments": {"email": "test@example.com"},
         }
 
-        with patch("src.handlers.admin_operations.get_cognito_client") as mock_get_client:
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
             mock_cognito = MagicMock()
             mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
             mock_cognito.admin_reset_user_password.return_value = {}
@@ -3129,7 +3126,7 @@ class TestAdminDeleteUserOrders:
             "arguments": {"accountId": "target-user-123"},
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.deletion_cascade.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected")
 
             result = admin_delete_user_orders(event, lambda_context)
@@ -5538,7 +5535,7 @@ class TestAdminGetUserProfiles:
         lambda_context: Any,
     ) -> None:
         """Test that profile retrieval follows DynamoDB pagination."""
-        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+        with patch("src.handlers.admin_user_reads.query_all_items") as mock_query_all:
             mock_query_all.return_value = [{"profileId": f"PROFILE#{i}", "sellerName": f"Scout {i}"} for i in range(3)]
 
             admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
@@ -5652,7 +5649,7 @@ class TestAdminGetUserCatalogs:
         lambda_context: Any,
     ) -> None:
         """Test that catalog retrieval follows DynamoDB pagination."""
-        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+        with patch("src.handlers.admin_user_reads.query_all_items") as mock_query_all:
             mock_query_all.return_value = [
                 {"catalogId": f"CATALOG#{i}", "catalogName": f"Catalog {i}"} for i in range(3)
             ]
@@ -5773,7 +5770,7 @@ class TestAdminGetUserCampaigns:
 
         with (
             patch("src.handlers.deletion_cascade.tables") as mock_cascade_tables,
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_user_reads.tables") as mock_tables,
         ):
             # Mock profiles query returning a malformed profile without profileId
             mock_cascade_tables.profiles.query.return_value = {
@@ -5937,7 +5934,7 @@ class TestAdminGetUserSharedCampaigns:
         lambda_context: Any,
     ) -> None:
         """Test that shared campaign retrieval follows DynamoDB pagination."""
-        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+        with patch("src.handlers.admin_user_reads.query_all_items") as mock_query_all:
             mock_query_all.return_value = [
                 {"sharedCampaignCode": f"CODE{i}", "campaignName": f"Campaign {i}"} for i in range(3)
             ]
@@ -5965,9 +5962,9 @@ class TestAdminGetUserSharedCampaigns:
         ]
 
         with (
-            patch("src.handlers.admin_operations.query_all_items", return_value=campaigns),
+            patch("src.handlers.admin_user_reads.query_all_items", return_value=campaigns),
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_resource,
-            patch("src.handlers.admin_operations.tables") as mock_tables,
+            patch("src.handlers.admin_user_reads.tables") as mock_tables,
         ):
             mock_resource.return_value.batch_get_item.return_value = {
                 "Responses": {"kernelworx-catalogs-ue1-dev": [catalog]},
@@ -5994,7 +5991,7 @@ class TestAdminGetUserSharedCampaigns:
         campaigns = [{"sharedCampaignCode": f"CODE{i}", "catalogId": f"CATALOG#{i}"} for i in range(150)]
 
         with (
-            patch("src.handlers.admin_operations.query_all_items", return_value=campaigns),
+            patch("src.handlers.admin_user_reads.query_all_items", return_value=campaigns),
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_resource,
         ):
             mock_resource.return_value.batch_get_item.return_value = {
@@ -6226,7 +6223,7 @@ class TestAdminGetProfileShares:
         admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
         admin_appsync_event["arguments"] = {"profileId": "test-profile"}
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_share_campaign_ops.tables") as mock_tables:
             # Return shares where permissions is a Python set
             mock_tables.shares.query.return_value = {
                 "Items": [
@@ -6254,7 +6251,7 @@ class TestAdminGetProfileShares:
         admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
         admin_appsync_event["arguments"] = {"profileId": "test-profile"}
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_share_campaign_ops.tables") as mock_tables:
             # Return shares where permissions is already a list (not a set)
             mock_tables.shares.query.return_value = {
                 "Items": [
@@ -6294,7 +6291,7 @@ class TestAdminGetProfileShares:
         lambda_context: Any,
     ) -> None:
         """Test that share retrieval follows DynamoDB pagination."""
-        with patch("src.handlers.admin_operations.query_all_items") as mock_query_all:
+        with patch("src.handlers.admin_share_campaign_ops.query_all_items") as mock_query_all:
             mock_query_all.return_value = [
                 {
                     "profileId": "PROFILE#test",
@@ -6565,7 +6562,7 @@ class TestAdminOperationExceptionHandlers:
         admin_appsync_event["info"]["fieldName"] = "adminGetUserProfiles"
         admin_appsync_event["arguments"] = {"accountId": "test-user"}
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_user_reads.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected failure")
 
             result = lambda_handler(admin_appsync_event, lambda_context)
@@ -6583,7 +6580,7 @@ class TestAdminOperationExceptionHandlers:
         admin_appsync_event["info"]["fieldName"] = "adminGetUserCatalogs"
         admin_appsync_event["arguments"] = {"accountId": "test-user"}
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_user_reads.tables") as mock_tables:
             mock_tables.catalogs.query.side_effect = RuntimeError("Unexpected failure")
 
             result = lambda_handler(admin_appsync_event, lambda_context)
@@ -6601,7 +6598,7 @@ class TestAdminOperationExceptionHandlers:
         admin_appsync_event["info"]["fieldName"] = "adminGetUserCampaigns"
         admin_appsync_event["arguments"] = {"accountId": "test-user"}
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_user_reads.tables") as mock_tables:
             mock_tables.profiles.query.side_effect = RuntimeError("Unexpected failure")
 
             result = lambda_handler(admin_appsync_event, lambda_context)
@@ -6619,7 +6616,7 @@ class TestAdminOperationExceptionHandlers:
         admin_appsync_event["info"]["fieldName"] = "adminGetUserSharedCampaigns"
         admin_appsync_event["arguments"] = {"accountId": "test-user"}
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_user_reads.tables") as mock_tables:
             mock_tables.shared_campaigns.query.side_effect = RuntimeError("Unexpected failure")
 
             result = lambda_handler(admin_appsync_event, lambda_context)
@@ -6637,7 +6634,7 @@ class TestAdminOperationExceptionHandlers:
         admin_appsync_event["info"]["fieldName"] = "adminGetProfileShares"
         admin_appsync_event["arguments"] = {"profileId": "test-profile"}
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_share_campaign_ops.tables") as mock_tables:
             mock_tables.shares.query.side_effect = RuntimeError("Unexpected failure")
 
             result = lambda_handler(admin_appsync_event, lambda_context)
@@ -6658,7 +6655,7 @@ class TestAdminOperationExceptionHandlers:
             "targetAccountId": "target-user",
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_share_campaign_ops.tables") as mock_tables:
             mock_tables.shares.delete_item.side_effect = RuntimeError("Unexpected failure")
 
             result = lambda_handler(admin_appsync_event, lambda_context)
@@ -6679,7 +6676,7 @@ class TestAdminOperationExceptionHandlers:
             "sharedCampaignCode": "CODE123",
         }
 
-        with patch("src.handlers.admin_operations.tables") as mock_tables:
+        with patch("src.handlers.admin_share_campaign_ops.tables") as mock_tables:
             mock_tables.campaigns.query.side_effect = RuntimeError("Unexpected failure")
 
             result = lambda_handler(admin_appsync_event, lambda_context)
@@ -7221,12 +7218,12 @@ class TestAdminAuditActorLogging:
         event = {**admin_appsync_event, "arguments": {"email": "target@example.com"}}
 
         with (
-            patch("src.handlers.admin_operations.get_cognito_client"),
+            patch("src.handlers.admin_credential_reset.get_cognito_client"),
             patch(
-                "src.handlers.admin_operations._find_user_by_email",
+                "src.handlers.admin_credential_reset._find_user_by_email",
                 return_value="target",
             ),
-            patch("src.handlers.admin_operations._initiate_password_reset"),
+            patch("src.handlers.admin_credential_reset._initiate_password_reset"),
         ):
             assert admin_reset_user_password(event, lambda_context) is True
 
