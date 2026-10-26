@@ -399,36 +399,6 @@ resource "aws_acm_certificate_validation" "site" {
   validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if !can(regex("(api|login)\\.", rec.name))]
 }
 
-# Import existing Lambda CloudWatch log groups that were auto-created by
-# Lambda invocations before these resources were added to the configuration.
-# Without imports, OpenTofu fails with ResourceAlreadyExistsException.
-import {
-  for_each = toset([
-    "admin-operations",
-    "confirm-qr-upload",
-    "delete-account",
-    "delete-campaign-orders",
-    "delete-profile-cascade",
-    "delete-qr-code",
-    "generate-qr-code-presigned-url",
-    "list-catalogs-in-use",
-    "list-unit-campaign-catalogs",
-    "list-unit-catalogs",
-    "request-qr-upload",
-    "request-report",
-    "transfer-ownership",
-    "unit-reporting",
-  ])
-  id = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
-  to = module.lambda.aws_cloudwatch_log_group.functions[each.value]
-}
-
-import {
-  for_each = toset(["post-auth", "pre-signup"])
-  id       = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
-  to       = module.lambda.aws_cloudwatch_log_group.trigger_functions[each.value]
-}
-
 # Outputs
 output "cognito_user_pool_id" {
   description = "ID of the Cognito User Pool for authentication"
@@ -475,6 +445,11 @@ output "cloudfront_distribution_id" {
 output "static_assets_bucket" {
   description = "Name of the S3 bucket for static assets"
   value       = module.s3.static_bucket_id
+}
+
+output "exports_bucket" {
+  description = "Name of the S3 bucket for generated reports"
+  value       = module.s3.exports_bucket_name
 }
 
 output "site_url" {
