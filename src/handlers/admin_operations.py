@@ -1160,8 +1160,8 @@ def _assert_profiles_deleted(account_id: str, profile_ids: list[str], logger: An
 def _parse_product_price(price: Any) -> Decimal:
     """Convert a product price (number or numeric string) to a validated Decimal.
 
-    A missing price, a non-numeric/unparsable value, or a negative price
-    raises INVALID_INPUT.
+    A missing price, a non-numeric/unparsable value, a non-finite value
+    (Infinity/inf/NaN), or a negative price raises INVALID_INPUT.
     """
     if price is None:
         raise AppError(ErrorCode.INVALID_INPUT, "Valid product price is required")
@@ -1169,6 +1169,9 @@ def _parse_product_price(price: Any) -> Decimal:
     try:
         price_decimal = Decimal(str(price))
     except InvalidOperation, ValueError, TypeError:
+        raise AppError(ErrorCode.INVALID_INPUT, "Product price must be a valid number")
+
+    if not price_decimal.is_finite():
         raise AppError(ErrorCode.INVALID_INPUT, "Product price must be a valid number")
 
     if price_decimal < 0:
