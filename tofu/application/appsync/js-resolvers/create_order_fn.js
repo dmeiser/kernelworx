@@ -132,8 +132,5 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     const order = ctx.result;
-    if (order && order.campaignId) {
-        order.campaignId = order.campaignId;
-    }
     return order;
 }

@@ -15,7 +15,7 @@ resource "aws_appsync_function" "get_payment_methods" {
 
 resource "aws_appsync_function" "inject_global_payment_methods" {
   api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.payment_methods_none.name
+  data_source = aws_appsync_datasource.none.name
   name        = "InjectGlobalPaymentMethodsFn${local.env_suffix}"
 
   runtime {
@@ -28,7 +28,7 @@ resource "aws_appsync_function" "inject_global_payment_methods" {
 
 resource "aws_appsync_function" "set_owner_account_id_in_stash" {
   api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.payment_methods_none.name
+  data_source = aws_appsync_datasource.none.name
   name        = "SetOwnerAccountIdInStashFn${local.env_suffix}"
 
   runtime {
@@ -67,7 +67,7 @@ resource "aws_appsync_function" "get_owner_payment_methods" {
 
 resource "aws_appsync_function" "filter_payment_methods_by_access" {
   api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.filter_payment_methods_none.name
+  data_source = aws_appsync_datasource.none.name
   name        = "FilterPaymentMethodsByAccessFn${local.env_suffix}"
 
   runtime {
