@@ -115,10 +115,10 @@ Global Secondary Indexes:
 | customerName | String | Customer name |
 | customerEmail | String | Customer email |
 | customerPhone | String | Customer phone |
-| items | JSON | Line items array |
+| orderDate | DateTime | When the order was placed |
+| lineItems | JSON | Line items array |
 | totalAmount | Float | Order total |
 | paymentMethod | String | Payment type |
-| deliveryStatus | String | Delivery state |
 | notes | String | Order notes |
 | status | String | Payment-verification state (`NEW`/`CONFIRMED`, `OrderStatus`). Absent on pre-feature and authenticated rows; the public path always writes `NEW` |
 | orderSource | String | `PUBLIC` for orders placed via the public order page; absent on authenticated orders |
