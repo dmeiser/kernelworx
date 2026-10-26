@@ -19,9 +19,8 @@ class CampaignPage(BasePage):
 
     * Campaign names are in ``<h3>`` elements (MUI ``Typography variant="h6"
       component="h3"``), rendered as ``"{campaignName} {campaignYear}"``.
-    * All interactive elements use visible-text or ARIA-role selectors because
-      the production components have no ``data-testid`` attributes.
-      TODO: add ``data-testid="campaign-card"`` to ``CampaignCard``.
+    * Interactive elements and campaign cards use visible-text and ARIA-role
+      selectors (scoped to ``div.MuiCard-root`` filtered by heading text).
     """
 
     _CAMPAIGNS_SUFFIX: str = "/campaigns"
@@ -81,6 +80,14 @@ class CampaignPage(BasePage):
     def _campaign_headings(self) -> Locator:
         """Return locator matching all campaign-name ``<h3>`` headings."""
         return self.page.locator(self._CAMPAIGN_HEADING_SEL)
+
+    def _campaign_card_for(self, name: str) -> Locator:
+        """Return locator for the campaign card containing *name*.
+
+        Args:
+            name: Substring of the campaign name to match.
+        """
+        return self.page.locator("div.MuiCard-root").filter(has=self.page.locator("h3", has_text=name)).first
 
     # ------------------------------------------------------------------
     # Actions
@@ -196,7 +203,7 @@ class CampaignPage(BasePage):
         Args:
             name: Substring of the campaign name to match.
         """
-        card = self.page.locator("div.MuiCard-root").filter(has=self.page.locator("h3", has_text=name)).first
+        card = self._campaign_card_for(name)
         expect(card).to_be_visible()
         card.get_by_role("button", name=self._VIEW_ORDERS_BTN, exact=True).click()
         self.page.wait_for_url("**/campaigns/**", timeout=10_000)

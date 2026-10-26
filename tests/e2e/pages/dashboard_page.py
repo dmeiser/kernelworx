@@ -16,9 +16,8 @@ class DashboardPage(BasePage):
     Selector notes:
 
     * Profile names are rendered as ``<h3>`` elements (MUI ``Typography
-      variant="h5" component="h3"``).  No ``data-testid`` is present in the
-      production component.  TODO: add ``data-testid="profile-card"`` to
-      ``ProfileCard`` for more robust targeting.
+      variant="h5" component="h3"``).  Profile cards are targeted by scoping
+      to ``div.MuiCard-root`` filtered by exact seller name text.
     * The *Create Scout* button uses visible text; no ``data-testid``.
     * The *View All Campaigns* button on each card uses visible text.
     """

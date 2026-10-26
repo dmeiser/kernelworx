@@ -17,12 +17,11 @@ class PaymentPage(BasePage):
 
     * Payment method names are rendered as ``<span>`` elements styled with
       ``MUI Typography variant="h6"`` inside each ``PaymentMethodCard``.
+      Cards are targeted by scoping to ``div.MuiCard-root`` filtered by exact
+      payment method name text.
     * The *Add Payment Method* button is a plain MUI Button (no ``data-testid``).
     * The ``CreatePaymentMethodDialog`` has a TextField with
       ``label="Payment Method Name"`` and a *Create* submit button.
-
-    TODO: add ``data-testid="payment-method-card"`` to ``PaymentMethodCard``
-    for more robust targeting.
     """
 
     PATH: str = "/payment-methods"
