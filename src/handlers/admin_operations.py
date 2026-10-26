@@ -29,45 +29,21 @@ campaign the request names, the actor is the caller, and they are different
 principals.
 """
 
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, NoReturn, Optional, cast
+from typing import TYPE_CHECKING, Any, Dict, NoReturn
 
 from botocore.exceptions import ClientError
-
-# Sibling handler modules use a same-package relative import, which resolves both
-# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
-from .deletion_cascade import (
-    get_user_profiles,
-    normalize_account_id,
-)
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.appsync_types import get_caller_id
     from utils.auth import require_admin_mfa
-    from utils.boto import get_cognito_client
-    from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import (
-        TRANSIENT_ERROR_CODES,
-        batch_get_chunked,
-        get_required_env,
-        tables,
-    )
+    from utils.dynamodb import TRANSIENT_ERROR_CODES
     from utils.errors import AppError, ErrorCode
-    from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.appsync_types import get_caller_id
     from ..utils.auth import require_admin_mfa
-    from ..utils.boto import get_cognito_client
-    from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import (
-        TRANSIENT_ERROR_CODES,
-        batch_get_chunked,
-        get_required_env,
-        tables,
-    )
+    from ..utils.dynamodb import TRANSIENT_ERROR_CODES
     from ..utils.errors import AppError, ErrorCode
-    from ..utils.logging import get_logger, mask_email
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -91,6 +67,21 @@ from .admin_account_purge import admin_purge_user_account
 # `admin_catalog_operations` does not import from this module at all.
 from .admin_catalog_operations import create_managed_catalog
 
+# The password-reset handler was extracted to its own module (#773) but stays
+# registered on this Lambda. The import is safe at module load because
+# `admin_credential_reset` only imports from this module inside functions.
+from .admin_credential_reset import admin_reset_user_password
+
+# The profile-share and campaign shared-code handlers were extracted to their
+# own module (#773) but stay registered on this Lambda. The import is safe at
+# module load because `admin_share_campaign_ops` only imports from this module
+# inside functions.
+from .admin_share_campaign_ops import (
+    admin_delete_share,
+    admin_get_profile_shares,
+    admin_update_campaign_shared_code,
+)
+
 # The per-entity user deletion handlers were extracted to their own module (#773)
 # but stay registered on this Lambda. The import is safe at module load because
 # `admin_user_deletion` only imports from this module inside functions.
@@ -106,16 +97,15 @@ from .admin_user_deletion import (
 # `admin_user_operations` only imports from this module inside functions.
 from .admin_user_operations import admin_list_users, admin_search_user
 
-# Handle both Lambda (absolute) and unit test (relative) imports.  mypy sees the
-# relative path it can resolve; the runtime fallback tries absolute first for Lambda.
-if TYPE_CHECKING:  # pragma: no cover
-    from ..utils.pagination import query_all_items
-else:  # pragma: no cover
-    try:
-        from utils.pagination import query_all_items
-    except ModuleNotFoundError:
-        from ..utils.pagination import query_all_items
-
+# The account-scoped admin user read handlers were extracted to their own module
+# (#773) but stay registered on this Lambda. The import is safe at module load
+# because `admin_user_reads` only imports from this module inside functions.
+from .admin_user_reads import (
+    admin_get_user_campaigns,
+    admin_get_user_catalogs,
+    admin_get_user_profiles,
+    admin_get_user_shared_campaigns,
+)
 
 # DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
 # RESOURCE_BUSY error instead of silently incomplete admin data (#291, #456).
@@ -232,500 +222,6 @@ def _require_admin_and_get_target_account_id(event: Dict[str, Any]) -> tuple[str
         raise AppError(ErrorCode.INVALID_INPUT, "Account ID is required")
 
     return account_id, actor_sub
-
-
-def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any) -> str:
-    """Find username by email. Returns username."""
-    try:
-        response = cognito.list_users(
-            UserPoolId=user_pool_id,
-            # Built in one step so the value that was checked is the value sent (#124, #560).
-            Filter=cognito_user_filter("email", email),
-            Limit=1,
-        )
-    except ClientError as e:
-        logger.error("Cognito list_users failed", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to search for user")
-
-    users = response.get("Users", [])
-    if not users:
-        raise AppError(ErrorCode.NOT_FOUND, f"User with email '{email}' not found")
-
-    return str(users[0]["Username"])
-
-
-def _initiate_password_reset(cognito: Any, user_pool_id: str, username: str, email: str, logger: Any) -> None:
-    """Initiate Cognito password reset for user."""
-    try:
-        cognito.admin_reset_user_password(
-            UserPoolId=user_pool_id,
-            Username=username,
-        )
-    except ClientError as e:
-        error_code = e.response.get("Error", {}).get("Code", "")
-        if error_code == "UserNotFoundException":
-            raise AppError(ErrorCode.NOT_FOUND, f"User with email '{email}' not found")
-        if error_code == "InvalidParameterException":
-            raise AppError(ErrorCode.INVALID_INPUT, "Cannot reset password for this user type")
-        logger.error("Cognito admin_reset_user_password failed", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to initiate password reset")
-
-
-@with_error_handling(error_message="Failed to reset password")
-def admin_reset_user_password(event: Dict[str, Any], context: Any) -> bool:
-    """
-    Send password reset email to user (admin only).
-
-    AppSync Lambda resolver for adminResetUserPassword mutation.
-
-    Args:
-        event: AppSync event with identity and arguments
-        context: Lambda context
-
-    Returns:
-        True if password reset was initiated successfully
-
-    Raises:
-        AppError: If not admin, user not found, or Cognito error
-    """
-    logger = get_logger(__name__)
-
-    # Verify caller is admin and extract email
-    require_admin_mfa(event)
-
-    arguments = event.get("arguments", {})
-    email = arguments.get("email", "").strip().lower()
-
-    if not email:
-        raise AppError(ErrorCode.INVALID_INPUT, "Email is required")
-
-    user_pool_id = get_required_env("USER_POOL_ID")
-    cognito = get_cognito_client()
-
-    # Find user and initiate reset
-    username = _find_user_by_email(cognito, user_pool_id, email, logger)
-    _initiate_password_reset(cognito, user_pool_id, username, email, logger)
-
-    actor_sub = _actor_sub(event)
-    logger.info(
-        "Password reset initiated",
-        email=mask_email(email),
-        username=mask_email(username),
-        actor_sub=actor_sub,
-    )
-    return True
-
-
-@with_error_handling(error_message="Failed to get user profiles")
-def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
-    """
-    Get all profiles owned by a user (admin only).
-
-    Returns the list of profiles with full details.
-    """
-    logger = get_logger(__name__)
-
-    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    db_account_id = normalize_account_id(account_id)
-
-    # Query profiles by ownerAccountId
-    profiles = query_all_items(
-        tables.profiles,
-        {
-            "KeyConditionExpression": "ownerAccountId = :owner",
-            "ExpressionAttributeValues": {":owner": db_account_id},
-        },
-    )
-
-    logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles), actor_sub=actor_sub)
-    return profiles
-
-
-@with_error_handling(error_message="Failed to get user catalogs")
-def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
-    """
-    Get all catalogs owned by a user (admin only).
-
-    Returns the list of catalogs with full details.
-    """
-    logger = get_logger(__name__)
-
-    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    db_account_id = normalize_account_id(account_id)
-
-    # Query catalogs by ownerAccountId using GSI
-    catalogs = query_all_items(
-        tables.catalogs,
-        {
-            "IndexName": "ownerAccountId-index",
-            "KeyConditionExpression": "ownerAccountId = :owner",
-            "FilterExpression": "attribute_not_exists(isDeleted) OR isDeleted = :false",
-            "ExpressionAttributeValues": {
-                ":owner": db_account_id,
-                ":false": False,
-            },
-        },
-    )
-
-    logger.info("Retrieved user catalogs", account_id=account_id, count=len(catalogs), actor_sub=actor_sub)
-    return catalogs
-
-
-def _extract_unique_catalog_ids(campaigns: list[Dict[str, Any]]) -> list[str]:
-    """Extract the de-duplicated catalogIds from a campaign array, preserving first-seen order."""
-    catalog_ids: list[str] = []
-    seen: set[str] = set()
-    for campaign in campaigns:
-        catalog_id = campaign.get("catalogId")
-        if catalog_id and catalog_id not in seen:
-            seen.add(catalog_id)
-            catalog_ids.append(catalog_id)
-    return catalog_ids
-
-
-def _batch_get_catalog_items(
-    catalog_ids: list[str], catalogs_table_name: str, logger: Any
-) -> Dict[str, Dict[str, Any]]:
-    """Batch-get the catalogs by id; the shared helper owns the 100-key chunking.
-
-    Raises AppError if keys stay unprocessed after the retries (#557).
-    """
-    catalog_map: Dict[str, Dict[str, Any]] = {}
-
-    def _store_catalog(item: Dict[str, Any]) -> None:
-        catalog_map[item["catalogId"]] = item
-
-    batch_get_chunked(
-        catalogs_table_name,
-        [{"catalogId": catalog_id} for catalog_id in catalog_ids],
-        _store_catalog,
-        consistent_read=False,
-        logger=logger,
-    )
-    return catalog_map
-
-
-def _campaign_catalog_value(catalog: Dict[str, Any] | None, treat_deleted_as_null: bool) -> Dict[str, Any] | None:
-    """Map a fetched catalog to its Campaign/SharedCampaign catalog contract value."""
-    if catalog is not None and treat_deleted_as_null and catalog.get("isDeleted") is True:
-        return None
-    return catalog
-
-
-def _attach_campaign_catalogs(
-    campaigns: list[Dict[str, Any]], catalog_map: Dict[str, Dict[str, Any]], treat_deleted_as_null: bool
-) -> None:
-    """Attach each campaign's fetched catalog, mapping missing/soft-deleted per contract."""
-    for campaign in campaigns:
-        catalog_id = campaign.get("catalogId")
-        if not catalog_id:
-            continue
-        campaign["catalog"] = _campaign_catalog_value(catalog_map.get(catalog_id), treat_deleted_as_null)
-
-
-def _batch_get_campaign_catalogs(campaigns: list[Dict[str, Any]], treat_deleted_as_null: bool, logger: Any) -> None:
-    """Batch-fetch the catalogs referenced by campaigns and attach each as `catalog`.
-
-    Mirrors the #332 list-query pipeline batching (batch_get_catalogs_fn.js /
-    batch_get_shared_campaign_catalogs_fn.js) inside the admin Lambda, which
-    can chunk and loop where AppSync pipeline functions cannot. AppSync always
-    executes the attached Campaign.catalog / SharedCampaign.catalog field
-    resolver; since check_source_catalog_fn.js short-circuits when the source
-    already carries `catalog`, attaching it here replaces the per-item GetItem
-    (N+1) the admin campaign lists previously paid.
-
-    Deleted-catalog contract matches the field resolvers: Campaign.catalog
-    returns the raw item including soft-deleted catalogs (treat_deleted_as_null
-    = False); SharedCampaign.catalog maps soft-deleted or missing catalogs to
-    None (treat_deleted_as_null = True).
-    """
-    catalog_ids = _extract_unique_catalog_ids(campaigns)
-    if not catalog_ids:
-        return
-
-    catalogs_table_name = get_required_env("CATALOGS_TABLE_NAME")
-    # batch_get_chunked already translates every lookup failure (retryable
-    # RESOURCE_BUSY on a throttle, INTERNAL_ERROR otherwise), so the typed
-    # AppError propagates unchanged (#557).
-    catalog_map = _batch_get_catalog_items(catalog_ids, catalogs_table_name, logger)
-
-    _attach_campaign_catalogs(campaigns, catalog_map, treat_deleted_as_null)
-
-
-def _get_campaigns_for_profiles(profiles: list[Dict[str, Any]], logger: Any, actor_sub: str) -> list[Dict[str, Any]]:
-    """Query campaigns for each profile."""
-    all_campaigns = []
-    for profile in profiles:
-        profile_id = profile.get("profileId")
-        if profile_id:
-            campaigns = query_all_items(
-                tables.campaigns,
-                {
-                    "KeyConditionExpression": "profileId = :pid",
-                    "ExpressionAttributeValues": {":pid": profile_id},
-                },
-            )
-            all_campaigns.extend(campaigns)
-            logger.info(
-                "Retrieved campaigns for profile",
-                profile_id=profile_id,
-                count=len(campaigns),
-                actor_sub=actor_sub,
-            )
-    return all_campaigns
-
-
-@with_error_handling(error_message="Failed to get user campaigns")
-def admin_get_user_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
-    """
-    Get all campaigns for a user's profiles.
-
-    Admin-only operation. Returns all campaigns across all profiles owned by the account.
-    """
-    logger = get_logger(__name__)
-
-    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    db_account_id = normalize_account_id(account_id)
-
-    # First, get all profiles owned by this account
-    profiles = get_user_profiles(db_account_id)
-    logger.info("Retrieved user profiles", account_id=account_id, count=len(profiles), actor_sub=actor_sub)
-
-    # Now query campaigns for each profile
-    all_campaigns = _get_campaigns_for_profiles(profiles, logger, actor_sub)
-    # Pre-resolve catalogs in one chunked BatchGetItem so the Campaign.catalog
-    # field resolver short-circuits instead of doing per-item GetItem reads (#332).
-    _batch_get_campaign_catalogs(all_campaigns, treat_deleted_as_null=False, logger=logger)
-    logger.info("Retrieved user campaigns", account_id=account_id, count=len(all_campaigns), actor_sub=actor_sub)
-    return all_campaigns
-
-
-@with_error_handling(error_message="Failed to get user shared campaigns")
-def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
-    """
-    Get all shared campaigns created by a user.
-
-    Admin-only operation.
-    """
-    logger = get_logger(__name__)
-
-    account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    db_account_id = normalize_account_id(account_id)
-
-    # Query shared campaigns by createdBy using GSI1
-    campaigns = query_all_items(
-        tables.shared_campaigns,
-        {
-            "IndexName": "GSI1",
-            "KeyConditionExpression": "createdBy = :creator",
-            "ExpressionAttributeValues": {
-                ":creator": db_account_id,
-            },
-        },
-    )
-
-    # Pre-resolve catalogs in one chunked BatchGetItem so the SharedCampaign.catalog
-    # field resolver short-circuits instead of doing per-item GetItem reads (#332).
-    _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=True, logger=logger)
-
-    logger.info(
-        "Retrieved user shared campaigns",
-        account_id=account_id,
-        count=len(campaigns),
-        actor_sub=actor_sub,
-    )
-    return campaigns
-
-
-def _convert_permissions_to_lists(shares: list[Dict[str, Any]]) -> None:
-    """Convert DynamoDB permission sets to lists for JSON serialization."""
-    for share in shares:
-        if "permissions" in share and isinstance(share["permissions"], set):
-            share["permissions"] = list(share["permissions"])
-
-
-def _query_profile_shares(db_profile_id: str) -> list[Dict[str, Any]]:
-    """Query all shares for a profile."""
-    return query_all_items(
-        tables.shares,
-        {
-            "KeyConditionExpression": "profileId = :pid",
-            "ExpressionAttributeValues": {":pid": db_profile_id},
-        },
-    )
-
-
-def _require_admin_and_get_target_profile_id(event: Dict[str, Any]) -> tuple[str, str]:
-    """Require admin + MFA, returning ``(db_profile_id, actor_sub)`` (#507).
-
-    ``db_profile_id`` is the target profile named by the request; ``actor_sub``
-    is the calling administrator, returned alongside so the audit line can
-    attribute the operation.
-    """
-    require_admin_mfa(event)
-    actor_sub = _actor_sub(event)
-
-    arguments = event.get("arguments", {})
-    profile_id = arguments.get("profileId", "").strip()
-
-    if not profile_id:
-        raise AppError(ErrorCode.INVALID_INPUT, "Profile ID is required")
-
-    # Add PROFILE# prefix if not present
-    db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
-    return db_profile_id, actor_sub
-
-
-@with_error_handling(error_message="Failed to get profile shares")
-def admin_get_profile_shares(event: Dict[str, Any], context: Any) -> list[Dict[str, Any]]:
-    """
-    Get all shares for a specific profile.
-
-    Admin-only operation. Returns all users who have access to this profile.
-    """
-    logger = get_logger(__name__)
-
-    db_profile_id, actor_sub = _require_admin_and_get_target_profile_id(event)
-
-    # Query shares and convert sets to lists
-    shares = _query_profile_shares(db_profile_id)
-    _convert_permissions_to_lists(shares)
-
-    logger.info("Retrieved profile shares", profile_id=db_profile_id, count=len(shares), actor_sub=actor_sub)
-    return shares
-
-
-def _normalize_profile_and_account_ids(profile_id: str, target_account_id: str) -> tuple[str, str]:
-    """Normalize profile ID and target account ID with prefixes."""
-    db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
-    db_target_id = target_account_id if target_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{target_account_id}"
-    return db_profile_id, db_target_id
-
-
-def _require_admin_and_get_share_ids(event: Dict[str, Any]) -> tuple[str, str, str]:
-    """Require admin + MFA, returning ``(profile_id, target_account_id, actor_sub)`` (#507).
-
-    The first two are the share the request names; the third is the calling
-    administrator, carried so the revocation can be attributed.
-    """
-    require_admin_mfa(event)
-    actor_sub = _actor_sub(event)
-
-    arguments = event.get("arguments", {})
-    profile_id = arguments.get("profileId", "").strip()
-    target_account_id = arguments.get("targetAccountId", "").strip()
-
-    if not profile_id or not target_account_id:
-        raise AppError(ErrorCode.INVALID_INPUT, "Profile ID and target account ID are required")
-
-    return profile_id, target_account_id, actor_sub
-
-
-@with_error_handling(error_message="Failed to delete share")
-def admin_delete_share(event: Dict[str, Any], context: Any) -> bool:
-    """
-    Delete a specific share (revoke access).
-
-    Admin-only operation. Allows admin to remove someone's access to a profile.
-    """
-    logger = get_logger(__name__)
-
-    profile_id, target_account_id, actor_sub = _require_admin_and_get_share_ids(event)
-    db_profile_id, db_target_id = _normalize_profile_and_account_ids(profile_id, target_account_id)
-
-    tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_target_id})
-
-    logger.info(
-        "Deleted share",
-        profile_id=profile_id,
-        target_account_id=target_account_id,
-        actor_sub=actor_sub,
-    )
-    return True
-
-
-def _get_campaign_profile_id(db_campaign_id: str, campaign_id: str) -> str:
-    """Get profile ID for a campaign via GSI lookup."""
-    response = tables.campaigns.query(
-        IndexName="campaignId-index",
-        KeyConditionExpression="campaignId = :cid",
-        ExpressionAttributeValues={":cid": db_campaign_id},
-    )
-
-    items = response.get("Items", [])
-    if not items:
-        raise AppError(ErrorCode.NOT_FOUND, f"Campaign not found: {campaign_id}")
-
-    return str(items[0]["profileId"])
-
-
-def _update_campaign_shared_code(
-    profile_id: str, db_campaign_id: str, shared_campaign_code: Optional[str]
-) -> Dict[str, Any]:
-    """Update campaign's sharedCampaignCode field and return the stored item."""
-    updated_at = datetime.now(timezone.utc).isoformat()
-
-    if shared_campaign_code is None:
-        update_expr = "REMOVE sharedCampaignCode SET updatedAt = :updated"
-        expr_vals = {":updated": updated_at}
-    else:
-        update_expr = "SET sharedCampaignCode = :code, updatedAt = :updated"
-        expr_vals = {":code": shared_campaign_code, ":updated": updated_at}
-
-    response = tables.campaigns.update_item(
-        Key={"profileId": profile_id, "campaignId": db_campaign_id},
-        UpdateExpression=update_expr,
-        ExpressionAttributeValues=expr_vals,
-        ReturnValues="ALL_NEW",
-    )
-
-    return cast(Dict[str, Any], response.get("Attributes", {}))
-
-
-def _require_admin_and_get_target_campaign_id(event: Dict[str, Any]) -> tuple[str, Optional[str], str]:
-    """Require admin + MFA, returning ``(campaign_id, shared_campaign_code, actor_sub)`` (#507).
-
-    ``campaign_id`` is the target campaign named by the request; ``actor_sub``
-    is the calling administrator, carried so the update can be attributed.
-    """
-    require_admin_mfa(event)
-    actor_sub = _actor_sub(event)
-
-    arguments = event.get("arguments", {})
-    campaign_id = arguments.get("campaignId", "").strip()
-    shared_campaign_code = arguments.get("sharedCampaignCode")
-
-    if not campaign_id:
-        raise AppError(ErrorCode.INVALID_INPUT, "Campaign ID is required")
-
-    return campaign_id, shared_campaign_code, actor_sub
-
-
-@with_error_handling(error_message="Failed to update campaign shared code")
-def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """
-    Update a campaign's sharedCampaignCode field and return the stored campaign item.
-
-    Admin-only operation. Allows associating a campaign with a shared campaign.
-    """
-    logger = get_logger(__name__)
-
-    campaign_id, shared_campaign_code, actor_sub = _require_admin_and_get_target_campaign_id(event)
-
-    # Add CAMPAIGN# prefix if not present
-    db_campaign_id = campaign_id if campaign_id.startswith("CAMPAIGN#") else f"CAMPAIGN#{campaign_id}"
-
-    # Get campaign profile, update shared code, and return the stored item
-    profile_id = _get_campaign_profile_id(db_campaign_id, campaign_id)
-    updated_campaign = _update_campaign_shared_code(profile_id, db_campaign_id, shared_campaign_code)
-
-    logger.info(
-        "Updated campaign shared code",
-        campaign_id=campaign_id,
-        shared_campaign_code=shared_campaign_code,
-        actor_sub=actor_sub,
-    )
-    return updated_campaign
 
 
 # Operation dispatcher map

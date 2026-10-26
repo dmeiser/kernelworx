@@ -14,7 +14,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.handlers import account_operations, admin_account_purge, admin_operations, admin_user_operations, pre_signup
+from src.handlers import (
+    account_operations,
+    admin_account_purge,
+    admin_credential_reset,
+    admin_user_operations,
+    pre_signup,
+)
 from src.utils.errors import AppError, ErrorCode
 
 POOL = "us-east-1_TEST123"
@@ -55,7 +61,7 @@ FILTER_SITES: List[Tuple[str, Callable[..., Any], str, str, str]] = [
     ),
     (
         "admin _find_user_by_email",
-        admin_operations._find_user_by_email,
+        admin_credential_reset._find_user_by_email,
         "email",
         "user@example.com",
         'email = "user@example.com"',
