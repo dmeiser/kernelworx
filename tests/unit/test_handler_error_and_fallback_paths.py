@@ -1,4 +1,11 @@
-"""Targeted coverage tests for unhit branches and helpers."""
+"""Failure and fallback paths in the Lambda handlers and their shared helpers.
+
+Pins how handlers and helpers react when a dependency fails or a lookup misses:
+errors are re-raised, translated into a typed ``AppError``, or returned as an
+``__isError`` payload instead of being swallowed, S3 key lookups fall back to the
+UUID-based object, and the transfer-ownership transaction rejects concurrent
+source/destination races.
+"""
 
 import importlib
 import sys
