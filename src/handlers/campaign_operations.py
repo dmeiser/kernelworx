@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Optional
 try:  # pragma: no cover
     from utils.appsync_types import get_caller_id
     from utils.auth import require_profile_access
-    from utils.dynamodb import tables
+    from utils.dynamodb import batch_get_chunked, get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_campaign_id
     from utils.logging import get_logger
@@ -15,7 +15,7 @@ try:  # pragma: no cover
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.appsync_types import get_caller_id
     from ..utils.auth import require_profile_access
-    from ..utils.dynamodb import tables
+    from ..utils.dynamodb import batch_get_chunked, get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_campaign_id
     from ..utils.logging import get_logger
@@ -208,47 +208,76 @@ def delete_order_keys(orders: List[Dict[str, Any]], *, logger: Any = None) -> in
     )
 
 
+def _table_name(table: Any, env_var: str) -> str:
+    """Return the table name from the table resource or environment variable."""
+    name = getattr(table, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return str(get_required_env(env_var))
+
+
 def _verify_order_keys_deleted(order_keys: List[Dict[str, Any]]) -> None:
     """Verify deleted orders are absent from the base table.
 
-    Uses a strongly consistent read on each exact key that was deleted, which
-    deterministically reflects the completed deletes. The orderId-index GSI
-    cannot be used here: it is eventually consistent and can keep showing
+    Uses strongly consistent batch reads on the exact keys that were deleted,
+    which deterministically reflects the completed deletes. The orderId-index
+    GSI cannot be used here: it is eventually consistent and can keep showing
     deleted rows for an unbounded time. Raises AppError if any key persists.
     """
-    for key in order_keys:
-        response = tables.orders.get_item(
-            Key={"campaignId": str(key["campaignId"]), "orderId": str(key["orderId"])},
-            ConsistentRead=True,
+    if not order_keys:
+        return
+
+    unique_keys = _drop_duplicate_delete_keys(
+        [{"campaignId": str(key["campaignId"]), "orderId": str(key["orderId"])} for key in order_keys],
+        ["campaignId", "orderId"],
+    )
+
+    def _on_persisting_order(item: Dict[str, Any]) -> None:
+        logger.error(
+            "Order still present after delete verification",
+            campaign_id=item.get("campaignId"),
+            order_id=item.get("orderId"),
         )
-        if response.get("Item"):
-            logger.error(
-                "Order still present after delete verification",
-                campaign_id=key["campaignId"],
-                order_id=key["orderId"],
-            )
-            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete order")
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete order")
+
+    table_name = _table_name(tables.orders, "ORDERS_TABLE_NAME")
+    batch_get_chunked(
+        table_name,
+        unique_keys,
+        _on_persisting_order,
+        consistent_read=True,
+        logger=logger,
+    )
 
 
 def _verify_campaign_deleted(profile_id: str, campaign_id: str) -> None:
     """Verify a deleted campaign is absent from the base table.
 
-    Uses a strongly consistent read on the exact key that was deleted, which
-    deterministically reflects the completed delete. The campaignId-index GSI
-    cannot be used here: it is eventually consistent and can keep showing a
+    Uses a strongly consistent batch read on the exact key that was deleted,
+    which deterministically reflects the completed delete. The campaignId-index
+    GSI cannot be used here: it is eventually consistent and can keep showing a
     deleted row for an unbounded time. Raises AppError if the key persists.
     """
-    response = tables.campaigns.get_item(
-        Key={"profileId": profile_id, "campaignId": campaign_id},
-        ConsistentRead=True,
-    )
-    if response.get("Item"):
+    keys = [{"profileId": profile_id, "campaignId": campaign_id}]
+
+    def _on_persisting_campaign(item: Dict[str, Any]) -> None:
+        persisting_profile_id = item.get("profileId", profile_id)
+        persisting_campaign_id = item.get("campaignId", campaign_id)
         logger.error(
             "Campaign still present after delete verification",
-            profile_id=profile_id,
-            campaign_id=campaign_id,
+            profile_id=persisting_profile_id,
+            campaign_id=persisting_campaign_id,
         )
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete campaign")
+
+    table_name = _table_name(tables.campaigns, "CAMPAIGNS_TABLE_NAME")
+    batch_get_chunked(
+        table_name,
+        keys,
+        _on_persisting_campaign,
+        consistent_read=True,
+        logger=logger,
+    )
 
 
 def delete_orders_for_campaign(campaign_id: str, *, logger: Any = None) -> int:

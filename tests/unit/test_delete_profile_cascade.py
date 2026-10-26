@@ -626,7 +626,9 @@ class TestDeleteProfileCascade:
         with (
             patch("src.handlers.delete_profile_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
+            patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
+            mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
             mock_tables.profiles.get_item.return_value = {
                 "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
             }
@@ -642,9 +644,7 @@ class TestDeleteProfileCascade:
                 mock_tables.campaigns,
             )
 
-            # Delete verification helpers use campaign_operations.tables
-            mock_campaign_tables.orders.get_item.return_value = {}
-            mock_campaign_tables.campaigns.get_item.return_value = {}
+            # Delete verification helpers use batch_get_chunked
             accept_batch_deletes(mock_campaign_tables.orders, mock_campaign_tables.campaigns)
 
             event = {
