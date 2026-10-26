@@ -586,5 +586,5 @@ def test_deploy_workflow_stops_setting_absolute_frontend_endpoints():
 
 def test_ephemeral_env_keeps_absolute_frontend_endpoints():
     script = (REPO_ROOT / "scripts" / "ephemeral-env.sh").read_text()
-    assert "export VITE_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)" in script
+    assert "export VITE_APPSYNC_ENDPOINT=$APPSYNC_API_URL" in script
     assert "export VITE_COGNITO_DOMAIN=$COGNITO_DOMAIN" in script

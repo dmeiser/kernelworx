@@ -27,6 +27,82 @@ log() {
   echo "$@" >&2
 }
 
+# STACK_OUTPUTS holds the single captured `tofu output -json` document. Every
+# separate `tofu output` call is a fresh read of the remote S3 state, so the
+# up/env branches capture the document once and read fields out of it with jq.
+STACK_OUTPUTS=""
+
+# Capture every stack output in one round trip. A failed read fails the script,
+# same as the per-name `tofu output` reads it replaces.
+capture_stack_outputs() {
+  if ! STACK_OUTPUTS=$(tofu output -json); then
+    log "❌ tofu output -json failed for run: $RUN_ID"
+    exit 1
+  fi
+}
+
+# Echo one string output from the captured document; empty when the output is
+# absent from the state.
+output_value() {
+  printf '%s' "$STACK_OUTPUTS" | jq -r --arg name "$1" '.[$name].value // empty'
+}
+
+# Fail the script when an output the exports depend on is absent. The old
+# single-name read form exited non-zero in exactly this case.
+require_output() {
+  if [ -z "$(output_value "$1")" ]; then
+    log "❌ required tofu output '$1' is missing from the state for run: $RUN_ID"
+    exit 1
+  fi
+}
+
+# Read the stack outputs into the variables the export block emits.
+load_stack_outputs() {
+  capture_stack_outputs
+  require_output cognito_user_pool_id
+  require_output cognito_client_id
+  require_output appsync_api_url
+  require_output cognito_domain
+  USER_POOL_ID=$(output_value cognito_user_pool_id)
+  USER_POOL_CLIENT_ID=$(output_value cognito_client_id)
+  APPSYNC_API_URL=$(output_value appsync_api_url)
+  COGNITO_DOMAIN=$(output_value cognito_domain)
+  # appsync_api_key is optional: stacks deployed before the public-orders
+  # feature do not declare it, and its absence omits the API-key exports.
+  APPSYNC_API_KEY=$(output_value appsync_api_key)
+}
+
+# Emit the eval-able export block from the values captured by the loader above.
+print_stack_exports() {
+  local test_region="${AWS_REGION:-us-east-1}"
+  echo "export TEST_APPSYNC_ENDPOINT=$APPSYNC_API_URL"
+  if [ -n "$APPSYNC_API_KEY" ]; then
+    echo "export TEST_APPSYNC_API_KEY=$APPSYNC_API_KEY"
+  fi
+  echo "export TEST_USER_POOL_ID=$USER_POOL_ID"
+  echo "export TEST_USER_POOL_CLIENT_ID=$USER_POOL_CLIENT_ID"
+  echo "export TEST_REGION=$test_region"
+  echo "export E2E_BASE_URL=http://localhost:4173"
+  echo "export VITE_APPSYNC_ENDPOINT=$APPSYNC_API_URL"
+  if [ -n "$APPSYNC_API_KEY" ]; then
+    echo "export VITE_APPSYNC_API_KEY=$APPSYNC_API_KEY"
+  fi
+  echo "export VITE_APPSYNC_REGION=$test_region"
+  echo "export VITE_COGNITO_USER_POOL_ID=$USER_POOL_ID"
+  echo "export VITE_COGNITO_USER_POOL_CLIENT_ID=$USER_POOL_CLIENT_ID"
+  echo "export VITE_COGNITO_DOMAIN=$COGNITO_DOMAIN"
+  echo "export VITE_OAUTH_REDIRECT_SIGNIN=http://localhost:4173/"
+  echo "export VITE_OAUTH_REDIRECT_SIGNOUT=http://localhost:4173/"
+  echo "export ACCOUNTS_TABLE_NAME=kernelworx-accounts-ue1-${RUN_ID}"
+  echo "export PROFILES_TABLE_NAME=kernelworx-profiles-ue1-${RUN_ID}"
+  echo "export CAMPAIGNS_TABLE_NAME=kernelworx-campaigns-ue1-${RUN_ID}"
+  echo "export ORDERS_TABLE_NAME=kernelworx-orders-ue1-${RUN_ID}"
+  echo "export SHARES_TABLE_NAME=kernelworx-shares-ue1-${RUN_ID}"
+  echo "export CATALOGS_TABLE_NAME=kernelworx-catalogs-ue1-${RUN_ID}"
+  echo "export INVITES_TABLE_NAME=kernelworx-invites-ue1-${RUN_ID}"
+  echo "export SHARED_CAMPAIGNS_TABLE_NAME=kernelworx-shared-campaigns-ue1-${RUN_ID}"
+}
+
 # Load environment variables from root .env
 if [ -f "$ROOT_DIR/.env" ]; then
   set -a
@@ -161,78 +237,23 @@ case "$ACTION" in
 
     log ""
     log "👤 Creating ephemeral test users..."
-    USER_POOL_ID=$(tofu output -raw cognito_user_pool_id)
-    USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)
+    load_stack_outputs
     "$ROOT_DIR/scripts/create-ephemeral-test-users.sh" "$RUN_ID" "$USER_POOL_ID" "$USER_POOL_CLIENT_ID"
 
     log ""
     log "📤 Environment exports (eval this output):"
     log ""
-    TEST_REGION="${AWS_REGION:-us-east-1}"
-    COGNITO_DOMAIN=$(tofu output -raw cognito_domain)
-    APPSYNC_API_KEY=$(tofu output -raw appsync_api_key 2>/dev/null) || true
-    echo "export TEST_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    if [ -n "$APPSYNC_API_KEY" ]; then
-      echo "export TEST_APPSYNC_API_KEY=$APPSYNC_API_KEY"
-    fi
-    echo "export TEST_USER_POOL_ID=$USER_POOL_ID"
-    echo "export TEST_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
-    echo "export TEST_REGION=$TEST_REGION"
-    echo "export E2E_BASE_URL=http://localhost:4173"
-    echo "export VITE_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    if [ -n "$APPSYNC_API_KEY" ]; then
-      echo "export VITE_APPSYNC_API_KEY=$APPSYNC_API_KEY"
-    fi
-    echo "export VITE_APPSYNC_REGION=$TEST_REGION"
-    echo "export VITE_COGNITO_USER_POOL_ID=$USER_POOL_ID"
-    echo "export VITE_COGNITO_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
-    echo "export VITE_COGNITO_DOMAIN=$COGNITO_DOMAIN"
-    echo "export VITE_OAUTH_REDIRECT_SIGNIN=http://localhost:4173/"
-    echo "export VITE_OAUTH_REDIRECT_SIGNOUT=http://localhost:4173/"
-    echo "export ACCOUNTS_TABLE_NAME=kernelworx-accounts-ue1-${RUN_ID}"
-    echo "export PROFILES_TABLE_NAME=kernelworx-profiles-ue1-${RUN_ID}"
-    echo "export CAMPAIGNS_TABLE_NAME=kernelworx-campaigns-ue1-${RUN_ID}"
-    echo "export ORDERS_TABLE_NAME=kernelworx-orders-ue1-${RUN_ID}"
-    echo "export SHARES_TABLE_NAME=kernelworx-shares-ue1-${RUN_ID}"
-    echo "export CATALOGS_TABLE_NAME=kernelworx-catalogs-ue1-${RUN_ID}"
-    echo "export INVITES_TABLE_NAME=kernelworx-invites-ue1-${RUN_ID}"
-    echo "export SHARED_CAMPAIGNS_TABLE_NAME=kernelworx-shared-campaigns-ue1-${RUN_ID}"
+    print_stack_exports
     ;;
 
   env)
-    TEST_REGION="${AWS_REGION:-us-east-1}"
-    COGNITO_DOMAIN=$(tofu output -raw cognito_domain)
-    APPSYNC_API_KEY=$(tofu output -raw appsync_api_key 2>/dev/null) || true
     log "📤 Environment exports for existing stack: $RUN_ID"
     log ""
-    echo "export TEST_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    if [ -n "$APPSYNC_API_KEY" ]; then
-      echo "export TEST_APPSYNC_API_KEY=$APPSYNC_API_KEY"
-    else
+    load_stack_outputs
+    if [ -z "$APPSYNC_API_KEY" ]; then
       log "⚠️  appsync_api_key output is absent from this stack's state; the stack has not yet deployed the public-orders feature, so TEST_APPSYNC_API_KEY/VITE_APPSYNC_API_KEY are omitted"
     fi
-    echo "export TEST_USER_POOL_ID=$(tofu output -raw cognito_user_pool_id)"
-    echo "export TEST_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
-    echo "export TEST_REGION=$TEST_REGION"
-    echo "export E2E_BASE_URL=http://localhost:4173"
-    echo "export VITE_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    if [ -n "$APPSYNC_API_KEY" ]; then
-      echo "export VITE_APPSYNC_API_KEY=$APPSYNC_API_KEY"
-    fi
-    echo "export VITE_APPSYNC_REGION=$TEST_REGION"
-    echo "export VITE_COGNITO_USER_POOL_ID=$(tofu output -raw cognito_user_pool_id)"
-    echo "export VITE_COGNITO_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
-    echo "export VITE_COGNITO_DOMAIN=$COGNITO_DOMAIN"
-    echo "export VITE_OAUTH_REDIRECT_SIGNIN=http://localhost:4173/"
-    echo "export VITE_OAUTH_REDIRECT_SIGNOUT=http://localhost:4173/"
-    echo "export ACCOUNTS_TABLE_NAME=kernelworx-accounts-ue1-${RUN_ID}"
-    echo "export PROFILES_TABLE_NAME=kernelworx-profiles-ue1-${RUN_ID}"
-    echo "export CAMPAIGNS_TABLE_NAME=kernelworx-campaigns-ue1-${RUN_ID}"
-    echo "export ORDERS_TABLE_NAME=kernelworx-orders-ue1-${RUN_ID}"
-    echo "export SHARES_TABLE_NAME=kernelworx-shares-ue1-${RUN_ID}"
-    echo "export CATALOGS_TABLE_NAME=kernelworx-catalogs-ue1-${RUN_ID}"
-    echo "export INVITES_TABLE_NAME=kernelworx-invites-ue1-${RUN_ID}"
-    echo "export SHARED_CAMPAIGNS_TABLE_NAME=kernelworx-shared-campaigns-ue1-${RUN_ID}"
+    print_stack_exports
     ;;
 
   down)

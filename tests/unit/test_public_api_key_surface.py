@@ -325,8 +325,8 @@ def test_deploy_workflow_feeds_the_key_into_the_frontend_build():
 
 
 def test_ephemeral_env_exports_the_key_in_both_blocks():
-    """`up` and `env` each hand-write their export lines; ephemeral CI evaluates
-    them, so a key missing from either block leaves every ephemeral
+    """`up` and `env` both emit the shared export block; ephemeral CI evaluates
+    it, so a key missing from that block leaves every ephemeral
     integration/E2E public test running without it."""
     lines = EPHEMERAL_ENV_SCRIPT.read_text().splitlines()
     label_indexes = [i for i, line in enumerate(lines) if re.match(r"^  (up|env|down)\)$", line)]
@@ -337,21 +337,21 @@ def test_ephemeral_env_exports_the_key_in_both_blocks():
         end = label_indexes[i + 1] if i + 1 < len(label_indexes) else esac_index
         blocks[label] = (start, end)
     assert set(blocks) == {"up", "env", "down"}, f"ephemeral-env.sh case blocks changed: {sorted(blocks)}"
+
+    # One `tofu output -json` capture feeds both branches through a shared emitter,
+    # so the contract is: up and env each call the emitter exactly once, down never
+    # calls it, and the emitter echoes each key once.
+    for label, expected in (("up", 1), ("env", 1), ("down", 0)):
+        start, end = blocks[label]
+        calls = sum(1 for line in lines[start:end] if re.match(r"^\s*print_stack_exports$", line))
+        assert calls == expected, f"{label} must call print_stack_exports {expected} time(s); got {calls}"
+
+    body_start = next(i for i, line in enumerate(lines) if line == "print_stack_exports() {")
+    body_end = next(i for i in range(body_start + 1, len(lines)) if lines[i] == "}")
+    emitter = lines[body_start:body_end]
     for key in ("TEST_APPSYNC_API_KEY", "VITE_APPSYNC_API_KEY"):
-        per_block = {}
-        for label, (start, end) in blocks.items():
-            block = lines[start:end]
-            # Each block resolves the output once into APPSYNC_API_KEY - tolerating
-            # a stack whose state predates the key - and echoes that variable per
-            # key, so the contract is the read plus the echo, not one line shape.
-            reads_key_output = any(
-                re.match(r"^\s*APPSYNC_API_KEY=\$\(tofu output -raw appsync_api_key", line) for line in block
-            )
-            echoes = sum(1 for line in block if re.match(rf'^\s*echo "export {key}=\$APPSYNC_API_KEY"', line))
-            per_block[label] = echoes if reads_key_output else 0
-        assert per_block["up"] == 1 and per_block["env"] == 1 and per_block["down"] == 0, (
-            f"{key} must be exported exactly once in the up and env blocks and never in down; got {per_block}"
-        )
+        echoes = sum(1 for line in emitter if re.match(rf'^\s*echo "export {key}=\$APPSYNC_API_KEY"', line))
+        assert echoes == 1, f"{key} must be exported exactly once by print_stack_exports; got {echoes}"
 
 
 def test_generator_manages_the_key_for_integration_and_frontend_envs():
