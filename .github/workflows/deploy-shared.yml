@@ -230,6 +230,13 @@ jobs:
           #   - list_my_shares: resolver switched from Lambda DS to pipeline (#334)
           #   - list_shares_by_profile / list_invites_by_profile: retired the single-step
           #     owner verifier for the two-phase owner pair (#547)
+          #   - inject_global_payment_methods / set_owner_account_id_in_stash /
+          #     filter_payment_methods_by_access: re-pointed to the shared NoneDataSource
+          #     when the two per-purpose NONE data sources were consolidated (#750). The
+          #     re-pointing deletes the config edge that ordered the data source destroys
+          #     after the function updates, so the full apply destroys the still-referenced
+          #     data sources first and AWS refuses with "Data source is still in use by
+          #     functions". Targeting the functions releases the references out of band.
           # Keep this target list in sync with scripts/ephemeral-env.sh.
           "$GITHUB_WORKSPACE/scripts/appsync-ensure-resolver-order.sh" \
             -t module.appsync.aws_appsync_resolver.create_order \
@@ -240,7 +247,10 @@ jobs:
             -t module.appsync.aws_appsync_resolver.update_my_account \
             -t module.appsync.aws_appsync_resolver.list_my_shares \
             -t module.appsync.aws_appsync_resolver.list_shares_by_profile \
-            -t module.appsync.aws_appsync_resolver.list_invites_by_profile
+            -t module.appsync.aws_appsync_resolver.list_invites_by_profile \
+            -t module.appsync.aws_appsync_function.inject_global_payment_methods \
+            -t module.appsync.aws_appsync_function.set_owner_account_id_in_stash \
+            -t module.appsync.aws_appsync_function.filter_payment_methods_by_access
 
       # One-time migration (#665): the custom CloudFront response headers
       # policies `security` and `auth_security` were retired in favour of the
