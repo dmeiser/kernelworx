@@ -78,18 +78,23 @@ destroy orphaned resources for a run-id.** Imports whatever still exists, then r
 
 ### `scripts/appsync-ensure-resolver-order.sh`
 
-**Work around AWS AppSync provider ordering issues.** When a Terraform plan would destroy
-`aws_appsync_function` or `aws_appsync_datasource` resources, this script runs a
-targeted apply for the affected resolver(s) first, so the resolver drops its references
-to the old functions/data sources before the full apply deletes them.
+**Work around AWS AppSync provider ordering issues.** When an OpenTofu plan would destroy
+`aws_appsync_function` or `aws_appsync_datasource` resources, AWS refuses the delete while a
+resolver or function still references the object, and removing the object from the
+configuration also removes the dependency edge that ordered the destroy after the
+referencing updates. This script plans, derives every such planned deletion address from the
+plan JSON, and runs `tofu apply -exclude=<addr>` for each — applying everything except those
+destroys, so the reference-releasing updates land and the caller's normal apply performs
+the deletes. The target set is derived from the plan; there is no address list to maintain.
 
 **Key flags/arguments:**
 
 - `-d <tofu-dir>` — Target OpenTofu directory (defaults to CWD).
-- `-t <resolver-target>` — One or more `-target` addresses to apply first (e.g.
-  `module.appsync.aws_appsync_resolver.create_order`). Can be specified multiple times.
 - `-- <extra-tofu-args>` — Pass additional arguments through to the `tofu` commands
   (plan/apply).
+
+`-t` is rejected: a hand-maintained target list is what let the ordering bug survive every
+previous fix (#298-#301, then #750).
 
 ### `scripts/build-resolvers.mjs`
 
@@ -340,8 +345,7 @@ enforces and for the entry points that call it.
   environment.
 - Recovery scripts (`recover-deploy.sh`, `recover-destroy.sh`) source `ephemeral-recover-common.sh`
   and will fail loudly if the encryption passphrase is missing.
-- The `appsync-ensure-resolver-order.sh` script targets specific resolver/function addresses
-  identified in `tofu/application/modules/appsync/resolvers_mutations.tf` and
-  `resolvers_queries.tf`. The authoritative, per-target rationale list lives with the two
-  invocations: `.github/workflows/deploy-shared.yml` (deploys) and `scripts/ephemeral-env.sh`
-  (ephemeral stacks) — read the `-t` targets and their comment blocks there rather than here.
+- The `appsync-ensure-resolver-order.sh` script derives its `-exclude` addresses from the plan
+  JSON it produces itself, so no resolver/function address list is maintained in
+  `.github/workflows/deploy-shared.yml` or `scripts/ephemeral-env.sh`. If a deploy ever passes
+  a `-t` target again, `tests/unit/test_ephemeral_deploy_resolver_parity.py` fails.
