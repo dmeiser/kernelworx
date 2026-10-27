@@ -11,3 +11,5 @@ export function response(ctx) {
     // Return accountId as-is with ACCOUNT# prefix
     return ctx.source.accountId;
 }
+
+// Deploy-pipeline exercise: no behavior change (captain-directed guard live-fire, 2026-10-27).
