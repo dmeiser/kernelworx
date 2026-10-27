@@ -144,7 +144,10 @@ case "$ACTION" in
     #   create_order (pipeline fn set), validate_payment_method_appsync (data_source switch #299),
     #   create_seller_profile (#300), create_campaign (#301), update_my_account (#298),
     #   list_my_shares (#334), list_shares_by_profile / list_invites_by_profile (single-step
-    #   owner verifier retired for the two-phase owner pair #547).
+    #   owner verifier retired for the two-phase owner pair #547), and the three payment-method
+    #   functions re-pointed to the shared NoneDataSource when the two per-purpose NONE data
+    #   sources were consolidated (#750) — that re-pointing removed the config edge ordering
+    #   the NONE data source destroys after the function updates.
     "$ROOT_DIR/scripts/appsync-ensure-resolver-order.sh" \
       -d "$ENV_DIR" \
       -t module.appsync.aws_appsync_resolver.create_order \
@@ -156,6 +159,9 @@ case "$ACTION" in
       -t module.appsync.aws_appsync_resolver.list_my_shares \
       -t module.appsync.aws_appsync_resolver.list_shares_by_profile \
       -t module.appsync.aws_appsync_resolver.list_invites_by_profile \
+      -t module.appsync.aws_appsync_function.inject_global_payment_methods \
+      -t module.appsync.aws_appsync_function.set_owner_account_id_in_stash \
+      -t module.appsync.aws_appsync_function.filter_payment_methods_by_access \
       -- -var="environment=$RUN_ID"
 
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"
