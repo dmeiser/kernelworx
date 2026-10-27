@@ -13,7 +13,7 @@ TARGET_RE = re.compile(r"-t\s+(module\.appsync\.(?:aws_appsync_resolver|aws_apps
 # the two per-purpose NONE data sources were consolidated (#750). Without these
 # targets the full apply destroys the still-referenced NONE data sources before
 # re-pointing the functions and AWS refuses every Deploy Production run.
-NONE_DS_REPOINTED_FUNCTIONS = (
+NONE_DS_FUNCTION_TARGETS = (
     "module.appsync.aws_appsync_function.inject_global_payment_methods",
     "module.appsync.aws_appsync_function.set_owner_account_id_in_stash",
     "module.appsync.aws_appsync_function.filter_payment_methods_by_access",
@@ -33,9 +33,9 @@ def test_target_sets_match() -> None:
     )
 
 
-def test_none_ds_repointed_functions_in_both() -> None:
+def test_none_ds_function_targets_in_both() -> None:
     ephemeral, deploy = _targets(EPHEMERAL), _targets(DEPLOY)
-    for target in NONE_DS_REPOINTED_FUNCTIONS:
+    for target in NONE_DS_FUNCTION_TARGETS:
         assert target in ephemeral
         assert target in deploy
 
