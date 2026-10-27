@@ -92,11 +92,17 @@ trap cleanup EXIT
 log "📋 Checking AppSync function/datasource deletion ordering in plan..."
 tofu plan -input=false -out="$PLAN_FILE" "${EXTRA_TOFU_ARGS[@]}"
 
+# Read the plan once; the deferred addresses and the applied-change count are
+# both derived from this same document, so the log cannot disagree with the
+# exclusions it passes.
+plan_json=$(tofu show -json "$PLAN_FILE")
+
 # The objects AWS refuses to delete while something still references them:
 # resource_changes of both AppSync types whose actions contain "delete"
 # (a replacement's delete is deferred the same way and lands in the main apply).
-deletions=$(tofu show -json "$PLAN_FILE" | \
-  jq -r '.resource_changes[]? | select((.type == "aws_appsync_function" or .type == "aws_appsync_datasource") and (.change.actions | index("delete"))) | .address')
+deletions=$(jq -r \
+  '.resource_changes[]? | select((.type == "aws_appsync_function" or .type == "aws_appsync_datasource") and (.change.actions | index("delete"))) | .address' \
+  <<<"$plan_json")
 
 if [ -z "$deletions" ]; then
   log "   No AppSync function/datasource deletions planned; resolver ordering guard not needed."
@@ -112,8 +118,9 @@ done <<<"$deletions"
 
 # Everything the reference-releasing apply will do, named from the same plan the
 # exclusions came from, so the log states what was applied and what was deferred.
-applied=$(tofu show -json "$PLAN_FILE" | \
-  jq -r '[.resource_changes[]? | select(.change.actions | index("delete") | not) | select(.change.actions != ["no-op"]) | .address] | length')
+applied=$(jq -r \
+  '[.resource_changes[]? | select(.change.actions | index("delete") | not) | select(.change.actions != ["no-op"]) | .address] | length' \
+  <<<"$plan_json")
 
 log "🎯 Applying $applied planned change(s) with the deletions above excluded..."
 if ! tofu apply -input=false -auto-approve "${EXCLUDE_ARGS[@]}" "${EXTRA_TOFU_ARGS[@]}"; then
