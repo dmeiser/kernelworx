@@ -135,33 +135,15 @@ case "$ACTION" in
     log "📦 Building AppSync JS resolvers..."
     ensure_resolvers_built
 
-    # AppSync rejects deleting pipeline functions or data sources that are still referenced
-    # by a resolver. If the plan would destroy any AppSync functions or data sources, update
-    # the affected resolver(s)/function(s) first so the full apply can delete them.
-    # Keep this target list in sync with .github/workflows/deploy-shared.yml
-    # (appsync-ensure-resolver-order step); a script-parity test asserts the set.
-    # Targets cover all Lambda→JS migrations that removed a Lambda data source:
-    #   create_order (pipeline fn set), validate_payment_method_appsync (data_source switch #299),
-    #   create_seller_profile (#300), create_campaign (#301), update_my_account (#298),
-    #   list_my_shares (#334), list_shares_by_profile / list_invites_by_profile (single-step
-    #   owner verifier retired for the two-phase owner pair #547), and the three payment-method
-    #   functions re-pointed to the shared NoneDataSource when the two per-purpose NONE data
-    #   sources were consolidated (#750) — that re-pointing removed the config edge ordering
-    #   the NONE data source destroys after the function updates.
+    # AppSync rejects deleting a pipeline function or data source that a resolver or function
+    # still references, and removing such a resource from the config removes the edge that
+    # ordered its destroy after the referencing objects' updates. The guard plans, derives
+    # every planned aws_appsync_function / aws_appsync_datasource deletion address from the
+    # plan JSON, and applies everything else with `-exclude=<addr>` so those references are
+    # released before the full apply below performs the deletes. The target set is derived,
+    # not hand-maintained — see scripts/appsync-ensure-resolver-order.sh.
     "$ROOT_DIR/scripts/appsync-ensure-resolver-order.sh" \
       -d "$ENV_DIR" \
-      -t module.appsync.aws_appsync_resolver.create_order \
-      -t module.appsync.aws_appsync_function.validate_payment_method_appsync \
-      -t module.appsync.aws_appsync_resolver.create_seller_profile \
-      -t module.appsync.aws_appsync_resolver.create_campaign \
-      -t module.appsync.aws_appsync_resolver.public_create_order \
-      -t module.appsync.aws_appsync_resolver.update_my_account \
-      -t module.appsync.aws_appsync_resolver.list_my_shares \
-      -t module.appsync.aws_appsync_resolver.list_shares_by_profile \
-      -t module.appsync.aws_appsync_resolver.list_invites_by_profile \
-      -t module.appsync.aws_appsync_function.inject_global_payment_methods \
-      -t module.appsync.aws_appsync_function.set_owner_account_id_in_stash \
-      -t module.appsync.aws_appsync_function.filter_payment_methods_by_access \
       -- -var="environment=$RUN_ID"
 
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"
