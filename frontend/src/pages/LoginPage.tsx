@@ -27,7 +27,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { confirmSignIn, signIn, signInWithRedirect } from 'aws-amplify/auth';
 import type { SignInOutput } from 'aws-amplify/auth';
-import { getSafeRedirect } from '../lib/redirect';
+import { getSafeRedirect, resolveRedirectFromState } from '../lib/redirect';
 
 // Get error message from unknown error
 function getErrorMessage(err: unknown, fallback: string): string {
@@ -515,7 +515,7 @@ export const LoginPage: React.FC = () => {
   const { isAuthenticated, loginWithPassword } = useAuth();
 
   const from = getSafeRedirect(
-    (location.state as { from?: { pathname?: string } } | undefined)?.from?.pathname,
+    resolveRedirectFromState(location.state),
     '/home',
   );
 
