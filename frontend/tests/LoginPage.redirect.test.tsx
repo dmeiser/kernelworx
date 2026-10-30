@@ -177,4 +177,22 @@ describe('LoginPage redirect preservation', () => {
       expect(signInWithRedirect).toHaveBeenCalledWith({ provider: 'Google' });
     });
   });
+
+  it('shows an error alert when password login fails', async () => {
+    mockLoginWithPassword.mockRejectedValue(new Error('bad creds'));
+
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'user@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'Secret123!' } });
+    fireEvent.click(screen.getByRole('button', { name: /Sign In$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/bad creds/i)).toBeInTheDocument();
+    });
+  });
 });
