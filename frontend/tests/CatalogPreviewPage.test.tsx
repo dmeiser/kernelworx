@@ -176,6 +176,29 @@ describe('CatalogPreviewPage', () => {
     await user.click(sharedButtons[0]);
   });
 
+  it('renders admin-managed public catalog with no products', async () => {
+    const emptyCatalog = {
+      ...CATALOG,
+      catalogType: 'ADMIN_MANAGED',
+      isPublic: true,
+      products: [],
+    };
+    const mocks: MockedResponse[] = [
+      {
+        request: { query: GET_CATALOG, variables: { catalogId: 'CATALOG#abc' } },
+        result: { data: { getCatalog: emptyCatalog } },
+      },
+    ];
+
+    renderPage('/catalogs/abc/preview', mocks);
+
+    await waitFor(() => {
+      expect(screen.getByText('Admin-Managed')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Public')).toBeInTheDocument();
+    expect(screen.getByText('No products in this catalog')).toBeInTheDocument();
+  });
+
   it('handles back button', async () => {
     const mocks: MockedResponse[] = [
       {

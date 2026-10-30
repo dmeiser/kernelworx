@@ -72,7 +72,6 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
 
   // Handler functions
   const handleCreateCampaign = () => {
-    if (!catalogId) return;
     if (onCreateCampaign) {
       onCreateCampaign(catalogId);
     } else {
@@ -81,7 +80,6 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
   };
 
   const handleCreateSharedCampaign = () => {
-    if (!catalogId) return;
     if (onCreateSharedCampaign) {
       onCreateSharedCampaign(catalogId);
     } else {
