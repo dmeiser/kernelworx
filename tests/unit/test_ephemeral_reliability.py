@@ -1027,10 +1027,10 @@ class TestInitReconfigure:
         assert result.returncode == 0, result.stderr
         calls = [line for line in recorded.read_text().splitlines() if line.strip()]
         init_idx = next((i for i, c in enumerate(calls) if c.startswith("init ")), None)
-        output_idxs = [i for i, c in enumerate(calls) if c.startswith("output ")]
+        output_indices = [i for i, c in enumerate(calls) if c.startswith("output ")]
         assert init_idx is not None, f"env must init the backend before reading output, got: {calls}"
         init = shlex.split(calls[init_idx])
-        assert output_idxs, f"env must read `tofu output`, got: {calls}"
+        assert output_indices, f"env must read `tofu output`, got: {calls}"
         assert "-reconfigure" in init, f"env init must re-configure the backend, got: {init}"
         assert "-migrate-state" not in init, f"env init must not migrate state, got: {init}"
         assert "-backend-config=key=application/ephemeral/pr-999/terraform.tfstate" in init, (
@@ -1040,7 +1040,7 @@ class TestInitReconfigure:
         assert "-backend-config=region=us-east-1" in init, f"got: {init}"
         # The init must precede every `tofu output`: reading output from an
         # uninitialized or wrong-run-id backend is exactly what #727 reports.
-        assert init_idx < min(output_idxs), f"env must init the backend before reading output, got: {calls}"
+        assert init_idx < min(output_indices), f"env must init the backend before reading output, got: {calls}"
 
     def test_every_tofu_init_in_ephemeral_env_reconfigures(self, repo_root: Path) -> None:
         """All three entry points (up, env, and down) can follow an init for a
