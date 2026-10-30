@@ -3,6 +3,8 @@ import { renderHook, act } from '@testing-library/react';
 import * as amplifyAuth from 'aws-amplify/auth';
 import { usePasswordChange } from '../../src/hooks/usePasswordChange';
 
+/* cspell:disable */
+
 vi.mock('aws-amplify/auth', () => ({
   updatePassword: vi.fn(),
 }));
