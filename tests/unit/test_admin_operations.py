@@ -1073,6 +1073,9 @@ class TestAdminResetUserPassword:
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.NOT_FOUND
+            # The raw target email must never appear in the error/log stream (#729).
+            assert "notfound@example.com" not in result["message"]
+            assert "n***@example.com" in result["message"]
 
     def test_missing_user_pool_id_raises_error(
         self,
@@ -6513,6 +6516,35 @@ class TestAdminUpdateCampaignSharedCode:
         assert result["campaignName"] == "Test Campaign"
         assert result["campaignId"] == "CAMPAIGN#c1"
         assert result["profileId"] == "PROFILE#p1"
+
+    def test_update_campaign_shared_code_log_does_not_leak_code(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        campaigns_table: Any,
+        capsys: Any,
+    ) -> None:
+        """The INFO log records that the code was set, never the code itself (#729)."""
+        campaigns_table.put_item(
+            Item={
+                "profileId": "PROFILE#p1",
+                "campaignId": "CAMPAIGN#c1",
+                "campaignName": "Test Campaign",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminUpdateCampaignSharedCode"
+        admin_appsync_event["arguments"] = {
+            "campaignId": "c1",
+            "sharedCampaignCode": "NEWCODE",
+        }
+
+        lambda_handler(admin_appsync_event, lambda_context)
+
+        captured = capsys.readouterr().out
+        assert "NEWCODE" not in captured
+        assert '"has_shared_campaign_code": true' in captured
 
     def test_update_campaign_shared_code_remove(
         self,
