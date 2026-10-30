@@ -136,6 +136,7 @@ resource "aws_appsync_resolver" "update_campaign" {
       # query the GSI for the profile so the share check can run.
       aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
+      aws_appsync_function.verify_update_catalog_access.function_id,
       aws_appsync_function.update_campaign.function_id,
       # isActive can change which campaign is the latest active one;
       # recompute the profile's denormalized latestCampaignId (#331).

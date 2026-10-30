@@ -26,6 +26,19 @@ resource "aws_appsync_function" "update_campaign" {
   code = file("${local.js_resolvers_dir}/update_campaign_fn.js")
 }
 
+resource "aws_appsync_function" "verify_update_catalog_access" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.catalogs.name
+  name        = "VerifyUpdateCatalogAccessFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_update_catalog_access_fn.js")
+}
+
 resource "aws_appsync_function" "lookup_campaign_for_delete" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.campaigns.name
