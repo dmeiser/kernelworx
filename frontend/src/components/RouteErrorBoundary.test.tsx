@@ -5,7 +5,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { RouteErrorBoundary } from './RouteErrorBoundary';
+import { RouteErrorBoundary, isChunkLoadError } from './RouteErrorBoundary';
 
 const ThrowingChild: React.FC = () => {
   throw new Error('Failed to fetch dynamically imported module');
@@ -82,5 +82,28 @@ describe('RouteErrorBoundary non-chunk errors', () => {
     expect(screen.queryByText('Sensitive internal details')).not.toBeInTheDocument();
 
     consoleError.mockRestore();
+  });
+});
+
+
+describe('isChunkLoadError', () => {
+  it('returns false for non-Error values', () => {
+    expect(isChunkLoadError(null)).toBe(false);
+    expect(isChunkLoadError(undefined)).toBe(false);
+  });
+
+  it('returns true when the error name is ChunkLoadError', () => {
+    const error = new Error('something else');
+    error.name = 'ChunkLoadError';
+    expect(isChunkLoadError(error)).toBe(true);
+  });
+
+  it('returns true for chunk-load messages', () => {
+    expect(isChunkLoadError(new Error('Failed to fetch dynamically imported module'))).toBe(true);
+    expect(isChunkLoadError(new Error('Loading chunk 123 failed'))).toBe(true);
+  });
+
+  it('returns false for ordinary runtime errors', () => {
+    expect(isChunkLoadError(new Error('Test route error'))).toBe(false);
   });
 });

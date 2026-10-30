@@ -25,16 +25,17 @@ export function isChunkLoadError(error: Error | null | undefined): boolean {
     return false;
   }
 
+  // cspell:ignore chunkloaderror
   const name = error.name.toLowerCase();
   const message = error.message.toLowerCase();
+  const chunkPatterns = [
+    /loading chunk [\w-]+ failed/i,
+    /failed to fetch dynamically imported module/i,
+    /importing a module script failed/i,
+    /error loading dynamically imported module/i,
+  ];
 
-  return (
-    name === 'chunkloaderror' ||
-    /loading chunk [\w-]+ failed/i.test(message) ||
-    /failed to fetch dynamically imported module/i.test(message) ||
-    /importing a module script failed/i.test(message) ||
-    /error loading dynamically imported module/i.test(message)
-  );
+  return name === 'chunkloaderror' || chunkPatterns.some((pattern) => pattern.test(message));
 }
 
 export class RouteErrorBoundary extends React.Component<RouteErrorBoundaryProps, RouteErrorBoundaryState> {
