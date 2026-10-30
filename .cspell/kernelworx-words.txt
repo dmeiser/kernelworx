@@ -193,6 +193,7 @@ idps
 idpresponse
 ie
 ifdef
+IDOR
 IIFE
 impls
 importPath
