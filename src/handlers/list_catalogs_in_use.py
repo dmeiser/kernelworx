@@ -41,11 +41,13 @@ try:  # pragma: no cover
     from utils.appsync_types import get_caller_id
     from utils.dynamodb import get_required_env
     from utils.errors import AppError, ErrorCode
+    from utils.ids import ensure_account_id
     from utils.logging import get_correlation_id, get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.appsync_types import get_caller_id
     from ..utils.dynamodb import get_required_env
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import ensure_account_id
     from ..utils.logging import get_correlation_id, get_logger
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -310,7 +312,7 @@ def handler(event: Dict[str, Any], context: Any) -> List[str]:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 
     # Add ACCOUNT# prefix for consistency with data model
-    account_id_with_prefix = f"ACCOUNT#{caller_sub}" if not caller_sub.startswith("ACCOUNT#") else caller_sub
+    account_id_with_prefix = ensure_account_id(caller_sub)
 
     request_logger.info("Listing catalogs in use", account_id=account_id_with_prefix)
 

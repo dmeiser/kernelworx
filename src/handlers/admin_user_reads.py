@@ -24,15 +24,16 @@ from typing import TYPE_CHECKING, Any, Dict
 # in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
 from .deletion_cascade import (
     get_user_profiles,
-    normalize_account_id,
 )
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.dynamodb import batch_get_chunked, get_required_env, tables
+    from utils.ids import ensure_account_id
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import batch_get_chunked, get_required_env, tables
+    from ..utils.ids import ensure_account_id
     from ..utils.logging import get_logger
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -70,7 +71,7 @@ def admin_get_user_profiles(event: Dict[str, Any], context: Any) -> list[Dict[st
     logger = get_logger(__name__)
 
     account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    db_account_id = normalize_account_id(account_id)
+    db_account_id = ensure_account_id(account_id)
 
     # Query profiles by ownerAccountId
     profiles = query_all_items(
@@ -97,7 +98,7 @@ def admin_get_user_catalogs(event: Dict[str, Any], context: Any) -> list[Dict[st
     logger = get_logger(__name__)
 
     account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    db_account_id = normalize_account_id(account_id)
+    db_account_id = ensure_account_id(account_id)
 
     # Query catalogs by ownerAccountId using GSI
     catalogs = query_all_items(
@@ -233,7 +234,7 @@ def admin_get_user_campaigns(event: Dict[str, Any], context: Any) -> list[Dict[s
     logger = get_logger(__name__)
 
     account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    db_account_id = normalize_account_id(account_id)
+    db_account_id = ensure_account_id(account_id)
 
     # First, get all profiles owned by this account
     profiles = get_user_profiles(db_account_id)
@@ -260,7 +261,7 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
     logger = get_logger(__name__)
 
     account_id, actor_sub = _require_admin_and_get_target_account_id(event)
-    db_account_id = normalize_account_id(account_id)
+    db_account_id = ensure_account_id(account_id)
 
     # Query shared campaigns by createdBy using GSI1
     campaigns = query_all_items(

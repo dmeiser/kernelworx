@@ -30,6 +30,7 @@ try:  # pragma: no cover
         tables,
     )
     from utils.errors import AppError, ErrorCode
+    from utils.ids import ensure_account_id
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
@@ -43,6 +44,7 @@ except ModuleNotFoundError:  # pragma: no cover
         tables,
     )
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import ensure_account_id
     from ..utils.logging import get_logger, mask_email
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -122,7 +124,7 @@ def _dedup_account_keys(account_ids: list[str]) -> list[Dict[str, str]]:
     seen: set[str] = set()
     keys: list[Dict[str, str]] = []
     for account_id in account_ids:
-        db_account_id = account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
+        db_account_id = ensure_account_id(account_id)
         if db_account_id in seen:
             continue
         seen.add(db_account_id)
