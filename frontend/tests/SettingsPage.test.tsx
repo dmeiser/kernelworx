@@ -1,14 +1,16 @@
 /**
  * SettingsPage component tests
+ *
+ * Admin Console visibility is driven by useAuth().isAdmin (derived from the
+ * Cognito JWT cognito:groups claim), NOT by GET_MY_ACCOUNT — the Account type
+ * has no isAdmin field. These tests gate on the auth context to guard against
+ * the #703 regression where the button never rendered.
  */
 
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MockedProvider } from '@apollo/client/testing/react';
 import { BrowserRouter } from 'react-router-dom';
-import { SettingsPage } from '../src/pages/SettingsPage';
-import { GET_MY_ACCOUNT } from '../src/lib/graphql';
 
 // Mock navigate
 const mockNavigate = vi.fn();
@@ -20,53 +22,33 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-// Mock logout
+// Mock auth — isAdmin is the sole driver of the Admin Console button.
 const mockLogout = vi.fn().mockResolvedValue(undefined);
+let mockIsAdmin = false;
 vi.mock('../src/contexts/AuthContext', () => ({
   useAuth: () => ({
     logout: mockLogout,
+    isAdmin: mockIsAdmin,
   }),
 }));
+
+import { SettingsPage } from '../src/pages/SettingsPage';
 
 describe('SettingsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsAdmin = false;
   });
 
-  const standardAccountMock = {
-    request: { query: GET_MY_ACCOUNT },
-    result: {
-      data: {
-        getMyAccount: {
-          __typename: 'Account',
-          accountId: 'account-123',
-          isAdmin: false,
-        },
-      },
-    },
-  };
-
-  const adminAccountMock = {
-    request: { query: GET_MY_ACCOUNT },
-    result: {
-      data: {
-        getMyAccount: {
-          __typename: 'Account',
-          accountId: 'account-123',
-          isAdmin: true,
-        },
-      },
-    },
-  };
-
-  test('renders page title and quick actions', async () => {
+  const renderPage = () =>
     render(
-      <MockedProvider mocks={[standardAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
+      <BrowserRouter>
+        <SettingsPage />
+      </BrowserRouter>,
     );
+
+  test('renders page title and quick actions', () => {
+    renderPage();
 
     expect(screen.getByText('Account Settings')).toBeInTheDocument();
     expect(screen.getByText('Quick Actions')).toBeInTheDocument();
@@ -75,44 +57,24 @@ describe('SettingsPage', () => {
   });
 
   test('shows Admin Console button for admin users', async () => {
-    render(
-      <MockedProvider mocks={[adminAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
-    );
+    mockIsAdmin = true;
+    renderPage();
 
-    // Wait for the admin button to appear
     const adminButton = await screen.findByRole('button', { name: /Admin Console/i });
     expect(adminButton).toBeInTheDocument();
   });
 
   test('hides Admin Console button for non-admin users', async () => {
-    render(
-      <MockedProvider mocks={[standardAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
-    );
+    mockIsAdmin = false;
+    renderPage();
 
-    // Give time for query to resolve
     await screen.findByText('Quick Actions');
-
-    // Admin button should not be present
     expect(screen.queryByRole('button', { name: /Admin Console/i })).not.toBeInTheDocument();
   });
 
   test('navigates to user settings when button clicked', async () => {
     const user = userEvent.setup();
-    render(
-      <MockedProvider mocks={[standardAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
-    );
+    renderPage();
 
     await user.click(screen.getByRole('button', { name: /User Settings/i }));
     expect(mockNavigate).toHaveBeenCalledWith('/account/settings');
@@ -120,13 +82,7 @@ describe('SettingsPage', () => {
 
   test('navigates to scouts page when Manage My Scouts clicked', async () => {
     const user = userEvent.setup();
-    render(
-      <MockedProvider mocks={[standardAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
-    );
+    renderPage();
 
     await user.click(screen.getByRole('button', { name: /Manage My Scouts/i }));
     expect(mockNavigate).toHaveBeenCalledWith('/scouts');
@@ -134,13 +90,8 @@ describe('SettingsPage', () => {
 
   test('navigates to admin page when Admin Console clicked', async () => {
     const user = userEvent.setup();
-    render(
-      <MockedProvider mocks={[adminAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
-    );
+    mockIsAdmin = true;
+    renderPage();
 
     const adminButton = await screen.findByRole('button', { name: /Admin Console/i });
     await user.click(adminButton);
@@ -149,51 +100,27 @@ describe('SettingsPage', () => {
 
   test('navigates to payment methods page when Payment Methods clicked', async () => {
     const user = userEvent.setup();
-    render(
-      <MockedProvider mocks={[standardAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
-    );
+    renderPage();
 
     await user.click(screen.getByRole('button', { name: /Payment Methods/i }));
     expect(mockNavigate).toHaveBeenCalledWith('/payment-methods');
   });
 
   test('displays Data & Privacy section', () => {
-    render(
-      <MockedProvider mocks={[standardAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
-    );
+    renderPage();
 
     expect(screen.getByText('Data & Privacy')).toBeInTheDocument();
     expect(screen.getByText(/encrypted at rest/i)).toBeInTheDocument();
   });
 
   test('displays About section with version info', () => {
-    render(
-      <MockedProvider mocks={[standardAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
-    );
+    renderPage();
 
     expect(screen.getByText('About KernelWorx')).toBeInTheDocument();
   });
 
   test('displays Support KernelWorx section with GitHub Sponsors link', () => {
-    render(
-      <MockedProvider mocks={[standardAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
-    );
+    renderPage();
 
     expect(screen.getByText('Support KernelWorx')).toBeInTheDocument();
     const sponsorLink = screen.getByRole('link', { name: /Sponsor on GitHub/i });
@@ -204,13 +131,7 @@ describe('SettingsPage', () => {
 
   test('calls logout and navigates home when Sign Out clicked', async () => {
     const user = userEvent.setup();
-    render(
-      <MockedProvider mocks={[standardAccountMock]}>
-        <BrowserRouter>
-          <SettingsPage />
-        </BrowserRouter>
-      </MockedProvider>,
-    );
+    renderPage();
 
     await user.click(screen.getByRole('button', { name: /Sign Out/i }));
     expect(mockLogout).toHaveBeenCalled();
