@@ -49,15 +49,25 @@ describe('create_public_order request', () => {
 
         // ARCH-1: each transact item MUST carry its own operation field -
         // AppSync rejects a TransactWriteItems item without one.
-        // First item: ConditionCheck on the campaigns table (campaign-existence
-        // guard). The source is templatefile()'d at deploy time; in tests the
+        // First item: UpdateItem on the campaigns table (#746) - maintains
+        // the denormalized totalOrders/totalRevenue counters and, through its
+        // condition, guards campaign existence (ARCH-1). DynamoDB forbids two
+        // operations on one item in a transaction, so the guard is a
+        // condition on this UpdateItem, not a separate ConditionCheck.
+        // The source is templatefile()'d at deploy time; in tests the
         // placeholder stays literal, which also pins the real-name injection:
         // a hardcoded logical name here is what broke the deployed pipeline.
-        const conditionCheck = req.transactItems[0];
-        assert.strictEqual(conditionCheck.operation, 'ConditionCheck');
-        assert.strictEqual(conditionCheck.table, '${campaigns_table_name}');
-        assert.deepStrictEqual(conditionCheck.key, { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#c1' });
-        assert.strictEqual(conditionCheck.condition.expression, 'attribute_exists(campaignId)');
+        const totalsUpdate = req.transactItems[0];
+        assert.strictEqual(totalsUpdate.operation, 'UpdateItem');
+        assert.strictEqual(totalsUpdate.table, '${campaigns_table_name}');
+        assert.deepStrictEqual(totalsUpdate.key, { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#c1' });
+        assert.strictEqual(totalsUpdate.update.expression, 'ADD #totalOrders :one, #totalRevenue :amount');
+        assert.deepStrictEqual(totalsUpdate.update.expressionNames, {
+            '#totalOrders': 'totalOrders',
+            '#totalRevenue': 'totalRevenue',
+        });
+        assert.deepStrictEqual(totalsUpdate.update.expressionValues, { ':one': 1, ':amount': 10 });
+        assert.strictEqual(totalsUpdate.condition.expression, 'attribute_exists(campaignId)');
 
         // Second item: PutItem on the orders table (placeholder stays literal
         // in tests; see the ConditionCheck item above).
@@ -80,6 +90,7 @@ describe('create_public_order request', () => {
         assert.strictEqual(item.totalAmount, 10);
         assert.strictEqual(item.receiptToken, 'auto-generated-id');
         assert.deepStrictEqual(item.lineItems, [{ productId: 'p1', productName: 'P1', quantity: 1, pricePerUnit: 10, subtotal: 10 }]);
+
     });
 
     it('only writes the optional buyer fields that were provided', () => {
