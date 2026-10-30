@@ -120,6 +120,11 @@ export function request(ctx) {
         }
     }
 
+    // #746: stash the denormalized-totals delta for sync_campaign_totals_fn
+    // (the step after this one). The order row's profileId/campaignId are the
+    // campaigns-table key, so no lookup is needed to address the counter.
+    ctx.stash.totalsDelta = { profileId: profileId, campaignId: campaignId, count: 1, revenue: totalAmount };
+
     return {
         operation: 'PutItem',
         key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),

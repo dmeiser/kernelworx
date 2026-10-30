@@ -4,24 +4,16 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@apollo/client/react';
 import { Box, Typography, Paper, Stack, Button } from '@mui/material';
 import { Logout as LogoutIcon } from '@mui/icons-material';
 import { PageHeader } from '../components/PageHeader';
 import { useAuth } from '../contexts/AuthContext';
-import { GET_MY_ACCOUNT } from '../lib/graphql';
-
-interface Account {
-  isAdmin: boolean;
-}
 
 export const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { logout } = useAuth();
-
-  // Only query for isAdmin to show/hide Admin Console button
-  const { data: accountData } = useQuery<{ getMyAccount: Account }>(GET_MY_ACCOUNT);
-  const account = accountData?.getMyAccount;
+  // Admin status comes from the Cognito JWT cognito:groups claim via AuthContext,
+  // not from GET_MY_ACCOUNT (the Account type has no isAdmin field).
+  const { logout, isAdmin } = useAuth();
 
   const handleLogout = () => {
     void logout()
@@ -69,7 +61,7 @@ export const SettingsPage: React.FC = () => {
           >
             Payment Methods
           </Button>
-          {account?.isAdmin && (
+          {isAdmin && (
             <Button
               variant="outlined"
               color="error"

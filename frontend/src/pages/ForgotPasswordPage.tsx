@@ -164,6 +164,15 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     return true;
   };
 
+  const requestResetCode = async (trimmedEmail: string): Promise<boolean> => {
+    try {
+      await resetPassword({ username: trimmedEmail });
+      return false;
+    } catch (err: unknown) {
+      return handleRequestError(err);
+    }
+  };
+
   const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -176,16 +185,14 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     }
 
     setLoading(true);
-    try {
-      await resetPassword({ username: trimmedEmail });
-    } catch (err: unknown) {
-      if (handleRequestError(err)) {
-        setLoading(false);
-        return;
-      }
+    const failed = await requestResetCode(trimmedEmail);
+    if (failed) {
+      setLoading(false);
+      return;
     }
     setCodeSent(true);
     setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
+    startResendCooldown();
     setLoading(false);
   };
 
@@ -202,15 +209,14 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     }
 
     setLoading(true);
-    try {
-      await resetPassword({ username: trimmedEmail });
-      setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
-      startResendCooldown();
-    } catch (err: unknown) {
-      handleRequestError(err);
-    } finally {
+    const failed = await requestResetCode(trimmedEmail);
+    if (failed) {
       setLoading(false);
+      return;
     }
+    setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
+    startResendCooldown();
+    setLoading(false);
   };
 
   const handleConfirmReset = async (e: React.FormEvent) => {
