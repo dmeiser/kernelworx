@@ -52,6 +52,23 @@ describe('usePasswordChange', () => {
     expect(amplifyAuth.updatePassword).not.toHaveBeenCalled();
   });
 
+  it('rejects mismatched passwords', async () => {
+    const { result } = renderHook(() => usePasswordChange());
+
+    act(() => {
+      result.current.setCurrentPassword('oldpassword123!');
+      result.current.setNewPassword('ValidPass1234!@#');
+      result.current.setConfirmPassword('DifferentPass1234!@#');
+    });
+
+    await act(async () => {
+      await result.current.handlePasswordChange({ preventDefault: () => {} } as any);
+    });
+
+    expect(result.current.passwordError).toBe('New passwords do not match');
+    expect(amplifyAuth.updatePassword).not.toHaveBeenCalled();
+  });
+
   it('accepts a valid password and calls updatePassword', async () => {
     vi.mocked(amplifyAuth.updatePassword).mockResolvedValue(undefined as any);
     const { result } = renderHook(() => usePasswordChange());
