@@ -1,49 +1,121 @@
 /**
  * Regression tests for issue #719
- *
- * CatalogPreviewPage must not construct 'CATALOG#undefined' when the
- * catalogId route param is missing; it should render the NoCatalogIdState
- * and must not write debug keys to localStorage.
  */
 
 import '@testing-library/jest-dom';
 import { describe, it, expect } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
+import type { MockedResponse } from '@apollo/client/testing';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { GET_CATALOG } from '../src/lib/graphql';
 import { CatalogPreviewPage } from '../src/pages/CatalogPreviewPage';
+
+const CATALOG = {
+  __typename: 'Catalog',
+  catalogId: 'CATALOG#abc',
+  catalogName: 'Preview Catalog',
+  catalogType: 'USER_CREATED',
+  isPublic: false,
+  products: [
+    {
+      __typename: 'Product',
+      productId: 'p1',
+      productName: 'Widget',
+      description: 'A widget',
+      price: 1.25,
+      sortOrder: 1,
+    },
+  ],
+  createdAt: '2024-01-01T00:00:00Z',
+  updatedAt: '2024-01-01T00:00:00Z',
+};
+
+function renderPage(path: string, mocks: MockedResponse[]) {
+  return render(
+    <MockedProvider mocks={mocks}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/catalogs/:catalogId?/preview" element={<CatalogPreviewPage />} />
+        </Routes>
+      </MemoryRouter>
+    </MockedProvider>,
+  );
+}
 
 describe('CatalogPreviewPage', () => {
   it('renders NoCatalogIdState when catalogId param is missing', async () => {
-    render(
-      <MockedProvider mocks={[]}>
-        <MemoryRouter initialEntries={['/catalogs/preview']}>
-          <Routes>
-            <Route path="/catalogs/:catalogId?/preview" element={<CatalogPreviewPage />} />
-          </Routes>
-        </MemoryRouter>
-      </MockedProvider>,
-    );
+    renderPage('/catalogs/preview', []);
 
     await waitFor(() => {
       expect(screen.getByText('No catalog ID provided')).toBeInTheDocument();
     });
   });
 
-  it('does not issue a query with CATALOG#undefined when param missing', async () => {
-    render(
-      <MockedProvider mocks={[]}>
-        <MemoryRouter initialEntries={['/catalogs/preview']}>
-          <Routes>
-            <Route path="/catalogs/:catalogId?/preview" element={<CatalogPreviewPage />} />
-          </Routes>
-        </MemoryRouter>
-      </MockedProvider>,
-    );
+  it('renders catalog details when param provided', async () => {
+    const mocks: MockedResponse[] = [
+      {
+        request: { query: GET_CATALOG, variables: { catalogId: 'CATALOG#abc' } },
+        result: { data: { getCatalog: CATALOG } },
+      },
+    ];
+
+    renderPage('/catalogs/abc/preview', mocks);
 
     await waitFor(() => {
-      expect(screen.getByText('No catalog ID provided')).toBeInTheDocument();
+      expect(screen.getByText('Preview Catalog')).toBeInTheDocument();
     });
-    // No unhandled GraphQL request should have been made; success of render is enough.
+    expect(screen.getByText('Widget')).toBeInTheDocument();
+    expect(screen.getByText('$1.25')).toBeInTheDocument();
+  });
+
+  it('shows not found when catalog missing', async () => {
+    const mocks: MockedResponse[] = [
+      {
+        request: { query: GET_CATALOG, variables: { catalogId: 'CATALOG#abc' } },
+        result: { data: { getCatalog: null } },
+      },
+    ];
+
+    renderPage('/catalogs/abc/preview', mocks);
+
+    await waitFor(() => {
+      expect(screen.getByText('Catalog not found')).toBeInTheDocument();
+    });
+  });
+
+  it('shows error alert on query error', async () => {
+    const mocks: MockedResponse[] = [
+      {
+        request: { query: GET_CATALOG, variables: { catalogId: 'CATALOG#abc' } },
+        error: new Error('boom'),
+      },
+    ];
+
+    renderPage('/catalogs/abc/preview', mocks);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Error loading catalog/)).toBeInTheDocument();
+    });
+  });
+
+  it('handles create campaign button', async () => {
+    const mocks: MockedResponse[] = [
+      {
+        request: { query: GET_CATALOG, variables: { catalogId: 'CATALOG#abc' } },
+        result: { data: { getCatalog: CATALOG } },
+      },
+    ];
+
+    renderPage('/catalogs/abc/preview', mocks);
+
+    await waitFor(() => {
+      expect(screen.getByText('Preview Catalog')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    const buttons = screen.getAllByRole('button', { name: /Create Campaign/i });
+    await user.click(buttons[0]);
   });
 });
