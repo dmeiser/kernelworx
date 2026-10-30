@@ -160,4 +160,21 @@ describe('LoginPage redirect preservation', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/home', { replace: true });
     });
   });
+
+  it('does not write oauth_redirect when social login has no preserved target', async () => {
+    vi.mocked(signInWithRedirect).mockResolvedValue();
+
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue with Google/i }));
+
+    await waitFor(() => {
+      expect(sessionStorage.getItem('oauth_redirect')).toBeNull();
+      expect(signInWithRedirect).toHaveBeenCalledWith({ provider: 'Google' });
+    });
+  });
 });
