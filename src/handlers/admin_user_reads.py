@@ -278,6 +278,12 @@ def admin_get_user_shared_campaigns(event: Dict[str, Any], context: Any) -> list
     # field resolver short-circuits instead of doing per-item GetItem reads (#332).
     _batch_get_campaign_catalogs(campaigns, treat_deleted_as_null=True, logger=logger)
 
+    # Normalize createdBy: strip ACCOUNT# prefix for GraphQL ID type (#737)
+    for campaign in campaigns:
+        created_by = campaign.get("createdBy")
+        if isinstance(created_by, str):
+            campaign["createdBy"] = created_by.removeprefix("ACCOUNT#")
+
     logger.info(
         "Retrieved user shared campaigns",
         account_id=account_id,
