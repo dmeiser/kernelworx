@@ -338,4 +338,19 @@ describe('CreateSharedCampaignPage', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(mockNavigate).toHaveBeenCalledWith(-1);
   });
+
+  it('creates even when the server returns no campaign payload', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([...baseMocks(), { request: createdMock.request, result: { data: { createSharedCampaign: null } } }]);
+
+    await pickCatalog(user);
+    await fillRequiredFields(user);
+    await pickUnitType(user);
+    fireEvent.change(screen.getByLabelText(/Start Date/), { target: { value: '2026-08-01' } });
+    fireEvent.change(screen.getByLabelText(/End Date/), { target: { value: '2026-10-31' } });
+
+    await waitFor(() => expect(submit()).toBeEnabled());
+    await user.click(submit());
+    await new Promise((r) => setTimeout(r, 100));
+  });
 }, 30000); // MUI Select interactions are slow under a loaded parallel run
