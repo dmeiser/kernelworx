@@ -115,7 +115,83 @@ describe('CatalogPreviewPage', () => {
     });
 
     const user = userEvent.setup();
-    const buttons = screen.getAllByRole('button', { name: /Create Campaign/i });
-    await user.click(buttons[0]);
+    const createButtons = screen.getAllByRole('button', { name: /Create Campaign/i });
+    await user.click(createButtons[0]);
+  });
+
+  it('handles create shared campaign button', async () => {
+    const mocks: MockedResponse[] = [
+      {
+        request: { query: GET_CATALOG, variables: { catalogId: 'CATALOG#abc' } },
+        result: { data: { getCatalog: CATALOG } },
+      },
+    ];
+
+    renderPage('/catalogs/abc/preview', mocks);
+
+    await waitFor(() => {
+      expect(screen.getByText('Preview Catalog')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    const sharedButtons = screen.getAllByRole('button', { name: /Create Shared Campaign/i });
+    await user.click(sharedButtons[0]);
+  });
+
+  it('invokes onCreateCampaign and onCreateSharedCampaign callbacks', async () => {
+    const mocks: MockedResponse[] = [
+      {
+        request: { query: GET_CATALOG, variables: { catalogId: 'CATALOG#abc' } },
+        result: { data: { getCatalog: CATALOG } },
+      },
+    ];
+
+    render(
+      <MockedProvider mocks={mocks}>
+        <MemoryRouter initialEntries={['/catalogs/abc/preview']}>
+          <Routes>
+            <Route
+              path="/catalogs/:catalogId?/preview"
+              element={
+                <CatalogPreviewPage
+                  onCreateCampaign={() => undefined}
+                  onCreateSharedCampaign={() => undefined}
+                />
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </MockedProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Preview Catalog')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    const createButtons = screen.getAllByRole('button', { name: /Create Campaign/i });
+    await user.click(createButtons[0]);
+
+    const sharedButtons = screen.getAllByRole('button', { name: /Create Shared Campaign/i });
+    await user.click(sharedButtons[0]);
+  });
+
+  it('handles back button', async () => {
+    const mocks: MockedResponse[] = [
+      {
+        request: { query: GET_CATALOG, variables: { catalogId: 'CATALOG#abc' } },
+        result: { data: { getCatalog: CATALOG } },
+      },
+    ];
+
+    renderPage('/catalogs/abc/preview', mocks);
+
+    await waitFor(() => {
+      expect(screen.getByText('Preview Catalog')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    const backButton = screen.getByRole('button', { name: /Back/i });
+    await user.click(backButton);
   });
 });
