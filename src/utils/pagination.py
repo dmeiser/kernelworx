@@ -23,15 +23,17 @@ logger = get_logger(__name__)
 # the others (#557).
 MAX_RETRY_ATTEMPTS: int = 3
 BASE_BACKOFF_SECONDS: float = 0.05
-_THROUGHPUT_ERROR: str = "ProvisionedThroughputExceededException"
-
-
 def _is_throughput_error(exc: BaseException) -> bool:
-    """Return True if the exception is a DynamoDB throughput error."""
+    """Return True if the exception is a retryable DynamoDB throttling error."""
     response = getattr(exc, "response", None)
     if not isinstance(response, dict):
         return False
-    return bool(response.get("Error", {}).get("Code") == _THROUGHPUT_ERROR)
+    # Import lazily to avoid a circular import (dynamodb.py imports retry
+    # constants from this module). Reuse the shared, authoritative classifier
+    # so the retry set here cannot drift from the rest of the codebase.
+    from .dynamodb import is_transient_client_error
+
+    return is_transient_client_error(exc)  # type: ignore[arg-type]
 
 
 def _calculate_backoff(attempt: int) -> float:
@@ -51,8 +53,8 @@ def _call_with_retry(
             return method(**kwargs)
         except ClientError as exc:
             if _is_throughput_error(exc) and attempt < MAX_RETRY_ATTEMPTS:
-                attempt += 1
                 backoff = _calculate_backoff(attempt)
+                attempt += 1
                 logger.warning(
                     f"DynamoDB {log_label} throttled, retrying",
                     attempt=attempt,
