@@ -43,5 +43,16 @@ describe('validate_update_payment_method_fn stash handoff', () => {
         };
         // Reserved new name is rejected in request.
         assert.throws(() => request(ctx), /INVALID_INPUT/);
+    it('stashes the existing QR code URL for the renamed method', () => {
+        const ctx = makeCtx('Venmo', 'Zelle', [
+            { name: 'Venmo', qrCodeUrl: 'payment-qr-codes/user-123/method.png' },
+            { name: 'PayPal' },
+        ]);
+
+        response(ctx);
+
+        assert.strictEqual(ctx.stash.existingQrCodeUrl, 'payment-qr-codes/user-123/method.png');
+    });
+
     });
 });
