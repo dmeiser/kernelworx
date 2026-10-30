@@ -11,6 +11,7 @@ EXTRA_FLAGS=("$@")
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+PROJECT_ROOT="$ROOT_DIR"
 ENV_DIR="$SCRIPT_DIR/../environments/$ENV"
 
 LAYER_DIR="$ROOT_DIR/.build/lambda-layer"
@@ -78,6 +79,18 @@ plan_is_fresh() {
 }
 
 main() {
+    if [[ ! -d "$ENV_DIR" ]]; then
+        echo "❌ Unknown environment directory: $ENV_DIR"
+        exit 1
+    fi
+    case "$ACTION" in
+        init|plan|apply|destroy|validate|fmt) ;;
+        *)
+            echo "Usage: $0 <env> <init|plan|apply|destroy|validate|fmt> [extra-flags]"
+            exit 1
+            ;;
+    esac
+
     cd "$ENV_DIR"
 
     echo ""
@@ -120,6 +133,7 @@ main() {
             tofu apply "${AUTO_APPROVE_FLAGS[@]}" "${EXTRA_FLAGS[@]}" tfplan
             rm tfplan
         fi
+        "${PROJECT_ROOT}/scripts/appsync-ensure-resolver-order.sh"
         ;;
     destroy)
         echo "⚠️  Are you sure? This will destroy all resources!"
