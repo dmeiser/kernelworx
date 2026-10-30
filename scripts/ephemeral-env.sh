@@ -189,6 +189,14 @@ case "$ACTION" in
     ;;
 
   env)
+    # Re-init before reading output: the workspace's saved backend-config may point
+    # at another run-id's state (or at nothing), so `tofu output` would fail or read
+    # the wrong stack. -reconfigure points the backend at this run's own state
+    # object; no state migration. Same init the `up` and `down` branches run.
+    tofu init -input=false -reconfigure \
+      -backend-config="key=$STATE_KEY" \
+      -backend-config="bucket=$STATE_BUCKET" \
+      -backend-config="region=$STATE_REGION"
     TEST_REGION="${AWS_REGION:-us-east-1}"
     COGNITO_DOMAIN=$(tofu output -raw cognito_domain)
     APPSYNC_API_KEY=$(tofu output -raw appsync_api_key 2>/dev/null) || true
