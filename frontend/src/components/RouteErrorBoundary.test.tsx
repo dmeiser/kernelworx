@@ -107,3 +107,20 @@ describe('isChunkLoadError', () => {
     expect(isChunkLoadError(new Error('Test route error'))).toBe(false);
   });
 });
+
+
+describe('RouteErrorBoundary componentDidCatch', () => {
+  it('skips the chunk-load log for non-chunk errors', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const instance = new (RouteErrorBoundary as any)({ children: null });
+
+    instance.componentDidCatch(new Error('ordinary runtime error'), {} as React.ErrorInfo);
+
+    const loggedChunkError = consoleError.mock.calls.some(
+      (call) => call[0] === 'Route chunk load error:',
+    );
+    expect(loggedChunkError).toBe(false);
+
+    consoleError.mockRestore();
+  });
+});
