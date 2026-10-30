@@ -10,9 +10,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act, renderHook } from '@testing-library/react';
 import { Hub } from 'aws-amplify/utils';
-import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth';
+import { fetchAuthSession, getCurrentUser, signIn } from 'aws-amplify/auth';
 import type { AuthSession } from 'aws-amplify/auth';
 import { apolloClient } from '../lib/apollo';
 import { AuthProvider, useAuth } from './AuthContext';
@@ -91,5 +91,26 @@ describe('AuthProvider signedIn auth event', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.getByTestId('auth')).toHaveTextContent('false');
+  });
+
+  it('deduplicates concurrent checkAuthSession() calls on password login (#741)', async () => {
+    sessionHasTokens = true;
+    vi.mocked(signIn).mockImplementation(async () => {
+      Hub.dispatch('auth', { event: 'signedIn' }, 'Auth');
+      return { isSignedIn: true } as unknown as any;
+    });
+
+    const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    vi.mocked(fetchAuthSession).mockClear();
+
+    await act(async () => {
+      await result.current.loginWithPassword('test@example.com', 'password123');
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(vi.mocked(fetchAuthSession)).toHaveBeenCalledTimes(1);
   });
 });
