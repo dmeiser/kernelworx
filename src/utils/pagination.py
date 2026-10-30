@@ -23,6 +23,8 @@ logger = get_logger(__name__)
 # the others (#557).
 MAX_RETRY_ATTEMPTS: int = 3
 BASE_BACKOFF_SECONDS: float = 0.05
+
+
 def _is_throughput_error(exc: BaseException) -> bool:
     """Return True if the exception is a retryable DynamoDB throttling error."""
     response = getattr(exc, "response", None)
