@@ -162,6 +162,26 @@ const EMPTY_UNIT_REPORT = {
   sellers: [],
 };
 
+const ZERO_TOTAL_REPORT = {
+  __typename: 'UnitReport' as const,
+  unitType: 'Troop',
+  unitNumber: 101,
+  campaignName: 'Fall Fundraiser',
+  campaignYear: 2025,
+  totalSales: 0,
+  totalOrders: 1,
+  sellers: [
+    {
+      __typename: 'UnitSellerSummary' as const,
+      profileId: 'profile-a',
+      sellerName: 'Scout Zero',
+      totalSales: 0,
+      orderCount: 1,
+      orders: [],
+    },
+  ],
+};
+
 function createMocks(report = UNIT_REPORT, campaigns = [TEST_CAMPAIGN]): MockedResponse[] {
   return [
     {
@@ -298,6 +318,19 @@ describe('CampaignReportsPage XLSX formula injection sanitization and report vie
     const safeRow = rows.find((row) => row[0] === SAFE_SELLER_NAME);
     expect(safeRow).toBeDefined();
     expect(safeRow![1]).toBe('Plain Customer');
+  });
+
+  test('renders zero-total campaign without NaN or %NaN in unit summary', async () => {
+    const user = userEvent.setup();
+    renderPage(createMocks(ZERO_TOTAL_REPORT));
+
+    const generateButton = await screen.findByRole('button', { name: /Generate Report/i });
+    await waitFor(() => expect(generateButton).not.toBeDisabled());
+    await user.click(generateButton);
+
+    await screen.findByText('Unit Overview');
+    expect(screen.queryByText(/NaN/i)).not.toBeInTheDocument();
+    expect(screen.getByText('0.0%')).toBeInTheDocument();
   });
 
   test('renders empty state when no active shared campaigns exist', async () => {
