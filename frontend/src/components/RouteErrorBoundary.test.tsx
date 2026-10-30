@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { RouteErrorBoundary } from './RouteErrorBoundary';
 
 const ThrowingChild: React.FC = () => {
-  throw new Error('Test route error');
+  throw new Error('Failed to fetch dynamically imported module');
 };
 
 describe('RouteErrorBoundary', () => {
@@ -34,7 +34,6 @@ describe('RouteErrorBoundary', () => {
 
     expect(screen.getByText(/This page failed to load/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /reload page/i })).toBeInTheDocument();
-    expect(screen.getByText('Test route error')).toBeInTheDocument();
 
     consoleError.mockRestore();
   });
@@ -56,6 +55,31 @@ describe('RouteErrorBoundary', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /reload page/i }));
     expect(reloadMock).toHaveBeenCalled();
+
+    consoleError.mockRestore();
+  });
+});
+
+import { ErrorBoundary } from './ErrorBoundary';
+
+describe('RouteErrorBoundary non-chunk errors', () => {
+  it('lets non-chunk runtime errors fall through to the outer ErrorBoundary without exposing raw text', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const NonChunkThrowingChild: React.FC = () => {
+      throw new Error('Sensitive internal details');
+    };
+
+    render(
+      <ErrorBoundary>
+        <RouteErrorBoundary>
+          <NonChunkThrowingChild />
+        </RouteErrorBoundary>
+      </ErrorBoundary>,
+    );
+
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    expect(screen.queryByText(/This page failed to load/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Sensitive internal details')).not.toBeInTheDocument();
 
     consoleError.mockRestore();
   });
