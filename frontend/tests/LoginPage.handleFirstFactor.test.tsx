@@ -72,6 +72,31 @@ describe('LoginPage handleFirstFactorSelection', () => {
       expect(screen.getByLabelText(/mfa code/i)).toBeInTheDocument();
     });
   });
+
+  it('falls through applyLoginAction when confirmSignIn returns first-factor-selection again', async () => {
+    const user = userEvent.setup();
+    vi.mocked(amplifyAuth.signIn).mockResolvedValue({
+      isSignedIn: false,
+      nextStep: { signInStep: 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION' },
+    } as any);
+    vi.mocked(amplifyAuth.confirmSignIn).mockResolvedValue({
+      isSignedIn: false,
+      nextStep: { signInStep: 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION' },
+    } as any);
+
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+
+    await user.type(screen.getByLabelText(/email/i), 'test@example.com');
+    await user.click(screen.getByRole('button', { name: /sign in with passkey/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /sign in with passkey/i })).not.toBeDisabled();
+    });
+  });
 });
 
 import { renderHook, act } from '@testing-library/react';
