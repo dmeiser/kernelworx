@@ -757,6 +757,28 @@ class TestAdminListUsers:
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
             assert "Failed to list users" in result["message"]
+            assert "Failed to list users" in result["message"]
+
+    def test_cognito_list_users_transient_error(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        event = {**admin_appsync_event, "arguments": {}}
+        with patch("src.handlers.admin_user_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "ListUsers",
+            )
+            mock_get_client.return_value = mock_cognito
+            with patch("time.sleep"):
+                result = admin_list_users(event, lambda_context)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
 
     def test_group_lookup_error_handled_gracefully(
         self,
@@ -1122,6 +1144,30 @@ class TestAdminResetUserPassword:
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
+    def test_cognito_list_users_transient_error(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "test@example.com"},
+        }
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "ListUsers",
+            )
+            mock_get_client.return_value = mock_cognito
+            with patch("time.sleep"):
+                result = admin_reset_user_password(event, lambda_context)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+
     def test_cognito_reset_user_not_found(
         self,
         dynamodb_table: Any,
@@ -1150,6 +1196,31 @@ class TestAdminResetUserPassword:
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.NOT_FOUND
+
+    def test_cognito_reset_user_transient_error(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "test@example.com"},
+        }
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
+            mock_cognito.admin_reset_user_password.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "AdminResetUserPassword",
+            )
+            mock_get_client.return_value = mock_cognito
+            with patch("time.sleep"):
+                result = admin_reset_user_password(event, lambda_context)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
 
     def test_cognito_invalid_parameter_exception(
         self,
