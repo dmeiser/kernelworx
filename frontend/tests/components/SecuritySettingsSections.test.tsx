@@ -59,7 +59,7 @@ const createMockPasskeyHook = (overrides?: Partial<UsePasskeysReturn>): UsePassk
 describe('MfaSection', () => {
   it('renders coexistence messaging and does not render conflict warnings', () => {
     const mfaHook = createMockMfaHook();
-    render(<MfaSection mfaHook={mfaHook} passkeyCount={2} onSetupMFA={vi.fn()} />);
+    render(<MfaSection mfaHook={mfaHook} onSetupMFA={vi.fn()} />);
 
     // Should indicate both are supported together
     expect(screen.getByText(/Both an authenticator app and passkeys are supported together/i)).toBeInTheDocument();
@@ -109,7 +109,7 @@ describe('MfaSection', () => {
 describe('PasskeySection', () => {
   it('renders coexistence messaging and does not render conflict warnings', () => {
     const passkeyHook = createMockPasskeyHook();
-    render(<PasskeySection passkeyHook={passkeyHook} mfaEnabled={true} onRegisterPasskey={vi.fn()} />);
+    render(<PasskeySection passkeyHook={passkeyHook} onRegisterPasskey={vi.fn()} />);
 
     // Should indicate both are supported together
     expect(screen.getAllByText(/Both an authenticator app and passkeys are supported together/i).length).toBeGreaterThan(0);

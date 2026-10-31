@@ -137,10 +137,10 @@ describe('OrdersPage row and header actions', () => {
     ui.unmount();
   });
 
-  it('deletes behind window.confirm and refetches the list', async () => {
-    vi.stubGlobal('confirm', () => true);
+  it('deletes through ConfirmDialog and refetches the list', async () => {
     const { ui, state } = makeHarness();
     await userEvent.click(await screen.findByRole('button', { name: 'Delete order for Public Buyer' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(state.deleteCalls).toBe(1));
     // The delete's onCompleted refetch drives the empty state, not a local splice.
     await waitFor(() => expect(screen.getByText(/No orders yet/)).toBeInTheDocument());
@@ -148,10 +148,10 @@ describe('OrdersPage row and header actions', () => {
     ui.unmount();
   });
 
-  it('sends no delete when the browser confirm is declined', async () => {
-    vi.stubGlobal('confirm', () => false);
+  it('sends no delete when the ConfirmDialog is cancelled', async () => {
     const { ui, state } = makeHarness();
     await userEvent.click(await screen.findByRole('button', { name: 'Delete order for Public Buyer' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.getByText('Public Buyer')).toBeInTheDocument());
     expect(state.deleteCalls).toBe(0);
     ui.unmount();
