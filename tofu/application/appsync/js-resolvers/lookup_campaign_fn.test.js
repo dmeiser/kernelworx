@@ -40,6 +40,15 @@ describe('lookup_campaign_fn request', () => {
             ':campaignId': 'CAMPAIGN#c2',
         });
     });
+
+    // #717: the GSI key is the DB form, so an unprefixed campaignId matched nothing.
+    it('normalizes an unprefixed campaignId to the DB form', () => {
+        const result = request({ args: { campaignId: 'c1' } });
+
+        assert.deepStrictEqual(result.query.expressionValues, {
+            ':campaignId': 'CAMPAIGN#c1',
+        });
+    });
 });
 
 describe('lookup_campaign_fn response', () => {
