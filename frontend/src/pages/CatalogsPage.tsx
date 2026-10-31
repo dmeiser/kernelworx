@@ -100,10 +100,6 @@ interface CatalogActionsProps {
 
 const CatalogActions: React.FC<CatalogActionsProps> = ({ catalog, isOwned, onEdit, onDelete, onView }) => {
   const handleViewClick = () => {
-    localStorage.setItem(
-      'lastViewClicked',
-      JSON.stringify({ catalogId: catalog.catalogId, timestamp: new Date().toISOString() }),
-    );
     onView(catalog.catalogId);
   };
 
