@@ -36,12 +36,7 @@ if [ -z "$TF_VAR_google_client_id" ] || [ -z "$TF_VAR_google_client_secret" ]; t
 fi
 
 build_lambda_layer() {
-    echo "📦 Building Lambda layer dependencies (prod-only)..."
-    rm -rf "$LAYER_DIR"
-    mkdir -p "$LAYER_DIR/python"
-
-    (cd "$ROOT_DIR" && uv export --no-dev --format requirements.txt --no-hashes > "$LAYER_REQ")
-    (cd "$ROOT_DIR" && uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python")
+    "$ROOT_DIR/scripts/build-lambda-layer.sh"
 }
 
 # Tofu reads resolver code from the esbuild bundle; regenerate it so init/plan/apply
