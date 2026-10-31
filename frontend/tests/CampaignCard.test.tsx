@@ -31,8 +31,6 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Fall 2025 Popcorn Sale"
           campaignYear={2025}
-          startDate="2025-09-01T00:00:00Z"
-          endDate="2025-11-30T00:00:00Z"
           totalOrders={25}
           totalRevenue={1250.5}
         />
@@ -50,8 +48,6 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Fall Sale"
           campaignYear={2025}
-          startDate="2025-09-01T00:00:00Z"
-          endDate="2025-11-30T00:00:00Z"
         />
       </BrowserRouter>,
     );
@@ -60,29 +56,7 @@ describe('CampaignCard', () => {
     expect(screen.getByText('Fall Sale 2025')).toBeInTheDocument();
   });
 
-  test('renders with startDate prop even though dates are not displayed', () => {
-    // CampaignCard accepts startDate but doesn't display it (simplified card view)
-    render(
-      <BrowserRouter>
-        <CampaignCard
-          campaignId="campaign-123"
-          profileId="profile-789"
-          campaignName="Ongoing Sale"
-          campaignYear={2025}
-          startDate="2025-09-01T00:00:00Z"
-        />
-      </BrowserRouter>,
-    );
-
-    // Component should render without error
-    expect(screen.getByText('Ongoing Sale 2025')).toBeInTheDocument();
-  });
-
-  test('shows Active badge for ongoing campaign', () => {
-    // Future end date
-    const futureDate = new Date();
-    futureDate.setFullYear(futureDate.getFullYear() + 1);
-
+  test('shows Active badge by default, driven by isActive rather than the end date', () => {
     render(
       <BrowserRouter>
         <CampaignCard
@@ -90,16 +64,15 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Active Sale"
           campaignYear={2025}
-          startDate="2025-01-01T00:00:00Z"
-          endDate={futureDate.toISOString()}
         />
       </BrowserRouter>,
     );
 
     expect(screen.getByText('Active Sale 2025')).toBeInTheDocument();
+    expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
-  test('shows Active badge when no end date provided', () => {
+  test('shows Active badge when isActive is explicitly true', () => {
     render(
       <BrowserRouter>
         <CampaignCard
@@ -107,17 +80,16 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Ongoing Sale"
           campaignYear={2025}
-          startDate="2025-01-01T00:00:00Z"
+          isActive
         />
       </BrowserRouter>,
     );
 
     expect(screen.getByText('Ongoing Sale 2025')).toBeInTheDocument();
+    expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
-  test('does not show Active badge for past campaign', () => {
-    const pastDate = new Date('2020-01-01T00:00:00Z');
-
+  test('does not show Active badge for a deactivated campaign, even without a past end date', () => {
     render(
       <BrowserRouter>
         <CampaignCard
@@ -125,8 +97,7 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Past Sale"
           campaignYear={2025}
-          startDate="2019-09-01T00:00:00Z"
-          endDate={pastDate.toISOString()}
+          isActive={false}
         />
       </BrowserRouter>,
     );
@@ -143,7 +114,6 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Sale"
           campaignYear={2025}
-          startDate="2025-01-01T00:00:00Z"
           totalOrders={1}
         />
       </BrowserRouter>,
@@ -160,7 +130,6 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Sale"
           campaignYear={2025}
-          startDate="2025-01-01T00:00:00Z"
           totalOrders={42}
         />
       </BrowserRouter>,
@@ -177,7 +146,6 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Sale"
           campaignYear={2025}
-          startDate="2025-01-01T00:00:00Z"
         />
       </BrowserRouter>,
     );
@@ -193,7 +161,6 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Sale"
           campaignYear={2025}
-          startDate="2025-01-01T00:00:00Z"
           totalRevenue={1234.567}
         />
       </BrowserRouter>,
@@ -210,7 +177,6 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Sale"
           campaignYear={2025}
-          startDate="2025-01-01T00:00:00Z"
         />
       </BrowserRouter>,
     );
@@ -228,7 +194,6 @@ describe('CampaignCard', () => {
           profileId="profile-789"
           campaignName="Sale"
           campaignYear={2025}
-          startDate="2025-01-01T00:00:00Z"
         />
       </BrowserRouter>,
     );
