@@ -226,7 +226,6 @@ export const UserSettingsPage: React.FC = () => {
       {/* Multi-Factor Authentication Section */}
       <MfaSection
         mfaHook={mfaHook}
-        passkeyCount={passkeyHook.passkeys.length}
         onSetupMFA={handleSetupMFA}
         isAdmin={isAdmin}
       />
@@ -234,7 +233,6 @@ export const UserSettingsPage: React.FC = () => {
       {/* Passkeys Section */}
       <PasskeySection
         passkeyHook={passkeyHook}
-        mfaEnabled={mfaHook.mfaEnabled}
         onRegisterPasskey={handleRegisterPasskey}
         isAdmin={isAdmin}
       />
