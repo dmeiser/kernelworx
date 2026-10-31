@@ -24,8 +24,10 @@ jobs:
     steps:
       - name: Export production E2E base URL
         id: export
+        env:
+          E2E_BASE_URL_PROD: ${{ vars.E2E_BASE_URL_PROD }}
         run: |
-          e2e_url="${{ vars.E2E_BASE_URL_PROD }}"
+          e2e_url="${E2E_BASE_URL_PROD}"
           if [ -z "$e2e_url" ]; then
             echo "E2E_BASE_URL_PROD is not set in the production environment. Set it to the production app URL before running smoke tests."
             exit 1
