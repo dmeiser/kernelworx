@@ -1,7 +1,8 @@
 import { util } from '@aws-appsync/utils';
 import { validatePhone, validateAddress } from './lib/validation.js';
-import { normalizeId, stripIdPrefix } from './lib/ids.js';
+import { normalizeId } from './lib/ids.js';
 import { enrichLineItems } from './lib/line_items.js';
+import { buildOrderKey } from './lib/order_keys.js';
 
 function validateCustomer(input) {
     if (!input.customerName || (typeof input.customerName === 'string' && !input.customerName.trim())) {
@@ -80,8 +81,10 @@ export function request(ctx) {
 
     const totalAmount = totalAmountCents / 100;
 
-    const campaignIdWithoutPrefix = stripIdPrefix(campaignId, 'CAMPAIGN#');
-    const orderId = `ORDER#${campaignIdWithoutPrefix}#${util.autoId()}`;
+    // The ORDER#<campaign without prefix>#<suffix> grammar has one owner
+    // (#534): lib/order_keys.js buildOrderKey, the exact shape parseOrderKey
+    // and parseEmbeddedCampaignId read back.
+    const orderId = buildOrderKey(campaignId, util.autoId());
     const now = util.time.nowISO8601();
 
     const orderItem = {
