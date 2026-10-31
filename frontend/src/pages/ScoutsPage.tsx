@@ -144,13 +144,33 @@ const SharedProfilesSection: React.FC<{
 const shouldShowEmptyState = (myProfiles: Profile[], filteredSharedProfiles: Profile[], loading: boolean): boolean =>
   myProfiles.length === 0 && filteredSharedProfiles.length === 0 && !loading;
 
-// Helper to build preferences update variables
+// Helper to build preferences update variables from the live blob
 const buildPreferencesVariables = (preferences: { showReadOnlyProfiles: boolean }, newChecked: boolean) => ({
   preferences: JSON.stringify({
     ...preferences,
     showReadOnlyProfiles: newChecked,
   }),
 });
+
+// Helper to read the live preferences blob from the Apollo cache rather than
+// the possibly-default memo, so a toggle can never overwrite keys it never
+// saw (e.g. paymentMethods added before getMyAccount resolved) (#510).
+const readLivePreferences = (
+  apolloClient: ReturnType<typeof useApolloClient>,
+  fallback: { showReadOnlyProfiles: boolean },
+): { showReadOnlyProfiles: boolean } => {
+  try {
+    const data = apolloClient.readQuery<{ getMyAccount?: { preferences?: string } }>({
+      query: GET_MY_ACCOUNT,
+    });
+    if (data?.getMyAccount) {
+      return parsePreferences(data.getMyAccount.preferences);
+    }
+  } catch {
+    // Cache read failed (e.g. partial cache) — fall back to the memo.
+  }
+  return fallback;
+};
 
 // Helper to check if should open dialog on return path
 const shouldAutoOpenDialog = (returnPath: string | undefined, createDialogOpen: boolean): boolean =>
@@ -376,14 +396,17 @@ export const ScoutsPage: React.FC = () => {
   // Update preferences mutation
   const [updatePreferences] = useMutation(UPDATE_MY_PREFERENCES);
 
+  // Apollo client for cache reads (declared before handlers that use it)
+  const apolloClient = useApolloClient();
+
   // Save preference to DynamoDB when it changes
   const handleToggleReadOnly = async (checked: boolean) => {
-    await updatePreferencesWithRollback(updatePreferences, preferences, checked, setShowReadOnlyProfiles);
+    const livePreferences = readLivePreferences(apolloClient, preferences);
+    await updatePreferencesWithRollback(updatePreferences, livePreferences, checked, setShowReadOnlyProfiles);
   };
 
   // Fetch owned profiles. listMyProfiles is server-side paginated (capped
   // pages, #328), so walk every nextToken page to get the full set.
-  const apolloClient = useApolloClient();
   const [myProfiles, setMyProfiles] = useState<Profile[]>([]);
   const [myProfilesLoaded, setMyProfilesLoaded] = useState(false);
   const [myProfilesLoading, setMyProfilesLoading] = useState(false);
@@ -508,6 +531,7 @@ export const ScoutsPage: React.FC = () => {
                   onChange={(e) => {
                     void handleToggleReadOnly(e.target.checked);
                   }}
+                  disabled={!accountData?.getMyAccount}
                   size="small"
                 />
               }
