@@ -304,6 +304,9 @@ const useMfaSetupFlow = (open: boolean, isFederatedProp?: boolean, onSuccess?: (
   useEffect(() => {
     if (!open) {
       hasFetchedRef.current = false;
+      setVerificationCode('');
+      setError(null);
+      setSuccess(false);
       return;
     }
 
@@ -316,13 +319,19 @@ const useMfaSetupFlow = (open: boolean, isFederatedProp?: boolean, onSuccess?: (
       return;
     }
 
+    let mounted = true;
     void checkIsFederatedSession().then((federated) => {
+      if (!mounted) return;
       setIsFederated(federated);
       if (!federated && !hasFetchedRef.current) {
         hasFetchedRef.current = true;
         void fetchTotpSetup(setSharedSecret, setOtpauthUrl, setQrCodeUrl, setError, setLoading);
       }
     });
+
+    return () => {
+      mounted = false;
+    };
   }, [open, isFederatedProp]);
 
   const handleVerify = useCallback(async () => {
