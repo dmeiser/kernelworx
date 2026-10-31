@@ -27,6 +27,7 @@ import { useNavigate, type NavigateFunction } from 'react-router-dom';
 import { signUp, confirmSignUp, autoSignIn, fetchAuthSession, resendSignUpCode } from 'aws-amplify/auth';
 import { useMutation } from '@apollo/client/react';
 import { UPDATE_MY_ACCOUNT } from '../lib/graphql';
+import { PASSWORD_REGEX } from '../lib/authUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { UNIT_TYPES } from '../constants/unitTypes';
 
@@ -79,8 +80,6 @@ function getVerificationErrorMessage(error: { name?: string; message?: string })
   const fallback = error.message || 'Verification failed. Please try again';
   return getErrorFromTable(VERIFICATION_ERROR_MESSAGES, error.name, fallback);
 }
-
-const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{15,}$/;
 
 // Helper: Validate form fields and return error message or null
 function validateFormFields(

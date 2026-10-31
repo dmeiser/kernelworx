@@ -94,3 +94,12 @@ export async function handleSignOutAndRedirect(): Promise<void> {
     window.location.href = '/login';
   }
 }
+
+
+/**
+ * Shared password policy regex.
+ *
+ * Mirrors the Cognito password policy enforced on signup/reset:
+ * at least 15 characters including uppercase, lowercase, digit, and symbol.
+ */
+export const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{15,}$/;

@@ -3,6 +3,7 @@
  */
 import { useState } from 'react';
 import { updatePassword } from 'aws-amplify/auth';
+import { PASSWORD_REGEX } from '../lib/authUtils';
 
 export interface UsePasswordChangeReturn {
   currentPassword: string;
@@ -45,8 +46,8 @@ export const usePasswordChange = (): UsePasswordChangeReturn => {
       return;
     }
 
-    if (newPassword.length < 15) {
-      setPasswordError('Password must be at least 15 characters');
+    if (!PASSWORD_REGEX.test(newPassword)) {
+      setPasswordError('Password must be at least 15 characters and include uppercase, lowercase, number, and symbol');
       return;
     }
 
