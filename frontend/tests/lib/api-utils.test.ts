@@ -434,4 +434,13 @@ describe('lib/api-utils', () => {
       expect(formatCurrency(10, 'EUR')).toBe(formatCurrency(10, 'EUR'));
     });
   });
+
+
+describe('coverage gaps', () => {
+  it('returns undefined when an apollo-like error has no graphql errors', () => {
+    const error = { errors: [] } as unknown as ApolloLikeError;
+    expect(getErrorCode(error)).toBeUndefined();
+  });
+});
+
 });
