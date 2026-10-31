@@ -33,6 +33,7 @@ let mockAccountData: any = {
 };
 let mockMyProfilesError: Error | null = null;
 let mockMyProfilesLoading = false;
+let mockReadQueryError: Error | null = null;
 
 const profilesQueryMock = vi.fn();
 const loadAccountMock = vi.fn();
@@ -112,8 +113,19 @@ vi.mock('@apollo/client/react', async () => {
   };
 
   // useApolloClient returns an instance whose query method serves both the
-  // paginated listMyProfiles connection and the shared-profiles list.
+  // paginated listMyProfiles connection and the shared-profiles list. The
+  // readQuery method backs the live preferences-blob read on toggle (#510).
   const useApolloClient = () => ({
+    readQuery: (options: any) => {
+      const name = getOpName(options?.query);
+      if (name === 'GetMyAccount') {
+        if (mockReadQueryError) {
+          throw mockReadQueryError;
+        }
+        return mockAccountData ? { getMyAccount: mockAccountData } : null;
+      }
+      return null;
+    },
     query: (options: any) => {
       const name = getOpName(options?.query);
       if (name === 'ListMyProfiles') {
@@ -163,6 +175,7 @@ describe('ScoutsPage – interactions', () => {
     mockSharedProfiles = [];
     mockMyProfilesError = null;
     mockMyProfilesLoading = false;
+    mockReadQueryError = null;
     mockAccountData = {
       accountId: 'acct-1',
       email: 'test@example.com',
@@ -216,6 +229,67 @@ describe('ScoutsPage – interactions', () => {
     fireEvent.click(checkbox!);
 
     await waitFor(() => expect(updatePreferencesMock).toHaveBeenCalled(), { timeout: 3000 });
+  }, 10000);
+
+  it('merges the live blob so a toggle cannot drop keys like paymentMethods (#510)', async () => {
+    mockAccountData = {
+      accountId: 'acct-1',
+      email: 'test@example.com',
+      preferences: JSON.stringify({
+        showReadOnlyProfiles: true,
+        paymentMethods: [{ name: 'Cash App', qrCodeUrl: null }],
+      }),
+    };
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
+    const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkbox).not.toBeNull();
+    fireEvent.click(checkbox!);
+
+    await waitFor(() => expect(updatePreferencesMock).toHaveBeenCalled(), { timeout: 3000 });
+    const variables = updatePreferencesMock.mock.calls[0][0].variables;
+    expect(JSON.parse(variables.preferences)).toEqual({
+      showReadOnlyProfiles: false,
+      paymentMethods: [{ name: 'Cash App', qrCodeUrl: null }],
+    });
+  }, 10000);
+
+  it('falls back to the memoized preferences when the cache read throws (#510)', async () => {
+    mockAccountData = {
+      accountId: 'acct-1',
+      email: 'test@example.com',
+      preferences: JSON.stringify({
+        showReadOnlyProfiles: true,
+        paymentMethods: [{ name: 'Venmo', qrCodeUrl: null }],
+      }),
+    };
+    mockReadQueryError = new Error('partial cache');
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
+    const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(checkbox!);
+
+    await waitFor(() => expect(updatePreferencesMock).toHaveBeenCalled(), { timeout: 3000 });
+    const variables = updatePreferencesMock.mock.calls[0][0].variables;
+    expect(JSON.parse(variables.preferences)).toEqual({
+      showReadOnlyProfiles: false,
+      paymentMethods: [{ name: 'Venmo', qrCodeUrl: null }],
+    });
+  }, 10000);
+
+  it('keeps the toggle disabled until getMyAccount has resolved (#510)', async () => {
+    mockAccountData = null;
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
+    const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkbox).not.toBeNull();
+    // The gate is the disabled attribute: real browsers never deliver a click
+    // to a disabled input (jsdom dispatches one anyway, so the no-fire path is
+    // covered by the attribute assertion alone).
+    expect(checkbox!.disabled).toBe(true);
   }, 10000);
 
   // ── create profile mutations ──────────────────────────────────────────────

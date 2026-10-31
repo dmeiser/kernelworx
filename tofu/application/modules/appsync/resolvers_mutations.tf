@@ -592,17 +592,24 @@ resource "aws_appsync_resolver" "transfer_profile_ownership" {
 
 # updateMyPreferences (JS)
 resource "aws_appsync_resolver" "update_my_preferences" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Mutation"
-  field       = "updateMyPreferences"
-  data_source = aws_appsync_datasource.accounts.name
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "updateMyPreferences"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.get_preferences_for_update.function_id,
+      aws_appsync_function.update_my_preferences.function_id,
+    ]
+  }
 
   runtime {
     name            = "APPSYNC_JS"
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/update_my_preferences_resolver.js")
+  code = file("${local.js_resolvers_dir}/update_my_preferences_pipeline_resolver.js")
 }
 
 # requestCampaignReport (Lambda)
