@@ -13,8 +13,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 ENV_DIR="$SCRIPT_DIR/../environments/$ENV"
 
-LAYER_DIR="$ROOT_DIR/.build/lambda-layer"
-LAYER_REQ="$LAYER_DIR/requirements.txt"
 
 # Load environment variables from root .env
 if [ -f "$ROOT_DIR/.env" ]; then
@@ -36,12 +34,7 @@ if [ -z "$TF_VAR_google_client_id" ] || [ -z "$TF_VAR_google_client_secret" ]; t
 fi
 
 build_lambda_layer() {
-    echo "📦 Building Lambda layer dependencies (prod-only)..."
-    rm -rf "$LAYER_DIR"
-    mkdir -p "$LAYER_DIR/python"
-
-    (cd "$ROOT_DIR" && uv export --no-dev --format requirements.txt --no-hashes > "$LAYER_REQ")
-    (cd "$ROOT_DIR" && uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python")
+    "$ROOT_DIR/scripts/build-lambda-layer.sh"
 }
 
 # Tofu reads resolver code from the esbuild bundle; regenerate it so init/plan/apply

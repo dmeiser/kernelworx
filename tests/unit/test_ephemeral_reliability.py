@@ -58,6 +58,7 @@ class TestBashSyntax:
     def test_all_shell_scripts_parse(self, repo_root: Path) -> None:
         scripts = [
             repo_root / "scripts" / "appsync-ensure-resolver-order.sh",
+            repo_root / "scripts" / "build-lambda-layer.sh",
             repo_root / "scripts" / "ephemeral-env.sh",
             repo_root / "scripts" / "ephemeral-recover-common.sh",
             repo_root / "scripts" / "recover-deploy.sh",
@@ -1111,9 +1112,7 @@ class TestWorkflowDispatchSurface:
         assert "inputs.pr_number" in concurrency.get("group", "")
 
         jobs = workflow.get("jobs", {})
-        assert set(jobs) == {"recover-deploy", "recover-destroy"}
-        assert self._if_gates_on_mode(jobs["recover-deploy"]["if"], "recover-deploy")
-        assert self._if_gates_on_mode(jobs["recover-destroy"]["if"], "recover-destroy")
+        assert set(jobs) == {"recover"}
 
     def test_ci_infra_job_installs_dependencies_and_builds_resolvers_before_opentofu(self, repo_root: Path) -> None:
         workflow = self._load_workflow(repo_root, "ci.yml")

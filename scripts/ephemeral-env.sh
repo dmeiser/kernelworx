@@ -69,12 +69,44 @@ ensure_resolvers_built() {
 }
 
 build_lambda_layer() {
-  log "📦 Building Lambda layer dependencies..."
-  LAYER_REQ="$LAYER_DIR/requirements.txt"
-  rm -rf "$LAYER_DIR"
-  mkdir -p "$LAYER_DIR/python"
-  (cd "$ROOT_DIR" && uv export --no-dev --format requirements.txt --no-hashes > "$LAYER_REQ")
-  (cd "$ROOT_DIR" && uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python")
+  KERNELWORX_TEST_LAYER_DIR="$LAYER_DIR" "$ROOT_DIR/scripts/build-lambda-layer.sh"
+}
+
+print_env_exports() {
+  local test_region cognito_domain appsync_api_key appsync_api_url user_pool_id client_id
+  test_region="${AWS_REGION:-us-east-1}"
+  cognito_domain="$(tofu output -raw cognito_domain)"
+  appsync_api_key="$(tofu output -raw appsync_api_key 2>/dev/null)" || true
+  appsync_api_url="$(tofu output -raw appsync_api_url)"
+  user_pool_id="$(tofu output -raw cognito_user_pool_id)"
+  client_id="$(tofu output -raw cognito_client_id)"
+
+  echo "export TEST_APPSYNC_ENDPOINT=$appsync_api_url"
+  if [ -n "$appsync_api_key" ]; then
+    echo "export TEST_APPSYNC_API_KEY=$appsync_api_key"
+  fi
+  echo "export TEST_USER_POOL_ID=$user_pool_id"
+  echo "export TEST_USER_POOL_CLIENT_ID=$client_id"
+  echo "export TEST_REGION=$test_region"
+  echo "export E2E_BASE_URL=http://localhost:4173"
+  echo "export VITE_APPSYNC_ENDPOINT=$appsync_api_url"
+  if [ -n "$appsync_api_key" ]; then
+    echo "export VITE_APPSYNC_API_KEY=$appsync_api_key"
+  fi
+  echo "export VITE_APPSYNC_REGION=$test_region"
+  echo "export VITE_COGNITO_USER_POOL_ID=$user_pool_id"
+  echo "export VITE_COGNITO_USER_POOL_CLIENT_ID=$client_id"
+  echo "export VITE_COGNITO_DOMAIN=$cognito_domain"
+  echo "export VITE_OAUTH_REDIRECT_SIGNIN=http://localhost:4173/"
+  echo "export VITE_OAUTH_REDIRECT_SIGNOUT=http://localhost:4173/"
+  echo "export ACCOUNTS_TABLE_NAME=kernelworx-accounts-ue1-${RUN_ID}"
+  echo "export PROFILES_TABLE_NAME=kernelworx-profiles-ue1-${RUN_ID}"
+  echo "export CAMPAIGNS_TABLE_NAME=kernelworx-campaigns-ue1-${RUN_ID}"
+  echo "export ORDERS_TABLE_NAME=kernelworx-orders-ue1-${RUN_ID}"
+  echo "export SHARES_TABLE_NAME=kernelworx-shares-ue1-${RUN_ID}"
+  echo "export CATALOGS_TABLE_NAME=kernelworx-catalogs-ue1-${RUN_ID}"
+  echo "export INVITES_TABLE_NAME=kernelworx-invites-ue1-${RUN_ID}"
+  echo "export SHARED_CAMPAIGNS_TABLE_NAME=kernelworx-shared-campaigns-ue1-${RUN_ID}"
 }
 
 cleanup_cloudwatch_log_groups() {
@@ -157,71 +189,17 @@ case "$ACTION" in
     log ""
     log "📤 Environment exports (eval this output):"
     log ""
-    TEST_REGION="${AWS_REGION:-us-east-1}"
-    COGNITO_DOMAIN=$(tofu output -raw cognito_domain)
-    APPSYNC_API_KEY=$(tofu output -raw appsync_api_key 2>/dev/null) || true
-    echo "export TEST_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    if [ -n "$APPSYNC_API_KEY" ]; then
-      echo "export TEST_APPSYNC_API_KEY=$APPSYNC_API_KEY"
-    fi
-    echo "export TEST_USER_POOL_ID=$USER_POOL_ID"
-    echo "export TEST_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
-    echo "export TEST_REGION=$TEST_REGION"
-    echo "export E2E_BASE_URL=http://localhost:4173"
-    echo "export VITE_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    if [ -n "$APPSYNC_API_KEY" ]; then
-      echo "export VITE_APPSYNC_API_KEY=$APPSYNC_API_KEY"
-    fi
-    echo "export VITE_APPSYNC_REGION=$TEST_REGION"
-    echo "export VITE_COGNITO_USER_POOL_ID=$USER_POOL_ID"
-    echo "export VITE_COGNITO_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
-    echo "export VITE_COGNITO_DOMAIN=$COGNITO_DOMAIN"
-    echo "export VITE_OAUTH_REDIRECT_SIGNIN=http://localhost:4173/"
-    echo "export VITE_OAUTH_REDIRECT_SIGNOUT=http://localhost:4173/"
-    echo "export ACCOUNTS_TABLE_NAME=kernelworx-accounts-ue1-${RUN_ID}"
-    echo "export PROFILES_TABLE_NAME=kernelworx-profiles-ue1-${RUN_ID}"
-    echo "export CAMPAIGNS_TABLE_NAME=kernelworx-campaigns-ue1-${RUN_ID}"
-    echo "export ORDERS_TABLE_NAME=kernelworx-orders-ue1-${RUN_ID}"
-    echo "export SHARES_TABLE_NAME=kernelworx-shares-ue1-${RUN_ID}"
-    echo "export CATALOGS_TABLE_NAME=kernelworx-catalogs-ue1-${RUN_ID}"
-    echo "export INVITES_TABLE_NAME=kernelworx-invites-ue1-${RUN_ID}"
-    echo "export SHARED_CAMPAIGNS_TABLE_NAME=kernelworx-shared-campaigns-ue1-${RUN_ID}"
+    print_env_exports
     ;;
 
   env)
-    TEST_REGION="${AWS_REGION:-us-east-1}"
-    COGNITO_DOMAIN=$(tofu output -raw cognito_domain)
     APPSYNC_API_KEY=$(tofu output -raw appsync_api_key 2>/dev/null) || true
     log "📤 Environment exports for existing stack: $RUN_ID"
     log ""
-    echo "export TEST_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    if [ -n "$APPSYNC_API_KEY" ]; then
-      echo "export TEST_APPSYNC_API_KEY=$APPSYNC_API_KEY"
-    else
+    if [ -z "$APPSYNC_API_KEY" ]; then
       log "⚠️  appsync_api_key output is absent from this stack's state; the stack has not yet deployed the public-orders feature, so TEST_APPSYNC_API_KEY/VITE_APPSYNC_API_KEY are omitted"
     fi
-    echo "export TEST_USER_POOL_ID=$(tofu output -raw cognito_user_pool_id)"
-    echo "export TEST_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
-    echo "export TEST_REGION=$TEST_REGION"
-    echo "export E2E_BASE_URL=http://localhost:4173"
-    echo "export VITE_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
-    if [ -n "$APPSYNC_API_KEY" ]; then
-      echo "export VITE_APPSYNC_API_KEY=$APPSYNC_API_KEY"
-    fi
-    echo "export VITE_APPSYNC_REGION=$TEST_REGION"
-    echo "export VITE_COGNITO_USER_POOL_ID=$(tofu output -raw cognito_user_pool_id)"
-    echo "export VITE_COGNITO_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
-    echo "export VITE_COGNITO_DOMAIN=$COGNITO_DOMAIN"
-    echo "export VITE_OAUTH_REDIRECT_SIGNIN=http://localhost:4173/"
-    echo "export VITE_OAUTH_REDIRECT_SIGNOUT=http://localhost:4173/"
-    echo "export ACCOUNTS_TABLE_NAME=kernelworx-accounts-ue1-${RUN_ID}"
-    echo "export PROFILES_TABLE_NAME=kernelworx-profiles-ue1-${RUN_ID}"
-    echo "export CAMPAIGNS_TABLE_NAME=kernelworx-campaigns-ue1-${RUN_ID}"
-    echo "export ORDERS_TABLE_NAME=kernelworx-orders-ue1-${RUN_ID}"
-    echo "export SHARES_TABLE_NAME=kernelworx-shares-ue1-${RUN_ID}"
-    echo "export CATALOGS_TABLE_NAME=kernelworx-catalogs-ue1-${RUN_ID}"
-    echo "export INVITES_TABLE_NAME=kernelworx-invites-ue1-${RUN_ID}"
-    echo "export SHARED_CAMPAIGNS_TABLE_NAME=kernelworx-shared-campaigns-ue1-${RUN_ID}"
+    print_env_exports
     ;;
 
   down)
