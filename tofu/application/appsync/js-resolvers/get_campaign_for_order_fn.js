@@ -2,7 +2,10 @@ import { util } from '@aws-appsync/utils';
 import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
-    const campaignId = ctx.args.input.campaignId;
+    // The GSI key is the DB form, so normalize before the lookup: create_order_fn
+    // normalizes its own copy, but an unprefixed input would already have failed
+    // this Step 1 query (#717).
+    const campaignId = normalizeIdOrPrefix(ctx.args.input.campaignId, 'CAMPAIGN#');
     // Query campaignId-index GSI to find campaign (V2 schema)
     return {
         operation: 'Query',

@@ -27,6 +27,7 @@ vi.mock('../src/lib/apollo', () => ({
         },
       },
     }),
+    clearStore: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

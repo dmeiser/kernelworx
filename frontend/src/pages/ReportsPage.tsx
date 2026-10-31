@@ -245,10 +245,6 @@ export const ReportsPage: React.FC = () => {
     setAboutExpanded(!isMobile);
   }, [isMobile]);
 
-  // Report format option (currently defaults to XLSX)
-  const reportFormat: 'CSV' | 'XLSX' = 'XLSX';
-  void reportFormat; // Used for future report format selection
-
   const { data: ordersData, loading: ordersLoading } = useQuery<{
     listOrdersByCampaign: { orders: GqlOrder[] };
   }>(LIST_ORDERS_BY_CAMPAIGN, {

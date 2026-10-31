@@ -273,4 +273,139 @@ describe('MfaSetupDialog', () => {
       expect(screen.queryByText(/MFA enabled — sign in again/i)).not.toBeInTheDocument();
     });
   });
+
+  describe('dialog reset on close and reopen', () => {
+    it('resets verification code and error state when closed and reopened', async () => {
+      const user = userEvent.setup();
+      vi.mocked(amplifyAuth.verifyTOTPSetup).mockRejectedValue(new Error('Invalid code'));
+
+      const { rerender } = render(<MfaSetupDialog open={true} onClose={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(mockSharedSecret)).toBeInTheDocument();
+      });
+
+      const input = screen.getByLabelText(/Verification Code/i);
+      await user.type(input, '123456');
+
+      const verifyButton = screen.getByRole('button', { name: /Verify & Enable/i });
+      await user.click(verifyButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('Invalid code')).toBeInTheDocument();
+      });
+
+      // Close the dialog
+      rerender(<MfaSetupDialog open={false} onClose={vi.fn()} />);
+
+      // Reopen the dialog
+      rerender(<MfaSetupDialog open={true} onClose={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(mockSharedSecret)).toBeInTheDocument();
+      });
+
+      // Verification code and error should be reset
+      expect(screen.getByLabelText(/Verification Code/i)).toHaveValue('');
+      expect(screen.queryByText('Invalid code')).not.toBeInTheDocument();
+    });
+
+    it('resets success state when closed and reopened', async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<MfaSetupDialog open={true} onClose={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(mockSharedSecret)).toBeInTheDocument();
+      });
+
+      const input = screen.getByLabelText(/Verification Code/i);
+      await user.type(input, '123456');
+
+      const verifyButton = screen.getByRole('button', { name: /Verify & Enable/i });
+      await user.click(verifyButton);
+
+      await waitFor(() => {
+        expect(screen.getByText(/MFA enabled — sign in again/i)).toBeInTheDocument();
+      });
+
+      // Close the dialog
+      rerender(<MfaSetupDialog open={false} onClose={vi.fn()} />);
+
+      // Reopen the dialog
+      rerender(<MfaSetupDialog open={true} onClose={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(mockSharedSecret)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText(/MFA enabled — sign in again/i)).not.toBeInTheDocument();
+      expect(screen.getByLabelText(/Verification Code/i)).toHaveValue('');
+    });
+
+    it('does not proceed with TOTP setup if unmounted while checkIsFederatedSession is in flight', async () => {
+      let resolveAuthSession!: (val: any) => void;
+      vi.mocked(amplifyAuth.fetchAuthSession).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveAuthSession = resolve;
+          }),
+      );
+
+      const { unmount } = render(<MfaSetupDialog open={true} onClose={vi.fn()} />);
+
+      expect(amplifyAuth.setUpTOTP).not.toHaveBeenCalled();
+
+      // Unmount before checkIsFederatedSession completes
+      unmount();
+
+      // Resolve as native session
+      resolveAuthSession({
+        tokens: {
+          idToken: {
+            payload: {
+              email: 'native@example.com',
+            },
+          },
+        },
+      });
+
+      // Allow microtasks to run
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(amplifyAuth.setUpTOTP).not.toHaveBeenCalled();
+    });
+
+    it('does not proceed with TOTP setup if closed while checkIsFederatedSession is in flight', async () => {
+      let resolveAuthSession!: (val: any) => void;
+      vi.mocked(amplifyAuth.fetchAuthSession).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveAuthSession = resolve;
+          }),
+      );
+
+      const { rerender } = render(<MfaSetupDialog open={true} onClose={vi.fn()} />);
+
+      expect(amplifyAuth.setUpTOTP).not.toHaveBeenCalled();
+
+      // Close dialog before checkIsFederatedSession completes
+      rerender(<MfaSetupDialog open={false} onClose={vi.fn()} />);
+
+      // Resolve as native session
+      resolveAuthSession({
+        tokens: {
+          idToken: {
+            payload: {
+              email: 'native@example.com',
+            },
+          },
+        },
+      });
+
+      // Allow microtasks to run
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(amplifyAuth.setUpTOTP).not.toHaveBeenCalled();
+    });
+  });
 });
