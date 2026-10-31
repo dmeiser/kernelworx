@@ -35,7 +35,6 @@ import boto3
 import botocore.client
 import pytest
 
-
 PROFILES_TABLE = "kernelworx-profiles-v2-ue1-dev"
 SHARES_TABLE = "kernelworx-shares-ue1-dev"
 CAMPAIGNS_TABLE = "kernelworx-campaigns-v2-ue1-dev"
