@@ -2,7 +2,8 @@
 
 from typing import Any, Dict
 
-from src.utils.appsync_types import get_caller_id
+from src.utils.appsync_types import get_caller_id, require_int
+from src.utils.errors import AppError, ErrorCode
 
 
 class TestGetCallerId:
@@ -33,9 +34,6 @@ class TestGetCallerId:
         event: Dict[str, Any] = {"identity": None}
         assert get_caller_id(event) is None
 
-
-from src.utils.appsync_types import require_int
-from src.utils.errors import AppError, ErrorCode
 
 
 class TestRequireInt:
