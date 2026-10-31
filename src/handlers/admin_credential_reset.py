@@ -57,7 +57,7 @@ def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any
 
     users = response.get("Users", [])
     if not users:
-        raise AppError(ErrorCode.NOT_FOUND, f"User with email '{email}' not found")
+        raise AppError(ErrorCode.NOT_FOUND, f"User with email '{mask_email(email)}' not found")
 
     return str(users[0]["Username"])
 
@@ -72,7 +72,7 @@ def _initiate_password_reset(cognito: Any, user_pool_id: str, username: str, ema
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
         if error_code == "UserNotFoundException":
-            raise AppError(ErrorCode.NOT_FOUND, f"User with email '{email}' not found")
+            raise AppError(ErrorCode.NOT_FOUND, f"User with email '{mask_email(email)}' not found")
         if error_code == "InvalidParameterException":
             raise AppError(ErrorCode.INVALID_INPUT, "Cannot reset password for this user type")
         logger.error("Cognito admin_reset_user_password failed", error=str(e))

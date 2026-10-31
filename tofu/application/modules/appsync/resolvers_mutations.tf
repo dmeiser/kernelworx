@@ -136,6 +136,7 @@ resource "aws_appsync_resolver" "update_campaign" {
       # query the GSI for the profile so the share check can run.
       aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
+      aws_appsync_function.verify_update_catalog_access.function_id,
       aws_appsync_function.update_campaign.function_id,
       # isActive can change which campaign is the latest active one;
       # recompute the profile's denormalized latestCampaignId (#331).
@@ -283,6 +284,9 @@ resource "aws_appsync_resolver" "update_order" {
       aws_appsync_function.get_catalog_for_update_order.function_id,
       aws_appsync_function.fetch_catalog_for_update.function_id,
       aws_appsync_function.update_order.function_id,
+      # #746: keep the denormalized campaign totals in sync when the edit
+      # changed lineItems (a zero/omitted delta makes this a pass-through).
+      aws_appsync_function.sync_campaign_totals.function_id,
     ]
   }
 
@@ -310,6 +314,9 @@ resource "aws_appsync_resolver" "delete_order" {
       aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.delete_order.function_id,
+      # #746: decrement the denormalized campaign totals after the delete (a
+      # no-op delete stashes no delta and this passes through).
+      aws_appsync_function.sync_campaign_totals.function_id,
       aws_appsync_function.verify_order_delete_propagation.function_id,
     ]
   }
@@ -340,6 +347,8 @@ resource "aws_appsync_resolver" "create_order" {
       aws_appsync_function.get_campaign_for_order.function_id,
       aws_appsync_function.get_catalog.function_id,
       aws_appsync_function.create_order.function_id,
+      # #746: increment the denormalized campaign totals after the write.
+      aws_appsync_function.sync_campaign_totals.function_id,
     ]
   }
 
