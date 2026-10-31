@@ -253,7 +253,8 @@ const SocialSection: React.FC<SocialSectionProps> = ({ loading, onSocialLogin, o
 );
 
 // Custom hook for login state and handlers
-function useLoginState(
+// eslint-disable-next-line react-refresh/only-export-components
+export function useLoginState(
   loginWithPassword: (email: string, password: string) => Promise<unknown>,
   navigate: ReturnType<typeof useNavigate>,
   from: string,
@@ -350,10 +351,8 @@ function useLoginState(
       }, 500);
       return;
     }
-    if (confirmResult.nextStep?.signInStep) {
-      setShowPasskeyPrompt(true);
-      setLoading(false);
-    }
+    const action = getLoginStepAction(confirmResult.nextStep?.signInStep);
+    applyLoginAction(action);
   };
 
   const processPasskeyResult = async (result: SignInOutput) => {
