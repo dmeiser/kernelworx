@@ -43,10 +43,7 @@ EXPECTED_UNIT_FIELDS = {
     # listMyShares migrated to a JS pipeline resolver (#334) and no longer
     # invokes a Lambda; it is intentionally absent from this map.
     "aws_appsync_datasource.list_catalogs_in_use.name": {"listCatalogsInUse"},
-    "aws_appsync_datasource.request_report.name": {"requestCampaignReport"},
     "aws_appsync_datasource.unit_reporting.name": {"getUnitReport"},
-    "aws_appsync_datasource.list_unit_catalogs.name": {"listUnitCatalogs"},
-    "aws_appsync_datasource.list_unit_campaign_catalogs.name": {"listUnitCampaignCatalogs"},
     "aws_appsync_datasource.delete_account.name": {"deleteMyAccount"},
     "aws_appsync_datasource.transfer_ownership.name": {"transferProfileOwnership"},
     "aws_appsync_datasource.request_qr_upload.name": {"requestPaymentMethodQRCodeUpload"},

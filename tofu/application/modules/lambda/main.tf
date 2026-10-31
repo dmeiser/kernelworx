@@ -131,24 +131,9 @@ locals {
       timeout     = 30
       memory_size = 256
     }
-    "request-report" = {
-      handler     = "handlers.report_generation.request_campaign_report"
-      timeout     = 60
-      memory_size = 512
-    }
     "unit-reporting" = {
       handler     = "handlers.campaign_reporting.get_unit_report"
       timeout     = 60
-      memory_size = 512
-    }
-    "list-unit-catalogs" = {
-      handler     = "handlers.list_unit_catalogs.list_unit_catalogs"
-      timeout     = 30
-      memory_size = 512
-    }
-    "list-unit-campaign-catalogs" = {
-      handler     = "handlers.list_unit_catalogs.list_unit_campaign_catalogs"
-      timeout     = 30
       memory_size = 512
     }
     "delete-campaign-orders" = {

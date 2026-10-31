@@ -824,16 +824,6 @@ input RedeemProfileInviteInput {
   inviteCode: ID!
 }
 
-"""Input for shareProfileDirect. Shares a profile directly with another account by email (owner only)."""
-input ShareProfileDirectInput {
-  """The ID of the profile to share (the caller must own it)."""
-  profileId: ID!
-  """The email address of the account to grant access to; the account must already exist in Cognito."""
-  targetAccountEmail: AWSEmail!
-  """The permissions to grant (READ and/or WRITE)."""
-  permissions: [PermissionType!]!
-}
-
 """Input for revokeShare. Removes a share's access to a profile (owner only)."""
 input RevokeShareInput {
   """The ID of the profile the share is on."""
@@ -864,14 +854,6 @@ input UpdateMyAccountInput {
   unitType: String
   """New scout unit number (a positive integer)."""
   unitNumber: Int
-}
-
-"""Input for requestCampaignReport. Requests a generated Excel or CSV report for a campaign."""
-input RequestCampaignReportInput {
-  """The ID of the campaign to generate the report for (the caller must have read access to its profile)."""
-  campaignId: ID!
-  """The report format: "xlsx" or "csv". Defaults to "xlsx" if omitted."""
-  format: String
 }
 
 """Input for updateCampaignPublicOrderSettings. Owner-only; the campaign is identified by its canonical (CAMPAIGN# prefixed) ID."""
@@ -1033,33 +1015,6 @@ type Query {
     campaignYear: Int!
   ): [SharedCampaign!]!
 
-  # Unit reporting
-  """List the distinct catalogs used by campaigns in a unit and season, limited to profiles the caller can read."""
-  listUnitCatalogs(
-    """The scout unit type."""
-    unitType: String!,
-    """The scout unit number."""
-    unitNumber: Int!,
-    """The campaign name (for example "Fall" or "Spring")."""
-    campaignName: String!,
-    """The campaign year (for example 2024)."""
-    campaignYear: Int!
-  ): [Catalog!]!
-  """List the distinct catalogs used by campaigns in a unit and season (matched with city and state), limited to profiles the caller can read."""
-  listUnitCampaignCatalogs(
-    """The scout unit type."""
-    unitType: String!,
-    """The scout unit number."""
-    unitNumber: Int!,
-    """The city, to identify the unit."""
-    city: String!,
-    """The state, to identify the unit."""
-    state: String!,
-    """The campaign name (for example "Fall" or "Spring")."""
-    campaignName: String!,
-    """The campaign year (for example 2024)."""
-    campaignYear: Int!
-  ): [Catalog!]!
   """Generate a unit-level sales report for a unit and season, covering only the sellers (profiles) the caller can read. catalogId is required so the report reflects a single catalog."""
   getUnitReport(
     """The scout unit type."""
@@ -1266,11 +1221,6 @@ type Mutation {
     """The invite code to redeem."""
     input: RedeemProfileInviteInput!
   ): Share!
-  """Share a profile the caller owns directly with another account by email. Returns the created share."""
-  shareProfileDirect(
-    """The profile, target email, and permissions."""
-    input: ShareProfileDirectInput!
-  ): Share!
   """Remove a share's access to a profile the caller owns. Returns true on success."""
   revokeShare(
     """The profile and account whose access should be revoked."""
@@ -1281,13 +1231,6 @@ type Mutation {
     """The profile and the new owner's account ID."""
     input: TransferProfileOwnershipInput!
   ): SellerProfile!
-
-  # Report generation
-  """Generate an Excel or CSV report for a campaign and store it in S3. Returns the report with a pre-signed download URL."""
-  requestCampaignReport(
-    """The campaign and report format."""
-    input: RequestCampaignReportInput!
-  ): CampaignReport!
 
   # Payment method mutations
   """Create a new payment method for the caller. The name must be unique and not a reserved name (Cash or Check). Returns the created payment method."""
