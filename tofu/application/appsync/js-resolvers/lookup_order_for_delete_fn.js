@@ -1,17 +1,12 @@
 import { util } from '@aws-appsync/utils';
+import { buildOrderLookupRequest } from './lib/order_lookup.js';
 
 export function request(ctx) {
-    const orderId = ctx.args.orderId;
-    // Query orderId-index GSI (V2 schema: PK=campaignId, SK=orderId)
-    return {
-        operation: 'Query',
-        index: 'orderId-index',
-        query: {
-        expression: 'orderId = :orderId',
-        expressionValues: util.dynamodb.toMapValues({ ':orderId': orderId })
-        },
-        limit: 1
-    };
+    // Same shared lookup as getOrder/lookup_order: a new-format ORDER#<campaign>#<uuid>
+    // ID carries the campaignId, so read the base table strongly consistently.
+    // The orderId-index GSI is only eventually consistent, so deleteOrder issued
+    // right after createOrder could look up nothing and silently no-op (#717).
+    return buildOrderLookupRequest(ctx.args.orderId);
 }
 
 export function response(ctx) {
@@ -19,14 +14,21 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     
-    const items = ctx.result.items || [];
+    // GetItem returns the item directly; the legacy GSI fallback returns items.
+    let order = null;
+    if (ctx.result && Array.isArray(ctx.result.items)) {
+        order = ctx.result.items[0] || null;
+    } else {
+        order = ctx.result || null;
+    }
+
     // For delete, if order not found, that's OK (idempotent)
     // Just store null in stash and let delete function handle it
-    if (items.length === 0) {
+    if (!order) {
         ctx.stash.order = null;
         return null;
     }
     
-    ctx.stash.order = items[0];
-    return items[0];
+    ctx.stash.order = order;
+    return order;
 }
