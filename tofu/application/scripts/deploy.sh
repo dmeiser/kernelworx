@@ -13,7 +13,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 ENV_DIR="$SCRIPT_DIR/../environments/$ENV"
 
-LAYER_DIR="$ROOT_DIR/.build/lambda-layer"
 
 # Load environment variables from root .env
 if [ -f "$ROOT_DIR/.env" ]; then
