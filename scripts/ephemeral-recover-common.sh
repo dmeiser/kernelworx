@@ -601,8 +601,8 @@ PY
 
 cleanup_cloudwatch_log_groups_for_run() {
   local run_id="$1"
+  local region="${2:-${AWS_REGION:-us-east-1}}"
   log "🧹 Cleaning up CloudWatch log groups for run: $run_id"
-  local region="${AWS_REGION:-us-east-1}"
   local suffix="-${run_id}"
   local log_groups=""
   local log_next_token=""
