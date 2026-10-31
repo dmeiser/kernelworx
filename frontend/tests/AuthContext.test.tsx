@@ -11,6 +11,7 @@ import { act } from '@testing-library/react';
 import { AuthProvider, useAuth } from '../src/contexts/AuthContext';
 import * as amplifyAuth from 'aws-amplify/auth';
 import * as amplifyUtils from 'aws-amplify/utils';
+import { apolloClient } from '../src/lib/apollo';
 
 // Mock Apollo client
 vi.mock('../src/lib/apollo', () => ({
@@ -259,6 +260,7 @@ describe('AuthContext', () => {
     await waitFor(() => {
       expect(amplifyAuth.signOut).toHaveBeenCalled();
       expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('false');
+      expect(apolloClient.clearStore).toHaveBeenCalled();
     });
   });
 
@@ -287,6 +289,7 @@ describe('AuthContext', () => {
     // Verify the fallback redirect was attempted
     await waitFor(() => {
       expect(locationHrefSpy).toHaveBeenCalled();
+      expect(apolloClient.clearStore).toHaveBeenCalled();
     });
     const redirectUrl = locationHrefSpy.mock.calls[0][0];
     expect(redirectUrl).toContain('/logout?client_id=');
@@ -357,6 +360,7 @@ describe('AuthContext', () => {
     await waitFor(() => {
       expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('false');
       expect(screen.getByTestId('loading')).toHaveTextContent('false');
+      expect(apolloClient.clearStore).toHaveBeenCalled();
     });
   });
 
@@ -443,6 +447,7 @@ describe('AuthContext', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('false');
+      expect(apolloClient.clearStore).toHaveBeenCalled();
     });
   });
 
@@ -849,6 +854,201 @@ describe('AuthContext', () => {
 
       // Account should be null
       expect(screen.queryByTestId('accountId')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('KW-ISSUE-708: Apollo cache cleared on logout and session expiration', () => {
+    it('clears Apollo store when logout succeeds', async () => {
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+      vi.mocked(amplifyAuth.signOut).mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+
+      await waitFor(() => {
+        expect(result.current.isAuthenticated).toBe(true);
+      });
+
+      vi.mocked(apolloClient.clearStore).mockClear();
+
+      await act(async () => {
+        await result.current.logout();
+      });
+
+      expect(apolloClient.clearStore).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears Apollo store when logout throws (fallback redirect path)', async () => {
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+      vi.mocked(amplifyAuth.signOut).mockRejectedValue(new Error('Sign out error'));
+      const { restore } = mockWindowLocationHref();
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+
+      await waitFor(() => {
+        expect(result.current.isAuthenticated).toBe(true);
+      });
+
+      vi.mocked(apolloClient.clearStore).mockClear();
+
+      await act(async () => {
+        await result.current.logout();
+      });
+
+      expect(apolloClient.clearStore).toHaveBeenCalledTimes(1);
+      restore();
+    });
+
+    it('swallows errors when apolloClient.clearStore rejects during logout', async () => {
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+      vi.mocked(amplifyAuth.signOut).mockResolvedValue(undefined);
+      vi.mocked(apolloClient.clearStore).mockRejectedValueOnce(new Error('Cache clear error'));
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+
+      await waitFor(() => {
+        expect(result.current.isAuthenticated).toBe(true);
+      });
+
+      // Should not throw even though clearStore rejected
+      await expect(
+        act(async () => {
+          await result.current.logout();
+        }),
+      ).resolves.not.toThrow();
+
+      expect(apolloClient.clearStore).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears Apollo store when signedOut Hub event occurs', async () => {
+      let hubCallback: any;
+      vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
+        hubCallback = callback;
+        return vi.fn();
+      });
+
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('true');
+      });
+
+      vi.mocked(apolloClient.clearStore).mockClear();
+
+      act(() => {
+        hubCallback({ payload: { event: 'signedOut' } });
+      });
+
+      await waitFor(() => {
+        expect(apolloClient.clearStore).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('swallows errors when apolloClient.clearStore rejects on signedOut Hub event', async () => {
+      let hubCallback: any;
+      vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
+        hubCallback = callback;
+        return vi.fn();
+      });
+
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+      vi.mocked(apolloClient.clearStore).mockRejectedValueOnce(new Error('Cache clear failure'));
+
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('true');
+      });
+
+      vi.mocked(apolloClient.clearStore).mockClear();
+      vi.mocked(apolloClient.clearStore).mockRejectedValueOnce(new Error('Cache clear failure'));
+
+      act(() => {
+        hubCallback({ payload: { event: 'signedOut' } });
+      });
+
+      await waitFor(() => {
+        expect(apolloClient.clearStore).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('false');
+      });
+    });
+
+    it('clears Apollo store on tokenRefresh_failure Hub event', async () => {
+      let hubCallback: any;
+      vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
+        hubCallback = callback;
+        return vi.fn();
+      });
+
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('true');
+      });
+
+      vi.mocked(apolloClient.clearStore).mockClear();
+
+      act(() => {
+        hubCallback({ payload: { event: 'tokenRefresh_failure', data: { error: 'Refresh failed' } } });
+      });
+
+      await waitFor(() => {
+        expect(apolloClient.clearStore).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('swallows errors when apolloClient.clearStore rejects on tokenRefresh_failure Hub event', async () => {
+      let hubCallback: any;
+      vi.mocked(amplifyUtils.Hub.listen).mockImplementation((_channel, callback) => {
+        hubCallback = callback;
+        return vi.fn();
+      });
+
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue(createMockSession(true) as any);
+      vi.mocked(amplifyAuth.getCurrentUser).mockResolvedValue(mockUser as any);
+
+      render(
+        <AuthProvider>
+          <TestComponent />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('true');
+      });
+
+      vi.mocked(apolloClient.clearStore).mockClear();
+      vi.mocked(apolloClient.clearStore).mockRejectedValueOnce(new Error('Cache clear failure'));
+
+      act(() => {
+        hubCallback({ payload: { event: 'tokenRefresh_failure', data: { error: 'Refresh failed' } } });
+      });
+
+      await waitFor(() => {
+        expect(apolloClient.clearStore).toHaveBeenCalledTimes(1);
+        expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('false');
+      });
     });
   });
 });

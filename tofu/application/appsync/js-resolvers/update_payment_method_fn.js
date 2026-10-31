@@ -24,5 +24,5 @@ export function request(ctx) {
 
 export function response(ctx) {
     mapPaymentMethodWriteError(ctx);
-    return { name: ctx.stash.newName, qrCodeUrl: null };
+    return { name: ctx.stash.newName, qrCodeUrl: ctx.stash.existingQrCodeUrl || null };
 }
