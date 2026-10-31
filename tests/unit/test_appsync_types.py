@@ -32,3 +32,28 @@ class TestGetCallerId:
         """
         event: Dict[str, Any] = {"identity": None}
         assert get_caller_id(event) is None
+
+
+from src.utils.appsync_types import require_int
+from src.utils.errors import AppError, ErrorCode
+
+
+class TestRequireInt:
+    def test_missing_raises(self) -> None:
+        try:
+            require_int({}, "x")
+        except AppError as exc:
+            assert exc.error_code == ErrorCode.INVALID_INPUT
+        else:
+            raise AssertionError("expected AppError")
+
+    def test_invalid_raises(self) -> None:
+        try:
+            require_int({"x": "abc"}, "x")
+        except AppError as exc:
+            assert exc.error_code == ErrorCode.INVALID_INPUT
+        else:
+            raise AssertionError("expected AppError")
+
+    def test_valid_returns_int(self) -> None:
+        assert require_int({"x": "42"}, "x") == 42
