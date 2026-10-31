@@ -68,6 +68,30 @@ resource "aws_appsync_resolver" "delete_profile_invite" {
   code = file("${local.js_resolvers_dir}/delete_profile_invite_pipeline_resolver.js")
 }
 
+# shareProfileDirect Pipeline
+resource "aws_appsync_resolver" "share_profile_direct" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Mutation"
+  field  = "shareProfileDirect"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      aws_appsync_function.verify_profile_owner_for_share.function_id,
+      aws_appsync_function.lookup_account_by_email.function_id,
+      aws_appsync_function.check_existing_share.function_id,
+      aws_appsync_function.create_share.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/share_profile_direct_pipeline_resolver.js")
+}
+
 # redeemProfileInvite Pipeline
 resource "aws_appsync_resolver" "redeem_profile_invite" {
   api_id = aws_appsync_graphql_api.main.id

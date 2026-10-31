@@ -414,6 +414,8 @@ export type GqlMutation = {
   requestPaymentMethodQRCodeUpload: GqlS3UploadInfo;
   /** Remove a share's access to a profile the caller owns. Returns true on success. */
   revokeShare: Scalars['Boolean']['output'];
+  /** Share a profile the caller owns directly with another account by email. Returns the created share. */
+  shareProfileDirect: GqlShare;
   /** Transfer a profile's ownership to an account that already has a share (the caller must be the owner or an admin). Returns the updated profile. */
   transferProfileOwnership: GqlSellerProfile;
   /** Update a campaign on a profile the caller has write access to. Only provided fields change. Returns the updated campaign. */
@@ -584,6 +586,11 @@ export type GqlMutation_RequestPaymentMethodQrCodeUploadArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_RevokeShareArgs = {
   input: GqlRevokeShareInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_ShareProfileDirectArgs = {
+  input: GqlShareProfileDirectInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1165,6 +1172,16 @@ export type GqlShareInfo = {
   permissions: Array<GqlPermissionType>;
   /** The ID of the profile the share is for. */
   profileId: Scalars['ID']['output'];
+};
+
+/** Input for shareProfileDirect. Shares a profile directly with another account by email (owner only). */
+export type GqlShareProfileDirectInput = {
+  /** The permissions to grant (READ and/or WRITE). */
+  permissions: Array<GqlPermissionType>;
+  /** The ID of the profile to share (the caller must own it). */
+  profileId: Scalars['ID']['input'];
+  /** The email address of the account to grant access to; the account must already exist in Cognito. */
+  targetAccountEmail: Scalars['AWSEmail']['input'];
 };
 
 /**

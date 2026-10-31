@@ -824,6 +824,16 @@ input RedeemProfileInviteInput {
   inviteCode: ID!
 }
 
+"""Input for shareProfileDirect. Shares a profile directly with another account by email (owner only)."""
+input ShareProfileDirectInput {
+  """The ID of the profile to share (the caller must own it)."""
+  profileId: ID!
+  """The email address of the account to grant access to; the account must already exist in Cognito."""
+  targetAccountEmail: AWSEmail!
+  """The permissions to grant (READ and/or WRITE)."""
+  permissions: [PermissionType!]!
+}
+
 """Input for revokeShare. Removes a share's access to a profile (owner only)."""
 input RevokeShareInput {
   """The ID of the profile the share is on."""
@@ -1220,6 +1230,11 @@ type Mutation {
   redeemProfileInvite(
     """The invite code to redeem."""
     input: RedeemProfileInviteInput!
+  ): Share!
+  """Share a profile the caller owns directly with another account by email. Returns the created share."""
+  shareProfileDirect(
+    """The profile, target email, and permissions."""
+    input: ShareProfileDirectInput!
   ): Share!
   """Remove a share's access to a profile the caller owns. Returns true on success."""
   revokeShare(
