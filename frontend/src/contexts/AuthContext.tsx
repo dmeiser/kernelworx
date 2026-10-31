@@ -183,10 +183,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setAccount(null);
         setHasValidTokens(false);
         setLoading(false);
+        void apolloClient.clearStore().catch(() => {});
       },
       onTokenRefreshFailure: () => {
         setAccount(null);
         setHasValidTokens(false);
+        void apolloClient.clearStore().catch(() => {});
       },
     });
 
@@ -263,6 +265,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         (typeof window !== 'undefined' ? window.location.origin : '');
       const logoutUri = encodeURIComponent(rawLogoutUri);
       window.location.href = `https://${domain}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
+    } finally {
+      await apolloClient.clearStore().catch(() => {});
     }
   }, []);
 
