@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { request, response } from './create_order_fn.js';
+import { parseOrderKey } from './lib/order_keys.js';
 
 describe('create_order_fn request', () => {
   const baseCtx = {
@@ -33,6 +34,17 @@ describe('create_order_fn request', () => {
     const order = result.attributeValues;
     assert.strictEqual(order.lineItems[0].subtotal, 5.97);
     assert.strictEqual(order.totalAmount, 5.97);
+  });
+
+  it('mints an order id the shared parser reads back as the same campaign (#534)', () => {
+    // The minter and the reader now share one grammar owner in
+    // lib/order_keys.js, so the key this resolver writes must parse back.
+    const result = request(baseCtx);
+    assert.deepStrictEqual(parseOrderKey(result.key.orderId), {
+      campaignId: 'CAMPAIGN#c1',
+      suffix: 'auto-generated-id',
+    });
+    assert.strictEqual(result.attributeValues.orderId, result.key.orderId);
   });
 
   it('accurately sums multiple items without float drift (e.g. 0.10 + 0.20 = 0.30)', () => {

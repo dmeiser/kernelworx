@@ -1,6 +1,6 @@
 import { util } from '@aws-appsync/utils';
-import { stripIdPrefix } from './lib/ids.js';
 import { enrichLineItems } from './lib/line_items.js';
+import { buildOrderKey } from './lib/order_keys.js';
 import { composePublicOrderReceipt } from './lib/public_order.js';
 
 // Loaded via Terraform templatefile() (functions_orders.tf): a dollar-brace
@@ -104,8 +104,11 @@ export function request(ctx) {
     // per-item tombstone; soft deletion is catalog-level only).
     const enriched = enrichLineItems(mapped.lineItems, catalog);
 
-    const campaignIdWithoutPrefix = stripIdPrefix(campaignId, 'CAMPAIGN#');
-    const orderId = 'ORDER#' + campaignIdWithoutPrefix + '#' + util.autoId();
+    // Same single owner for the order-id grammar as the authenticated write
+    // path (#534) - both minters now emit buildOrderKey's shape, so the
+    // public order id parseable by parseOrderKey cannot drift from the
+    // authenticated one.
+    const orderId = buildOrderKey(campaignId, util.autoId());
     const now = util.time.nowISO8601();
 
     const orderItem = {

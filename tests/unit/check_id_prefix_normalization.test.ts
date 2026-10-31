@@ -24,8 +24,13 @@ const ALL_RESOLVERS = readdirSync(JS_RESOLVERS_DIR).filter(
 );
 
 // The ID prefixes resolvers normalize. Derived from the prefixes the DynamoDB
-// tables actually use.
-const PREFIXES = ["ACCOUNT", "PROFILE", "CATALOG", "CAMPAIGN"];
+// tables actually use, plus ORDER: the ORDER#<campaign>#<suffix> order-id
+// grammar has a single owner in lib/order_keys.js (buildOrderKey), and both
+// minters now route through it (#534), so a re-inlined order key in a resolver
+// is caught. SHARE# is deliberately NOT swept: share ids are minted from the
+// target account id with no shared helper owning that grammar yet, so sweeping
+// it would flag mint sites rather than protect a canonical owner.
+const PREFIXES = ["ACCOUNT", "PROFILE", "CATALOG", "CAMPAIGN", "ORDER"];
 
 // Helpers that legitimately own a prefix literal as an argument. Derived from
 // the actual exports of lib/ so a new helper is covered without editing this
@@ -129,6 +134,18 @@ function canStartRegex(last: string): boolean {
 }
 
 /**
+ * True when a template literal interpolates something other than an autoId()
+ * call, i.e. it embeds an id that already exists rather than minting a fresh
+ * one. Such a literal builds a grammar (e.g. an ORDER#<campaign>#<suffix>
+ * order key) out of a normalized id, so it is a normalization site and the
+ * minting exemption must not cover it (#534).
+ */
+function interpolatesExistingId(raw: string): boolean {
+  if (!raw.startsWith("`")) return false;
+  return [...raw.matchAll(/\$\{([^}]*)\}/g)].some((m) => !m[1].includes("autoId("));
+}
+
+/**
  * Yields every prefix literal in `source` (comments removed) together with the
  * statement text around it, so the guard can report a usable location.
  */
@@ -216,8 +233,12 @@ function findPrefixLiterals(source: string): {
 
     // Is this literal minting a brand-new id (e.g. 'CAMPAIGN#' + util.autoId())
     // rather than normalizing an existing one? Minting legitimately owns the
-    // prefix literal; only normalization must route through the helper.
-    const isMinting = text.includes("autoId(");
+    // prefix literal; only normalization must route through the helper. A
+    // template literal that interpolates an id that already exists is not pure
+    // minting even when autoId() sits on the same line: the pre-#534 order-id
+    // mint interpolated the campaign id, duplicating the grammar that
+    // lib/order_keys.js buildOrderKey owns.
+    const isMinting = text.includes("autoId(") && !interpolatesExistingId(lit.raw);
 
     found.push({
       line: source.slice(0, lit.start).split("\n").length,
@@ -273,6 +294,21 @@ describe("the guard catches the duplication it exists to prevent", () => {
       name: "an inline ACCOUNT# template literal",
       code: "const accountId = `ACCOUNT#${ctx.identity.sub}`;",
     },
+    {
+      // The order-id grammar buildOrderKey owns. No autoId() on the line, so
+      // the minting exemption does not cover it; a resolver that re-inlines
+      // the grammar fails here.
+      name: "an inlined ORDER#<campaign>#<suffix> order key",
+      code: "const orderId = `ORDER#${campaignIdWithoutPrefix}#${suffix}`;",
+    },
+    {
+      // The shape the #534 sweep replaced: autoId() sits on the line, but the
+      // literal also interpolates an existing campaign id, so the minting
+      // exemption must not excuse it.
+      name: "an ORDER# mint that interpolates an existing campaign id alongside autoId()",
+      code:
+        "const orderId = `ORDER#${campaignIdWithoutPrefix}#${util.autoId()}`;",
+    },
   ];
 
   for (const { name, code } of reintroduced) {
@@ -290,6 +326,20 @@ describe("the guard catches the duplication it exists to prevent", () => {
   test("does not flag a prefix passed to normalizeIdOrPrefix", () => {
     const code = "const id = normalizeIdOrPrefix(value, 'ACCOUNT#');";
     expect(findPrefixLiterals(code).filter((f) => !f.inHelperCall)).toEqual([]);
+  });
+
+  test("treats an ORDER# mint that interpolates an existing campaign id as a normalization site", () => {
+    const found = findPrefixLiterals(
+      "const orderId = `ORDER#${campaignIdWithoutPrefix}#${util.autoId()}`;",
+    );
+    expect(found.length).toBe(1);
+    expect(found[0].isMinting).toBe(false);
+  });
+
+  test("still exempts a fresh id minted by concatenating autoId()", () => {
+    const found = findPrefixLiterals("const campaignId = 'CAMPAIGN#' + util.autoId();");
+    expect(found.length).toBe(1);
+    expect(found[0].isMinting).toBe(true);
   });
 
   test("does not flag a prefix that only appears in a comment", () => {
