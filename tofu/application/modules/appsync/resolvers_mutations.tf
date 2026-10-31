@@ -605,21 +605,6 @@ resource "aws_appsync_resolver" "update_my_preferences" {
   code = file("${local.js_resolvers_dir}/update_my_preferences_resolver.js")
 }
 
-# requestCampaignReport (Lambda)
-resource "aws_appsync_resolver" "request_campaign_report" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Mutation"
-  field       = "requestCampaignReport"
-  data_source = aws_appsync_datasource.request_report.name
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
-}
-
 # === PAYMENT METHODS MUTATIONS ===
 
 # createPaymentMethod Pipeline

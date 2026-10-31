@@ -196,26 +196,3 @@ class TestBuildUnitCampaignKey:
         """Test unit number and campaign year are interpolated positionally."""
         result = build_unit_campaign_key("Crew", 7, "Town", "CA", "Winter", 1999)
         assert result.split("#") == ["Crew", "7", "Town", "CA", "Winter", "1999"]
-
-
-class TestUnitCampaignKeySingleDefinition:
-    """Regression tests for #575: one shared key builder, no per-handler copies.
-
-    Both unit-report and unit-catalog handlers query the same
-    unitCampaignKey-index GSI; a divergent copy in either handler would make
-    one query silently return nothing while the other still works.
-    """
-
-    def test_neither_handler_defines_its_own_copy(self) -> None:
-        """Neither unit-campaign handler may carry a private key builder."""
-        from src.handlers import campaign_reporting, list_unit_catalogs
-
-        assert not hasattr(campaign_reporting, "_build_unit_campaign_key")
-        assert not hasattr(list_unit_catalogs, "_build_unit_campaign_key")
-
-    def test_both_handlers_share_the_ids_helper(self) -> None:
-        """Both handlers route key construction through utils.ids."""
-        from src.handlers import campaign_reporting, list_unit_catalogs
-
-        assert campaign_reporting.build_unit_campaign_key is build_unit_campaign_key
-        assert list_unit_catalogs.build_unit_campaign_key is build_unit_campaign_key

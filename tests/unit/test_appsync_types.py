@@ -2,7 +2,8 @@
 
 from typing import Any, Dict
 
-from src.utils.appsync_types import get_caller_id
+from src.utils.appsync_types import get_caller_id, require_int
+from src.utils.errors import AppError, ErrorCode
 
 
 class TestGetCallerId:
@@ -32,3 +33,25 @@ class TestGetCallerId:
         """
         event: Dict[str, Any] = {"identity": None}
         assert get_caller_id(event) is None
+
+
+
+class TestRequireInt:
+    def test_missing_raises(self) -> None:
+        try:
+            require_int({}, "x")
+        except AppError as exc:
+            assert exc.error_code == ErrorCode.INVALID_INPUT
+        else:
+            raise AssertionError("expected AppError")
+
+    def test_invalid_raises(self) -> None:
+        try:
+            require_int({"x": "abc"}, "x")
+        except AppError as exc:
+            assert exc.error_code == ErrorCode.INVALID_INPUT
+        else:
+            raise AssertionError("expected AppError")
+
+    def test_valid_returns_int(self) -> None:
+        assert require_int({"x": "42"}, "x") == 42

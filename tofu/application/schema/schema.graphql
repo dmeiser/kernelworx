@@ -866,14 +866,6 @@ input UpdateMyAccountInput {
   unitNumber: Int
 }
 
-"""Input for requestCampaignReport. Requests a generated Excel or CSV report for a campaign."""
-input RequestCampaignReportInput {
-  """The ID of the campaign to generate the report for (the caller must have read access to its profile)."""
-  campaignId: ID!
-  """The report format: "xlsx" or "csv". Defaults to "xlsx" if omitted."""
-  format: String
-}
-
 """Input for updateCampaignPublicOrderSettings. Owner-only; the campaign is identified by its canonical (CAMPAIGN# prefixed) ID."""
 input UpdateCampaignPublicOrderSettingsInput {
   """Canonical ID of the campaign whose public-order settings are being written."""
@@ -1033,33 +1025,6 @@ type Query {
     campaignYear: Int!
   ): [SharedCampaign!]!
 
-  # Unit reporting
-  """List the distinct catalogs used by campaigns in a unit and season, limited to profiles the caller can read."""
-  listUnitCatalogs(
-    """The scout unit type."""
-    unitType: String!,
-    """The scout unit number."""
-    unitNumber: Int!,
-    """The campaign name (for example "Fall" or "Spring")."""
-    campaignName: String!,
-    """The campaign year (for example 2024)."""
-    campaignYear: Int!
-  ): [Catalog!]!
-  """List the distinct catalogs used by campaigns in a unit and season (matched with city and state), limited to profiles the caller can read."""
-  listUnitCampaignCatalogs(
-    """The scout unit type."""
-    unitType: String!,
-    """The scout unit number."""
-    unitNumber: Int!,
-    """The city, to identify the unit."""
-    city: String!,
-    """The state, to identify the unit."""
-    state: String!,
-    """The campaign name (for example "Fall" or "Spring")."""
-    campaignName: String!,
-    """The campaign year (for example 2024)."""
-    campaignYear: Int!
-  ): [Catalog!]!
   """Generate a unit-level sales report for a unit and season, covering only the sellers (profiles) the caller can read. catalogId is required so the report reflects a single catalog."""
   getUnitReport(
     """The scout unit type."""
@@ -1281,13 +1246,6 @@ type Mutation {
     """The profile and the new owner's account ID."""
     input: TransferProfileOwnershipInput!
   ): SellerProfile!
-
-  # Report generation
-  """Generate an Excel or CSV report for a campaign and store it in S3. Returns the report with a pre-signed download URL."""
-  requestCampaignReport(
-    """The campaign and report format."""
-    input: RequestCampaignReportInput!
-  ): CampaignReport!
 
   # Payment method mutations
   """Create a new payment method for the caller. The name must be unique and not a reserved name (Cash or Check). Returns the created payment method."""

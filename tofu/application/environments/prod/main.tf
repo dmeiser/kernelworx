@@ -266,10 +266,7 @@ module "lambda" {
     # #354 (chunk 4 of #326): account/reporting-domain handlers use the scoped
     # account-reporting execution role. delete-account stays on the admin role
     # (#121, which takes precedence in the lambda module's role resolution).
-    "request-report"              = module.iam.lambda_account_reporting_execution_role_arn
     "list-catalogs-in-use"        = module.iam.lambda_account_reporting_execution_role_arn
-    "list-unit-catalogs"          = module.iam.lambda_account_reporting_execution_role_arn
-    "list-unit-campaign-catalogs" = module.iam.lambda_account_reporting_execution_role_arn
     # #355 (chunk 5 of #326, final): the Cognito post-auth account-bootstrap
     # trigger uses its own scoped role (accounts table only). The monolithic
     # shared role is retired.
