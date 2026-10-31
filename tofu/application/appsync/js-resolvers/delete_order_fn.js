@@ -19,6 +19,19 @@ export function request(ctx) {
         };
     }
     
+    // #746: denormalized-totals delta for sync_campaign_totals_fn (the step
+    // after this one). The order row's profileId/campaignId are the
+    // campaigns-table key, so no lookup is needed to address the counter. A
+    // missing totalAmount (never written by any order path) degrades to a
+    // count-only decrement rather than failing the delete.
+    const revenue = typeof order.totalAmount === 'number' ? -order.totalAmount : 0;
+    ctx.stash.totalsDelta = {
+        profileId: order.profileId,
+        campaignId: order.campaignId,
+        count: -1,
+        revenue: revenue
+    };
+
     // V2 schema: composite key (campaignId, orderId)
     return {
         operation: 'DeleteItem',
