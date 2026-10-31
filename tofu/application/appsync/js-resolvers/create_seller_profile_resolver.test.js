@@ -106,42 +106,6 @@ describe('create_seller_profile_resolver request', () => {
         assert.strictEqual(result.attributeValues.sellerName, 'A'.repeat(100));
     });
 
-    it('rejects invalid unitType with allowed enum values in error', () => {
-        const ctx = {
-            identity: { sub: 'user-sub-123' },
-            args: {
-                input: {
-                    sellerName: 'Valid Name',
-                    unitType: 'InvalidType',
-                },
-            },
-        };
-
-        assert.throws(
-            () => request(ctx),
-            /INVALID_INPUT: unitType must be one of: Crew, Pack, Post, Ship, Troop/
-        );
-    });
-
-    it('accepts all valid unitTypes: Pack, Troop, Crew, Ship, Post', () => {
-        const validUnitTypes = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
-
-        for (const unitType of validUnitTypes) {
-            const ctx = {
-                identity: { sub: 'user-sub-123' },
-                args: {
-                    input: {
-                        sellerName: 'Valid Name',
-                        unitType: unitType,
-                    },
-                },
-            };
-
-            const result = request(ctx);
-            assert.strictEqual(result.attributeValues.unitType, unitType);
-        }
-    });
-
     it('rejects invalid unitNumber (non-number string)', () => {
         const ctx = {
             identity: { sub: 'user-sub-123' },

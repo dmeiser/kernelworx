@@ -7,24 +7,12 @@ export function request(ctx) {
     const now = util.time.nowISO8601();
     const sellerName = validateSellerName(input.sellerName);
 
-    // Build update expression dynamically to include optional unit fields
+    // Build update expression
     const expressionParts = ['sellerName = :sellerName', 'updatedAt = :updatedAt'];
     const expressionValues = {
         ':sellerName': sellerName,
         ':updatedAt': now
     };
-    
-    // Add unitType if provided
-    if (input.unitType !== undefined && input.unitType !== null) {
-        expressionParts.push('unitType = :unitType');
-        expressionValues[':unitType'] = input.unitType;
-    }
-    
-    // Add unitNumber if provided
-    if (input.unitNumber !== undefined && input.unitNumber !== null) {
-        expressionParts.push('unitNumber = :unitNumber');
-        expressionValues[':unitNumber'] = input.unitNumber;
-    }
     
     // NEW STRUCTURE: Update using ownerAccountId + profileId keys
     return {
@@ -53,8 +41,6 @@ export function response(ctx) {
     return {
         ...profile,
         sellerName: validateSellerName(input.sellerName),
-        unitType: input.unitType !== undefined ? input.unitType : profile.unitType,
-        unitNumber: input.unitNumber !== undefined ? input.unitNumber : profile.unitNumber,
         updatedAt: now
     };
 }
