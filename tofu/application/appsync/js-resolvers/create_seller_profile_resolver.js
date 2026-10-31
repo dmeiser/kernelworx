@@ -11,13 +11,6 @@ export function request(ctx) {
 
     const sellerName = validateSellerName(input.sellerName);
 
-    const validUnitTypes = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
-    if (input.unitType !== undefined && input.unitType !== null) {
-        if (!validUnitTypes.includes(input.unitType)) {
-            util.error('unitType must be one of: Crew, Pack, Post, Ship, Troop', 'INVALID_INPUT');
-        }
-    }
-
     if (input.unitNumber !== undefined && input.unitNumber !== null) {
         if (typeof input.unitNumber !== 'number' || !Number.isFinite(input.unitNumber) || Math.floor(input.unitNumber) !== input.unitNumber || input.unitNumber < 1) {
             util.error('unitNumber must be a positive integer', 'INVALID_INPUT');
