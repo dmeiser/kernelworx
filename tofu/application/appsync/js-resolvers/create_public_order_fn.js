@@ -53,15 +53,24 @@ const campaignsTableName = '${campaigns_table_name}';
 // an orphaned order under a deleted campaign. To prevent this, the write runs
 // as a TransactWriteItems with two operations (each transact item MUST carry
 // its own `operation` field - AppSync rejects an item without one):
-//   1. ConditionCheck on the campaign table: verifies the campaign item still
-//      exists (attribute_exists(campaignId) on the campaign's partition key).
-//      Requires the `dynamodb:ConditionCheckItem` IAM permission on the campaigns
-//      table (granted on the shared AppSync datasource role in iam/main.tf).
+//   1. UpdateItem on the campaigns table: maintains the denormalized
+//      totalOrders/totalRevenue counters (#746) AND, through its condition,
+//      verifies the campaign item still exists (attribute_exists(campaignId)
+//      on the campaign's partition key) - the ARCH-1 existence guard. The
+//      guard lives ON this UpdateItem, not on a standalone ConditionCheck,
+//      because DynamoDB rejects a transaction with two operations on the
+//      same item ("Transaction request cannot include multiple operations on
+//      one item"), and the counters must live on exactly this item.
 //   2. PutItem on the orders table: writes the order row.
+// The totals update rides INSIDE the transaction rather than as a follow-up
+// sync_campaign_totals pipeline step because the publicCreateOrder resolver
+// is already at AppSync's 10-function cap; atomic is also strictly better -
+// order row and counters commit or cancel together, so the partial-failure
+// drift documented on sync_campaign_totals_fn cannot occur on this path.
 // Both operations succeed or fail atomically, so a concurrent campaign deletion
 // (which deletes the campaign item) cancels the transaction with
 // TransactionCanceledException and no order row is written. The cap itself is
-// still enforced only by step 6 - this transaction's ConditionCheck guards
+// still enforced only by step 6 - this transaction's condition guards
 // existence, not the count, so a cancellation here means the campaign is
 // gone and surfaces as NOT_FOUND, never as a limit error.
 //
@@ -160,13 +169,22 @@ export function request(ctx) {
         operation: 'TransactWriteItems',
         transactItems: [
             {
-                // ConditionCheck: verify the campaign item exists in the
-                // campaigns table. The campaign table's key is {profileId, campaignId}.
-                // A concurrent deleteCampaign deletes this item, causing the
-                // ConditionCheck to fail and the entire transaction to cancel.
-                operation: 'ConditionCheck',
+                // UpdateItem on the campaigns table (#746): maintains the
+                // denormalized totalOrders/totalRevenue counters, and through
+                // its condition verifies the campaign item still exists (the
+                // ARCH-1 guard). A concurrent deleteCampaign deletes this
+                // item, failing the condition and cancelling the entire
+                // transaction. DynamoDB forbids two operations on one item in
+                // a transaction, so the existence guard cannot be a separate
+                // ConditionCheck on this same item.
+                operation: 'UpdateItem',
                 table: campaignsTableName,
                 key: util.dynamodb.toMapValues({ profileId: profileId, campaignId: campaignId }),
+                update: {
+                    expression: 'ADD #totalOrders :one, #totalRevenue :amount',
+                    expressionNames: { '#totalOrders': 'totalOrders', '#totalRevenue': 'totalRevenue' },
+                    expressionValues: util.dynamodb.toMapValues({ ':one': 1, ':amount': orderItem.totalAmount })
+                },
                 condition: {
                     expression: 'attribute_exists(campaignId)'
                 }

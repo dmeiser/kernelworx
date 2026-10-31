@@ -846,7 +846,7 @@ describe('Campaign Operations Integration Tests', () => {
       expect(result.Items?.length || 0).toBe(0);
     }, 15000);
 
-    it('Updating campaign to reference non-existent catalog succeeds (no foreign key validation)', async () => {
+    it('Updating campaign to reference non-existent catalog fails (foreign key validation)', async () => {
       // Arrange: Create a campaign
       const created = await createCampaignAndAwaitProjection(ownerClient, {
         profileId: testProfileId,
@@ -858,22 +858,19 @@ describe('Campaign Operations Integration Tests', () => {
       const campaignId = created.campaignId;
 
       // Act & Assert: Try to update with non-existent catalog
-      // Note: The resolver allows updating catalogId to a reference that doesn't exist.
-      // This is acceptable behavior - the catalog might be deleted later, or
-      // the caller might provide an invalid ID. The resolver only stores the reference.
-      const { data: updateData } = await ownerClient.mutate({
-        mutation: UPDATE_CAMPAIGN,
-        variables: {
-          input: {
-            campaignId,
-            catalogId: 'CATALOG#non-existent-catalog-id',
+      // #706: the security fix validates that the target catalog exists and is
+      // accessible to the caller before allowing the reference change.
+      await expect(
+        ownerClient.mutate({
+          mutation: UPDATE_CAMPAIGN,
+          variables: {
+            input: {
+              campaignId,
+              catalogId: 'CATALOG#non-existent-catalog-id',
+            },
           },
-        },
-      });
-      
-      // The update should succeed (resolver doesn't validate catalog existence)
-      expect(updateData.updateCampaign.campaignId).toBe(campaignId);
-      expect(updateData.updateCampaign.catalogId).toBe('CATALOG#non-existent-catalog-id');
+        })
+      ).rejects.toThrow(/Catalog not found/);
 
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
