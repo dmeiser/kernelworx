@@ -1728,6 +1728,42 @@ class TestAdminPurgeUserAccount:
         mock_cognito.admin_delete_user.assert_not_called()
         assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
 
+    def test_purge_refuses_surviving_profile_supplied_unprefixed(
+        self,
+        dynamodb_table: Any,
+        profiles_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An unprefixed profile ID is normalized, so the guard still detects the surviving row (#698)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{target_account_id}",
+                "profileId": "PROFILE#p1",
+                "sellerName": "Still There",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["p1"]}}
+
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.CONFLICT
+        mock_cognito.admin_delete_user.assert_not_called()
+
     def test_succeeds_once_the_profiles_are_gone(
         self,
         dynamodb_table: Any,
