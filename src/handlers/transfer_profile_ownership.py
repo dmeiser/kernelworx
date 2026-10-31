@@ -202,7 +202,7 @@ def _remove_new_owner_share_after_commit(db_profile_id: str, db_new_owner_id: st
     is idempotent, so a lost or repeated deletion converges on the next attempt.
     The transfer cannot be undone at this point, so a failed deletion is logged for
     the operator (naming the affected account) and the committed transfer reports
-    success.
+    success. Retrying the transfer converges because the deletion is idempotent.
     """
     try:
         tables.shares.delete_item(Key={"profileId": db_profile_id, "targetAccountId": db_new_owner_id})
