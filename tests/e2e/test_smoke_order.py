@@ -446,8 +446,8 @@ def test_edit_order(owner_page: Page, ensure_owner_profile: str, ensure_owner_ca
 def test_delete_order(owner_page: Page, ensure_owner_profile: str, ensure_owner_catalog: None) -> None:
     """Create an order, delete it via the delete button, and verify it disappears.
 
-    Creates a fresh *Delete Target Customer* order, registers a ``window.confirm``
-    dialog handler before clicking the second (delete) icon button on that row,
+    Creates a fresh *Delete Target Customer* order, opens the MUI ``ConfirmDialog``
+    before clicking the second (delete) icon button on that row,
     and asserts the customer name is no longer visible in the orders table.
 
     Args:
@@ -460,10 +460,13 @@ def test_delete_order(owner_page: Page, ensure_owner_profile: str, ensure_owner_
         "'Delete Target Customer' must appear before attempting to delete it"
     )
 
-    # Register dialog handler BEFORE clicking; window.confirm fires synchronously.
-    owner_page.once("dialog", lambda dlg: dlg.accept())
     row = owner_page.get_by_role("row").filter(has_text="Delete Target Customer")
     row.get_by_role("button").nth(1).click()
+
+    dialog = owner_page.get_by_role("dialog")
+    expect(dialog).to_be_visible(timeout=5_000)
+    dialog.get_by_role("button", name="Delete", exact=True).click()
+    expect(dialog).to_be_hidden(timeout=15_000)
 
     cell = owner_page.get_by_role("cell", name="Delete Target Customer")
     expect(cell.first).to_be_hidden(timeout=10_000)

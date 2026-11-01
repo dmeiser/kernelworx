@@ -21,6 +21,7 @@ from botocore.exceptions import ClientError
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
     from utils.boto import get_cognito_client
+    from utils.cognito import retry_on_transient_errors
     from utils.cognito_filters import cognito_user_filter
     from utils.dynamodb import (
         EMAIL_SEARCH_KEY,
@@ -30,10 +31,12 @@ try:  # pragma: no cover
         tables,
     )
     from utils.errors import AppError, ErrorCode
+    from utils.ids import ensure_account_id
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
     from ..utils.boto import get_cognito_client
+    from ..utils.cognito import retry_on_transient_errors
     from ..utils.cognito_filters import cognito_user_filter
     from ..utils.dynamodb import (
         EMAIL_SEARCH_KEY,
@@ -43,6 +46,7 @@ except ModuleNotFoundError:  # pragma: no cover
         tables,
     )
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import ensure_account_id
     from ..utils.logging import get_logger, mask_email
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -66,7 +70,8 @@ def _get_user_groups(cognito: Any, user_pool_id: str, username: str, logger: Any
     from .admin_operations import _raise_batch_lookup_error
 
     try:
-        response = cognito.admin_list_groups_for_user(
+        response = retry_on_transient_errors(
+            cognito.admin_list_groups_for_user,
             UserPoolId=user_pool_id,
             Username=username,
         )
@@ -122,7 +127,7 @@ def _dedup_account_keys(account_ids: list[str]) -> list[Dict[str, str]]:
     seen: set[str] = set()
     keys: list[Dict[str, str]] = []
     for account_id in account_ids:
-        db_account_id = account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
+        db_account_id = ensure_account_id(account_id)
         if db_account_id in seen:
             continue
         seen.add(db_account_id)
@@ -175,10 +180,14 @@ def _list_cognito_users(
         list_params["PaginationToken"] = next_token
 
     try:
-        response = cognito.list_users(**list_params)
+        response = retry_on_transient_errors(cognito.list_users, **list_params)
     except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "")
+        if error_code in TRANSIENT_ERROR_CODES:
+            logger.warning("Cognito list_users throttled", error=str(e), error_code=error_code)
+            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from e
         logger.error("Cognito list_users failed", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list users")
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to list users") from e
 
     return response.get("Users", []), response.get("PaginationToken")
 
@@ -377,7 +386,7 @@ def _filter_matching_accounts(
 
 def _scan_accounts_page(
     paginator_params: Dict[str, Any], page_size: int
-) -> tuple[list[Dict[str, Any]], Dict[str, Any] | None]:
+) -> tuple[list[Dict[str, Any]], Dict[str, Any] | None, int]:
     """Scan one bounded page of accounts. Returns (items, last_evaluated_key).
 
     ``Limit`` caps how many items this request reads and ``ProjectionExpression``
@@ -393,7 +402,11 @@ def _scan_accounts_page(
     )
     items = response.get("Items", [])
     last_key = response.get("LastEvaluatedKey")
-    return items, last_key
+    # ``ScannedCount`` is the number of items DynamoDB evaluated for this page;
+    # ``len(items)`` is only the subset it returned. The safety budget must bound
+    # the former so a table of removed/filtered items cannot blow past it.
+    scanned_count = response.get("ScannedCount", len(items))
+    return items, last_key, scanned_count
 
 
 # Limit search results to prevent overwhelming responses.
@@ -489,10 +502,15 @@ def _scan_accounts_page_into(
     max_results: int,
     page_size: int,
 ) -> tuple[int, Dict[str, Any] | None]:
-    """Scan one page and append its matching accounts to matches. Returns (page_size, last_key)."""
-    items, last_key = _scan_accounts_page(paginator_params, page_size)
+    """Scan one page and append its matching accounts to matches. Returns (scanned_count, last_key).
+
+    ``scanned_count`` is the number of items DynamoDB *evaluated* (``ScannedCount``),
+    not the number it returned, so the safety budget bounds scan capacity even
+    when a page evaluates items that are filtered out or removed.
+    """
+    items, last_key, scanned_count = _scan_accounts_page(paginator_params, page_size)
     _filter_matching_accounts(items, query_lower, matches, max_results)
-    return len(items), last_key
+    return scanned_count, last_key
 
 
 def _scan_is_truncated(scanned_count: int, pages: int, last_count: int, last_key: Dict[str, Any] | None) -> bool:
@@ -623,7 +641,8 @@ def _validate_search_query(query: str) -> None:
 def _search_user_by_sub(cognito: Any, user_pool_id: str, sub: str, logger: Any) -> Dict[str, Any] | None:
     """Search for a Cognito user by sub (account ID)."""
     try:
-        response = cognito.list_users(
+        response = retry_on_transient_errors(
+            cognito.list_users,
             UserPoolId=user_pool_id,
             Filter=cognito_user_filter("sub", sub),
             Limit=1,
@@ -651,7 +670,8 @@ def _search_users_in_cognito_by_email_prefix(
     Returns up to 50 matching users.
     """
     try:
-        response = cognito.list_users(
+        response = retry_on_transient_errors(
+            cognito.list_users,
             UserPoolId=user_pool_id,
             Filter=cognito_user_filter("email_prefix", query),  # Prefix match on email
             Limit=50,  # Reasonable limit for search results
