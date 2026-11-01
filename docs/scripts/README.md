@@ -115,6 +115,13 @@ as `<run-id>-owner@kernelworx.test` etc. so they never collide with dev/prod use
 The Smoke user is pre-confirmed so smoke suites run without burning Cognito's daily
 email quota (#483); its credentials are exported as `TEST_SMOKE_EMAIL`/`TEST_SMOKE_PASSWORD`.
 
+Passwords never appear on a command line (#710): the credential-carrying Cognito calls
+read them from a `chmod 600` `mktemp` file via `--cli-input-json file://...`, removed by
+an `EXIT` trap, matching `scripts/provision-user-totp.sh`. The generated passwords reach
+the caller only through the `export TEST_*` block on stdout, which
+`scripts/ephemeral-env.sh` pipes into the CI environment; all human-readable logging
+goes to stderr.
+
 **Key flags/arguments:**
 
 - `<run-id>` — Required. See
@@ -126,7 +133,9 @@ email quota (#483); its credentials are exported as `TEST_SMOKE_EMAIL`/`TEST_SMO
 ### `scripts/create-screenshot-user.sh`
 
 **Create the Alex Kernel screenshot/marketing user in Cognito.** Idempotent: safe to
-re-run if the user already exists.
+re-run if the user already exists. The password is passed to Cognito through a
+`chmod 600` `--cli-input-json` parameter file and is never printed (#710); it stays in
+`./.env` as `TEST_ALEX_PASSWORD`.
 
 **Key flags/arguments:** None. Loads `TEST_USER_POOL_ID`, `TEST_REGION`, `TEST_ALEX_EMAIL`,
 `TEST_ALEX_PASSWORD` from `./.env`.
@@ -137,6 +146,10 @@ re-run if the user already exists.
 Creates Owner, Contributor, and Read-only users, plus a pre-confirmed Smoke user when
 `TEST_SMOKE_EMAIL`/`TEST_SMOKE_PASSWORD` are set, so smoke suites don't burn Cognito's
 daily email quota (#483).
+
+Passwords are read from `./.env`, passed to Cognito through a `chmod 600`
+`--cli-input-json` parameter file, and never printed to stdout (#710) — the closing
+summary lists usernames only.
 
 **Key flags/arguments:** None. Requires `TEST_USER_POOL_ID`, `TEST_OWNER_EMAIL`,
 `TEST_OWNER_PASSWORD`, `TEST_REGION` in environment.

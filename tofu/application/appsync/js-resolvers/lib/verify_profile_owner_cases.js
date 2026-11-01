@@ -9,6 +9,7 @@
  * is asserted once, here, for all families.
  */
 import { describe, it } from 'node:test';
+import { normalizeId } from './ids.js';
 import assert from 'node:assert';
 
 import { request as shareRequest, response as shareResponse } from '../verify_profile_owner_for_share_fn.js';
@@ -57,8 +58,8 @@ export function describeVerifyProfileOwnerFamily(familyKey) {
 
             assert.strictEqual(result.operation, 'GetItem');
             assert.deepStrictEqual(result.key, {
-                ownerAccountId: 'ACCOUNT#user-123',
-                profileId: 'PROFILE#prof-456',
+                ownerAccountId: normalizeId('user-123', 'ACCOUNT#'),
+                profileId: normalizeId('prof-456', 'PROFILE#'),
             });
             assert.strictEqual(result.consistentRead, true);
         });
@@ -66,35 +67,35 @@ export function describeVerifyProfileOwnerFamily(familyKey) {
         it('does not re-prefix an already-normalized profileId', () => {
             const result = family.request({
                 identity: { sub: 'user-123' },
-                args: { input: { profileId: 'PROFILE#prof-456' } },
+                args: { input: { profileId: normalizeId('prof-456', 'PROFILE#') } },
                 stash: {},
             });
 
             assert.strictEqual(result.operation, 'GetItem');
             assert.deepStrictEqual(result.key, {
-                ownerAccountId: 'ACCOUNT#user-123',
-                profileId: 'PROFILE#prof-456',
+                ownerAccountId: normalizeId('user-123', 'ACCOUNT#'),
+                profileId: normalizeId('prof-456', 'PROFILE#'),
             });
             assert.strictEqual(result.consistentRead, true);
         });
 
         it('leaves an already-prefixed caller sub alone (#534)', () => {
             const result = family.request({
-                identity: { sub: 'ACCOUNT#user-123' },
-                args: { input: { profileId: 'PROFILE#prof-456' } },
+                identity: { sub: normalizeId('user-123', 'ACCOUNT#') },
+                args: { input: { profileId: normalizeId('prof-456', 'PROFILE#') } },
                 stash: {},
             });
 
             assert.deepStrictEqual(result.key, {
-                ownerAccountId: 'ACCOUNT#user-123',
-                profileId: 'PROFILE#prof-456',
+                ownerAccountId: normalizeId('user-123', 'ACCOUNT#'),
+                profileId: normalizeId('prof-456', 'PROFILE#'),
             });
         });
     });
 
     describe(`${family.resolver} response`, () => {
         it('stashes and returns the profile when the caller owns it', () => {
-            const profile = { profileId: 'PROFILE#prof-456', ownerAccountId: 'ACCOUNT#user-123', name: 'Test' };
+            const profile = { profileId: normalizeId('prof-456', 'PROFILE#'), ownerAccountId: normalizeId('user-123', 'ACCOUNT#'), name: 'Test' };
             const ctx = { stash: {}, result: profile };
 
             const result = family.response(ctx);

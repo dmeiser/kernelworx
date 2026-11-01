@@ -20,11 +20,13 @@ try:  # pragma: no cover
     from utils.auth import require_admin_mfa
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
+    from utils.ids import ensure_account_id, ensure_campaign_id, ensure_profile_id
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import ensure_account_id, ensure_campaign_id, ensure_profile_id
     from ..utils.logging import get_logger
 
 # query_all_items must be typed for mypy (warn_return_any): mypy reads only the
@@ -87,7 +89,7 @@ def _require_admin_and_get_target_profile_id(event: Dict[str, Any]) -> tuple[str
         raise AppError(ErrorCode.INVALID_INPUT, "Profile ID is required")
 
     # Add PROFILE# prefix if not present
-    db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
+    db_profile_id = ensure_profile_id(profile_id)
     return db_profile_id, actor_sub
 
 
@@ -112,8 +114,8 @@ def admin_get_profile_shares(event: Dict[str, Any], context: Any) -> list[Dict[s
 
 def _normalize_profile_and_account_ids(profile_id: str, target_account_id: str) -> tuple[str, str]:
     """Normalize profile ID and target account ID with prefixes."""
-    db_profile_id = profile_id if profile_id.startswith("PROFILE#") else f"PROFILE#{profile_id}"
-    db_target_id = target_account_id if target_account_id.startswith("ACCOUNT#") else f"ACCOUNT#{target_account_id}"
+    db_profile_id = ensure_profile_id(profile_id)
+    db_target_id = ensure_account_id(target_account_id)
     return db_profile_id, db_target_id
 
 
@@ -232,7 +234,7 @@ def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Di
     campaign_id, shared_campaign_code, actor_sub = _require_admin_and_get_target_campaign_id(event)
 
     # Add CAMPAIGN# prefix if not present
-    db_campaign_id = campaign_id if campaign_id.startswith("CAMPAIGN#") else f"CAMPAIGN#{campaign_id}"
+    db_campaign_id = ensure_campaign_id(campaign_id)
 
     # Get campaign profile, update shared code, and return the stored item
     profile_id = _get_campaign_profile_id(db_campaign_id, campaign_id)
@@ -241,7 +243,7 @@ def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Di
     logger.info(
         "Updated campaign shared code",
         campaign_id=campaign_id,
-        shared_campaign_code=shared_campaign_code,
+        has_shared_campaign_code=shared_campaign_code is not None,
         actor_sub=actor_sub,
     )
     return updated_campaign
