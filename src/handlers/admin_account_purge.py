@@ -29,7 +29,7 @@ from .deletion_cascade import (
 try:  # pragma: no cover
     from utils.appsync_types import get_caller_id
     from utils.boto import get_cognito_client
-    from utils.cognito import is_transient_cognito_error
+    from utils.cognito import is_transient_cognito_error, retry_on_transient_errors
     from utils.cognito_filters import cognito_user_filter
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
@@ -39,7 +39,7 @@ try:  # pragma: no cover
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.appsync_types import get_caller_id
     from ..utils.boto import get_cognito_client
-    from ..utils.cognito import is_transient_cognito_error
+    from ..utils.cognito import is_transient_cognito_error, retry_on_transient_errors
     from ..utils.cognito_filters import cognito_user_filter
     from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
@@ -71,7 +71,8 @@ def _find_cognito_user_by_sub(
     """
     raw_sub = account_id[8:] if account_id.startswith("ACCOUNT#") else account_id
     try:
-        users_response = cognito.list_users(
+        users_response = retry_on_transient_errors(
+            cognito.list_users,
             UserPoolId=user_pool_id,
             # Built in one step so the value that was checked is the value sent (#124, #560).
             Filter=cognito_user_filter("sub", raw_sub),
@@ -108,7 +109,7 @@ def _delete_user_from_cognito(
     """
     masked_email = mask_email(email)
     try:
-        cognito.admin_delete_user(UserPoolId=user_pool_id, Username=username)
+        retry_on_transient_errors(cognito.admin_delete_user, UserPoolId=user_pool_id, Username=username)
         logger.info(
             "Deleted user from Cognito",
             username=mask_email(username),
