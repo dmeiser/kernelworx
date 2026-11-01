@@ -243,7 +243,7 @@ def admin_update_campaign_shared_code(event: Dict[str, Any], context: Any) -> Di
     logger.info(
         "Updated campaign shared code",
         campaign_id=campaign_id,
-        shared_campaign_code=shared_campaign_code,
+        has_shared_campaign_code=shared_campaign_code is not None,
         actor_sub=actor_sub,
     )
     return updated_campaign
