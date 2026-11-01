@@ -57,6 +57,7 @@ export function response(ctx) {
     }
 
     ctx.stash.existingMethods = methods;
+    ctx.stash.existingQrCodeUrl = exists.qrCodeUrl || null;
 
     // Carry the raw read preferences snapshot so the mutation step can apply an
     // optimistic lock (preferences = :readPrefs) against concurrent writes.

@@ -127,17 +127,19 @@ tflint:
 
 # Run KICS security scan
 kics:
-	@echo "Pulling latest KICS image..."
-	docker pull checkmarx/kics:latest
+	@echo "Pulling KICS image..."
+	docker pull checkmarx/kics:v2.1.20
 	@echo "Running KICS security scan..."
 	@mkdir -p tofu/kics-results
 	docker run -t \
 		-v "$(PWD)/tofu":/path:ro,z \
 		-v "$(PWD)/tofu/kics-results":/results:z \
-		checkmarx/kics scan \
+		checkmarx/kics:v2.1.20 scan \
 		-p /path \
+		--config /path/.kics.yml \
+		--fail-on high,medium \
 		-o /results \
-		--config /path/.kics.yml
+		--report-formats json
 	@echo "KICS results saved to tofu/kics-results/"
 
 # All infrastructure checks (linting only, no deployment)

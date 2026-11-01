@@ -26,7 +26,6 @@ import type { UsePasskeysReturn } from '../../hooks/usePasskeys';
 
 interface PasskeySectionProps {
   passkeyHook: UsePasskeysReturn;
-  mfaEnabled?: boolean;
   onRegisterPasskey: () => void;
   isAdmin?: boolean;
 }

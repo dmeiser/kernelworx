@@ -3,6 +3,7 @@
  */
 
 import React from 'react';
+import { buildInfo } from '../lib/buildInfo';
 import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Paper, Stack, Button } from '@mui/material';
 import { Logout as LogoutIcon } from '@mui/icons-material';
@@ -113,7 +114,7 @@ export const SettingsPage: React.FC = () => {
             fundraisers.
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            <strong>Version:</strong> 1.0.0-beta
+            <strong>Version:</strong> {buildInfo.version}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             <strong>License:</strong> MIT (Open Source)
