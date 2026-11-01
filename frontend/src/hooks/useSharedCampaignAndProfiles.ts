@@ -5,29 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApolloClient, useQuery } from '@apollo/client/react';
 import { GET_SHARED_CAMPAIGN } from '../lib/graphql';
 import { fetchAllMyProfiles, type MyProfile } from '../lib/myProfiles';
-
-interface SharedCampaign {
-  sharedCampaignCode: string;
-  catalogId: string;
-  catalog: {
-    catalogId: string;
-    catalogName: string;
-  } | null;
-  campaignName: string;
-  campaignYear: number;
-  startDate: string | null;
-  endDate: string | null;
-  unitType: string;
-  unitNumber: number;
-  city: string;
-  state: string;
-  createdBy: string;
-  createdByName: string;
-  createdByAccountId: string;
-  creatorMessage: string;
-  description: string | null;
-  isActive: boolean;
-}
+import type { GqlSharedCampaign } from '../types/graphql-generated';
 
 export const useSharedCampaignAndProfiles = (effectiveSharedCampaignCode: string | undefined) => {
   const apolloClient = useApolloClient();
@@ -35,7 +13,7 @@ export const useSharedCampaignAndProfiles = (effectiveSharedCampaignCode: string
     data: sharedCampaignData,
     loading: sharedCampaignLoading,
     error: sharedCampaignError,
-  } = useQuery<{ getSharedCampaign: SharedCampaign | null }>(GET_SHARED_CAMPAIGN, {
+  } = useQuery<{ getSharedCampaign: GqlSharedCampaign | null }>(GET_SHARED_CAMPAIGN, {
     variables: { sharedCampaignCode: effectiveSharedCampaignCode },
     skip: !effectiveSharedCampaignCode,
   });
