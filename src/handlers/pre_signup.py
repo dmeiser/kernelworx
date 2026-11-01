@@ -22,15 +22,16 @@ How it works:
 
 from typing import Any, Dict, NoReturn
 
-import boto3
 from botocore.exceptions import ClientError
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.boto import get_cognito_client
     from utils.cognito_filters import cognito_user_filter
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.boto import get_cognito_client
     from ..utils.cognito_filters import cognito_user_filter
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
@@ -259,7 +260,7 @@ def _process_federated_signup(
     :func:`_provider_email_filter`; ``email`` itself is only ever masked for logging.
     """
     try:
-        cognito = boto3.client("cognito-idp")
+        cognito = get_cognito_client()
         response = cognito.list_users(UserPoolId=user_pool_id, Filter=email_filter, Limit=1)
         existing_users = response.get("Users", [])
 

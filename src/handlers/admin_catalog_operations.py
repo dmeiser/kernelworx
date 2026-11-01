@@ -23,12 +23,14 @@ try:  # pragma: no cover
     from utils.auth import require_admin_mfa
     from utils.dynamodb import tables
     from utils.errors import AppError, ErrorCode
+    from utils.ids import ensure_account_id
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.appsync_types import get_caller_id
     from ..utils.auth import require_admin_mfa
     from ..utils.dynamodb import tables
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import ensure_account_id
     from ..utils.logging import get_logger
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -118,7 +120,7 @@ def _build_catalog_item(
         "catalogId": catalog_id,
         "catalogName": catalog_name,
         "catalogType": "ADMIN_MANAGED",  # Key difference from regular createCatalog
-        "ownerAccountId": f"ACCOUNT#{caller_id}",  # Track who created it
+        "ownerAccountId": ensure_account_id(caller_id),  # Track who created it
         "isPublic": is_public,
         "isPublicStr": "true" if is_public else "false",  # For GSI queries
         "products": processed_products,

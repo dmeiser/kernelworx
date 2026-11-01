@@ -137,7 +137,6 @@ see `../tests/e2e/README.md` and `TESTING.md`.
 
 ```bash
 npm run lint              # ESLint (complexity <= 5, max-depth <= 3) + the complexity-disable ratchet
-npm run lint:complexity   # the two complexity rules as a one-off report (not run in CI)
 npm run typecheck         # tsc -b --noEmit && tsc -p tsconfig.test.json --noEmit
 npm run format            # Prettier over src/**/*.{ts,tsx}
 npm run spellcheck        # cspell against the root cspell.json
