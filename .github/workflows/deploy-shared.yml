@@ -314,7 +314,7 @@ jobs:
             exit 0
           fi
           for policy_id in $RETIRED_POLICY_IDS; do
-            etag=$(aws cloudfront get-response-headers-policy --id "$policy_id" --query 'ResponseHeadersPolicy.ETag' --output text 2>aws_err.txt)
+            etag=$(aws cloudfront get-response-headers-policy --id "$policy_id" --query 'ResponseHeadersPolicy.ETag' --output text 2>aws_err.txt || true)
             if [ -z "$etag" ] || grep -q 'NoSuchResponseHeadersPolicy' aws_err.txt; then
               echo "Response headers policy $policy_id already deleted; continuing."
               continue

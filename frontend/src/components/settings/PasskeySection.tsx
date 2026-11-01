@@ -6,7 +6,6 @@ import {
   Stack,
   Box,
   Typography,
-  TextField,
   Button,
   Alert,
   CircularProgress,
@@ -26,7 +25,6 @@ import type { UsePasskeysReturn } from '../../hooks/usePasskeys';
 
 interface PasskeySectionProps {
   passkeyHook: UsePasskeysReturn;
-  mfaEnabled?: boolean;
   onRegisterPasskey: () => void;
   isAdmin?: boolean;
 }
@@ -141,20 +139,11 @@ const RegisterPasskeyForm: React.FC<{
       Register a New Passkey
     </Typography>
     <Stack direction="row" spacing={2} alignItems="flex-start" flexWrap="wrap">
-      <TextField
-        label="Passkey Name"
-        value={hook.passkeyName}
-        onChange={(event) => hook.setPasskeyName(event.target.value)}
-        placeholder="e.g., My iPhone, Work Laptop"
-        disabled={hook.passkeyLoading}
-        sx={{ flex: 1, minWidth: 0 }}
-        helperText="Give this passkey a name to remember which device it's for"
-      />
       <Button
         variant="contained"
         startIcon={hook.passkeyLoading ? <CircularProgress size={20} /> : <AddIcon />}
         onClick={onRegisterPasskey}
-        disabled={hook.passkeyLoading || !hook.passkeyName.trim()}
+        disabled={hook.passkeyLoading}
       >
         Register
       </Button>

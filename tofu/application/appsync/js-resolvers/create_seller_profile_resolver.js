@@ -1,5 +1,6 @@
 import { util } from '@aws-appsync/utils';
 import { validateSellerName } from './lib/validate_seller_name.js';
+import { validateUnitFields } from './lib/validate_unit_fields.js';
 import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
@@ -10,19 +11,7 @@ export function request(ctx) {
     const input = ctx.args.input || {};
 
     const sellerName = validateSellerName(input.sellerName);
-
-    const validUnitTypes = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
-    if (input.unitType !== undefined && input.unitType !== null) {
-        if (!validUnitTypes.includes(input.unitType)) {
-            util.error('unitType must be one of: Crew, Pack, Post, Ship, Troop', 'INVALID_INPUT');
-        }
-    }
-
-    if (input.unitNumber !== undefined && input.unitNumber !== null) {
-        if (typeof input.unitNumber !== 'number' || !Number.isFinite(input.unitNumber) || Math.floor(input.unitNumber) !== input.unitNumber || input.unitNumber < 1) {
-            util.error('unitNumber must be a positive integer', 'INVALID_INPUT');
-        }
-    }
+    const unitFields = validateUnitFields(input);
 
     const profileId = 'PROFILE#' + util.autoId();
     const ownerAccountId = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
@@ -35,11 +24,11 @@ export function request(ctx) {
         createdAt: now,
         updatedAt: now,
     };
-    if (input.unitType) {
-        item.unitType = input.unitType;
+    if (unitFields.unitType !== undefined) {
+        item.unitType = unitFields.unitType;
     }
-    if (input.unitNumber !== undefined && input.unitNumber !== null) {
-        item.unitNumber = input.unitNumber;
+    if (unitFields.unitNumber !== undefined) {
+        item.unitNumber = unitFields.unitNumber;
     }
 
     return {

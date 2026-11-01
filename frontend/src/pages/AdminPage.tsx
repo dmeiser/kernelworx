@@ -5,6 +5,7 @@
  */
 
 import React, { useState } from 'react';
+import { buildInfo } from '../lib/buildInfo';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useLazyQuery } from '@apollo/client/react';
 import {
@@ -483,7 +484,7 @@ const SystemInfoTabContent: React.FC = () => (
         <Typography variant="subtitle2" color="text.secondary">
           Application Version
         </Typography>
-        <Typography variant="body1">1.0.0-beta</Typography>
+        <Typography variant="body1">{buildInfo.version}</Typography>
       </Box>
       <Box>
         <Typography variant="subtitle2" color="text.secondary">
