@@ -40,8 +40,6 @@ const createMockMfaHook = (overrides?: Partial<UseMfaReturn>): UseMfaReturn => (
 
 const createMockPasskeyHook = (overrides?: Partial<UsePasskeysReturn>): UsePasskeysReturn => ({
   passkeys: [],
-  passkeyName: '',
-  setPasskeyName: vi.fn(),
   passkeyError: null,
   setPasskeyError: vi.fn(),
   passkeySuccess: false,
@@ -423,11 +421,11 @@ describe('PasskeySection states and interactions', () => {
     expect(screen.queryByText('Registered Passkeys')).not.toBeInTheDocument();
   });
 
-  it('registers a passkey when a name is present', () => {
+  it('registers a passkey', () => {
     const onRegisterPasskey = vi.fn();
     render(
       <PasskeySection
-        passkeyHook={createMockPasskeyHook({ passkeyName: 'My Phone' })}
+        passkeyHook={createMockPasskeyHook()}
         onRegisterPasskey={onRegisterPasskey}
       />,
     );
@@ -438,32 +436,15 @@ describe('PasskeySection states and interactions', () => {
     expect(onRegisterPasskey).toHaveBeenCalledTimes(1);
   });
 
-  it('disables register without a name', () => {
-    render(
-      <PasskeySection passkeyHook={createMockPasskeyHook({ passkeyName: '  ' })} onRegisterPasskey={vi.fn()} />,
-    );
-
-    expect(screen.getByRole('button', { name: 'Register' })).toBeDisabled();
-  });
-
-  it('disables register and the name field while loading', () => {
+  it('disables register while loading', () => {
     render(
       <PasskeySection
-        passkeyHook={createMockPasskeyHook({ passkeyName: 'My Phone', passkeyLoading: true })}
+        passkeyHook={createMockPasskeyHook({ passkeyLoading: true })}
         onRegisterPasskey={vi.fn()}
       />,
     );
 
     expect(screen.getByRole('button', { name: 'Register' })).toBeDisabled();
-    expect(screen.getByLabelText('Passkey Name')).toBeDisabled();
-  });
-
-  it('forwards name edits to setPasskeyName', () => {
-    const setPasskeyName = vi.fn();
-    render(<PasskeySection passkeyHook={createMockPasskeyHook({ setPasskeyName })} onRegisterPasskey={vi.fn()} />);
-
-    fireEvent.change(screen.getByLabelText('Passkey Name'), { target: { value: 'My Phone' } });
-    expect(setPasskeyName).toHaveBeenCalledWith('My Phone');
   });
 
   it('disables the setup button while MFA is loading (spinner replaces the label)', () => {

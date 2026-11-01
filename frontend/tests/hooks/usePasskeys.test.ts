@@ -50,7 +50,6 @@ describe('usePasskeys', () => {
   it('initializes with empty defaults', () => {
     const { result } = renderHook(() => usePasskeys());
     expect(result.current.passkeys).toEqual([]);
-    expect(result.current.passkeyName).toBe('');
     expect(result.current.passkeyError).toBeNull();
     expect(result.current.passkeySuccess).toBe(false);
     expect(result.current.passkeyLoading).toBe(false);
@@ -79,23 +78,8 @@ describe('usePasskeys', () => {
     expect(result.current.passkeys).toEqual([]);
   });
 
-  it('requires a passkey name before registering', async () => {
-    const { result } = renderHook(() => usePasskeys());
-
-    await act(async () => {
-      await result.current.handleRegisterPasskey();
-    });
-
-    expect(result.current.passkeyError).toBe('Please enter a name for this passkey');
-    expect(amplifyAuth.associateWebAuthnCredential).not.toHaveBeenCalled();
-  });
-
   it('registers passkey, enables passkey MFA, and leaves TOTP untouched (coexistence)', async () => {
     const { result } = renderHook(() => usePasskeys());
-
-    act(() => {
-      result.current.setPasskeyName('New Security Key');
-    });
 
     await act(async () => {
       await result.current.handleRegisterPasskey();
@@ -110,17 +94,12 @@ describe('usePasskeys', () => {
     // No confirmation dialog needed
     expect(result.current.pendingConfirmation).toBeNull();
     expect(result.current.passkeySuccess).toBe(true);
-    expect(result.current.passkeyName).toBe('');
     expect(amplifyAuth.listWebAuthnCredentials).toHaveBeenCalled();
   });
 
   it('does not enable passkey MFA when registration fails', async () => {
     vi.mocked(amplifyAuth.associateWebAuthnCredential).mockRejectedValue(new Error('Passkey rejected'));
     const { result } = renderHook(() => usePasskeys());
-
-    act(() => {
-      result.current.setPasskeyName('Phone');
-    });
 
     await act(async () => {
       await result.current.handleRegisterPasskey();
@@ -134,10 +113,6 @@ describe('usePasskeys', () => {
   it('reports an error but keeps the credential when passkey MFA enablement fails', async () => {
     vi.mocked(enablePasskeyMfa).mockRejectedValue(new Error('WebAuthn MFA not enabled on pool'));
     const { result } = renderHook(() => usePasskeys());
-
-    act(() => {
-      result.current.setPasskeyName('Phone');
-    });
 
     await act(async () => {
       await result.current.handleRegisterPasskey();
@@ -205,9 +180,6 @@ describe('usePasskeys error-message variants', () => {
     vi.mocked(amplifyAuth.associateWebAuthnCredential).mockRejectedValue({ message: 'webauthn exploded' } as any);
     const { result } = renderHook(() => usePasskeys());
 
-    act(() => {
-      result.current.setPasskeyName('Phone');
-    });
     await act(async () => {
       await result.current.handleRegisterPasskey();
     });
@@ -219,9 +191,6 @@ describe('usePasskeys error-message variants', () => {
     vi.mocked(amplifyAuth.associateWebAuthnCredential).mockRejectedValue('rejected-string' as any);
     const { result } = renderHook(() => usePasskeys());
 
-    act(() => {
-      result.current.setPasskeyName('Phone');
-    });
     await act(async () => {
       await result.current.handleRegisterPasskey();
     });
