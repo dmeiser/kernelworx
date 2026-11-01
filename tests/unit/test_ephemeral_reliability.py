@@ -1148,8 +1148,11 @@ class TestWorkflowDispatchSurface:
         up_step = next(s for s in workflow["jobs"]["ephemeral-test"]["steps"] if s.get("id") == "ephemeral_up")
         run_script = up_step["run"]
         args = self._extract_command_args(run_script, "ephemeral-env.sh", "up")
-        assert args[2] == "pr-${{ github.event.pull_request.number }}", (
+        assert args[2] == "pr-${PR_NUMBER}", (
             "ephemeral-env.sh up must use a PR-numbered run-id"
+        )
+        assert up_step.get("env", {}).get("PR_NUMBER") == "${{ github.event.pull_request.number }}", (
+            "PR number must be bound via env, not interpolated into the shell"
         )
 
     def test_sweep_job_has_ephemeral_environment(self, repo_root: Path) -> None:
