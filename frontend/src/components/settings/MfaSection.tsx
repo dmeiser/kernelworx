@@ -28,7 +28,6 @@ import { handleSignOutAndRedirect } from '../../lib/authUtils';
 
 interface MfaSectionProps {
   mfaHook: UseMfaReturn;
-  passkeyCount?: number;
   onSetupMFA: () => void;
   isAdmin?: boolean;
 }

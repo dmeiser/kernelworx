@@ -18,8 +18,6 @@ export interface PasskeyPendingConfirmation {
 
 export interface UsePasskeysReturn {
   passkeys: AuthWebAuthnCredential[];
-  passkeyName: string;
-  setPasskeyName: (value: string) => void;
   passkeyError: string | null;
   setPasskeyError: (value: string | null) => void;
   passkeySuccess: boolean;
@@ -46,18 +44,11 @@ const PASSKEY_MESSAGES = {
 };
 
 const registerPasskey = async (
-  passkeyName: string,
-  setPasskeyName: (value: string) => void,
   setPasskeyError: (value: string | null) => void,
   setPasskeySuccess: (value: boolean) => void,
   setPasskeyLoading: (value: boolean) => void,
   loadPasskeys: () => Promise<void>,
 ): Promise<void> => {
-  if (!passkeyName.trim()) {
-    setPasskeyError('Please enter a name for this passkey');
-    return;
-  }
-
   setPasskeyError(null);
   setPasskeySuccess(false);
   setPasskeyLoading(true);
@@ -78,7 +69,6 @@ const registerPasskey = async (
       return;
     }
     setPasskeySuccess(true);
-    setPasskeyName('');
     await loadPasskeys();
   } catch (err: unknown) {
     setPasskeyError(
@@ -94,7 +84,6 @@ const registerPasskey = async (
 
 export const usePasskeys = (): UsePasskeysReturn => {
   const [passkeys, setPasskeys] = useState<AuthWebAuthnCredential[]>([]);
-  const [passkeyName, setPasskeyName] = useState('');
   const [passkeyError, setPasskeyError] = useState<string | null>(null);
   const [passkeySuccess, setPasskeySuccess] = useState(false);
   const [passkeyLoading, setPasskeyLoading] = useState(false);
@@ -124,8 +113,6 @@ export const usePasskeys = (): UsePasskeysReturn => {
 
   const handleRegisterPasskey = async () => {
     await registerPasskey(
-      passkeyName,
-      setPasskeyName,
       setPasskeyError,
       setPasskeySuccess,
       setPasskeyLoading,
@@ -154,8 +141,6 @@ export const usePasskeys = (): UsePasskeysReturn => {
 
   return {
     passkeys,
-    passkeyName,
-    setPasskeyName,
     passkeyError,
     setPasskeyError,
     passkeySuccess,

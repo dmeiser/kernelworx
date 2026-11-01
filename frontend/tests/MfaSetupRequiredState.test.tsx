@@ -187,4 +187,21 @@ describe('MfaSetupRequiredState', () => {
     backSpy.mockRestore();
     vi.restoreAllMocks();
   });
+
+  it('closes the federated dialog through handleClose', async () => {
+    const user = userEvent.setup();
+    render(<MfaSetupRequiredState autoOpenDialog={true} isFederated={true} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    const back = screen.getAllByRole('button', { name: /Back/i })[0];
+    await user.click(back);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
 });

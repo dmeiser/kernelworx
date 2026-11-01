@@ -15,6 +15,7 @@ try:  # pragma: no cover
     from utils.boto import get_s3_client
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
+    from utils.ids import ensure_account_id
     from utils.logging import get_logger
     from utils.payment_methods import (
         _delete_qr_if_exists,
@@ -29,6 +30,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.boto import get_s3_client
     from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import ensure_account_id
     from ..utils.logging import get_logger
     from ..utils.payment_methods import (
         _delete_qr_if_exists,
@@ -221,7 +223,7 @@ def _get_payment_method_qr_key(caller_id: str, payment_method_name: str) -> Opti
     Raises:
         AppError: If the account or payment method does not exist.
     """
-    account_id_key = f"ACCOUNT#{caller_id}"
+    account_id_key = ensure_account_id(caller_id)
     response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
 
     if "Item" not in response:
