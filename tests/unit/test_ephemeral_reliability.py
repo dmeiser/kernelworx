@@ -1033,13 +1033,59 @@ class TestInitReconfigure:
         assert "-backend-config=bucket=test-bucket" in init, f"got: {init}"
         assert "-backend-config=region=us-east-1" in init, f"got: {init}"
 
+    def test_env_inits_the_backend_with_reconfigure(self, repo_root: Path, tmp_env: Path, tmp_path: Path) -> None:
+        """`env` only reads `tofu output`, but the workspace's saved backend-config
+        may point at another run-id's state (or at nothing). It must re-init the
+        backend before reading output, or it fails or exports the wrong stack's
+        endpoints (#727)."""
+        recorded = tmp_env / "tofu_calls.txt"
+        build_dir = tmp_path / "lambda-layer"
+        write_mock(
+            tmp_env,
+            "tofu",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            exit 0
+            """,
+        )
+
+        script = f"""
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
+            rm -f "{recorded}"
+            scripts/ephemeral-env.sh env pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        calls = [line for line in recorded.read_text().splitlines() if line.strip()]
+        init_idx = next((i for i, c in enumerate(calls) if c.startswith("init ")), None)
+        output_indices = [i for i, c in enumerate(calls) if c.startswith("output ")]
+        assert init_idx is not None, f"env must init the backend before reading output, got: {calls}"
+        init = shlex.split(calls[init_idx])
+        assert output_indices, f"env must read `tofu output`, got: {calls}"
+        assert "-reconfigure" in init, f"env init must re-configure the backend, got: {init}"
+        assert "-migrate-state" not in init, f"env init must not migrate state, got: {init}"
+        assert "-backend-config=key=application/ephemeral/pr-999/terraform.tfstate" in init, (
+            f"backend-config overrides must be unchanged, got: {init}"
+        )
+        assert "-backend-config=bucket=test-bucket" in init, f"got: {init}"
+        assert "-backend-config=region=us-east-1" in init, f"got: {init}"
+        # The init must precede every `tofu output`: reading output from an
+        # uninitialized or wrong-run-id backend is exactly what #727 reports.
+        assert init_idx < min(output_indices), f"env must init the backend before reading output, got: {calls}"
+
     def test_every_tofu_init_in_ephemeral_env_reconfigures(self, repo_root: Path) -> None:
-        """Both entry points (up and down) can follow an init for a different run-id
-        in the same workspace, so both must pass -reconfigure."""
+        """All three entry points (up, env, and down) can follow an init for a
+        different run-id in the same workspace, so every init must pass
+        -reconfigure."""
         source = (repo_root / "scripts" / "ephemeral-env.sh").read_text()
         joined = re.sub(r"\\\n\s*", " ", source)
         init_calls = [line.strip() for line in joined.splitlines() if "tofu init " in line]
-        assert len(init_calls) == 2, f"expected the up and down init calls, got: {init_calls}"
+        assert len(init_calls) == 3, f"expected the up, env, and down init calls, got: {init_calls}"
         for call in init_calls:
             assert "-reconfigure" in call, f"tofu init must pass -reconfigure: {call}"
             assert "-migrate-state" not in call, f"tofu init must not migrate state: {call}"
