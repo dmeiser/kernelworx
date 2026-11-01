@@ -102,6 +102,17 @@ describe('create_order_fn request', () => {
       /INVALID_INPUT: Product PROD#UNKNOWN not found in catalog/
     );
   });
+
+  it('stashes the denormalized-totals delta for sync_campaign_totals_fn (#746)', () => {
+    const stash = { ...baseCtx.stash };
+    request({ ...baseCtx, stash });
+    assert.deepStrictEqual(stash.totalsDelta, {
+      profileId: 'PROFILE#p1',
+      campaignId: 'CAMPAIGN#c1',
+      count: 1,
+      revenue: 5.97,
+    });
+  });
 });
 
 describe('create_order_fn response', () => {

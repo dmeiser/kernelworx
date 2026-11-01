@@ -8,10 +8,8 @@ validated here rather than at each call site: a set value must be an http(s)
 URL with a host.
 
 The pre-token-generation trigger builds its Cognito client once at module scope
-on purpose (warm-start connection reuse, #458), and the account-deletion and
-pre-signup handlers construct their own per-call Cognito clients, so those
-three sites are not routed through here. The DYNAMODB_ENDPOINT override
-remains unvalidated (#523).
+on purpose (warm-start connection reuse, #458), so that site is not routed
+through here. The DYNAMODB_ENDPOINT override remains unvalidated (#523).
 """
 
 import os

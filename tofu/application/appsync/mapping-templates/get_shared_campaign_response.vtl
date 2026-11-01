@@ -8,6 +8,9 @@
     #if($ctx.result.isActive == false)
         $util.toJson(null)
     #else
+        #if($ctx.result.createdBy && $ctx.result.createdBy.startsWith("ACCOUNT#"))
+            $util.qr($ctx.result.put("createdBy", $ctx.result.createdBy.substring(8)))
+        #end
         $util.toJson($ctx.result)
     #end
 #end

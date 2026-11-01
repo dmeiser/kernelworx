@@ -17,6 +17,22 @@ describe('query_orders_by_campaign_fn request', () => {
         assert.strictEqual(result.nextToken, undefined);
     });
 
+    // #717: the orders table PK is the DB form, so an unprefixed campaignId
+    // queried a partition that never exists.
+    it('normalizes an unprefixed campaignId to the DB form', () => {
+        const ctx = {
+            stash: { authorized: true },
+            args: { campaignId: 'c1' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, 'Query');
+        assert.deepStrictEqual(result.query.expressionValues, {
+            ':campaignId': 'CAMPAIGN#c1',
+        });
+    });
+
     it('passes limit and nextToken through to the DynamoDB query', () => {
         const ctx = {
             stash: { authorized: true },
