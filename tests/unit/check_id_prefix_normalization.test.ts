@@ -23,6 +23,11 @@ const ALL_RESOLVERS = readdirSync(JS_RESOLVERS_DIR).filter(
   (f) => f.endsWith(".js") && !f.includes(".test."),
 );
 
+// #732: also guard non-ids.js files under lib/.
+const ALL_LIB_GUARDED = readdirSync(LIB_DIR).filter(
+  (f) => f.endsWith(".js") && f !== "ids.js" && !f.includes(".test."),
+);
+
 // The ID prefixes resolvers normalize. Derived from the prefixes the DynamoDB
 // tables actually use.
 const PREFIXES = ["ACCOUNT", "PROFILE", "CATALOG", "CAMPAIGN"];
@@ -234,6 +239,25 @@ function findPrefixLiterals(source: string): {
 describe("ID-prefix normalization has a single owner (#534)", () => {
   for (const name of ALL_RESOLVERS) {
     const source = readFileSync(join(JS_RESOLVERS_DIR, name), "utf8");
+
+    test(`${name} builds every ACCOUNT#/PROFILE# prefix through lib/ids.js`, () => {
+      const offenders = findPrefixLiterals(source)
+        .filter((f) => !f.inHelperCall && !f.isMinting)
+        .map((f) => `line ${f.line}: ${f.text}`);
+
+      expect(
+        offenders,
+        `${name} still hand-rolls an ID prefix. Route it through ` +
+          `normalizeId from lib/ids.js so the normalization rule has one ` +
+          `owner:\n  ${offenders.join("\n  ")}`,
+      ).toEqual([]);
+    });
+  }
+});
+
+describe("ID-prefix normalization has a single owner in lib/ (#732)", () => {
+  for (const name of ALL_LIB_GUARDED) {
+    const source = readFileSync(join(LIB_DIR, name), "utf8");
 
     test(`${name} builds every ACCOUNT#/PROFILE# prefix through lib/ids.js`, () => {
       const offenders = findPrefixLiterals(source)

@@ -21,7 +21,6 @@ from .deletion_cascade import (
     delete_inbound_shares,
     delete_invites_for_owned_profiles,
     delete_user_s3_reports,
-    normalize_account_id,
     run_deletion_steps,
 )
 
@@ -33,7 +32,7 @@ try:  # pragma: no cover
     from utils.cognito_filters import cognito_user_filter
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
-    from utils.ids import ensure_profile_id
+    from utils.ids import ensure_account_id, ensure_profile_id
     from utils.logging import get_logger, mask_email
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
@@ -43,7 +42,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.cognito_filters import cognito_user_filter
     from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
-    from ..utils.ids import ensure_profile_id
+    from ..utils.ids import ensure_account_id, ensure_profile_id
     from ..utils.logging import get_logger, mask_email
     from ..utils.payment_methods import delete_all_user_qr_codes
 
@@ -161,7 +160,7 @@ def _sweep_purge_residue(profiles_for_sweep: list[Dict[str, Any]], account_id: s
 
 def _account_exists_in_dynamodb(account_id: str, logger: Any, actor_sub: str = "") -> bool:
     """Check whether an account record exists in DynamoDB."""
-    db_account_id = normalize_account_id(account_id)
+    db_account_id = ensure_account_id(account_id)
     try:
         response = tables.accounts.get_item(Key={"accountId": db_account_id}, ProjectionExpression="accountId")
         exists = "Item" in response
@@ -179,7 +178,7 @@ def _check_not_self_deletion(caller_id: str, account_id: str) -> None:
     Normalize both IDs to their canonical ACCOUNT# form before comparing so a
     caller passing ``ACCOUNT#<own-sub>`` cannot bypass the guard (#125).
     """
-    if normalize_account_id(account_id) == normalize_account_id(caller_id):
+    if ensure_account_id(account_id) == ensure_account_id(caller_id):
         raise AppError(ErrorCode.INVALID_INPUT, "Cannot delete your own account")
 
 
@@ -287,7 +286,7 @@ def admin_purge_user_account(event: Dict[str, Any], context: Any) -> bool:
     )
 
     if account_exists:
-        db_account_id = normalize_account_id(account_id)
+        db_account_id = ensure_account_id(account_id)
         try:
             tables.accounts.delete_item(Key={"accountId": db_account_id})
             logger.info("Deleted account record", account_id=db_account_id, actor_sub=actor_sub)
@@ -324,7 +323,7 @@ def _assert_profiles_deleted(account_id: str, profile_ids: list[str], logger: An
     """
     from .admin_operations import _raise_batch_lookup_error
 
-    db_account_id = normalize_account_id(account_id)
+    db_account_id = ensure_account_id(account_id)
     for raw_profile_id in profile_ids:
         profile_id = ensure_profile_id(raw_profile_id.strip() if isinstance(raw_profile_id, str) else raw_profile_id)
         try:

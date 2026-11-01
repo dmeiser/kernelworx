@@ -34,12 +34,14 @@ try:  # pragma: no cover
     from utils.cognito import is_transient_cognito_error
     from utils.dynamodb import is_transient_client_error, tables
     from utils.errors import AppError, ErrorCode
+    from utils.ids import ensure_account_id
     from utils.logging import get_logger
     from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.cognito import is_transient_cognito_error
     from ..utils.dynamodb import is_transient_client_error, tables
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import ensure_account_id
     from ..utils.logging import get_logger
     from ..utils.payment_methods import delete_all_user_qr_codes
 
@@ -52,11 +54,6 @@ else:  # pragma: no cover
         from ..utils.pagination import query_all_items
 
 logger = get_logger(__name__)
-
-
-def normalize_account_id(account_id: str) -> str:
-    """Add ACCOUNT# prefix if not present."""
-    return account_id if account_id.startswith("ACCOUNT#") else f"ACCOUNT#{account_id}"
 
 
 def get_user_profiles(db_account_id: str) -> list[Dict[str, Any]]:
@@ -194,7 +191,7 @@ def delete_user_shares(profiles: list[Dict[str, Any]], logger: Any) -> int:
 
 def delete_user_profiles(account_id: str, profiles: list[Dict[str, Any]], logger: Any) -> int:
     """Delete the given profiles. Returns count deleted."""
-    db_account_id = normalize_account_id(account_id)
+    db_account_id = ensure_account_id(account_id)
 
     profile_keys = [
         {"ownerAccountId": db_account_id, "profileId": profile["profileId"]}
@@ -235,7 +232,7 @@ def delete_invites_for_owned_profiles(profiles: list[Dict[str, Any]], logger: An
 
 def delete_inbound_shares(account_id: str, logger: Any) -> int:
     """Delete all inbound shares where the account is the target."""
-    db_account_id = normalize_account_id(account_id)
+    db_account_id = ensure_account_id(account_id)
 
     shares = query_all_items(
         tables.shares,
@@ -283,7 +280,7 @@ def delete_all_user_data(account_id: str, logger: Any = None) -> None:
     """
     log = logger or get_logger(__name__)
 
-    profiles = get_user_profiles(normalize_account_id(account_id))
+    profiles = get_user_profiles(ensure_account_id(account_id))
 
     delete_user_orders(profiles, log)
     delete_user_campaigns(profiles, log)
@@ -296,7 +293,7 @@ def delete_all_user_data(account_id: str, logger: Any = None) -> None:
     # Delete payment method QR codes from S3 per captain decision
     delete_all_user_qr_codes(account_id, log)
 
-    account_id_key = normalize_account_id(account_id)
+    account_id_key = ensure_account_id(account_id)
     try:
         tables.accounts.delete_item(Key={"accountId": account_id_key})
         log.info("Deleted account from DynamoDB", account_id=account_id_key)
