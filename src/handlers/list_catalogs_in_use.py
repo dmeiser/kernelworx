@@ -19,6 +19,7 @@ Returns: [ID!]! (list of catalog IDs)
 """
 
 import asyncio
+import os
 from typing import TYPE_CHECKING, Any, Dict, List, Set, Tuple, cast
 
 import aioboto3
@@ -273,7 +274,7 @@ async def _async_get_all_catalog_ids(
     shares_table_name = get_required_env("SHARES_TABLE_NAME")
 
     session = aioboto3.Session()
-    async with session.resource("dynamodb") as dynamodb:
+    async with session.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT")) as dynamodb:
         # Step 1 & 2: Run owned profiles and shared profiles queries in parallel
         owned_profiles_task = _async_get_owned_profile_ids(dynamodb, profiles_table_name, account_id)
         shared_profiles_task = _async_get_shared_profile_ids(

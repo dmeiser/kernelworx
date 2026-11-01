@@ -18,15 +18,17 @@ from botocore.exceptions import ClientError
 try:  # pragma: no cover
     from utils.auth import require_admin_mfa
     from utils.boto import get_cognito_client
+    from utils.cognito import retry_on_transient_errors
     from utils.cognito_filters import cognito_user_filter
-    from utils.dynamodb import get_required_env
+    from utils.dynamodb import TRANSIENT_ERROR_CODES, get_required_env
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger, mask_email
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.auth import require_admin_mfa
     from ..utils.boto import get_cognito_client
+    from ..utils.cognito import retry_on_transient_errors
     from ..utils.cognito_filters import cognito_user_filter
-    from ..utils.dynamodb import get_required_env
+    from ..utils.dynamodb import TRANSIENT_ERROR_CODES, get_required_env
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger, mask_email
 
@@ -45,15 +47,19 @@ else:  # pragma: no cover
 def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any) -> str:
     """Find username by email. Returns username."""
     try:
-        response = cognito.list_users(
+        response = retry_on_transient_errors(
+            cognito.list_users,
             UserPoolId=user_pool_id,
             # Built in one step so the value that was checked is the value sent (#124, #560).
             Filter=cognito_user_filter("email", email),
             Limit=1,
         )
     except ClientError as e:
+        if e.response.get("Error", {}).get("Code", "") in TRANSIENT_ERROR_CODES:
+            logger.warning("Cognito list_users throttled", error=str(e))
+            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from e
         logger.error("Cognito list_users failed", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to search for user")
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to search for user") from e
 
     users = response.get("Users", [])
     if not users:
@@ -65,7 +71,8 @@ def _find_user_by_email(cognito: Any, user_pool_id: str, email: str, logger: Any
 def _initiate_password_reset(cognito: Any, user_pool_id: str, username: str, email: str, logger: Any) -> None:
     """Initiate Cognito password reset for user."""
     try:
-        cognito.admin_reset_user_password(
+        retry_on_transient_errors(
+            cognito.admin_reset_user_password,
             UserPoolId=user_pool_id,
             Username=username,
         )
@@ -75,8 +82,11 @@ def _initiate_password_reset(cognito: Any, user_pool_id: str, username: str, ema
             raise AppError(ErrorCode.NOT_FOUND, f"User with email '{mask_email(email)}' not found")
         if error_code == "InvalidParameterException":
             raise AppError(ErrorCode.INVALID_INPUT, "Cannot reset password for this user type")
+        if error_code in TRANSIENT_ERROR_CODES:
+            logger.warning("Cognito admin_reset_user_password throttled", error=str(e), error_code=error_code)
+            raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to load data. Please retry.") from e
         logger.error("Cognito admin_reset_user_password failed", error=str(e))
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to initiate password reset")
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to initiate password reset") from e
 
 
 @with_error_handling(error_message="Failed to reset password")
