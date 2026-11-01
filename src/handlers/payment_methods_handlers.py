@@ -20,6 +20,7 @@ get_caller_id = import_from_utils("appsync_types", "get_caller_id")
 get_s3_client = import_from_utils("boto", "get_s3_client")
 get_required_env, tables = import_from_utils("dynamodb", "get_required_env", "tables")
 AppError, ErrorCode = import_from_utils("errors", "AppError", "ErrorCode")
+ensure_account_id = import_from_utils("ids", "ensure_account_id")
 get_logger = import_from_utils("logging", "get_logger")
 (
     _delete_qr_if_exists,
@@ -217,7 +218,7 @@ def _get_payment_method_qr_key(caller_id: str, payment_method_name: str) -> Opti
     Raises:
         AppError: If the account or payment method does not exist.
     """
-    account_id_key = f"ACCOUNT#{caller_id}"
+    account_id_key = ensure_account_id(caller_id)
     response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
 
     if "Item" not in response:

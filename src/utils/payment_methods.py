@@ -26,6 +26,7 @@ except ModuleNotFoundError:  # pragma: no cover
 get_s3_client = import_from_utils("boto", "get_s3_client")
 get_required_env, tables = import_from_utils("dynamodb", "get_required_env", "tables")
 AppError, ErrorCode = import_from_utils("errors", "AppError", "ErrorCode")
+ensure_account_id = import_from_utils("ids", "ensure_account_id")
 get_logger = import_from_utils("logging", "get_logger")
 purge_s3_prefix = import_from_utils("s3", "purge_s3_prefix")
 
@@ -209,7 +210,7 @@ def is_reserved_name(name: str) -> bool:
 
 def _get_existing_payment_methods(account_id: str) -> list[Dict[str, Any]]:
     """Get existing payment methods from account record."""
-    account_id_key = f"ACCOUNT#{account_id}"
+    account_id_key = ensure_account_id(account_id)
     response = tables.accounts.get_item(Key={"accountId": account_id_key})
 
     if "Item" not in response:
@@ -272,7 +273,7 @@ def _mutate_payment_methods(
 
     fn receives the list and returns the replacement list, or None to leave it unchanged.
     """
-    account_id_key = f"ACCOUNT#{account_id}"
+    account_id_key = ensure_account_id(account_id)
     response = tables.accounts.get_item(Key={"accountId": account_id_key}, ConsistentRead=True)
 
     preferences: Dict[str, Any] = {}
@@ -347,7 +348,7 @@ def get_payment_methods(account_id: str) -> List[Dict[str, Any]]:
     logger = get_logger(__name__)
 
     try:
-        account_id_key = f"ACCOUNT#{account_id}"
+        account_id_key = ensure_account_id(account_id)
         response = tables.accounts.get_item(Key={"accountId": account_id_key})
 
         if "Item" not in response:
