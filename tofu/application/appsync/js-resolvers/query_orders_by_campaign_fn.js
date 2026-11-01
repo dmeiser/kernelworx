@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 const MAX_PAGE_LIMIT = 100;
 
@@ -16,7 +17,9 @@ export function request(ctx) {
         };
     }
     
-    const campaignId = ctx.args.campaignId;
+    // The orders table PK is the DB form, so an unprefixed campaignId would
+    // query a partition that never exists (#717).
+    const campaignId = normalizeIdOrPrefix(ctx.args.campaignId, 'CAMPAIGN#');
     // Direct PK query on orders table (V2 schema: PK=campaignId)
     const request = {
         operation: 'Query',
