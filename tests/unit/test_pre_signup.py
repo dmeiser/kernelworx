@@ -360,6 +360,61 @@ class TestExistingUserStateCheck:
         assert "email is not verified" in message
 
 
+class TestRefusalCounter:
+    """Tests that each fail-closed refusal is logged as a sliceable counter.
+
+    The counter is what makes the email-squatting class this guard exists for
+    (#503) observable: one refusal = one ``warning`` log with a stable marker,
+    sliceable by the ``reason`` field.
+    """
+
+    REFUSAL_MARKER = "pre-signup: refusing to link federated identity (fail closed)"
+
+    @staticmethod
+    def _logged_refusal(user: dict[str, Any], event: dict[str, Any], context: MagicMock):
+        """Run the handler against ``user``; return (args, kwargs) of the single refusal log."""
+        with patch("boto3.client") as mock_client, patch("src.handlers.pre_signup.logger") as mock_logger:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": [user]}
+            mock_client.return_value = mock_cognito
+            with pytest.raises(FederatedIdentityLinkedException):
+                lambda_handler(event, context)
+            assert mock_logger.warning.call_count == 1
+            return mock_logger.warning.call_args
+
+    def test_refusal_reason_not_confirmed(
+        self, federated_signup_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """A refusal on an unconfirmed account logs reason=existing_user_not_confirmed."""
+        call = self._logged_refusal(
+            {
+                "Username": "user@example.com",
+                "UserStatus": "UNCONFIRMED",
+                "Attributes": [{"Name": "email_verified", "Value": "true"}],
+            },
+            federated_signup_event,
+            lambda_context,
+        )
+        assert call.args[0] == self.REFUSAL_MARKER
+        assert call.kwargs["reason"] == "existing_user_not_confirmed"
+
+    def test_refusal_reason_unverified_email(
+        self, federated_signup_event: dict[str, Any], lambda_context: MagicMock
+    ) -> None:
+        """A refusal on a confirmed-but-unverified account logs reason=existing_user_email_unverified."""
+        call = self._logged_refusal(
+            {
+                "Username": "user@example.com",
+                "UserStatus": "CONFIRMED",
+                "Attributes": [{"Name": "email_verified", "Value": "false"}],
+            },
+            federated_signup_event,
+            lambda_context,
+        )
+        assert call.args[0] == self.REFUSAL_MARKER
+        assert call.kwargs["reason"] == "existing_user_email_unverified"
+
+
 class TestErrorHandling:
     """Tests for error handling scenarios"""
 

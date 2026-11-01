@@ -247,6 +247,8 @@ jobs:
           cd tofu
           tflint --init
           tflint --chdir application/modules
+          tflint --chdir application/environments/dev
+          tflint --chdir application/environments/ephemeral
           tflint --chdir application/environments/prod
           tflint --chdir bootstrap
 
