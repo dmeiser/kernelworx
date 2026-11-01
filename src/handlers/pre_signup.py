@@ -105,6 +105,23 @@ def _existing_user_email_verified(existing_user: Dict[str, Any]) -> bool:
     return False
 
 
+def _refuse_linking(existing_username: str, reason: str, user_message: str) -> NoReturn:
+    """Fail closed on an ineligible existing account, logging a sliceable refusal.
+
+    Every fail-closed refusal is logged once with a stable marker plus a
+    machine-readable ``reason`` field so the email-squatting class this guard
+    exists for (a native signup squatting a victim's verified email, #503) is
+    observable and countable in CloudWatch: count the stable marker, slice by
+    ``reason``. ``user_message`` is the text the user sees.
+    """
+    logger.warning(
+        "pre-signup: refusing to link federated identity (fail closed)",
+        reason=reason,
+        username=mask_email(existing_username),
+    )
+    raise FederatedIdentityLinkedException(user_message)
+
+
 def _handle_existing_user(
     cognito: Any, user_pool_id: str, email: str, username: str, existing_user: Dict[str, Any]
 ) -> NoReturn:
@@ -117,19 +134,23 @@ def _handle_existing_user(
     existing_username = existing_user["Username"]
 
     if existing_user.get("UserStatus") != "CONFIRMED":
-        logger.warning("Refusing to link: existing user is not confirmed", username=mask_email(existing_username))
-        raise FederatedIdentityLinkedException(
-            "An account with this email already exists but is not fully set up. "
-            "Please resolve the existing account before signing in."
+        _refuse_linking(
+            existing_username,
+            reason="existing_user_not_confirmed",
+            user_message=(
+                "An account with this email already exists but is not fully set up. "
+                "Please resolve the existing account before signing in."
+            ),
         )
 
     if not _existing_user_email_verified(existing_user):
-        logger.warning(
-            "Refusing to link: existing user has an unverified email", username=mask_email(existing_username)
-        )
-        raise FederatedIdentityLinkedException(
-            "An account with this email already exists but its email is not verified. "
-            "Please resolve the existing account before signing in."
+        _refuse_linking(
+            existing_username,
+            reason="existing_user_email_unverified",
+            user_message=(
+                "An account with this email already exists but its email is not verified. "
+                "Please resolve the existing account before signing in."
+            ),
         )
 
     logger.info("Found existing user for linking", username=mask_email(existing_username), email=mask_email(email))
