@@ -226,9 +226,7 @@ class TestListUnitCatalogsEnvironmentIsolation:
         catalogs_reads = [t for t in two_environment_stack.batch_get_tables if "catalogs" in t]
         assert catalogs_reads == []
 
-    def test_table_name_resolution_matches_the_shared_accessor(
-        self, two_environment_stack: SimpleNamespace
-    ) -> None:
+    def test_table_name_resolution_matches_the_shared_accessor(self, two_environment_stack: SimpleNamespace) -> None:
         """The name used for BatchGetItem is exactly the shared accessor's resolved table name."""
         from src.utils.dynamodb import tables
 

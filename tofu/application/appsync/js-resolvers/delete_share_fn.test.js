@@ -24,7 +24,7 @@ describe('delete_share_fn request', () => {
             targetAccountId: 'ACCOUNT#user-456'
         });
         assert.deepStrictEqual(result.condition, {
-            expression: 'ownerAccountId = :caller',
+            expression: 'attribute_not_exists(ownerAccountId) OR ownerAccountId = :caller',
             expressionValues: {
                 ':caller': 'ACCOUNT#owner-789'
             }
@@ -52,7 +52,7 @@ describe('delete_share_fn request', () => {
             targetAccountId: 'ACCOUNT#user-456'
         });
         assert.deepStrictEqual(result.condition, {
-            expression: 'ownerAccountId = :caller',
+            expression: 'attribute_not_exists(ownerAccountId) OR ownerAccountId = :caller',
             expressionValues: {
                 ':caller': 'ACCOUNT#owner-789'
             }

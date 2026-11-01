@@ -95,10 +95,7 @@ def test_cleanup_actions_are_whole_bucket():
     assert rules, "no lifecycle configuration found for the exports bucket"
 
     unfiltered = [r for r in rules if not _has_filter(r)]
-    assert len(unfiltered) == 1, (
-        f"expected exactly one whole-bucket (filter-less) rule, "
-        f"found {len(unfiltered)}"
-    )
+    assert len(unfiltered) == 1, f"expected exactly one whole-bucket (filter-less) rule, found {len(unfiltered)}"
     whole = unfiltered[0]
     assert whole["status"] == "Enabled"
 

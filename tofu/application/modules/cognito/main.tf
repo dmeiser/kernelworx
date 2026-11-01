@@ -186,13 +186,28 @@ resource "aws_cognito_user_pool" "main" {
   deletion_protection = var.environment == "prod" ? "ACTIVE" : "INACTIVE"
 
   # Username configuration
-  username_attributes      = ["email"]
-  auto_verified_attributes = ["email"]
+  username_attributes = ["email"]
+  # Email is intentionally NOT auto-verified. Native signups confirm the
+  # supplied address via Cognito's verification-code flow (the frontend handles
+  # nextStep CONFIRM_SIGN_UP, then confirmSignUp). Auto-verifying email would
+  # let an attacker squat a victim's verified email with a native signup -
+  # auto-confirmed AND email_verified - which defeats the fail-closed guard in
+  # src/handlers/pre_signup.py. That guard only links a federated identity to a
+  # CONFIRMED, email-verified account, so a squat must stay unconfirmed and
+  # unverified to be refused; auto-verification makes both guards pass. (#503)
+  #
+  # The user_attribute_update_settings block is deliberately absent too: Cognito
+  # rejects a pool whose attributes_require_verification_before_update names an
+  # attribute not in auto_verified_attributes, so the two settings move
+  # together. Email changes still go through the verification-code flow. (#503)
 
   # Password policy
-  # Matches client-side validation in ForgotPasswordPage.tsx and SignupPage.tsx.
+  # OWASP floor for pools where MFA is OPTIONAL: minimum 15 characters.
+  # Complexity rules are not a substitute for length. Client-side validation
+  # in ForgotPasswordPage.tsx and SignupPage.tsx mirrors this policy so
+  # users see the requirement before the pool rejects them.
   password_policy {
-    minimum_length                   = 8
+    minimum_length                   = 15
     require_lowercase                = true
     require_uppercase                = true
     require_numbers                  = true
@@ -239,11 +254,6 @@ resource "aws_cognito_user_pool" "main" {
       min_length = 0
       max_length = 2048
     }
-  }
-
-  # User attribute update settings
-  user_attribute_update_settings {
-    attributes_require_verification_before_update = ["email"]
   }
 
   # WebAuthn / passkey sign-in
@@ -431,7 +441,8 @@ resource "aws_iam_role_policy" "lambda_cognito_admin" {
   policy = data.aws_iam_policy_document.lambda_cognito_admin.json
 }
 
-# Google Identity Provider (optional - not currently configured)
+# Google Identity Provider (enabled in dev and prod via var.enable_google_idp;
+# omitted only in ephemeral, where it is false)
 resource "aws_cognito_identity_provider" "google" {
   count = var.enable_google_idp ? 1 : 0
 

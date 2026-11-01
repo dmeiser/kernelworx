@@ -96,3 +96,17 @@ resource "aws_appsync_datasource" "shared_campaigns" {
     region     = var.aws_region
   }
 }
+
+# Public-order throttle items (SEC-6): one small item per (share token, 60s
+# window) with TTL, written only by the publicCreateOrder throttle step.
+resource "aws_appsync_datasource" "public_order_throttles" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "PublicOrderThrottlesDS"
+  type             = "AMAZON_DYNAMODB"
+  service_role_arn = var.appsync_service_role_arn
+
+  dynamodb_config {
+    table_name = var.dynamodb_table_names.public_order_throttles
+    region     = var.aws_region
+  }
+}

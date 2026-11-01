@@ -38,6 +38,35 @@ describe('lookup_profile_for_update_fn request', () => {
         assert.strictEqual(result.key.profileId, 'PROFILE#prof-456');
         assert.strictEqual(result.consistentRead, true);
     });
+
+    it('leaves a caller sub that already carries the ACCOUNT# prefix alone', () => {
+        const ctx = {
+            identity: { sub: 'ACCOUNT#user-uuid-123' },
+            args: {
+                input: {
+                    profileId: 'prof-456',
+                },
+            },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.key.ownerAccountId, 'ACCOUNT#user-uuid-123');
+    });
+
+    it('keeps the historical placeholder key when profileId is an empty string', () => {
+        // Degenerate input (GraphQL requires profileId, but never trust the
+        // edge): the old inline ternary produced the key 'PROFILE#', and the
+        // shared helper must preserve exactly that fail-closed miss.
+        const ctx = {
+            identity: { sub: 'user-uuid-123' },
+            args: { input: { profileId: '' } },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.key.profileId, 'PROFILE#');
+    });
 });
 
 describe('lookup_profile_for_update_fn response', () => {

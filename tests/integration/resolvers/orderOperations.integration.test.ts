@@ -117,6 +117,7 @@ const UPDATE_ORDER = gql`
       }
       totalAmount
       updatedAt
+      status
     }
   }
 `;
@@ -168,6 +169,7 @@ const GET_ORDER = gql`
       customerName
       orderDate
       paymentMethod
+      status
     }
   }
 `;
@@ -1245,6 +1247,139 @@ describe('Order Operations Integration Tests', () => {
       });
 
       expect(updateData.updateOrder.paymentMethod).toBe('CHECK');
+    }, 10000);
+
+    // #506: UpdateOrderInput.paymentMethod is nullable in the input but
+    // Order.paymentMethod is non-nullable. Omitting the field must keep the
+    // stored value; an explicit null must be rejected, never persisted.
+    test('omitting paymentMethod keeps the current value (#506)', async () => {
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            campaignId: testCampaignId,
+            customerName: 'Omit PaymentMethod Test',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      try {
+        const { data: updateData } = await ownerClient.mutate({
+          mutation: UPDATE_ORDER,
+          variables: { input: { orderId, customerName: 'Omit PaymentMethod Updated' } },
+        });
+
+        expect(updateData.updateOrder.customerName).toBe('Omit PaymentMethod Updated');
+        expect(updateData.updateOrder.paymentMethod).toBe('CASH');
+      } finally {
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 10000);
+
+    test('rejects an explicit null paymentMethod (#506)', async () => {
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            campaignId: testCampaignId,
+            customerName: 'Null PaymentMethod Test',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      try {
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_ORDER,
+            variables: { input: { orderId, paymentMethod: null } },
+          })
+        ).rejects.toThrow(/paymentMethod cannot be null/);
+
+        // The stored value must be untouched by the rejected mutation.
+        const { data: getData } = await ownerClient.query({
+          query: GET_ORDER,
+          variables: { orderId },
+        });
+        expect(getData.getOrder.paymentMethod).toBe('CASH');
+      } finally {
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 10000);
+
+    // The order lifecycle slice: updateOrder accepts status, but only as the
+    // one-way CONFIRMED move on a PUBLIC order. An authenticated order has no
+    // lifecycle to advance, so the transition must be refused and the row left
+    // without a status attribute.
+    test('rejects status on an order that is not a public order', async () => {
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            campaignId: testCampaignId,
+            customerName: 'Lifecycle Status Test',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      try {
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_ORDER,
+            variables: { input: { orderId, status: 'CONFIRMED' } },
+          })
+        ).rejects.toThrow(/status can only be set on public orders/);
+
+        // The rejected write must leave the row exactly as created: no status.
+        const { data: getData } = await ownerClient.query({ query: GET_ORDER, variables: { orderId } });
+        expect(getData.getOrder.status).toBeNull();
+      } finally {
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
+    }, 10000);
+
+    test('rejects a status value other than CONFIRMED', async () => {
+      const { data: createData } = await ownerClient.mutate({
+        mutation: CREATE_ORDER,
+        variables: {
+          input: {
+            profileId: testProfileId,
+            campaignId: testCampaignId,
+            customerName: 'Lifecycle Enum Test',
+            orderDate: new Date().toISOString(),
+            paymentMethod: 'CASH',
+            lineItems: [{ productId: testProductId, quantity: 1 }],
+          },
+        },
+      });
+      const orderId = createData.createOrder.orderId;
+
+      try {
+        // The enum guard fires before the public-order guard: only CONFIRMED is
+        // ever accepted in v1, so NEW (the initial state) is not a transition.
+        await expect(
+          ownerClient.mutate({
+            mutation: UPDATE_ORDER,
+            variables: { input: { orderId, status: 'NEW' } },
+          })
+        ).rejects.toThrow(/Only CONFIRMED can be set on an order status/);
+      } finally {
+        await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId } });
+      }
     }, 10000);
   });
 

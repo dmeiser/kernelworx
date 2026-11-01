@@ -215,7 +215,7 @@ const AppLayoutView: React.FC<{
           <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
             <Box
               component="img"
-              src="/logo.svg"
+              src="/kernelworx-logo.svg"
               alt="Popcorn kernel"
               sx={{
                 width: { xs: '28px', sm: '32px', md: '40px' },

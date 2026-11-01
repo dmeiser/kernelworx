@@ -4,7 +4,13 @@
 #if(!$ctx.result || $ctx.result.isEmpty())
     $util.toJson(null)
 #else
-    ## READ ACCESS: Anyone can view catalog by ID (no authorization check)
-    ## Note: ownerAccountId is removed from GraphQL schema but still in DynamoDB for WRITE auth
-    $util.toJson($ctx.result)
+    ## #509: a catalog is readable by ID only when it is public, admin-managed,
+    ## or owned by the caller. Note: ownerAccountId is removed from the GraphQL
+    ## schema but still present in DynamoDB for this authorization check.
+    #set($callerAccountId = "ACCOUNT#$ctx.identity.sub")
+    #if($ctx.result.isPublic == true || $ctx.result.catalogType == "ADMIN_MANAGED" || $ctx.result.ownerAccountId == $callerAccountId)
+        $util.toJson($ctx.result)
+    #else
+        $util.toJson(null)
+    #end
 #end

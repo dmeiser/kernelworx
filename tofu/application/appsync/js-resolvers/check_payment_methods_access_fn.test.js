@@ -18,6 +18,46 @@ describe('check_payment_methods_access_fn request', () => {
         assert.strictEqual(ctx.stash.ownerAccountId, 'ACCOUNT#owner-1');
     });
 
+    it('short-circuits for the owner when stash.isOwner is explicitly true (#545)', () => {
+        const ctx = {
+            identity: { sub: 'owner-1' },
+            stash: {
+                isOwner: true,
+                profile: { profileId: 'PROFILE#prof-1', ownerAccountId: 'ACCOUNT#owner-1' }
+            }
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.operation, 'GetItem');
+        assert.deepStrictEqual(result.key, { profileId: 'NOOP', targetAccountId: 'NOOP' });
+        assert.strictEqual(ctx.stash.accessLevel, 'OWNER');
+        assert.strictEqual(ctx.stash.canSeeQR, true);
+        assert.strictEqual(ctx.stash.ownerAccountId, 'ACCOUNT#owner-1');
+    });
+
+    it('does NOT short-circuit for a former owner when stash.isOwner is false even if profile.ownerAccountId matches (#545)', () => {
+        const ctx = {
+            identity: { sub: 'former-owner' },
+            stash: {
+                isOwner: false,
+                profile: { profileId: 'PROFILE#prof-1', ownerAccountId: 'ACCOUNT#former-owner' }
+            }
+        };
+
+        const result = request(ctx);
+
+        // Must not be OWNER; must query shares table
+        assert.strictEqual(result.operation, 'GetItem');
+        assert.strictEqual(result.consistentRead, true);
+        assert.deepStrictEqual(result.key, {
+            profileId: 'PROFILE#prof-1',
+            targetAccountId: 'ACCOUNT#former-owner'
+        });
+        assert.strictEqual(ctx.stash.accessLevel, undefined);
+        assert.strictEqual(ctx.stash.canSeeQR, undefined);
+    });
+
     it('queries the shares table for non-owners with prefixed keys', () => {
         const ctx = {
             identity: { sub: 'user-123' },
@@ -73,6 +113,20 @@ describe('check_payment_methods_access_fn response', () => {
     it('denies when no share is found', () => {
         const ctx = {
             stash: { accessLevel: undefined, profile: { ownerAccountId: 'ACCOUNT#owner-1' } },
+            result: null
+        };
+
+        assert.throws(() => response(ctx), /FORBIDDEN: Unauthorized access to profile/);
+    });
+
+    it('denies a former owner (isOwner is false) who has no share (#545)', () => {
+        const ctx = {
+            identity: { sub: 'former-owner' },
+            stash: {
+                isOwner: false,
+                accessLevel: undefined,
+                profile: { profileId: 'PROFILE#prof-1', ownerAccountId: 'ACCOUNT#former-owner' }
+            },
             result: null
         };
 

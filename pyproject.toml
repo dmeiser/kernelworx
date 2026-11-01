@@ -2,6 +2,11 @@
 name = "kernelworx"
 version = "0.1.0"
 description = "KernelWorx - Lambda functions and backend code"
+# Posture (issue #768): 3.14 is the interpreter everything actually runs on —
+# the Lambda runtime (tofu/application/modules/lambda/main.tf), CI's setup-python,
+# and the local dev pin in the tracked .python-version. This is a floor, not an
+# invitation to develop on a newer minor: the shipped runtime decides what the
+# code may use. tests/unit/test_python_version_surfaces.py fails if the surfaces drift.
 requires-python = ">=3.14"
 dependencies = [
     "aioboto3>=14.3.0",
@@ -28,6 +33,12 @@ dev = [
 ]
 
 [tool.ruff]
+# Pinned to the requires-python floor above. At py314 `ruff format` emits PEP 758
+# unparenthesized multi-type `except A, B:` clauses, and it STRIPS parentheses
+# around them. Stating the target explicitly keeps that formatter/linter behavior
+# a declared choice rather than an inference that a future floor change would
+# silently flip (see tests/unit/test_except_syntax.py).
+target-version = "py314"
 line-length = 120
 lint.extend-select = ["I"]
 # Use Ruff for linting, import sorting, and formatting. Run `ruff check` and `ruff format` to apply fixes.

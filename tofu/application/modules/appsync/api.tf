@@ -41,12 +41,74 @@ resource "aws_appsync_graphql_api" "main" {
     exclude_verbose_content  = true
   }
 
+  # Additional authentication mode for the public-orders surface (#679 rev 7).
+  # The provider takes ONLY authentication_type here: an API key carries no
+  # inline configuration block, and the key itself is the separate
+  # aws_appsync_api_key resource below. The Cognito user-pool config above stays
+  # the PRIMARY mode, so every existing field keeps its current auth; a field is
+  # reachable with the key only when it carries @aws_api_key. At transport level
+  # the key alone suffices to reach those fields; the per-campaign share token
+  # is not a bearer header but a plain GraphQL argument each resolver checks
+  # itself, answering NOT_FOUND when absent.
+  additional_authentication_provider {
+    authentication_type = "API_KEY"
+  }
+
   # Schema loaded from file
   schema = file("${path.module}/../../schema/schema.graphql")
 
   lifecycle {
     prevent_destroy = var.prevent_destroy
   }
+}
+
+# The public-orders API key (#679 rev 7). It is baked into the frontend bundle
+# (VITE_APPSYNC_API_KEY), so it is expected to be public: it grants access only
+# to the @aws_api_key root fields, and every one of those still requires a valid
+# per-campaign share token, which is a plain GraphQL argument checked inside
+# the resolver (NOT_FOUND when absent).
+#
+# `expires` is an explicit RFC3339 value at hour granularity. Omitting it is a
+# trap: the provider defaults to 7 days, which would silently kill the public
+# order page a week after every deploy. The value is a literal rather than
+# timeadd(timestamp(), ...) on purpose - a computed expiry changes on every
+# plan and would replace the key (and break every open tab holding the old
+# bundle) on each deploy. The service caps a key at 365 days from creation, so
+# this date must stay within a year of the deploy that creates the key.
+#
+# ROTATION MODEL (SEC-3): an expires-only edit does NOT rotate the key. The
+# provider updates `expires` in place via UpdateApiKey and the key material
+# never changes, so a leaked key edited this way stays valid - the old runbook
+# premise ("any new value mints a new key") was false. AppSync's API-key mode
+# genuinely supports multiple keys per API, so rotation is explicit and
+# two-phase, modeled by `var.public_orders_key_slots`:
+#
+#   "a"  steady state: only slot A exists; the module output reads A.
+#   "ab" rotation phase 1 (ADD NEW + DEPLOY): slot B is created; the module
+#        output (and therefore every bundle the deploy builds) now reads B,
+#        while slot A stays valid so open tabs are not broken.
+#   "b"  rotation phase 3 (REMOVE OLD, after the B bundle is verified live):
+#        slot A is destroyed and the leaked key is actually revoked.
+#
+# The full sequence with verification steps is docs/PUBLIC_API_KEY_RUNBOOK.md.
+resource "aws_appsync_api_key" "public_orders" {
+  count = contains(["a", "ab"], var.public_orders_key_slots) ? 1 : 0
+
+  api_id      = aws_appsync_graphql_api.main.id
+  description = "Public orders slot A (campaign-scoped share tokens)"
+  expires     = "2027-10-01T00:00:00Z"
+}
+
+# Rotation slot B: exists only while `var.public_orders_key_slots` is "ab" or
+# "b". Fresh key material on every creation; while it exists the module output
+# prefers it. The "slot A"/"slot B" tags in the descriptions are what the
+# ephemeral recovery import matches on (AppSync keys have no name).
+resource "aws_appsync_api_key" "public_orders_rotation" {
+  count = contains(["ab", "b"], var.public_orders_key_slots) ? 1 : 0
+
+  api_id      = aws_appsync_graphql_api.main.id
+  description = "Public orders rotation slot B (campaign-scoped share tokens)"
+  expires     = "2027-10-01T00:00:00Z"
 }
 
 # AppSync-managed CloudWatch log group with explicit retention.

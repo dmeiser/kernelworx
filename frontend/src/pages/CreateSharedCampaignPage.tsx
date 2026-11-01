@@ -23,7 +23,6 @@ import {
   Paper,
   Container,
 } from '@mui/material';
-import type { SelectChangeEvent } from '@mui/material';
 import { Save as SaveIcon } from '@mui/icons-material';
 import {
   LIST_MANAGED_CATALOGS,
@@ -31,13 +30,16 @@ import {
   CREATE_SHARED_CAMPAIGN,
   LIST_MY_SHARED_CAMPAIGNS,
 } from '../lib/graphql';
+import { CampaignYearField } from '../components/CampaignYearField';
+import { CAMPAIGN_YEAR_MAX, CAMPAIGN_YEAR_MIN, isCampaignYearInRange } from '../constants/campaign';
 import { StateAutocomplete } from '../components/StateAutocomplete';
+import { CatalogSection } from '../components/CatalogSection';
+import { UNIT_TYPES } from '../constants/unitTypes';
 import { PageHeader } from '../components/PageHeader';
 import type { GqlCatalog, GqlSharedCampaign } from '../types';
 
 /* eslint-disable complexity */
 
-const UNIT_TYPES = ['Pack', 'Troop', 'Crew', 'Ship', 'Post'];
 
 const BASE_URL = window.location.origin;
 const MAX_CREATOR_MESSAGE_LENGTH = 300;
@@ -77,75 +79,19 @@ function isFormValid(data: FormData): boolean {
   return hasCampaignFields && hasUnitFields && validateCreatorMessageLength(creatorMessage);
 }
 
+/**
+ * Message shown when the year is outside the shared campaign-year range. The
+ * year is range-checked here rather than in `isFormValid` so the user is told
+ * why the campaign cannot be created, matching how the unit fields are handled.
+ */
+function campaignYearError(campaignYear: number): string | null {
+  if (isCampaignYearInRange(campaignYear)) return null;
+  return `Campaign year must be between ${CAMPAIGN_YEAR_MIN} and ${CAMPAIGN_YEAR_MAX}`;
+}
+
 // ============================================================================
 // Sub-Components
 // ============================================================================
-
-interface CatalogSectionProps {
-  catalogId: string;
-  onCatalogChange: (value: string) => void;
-  catalogsLoading: boolean;
-  filteredPublicCatalogs: GqlCatalog[];
-  myCatalogs: GqlCatalog[];
-}
-
-const CatalogSection: React.FC<CatalogSectionProps> = ({
-  catalogId,
-  onCatalogChange,
-  catalogsLoading,
-  filteredPublicCatalogs,
-  myCatalogs,
-}) => {
-  const handleChange = (e: SelectChangeEvent<string>) => onCatalogChange(e.target.value);
-  const noCatalogs = !catalogsLoading && filteredPublicCatalogs.length === 0 && myCatalogs.length === 0;
-  const allCatalogs = [...filteredPublicCatalogs, ...myCatalogs];
-
-  return (
-    <Box>
-      <Typography variant="h6" gutterBottom>
-        Product Catalog
-      </Typography>
-      <FormControl fullWidth required disabled={catalogsLoading}>
-        <InputLabel>Select Catalog</InputLabel>
-        <Select
-          value={catalogId}
-          onChange={handleChange}
-          label="Select Catalog"
-          renderValue={(value) => {
-            if (!value) return '';
-            const catalog = allCatalogs.find((c) => c.catalogId === value);
-            return catalog ? catalog.catalogName : '';
-          }}
-        >
-          {catalogsLoading && <MenuItem disabled>Loading catalogs...</MenuItem>}
-          {noCatalogs && <MenuItem disabled>No catalogs available</MenuItem>}
-
-          {filteredPublicCatalogs.length > 0 && (
-            <MenuItem disabled sx={{ fontWeight: 'bold', py: 1 }}>
-              Public Catalogs
-            </MenuItem>
-          )}
-          {filteredPublicCatalogs.map((catalog) => (
-            <MenuItem key={`public-${catalog.catalogId}`} value={catalog.catalogId} sx={{ pl: 4 }}>
-              {catalog.catalogName}
-            </MenuItem>
-          ))}
-
-          {myCatalogs.length > 0 && (
-            <MenuItem disabled sx={{ fontWeight: 'bold', py: 1 }}>
-              My Catalogs
-            </MenuItem>
-          )}
-          {myCatalogs.map((catalog) => (
-            <MenuItem key={`my-${catalog.catalogId}`} value={catalog.catalogId} sx={{ pl: 4 }}>
-              {catalog.catalogName}
-            </MenuItem>
-          ))}
-        </Select>
-      </FormControl>
-    </Box>
-  );
-};
 
 interface CampaignInfoSectionProps {
   campaignName: string;
@@ -182,14 +128,11 @@ const CampaignInfoSection: React.FC<CampaignInfoSectionProps> = ({
           required
           fullWidth
         />
-        <TextField
+        <CampaignYearField
           label="Campaign Year"
-          type="number"
           value={campaignYear}
-          onChange={(e) => onCampaignYearChange(parseInt(e.target.value, 10) || 0)}
-          required
+          onChange={(year) => onCampaignYearChange(year || 0)}
           sx={{ minWidth: { xs: '100%', sm: 150 } }}
-          inputProps={{ min: 2020, max: 2100 }}
         />
       </Stack>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
@@ -247,9 +190,9 @@ const UnitInfoSection: React.FC<UnitInfoSectionProps> = ({
         <FormControl required fullWidth>
           <InputLabel>Unit Type</InputLabel>
           <Select value={unitType} onChange={(e) => onUnitTypeChange(e.target.value)} label="Unit Type">
-            {UNIT_TYPES.map((type) => (
-              <MenuItem key={type} value={type}>
-                {type}
+            {UNIT_TYPES.map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
               </MenuItem>
             ))}
           </Select>
@@ -529,6 +472,13 @@ export const CreateSharedCampaignPage: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    const yearError = campaignYearError(campaignYear);
+    if (yearError) {
+      setError(yearError);
+      scrollToTop();
+      return;
+    }
+
     if (!formIsValid) {
       showValidationError();
       return;

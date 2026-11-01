@@ -6,7 +6,7 @@ Visual schema documentation for the DynamoDB data model.
 
 ```mermaid
 graph LR
-    A["📋 ACCOUNTS<br/>PK: accountId<br/>GSI: email"] 
+    A["📋 ACCOUNTS<br/>PK: accountId<br/>GSI: email, emailSearchKey+email"] 
     B["👤 PROFILES<br/>PK: ownerAccountId + profileId<br/>GSI: profileId"]
     C["📊 CAMPAIGNS<br/>PK: profileId + campaignId<br/>GSI: campaignId, catalogId, unitCampaignKey, profileId+createdAt"]
     D["📦 ORDERS<br/>PK: campaignId + orderId<br/>GSI: orderId, profileId+createdAt"]
@@ -29,12 +29,22 @@ graph LR
 
 ### accounts
 Primary Key: `accountId` (String)
-Global Secondary Indexes: `email-index` (email)
+Global Secondary Indexes:
+- `email-index` (email)
+- `emailSearchIndex` (emailSearchKey + email)
+
+`emailSearchIndex` is a prefix-segment index: a constant HASH key (`emailSearchKey`) plus
+`email` as the RANGE key, which is what makes `begins_with(email, :prefix)` a legal Query
+key condition for admin email search (`email-index` is HASH-only, so a Query key condition
+there must be an equality). The index is **sparse**: an account is only searchable once it
+carries `emailSearchKey`, which the Cognito account bootstrap trigger writes and
+`scripts/backfill_email_search_key.py` backfills for pre-existing accounts.
 
 | Attribute | Type | Purpose |
 |-----------|------|---------|
 | accountId | String | PK - Cognito user sub |
-| email | String | GSI - User lookup by email |
+| email | String | GSI - User lookup by email; range key of emailSearchIndex |
+| emailSearchKey | String | GSI - Constant HASH key (`EMAIL`) of emailSearchIndex |
 | givenName | String | User's first name |
 | familyName | String | User's last name |
 | city | String | Location |
@@ -85,6 +95,7 @@ Global Secondary Indexes:
 | state | String | Unit location |
 | sharedCampaignCode | String | Reference to shared template |
 | isActive | Boolean | Active/inactive flag |
+| publicOrders | Map | Public-orders settings for this campaign (enabled flag, share token, allowed payment methods, acknowledgement stamp); written whole by `updateCampaignPublicOrderSettings`, deleted with the campaign |
 | totalOrders | Integer | Computed count from ORDER query (Select: COUNT) |
 | totalRevenue | Float | Computed sum from ORDER query (projected totalAmount) |
 | unitCampaignKey | String | GSI - Composite lookup key |
@@ -104,11 +115,15 @@ Global Secondary Indexes:
 | customerName | String | Customer name |
 | customerEmail | String | Customer email |
 | customerPhone | String | Customer phone |
-| items | JSON | Line items array |
+| orderDate | DateTime | When the order was placed |
+| lineItems | JSON | Line items array |
 | totalAmount | Float | Order total |
 | paymentMethod | String | Payment type |
-| deliveryStatus | String | Delivery state |
 | notes | String | Order notes |
+| status | String | Payment-verification state (`NEW`/`CONFIRMED`, `OrderStatus`). Absent on pre-feature and authenticated rows; the public path always writes `NEW` |
+| orderSource | String | `PUBLIC` for orders placed via the public order page; absent on authenticated orders |
+| sellerName | String | Denormalized seller display name captured at public order time; not an `Order` GraphQL field |
+| receiptToken | String | Public receipt capability token from the `/r/` URL; not an `Order` GraphQL field |
 | createdAt | DateTime | Timestamp |
 | updatedAt | DateTime | Timestamp |
 
@@ -131,7 +146,7 @@ Global Secondary Indexes:
 | createdAt | DateTime | GSI - Sorting |
 | updatedAt | DateTime | Timestamp |
 
-> **Legacy rows:** catalogs written before the `isPublic` BOOL fix (issue #428) may still store `isPublic` as the DynamoDB String `"true"`/`"false"`. They are repaired on their next `updateCatalog` write; until then every read path (AppSync resolvers and the catalog-returning Lambda handlers) coerces the legacy String back to a Boolean before GraphQL serialization. No backfill is performed.
+> **Legacy rows:** catalogs written before the `isPublic` BOOL fix (issue #428) may still store `isPublic` as the DynamoDB String `"true"`/`"false"`. They are repaired on their next `updateCatalog` write; no backfill is performed and no read-side coercion exists — the read-path normalization added with #428 was removed in #464 because no legacy rows exist, so read paths (AppSync resolvers, catalog-returning Lambda handlers, and the `get_catalog_response.vtl` authorization check added by #509) read the attribute as-is and must expect the native BOOL.
 
 ### shares
 Primary Key: `profileId` + `targetAccountId` (Composite)

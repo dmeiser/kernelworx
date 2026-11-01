@@ -38,7 +38,7 @@ import {
   Cancel as InactiveIcon,
   Download as DownloadIcon,
 } from '@mui/icons-material';
-import QRCode from 'qrcode';
+import { useQrDataUrl } from '../hooks/useQrDataUrl';
 import { LIST_MY_SHARED_CAMPAIGNS, UPDATE_SHARED_CAMPAIGN, DELETE_SHARED_CAMPAIGN } from '../lib/graphql';
 import { stripPrefix } from '../lib/ids';
 import { useSnackbar } from '../hooks/useSnackbar';
@@ -110,30 +110,6 @@ const copyLinkToClipboard = async (
   } catch (err) {
     if (import.meta.env.DEV) {
       console.error('Failed to copy link:', err);
-    }
-    onError(err);
-  }
-};
-
-// Helper to generate QR code with error handling
-const generateQRCode = async (
-  link: string,
-  onSuccess: (dataUrl: string) => void,
-  onError: (err: unknown) => void,
-): Promise<void> => {
-  try {
-    const qrDataUrl = await QRCode.toDataURL(link, {
-      width: 400,
-      margin: 2,
-      color: {
-        dark: '#000000',
-        light: '#ffffff',
-      },
-    });
-    onSuccess(qrDataUrl);
-  } catch (err) {
-    if (import.meta.env.DEV) {
-      console.error('Failed to generate QR code:', err);
     }
     onError(err);
   }
@@ -521,7 +497,7 @@ export const SharedCampaignsPage: React.FC = () => {
   const [deactivateDialogOpen, setDeactivateDialogOpen] = useState(false);
   const [sharedCampaignToDeactivate, setSharedCampaignToDeactivate] = useState<GqlSharedCampaign | null>(null);
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
-  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+  const { qrDataUrl: qrCodeDataUrl, generateQrCode } = useQrDataUrl();
   const [qrSharedCampaign, setQrSharedCampaign] = useState<GqlSharedCampaign | null>(null);
   const {
     message: snackbarMessage,
@@ -591,15 +567,19 @@ export const SharedCampaignsPage: React.FC = () => {
 
   const handleShowQRCode = async (sharedCampaign: GqlSharedCampaign) => {
     const link = getShortLink(sharedCampaign.sharedCampaignCode);
-    await generateQRCode(
-      link,
-      (qrDataUrl) => {
-        setQrCodeDataUrl(qrDataUrl);
-        setQrSharedCampaign(sharedCampaign);
-        setQrDialogOpen(true);
+    const dataUrl = await generateQrCode(link, {
+      width: 400,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#ffffff',
       },
-      () => showSnackbar('Failed to generate QR code'),
-    );
+      onError: () => showSnackbar('Failed to generate QR code'),
+    });
+    if (dataUrl) {
+      setQrSharedCampaign(sharedCampaign);
+      setQrDialogOpen(true);
+    }
   };
 
   const handleDownloadQRCode = () => {

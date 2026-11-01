@@ -27,7 +27,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { confirmSignIn, signIn, signInWithRedirect } from 'aws-amplify/auth';
 import type { SignInOutput } from 'aws-amplify/auth';
-import { getSafeRedirect } from '../lib/redirect';
+import { getSafeRedirect, resolveRedirectFromState } from '../lib/redirect';
 
 // Get error message from unknown error
 function getErrorMessage(err: unknown, fallback: string): string {
@@ -253,7 +253,8 @@ const SocialSection: React.FC<SocialSectionProps> = ({ loading, onSocialLogin, o
 );
 
 // Custom hook for login state and handlers
-function useLoginState(
+// eslint-disable-next-line react-refresh/only-export-components
+export function useLoginState(
   loginWithPassword: (email: string, password: string) => Promise<unknown>,
   navigate: ReturnType<typeof useNavigate>,
   from: string,
@@ -350,10 +351,8 @@ function useLoginState(
       }, 500);
       return;
     }
-    if (confirmResult.nextStep?.signInStep) {
-      setShowPasskeyPrompt(true);
-      setLoading(false);
-    }
+    const action = getLoginStepAction(confirmResult.nextStep?.signInStep);
+    applyLoginAction(action);
   };
 
   const processPasskeyResult = async (result: SignInOutput) => {
@@ -515,7 +514,7 @@ export const LoginPage: React.FC = () => {
   const { isAuthenticated, loginWithPassword } = useAuth();
 
   const from = getSafeRedirect(
-    (location.state as { from?: { pathname?: string } } | undefined)?.from?.pathname,
+    resolveRedirectFromState(location.state),
     '/home',
   );
 
@@ -559,7 +558,7 @@ export const LoginPage: React.FC = () => {
                 flexWrap: 'wrap',
               }}
             >
-              <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
+              <Box component="img" src="/kernelworx-logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
               <Typography
                 variant="h5"
                 sx={{

@@ -29,6 +29,17 @@ fi
 RUN_ID="$1"
 USER_POOL_ID="$2"
 CLIENT_ID="$3"
+
+# The run-id is caller-supplied and is interpolated into the test-user emails,
+# so it must be validated before the first Cognito call. The contract (format,
+# provenance, enforcement) is stated once in the "Run identifiers" section of
+# docs/scripts/README.md; validate_run_id in ephemeral-recover-common.sh is its
+# single owner, and this script calls that helper rather than restating it.
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "$0")" && pwd)/ephemeral-recover-common.sh"
+
+validate_run_id "$RUN_ID" || exit 1
+
 REGION="${AWS_REGION:-us-east-1}"
 TEST_DOMAIN="${EPHEMERAL_TEST_DOMAIN:-kernelworx.test}"
 
@@ -38,11 +49,95 @@ READONLY_EMAIL="${RUN_ID}-readonly@${TEST_DOMAIN}"
 SMOKE_EMAIL="${RUN_ID}-smoke@${TEST_DOMAIN}"
 
 # Generate a password satisfying Cognito's policy:
-# minimum 8, lowercase, uppercase, number, symbol.
+# minimum 15, lowercase, uppercase, number, symbol.
+#
+# Each required character class is guaranteed BY CONSTRUCTION, not by the
+# randomness of the prefix: hex output is [0-9a-f], so a prefix alone can never
+# provide an uppercase letter or symbol, and the fixed suffix "Aa1!" supplies
+# lowercase, uppercase, digit and symbol unconditionally. This matters because
+# the password is generated once and then retried as-is: if the generator could
+# emit a policy-rejected password (e.g. a base64 prefix whose surviving
+# characters were all non-lowercase with suffix "A1!"), every attempt would
+# fail with the same invalid password.
 generate_password() {
   local prefix
-  prefix=$(openssl rand -base64 9 | tr -d '=+/')
-  echo "${prefix}A1!"
+  prefix=$(openssl rand -hex 9)
+  echo "${prefix}Aa1!"
+}
+
+# Credentials must never sit on a command line: a running process's argv is
+# world-readable on Linux via /proc/<pid>/cmdline and shows up in `ps`, so any
+# co-tenant on the CI runner could read a generated password there (#710). The
+# password rides in a private mktemp file passed with --cli-input-json
+# file://..., the same shape as scripts/provision-user-totp.sh (#569/#597), and
+# the EXIT trap removes the file on every exit path, including the aborts below.
+CRED_PARAMS_FILE=$(mktemp)
+chmod 600 "$CRED_PARAMS_FILE"
+trap 'rm -f "$CRED_PARAMS_FILE"' EXIT
+
+# Rewrite the parameter file for each credential-carrying call: $1 is the
+# Cognito input member holding the secret (TemporaryPassword or Password).
+# Built with python3 so a password containing JSON metacharacters is escaped,
+# and the value travels through the environment rather than this argv.
+write_password_params() {
+  local key=$1
+  local password=$2
+  KW_PARAM_KEY="$key" KW_PARAM_PASSWORD="$password" python3 - "$CRED_PARAMS_FILE" <<'PY'
+import json, os, sys
+
+with open(sys.argv[1], "w") as handle:
+    json.dump({os.environ["KW_PARAM_KEY"]: os.environ["KW_PARAM_PASSWORD"]}, handle)
+PY
+}
+
+# Cognito error codes this script branches on. Both appear in the aws CLI's
+# stderr as "(<Code>) when calling the <Operation> operation: <message>".
+USERNAME_EXISTS_EXCEPTION="UsernameExistsException"
+USER_NOT_FOUND_EXCEPTION="UserNotFoundException"
+
+# The TEST_*_PASSWORD values this script exports are the credentials the
+# integration and e2e suites sign in with, so a password Cognito did not accept
+# must never be exported: the suites would keep presenting a password that does
+# not work until Cognito's failed-attempt backoff ("Password attempts exceeded")
+# locks the user out, and the run then fails on a misleading auth error far from
+# the real cause. The admin control plane fails transiently (throttling,
+# propagation), so retry the assignment briefly and abort the run if it still
+# has not taken effect.
+PASSWORD_SET_ATTEMPTS=5
+PASSWORD_SET_BACKOFF_SECONDS=2
+
+set_user_password() {
+  local email=$1
+  local password=$2
+  local attempt=1
+  local error=""
+  while [ "$attempt" -le "$PASSWORD_SET_ATTEMPTS" ]; do
+    write_password_params Password "$password"
+    error=$(aws cognito-idp admin-set-user-password \
+      --user-pool-id "$USER_POOL_ID" \
+      --username "$email" \
+      --permanent \
+      --cli-input-json "file://$CRED_PARAMS_FILE" \
+      --region "$REGION" 2>&1) && return 0
+    # A missing user is not a transient condition: no number of retries can
+    # make the password call succeed, and the caller never created the user.
+    # Say so once and stop instead of repeating the same doomed call.
+    case "$error" in
+      *"An error occurred ($USER_NOT_FOUND_EXCEPTION) when calling the "*)
+        log "ERROR: Cognito has no user $email ($USER_NOT_FOUND_EXCEPTION), so its password cannot be set."
+        log "  The user creation above did not take effect; this is not a retryable failure."
+        return 1
+        ;;
+    esac
+    log "  (Attempt $attempt/$PASSWORD_SET_ATTEMPTS could not set the password for $email: $error)"
+    attempt=$((attempt + 1))
+    sleep "$PASSWORD_SET_BACKOFF_SECONDS"
+  done
+  log "Refusing to export test credentials: the password for $email was never set."
+  if [ -n "$error" ]; then
+    log "  Last Cognito error: $error"
+  fi
+  return 1
 }
 
 OWNER_PASSWORD=$(generate_password)
@@ -61,21 +156,33 @@ create_or_update_user() {
 
   log "Setting up $user_type user: $email"
 
-  aws cognito-idp admin-create-user \
+  # Only UsernameExistsException means "the user is already there". Any other
+  # failure (a quota, a malformed attribute, a network error) previously fell
+  # into the same "may already exist" message, so the run carried on and the
+  # password step then failed against a user that was never created, hiding the
+  # real cause. Surface it and abort instead.
+  local create_error=""
+  write_password_params TemporaryPassword "$password"
+  if ! create_error=$(aws cognito-idp admin-create-user \
     --user-pool-id "$USER_POOL_ID" \
     --username "$email" \
     --message-action SUPPRESS \
-    --temporary-password "$password" \
-    --region "$REGION" \
-    >/dev/null 2>&1 || log "  (User may already exist)"
+    --cli-input-json "file://$CRED_PARAMS_FILE" \
+    --region "$REGION" 2>&1); then
+    case "$create_error" in
+      *"An error occurred ($USERNAME_EXISTS_EXCEPTION) when calling the "*)
+        log "  (User already exists; continuing with the existing account)"
+        ;;
+      *)
+        log "ERROR: could not create the $user_type user $email. Cognito said:"
+        log "  $create_error"
+        log "  This is not an 'already exists' condition, so the run cannot continue."
+        exit 1
+        ;;
+    esac
+  fi
 
-  aws cognito-idp admin-set-user-password \
-    --user-pool-id "$USER_POOL_ID" \
-    --username "$email" \
-    --password "$password" \
-    --permanent \
-    --region "$REGION" \
-    >/dev/null 2>&1 || log "  (Could not set password)"
+  set_user_password "$email" "$password"
 
   aws cognito-idp admin-update-user-attributes \
     --user-pool-id "$USER_POOL_ID" \
@@ -118,6 +225,11 @@ OWNER_TOTP_SECRET=$(PROVISION_USER_TOTP_PASSWORD="$OWNER_PASSWORD" \
   "$USER_POOL_ID" "$CLIENT_ID" "$OWNER_EMAIL")
 
 log ""
+# The export block IS the caller contract: scripts/ephemeral-env.sh pipes this
+# script's stdout through `grep '^export '` into the CI environment, so the
+# generated passwords reach the test harnesses through a pipe to the caller
+# rather than through a terminal, a log, or argv (#710). Everything the script
+# logs for humans goes to stderr instead.
 echo "export TEST_OWNER_EMAIL=$OWNER_EMAIL"
 echo "export TEST_OWNER_PASSWORD=$OWNER_PASSWORD"
 echo "export TEST_OWNER_TOTP_SECRET=$OWNER_TOTP_SECRET"

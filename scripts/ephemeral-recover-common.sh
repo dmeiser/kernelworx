@@ -12,6 +12,20 @@ log() {
   echo "$@" >&2
 }
 
+# Reject run-ids that are not plain [A-Za-z0-9._-] before they reach an S3
+# state key or a -var value. This function is the single owner of the rule (the
+# same rule scripts/generate_integration_env.py applies); the contract it
+# enforces and the entry points that call it are documented in the
+# "Run identifiers" section of docs/scripts/README.md.
+validate_run_id() {
+  local run_id="$1"
+  if ! [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    log "❌ Invalid run-id: must match [A-Za-z0-9._-]+"
+    return 1
+  fi
+  return 0
+}
+
 load_env() {
   if [ -f "$ROOT_DIR/.env" ]; then
     set -a
@@ -35,7 +49,7 @@ init_backend() {
   echo "# placeholder" > "$ROOT_DIR/.build/lambda-layer/python/.placeholder"
 
   log "📦 Initializing OpenTofu backend..."
-  cd "$ENV_DIR"
+  cd "$ENV_DIR" || exit 1
   tofu init -input=false \
     -backend-config="key=$state_key" \
     -backend-config="bucket=$STATE_BUCKET" \
@@ -188,7 +202,7 @@ import_ephemeral_resources() {
 
   # DynamoDB tables
   log "   Importing DynamoDB tables..."
-  for table in accounts catalogs profiles campaigns orders shares invites shared-campaigns; do
+  for table in accounts catalogs profiles campaigns orders shares invites shared-campaigns public-order-throttles; do
     table_name="kernelworx-${table}${suffix}"
     resource_name=$(echo "$table" | tr '-' '_')
     if aws dynamodb describe-table --table-name "$table_name" --region "$region" >/dev/null 2>&1; then
@@ -215,6 +229,9 @@ import_ephemeral_resources() {
   import_resource "$run_id" "module.s3.aws_s3_bucket_public_access_block.exports" "kernelworx-exports${suffix}"
   import_resource "$run_id" "module.s3.aws_s3_bucket_lifecycle_configuration.exports" "kernelworx-exports${suffix}"
   import_resource "$run_id" "module.s3.aws_s3_bucket_cors_configuration.exports" "kernelworx-exports${suffix}"
+  # #525: deny-insecure-transport bucket policies (import id = bucket name).
+  import_resource "$run_id" "module.s3.aws_s3_bucket_policy.exports" "kernelworx-exports${suffix}"
+  import_resource "$run_id" "module.cloudfront.aws_s3_bucket_policy.static" "kernelworx-static${suffix}"
 
   # IAM roles
   log "   Importing IAM roles..."
@@ -224,6 +241,7 @@ import_ephemeral_resources() {
   local lambda_profile_sharing_exec_role="kernelworx-lambda-profile-sharing-exec${suffix}"
   local lambda_payment_exec_role="kernelworx-lambda-payment-exec${suffix}"
   local lambda_account_reporting_exec_role="kernelworx-lambda-account-reporting-exec${suffix}"
+  local lambda_public_orders_exec_role="kernelworx-lambda-public-orders-exec${suffix}"
   local appsync_role="kernelworx-appsync${suffix}"
   local cognito_sms_role="kernelworx${suffix}-UserPoolsmsRole"
   local appsync_logging_role="kernelworx-api${suffix}-logs"
@@ -236,6 +254,7 @@ import_ephemeral_resources() {
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_profile_sharing_execution" "$lambda_profile_sharing_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_payment_execution" "$lambda_payment_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_account_reporting_execution" "$lambda_account_reporting_exec_role"
+  import_resource "$run_id" "module.iam.aws_iam_role.lambda_public_orders_execution" "$lambda_public_orders_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.appsync_service" "$appsync_role"
   import_resource "$run_id" "module.appsync.aws_iam_role.appsync_logging" "$appsync_logging_role"
   import_resource "$run_id" "module.iam.aws_iam_role.cognito_sms" "$cognito_sms_role"
@@ -263,6 +282,13 @@ import_ephemeral_resources() {
   import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_account_reporting_basic" "${lambda_account_reporting_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_account_reporting_dynamodb" "${lambda_account_reporting_exec_role}:dynamodb-access"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_account_reporting_s3" "${lambda_account_reporting_exec_role}:s3-reports"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_public_orders_basic" "${lambda_public_orders_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_public_orders_dynamodb" "${lambda_public_orders_exec_role}:dynamodb-access"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_public_orders_s3" "${lambda_public_orders_exec_role}:s3-qr-codes"
+  # KW-PUBLIC-ORDERS-SES-1: exists only where the SES module is instantiated
+  # (dev); count is zero on ephemeral, so this import is expected to fail there
+  # and import_resource tolerates that.
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_public_orders_ses[0]" "${lambda_public_orders_exec_role}:ses-order-emails"
 
   import_resource "$run_id" "module.iam.aws_iam_role_policy.cognito_sms" "${cognito_sms_role}:sns-publish"
   import_resource "$run_id" "module.appsync.aws_iam_role_policy.appsync_logging" "${appsync_logging_role}:appsync-logging"
@@ -353,6 +379,34 @@ import_ephemeral_resources() {
   if [ -n "$appsync_id" ] && [ "$appsync_id" != "None" ]; then
     import_resource "$run_id" "module.appsync.aws_appsync_graphql_api.main" "$appsync_id"
     import_resource "$run_id" "module.appsync.aws_cloudwatch_log_group.appsync" "/aws/appsync/apis/${appsync_id}"
+
+    # The public-orders API keys (#679 rev 7, SEC-3 two-slot rotation model).
+    # The dynamic AppSync importer below discovers datasources, functions and
+    # resolvers only, so the keys need their own static import lines here
+    # (guarded by tests/unit/test_ephemeral_reliability.py). Matched by the
+    # "slot A"/"slot B" tags in the descriptions because AppSync has no name
+    # for a key; the id is "<api_id>:<key_id>". Slot B only exists during a
+    # rotation window (var.public_orders_key_slots = "ab" or "b").
+    local api_key_ids
+    api_key_ids=$(aws appsync list-api-keys --api-id "$appsync_id" --region "$region" --output json 2>/dev/null | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for k in d.get('apiKeys', []):
+    desc = k.get('description', '')
+    if 'Public orders slot A' in desc:
+        print('A=' + k['id'])
+    elif 'Public orders rotation slot B' in desc:
+        print('B=' + k['id'])
+" 2>/dev/null || true)
+    local api_key_id_a="" api_key_id_b=""
+    api_key_id_a=$(echo "$api_key_ids" | sed -n 's/^A=//p' | head -1)
+    api_key_id_b=$(echo "$api_key_ids" | sed -n 's/^B=//p' | head -1)
+    if [ -n "$api_key_id_a" ]; then
+      import_resource "$run_id" "module.appsync.aws_appsync_api_key.public_orders[0]" "${appsync_id}:${api_key_id_a}"
+    fi
+    if [ -n "$api_key_id_b" ]; then
+      import_resource "$run_id" "module.appsync.aws_appsync_api_key.public_orders_rotation[0]" "${appsync_id}:${api_key_id_b}"
+    fi
 
     # AppSync data layer (datasources, functions, resolvers).
     import_ephemeral_appsync_resources "$run_id" "$appsync_id"
@@ -547,8 +601,8 @@ PY
 
 cleanup_cloudwatch_log_groups_for_run() {
   local run_id="$1"
+  local region="${2:-${AWS_REGION:-us-east-1}}"
   log "🧹 Cleaning up CloudWatch log groups for run: $run_id"
-  local region="${AWS_REGION:-us-east-1}"
   local suffix="-${run_id}"
   local log_groups=""
   local log_next_token=""
@@ -653,11 +707,11 @@ cleanup_stale_lock() {
 
   if [ -n "$lock_created" ]; then
     local lock_age_seconds
-    lock_age_seconds=$(python3 - <<PY
+    lock_age_seconds=$(python3 - "$lock_created" <<'PY'
 from datetime import datetime, timezone
 import sys
 try:
-    last = datetime.fromisoformat("${lock_created}".replace('Z', '+00:00'))
+    last = datetime.fromisoformat(sys.argv[1].replace('Z', '+00:00'))
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     print(int((datetime.now(timezone.utc) - last).total_seconds()))

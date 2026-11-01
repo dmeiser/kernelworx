@@ -71,6 +71,167 @@ class TestBashSyntax:
             assert result.returncode == 0, f"{script.name} failed bash syntax check: {result.stderr}"
 
 
+class TestRunIdValidation:
+    """RUN_ID reaches S3 state keys and -var values, so all three entry
+    points reject anything outside [A-Za-z0-9._-] before any AWS call."""
+
+    INVALID_RUN_IDS = ["../prod", "pr-1/x", "pr-1/../../application/prod", "pr 1", "pr-1;rm", ""]
+
+    # Both actions interpolate RUN_ID into the S3 state key, the -var value, and
+    # (for down) the log-group/bucket cleanup suffix, so both must reject first.
+    @pytest.mark.parametrize("action", ["up", "down"])
+    @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
+    def test_ephemeral_env_rejects_invalid_run_id(
+        self, repo_root: Path, tmp_env: Path, tmp_path: Path, action: str, run_id: str
+    ) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        write_mock(tmp_env, "tofu", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        build_dir = tmp_path / "lambda-layer"
+        script = f"""
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
+            scripts/ephemeral-env.sh {action} {shlex.quote(run_id)}
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode != 0, result.stderr
+        # The empty case is caught by the pre-existing non-empty check.
+        assert "Invalid run-id" in result.stderr or run_id == "", result.stderr
+        assert not recorded.exists(), f"validation must precede any AWS/tofu call: {recorded.read_text()}"
+
+    @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
+    def test_recover_deploy_rejects_invalid_run_id(self, repo_root: Path, tmp_env: Path, run_id: str) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        write_mock(tmp_env, "tofu", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        result = run_bash(repo_root, f"scripts/recover-deploy.sh {shlex.quote(run_id)}")
+        assert result.returncode != 0, result.stderr
+        assert "Invalid run-id" in result.stderr
+        assert not recorded.exists(), f"validation must precede any AWS/tofu call: {recorded.read_text()}"
+
+    @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
+    def test_recover_destroy_rejects_invalid_run_id(self, repo_root: Path, tmp_env: Path, run_id: str) -> None:
+        recorded = tmp_env / "aws_calls.txt"
+        write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        write_mock(tmp_env, "tofu", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        result = run_bash(repo_root, f"scripts/recover-destroy.sh {shlex.quote(run_id)}")
+        assert result.returncode != 0, result.stderr
+        assert "Invalid run-id" in result.stderr
+        assert not recorded.exists(), f"validation must precede any AWS/tofu call: {recorded.read_text()}"
+
+    def test_valid_run_id_is_accepted(self, repo_root: Path, tmp_env: Path, tmp_path: Path) -> None:
+        write_mock(tmp_env, "aws", "#!/bin/bash\nexit 0")
+        write_mock(tmp_env, "tofu", "#!/bin/bash\nexit 0")
+        build_dir = tmp_path / "lambda-layer"
+        script = f"""
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
+            scripts/ephemeral-env.sh down pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        assert "Invalid run-id" not in result.stderr
+
+
+class TestCreateEphemeralTestUsersRunIdValidation:
+    """The test-user script takes the run-id from the same workflow inputs as
+    the state-touching ephemeral entry points, so it rejects anything outside
+    [A-Za-z0-9._-] before the first Cognito call (#583)."""
+
+    INVALID_RUN_IDS = ["pr-1/../x", "../prod", "pr 1", "pr-1;rm", "owner@evil.test", ""]
+
+    def _run(self, repo_root: Path, tmp_env: Path, run_id: str) -> subprocess.CompletedProcess[str]:
+        recorded = tmp_env / "aws_calls.txt"
+        write_mock(tmp_env, "aws", f'#!/bin/bash\necho "$@" >> "{recorded}"\nexit 0')
+        # provision-user-totp.sh waits for the next TOTP window; skip the wait.
+        write_mock(tmp_env, "sleep", "#!/bin/bash\nexit 0")
+        return run_bash(
+            repo_root,
+            f"scripts/create-ephemeral-test-users.sh {shlex.quote(run_id)} pool-123 client-456",
+        )
+
+    @pytest.mark.parametrize("run_id", INVALID_RUN_IDS)
+    def test_invalid_run_id_rejected_before_any_aws_call(self, repo_root: Path, tmp_env: Path, run_id: str) -> None:
+        result = self._run(repo_root, tmp_env, run_id)
+        assert result.returncode != 0, result.stderr
+        recorded = tmp_env / "aws_calls.txt"
+        assert not recorded.exists(), f"validation must precede any Cognito call: {recorded.read_text()}"
+
+    def test_valid_run_id_creates_scoped_test_users(self, repo_root: Path, tmp_env: Path) -> None:
+        result = self._run(repo_root, tmp_env, "pr-999")
+        assert result.returncode == 0, result.stderr
+        calls = (tmp_env / "aws_calls.txt").read_text()
+        for suffix in ("owner", "contributor", "readonly", "smoke"):
+            assert f"pr-999-{suffix}@kernelworx.test" in calls
+
+
+class TestCreateEphemeralTestUsersPasswordProvisioning:
+    """The exported TEST_*_PASSWORD values are the credentials the integration
+    and e2e suites sign in with, so the script must never export a password
+    Cognito did not accept. It used to swallow a failed AdminSetUserPassword
+    ("(Could not set password)") and export the generated password anyway, so
+    a transient control-plane failure produced a whole suite of
+    "Incorrect username or password" failures followed by Cognito's
+    "Password attempts exceeded" backoff instead of a provisioning error.
+    """
+
+    def _run(self, repo_root: Path, tmp_env: Path, failing_set_password_calls: int) -> subprocess.CompletedProcess[str]:
+        counter = tmp_env / "set-password-calls.txt"
+        recorded = tmp_env / "aws_calls.txt"
+        write_mock(
+            tmp_env,
+            "aws",
+            f"""
+            #!/bin/bash
+            printf '%s\\n' "$*" >> "{recorded}"
+            case "$1 $2" in
+              "cognito-idp admin-set-user-password")
+                echo call >> "{counter}"
+                if [ "$(wc -l < "{counter}")" -le {failing_set_password_calls} ]; then
+                  echo "An error occurred (ThrottlingException) when calling the AdminSetUserPassword operation" >&2
+                  exit 254
+                fi
+                ;;
+              "cognito-idp admin-get-user") echo "None" ;;
+              "cognito-idp initiate-auth") echo "an-access-token" ;;
+              "cognito-idp associate-software-token") echo "JBSWY3DPEHPK3PXP" ;;
+            esac
+            exit 0
+            """,
+        )
+        # provision-user-totp.sh waits for the next TOTP window; skip the wait.
+        write_mock(tmp_env, "sleep", "#!/bin/bash\nexit 0")
+        return run_bash(repo_root, "scripts/create-ephemeral-test-users.sh pr-999 pool-123 client-456")
+
+    def _set_password_calls(self, tmp_env: Path) -> list[str]:
+        calls = (tmp_env / "aws_calls.txt").read_text().splitlines()
+        return [line for line in calls if line.startswith("cognito-idp admin-set-user-password")]
+
+    def test_transient_set_password_failure_is_retried(self, repo_root: Path, tmp_env: Path) -> None:
+        result = self._run(repo_root, tmp_env, failing_set_password_calls=3)
+        assert result.returncode == 0, result.stderr
+        owner_calls = [call for call in self._set_password_calls(tmp_env) if "pr-999-owner@" in call]
+        assert len(owner_calls) > 1, "a rejected password must be retried, not exported as-is"
+        for user in ("OWNER", "CONTRIBUTOR", "READONLY", "SMOKE"):
+            assert f"TEST_{user}_PASSWORD=" in result.stdout
+
+    def test_password_never_accepted_fails_without_exporting(self, repo_root: Path, tmp_env: Path) -> None:
+        result = self._run(repo_root, tmp_env, failing_set_password_calls=1000)
+        assert result.returncode != 0, result.stdout
+        assert "Refusing to export test credentials" in result.stderr
+        assert "TEST_OWNER_PASSWORD" not in result.stdout
+        assert not any(line.startswith("export ") for line in result.stdout.splitlines())
+        # The retry is bounded: it gives up instead of looping forever.
+        owner_calls = [call for call in self._set_password_calls(tmp_env) if "pr-999-owner@" in call]
+        assert 1 < len(owner_calls) <= 10
+
+
 class TestCleanupStaleLock:
     def _source_and_call(
         self,
@@ -231,6 +392,42 @@ class TestCleanupStaleLock:
         assert "Lock is older than threshold" in result.stderr
         rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
         assert rm_calls, "Stale lock from the same host must be deleted"
+
+    def test_crafted_lock_timestamp_is_data_not_python_source(self, repo_root: Path, tmp_env: Path) -> None:
+        """`Created` comes from the S3 `.tflock` object body, so it must reach the age
+        snippet as an argument, never as interpolated Python source (#730): crafted
+        content must not be able to run code, and an unparseable timestamp must fall
+        back to "fresh" rather than deleting the lock."""
+        recorded = tmp_env / "aws_calls.txt"
+        marker = tmp_env / "pwned"
+        lock_file = tmp_env / "lock.json"
+        payload = f'2024-01-01T00:00:00Z" + __import__("os").popen("touch {marker}").read() + "'
+        lock_file.write_text(json.dumps({"Created": payload, "Who": "runner@other-host"}))
+        result = self._source_and_call(
+            repo_root,
+            tmp_env,
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            case "$1 $2" in
+              "s3api head-object")
+                exit 0
+                ;;
+              "s3 cp")
+                cat "{lock_file}"
+                ;;
+              "s3 rm")
+                echo "removed"
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        assert result.returncode == 0, result.stderr
+        assert not marker.exists(), "lock content must never be evaluated as Python source"
+        assert "Lock appears fresh" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert not rm_calls, "an unparseable lock timestamp must not be treated as stale"
 
 
 class TestRecoverStateIfMissing:
@@ -504,6 +701,12 @@ class TestImportEphemeralResources:
               "appsync list-graphql-apis")
                 echo '{"graphqlApis": [{"name": "kernelworx-api-ue1-pr-999", "apiId": "api123"}]}'
                 ;;
+              "appsync list-api-keys")
+                # SEC-3 two-slot rotation model: recovery distinguishes the
+                # slots by their description tags and imports each existing
+                # one at its counted address.
+                echo '{"apiKeys": [{"id": "key123", "description": "Public orders slot A (campaign-scoped share tokens)"}, {"id": "key456", "description": "Public orders rotation slot B (campaign-scoped share tokens)"}]}'
+                ;;
               "appsync list-data-sources" | "appsync list-functions")
                 echo '{"dataSources": [], "functions": []}'
                 ;;
@@ -555,6 +758,15 @@ class TestImportEphemeralResources:
         assert "module.cognito.aws_iam_role_policy.lambda_cognito_admin" in calls
         assert "kernelworx-lambda-admin-exec-ue1-pr-999:cognito-admin" in calls
         assert "module.appsync.aws_iam_role_policy.appsync_logging" in calls
+        # The public-orders API keys (#679 rev 7, SEC-3 two-slot rotation) are
+        # NOT covered by the dynamic AppSync discovery below (datasources/
+        # functions/resolvers only), so their import lines in
+        # scripts/ephemeral-recover-common.sh are manual: slot A always (counted
+        # address) and slot B whenever it exists (rotation window).
+        assert "module.appsync.aws_appsync_api_key.public_orders[0]" in calls
+        assert "module.appsync.aws_appsync_api_key.public_orders_rotation[0]" in calls
+        assert "api123:key123" in calls, "the slot-A key import id must be <api_id>:<key_id>"
+        assert "api123:key456" in calls, "the rotation slot-B key must be imported too when it exists"
         assert "module.s3.aws_s3_bucket_versioning.static" in calls
         assert "module.s3.aws_s3_bucket_cors_configuration.exports" in calls
 
@@ -754,6 +966,129 @@ class TestEphemeralEnvDown:
         assert "tofu init" in tofu_calls
         assert "tofu destroy" in tofu_calls
         assert "Building Lambda layer" not in result.stderr
+
+
+class TestInitReconfigure:
+    """The sweep tears down many run-ids from one runner workspace, so every
+    ``tofu init`` after the first passes a state key that differs from the backend
+    config the previous init saved. OpenTofu aborts with ``Backend configuration
+    changed`` unless init re-configures, which failed 29 of the 30 teardown attempts
+    in sweep run 40170048037."""
+
+    def test_down_inits_the_backend_with_reconfigure(self, repo_root: Path, tmp_env: Path, tmp_path: Path) -> None:
+        recorded = tmp_env / "tofu_calls.txt"
+        build_dir = tmp_path / "lambda-layer"
+        write_mock(
+            tmp_env,
+            "aws",
+            """
+            #!/bin/bash
+            case "$1 $2" in
+              "s3api head-object")
+                exit 1
+                ;;
+              "s3api list-object-versions")
+                echo 'None'
+                ;;
+              "s3api head-bucket")
+                exit 1
+                ;;
+              "s3 rm")
+                exit 0
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        write_mock(
+            tmp_env,
+            "tofu",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            exit 0
+            """,
+        )
+
+        script = f"""
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
+            scripts/ephemeral-env.sh down pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        init_calls = [c for c in recorded.read_text().splitlines() if c.startswith("init ")]
+        assert len(init_calls) == 1, f"down must init the backend exactly once, got: {init_calls}"
+        init = shlex.split(init_calls[0])
+        assert "-reconfigure" in init, f"down init must re-configure the backend, got: {init}"
+        # -migrate-state would copy the state to the new key instead of re-pointing
+        # the backend at this run's own state object.
+        assert "-migrate-state" not in init, f"down init must not migrate state, got: {init}"
+        assert "-backend-config=key=application/ephemeral/pr-999/terraform.tfstate" in init, (
+            f"backend-config overrides must be unchanged, got: {init}"
+        )
+        assert "-backend-config=bucket=test-bucket" in init, f"got: {init}"
+        assert "-backend-config=region=us-east-1" in init, f"got: {init}"
+
+    def test_env_inits_the_backend_with_reconfigure(self, repo_root: Path, tmp_env: Path, tmp_path: Path) -> None:
+        """`env` only reads `tofu output`, but the workspace's saved backend-config
+        may point at another run-id's state (or at nothing). It must re-init the
+        backend before reading output, or it fails or exports the wrong stack's
+        endpoints (#727)."""
+        recorded = tmp_env / "tofu_calls.txt"
+        build_dir = tmp_path / "lambda-layer"
+        write_mock(
+            tmp_env,
+            "tofu",
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            exit 0
+            """,
+        )
+
+        script = f"""
+            set -e
+            export STATE_BUCKET="test-bucket"
+            export STATE_REGION="us-east-1"
+            export TF_VAR_encryption_passphrase="not-used"
+            export KERNELWORX_TEST_LAYER_DIR="{build_dir}"
+            rm -f "{recorded}"
+            scripts/ephemeral-env.sh env pr-999
+        """
+        result = run_bash(repo_root, script)
+        assert result.returncode == 0, result.stderr
+        calls = [line for line in recorded.read_text().splitlines() if line.strip()]
+        init_idx = next((i for i, c in enumerate(calls) if c.startswith("init ")), None)
+        output_indices = [i for i, c in enumerate(calls) if c.startswith("output ")]
+        assert init_idx is not None, f"env must init the backend before reading output, got: {calls}"
+        init = shlex.split(calls[init_idx])
+        assert output_indices, f"env must read `tofu output`, got: {calls}"
+        assert "-reconfigure" in init, f"env init must re-configure the backend, got: {init}"
+        assert "-migrate-state" not in init, f"env init must not migrate state, got: {init}"
+        assert "-backend-config=key=application/ephemeral/pr-999/terraform.tfstate" in init, (
+            f"backend-config overrides must be unchanged, got: {init}"
+        )
+        assert "-backend-config=bucket=test-bucket" in init, f"got: {init}"
+        assert "-backend-config=region=us-east-1" in init, f"got: {init}"
+        # The init must precede every `tofu output`: reading output from an
+        # uninitialized or wrong-run-id backend is exactly what #727 reports.
+        assert init_idx < min(output_indices), f"env must init the backend before reading output, got: {calls}"
+
+    def test_every_tofu_init_in_ephemeral_env_reconfigures(self, repo_root: Path) -> None:
+        """All three entry points (up, env, and down) can follow an init for a
+        different run-id in the same workspace, so every init must pass
+        -reconfigure."""
+        source = (repo_root / "scripts" / "ephemeral-env.sh").read_text()
+        joined = re.sub(r"\\\n\s*", " ", source)
+        init_calls = [line.strip() for line in joined.splitlines() if "tofu init " in line]
+        assert len(init_calls) == 3, f"expected the up, env, and down init calls, got: {init_calls}"
+        for call in init_calls:
+            assert "-reconfigure" in call, f"tofu init must pass -reconfigure: {call}"
+            assert "-migrate-state" not in call, f"tofu init must not migrate state: {call}"
 
 
 class TestWorkflowDispatchSurface:

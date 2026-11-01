@@ -7,7 +7,8 @@ repeating boilerplate across test files.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 
@@ -501,3 +502,47 @@ class MockLambdaContext:
     def get_remaining_time_in_millis(self) -> int:
         """Return remaining execution time (mock returns 30 seconds)."""
         return 30000
+
+
+def batch_delete_table(table_name: str = "test-table") -> MagicMock:
+    """Build a mock DynamoDB Table whose client accepts BatchWriteItem deletes.
+
+    ``batch_delete_keys`` drives BatchWriteItem through ``table.meta.client``
+    rather than boto3's ``batch_writer`` so the UnprocessedItems retry is
+    bounded; this scaffold gives a table that answers with no unprocessed items.
+    Override ``table.meta.client.batch_write_item`` to simulate throttling.
+    """
+    table = MagicMock()
+    table.name = table_name
+    table.meta.client.batch_write_item.return_value = {"UnprocessedItems": {}}
+    return table
+
+
+def accept_batch_deletes(*tables: MagicMock) -> None:
+    """Make each mock table's client answer BatchWriteItem with nothing unprocessed.
+
+    Use on a patched ``tables`` module whose tables are plain MagicMocks; without
+    this, ``batch_write_item`` returns a MagicMock whose ``UnprocessedItems`` is
+    truthy and every delete looks throttled.
+    """
+    for table in tables:
+        table.meta.client.batch_write_item.return_value = {"UnprocessedItems": {}}
+
+
+def unprocessed_batches(table: MagicMock, requests: Sequence[Dict[str, Any]], attempts: int) -> None:
+    """Make the next ``attempts`` BatchWriteItem calls report every item unprocessed.
+
+    The call after that reports success, so a test can assert the retry both
+    happens and eventually clears. Pass ``attempts`` at or above the production
+    cap to exercise the "still unprocessed at the cap" path.
+    """
+    pending = list(requests)
+    calls = {"count": 0}
+
+    def _batch_write_item(RequestItems: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:  # noqa: N803
+        calls["count"] += 1
+        if calls["count"] <= attempts:
+            return {"UnprocessedItems": {table.name: pending}}
+        return {"UnprocessedItems": {}}
+
+    table.meta.client.batch_write_item.side_effect = _batch_write_item

@@ -111,14 +111,18 @@ const CampaignTabs: React.FC<CampaignTabsProps> = ({ tabValue, hasWritePermissio
   </Box>
 );
 
-const CampaignRoutes: React.FC = () => (
+interface CampaignRoutesProps {
+  isOwner: boolean;
+}
+
+const CampaignRoutes: React.FC<CampaignRoutesProps> = ({ isOwner }) => (
   <Routes>
     <Route path="orders/new" element={<OrderEditorPage />} />
     <Route path="orders/:orderId/edit" element={<OrderEditorPage />} />
     <Route path="orders" element={<OrdersPage />} />
     <Route path="summary" element={<CampaignSummaryPage />} />
     <Route path="reports" element={<ReportsPage />} />
-    <Route path="settings" element={<CampaignSettingsPage />} />
+    <Route path="settings" element={<CampaignSettingsPage isOwner={isOwner} />} />
     <Route path="/" element={<Navigate to="orders" replace />} />
     <Route path="*" element={<Navigate to="orders" replace />} />
   </Routes>
@@ -208,7 +212,7 @@ const CampaignContent: React.FC<CampaignContentProps> = ({ profileId, tabValue, 
       hasWritePermission={getWritePermission(profile)}
       onTabChange={navHandlers.handleTabChange}
     />
-    <CampaignRoutes />
+    <CampaignRoutes isOwner={Boolean(profile?.isOwner)} />
   </Box>
 );
 

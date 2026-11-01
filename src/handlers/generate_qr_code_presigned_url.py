@@ -13,13 +13,17 @@ Supports two invocation shapes from AppSync:
 from typing import TYPE_CHECKING, Any, Dict, cast
 
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id
     from utils.auth import check_profile_access
     from utils.errors import AppError, ErrorCode
+    from utils.ids import strip_prefix
     from utils.logging import get_logger
     from utils.payment_methods import generate_presigned_get_url
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id
     from ..utils.auth import check_profile_access
     from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import strip_prefix
     from ..utils.logging import get_logger
     from ..utils.payment_methods import generate_presigned_get_url
 
@@ -40,25 +44,26 @@ def _caller_can_access_qr(caller_id: str, owner_account_id: str, profile_id: str
 
     Owners may always retrieve their own QR codes. WRITE collaborators may
     retrieve QR codes for payment methods on profiles they have WRITE access to.
+    When a profileId is present, ownership is re-derived strongly consistently
+    via check_profile_access instead of trusting owner_account_id (#545).
     """
-    if caller_id == owner_account_id:
-        return True
+    if profile_id:
+        try:
+            return cast(bool, check_profile_access(caller_id, profile_id, "WRITE"))
+        except AppError as e:
+            if e.error_code == ErrorCode.NOT_FOUND:
+                return False
+            raise
 
-    if not profile_id:
-        return False
-
-    try:
-        return cast(bool, check_profile_access(caller_id, profile_id, "WRITE"))
-    except AppError as e:
-        if e.error_code == ErrorCode.NOT_FOUND:
-            return False
-        raise
+    # Direct invocations may carry a prefixed ownerAccountId; compare in the
+    # unprefixed display dialect so both forms authorize (house ID dialect).
+    owner_bare_id: str = strip_prefix(owner_account_id)
+    return caller_id == owner_bare_id
 
 
 def _validate_and_extract_params(event: Dict[str, Any]) -> tuple[str, str, str | None]:
     """Validate event and extract required parameters."""
-    identity = event.get("identity", {})
-    caller_id = identity.get("sub")
+    caller_id = get_caller_id(event)
     if not caller_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 

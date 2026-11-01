@@ -27,7 +27,7 @@ export function validateAddress(address) {
         return { valid: false, error: 'Address is missing required fields: ' + missing.join(', ') };
     }
     const rawZip = address.zipCode;
-    const zip = rawZip == null ? '' : `${rawZip}`.trim();
+    const zip = rawZip == null ? '' : ('' + rawZip).trim();
     let zipDigits = '';
     for (const c of zip) {
         if (c >= '0' && c <= '9') {

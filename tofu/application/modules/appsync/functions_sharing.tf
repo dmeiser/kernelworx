@@ -146,6 +146,24 @@ resource "aws_appsync_function" "verify_profile_read_access" {
   code = file("${local.js_resolvers_dir}/verify_profile_read_access_fn.js")
 }
 
+# Second invocation in the two-phase read owner check (#508), mirroring
+# verify_profile_write_access_step2. AppSync rejects duplicate function IDs in
+# a pipeline, so the second slot needs its own resource; it points at the same
+# JS file, which branches on ctx.stash.isOwner set by the first call (Step 2
+# runs the GSI locator only for non-owners).
+resource "aws_appsync_function" "verify_profile_read_access_step2" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "VerifyProfileReadAccessStep2Fn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_profile_read_access_fn.js")
+}
+
 resource "aws_appsync_function" "check_share_read_permissions" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.shares.name
@@ -261,11 +279,13 @@ resource "aws_appsync_function" "batch_get_shared_profiles" {
     runtime_version = "1.0.0"
   }
 
-  # WARNING: templatefile() interpolates every `${...}` sequence in the source as a
-  # Terraform variable reference. The bundled source keeps only the intended
-  # `${table_name}` placeholder; any JS template literal added to the source will
-  # either fail the plan or be silently substituted. Do not add `${...}` to the
-  # source without also switching this to file() (#284 defers that switch).
+  # templatefile() reads the esbuild bundle in appsync/dist/, which strips
+  # ordinary comments, so a dollar-brace sequence that survives bundling is
+  # interpolated as a Terraform expression: in a string literal it aborts every
+  # plan/apply with "Invalid expression". `${table_name}` is the only intended
+  # placeholder; escape a literal as `$${...}` or switch this to file() (#284
+  # defers that switch). Enforced by
+  # tests/unit/check_templatefile_escaping.test.ts (#570).
   code = templatefile("${local.js_resolvers_dir}/batch_get_shared_profiles_fn.js", {
     table_name = var.dynamodb_table_names.profiles
   })

@@ -323,6 +323,58 @@ export async function deleteCatalogWithRetry(
 }
 
 /**
+ * GraphQL query that reads a campaign through the campaignId-index GSI — the
+ * same index deleteCampaign uses to resolve its target.
+ */
+const GET_CAMPAIGN = gql`
+  query GetCampaign($campaignId: ID!) {
+    getCampaign(campaignId: $campaignId) {
+      campaignId
+    }
+  }
+`;
+
+/**
+ * GraphQL mutation to delete a campaign.
+ */
+const DELETE_CAMPAIGN = gql`
+  mutation DeleteCampaign($campaignId: ID!) {
+    deleteCampaign(campaignId: $campaignId)
+  }
+`;
+
+/**
+ * Delete a campaign, waiting until the campaignId-index GSI has projected it.
+ *
+ * deleteCampaign resolves its target through that eventually-consistent index
+ * (Bug #21): if the index has not caught up yet, the mutation reports success
+ * while skipping the delete, and the surviving row then blocks catalog
+ * deletion. getCampaign reads the same index and returns null for a campaign
+ * it cannot see yet, so polling it until the campaign appears proves the
+ * delete will find it too. Only use this for campaigns known to exist — a
+ * campaign that is truly absent never becomes visible and times out.
+ */
+export async function deleteCampaign(
+  client: ApolloClient<any>,
+  campaignId: string
+): Promise<void> {
+  await waitForGSIConsistency(
+    async () => {
+      const res = await client.query({
+        query: GET_CAMPAIGN,
+        variables: { campaignId },
+        fetchPolicy: 'network-only',
+      });
+      return res.data?.getCampaign ? [res.data.getCampaign] : [];
+    },
+    (items) => items.length > 0,
+    10,
+    1000
+  );
+  await client.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+}
+
+/**
  * Create unique test data prefix to avoid collisions.
  */
 export function getTestPrefix(): string {

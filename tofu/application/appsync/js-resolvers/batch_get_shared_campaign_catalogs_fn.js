@@ -1,13 +1,11 @@
 import { util, runtime } from '@aws-appsync/utils';
 import { extractUniqueCatalogIds, attachCatalogs } from './lib/batch_catalogs.js';
 
-// WARNING: this file is loaded via Terraform templatefile() (see
-// modules/appsync/functions_catalogs.tf), so every dollar-brace sequence in
-// this file is Terraform-interpolated, not a JS template literal. The
-// table_name placeholder below is the only intended one; do NOT add other
-// dollar-brace sequences here — Terraform will try to substitute them and
-// the plan will fail or substitute the wrong value. (Switching to file() is
-// deferred per #284.)
+// Loaded via Terraform templatefile() (functions_catalogs.tf): a dollar-brace
+// sequence here is Terraform-interpolated, not JS. In a template/string literal
+// that aborts every plan/apply with "Invalid expression"; ordinary comments are
+// stripped by the esbuild bundle, but are banned too as defense-in-depth.
+// Enforced by tests/unit/check_templatefile_escaping.test.ts (#570).
 const tableName = '${table_name}';
 
 // DynamoDB caps BatchGetItem at 100 keys per request.

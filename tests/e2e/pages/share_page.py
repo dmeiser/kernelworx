@@ -22,12 +22,10 @@ class SharePage(BasePage):
       helper returns ``"Generate New Invite"``).
     * The new invite code is shown in an ``<Alert severity="success">`` whose
       text contains ``"New Invite Code:"``; the actual code follows that prefix.
-    * The shares table uses ``<IconButton title="Revoke access">`` per row.
+    * The shares table uses ``<IconButton title="Revoke access">`` per row,
+      targeted via ``get_by_role("row").filter(has_text=email)``.
     * The accept-invite form has ``label="Invite Code"`` on the ``<TextField>``
       and a *Accept Invite* ``<Button type="submit">``.
-
-    TODO: add ``data-testid`` attributes to the invite section and share rows
-    for more precise targeting.
     """
 
     _MANAGE_SUFFIX: str = "/manage"

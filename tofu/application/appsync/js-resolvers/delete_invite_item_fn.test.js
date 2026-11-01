@@ -12,9 +12,14 @@ describe('delete_invite_item_fn request', () => {
 
         assert.strictEqual(result.operation, 'DeleteItem');
         assert.deepStrictEqual(result.key, { inviteCode: 'INV-789' });
+        // The AppSync JS DynamoDB condition shape is
+        // { expression, expressionNames?, expressionValues? } - NOT the
+        // DynamoDB-API-level `expressionAttributeValues`. Binding the value
+        // under the wrong key leaves `:profileId` unbound, so the guard is
+        // either rejected at deploy time or silently dropped.
         assert.deepStrictEqual(result.condition, {
             expression: 'profileId = :profileId',
-            expressionAttributeValues: { ':profileId': 'PROFILE#prof-456' }
+            expressionValues: { ':profileId': 'PROFILE#prof-456' }
         });
     });
 });

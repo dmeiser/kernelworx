@@ -2,14 +2,10 @@
  * Custom hook for MFA (TOTP) functionality
  */
 import { useState, useCallback } from 'react';
-import {
-  setUpTOTP,
-  verifyTOTPSetup,
-  updateMFAPreference,
-  fetchMFAPreference,
-} from 'aws-amplify/auth';
+import { setUpTOTP, verifyTOTPSetup, updateMFAPreference, updatePassword, fetchMFAPreference } from 'aws-amplify/auth';
 import QRCode from 'qrcode';
 import { getMfaEnabledFromCognito } from '../lib/mfaStatus';
+import { checkIsFederatedSession } from '../lib/authUtils';
 
 export interface MfaPendingConfirmation {
   type: 'disable';
@@ -27,12 +23,12 @@ export interface UseMfaReturn {
   setMfaSuccess: (value: boolean) => void;
   mfaLoading: boolean;
   mfaEnabled: boolean;
+  federatedNotice: boolean;
   pendingConfirmation: MfaPendingConfirmation | null;
   handleSetupMFA: () => Promise<void>;
-  confirmSetupMFA: () => Promise<void>;
   handleVerifyMFA: (e: React.FormEvent) => Promise<void>;
-  handleDisableMFA: () => void;
-  confirmDisableMFA: () => Promise<void>;
+  handleDisableMFA: () => Promise<void>;
+  confirmDisableMFA: (password: string) => Promise<void>;
   cancelMfaConfirmation: () => void;
   checkMfaStatus: () => Promise<void>;
   setMfaEnabled: (enabled: boolean) => void;
@@ -60,7 +56,9 @@ const runMfaSetup = async (
   setMfaLoading(true);
   try {
     const totpSetupDetails = await setUpTOTP();
-    const setupUri = totpSetupDetails.getSetupUri('PopcornManager');
+    // The issuer label is what the authenticator app shows; both enrollment
+    // entry points must use the product name (issue #722).
+    const setupUri = totpSetupDetails.getSetupUri('KernelWorx');
     const qrDataUrl = await QRCode.toDataURL(setupUri.href);
 
     setMfaSetupCode(totpSetupDetails.sharedSecret);
@@ -80,6 +78,7 @@ export const useMfa = (): UseMfaReturn => {
   const [mfaSuccess, setMfaSuccess] = useState(false);
   const [mfaLoading, setMfaLoading] = useState(false);
   const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [federatedNotice, setFederatedNotice] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] = useState<MfaPendingConfirmation | null>(null);
 
   const checkMfaStatus = useCallback(async () => {
@@ -104,11 +103,7 @@ export const useMfa = (): UseMfaReturn => {
 
   const handleSetupMFA = async () => {
     setPendingConfirmation(null);
-    await runMfaSetup(setMfaSetupCode, setQrCodeUrl, setMfaError, setMfaLoading);
-  };
-
-  const confirmSetupMFA = async () => {
-    setPendingConfirmation(null);
+    setFederatedNotice(false);
     setMfaError(null);
     await runMfaSetup(setMfaSetupCode, setQrCodeUrl, setMfaError, setMfaLoading);
   };
@@ -134,16 +129,31 @@ export const useMfa = (): UseMfaReturn => {
     }
   };
 
-  const handleDisableMFA = () => {
+  const handleDisableMFA = async () => {
+    // Federated sessions have no native password, so the updatePassword
+    // re-auth inside confirmDisableMFA could never succeed for them. Mirror
+    // the MfaSetupDialog enrollment gate: resolve the session type before
+    // offering the password prompt and point the user at a password sign-in.
+    const federated = await checkIsFederatedSession();
+    if (federated) {
+      setFederatedNotice(true);
+      return;
+    }
     setPendingConfirmation({ type: 'disable', message: MFA_MESSAGES.disable });
   };
 
-  const confirmDisableMFA = async () => {
+  const confirmDisableMFA = async (password: string) => {
     setPendingConfirmation(null);
     setMfaError(null);
     setMfaLoading(true);
 
     try {
+      // Re-authenticate by re-checking the current password — the same
+      // sensitive-action pattern usePasswordChange relies on. Cognito
+      // ChangePassword with an unchanged password verifies the live session's
+      // password; a hijacked or borrowed session cannot supply it, so MFA
+      // cannot be turned off from a session alone. Refused unless it succeeds.
+      await updatePassword({ oldPassword: password, newPassword: password });
       await updateMFAPreference({ totp: 'DISABLED' });
       setMfaEnabled(false);
       setMfaSuccess(false);
@@ -175,9 +185,9 @@ export const useMfa = (): UseMfaReturn => {
     setMfaSuccess,
     mfaLoading,
     mfaEnabled,
+    federatedNotice,
     pendingConfirmation,
     handleSetupMFA,
-    confirmSetupMFA,
     handleVerifyMFA,
     handleDisableMFA,
     confirmDisableMFA,

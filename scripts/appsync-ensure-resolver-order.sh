@@ -1,21 +1,34 @@
 #!/bin/bash
-# Ensure AppSync resolver pipeline updates are applied before functions they
-# reference are destroyed.
+# Ensure AppSync reference-releasing updates land before the main apply destroys
+# aws_appsync_function / aws_appsync_datasource resources.
 #
-# This works around a long-standing AWS provider ordering issue where AppSync
-# rejects deleting pipeline functions that are still referenced by a resolver.
-# When a plan would destroy aws_appsync_function resources, this script runs a
-# targeted apply for the affected pipeline resolver(s) first, so the resolver
-# drops its references to the old functions before the full apply deletes them.
+# AWS rejects deleting an AppSync pipeline function that a resolver still
+# references, and deleting a data source that a function or resolver still
+# references. When a change removes such a resource from the configuration, the
+# config edge that ordered the destroy after the referencing objects' updates is
+# removed with it, and OpenTofu walks the destroy nodes first: the apply aborts
+# before a single reference-releasing update runs. That is the #750 prod outage
+# (13 consecutive failed deploys) and the earlier #298-#301 Lambda-to-JS
+# migrations.
+#
+# The guard therefore derives its own targets from the plan instead of relying
+# on a hand-maintained address list: it plans, collects every planned
+# aws_appsync_function / aws_appsync_datasource deletion address, and runs
+# `tofu apply -exclude=<addr>` for each. OpenTofu then applies everything EXCEPT
+# those deferred destroys, so the reference-releasing updates land while the
+# deletions remain for the caller's normal apply. Verified against OpenTofu
+# 1.13.1: a resource re-pointed away from an excluded object in the new
+# configuration is still applied, and unlike -target, -exclude never trips the
+# "Moved resource instances excluded by targeting" refusal, so no target-widening
+# retry is needed.
 #
 # Usage:
-#   scripts/appsync-ensure-resolver-order.sh [-d <tofu-dir>] [-t <resolver-target>]... [-- <extra-tofu-args>...]
+#   scripts/appsync-ensure-resolver-order.sh [-d <tofu-dir>] [-- <extra-tofu-args>...]
 #
 # Examples:
-#   scripts/appsync-ensure-resolver-order.sh -d tofu/application/environments/prod \
-#     -t module.appsync.aws_appsync_resolver.create_order
+#   scripts/appsync-ensure-resolver-order.sh -d tofu/application/environments/prod
 #
-#   scripts/appsync-ensure-resolver-order.sh -t module.appsync.aws_appsync_resolver.create_order \
+#   scripts/appsync-ensure-resolver-order.sh -d tofu/application/environments/ephemeral \
 #     -- -var="environment=pr-123"
 
 set -e
@@ -26,12 +39,11 @@ log() {
 }
 
 usage() {
-  log "Usage: $0 [-d <tofu-dir>] [-t <resolver-target>]... [-- <extra-tofu-args>...]"
+  log "Usage: $0 [-d <tofu-dir>] [-- <extra-tofu-args>...]"
   exit 1
 }
 
 TOFUDIR=""
-TARGETS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,11 +55,11 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     -t)
-      if [ -z "${2:-}" ]; then
-        usage
-      fi
-      TARGETS+=("$2")
-      shift 2
+      # Retired deliberately: a hand-maintained target list is how the ordering
+      # bug survived every previous fix. Fail loudly rather than ignore a stale
+      # call site.
+      log "❌ -t is no longer supported: the guard derives its exclusions from the plan."
+      usage
       ;;
     --)
       shift
@@ -68,11 +80,6 @@ if [ -z "$TOFUDIR" ]; then
   TOFUDIR="$(pwd)"
 fi
 
-if [ ${#TARGETS[@]} -eq 0 ]; then
-  log "ℹ️  No resolver targets specified; nothing to do."
-  exit 0
-fi
-
 cd "$TOFUDIR"
 
 PLAN_FILE="tfplan.appsync-order.tmp"
@@ -85,81 +92,40 @@ trap cleanup EXIT
 log "📋 Checking AppSync function/datasource deletion ordering in plan..."
 tofu plan -input=false -out="$PLAN_FILE" "${EXTRA_TOFU_ARGS[@]}"
 
-# Check whether the plan would destroy any aws_appsync_function or
-# aws_appsync_datasource resources. AppSync rejects deleting either when a
-# resolver or function still references them. The jq query selects
-# resource_changes of both types where actions contains "delete".
-deletions=$(tofu show -json "$PLAN_FILE" | \
-  jq -r '.resource_changes[]? | select((.type == "aws_appsync_function" or .type == "aws_appsync_datasource") and (.change.actions | index("delete"))) | .address')
+# Read the plan once; the deferred addresses and the applied-change count are
+# both derived from this same document, so the log cannot disagree with the
+# exclusions it passes.
+plan_json=$(tofu show -json "$PLAN_FILE")
+
+# The objects AWS refuses to delete while something still references them:
+# resource_changes of both AppSync types whose actions contain "delete"
+# (a replacement's delete is deferred the same way and lands in the main apply).
+deletions=$(jq -r \
+  '.resource_changes[]? | select((.type == "aws_appsync_function" or .type == "aws_appsync_datasource") and (.change.actions | index("delete"))) | .address' \
+  <<<"$plan_json")
 
 if [ -z "$deletions" ]; then
   log "   No AppSync function/datasource deletions planned; resolver ordering guard not needed."
   exit 0
 fi
 
-log "   Planned AppSync function/datasource deletions detected:"
-echo "$deletions" | while IFS= read -r addr; do
+EXCLUDE_ARGS=()
+log "   Planned AppSync function/datasource deletions detected; deferring to the main apply:"
+while IFS= read -r addr; do
   log "     - $addr"
-done
+  EXCLUDE_ARGS+=("-exclude=$addr")
+done <<<"$deletions"
 
-# Print the -target addresses OpenTofu suggests after a targeted apply fails
-# with "Moved resource instances excluded by targeting". Returns non-zero when
-# that error is absent so callers never retry on unrelated failures.
-extract_moved_targets() {
-  local err
-  err="$(cat)"
-  if ! grep -q "Moved resource instances excluded by targeting" <<<"$err"; then
-    return 1
-  fi
-  # The (\\.|[^"])* body tolerates backslash-escaped quotes in index keys,
-  # e.g. trigger_functions[\"pre-signup\"].
-  grep -oE -- '-target="(\\.|[^"])*"' <<<"$err" | sed -e 's/^-target="//' -e 's/"$//' -e 's/\\"/"/g' | sort -u
-}
+# Everything the reference-releasing apply will do, named from the same plan the
+# exclusions came from, so the log states what was applied and what was deferred.
+applied=$(jq -r \
+  '[.resource_changes[]? | select(.change.actions | index("delete") | not) | select(.change.actions != ["no-op"]) | .address] | length' \
+  <<<"$plan_json")
 
-# Run a targeted apply for one resolver, widening the target set if OpenTofu
-# refuses because moved resource instances are excluded by targeting. Such
-# moves stay pending in environments whose state predates a `moved`-block
-# deployment, and each retry may surface further required targets, so retry
-# with the union of the known and suggested targets, bounded.
-apply_resolver_target() {
-  local target="$1"
-  local apply_targets=("$target")
-  local attempt=0
-  local max_retries=3
-  local apply_err suggested t s found
-  while true; do
-    local apply_args=()
-    for t in "${apply_targets[@]}"; do
-      apply_args+=("-target=$t")
-    done
-    if apply_err=$(tofu apply -input=false -auto-approve "${apply_args[@]}" "${EXTRA_TOFU_ARGS[@]}" 2>&1); then
-      return 0
-    fi
-    printf '%s\n' "$apply_err" >&2
-    attempt=$((attempt + 1))
-    if [ "$attempt" -gt "$max_retries" ] || ! suggested=$(extract_moved_targets <<<"$apply_err") || [ -z "$suggested" ]; then
-      return 1
-    fi
-    log "   Moved resource instances excluded by targeting; retrying with additional targets:"
-    while IFS= read -r s; do
-      found=0
-      for t in "${apply_targets[@]}"; do
-        if [ "$t" = "$s" ]; then
-          found=1
-          break
-        fi
-      done
-      if [ "$found" -eq 0 ]; then
-        log "     + $s"
-        apply_targets+=("$s")
-      fi
-    done <<<"$suggested"
-  done
-}
+log "🎯 Applying $applied planned change(s) with the deletions above excluded..."
+if ! tofu apply -input=false -auto-approve "${EXCLUDE_ARGS[@]}" "${EXTRA_TOFU_ARGS[@]}"; then
+  log "❌ Reference-releasing apply failed; aborting before the main apply touches anything."
+  exit 1
+fi
 
-for target in "${TARGETS[@]}"; do
-  log "🎯 Applying resolver target first: $target"
-  apply_resolver_target "$target"
-done
-
-log "   Resolver ordering guard complete."
+log "   Resolver ordering guard complete: reference-releasing updates applied, the deletions above remain for the main apply."

@@ -7,10 +7,11 @@ fi
 ENV="${1:-dev}"
 ACTION="${2:-plan}"
 shift 2 2>/dev/null || shift $#  # Remove first two args, keep rest as extra flags
-EXTRA_FLAGS="$@"
+EXTRA_FLAGS=("$@")
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+PROJECT_ROOT="$ROOT_DIR"
 ENV_DIR="$SCRIPT_DIR/../environments/$ENV"
 
 LAYER_DIR="$ROOT_DIR/.build/lambda-layer"
@@ -20,6 +21,7 @@ LAYER_REQ="$LAYER_DIR/requirements.txt"
 if [ -f "$ROOT_DIR/.env" ]; then
     echo "📂 Loading environment from $ROOT_DIR/.env"
     set -a
+    # shellcheck source=/dev/null
     source "$ROOT_DIR/.env"
     set +a
 fi
@@ -77,6 +79,18 @@ plan_is_fresh() {
 }
 
 main() {
+    if [[ ! -d "$ENV_DIR" ]]; then
+        echo "❌ Unknown environment directory: $ENV_DIR"
+        exit 1
+    fi
+    case "$ACTION" in
+        init|plan|apply|destroy|validate|fmt) ;;
+        *)
+            echo "Usage: $0 <env> <init|plan|apply|destroy|validate|fmt> [extra-flags]"
+            exit 1
+            ;;
+    esac
+
     cd "$ENV_DIR"
 
     echo ""
@@ -88,25 +102,25 @@ main() {
     init)
         echo "📦 Initializing OpenTofu..."
         build_resolvers
-        tofu init -upgrade $EXTRA_FLAGS
+        tofu init -upgrade "${EXTRA_FLAGS[@]}"
         ;;
     plan)
         echo "📋 Planning changes..."
         build_lambda_layer
         build_resolvers
-        tofu plan -out=tfplan $EXTRA_FLAGS
+        tofu plan -out=tfplan "${EXTRA_FLAGS[@]}"
         ;;
     apply)
-        AUTO_APPROVE_FLAG=""
+        AUTO_APPROVE_FLAGS=()
         if [ "${AUTO_APPROVE:-}" = "1" ]; then
-            AUTO_APPROVE_FLAG="-auto-approve"
+            AUTO_APPROVE_FLAGS=("-auto-approve")
         fi
 
         build_lambda_layer
         build_resolvers
         if [ -f tfplan ] && plan_is_fresh tfplan; then
             echo "🚀 Applying saved plan..."
-            tofu apply $AUTO_APPROVE_FLAG $EXTRA_FLAGS tfplan
+            tofu apply "${AUTO_APPROVE_FLAGS[@]}" "${EXTRA_FLAGS[@]}" tfplan
             rm tfplan
         else
             if [ -f tfplan ]; then
@@ -114,18 +128,19 @@ main() {
                 rm tfplan
             fi
             echo "📋 Re-planning changes before apply..."
-            tofu plan -out=tfplan $EXTRA_FLAGS
+            tofu plan -out=tfplan "${EXTRA_FLAGS[@]}"
             echo "🚀 Applying changes..."
-            tofu apply $AUTO_APPROVE_FLAG $EXTRA_FLAGS tfplan
+            tofu apply "${AUTO_APPROVE_FLAGS[@]}" "${EXTRA_FLAGS[@]}" tfplan
             rm tfplan
         fi
+        "${PROJECT_ROOT}/scripts/appsync-ensure-resolver-order.sh"
         ;;
     destroy)
         echo "⚠️  Are you sure? This will destroy all resources!"
-        read -p "Type 'yes' to confirm: " confirm
+        read -r -p "Type 'yes' to confirm: " confirm
         if [ "$confirm" == "yes" ]; then
             build_resolvers
-            tofu destroy $EXTRA_FLAGS
+            tofu destroy "${EXTRA_FLAGS[@]}"
         else
             echo "Aborted."
         fi
@@ -133,7 +148,7 @@ main() {
     validate)
         echo "✅ Validating configuration..."
         build_resolvers
-        tofu validate $EXTRA_FLAGS
+        tofu validate "${EXTRA_FLAGS[@]}"
         ;;
     fmt)
         echo "🎨 Formatting configuration..."

@@ -51,7 +51,7 @@ interface ConfirmDialogProps {
   maxWidth?: React.ComponentProps<typeof Dialog>['maxWidth'];
 }
 
-/* eslint-disable complexity -- wrapper component: destructuring + conditional default props are not real complexity */
+/* eslint-disable complexity -- real hits, not false positives: eslint counts each default-parameter initializer, and this wrapper carries 5 optional props with defaults (a design smell to shrink under #532) */
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = (props) => {
   const {
     open,

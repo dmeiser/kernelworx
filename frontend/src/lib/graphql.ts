@@ -3,7 +3,6 @@
  */
 
 import { gql } from '@apollo/client';
-import type { GqlAdminUser } from '../types/graphql-generated';
 
 // ============================================================================
 // Fragments
@@ -87,6 +86,7 @@ export const ORDER_FRAGMENT = gql`
     notes
     createdAt
     updatedAt
+    status
   }
 `;
 
@@ -827,11 +827,6 @@ export const ADMIN_SEARCH_USER = gql`
   }
 `;
 
-// Type for search results
-export type AdminSearchUserResponse = {
-  adminSearchUser: GqlAdminUser[];
-};
-
 export const ADMIN_GET_USER_PROFILES = gql`
   ${SELLER_PROFILE_FRAGMENT}
   query AdminGetUserProfiles($accountId: ID!) {
@@ -911,9 +906,9 @@ export const ADMIN_RESET_USER_PASSWORD = gql`
   }
 `;
 
-export const ADMIN_DELETE_USER = gql`
-  mutation AdminDeleteUser($accountId: ID!) {
-    adminDeleteUser(accountId: $accountId)
+export const ADMIN_PURGE_USER_ACCOUNT = gql`
+  mutation AdminPurgeUserAccount($accountId: ID!, $profileIds: [ID!]!) {
+    adminPurgeUserAccount(accountId: $accountId, profileIds: $profileIds)
   }
 `;
 
@@ -941,12 +936,6 @@ export const ADMIN_DELETE_USER_PROFILES = gql`
   }
 `;
 
-export const ADMIN_DELETE_USER_CATALOGS = gql`
-  mutation AdminDeleteUserCatalogs($accountId: ID!) {
-    adminDeleteUserCatalogs(accountId: $accountId)
-  }
-`;
-
 export const ADMIN_DELETE_SHARE = gql`
   mutation AdminDeleteShare($profileId: ID!, $targetAccountId: ID!) {
     adminDeleteShare(profileId: $profileId, targetAccountId: $targetAccountId)
@@ -970,3 +959,36 @@ export const CREATE_MANAGED_CATALOG = gql`
     }
   }
 `;
+
+export const GET_CAMPAIGN_PUBLIC_ORDER_SETTINGS = gql`
+  query GetCampaignPublicOrderSettings($campaignId: ID!) {
+    getCampaignPublicOrderSettings(campaignId: $campaignId) {
+      enabled
+      shareToken
+      allowedPaymentMethods
+      acknowledgedAt
+      ackVersion
+      publicOrderCount
+      campaignId
+      campaignName
+      campaignState
+    }
+  }
+`;
+
+export const UPDATE_CAMPAIGN_PUBLIC_ORDER_SETTINGS = gql`
+  mutation UpdateCampaignPublicOrderSettings($input: UpdateCampaignPublicOrderSettingsInput!) {
+    updateCampaignPublicOrderSettings(input: $input) {
+      enabled
+      shareToken
+      allowedPaymentMethods
+      acknowledgedAt
+      ackVersion
+      publicOrderCount
+      campaignId
+      campaignName
+      campaignState
+    }
+  }
+`;
+

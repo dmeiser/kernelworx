@@ -1913,14 +1913,14 @@ describe('Profile Sharing Integration Tests', () => {
         },
       });
 
-      // Assert: Contributor can no longer access the profile
-      await expect(
-        contributorClient.query({
-          query: gql`query GetProfile($profileId: ID!) { getProfile(profileId: $profileId) { profileId sellerName } }`,
-          variables: { profileId },
-          fetchPolicy: 'network-only',
-        })
-      ).rejects.toThrow();
+      // Assert: Contributor can no longer access the profile — schema contract returns
+      // null on a denied read (schema.graphql getProfile), not a query error (#522)
+      const { data: accessAfter } = await contributorClient.query({
+        query: gql`query GetProfile($profileId: ID!) { getProfile(profileId: $profileId) { profileId sellerName } }`,
+        variables: { profileId },
+        fetchPolicy: 'network-only',
+      });
+      expect(accessAfter.getProfile).toBeNull();
     });
 
     it('concurrent revocation and access (race condition)', async () => {

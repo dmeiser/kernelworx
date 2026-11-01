@@ -39,6 +39,7 @@ COGNITO_DOMAIN=$(tofu_output cognito_domain)
 S3_BUCKET=$(tofu_output static_assets_bucket)
 CF_DISTRIBUTION=$(tofu_output cloudfront_distribution_id)
 APPSYNC_API_URL=$(tofu_output appsync_api_url)
+APPSYNC_API_KEY=$(tofu_output appsync_api_key)
 SITE_URL=$(tofu_output site_url)
 
 # ============================================================
@@ -53,10 +54,14 @@ if [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" == "None" ]; then
 fi
 
 if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" == "None" ]; then
+    # Must be the tofu-managed KernelWorx-Web app client (module.cognito.client_id).
+    # Never fall back to `list-user-pool-clients --max-results 1`: it returns the
+    # first client in pool order (a non-tofu-managed client lacking the required
+    # auth flows) and bakes the wrong Client ID into the bundle (#709; see AGENTS.md).
+    # shellcheck disable=SC2016  # JMESPath literal: the backticks are aws CLI syntax, not shell command substitution
     CLIENT_ID=$(aws cognito-idp list-user-pool-clients \
         --user-pool-id "$USER_POOL_ID" \
-        --max-results 1 \
-        --query "UserPoolClients[0].ClientId" \
+        --query 'UserPoolClients[?ClientName==`KernelWorx-Web`].ClientId | [0]' \
         --output text \
         --region "$REGION" 2>/dev/null || echo "")
 fi
@@ -111,7 +116,7 @@ if [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" == "None" ]; then
 fi
 
 if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" == "None" ]; then
-    echo "❌ Error: Could not find Cognito App Client"
+    echo "❌ Error: Could not find the KernelWorx-Web Cognito App Client in pool $USER_POOL_ID"
     exit 1
 fi
 
@@ -146,6 +151,7 @@ cat > .env.production << EOF
 # VITE_APPSYNC_ENDPOINT is intentionally unset: the deployed app calls
 # /graphql same-origin through the site's CloudFront distribution.
 VITE_APPSYNC_REGION=${REGION}
+VITE_APPSYNC_API_KEY=${APPSYNC_API_KEY}
 
 # Cognito User Pool
 VITE_COGNITO_USER_POOL_ID=${USER_POOL_ID}
@@ -186,7 +192,11 @@ EOF
 # ============================================================
 echo ""
 echo "☁️  Uploading to S3..."
-aws s3 sync dist "s3://${S3_BUCKET}" --delete --region "$REGION"
+# Do not use --delete: hashed JS/CSS chunks from previous deploys may still be
+# requested by clients holding a cached index.html until the CloudFront
+# invalidation below completes. Keeping old chunks prevents white-screen errors
+# for open sessions during the deploy window (see deploy-shared.yml).
+aws s3 sync dist "s3://${S3_BUCKET}" --region "$REGION"
 
 # ============================================================
 # Step 5: Invalidate CloudFront cache

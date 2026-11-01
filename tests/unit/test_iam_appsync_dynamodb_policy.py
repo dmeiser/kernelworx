@@ -30,6 +30,7 @@ EXPECTED_ACTIONS = [
     "dynamodb:PutItem",
     "dynamodb:UpdateItem",
     "dynamodb:DeleteItem",
+    "dynamodb:ConditionCheckItem",
     "dynamodb:Query",
     "dynamodb:BatchGetItem",
     "dynamodb:BatchWriteItem",

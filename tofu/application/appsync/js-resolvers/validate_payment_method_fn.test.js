@@ -3,17 +3,18 @@ import assert from 'node:assert';
 import { request, response } from './validate_payment_method_fn.js';
 
 describe('validate_payment_method_fn request', () => {
-  it('skips validation when paymentMethod is null', () => {
+  it('rejects an explicit null paymentMethod (#506)', () => {
+    // Order.paymentMethod is non-nullable; persisting null would corrupt the
+    // order. An absent field means "keep the current value", an explicit null
+    // is a client error.
     const ctx = {
       args: { input: { paymentMethod: null } },
       stash: {}
     };
-    const req = request(ctx);
-    assert.strictEqual(ctx.stash.skipPaymentMethodValidation, true);
-    assert.deepStrictEqual(req, {
-      operation: 'GetItem',
-      key: { accountId: 'NOOP' }
-    });
+    assert.throws(
+      () => request(ctx),
+      /INVALID_INPUT: paymentMethod cannot be null; omit the field to keep the current value/
+    );
   });
 
   it('skips validation when paymentMethod is undefined', () => {

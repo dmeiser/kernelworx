@@ -1,0 +1,389 @@
+"""Shared account-deletion cascade internals.
+
+The whole-user deletion cascade used to be split between
+``account_operations``, which orchestrated it, and ``admin_operations``,
+which held the per-domain sub-cascades. That split was a circular import:
+``admin_operations`` imported the orchestrator at module scope, so the
+orchestrator had to import the sub-cascades back inside function bodies.
+A consequence was that every sub-cascade re-paginated the whole profiles
+table on its own, so one account deletion paid six full profiles sweeps
+(#554).
+
+The internals now live here, below both handlers in the graph:
+``delete_all_user_data`` sweeps the profiles table once and passes the list
+into each sub-cascade, which only ever iterates it. Only self-service
+``deleteMyAccount`` runs the whole cascade today: admin deletion is
+client-side (#521) and reuses these per-entity sub-cascades directly, then
+calls ``adminPurgeUserAccount`` — see the #521 entry in AGENTS.md.
+"""
+
+from typing import TYPE_CHECKING, Any, Callable, Dict
+
+from botocore.exceptions import ClientError
+
+# Sibling handler modules use a same-package relative import, which resolves both
+# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+from .campaign_operations import (
+    batch_delete_keys,
+    delete_orders_for_campaign,
+)
+from .delete_profile_cascade import _delete_s3_reports
+
+# Handle both Lambda (absolute) and unit test (relative) imports
+try:  # pragma: no cover
+    from utils.cognito import is_transient_cognito_error
+    from utils.dynamodb import is_transient_client_error, tables
+    from utils.errors import AppError, ErrorCode
+    from utils.ids import ensure_account_id
+    from utils.logging import get_logger
+    from utils.payment_methods import delete_all_user_qr_codes
+except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.cognito import is_transient_cognito_error
+    from ..utils.dynamodb import is_transient_client_error, tables
+    from ..utils.errors import AppError, ErrorCode
+    from ..utils.ids import ensure_account_id
+    from ..utils.logging import get_logger
+    from ..utils.payment_methods import delete_all_user_qr_codes
+
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.pagination import query_all_items
+else:  # pragma: no cover
+    try:
+        from utils.pagination import query_all_items
+    except ModuleNotFoundError:
+        from ..utils.pagination import query_all_items
+
+logger = get_logger(__name__)
+
+
+def get_user_profiles(db_account_id: str) -> list[Dict[str, Any]]:
+    """Get all profiles owned by an account."""
+    return query_all_items(
+        tables.profiles,
+        {
+            "KeyConditionExpression": "ownerAccountId = :owner",
+            "ExpressionAttributeValues": {":owner": db_account_id},
+        },
+    )
+
+
+def delete_user_orders(profiles: list[Dict[str, Any]], logger: Any) -> int:
+    """Delete all orders for all campaigns of the given profiles.
+
+    Verifies with strongly consistent reads that each deleted order is gone
+    from the orders table before returning. Raises AppError if a deleted order
+    is still present.
+
+    Returns:
+        Count of orders deleted.
+    """
+    deleted_count = 0
+
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        campaigns = query_all_items(
+            tables.campaigns,
+            {
+                "KeyConditionExpression": "profileId = :pid",
+                "ExpressionAttributeValues": {":pid": profile_id},
+            },
+        )
+        for campaign in campaigns:
+            deleted_count += delete_orders_for_campaign(campaign["campaignId"], logger=logger)
+
+    logger.info("Deleted user orders", count=deleted_count)
+    return deleted_count
+
+
+def _verify_no_campaigns_remain(profile_id: str, logger: Any) -> None:
+    """Verify the campaigns table holds no campaign row for this profile.
+
+    The check measures the settled table, not the in-memory list the delete
+    keys were filtered from (#765): a strongly consistent Query on the base
+    table reflects every acknowledged delete, so a row the key filter skipped
+    cannot pass verification by never having been deleted, and an empty key
+    list cannot make the check vacuous. The campaignId-index GSI is not used
+    here: it is eventually consistent and can keep showing deleted rows for an
+    unbounded time. Raises AppError if any row persists.
+    """
+    remaining = query_all_items(
+        tables.campaigns,
+        {
+            "KeyConditionExpression": "profileId = :pid",
+            "ExpressionAttributeValues": {":pid": profile_id},
+            "ConsistentRead": True,
+        },
+        max_items=1,
+    )
+    if remaining:
+        logger.error(
+            "Campaign still present after delete verification",
+            profile_id=profile_id,
+            campaign_id=remaining[0].get("campaignId"),
+        )
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete campaign")
+
+
+def delete_user_campaigns(profiles: list[Dict[str, Any]], logger: Any) -> int:
+    """Delete all campaigns for the given profiles.
+
+    Verifies with a strongly consistent re-query of the campaigns table that no
+    campaign row remains for the profile before returning. The verification
+    runs per profile whether or not any delete key was built, so it cannot be
+    satisfied by the filtered key list it audits (#765). Raises AppError if any
+    campaign is still present.
+
+    Returns:
+        Count of campaigns deleted.
+    """
+    deleted_count = 0
+
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        campaigns = query_all_items(
+            tables.campaigns,
+            {
+                "KeyConditionExpression": "profileId = :pid",
+                "ExpressionAttributeValues": {":pid": profile_id},
+            },
+        )
+        campaign_keys = [
+            {"profileId": profile_id, "campaignId": campaign["campaignId"]}
+            for campaign in campaigns
+            if campaign.get("campaignId")
+        ]
+        if campaign_keys:
+            deleted_count += batch_delete_keys(
+                tables.campaigns, campaign_keys, ["profileId", "campaignId"], logger=logger
+            )
+        _verify_no_campaigns_remain(profile_id, logger=logger)
+
+    logger.info("Deleted user campaigns", count=deleted_count)
+    return deleted_count
+
+
+def delete_user_shares(profiles: list[Dict[str, Any]], logger: Any) -> int:
+    """Delete all outbound shares for the given profiles. Returns count deleted."""
+    deleted_count = 0
+
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        shares = query_all_items(
+            tables.shares,
+            {
+                "KeyConditionExpression": "profileId = :pid",
+                "ExpressionAttributeValues": {":pid": profile_id},
+            },
+        )
+        share_keys = [
+            {"profileId": profile_id, "targetAccountId": share["targetAccountId"]}
+            for share in shares
+            if share.get("targetAccountId")
+        ]
+        if share_keys:
+            deleted_count += batch_delete_keys(
+                tables.shares, share_keys, ["profileId", "targetAccountId"], logger=logger
+            )
+
+    logger.info("Deleted user shares", count=deleted_count)
+    return deleted_count
+
+
+def delete_user_profiles(account_id: str, profiles: list[Dict[str, Any]], logger: Any) -> int:
+    """Delete the given profiles. Returns count deleted."""
+    db_account_id = ensure_account_id(account_id)
+
+    profile_keys = [
+        {"ownerAccountId": db_account_id, "profileId": profile["profileId"]}
+        for profile in profiles
+        if profile.get("profileId")
+    ]
+    deleted_count = (
+        batch_delete_keys(tables.profiles, profile_keys, ["ownerAccountId", "profileId"], logger=logger)
+        if profile_keys
+        else 0
+    )
+
+    logger.info("Deleted user profiles", account_id=account_id, count=deleted_count)
+    return deleted_count
+
+
+def delete_invites_for_owned_profiles(profiles: list[Dict[str, Any]], logger: Any) -> int:
+    """Delete all invites for the given profiles."""
+    deleted_count = 0
+
+    for profile in profiles:
+        profile_id = profile["profileId"]
+        invites = query_all_items(
+            tables.invites,
+            {
+                "KeyConditionExpression": "profileId = :pid",
+                "ExpressionAttributeValues": {":pid": profile_id},
+                "IndexName": "profileId-index",
+            },
+        )
+        invite_keys = [{"inviteCode": invite["inviteCode"]} for invite in invites if invite.get("inviteCode")]
+        if invite_keys:
+            deleted_count += batch_delete_keys(tables.invites, invite_keys, ["inviteCode"], logger=logger)
+
+    logger.info("Deleted invites for owned profiles", count=deleted_count)
+    return deleted_count
+
+
+def delete_inbound_shares(account_id: str, logger: Any) -> int:
+    """Delete all inbound shares where the account is the target."""
+    db_account_id = ensure_account_id(account_id)
+
+    shares = query_all_items(
+        tables.shares,
+        {
+            "KeyConditionExpression": "targetAccountId = :tid",
+            "ExpressionAttributeValues": {":tid": db_account_id},
+            "IndexName": "targetAccountId-index",
+        },
+    )
+    share_keys = [
+        {"profileId": share["profileId"], "targetAccountId": share["targetAccountId"]}
+        for share in shares
+        if share.get("profileId") and share.get("targetAccountId")
+    ]
+    deleted_count = (
+        batch_delete_keys(tables.shares, share_keys, ["profileId", "targetAccountId"], logger=logger)
+        if share_keys
+        else 0
+    )
+
+    logger.info("Deleted inbound shares", account_id=account_id, count=deleted_count)
+    return deleted_count
+
+
+def delete_user_s3_reports(profiles: list[Dict[str, Any]], logger: Any) -> int:
+    """Delete all S3 report objects and versions for the given profiles.
+
+    Returns the count of deleted S3 report versions.
+    """
+    total_deleted = 0
+    for profile in profiles:
+        profile_id = profile.get("profileId")
+        if profile_id:
+            total_deleted += _delete_s3_reports(str(profile_id))
+
+    logger.info("Deleted user S3 reports", count=total_deleted)
+    return total_deleted
+
+
+def delete_all_user_data(account_id: str, logger: Any = None) -> None:
+    """Delete all user data from DynamoDB and S3 using shared deletion internals.
+
+    The profiles table is swept once and the resulting list is handed to every
+    sub-cascade, which only iterates it (#554).
+    """
+    log = logger or get_logger(__name__)
+
+    profiles = get_user_profiles(ensure_account_id(account_id))
+
+    delete_user_orders(profiles, log)
+    delete_user_campaigns(profiles, log)
+    delete_user_shares(profiles, log)
+    delete_invites_for_owned_profiles(profiles, log)
+    delete_inbound_shares(account_id, log)
+    delete_user_s3_reports(profiles, log)
+    delete_user_profiles(account_id, profiles, log)
+    # Catalogs are preserved per product design and should never be deleted.
+    # Delete payment method QR codes from S3 per captain decision
+    delete_all_user_qr_codes(account_id, log)
+
+    account_id_key = ensure_account_id(account_id)
+    try:
+        tables.accounts.delete_item(Key={"accountId": account_id_key})
+        log.info("Deleted account from DynamoDB", account_id=account_id_key)
+    except ClientError as e:
+        log.error("Failed to delete account from DynamoDB", error=str(e), account_id=account_id_key)
+        raise
+    log.info("Deleted all user data from DynamoDB")
+
+
+# The partial-state narration is identical on both deletion paths, so it is
+# defined once here: exactly one error line per failed Cognito delete.
+PARTIAL_STATE_LOG_MESSAGE = (
+    "Account data swept but the Cognito delete did not report success; "
+    "the account's Cognito state is unknown and needs a retry or manual completion"
+)
+
+
+def run_deletion_steps(
+    sweep: Callable[[], None],
+    delete_cognito: Callable[[], None],
+    *,
+    logger: Any,
+    log_context: Dict[str, Any],
+    sweep_log_message: str,
+    sweep_retry_message: str,
+    sweep_fatal_message: str,
+    partial_retry_message: str,
+    partial_fatal_message: str,
+) -> None:
+    """Run the data sweep, then the Cognito delete, with one failure classification each.
+
+    This is the single home of the sweep classification and the partial-state
+    report shared by self-service ``delete_my_account`` and the admin purge:
+    each failure is logged exactly once with ``log_context`` (``account_id`` on
+    the self path, ``account_id`` plus ``actor_sub`` on the admin path) merged
+    into the line, then raised as the typed error whose code matches the retry
+    guidance in the caller-supplied message.
+
+    The sweep runs first and is safe to re-run, so a sweep failure leaves the
+    Cognito user untouched and a retry converges. The Cognito delete runs only
+    after a successful sweep: a failure there logs the partial state
+    (``PARTIAL_STATE_LOG_MESSAGE``), maps a transient Cognito fault to the
+    retryable ``RESOURCE_BUSY`` (#291), and leaves everything else as
+    ``INTERNAL_ERROR`` pointing at manual completion.
+    """
+    try:
+        sweep()
+    except AppError as error:
+        # The caller's typed error (retryable RESOURCE_BUSY included) is
+        # re-raised unchanged after the single attributed log line.
+        logger.error(
+            sweep_log_message,
+            **log_context,
+            error=str(error),
+            error_code=error.error_code,
+            exc_info=True,
+        )
+        raise
+    except ClientError as error:
+        logger.error(
+            sweep_log_message,
+            **log_context,
+            error=str(error),
+            aws_error_code=error.response.get("Error", {}).get("Code", ""),
+            exc_info=True,
+        )
+        if is_transient_client_error(error):
+            raise AppError(ErrorCode.RESOURCE_BUSY, sweep_retry_message) from error
+        raise AppError(ErrorCode.INTERNAL_ERROR, sweep_fatal_message) from error
+
+    try:
+        delete_cognito()
+    except Exception as error:
+        # Non-ClientError faults (BotoCoreError network errors) land here too:
+        # the partial state is just as unknown, so the narration must survive.
+        logger.error(
+            PARTIAL_STATE_LOG_MESSAGE,
+            **log_context,
+            error=str(error),
+            aws_error_code=error.response.get("Error", {}).get("Code", "") if isinstance(error, ClientError) else "",
+            exc_info=True,
+        )
+        # Deliberately narrower than is_transient_cognito_error, which counts a
+        # bare BotoCoreError as retryable. Here the delete request has already
+        # been sent, so a transport fault leaves the Cognito state genuinely
+        # unknown -- the delete may or may not have landed -- and promising a
+        # retry would be a claim the code cannot support. Only a service
+        # verdict that says "throttled, not done" is safe to call retryable.
+        # The pre-delete lookup catches are the opposite case (nothing mutated
+        # yet, so a transport fault there is a plain retryable failure).
+        if isinstance(error, ClientError) and is_transient_cognito_error(error):
+            raise AppError(ErrorCode.RESOURCE_BUSY, partial_retry_message) from error
+        raise AppError(ErrorCode.INTERNAL_ERROR, partial_fatal_message) from error

@@ -59,8 +59,7 @@ def migrate(table_name: str) -> None:
                 table.update_item(
                     Key=key,
                     UpdateExpression="SET createdByAccountId = :new",
-                    ConditionExpression=
-                    "attribute_exists(profileId) AND attribute_exists(targetAccountId) AND createdByAccountId = :current",
+                    ConditionExpression="attribute_exists(profileId) AND attribute_exists(targetAccountId) AND createdByAccountId = :current",
                     ExpressionAttributeValues={
                         ":new": prefixed,
                         ":current": created_by,

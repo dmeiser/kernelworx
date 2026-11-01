@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 // #453: an invite stamps the ownerAccountId at creation time. If the profile
 // was transferred since then, the profiles-table item moves to the new owner's
@@ -7,7 +8,7 @@ import { util } from '@aws-appsync/utils';
 // invite is rejected instead of stamping a share with the old owner.
 export function request(ctx) {
     const invite = ctx.stash.invite;
-    const profileId = invite.profileId && invite.profileId.startsWith('PROFILE#') ? invite.profileId : `PROFILE#${invite.profileId}`;
+    const profileId = normalizeIdOrPrefix(invite.profileId, 'PROFILE#');
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ ownerAccountId: invite.ownerAccountId, profileId: profileId }),

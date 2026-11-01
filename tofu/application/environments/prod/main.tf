@@ -111,6 +111,14 @@ variable "github_token" {
   description = "Optional GitHub token for authenticating calls to api.github.com/meta"
 }
 
+variable "alert_email" {
+  type        = string
+  # INTERIM ops alias (known): no checked-in or CI-supplied tfvars path exists
+  # for prod env vars, so this default stands. TODO: move to a team alias.
+  default     = "dave@repeatersolutions.com"
+  description = "Ops address the CloudWatch alarms notify (same address the bootstrap cost budgets notify). The SNS email subscription needs a one-time confirmation."
+}
+
 # Local computed values
 locals {
   name_prefix  = "kernelworx"
@@ -162,6 +170,30 @@ module "iam" {
   lambda_function_arns = module.lambda.function_arns
 
   cloudfront_distribution_arn = module.cloudfront.distribution_arn
+
+  # KW-PROD-MAIL-ENABLE: the public-orders confirmation mailer sends from the
+  # prod-owned identity. Same shape as dev (see environments/dev/main.tf), but
+  # the identity is the apex kernelworx.app zone itself and the sender is
+  # orders@kernelworx.app. The apex zone is looked up, never owned: the module
+  # only creates its three Easy DKIM CNAMEs (additive new names) — the zone's
+  # existing records (live MX/SPF, site records) are never read or modified,
+  # and the SPF update was made by hand outside this stack.
+  ses_order_emails_enabled = true
+  ses_order_identity_arn   = module.ses.identity_arn
+  ses_order_template_arns  = module.ses.template_arns
+}
+
+# SES sending identity for application transactional mail in prod
+# (KW-PROD-MAIL-ENABLE). No subject_prefix: prod subjects carry no environment
+# marker (the module default "" is correct; dev passes "[DEV] "). The account
+# stays in the SES sandbox until the production-access request lands as the
+# named pre-launch gate (docs/PUBLIC_ORDERS_PRELAUNCH.md).
+module "ses" {
+  source = "../../modules/ses"
+
+  name_prefix = local.name_prefix
+  environment = var.environment
+  zone_domain = local.zone_domain
 }
 
 module "certificates" {
@@ -242,6 +274,9 @@ module "lambda" {
     # trigger uses its own scoped role (accounts table only). The monolithic
     # shared role is retired.
     "post-auth" = module.iam.lambda_post_auth_execution_role_arn
+    # #679 (public-orders offer slice): the public buyer order offer + receipt
+    # Lambda uses its own scoped role (the anonymous-facing read path).
+    "public-orders" = module.iam.lambda_public_orders_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name
 
@@ -257,6 +292,13 @@ module "lambda" {
   }
 
   user_pool_id = module.cognito.user_pool_id
+
+  # KW-PROD-MAIL-ENABLE: order-confirmation mailer env from the prod SES
+  # module (apex identity kernelworx.app, sender orders@kernelworx.app).
+  ses_order_from_address         = module.ses.from_address
+  ses_order_template_name        = module.ses.order_template_name
+  ses_order_seller_template_name = module.ses.order_seller_template_name
+  public_site_url                = "https://${local.site_domain}"
 }
 
 module "appsync" {
@@ -276,6 +318,24 @@ module "appsync" {
   lambda_function_arns = module.lambda.function_arns
 }
 
+# Operational alarms for the public-orders surface (spec §9, slice 10). Prod
+# carries the full set: the AppSync 4xx/throttle alarm, the SES reputation
+# alarms (account-level reputation, so prod only — Q3), and the scheduled
+# public-orders API-key expiry reminder (the spec's ExpiredAPIKeys alarm; see
+# docs/PUBLIC_API_KEY_RUNBOOK.md for why it is a scheduled reminder rather than
+# a metric alarm).
+module "alarms" {
+  source = "../../modules/alarms"
+
+  name_prefix                     = local.name_prefix
+  environment                     = var.environment
+  appsync_api_id                  = module.appsync.api_id
+  alert_email                     = var.alert_email
+  api_key_expiry                  = module.appsync.api_key_expires
+  ses_reputation_enabled          = true
+  api_key_expiry_reminder_enabled = true
+}
+
 module "cloudfront" {
   source = "../../modules/cloudfront"
 
@@ -285,18 +345,9 @@ module "cloudfront" {
   static_bucket_id              = module.s3.static_bucket_id
   static_bucket_arn             = module.s3.static_bucket_arn
   static_bucket_regional_domain = module.s3.static_bucket_regional_domain
-  exports_bucket_name           = module.s3.exports_bucket_name
-  aws_region                    = var.aws_region
 
   # #165: one CLOUDFRONT-scope WAF on the distribution (the only WAF).
   web_acl_id = module.waf.web_acl_arn
-
-  # #430: production HSTS — one year, all subdomains. Browsers clamp on
-  # max-age decrease, so this direction is safe; do not lower it later.
-  # `preload` is intentionally not enabled (irreversible preload-listing
-  # commitment; needs its own go/no-go).
-  hsts_max_age_sec        = 31536000
-  hsts_include_subdomains = true
 
   # Same-origin API and auth proxy through the distribution. The AppSync
   # origin is the default endpoint hostname: the served TLS cert matches it,
@@ -308,14 +359,13 @@ module "cloudfront" {
 # The only WAF in the design: CLOUDFRONT scope, attached to the site
 # distribution. Rate rule blocks at 2000 req/300s per IP (GitHub Actions CI
 # ranges skip only the rate rule via a deploy-time IP set); the AWS managed
-# core rule set runs in Count until tuned.
+# core rule set blocks (#429; dev stays on the module's Count default).
 module "waf" {
   source = "../../modules/waf"
 
   name_prefix         = local.name_prefix
   environment         = var.environment
   managed_rule_action = "Block"
-  log_retention_days  = var.environment == "prod" ? 30 : 7
   github_token        = var.github_token
 }
 
@@ -346,36 +396,6 @@ resource "aws_acm_certificate_validation" "site" {
   validation_record_fqdns = [for rec in module.route53.cert_validation_records : rec.fqdn if !can(regex("(api|login)\\.", rec.name))]
 }
 
-# Import existing Lambda CloudWatch log groups that were auto-created by
-# Lambda invocations before these resources were added to the configuration.
-# Without imports, OpenTofu fails with ResourceAlreadyExistsException.
-import {
-  for_each = toset([
-    "admin-operations",
-    "confirm-qr-upload",
-    "delete-account",
-    "delete-campaign-orders",
-    "delete-profile-cascade",
-    "delete-qr-code",
-    "generate-qr-code-presigned-url",
-    "list-catalogs-in-use",
-    "list-unit-campaign-catalogs",
-    "list-unit-catalogs",
-    "request-qr-upload",
-    "request-report",
-    "transfer-ownership",
-    "unit-reporting",
-  ])
-  id = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
-  to = module.lambda.aws_cloudwatch_log_group.functions[each.value]
-}
-
-import {
-  for_each = toset(["post-auth", "pre-signup"])
-  id       = "/aws/lambda/${local.name_prefix}-${each.value}-${var.region_abbrev}-${var.environment}"
-  to       = module.lambda.aws_cloudwatch_log_group.trigger_functions[each.value]
-}
-
 # Outputs
 output "cognito_user_pool_id" {
   description = "ID of the Cognito User Pool for authentication"
@@ -397,6 +417,23 @@ output "appsync_api_url" {
   value       = module.appsync.api_url
 }
 
+# The public-orders API key (#679 rev 7). Read by
+# scripts/generate_integration_env.py to write the TEST_APPSYNC_API_KEY and
+# VITE_APPSYNC_API_KEY managed keys, and by the deploy build to bake
+# VITE_APPSYNC_API_KEY into the frontend bundle. Not a secret: it is shipped in
+# the public bundle and only reaches the @aws_api_key fields, each of which
+# also requires the per-campaign share token, a GraphQL argument checked
+# inside the resolver (NOT_FOUND when absent).
+output "appsync_api_key" {
+  description = "AppSync API key for the public-orders (@aws_api_key) fields"
+  value       = module.appsync.api_key
+}
+
+output "appsync_api_key_expires" {
+  description = "RFC3339 expiry of the public-orders AppSync API key (renewal runbook: docs/PUBLIC_API_KEY_RUNBOOK.md)"
+  value       = module.appsync.api_key_expires
+}
+
 output "cloudfront_distribution_id" {
   description = "ID of the CloudFront distribution serving the site"
   value       = module.cloudfront.distribution_id
@@ -405,6 +442,11 @@ output "cloudfront_distribution_id" {
 output "static_assets_bucket" {
   description = "Name of the S3 bucket for static assets"
   value       = module.s3.static_bucket_id
+}
+
+output "exports_bucket" {
+  description = "Name of the S3 bucket for generated reports"
+  value       = module.s3.exports_bucket_name
 }
 
 output "site_url" {

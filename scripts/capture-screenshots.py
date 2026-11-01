@@ -225,9 +225,7 @@ def ensure_payment_methods(page: Page) -> None:
         print(f"  Adding payment method: {method}")
         payment_page.add_payment_method(method)
         # Wait for the new method heading to appear in the list.
-        expect(
-            page.locator("div.MuiCard-root .MuiTypography-h6", has_text=method)
-        ).to_be_visible(timeout=10_000)
+        expect(page.locator("div.MuiCard-root .MuiTypography-h6", has_text=method)).to_be_visible(timeout=10_000)
 
 
 def _create_order_with_options(
@@ -299,14 +297,26 @@ def _create_order_with_options(
 def ensure_orders(page: Page, profile_id: str, campaign_id: str) -> None:
     """Create a varied set of orders with plausible names and addresses."""
     orders = [
-        ("Sarah Johnson", 0, 2, "Cash", {"street": "123 Maple St", "city": "Springfield", "state": "IL", "zip": "62701"}),
+        (
+            "Sarah Johnson",
+            0,
+            2,
+            "Cash",
+            {"street": "123 Maple St", "city": "Springfield", "state": "IL", "zip": "62701"},
+        ),
         ("Mike Chen", 1, 1, "Venmo", {"street": "456 Oak Ave", "city": "Bloomington", "state": "IL", "zip": "61701"}),
         ("Lisa Rodriguez", 0, 3, "PayPal", {"street": "789 Pine Rd", "city": "Decatur", "state": "IL", "zip": "62521"}),
         ("David Miller", 1, 2, "Check", {"street": "321 Birch Ln", "city": "Champaign", "state": "IL", "zip": "61820"}),
         ("Emily Davis", 0, 1, "Cash", {"street": "654 Cedar Dr", "city": "Peoria", "state": "IL", "zip": "61602"}),
         ("James Wilson", 1, 4, "Venmo", {"street": "987 Walnut St", "city": "Normal", "state": "IL", "zip": "61761"}),
         ("Emma Brown", 0, 2, "PayPal", {"street": "147 Elm St", "city": "Quincy", "state": "IL", "zip": "62301"}),
-        ("Michael Garcia", 1, 1, "Check", {"street": "258 Spruce Ave", "city": "Rockford", "state": "IL", "zip": "61101"}),
+        (
+            "Michael Garcia",
+            1,
+            1,
+            "Check",
+            {"street": "258 Spruce Ave", "city": "Rockford", "state": "IL", "zip": "61101"},
+        ),
     ]
     order_page = OrderPage(page)
     order_page.goto(profile_id, campaign_id)
@@ -316,9 +326,7 @@ def ensure_orders(page: Page, profile_id: str, campaign_id: str) -> None:
         if customer in existing_customers:
             print(f"  Order already exists for {customer}")
             continue
-        _create_order_with_options(
-            page, profile_id, campaign_id, customer, product_index, quantity, payment, address
-        )
+        _create_order_with_options(page, profile_id, campaign_id, customer, product_index, quantity, payment, address)
 
 
 def ensure_share_invite(page: Page, profile_id: str, browser: Browser, base_url: str) -> None:

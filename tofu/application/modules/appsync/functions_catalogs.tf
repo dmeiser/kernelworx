@@ -55,9 +55,12 @@ resource "aws_appsync_function" "batch_get_catalogs" {
     runtime_version = "1.0.0"
   }
 
-  # WARNING: templatefile() interpolates every `${...}` in the source; see the
-  # header comment in batch_get_catalogs_fn.js. Do not add JS template
-  # literals to that file.
+  # templatefile() reads the esbuild bundle in appsync/dist/, which strips
+  # ordinary comments, so a dollar-brace sequence that survives bundling is
+  # interpolated as a Terraform expression: in a string literal it aborts every
+  # plan/apply with "Invalid expression". `${table_name}` is the only intended
+  # placeholder; escape a literal as `$${...}` or load the resolver with file()
+  # instead. Enforced by tests/unit/check_templatefile_escaping.test.ts (#570).
   code = templatefile("${local.js_resolvers_dir}/batch_get_catalogs_fn.js", {
     table_name = var.dynamodb_table_names.catalogs
   })
@@ -151,4 +154,25 @@ resource "aws_appsync_function" "find_shared_campaigns_by_unit" {
   }
 
   code = file("${local.js_resolvers_dir}/find_shared_campaigns_resolver.js")
+}
+
+# === #679 rev 7 public-order settings (campaign-keyed, owner-only) ===
+
+# Catalog gate of updateCampaignPublicOrderSettings (#679 rev 7). The campaign's
+# catalog lives in a different table, so this is its own function on its own
+# datasource: a public buyer picks products from it, so enabling over a missing
+# or soft-deleted catalog would publish an offer with nothing buyable. The
+# previous step sets publicSettingsCatalogId only when the save is publishing,
+# so a disable / rotate / method-list save makes no read at all.
+resource "aws_appsync_function" "validate_public_settings_catalog" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.catalogs.name
+  name        = "ValidatePublicSettingsCatalogFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_public_settings_catalog_fn.js")
 }

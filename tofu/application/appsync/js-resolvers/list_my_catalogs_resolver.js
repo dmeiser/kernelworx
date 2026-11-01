@@ -1,7 +1,8 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
-    const ownerAccountId = 'ACCOUNT#' + ctx.identity.sub;
+    const ownerAccountId = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
     return {
         operation: 'Query',
         index: 'ownerAccountId-index',

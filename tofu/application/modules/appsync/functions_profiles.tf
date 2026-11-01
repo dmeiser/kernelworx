@@ -40,6 +40,23 @@ resource "aws_appsync_function" "fetch_profile" {
   code = file("${local.js_resolvers_dir}/fetch_profile_fn.js")
 }
 
+# Second invocation in the two-phase ownership check (#545). AppSync
+# rejects duplicate function IDs in a pipeline; this resource points at
+# the same JS file, which branches on ctx.stash.isOwner populated by
+# the first call.
+resource "aws_appsync_function" "fetch_profile_step2" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "FetchProfileStep2Fn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/fetch_profile_fn.js")
+}
+
 resource "aws_appsync_function" "check_profile_read_auth" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.shares.name
@@ -51,19 +68,6 @@ resource "aws_appsync_function" "check_profile_read_auth" {
   }
 
   code = file("${local.js_resolvers_dir}/check_profile_read_auth_fn.js")
-}
-
-resource "aws_appsync_function" "verify_profile_write_or_owner" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.profiles.name
-  name        = "VerifyProfileWriteAccessOrOwnerFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/verify_profile_write_access_or_owner_fn.js")
 }
 
 resource "aws_appsync_function" "check_write_permission" {
@@ -185,13 +189,73 @@ resource "aws_appsync_function" "batch_latest_campaigns" {
     runtime_version = "1.0.0"
   }
 
-  # WARNING: templatefile() interpolates every `${...}` sequence in the source as a
-  # Terraform variable reference. The bundled source keeps only the intended
-  # `${campaigns_table_name}` placeholder; any JS template literal added to the
-  # source will either fail the plan or be silently substituted. Do not add
-  # `${...}` to the source without also switching this to file() (#284 defers
-  # that switch).
+  # templatefile() reads the esbuild bundle in appsync/dist/, which strips
+  # ordinary comments, so a dollar-brace sequence that survives bundling is
+  # interpolated as a Terraform expression: in a string literal it aborts every
+  # plan/apply with "Invalid expression". `${campaigns_table_name}` is the only
+  # intended placeholder; escape a literal as `$${...}` or switch this to file()
+  # (#284 defers that switch). Enforced by
+  # tests/unit/check_templatefile_escaping.test.ts (#570).
   code = templatefile("${local.js_resolvers_dir}/batch_latest_campaigns_fn.js", {
     campaigns_table_name = var.dynamodb_table_names.campaigns
   })
+}
+
+# === #679 rev 7 public-order settings (campaign-keyed, owner-only) ===
+
+# Owner gate for both settings pipelines. Runs after the two-phase write-access
+# pair, which the campaign-keyed pipelines reach through the campaign's own
+# profileId, and refuses everyone else with FORBIDDEN - including a WRITE-share
+# collaborator and a caller who cannot resolve the profile at all, which is the
+# same answer for both so the settings query stays no existence oracle. It makes
+# no datastore call of its own (ownership is already decided by the pair's
+# consistent base-table read), so it sits on the None datasource.
+resource "aws_appsync_function" "verify_public_settings_owner" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.none.name
+  name        = "VerifyPublicSettingsOwnerFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_public_settings_owner_fn.js")
+}
+
+# publicCreateOrder pipeline step 3 (#679): LOCATE the campaign's profile on
+# the profileId-index GSI. The GSI is a locator only; a transfer-window second
+# projection is refused, never guessed (#438). The located ownerAccountId is a
+# candidate only - step 4 proves ownership against the base table.
+resource "aws_appsync_function" "get_profile_for_public_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "GetProfileForPublicOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_profile_for_public_order_fn.js")
+}
+
+# Second invocation in the two-phase ownership confirmation (#545 shape, same
+# as fetch_profile + fetch_profile_step2). AppSync rejects duplicate function
+# IDs in a pipeline, so this is a second resource over the step-4 file: a
+# strongly consistent base-table GetItem on {ownerAccountId, profileId} that
+# fails closed when the step-3 GSI projection was stale (ownership-transfer
+# lag). Without it the deleted old-owner row's projected ownerAccountId is
+# forwarded to the mailer Lambda, emailing buyer PII to the former owner.
+resource "aws_appsync_function" "get_profile_for_public_order_step2" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.profiles.name
+  name        = "GetProfileForPublicOrderStep2Fn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_profile_for_public_order_step2_fn.js")
 }

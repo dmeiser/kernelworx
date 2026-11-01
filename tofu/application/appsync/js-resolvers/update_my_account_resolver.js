@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
   if (!ctx.identity || !ctx.identity.sub) {
@@ -31,7 +32,7 @@ export function request(ctx) {
 
   return {
     operation: 'UpdateItem',
-    key: util.dynamodb.toMapValues({ accountId: 'ACCOUNT#' + ctx.identity.sub }),
+    key: util.dynamodb.toMapValues({ accountId: normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#') }),
     update: {
       expression: 'SET ' + sets.join(', '),
       expressionNames: expNames,

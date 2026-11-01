@@ -8,13 +8,16 @@ schema (`table_schemas.create_accounts_table_schema`), so DynamoDB validates
 every key condition the handler emits, and assert the operations actually
 issued (#576).
 
-Current, honest behavior: the `email-index` GSI is keyed on `email` alone, so
-`begins_with` is not a legal key condition on it and no index-backed prefix
-search exists. A full email uses the GSI; any partial query is served by a full
-accounts-table scan.
+Current, honest behavior: the accounts table carries two GSIs. `email-index` is
+keyed on `email` alone and answers a complete email; `emailSearchIndex` is a
+prefix-segment index (constant `emailSearchKey` HASH + `email` RANGE) and
+answers an email prefix with one Query. Both are sparse, so an account is only
+reachable through an index once it carries the key attribute; a name fragment is
+still a substring search served by a full accounts-table scan.
 """
 
 from datetime import datetime, timezone
+from json import loads
 from types import SimpleNamespace
 from typing import Any, Dict, List, Tuple
 
@@ -22,9 +25,12 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from src.handlers.admin_operations import admin_search_user
+from src.handlers.admin_user_operations import _search_accounts_in_dynamodb, admin_search_user
 from src.utils.errors import ErrorCode
+from src.utils.logging import get_logger
 from tests.unit.table_schemas import create_accounts_table_schema
+
+logger = get_logger(__name__)
 
 ACCOUNT_ITEMS = [
     {
@@ -116,13 +122,13 @@ def search(accounts_table: Any, monkeypatch: Any) -> Any:
     cognito_users = [_cognito_user(item["accountId"].removeprefix("ACCOUNT#"), item["email"]) for item in ACCOUNT_ITEMS]
     cognito = _FakeCognito(cognito_users)
 
-    monkeypatch.setattr("src.handlers.admin_operations.tables", SimpleNamespace(accounts=accounts_table))
-    monkeypatch.setattr("src.handlers.admin_operations._get_cognito_client", lambda: cognito)
+    monkeypatch.setattr("src.handlers.admin_user_operations.tables", SimpleNamespace(accounts=accounts_table))
+    monkeypatch.setattr("src.handlers.admin_user_operations.get_cognito_client", lambda: cognito)
     monkeypatch.setattr(
-        "src.handlers.admin_operations._batch_get_display_names",
+        "src.handlers.admin_user_operations._batch_get_display_names",
         lambda account_ids, logger: {i: "Alice Anderson" for i in account_ids},
     )
-    monkeypatch.setattr("src.handlers.admin_operations._batch_get_user_groups", lambda *args, **kwargs: {})
+    monkeypatch.setattr("src.handlers.admin_user_operations._batch_get_user_groups", lambda *args, **kwargs: {})
 
     def call(query: str) -> Any:
         event = {
@@ -152,14 +158,20 @@ class TestAdminSearchAccountsScan:
     def test_exact_email_query_uses_email_index_gsi(
         self, search: Any, dynamodb_ops: List[Tuple[str, Dict[str, Any]]]
     ) -> None:
-        """A full email is still answered by the legal `email = :email` key condition."""
+        """A full email is answered by the prefix index, falling back to the scan when unindexed.
+
+        These fixture accounts carry no `emailSearchKey`, which is what an
+        account looks like before the #586 backfill has covered it. The
+        `emailSearchIndex` GSI is sparse, so it cannot project them, and the
+        documented scan fallback is what keeps them findable (#586).
+        """
         result = search("alice@example.com")
 
         assert [user["email"] for user in result] == ["alice@example.com"]
-        assert [operation for operation, _ in dynamodb_ops] == ["Query"]
+        assert [operation for operation, _ in dynamodb_ops] == ["Query", "Scan"]
         query_params = dynamodb_ops[0][1]
-        assert query_params["IndexName"] == "email-index"
-        assert query_params["KeyConditionExpression"] == "email = :email"
+        assert query_params["IndexName"] == "emailSearchIndex"
+        assert query_params["KeyConditionExpression"] == "emailSearchKey = :searchKey AND begins_with(email, :prefix)"
 
     def test_query_under_minimum_length_is_rejected_before_any_read(
         self, search: Any, dynamodb_ops: List[Tuple[str, Dict[str, Any]]]
@@ -173,3 +185,94 @@ class TestAdminSearchAccountsScan:
         assert payload["errorCode"] == ErrorCode.INVALID_INPUT
         assert payload["message"] == "Search query must be at least 3 characters"
         assert dynamodb_ops == []
+
+
+class TestAdminSearchScanPagination:
+    """The name-fragment scan is bounded per request, not only between requests (#775).
+
+    A name fragment is a substring match, and the accounts table carries only
+    email-keyed GSIs, so the scan itself is unavoidable; what is bounded is how
+    much one request may read. These tests drive the real scan loop against moto
+    so the page chain, the per-request `Limit`, and the projection are validated
+    by a DynamoDB implementation rather than by a mocked `scan`.
+    """
+
+    @staticmethod
+    def _seed_bulk_accounts(accounts_table: Any, count: int) -> None:
+        """Seed ``count`` accounts carrying a `preferences` blob like real rows do."""
+        for index in range(count):
+            accounts_table.put_item(
+                Item={
+                    "accountId": f"ACCOUNT#bulk-{index:04d}",
+                    "email": f"bulk{index:04d}@example.com",
+                    "givenName": "Bulk",
+                    "familyName": "Aardvark",
+                    "preferences": {"paymentMethods": [{"id": f"pm-{index}-{n}"} for n in range(20)]},
+                }
+            )
+
+    @staticmethod
+    def _scan_requests(dynamodb_ops: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        return [params for operation, params in dynamodb_ops if operation == "Scan"]
+
+    @pytest.fixture
+    def scan_tables(self, accounts_table: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+        """Point the handler's table accessor at the moto table so its client records."""
+        monkeypatch.setattr("src.handlers.admin_user_operations.tables", SimpleNamespace(accounts=accounts_table))
+        return accounts_table
+
+    def test_match_on_a_later_page_is_still_found(
+        self, scan_tables: Any, dynamodb_ops: List[Tuple[str, Dict[str, Any]]]
+    ) -> None:
+        """The walk follows `LastEvaluatedKey` until the match turns up."""
+        self._seed_bulk_accounts(scan_tables, 600)
+        scan_tables.put_item(
+            Item={"accountId": "ACCOUNT#zzz-needle", "email": "zzz@example.com", "givenName": "Needle"}
+        )
+        dynamodb_ops.clear()
+
+        matches = _search_accounts_in_dynamodb("needle", logger)
+
+        assert [item["accountId"] for item in matches] == ["ACCOUNT#zzz-needle"]
+        scans = self._scan_requests(dynamodb_ops)
+        assert [params["Limit"] for params in scans] == [250, 250, 250]
+        assert "ExclusiveStartKey" not in scans[0]
+        resume_keys = {str(params["ExclusiveStartKey"]) for params in scans[1:]}
+        assert len(resume_keys) == len(scans) - 1
+
+    def test_item_budget_is_enforced_per_request(
+        self,
+        scan_tables: Any,
+        dynamodb_ops: List[Tuple[str, Dict[str, Any]]],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """1004 rows: the scan reads exactly the 1000-item budget and says it truncated.
+
+        Without a per-request `Limit` DynamoDB serves a page until it hits its
+        own 1 MB byte cap, which for these rows is several hundred items, so the
+        old loop could overshoot the budget on its very first request.
+        """
+        self._seed_bulk_accounts(scan_tables, 1001)
+        dynamodb_ops.clear()
+
+        matches = _search_accounts_in_dynamodb("absent", logger)
+
+        scans = self._scan_requests(dynamodb_ops)
+        assert [params["Limit"] for params in scans] == [250, 250, 250, 250]
+        assert matches == []
+        warnings = [loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+        assert any(entry.get("level") == "WARNING" and "truncated" in entry.get("message", "") for entry in warnings)
+
+    def test_scan_reads_only_the_searched_attributes(
+        self, scan_tables: Any, dynamodb_ops: List[Tuple[str, Dict[str, Any]]]
+    ) -> None:
+        """The page payload never carries the `preferences` blob into the Lambda."""
+        self._seed_bulk_accounts(scan_tables, 1)
+        dynamodb_ops.clear()
+
+        matches = _search_accounts_in_dynamodb("bulk", logger)
+
+        scans = self._scan_requests(dynamodb_ops)
+        assert scans[0]["ProjectionExpression"] == "accountId, email, givenName, familyName"
+        assert [item["accountId"] for item in matches] == ["ACCOUNT#bulk-0000"]
+        assert all(set(item) == {"accountId", "email", "givenName", "familyName"} for item in matches)

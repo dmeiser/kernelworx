@@ -5,6 +5,7 @@
  * Global methods (cash, check) are NOT stored and will be injected later.
  */
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const accountId = ctx.identity.sub;
@@ -15,7 +16,7 @@ export function request(ctx) {
     
     // Account table uses accountId as primary key (with ACCOUNT# prefix)
     const key = {
-        accountId: `ACCOUNT#${accountId}`
+        accountId: normalizeIdOrPrefix(accountId, 'ACCOUNT#')
     };
     
     return {

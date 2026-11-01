@@ -94,7 +94,7 @@ export const CatalogSelect: React.FC<CatalogSelectProps> = ({
   required = false,
   label = 'Product Catalog',
   maxMenuHeight = 300,
-  // eslint-disable-next-line complexity -- Many optional props with defaults inflate complexity count
+  // eslint-disable-next-line complexity -- real hits, not false positives: eslint counts each default-parameter initializer, and this component carries 6 optional props with defaults (a design smell to shrink under #532)
 }) => {
   const selectId = useId();
   const labelId = `${selectId}-label`;

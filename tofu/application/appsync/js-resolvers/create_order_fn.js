@@ -1,6 +1,7 @@
 import { util } from '@aws-appsync/utils';
 import { validatePhone, validateAddress } from './lib/validation.js';
-import { normalizeId } from './lib/ids.js';
+import { normalizeId, stripIdPrefix } from './lib/ids.js';
+import { enrichLineItems } from './lib/line_items.js';
 
 function validateCustomer(input) {
     if (!input.customerName || (typeof input.customerName === 'string' && !input.customerName.trim())) {
@@ -75,46 +76,11 @@ export function request(ctx) {
         util.error('Catalog could not be loaded for this campaign', 'INVALID_INPUT');
     }
 
-    let enrichedLineItems = [];
-    // Accumulate money in integer cents to avoid floating-point drift.
-    let totalAmountCents = 0;
-
-    const productsMap = {};
-    for (const product of catalog.products || []) {
-        productsMap[product.productId] = product;
-    }
-
-    for (const lineItem of input.lineItems) {
-        const productId = lineItem.productId;
-        const quantity = lineItem.quantity;
-
-        if (quantity < 1) {
-            util.error('Quantity must be at least 1 (got ' + quantity + ')', 'INVALID_INPUT');
-        }
-
-        if (!productsMap[productId]) {
-            util.error('Product ' + productId + ' not found in catalog', 'INVALID_INPUT');
-        }
-
-        const product = productsMap[productId];
-        const pricePerUnitCents = Math.round(product.price * 100);
-        const pricePerUnit = pricePerUnitCents / 100;
-        const subtotalCents = pricePerUnitCents * quantity;
-        totalAmountCents += subtotalCents;
-        const subtotal = subtotalCents / 100;
-
-        enrichedLineItems.push({
-            productId: productId,
-            productName: product.productName,
-            quantity: quantity,
-            pricePerUnit: pricePerUnit,
-            subtotal: subtotal
-        });
-    }
+    const { enrichedLineItems, totalAmountCents } = enrichLineItems(input.lineItems, catalog);
 
     const totalAmount = totalAmountCents / 100;
 
-    const campaignIdWithoutPrefix = campaignId.startsWith('CAMPAIGN#') ? campaignId.substring(9) : campaignId;
+    const campaignIdWithoutPrefix = stripIdPrefix(campaignId, 'CAMPAIGN#');
     const orderId = `ORDER#${campaignIdWithoutPrefix}#${util.autoId()}`;
     const now = util.time.nowISO8601();
 
@@ -154,6 +120,11 @@ export function request(ctx) {
         }
     }
 
+    // #746: stash the denormalized-totals delta for sync_campaign_totals_fn
+    // (the step after this one). The order row's profileId/campaignId are the
+    // campaigns-table key, so no lookup is needed to address the counter.
+    ctx.stash.totalsDelta = { profileId: profileId, campaignId: campaignId, count: 1, revenue: totalAmount };
+
     return {
         operation: 'PutItem',
         key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),
@@ -166,8 +137,5 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
     const order = ctx.result;
-    if (order && order.campaignId) {
-        order.campaignId = order.campaignId;
-    }
     return order;
 }

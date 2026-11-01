@@ -85,9 +85,7 @@ def override_blocks_for(doc: dict, action: str) -> set[str]:
         for bodies in entry.get("aws_wafv2_web_acl", {}).items():
             acl = bodies[1]
     assert acl is not None, "aws_wafv2_web_acl.main not found"
-    managed = next(
-        r for e in acl["dynamic"] for r in e["rule"]["content"] if r["name"] == "aws-core-managed-rules"
-    )
+    managed = next(r for e in acl["dynamic"] for r in e["rule"]["content"] if r["name"] == "aws-core-managed-rules")
     selected = set()
     for dyn in block(managed["override_action"])["dynamic"]:
         for name, spec in dyn.items():

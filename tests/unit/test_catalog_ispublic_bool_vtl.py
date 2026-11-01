@@ -13,7 +13,10 @@ and assert on the emitted DynamoDB operation documents: the PutItem /
 UpdateItem ``attributeValues`` must carry ``isPublic`` as a DynamoDB BOOL and
 ``isPublicStr`` as the separate String keying the ``isPublic-createdAt-index``
 GSI. The read-side tests render ``get_catalog_response.vtl`` and assert the
-catalog item serializes unchanged for GraphQL.
+#509 authorization rule: the catalog item serializes for GraphQL only when
+it is public, admin-managed, or owned by the caller (identity is supplied
+in every read context; a private catalog read by any other authenticated
+user serializes as null).
 """
 
 from __future__ import annotations
@@ -561,23 +564,58 @@ class TestUpdateCatalogRequestVtl:
 
 
 class TestGetCatalogResponseVtl:
-    """The response template serializes the raw catalog item unchanged."""
+    """The #509 response template enforces read authorization by ID.
 
-    @staticmethod
-    def _context_with_result(result: Any) -> Dict[str, Any]:
-        return {"ctx": {"result": result}}
+    A catalog serializes to the caller only when it is public,
+    ADMIN_MANAGED, or owned by the caller; otherwise the response is null.
+    """
 
-    def test_native_bool_passthrough(self):
-        result = {"catalogId": "CATALOG#new", "isPublic": False, "catalogName": "New"}
-        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result))
+    OWNER_SUB = "11111111-2222-3333-4444-555555555555"
+    OTHER_SUB = "99999999-8888-7777-6666-555555555555"
+
+    @classmethod
+    def _context_with_result(cls, result: Any, sub: str = OTHER_SUB) -> Dict[str, Any]:
+        return {"ctx": {"identity": {"sub": sub}, "result": result}}
+
+    @classmethod
+    def _catalog_item(cls, **overrides: Any) -> Dict[str, Any]:
+        item: Dict[str, Any] = {
+            "catalogId": "CATALOG#abc123",
+            "catalogName": "Troop fundraiser",
+            "catalogType": "USER_CREATED",
+            "ownerAccountId": f"ACCOUNT#{cls.OWNER_SUB}",
+            "isPublic": False,
+            "products": [],
+        }
+        item.update(overrides)
+        return item
+
+    def test_owner_passes_through_private_catalog(self):
+        result = self._catalog_item()
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OWNER_SUB))
         assert output["isPublic"] is False
 
+    def test_other_caller_denied_private_catalog(self):
+        result = self._catalog_item()
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OTHER_SUB))
+        assert output is None
+
+    def test_other_caller_passes_through_public_catalog(self):
+        result = self._catalog_item(isPublic=True)
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OTHER_SUB))
+        assert output["isPublic"] is True
+
+    def test_other_caller_passes_through_admin_managed_catalog(self):
+        result = self._catalog_item(catalogType="ADMIN_MANAGED", ownerAccountId="ACCOUNT#admin-sub")
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(result, sub=self.OTHER_SUB))
+        assert output["catalogType"] == "ADMIN_MANAGED"
+
     def test_missing_result_serializes_null(self):
-        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(None))
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result(None, sub=self.OTHER_SUB))
         assert output is None
 
     def test_empty_result_serializes_null(self):
-        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result({}))
+        output = _render_json(GET_CATALOG_RESPONSE_VTL, self._context_with_result({}, sub=self.OTHER_SUB))
         assert output is None
 
     def test_error_propagates(self):

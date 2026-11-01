@@ -23,8 +23,8 @@
     <meta name="twitter:image" content="https://kernelworx.app/og-image.png" />
     
     <!--
-      CSP (#440): mirrors the CloudFront response headers policy in
-      tofu/application/modules/cloudfront/response-headers.tf. img-src is
+      CSP (#440): meta-only - since #665 this tag is the only CSP; there is no
+      CloudFront response-headers copy. img-src is
       an explicit allowlist, not a wildcard: payment QR codes load from the exports
       bucket's S3 virtual-hosted origins (presigned GET URLs - both the
       regional and the legacy global s3.amazonaws.com styles, since the
@@ -33,12 +33,11 @@
       connect-src carries no ws:/wss: - the app uses no WebSockets.
       The dev/prod exports buckets are named kernelworx-exports-ue1-<env>;
       keep both listed here (this meta is baked into one build for all
-      environments, and the effective policy is the intersection with the
-      per-environment header CSP).
+      environments).
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob: https://kernelworx-exports-ue1-dev.s3.us-east-1.amazonaws.com https://kernelworx-exports-ue1-dev.s3.amazonaws.com https://kernelworx-exports-ue1-prod.s3.us-east-1.amazonaws.com https://kernelworx-exports-ue1-prod.s3.amazonaws.com; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://api.kernelworx.app https://api.dev.kernelworx.app https://login.dev.kernelworx.app https://login.kernelworx.app;"
+      content="default-src 'self'; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob: https://kernelworx-exports-ue1-dev.s3.us-east-1.amazonaws.com https://kernelworx-exports-ue1-dev.s3.amazonaws.com https://kernelworx-exports-ue1-prod.s3.us-east-1.amazonaws.com https://kernelworx-exports-ue1-prod.s3.amazonaws.com; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://login.dev.kernelworx.app https://login.kernelworx.app;"
     />
   </head>
   <body>

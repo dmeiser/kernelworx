@@ -34,6 +34,9 @@ resource "aws_appsync_resolver" "get_profile" {
   pipeline_config {
     functions = [
       aws_appsync_function.fetch_profile.function_id,
+      # Step 2 of the two-phase owner check (#545): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.fetch_profile_step2.function_id,
       aws_appsync_function.check_profile_read_auth.function_id,
     ]
   }
@@ -117,6 +120,9 @@ resource "aws_appsync_resolver" "get_campaign" {
     functions = [
       aws_appsync_function.query_campaign.function_id,
       aws_appsync_function.verify_profile_read_access.function_id,
+      # Step 2 of the two-phase owner check (#508): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.verify_profile_read_access_step2.function_id,
       aws_appsync_function.check_share_read_permissions.function_id,
       aws_appsync_function.return_campaign.function_id,
     ]
@@ -142,6 +148,8 @@ resource "aws_appsync_resolver" "list_campaigns_by_profile" {
   pipeline_config {
     functions = [
       aws_appsync_function.verify_profile_read_access.function_id,
+      # Step 2 of the two-phase owner check (#508).
+      aws_appsync_function.verify_profile_read_access_step2.function_id,
       aws_appsync_function.check_share_read_permissions.function_id,
       aws_appsync_function.query_campaigns.function_id,
       aws_appsync_function.batch_get_catalogs.function_id,
@@ -154,6 +162,45 @@ resource "aws_appsync_resolver" "list_campaigns_by_profile" {
   }
 
   code = file("${local.js_resolvers_dir}/list_campaigns_by_profile_resolver.js")
+}
+
+# === PUBLIC ORDER SETTINGS QUERIES (#679 rev 7, campaign-keyed) ===
+
+# getCampaignPublicOrderSettings Pipeline. Rev 7 keys the public-order settings
+# by campaign, so the pipeline starts by locating the campaign (the base table
+# is keyed {profileId, campaignId} and the client only knows the campaign id),
+# then authorizes through the campaign's own profileId with the two-phase
+# write-access pair (#438: ownership comes from the strongly consistent
+# base-table read, never the eventually-consistent GSI), refuses everyone but the
+# profile owner, and finally re-reads the campaign consistently so the settings
+# the owner just saved are what comes back rather than a lagging GSI projection.
+resource "aws_appsync_resolver" "get_campaign_public_order_settings" {
+  api_id = aws_appsync_graphql_api.main.id
+  type   = "Query"
+  field  = "getCampaignPublicOrderSettings"
+  kind   = "PIPELINE"
+
+  pipeline_config {
+    functions = [
+      # CampaignsDS GSI locator: campaignId -> profileId, for the pair below.
+      aws_appsync_function.locate_campaign_public_settings.function_id,
+      # Two-phase owner check (#438) over the campaign's own profileId.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
+      # Gate: isOwner === true, else FORBIDDEN (share collaborators included).
+      aws_appsync_function.verify_public_settings_owner.function_id,
+      # CampaignsDS consistent read: the publicOrders map, the counter, and the
+      # campaign's name and active state, all off one item.
+      aws_appsync_function.lookup_campaign_public_settings.function_id,
+    ]
+  }
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_campaign_public_order_settings_pipeline_resolver.js")
 }
 
 # === ORDER QUERIES ===
@@ -169,6 +216,8 @@ resource "aws_appsync_resolver" "get_order" {
     functions = [
       aws_appsync_function.query_order.function_id,
       aws_appsync_function.verify_profile_read_access.function_id,
+      # Step 2 of the two-phase owner check (#508).
+      aws_appsync_function.verify_profile_read_access_step2.function_id,
       aws_appsync_function.check_share_read_permissions.function_id,
       aws_appsync_function.return_order.function_id,
     ]
@@ -193,6 +242,8 @@ resource "aws_appsync_resolver" "list_orders_by_campaign" {
     functions = [
       aws_appsync_function.lookup_campaign_for_orders.function_id,
       aws_appsync_function.verify_profile_read_access.function_id,
+      # Step 2 of the two-phase owner check (#508).
+      aws_appsync_function.verify_profile_read_access_step2.function_id,
       aws_appsync_function.check_share_read_permissions.function_id,
       aws_appsync_function.query_orders_by_campaign.function_id,
     ]
@@ -217,7 +268,12 @@ resource "aws_appsync_resolver" "list_shares_by_profile" {
 
   pipeline_config {
     functions = [
-      aws_appsync_function.verify_profile_write_or_owner.function_id,
+      # #547: two-phase owner check (#438) - the strongly consistent base-table
+      # GetItem decides ownership; the GSI runs only for non-owners. This was
+      # previously the pre-#438 verify_profile_write_or_owner single-step GSI
+      # read, which authorized off the eventually-consistent GSI.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_write_permission.function_id,
       aws_appsync_function.query_shares.function_id,
     ]
@@ -240,7 +296,10 @@ resource "aws_appsync_resolver" "list_invites_by_profile" {
 
   pipeline_config {
     functions = [
-      aws_appsync_function.verify_profile_write_or_owner.function_id,
+      # #547: two-phase owner check (#438), same as listSharesByProfile - ownership
+      # is decided by the strongly consistent base-table GetItem, never the GSI.
+      aws_appsync_function.verify_profile_write_access.function_id,
+      aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_write_permission.function_id,
       aws_appsync_function.query_invites.function_id,
     ]
@@ -442,6 +501,9 @@ resource "aws_appsync_resolver" "payment_methods_for_profile" {
   pipeline_config {
     functions = [
       aws_appsync_function.fetch_profile.function_id,
+      # Step 2 of the two-phase owner check (#545): runs only for non-owners to
+      # query the GSI for the profile so the share check can run.
+      aws_appsync_function.fetch_profile_step2.function_id,
       aws_appsync_function.check_payment_methods_access.function_id,
       aws_appsync_function.get_owner_payment_methods.function_id,
       aws_appsync_function.filter_payment_methods_by_access.function_id,
@@ -563,4 +625,42 @@ resource "aws_appsync_resolver" "admin_get_profile_shares" {
   }
 
   code = file("${local.js_resolvers_dir}/lambda_passthrough_resolver.js")
+}
+
+# publicGetOrderOffer (Lambda unit resolver, #679). Anonymous API-key read; the
+# share token in the argument is the authorization. The offer is six datastore
+# reads plus QR pre-signing, which exceeds one APPSYNC_JS function's single
+# datastore call, so it is a Lambda, not a pipeline. The handler dispatches on
+# info.fieldName; identity is null under API_KEY and is never read.
+resource "aws_appsync_resolver" "public_order_offer" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "publicGetOrderOffer"
+  data_source = aws_appsync_datasource.public_orders.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# publicGetOrderReceipt (Lambda unit resolver, #679). The second field on the
+# same public-orders Lambda: the receipt read is one strongly consistent orders
+# GetItem, and the per-order receipt token in the argument is the capability.
+# Unknown campaign/suffix, absent or mismatched token, and a campaign mismatch
+# all answer the identical NOT_FOUND.
+resource "aws_appsync_resolver" "public_order_receipt" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "publicGetOrderReceipt"
+  data_source = aws_appsync_datasource.public_orders.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }

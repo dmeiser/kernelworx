@@ -1,18 +1,21 @@
 """Lambda resolver for campaign order operations and deletion verification helpers."""
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+import time
+from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Optional
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id
     from utils.auth import require_profile_access
-    from utils.dynamodb import tables
+    from utils.dynamodb import batch_get_chunked, get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_campaign_id
     from utils.logging import get_logger
     from utils.pagination import query_all_items
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id
     from ..utils.auth import require_profile_access
-    from ..utils.dynamodb import tables
+    from ..utils.dynamodb import batch_get_chunked, get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_campaign_id
     from ..utils.logging import get_logger
@@ -31,8 +34,17 @@ else:  # pragma: no cover
 
 
 logger = get_logger(__name__)
+_default_logger = logger
 
-BATCH_DELETE_SIZE = 25
+BATCH_SIZE = 25
+
+# DynamoDB signals BatchWriteItem throttling primarily as UnprocessedItems in an
+# HTTP 200 response, not as an exception, so the retry has to be bounded here.
+# boto3's BatchWriter.__exit__ is `while self._items_buffer: self._flush()` and
+# _flush re-appends UnprocessedItems with no cap and no sleep, which turns a
+# throttled delete into a Lambda timeout instead of a retryable error.
+MAX_BATCH_WRITE_ATTEMPTS = 5
+BATCH_WRITE_BACKOFF_SECONDS = 0.05
 
 
 def _get_campaign_by_id(campaign_id: str) -> Optional[Dict[str, Any]]:
@@ -67,86 +79,229 @@ def _query_order_keys_for_campaign(campaign_id: str) -> List[Dict[str, Any]]:
     return orders
 
 
-def _delete_order_keys(orders: List[Dict[str, Any]]) -> int:
-    """Delete a list of order keys in batches, returning the count deleted."""
+def _raise_delete_error(table_name: str, exc: Exception, log: Any = None) -> NoReturn:
+    """Translate a failed batch deletion into a typed AppError via the shared classifier.
+
+    Reuses `admin_operations._raise_batch_lookup_error` (the single
+    classify-and-raise helper) instead of re-implementing the transient/permanent
+    split. The import is function-level: a top-level import would be circular
+    (`admin_operations` -> `deletion_cascade` -> `campaign_operations`).
+    """
+    from .admin_operations import _raise_batch_lookup_error
+
+    target_log = log if log is not None else _default_logger
+    _raise_batch_lookup_error(
+        f"delete batch from {table_name}",
+        target_log,
+        exc,
+        busy_message="Temporarily unable to delete data. Please retry.",
+    )
+
+
+def _drop_duplicate_delete_keys(keys: List[Dict[str, Any]], primary_keys: Optional[List[str]]) -> List[Dict[str, Any]]:
+    """Drop duplicate deletes by primary key, keeping the last occurrence.
+
+    Replaces boto3's ``overwrite_by_pkeys`` buffer dedup, which only ever saw
+    the current flush chunk and so could not collapse a duplicate that straddled
+    two chunks. For identical DeleteRequests the retained copy is equivalent;
+    doing it up front also keeps the delete count honest.
+    """
+    if not primary_keys:
+        return list(keys)
+
+    positions: Dict[Any, int] = {}
+    unique: List[Dict[str, Any]] = []
+    for key in keys:
+        identity = tuple(str(key.get(name)) for name in primary_keys)
+        existing = positions.get(identity)
+        if existing is None:
+            positions[identity] = len(unique)
+            unique.append(key)
+        else:
+            unique[existing] = key
+    return unique
+
+
+def _flush_delete_requests(client: Any, table_name: str, requests: List[Dict[str, Any]], log: Any) -> None:
+    """Send DeleteRequests, retrying unprocessed items with bounded backoff.
+
+    Raises:
+        AppError: RESOURCE_BUSY when items are still unprocessed after
+            MAX_BATCH_WRITE_ATTEMPTS attempts, so a throttled delete surfaces as
+            a retryable error rather than spinning until the Lambda times out.
+    """
+    pending = requests
+    for attempt in range(1, MAX_BATCH_WRITE_ATTEMPTS + 1):
+        response = client.batch_write_item(RequestItems={table_name: pending})
+        pending = (response.get("UnprocessedItems") or {}).get(table_name) or []
+        if not pending:
+            return
+        if attempt < MAX_BATCH_WRITE_ATTEMPTS:
+            time.sleep(BATCH_WRITE_BACKOFF_SECONDS * attempt)
+
+    log.warning(
+        f"Batch delete from {table_name} left items unprocessed",
+        pending_count=len(pending),
+        attempts=MAX_BATCH_WRITE_ATTEMPTS,
+    )
+    raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to delete data. Please retry.")
+
+
+def batch_delete_keys(
+    table: Any,
+    keys: List[Dict[str, Any]],
+    primary_keys: Optional[List[str]] = None,
+    *,
+    logger: Any = None,
+) -> int:
+    """Delete a list of keys in batches of 25, returning the count deleted.
+
+    Args:
+        table: DynamoDB Table resource.
+        keys: List of key dicts to delete.
+        primary_keys: Optional list of primary key attribute names for deduplication.
+        logger: Optional logger instance.
+
+    Returns:
+        Number of items deleted.
+
+    Raises:
+        AppError: RESOURCE_BUSY on throttling (as an exception or as
+            UnprocessedItems that survive the retry cap), INTERNAL_ERROR on
+            other failures.
+    """
+    if not keys:
+        return 0
+
+    log = logger if logger is not None else _default_logger
+    table_name = getattr(table, "name", str(table))
+    unique = _drop_duplicate_delete_keys(keys, primary_keys)
     deleted_count = 0
-    for i in range(0, len(orders), BATCH_DELETE_SIZE):
-        batch = orders[i : i + BATCH_DELETE_SIZE]
-        with tables.orders.batch_writer(overwrite_by_pkeys=["campaignId", "orderId"]) as writer:
-            for order in batch:
-                writer.delete_item(
-                    Key={
-                        "campaignId": str(order["campaignId"]),
-                        "orderId": str(order["orderId"]),
-                    }
-                )
+
+    for i in range(0, len(unique), BATCH_SIZE):
+        batch = unique[i : i + BATCH_SIZE]
+        requests = [{"DeleteRequest": {"Key": key}} for key in batch]
+        try:
+            _flush_delete_requests(table.meta.client, table_name, requests, log)
+        except AppError:
+            raise
+        except Exception as e:
+            _raise_delete_error(table_name, e, log)
         deleted_count += len(batch)
+        log.info(f"Deleted batch of {len(batch)} items from {table_name}")
+
     return deleted_count
+
+
+def delete_order_keys(orders: List[Dict[str, Any]], *, logger: Any = None) -> int:
+    """Delete the given order items by primary key, returning the count deleted.
+
+    The single shared path for deleting orders by key: every caller builds keys
+    through this so the key shape (and its string coercion) lives in one place.
+    """
+    order_keys = [{"campaignId": str(order["campaignId"]), "orderId": str(order["orderId"])} for order in orders]
+    return batch_delete_keys(
+        tables.orders,
+        order_keys,
+        primary_keys=["campaignId", "orderId"],
+        logger=logger,
+    )
+
+
+def _table_name(table: Any, env_var: str) -> str:
+    """Return the table name from the table resource or environment variable."""
+    name = getattr(table, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return str(get_required_env(env_var))
 
 
 def _verify_order_keys_deleted(order_keys: List[Dict[str, Any]]) -> None:
     """Verify deleted orders are absent from the base table.
 
-    Uses a strongly consistent read on each exact key that was deleted, which
-    deterministically reflects the completed deletes. The orderId-index GSI
-    cannot be used here: it is eventually consistent and can keep showing
+    Uses strongly consistent batch reads on the exact keys that were deleted,
+    which deterministically reflects the completed deletes. The orderId-index
+    GSI cannot be used here: it is eventually consistent and can keep showing
     deleted rows for an unbounded time. Raises AppError if any key persists.
     """
-    for key in order_keys:
-        response = tables.orders.get_item(
-            Key={"campaignId": str(key["campaignId"]), "orderId": str(key["orderId"])},
-            ConsistentRead=True,
+    if not order_keys:
+        return
+
+    unique_keys = _drop_duplicate_delete_keys(
+        [{"campaignId": str(key["campaignId"]), "orderId": str(key["orderId"])} for key in order_keys],
+        ["campaignId", "orderId"],
+    )
+
+    def _on_persisting_order(item: Dict[str, Any]) -> None:
+        logger.error(
+            "Order still present after delete verification",
+            campaign_id=item.get("campaignId"),
+            order_id=item.get("orderId"),
         )
-        if response.get("Item"):
-            logger.error(
-                "Order still present after delete verification",
-                campaign_id=key["campaignId"],
-                order_id=key["orderId"],
-            )
-            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete order")
+        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete order")
+
+    table_name = _table_name(tables.orders, "ORDERS_TABLE_NAME")
+    batch_get_chunked(
+        table_name,
+        unique_keys,
+        _on_persisting_order,
+        consistent_read=True,
+        logger=logger,
+    )
 
 
 def _verify_campaign_deleted(profile_id: str, campaign_id: str) -> None:
     """Verify a deleted campaign is absent from the base table.
 
-    Uses a strongly consistent read on the exact key that was deleted, which
-    deterministically reflects the completed delete. The campaignId-index GSI
-    cannot be used here: it is eventually consistent and can keep showing a
+    Uses a strongly consistent batch read on the exact key that was deleted,
+    which deterministically reflects the completed delete. The campaignId-index
+    GSI cannot be used here: it is eventually consistent and can keep showing a
     deleted row for an unbounded time. Raises AppError if the key persists.
     """
-    response = tables.campaigns.get_item(
-        Key={"profileId": profile_id, "campaignId": campaign_id},
-        ConsistentRead=True,
-    )
-    if response.get("Item"):
+    keys = [{"profileId": profile_id, "campaignId": campaign_id}]
+
+    def _on_persisting_campaign(item: Dict[str, Any]) -> None:
+        persisting_profile_id = item.get("profileId", profile_id)
+        persisting_campaign_id = item.get("campaignId", campaign_id)
         logger.error(
             "Campaign still present after delete verification",
-            profile_id=profile_id,
-            campaign_id=campaign_id,
+            profile_id=persisting_profile_id,
+            campaign_id=persisting_campaign_id,
         )
         raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete campaign")
 
+    table_name = _table_name(tables.campaigns, "CAMPAIGNS_TABLE_NAME")
+    batch_get_chunked(
+        table_name,
+        keys,
+        _on_persisting_campaign,
+        consistent_read=True,
+        logger=logger,
+    )
 
-def _delete_orders_for_campaign(campaign_id: str) -> int:
+
+def delete_orders_for_campaign(campaign_id: str, *, logger: Any = None) -> int:
     """Delete all orders for a campaign and verify they are gone.
 
     Args:
         campaign_id: The campaign ID (with CAMPAIGN# prefix).
+        logger: Optional logger instance.
 
     Returns:
         Number of orders deleted.
 
     Raises:
-        AppError: If a deleted order is still present afterwards.
+        AppError: If a deleted order is still present afterwards or deletion fails.
     """
     orders = _query_order_keys_for_campaign(campaign_id)
     if not orders:
         return 0
 
-    deleted_count = _delete_order_keys(orders)
+    log = logger if logger is not None else _default_logger
+    deleted_count = delete_order_keys(orders, logger=log)
     _verify_order_keys_deleted(orders)
 
-    logger.info("Deleted orders for campaign", campaign_id=campaign_id, count=deleted_count)
+    log.info("Deleted orders for campaign", campaign_id=campaign_id, count=deleted_count)
     return deleted_count
 
 
@@ -168,7 +323,7 @@ def delete_campaign_orders(event: Dict[str, Any], context: Any) -> Dict[str, Any
     if not campaign_id_arg:
         raise AppError(ErrorCode.INVALID_INPUT, "campaignId is required")
 
-    caller_account_id = event.get("identity", {}).get("sub")
+    caller_account_id = get_caller_id(event)
     if not caller_account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
 
@@ -185,5 +340,5 @@ def delete_campaign_orders(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
     require_profile_access(caller_account_id, profile_id, "WRITE")
 
-    deleted_count = _delete_orders_for_campaign(db_campaign_id)
+    deleted_count = delete_orders_for_campaign(db_campaign_id)
     return {"deletedCount": deleted_count}

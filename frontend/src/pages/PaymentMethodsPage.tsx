@@ -54,6 +54,154 @@ interface RequestQRUploadData {
 // Import shared validation constants and functions
 import { isReservedName } from '../lib/paymentMethodValidation';
 
+// Presentational subcomponent: the payment-method dialog tree. Kept out of the
+// page component so its render tree stays a plain pass-through.
+interface PaymentMethodDialogsProps {
+  createOpen: boolean;
+  createIsLoading: boolean;
+  data: { myPaymentMethods: PaymentMethod[] } | undefined;
+  onCreate: (name: string) => Promise<void>;
+  onCloseCreate: () => void;
+
+  editOpen: boolean;
+  editIsLoading: boolean;
+  currentName: string;
+  onUpdate: (oldName: string, newName: string) => Promise<void>;
+  onCloseEdit: () => void;
+
+  deleteOpen: boolean;
+  deleteIsLoading: boolean;
+  onDelete: () => Promise<void>;
+  onCloseDelete: () => void;
+
+  qrOpen: boolean;
+  qrIsLoading: boolean;
+  qrError: string | null;
+  onUpload: (file: File) => Promise<void>;
+  onCloseQr: () => void;
+}
+
+const PaymentMethodDialogs: React.FC<PaymentMethodDialogsProps> = ({
+  createOpen,
+  createIsLoading,
+  data,
+  onCreate,
+  onCloseCreate,
+  editOpen,
+  editIsLoading,
+  currentName,
+  onUpdate,
+  onCloseEdit,
+  deleteOpen,
+  deleteIsLoading,
+  onDelete,
+  onCloseDelete,
+  qrOpen,
+  qrIsLoading,
+  qrError,
+  onUpload,
+  onCloseQr,
+}) => {
+  const existingNames = (data?.myPaymentMethods ?? []).map((m) => m.name);
+
+  return (
+    <>
+    <CreatePaymentMethodDialog
+      open={createOpen}
+      onClose={onCloseCreate}
+      onCreate={onCreate}
+      existingNames={existingNames}
+      isLoading={createIsLoading}
+    />
+
+    <EditPaymentMethodDialog
+      open={editOpen}
+      onClose={onCloseEdit}
+      onUpdate={onUpdate}
+      currentName={currentName}
+      existingNames={existingNames}
+      isLoading={editIsLoading}
+    />
+
+    <DeletePaymentMethodDialog
+      open={deleteOpen}
+      onClose={onCloseDelete}
+      onDelete={onDelete}
+      methodName={currentName}
+      isLoading={deleteIsLoading}
+    />
+
+    <QRUploadDialog
+      open={qrOpen}
+      onClose={onCloseQr}
+      onUpload={onUpload}
+      methodName={currentName}
+      isLoading={qrIsLoading}
+      uploadError={qrError}
+    />
+  </>
+  );
+};
+
+// Presentational subcomponent: the payment-methods list. Owns the derivation
+// from the raw query data (optional chaining, sorting, empty-state check) so the
+// page component's render tree stays a flat pass-through.
+interface PaymentMethodsListProps {
+  data: { myPaymentMethods: PaymentMethod[] } | undefined;
+  selectedMethod: PaymentMethod | null;
+  uploadingQR: boolean;
+  deletingQRMethod: string | null;
+  anyMutationLoading: boolean;
+  onEdit: (method: PaymentMethod) => void;
+  onDelete: (method: PaymentMethod) => void;
+  onUploadQR: (method: PaymentMethod) => void;
+  onDeleteQR: (method: PaymentMethod) => Promise<void>;
+}
+
+const PaymentMethodsList: React.FC<PaymentMethodsListProps> = ({
+  data,
+  selectedMethod,
+  uploadingQR,
+  deletingQRMethod,
+  anyMutationLoading,
+  onEdit,
+  onDelete,
+  onUploadQR,
+  onDeleteQR,
+}) => {
+  // v8 ignore next - data is defined when query succeeds; defensive fallback
+  const paymentMethods = [...(data?.myPaymentMethods ?? [])].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+  );
+
+  return (
+    <Stack spacing={2}>
+      {paymentMethods.map((method) => (
+        <PaymentMethodCard
+          key={method.name}
+          method={method}
+          isReserved={isReservedName(method.name)}
+          onEdit={() => onEdit(method)}
+          onDelete={() => onDelete(method)}
+          onUploadQR={() => onUploadQR(method)}
+          onDeleteQR={() => {
+            void onDeleteQR(method);
+          }}
+          isDeleting={anyMutationLoading || deletingQRMethod === method.name}
+          isUploadingQR={uploadingQR && selectedMethod?.name === method.name}
+        />
+      ))}
+
+      {paymentMethods.length === 0 && (
+        <EmptyState
+          title="No Payment Methods Yet"
+          message="Cash and Check are always available. Add custom methods and QR codes for apps like Venmo or PayPal."
+        />
+      )}
+    </Stack>
+  );
+};
+
 // Message alerts component
 interface MessageAlertsProps {
   successMessage: string | null;
@@ -77,7 +225,6 @@ const MessageAlerts: React.FC<MessageAlertsProps> = ({ successMessage, error, on
   </>
 );
 
-// eslint-disable-next-line complexity -- Complex page component managing multiple dialogs and state
 export const PaymentMethodsPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -290,21 +437,12 @@ export const PaymentMethodsPage: React.FC = () => {
     setQrUploadError(null);
   };
 
-  // Sort payment methods alphabetically - returns empty array if no data
-  // v8 ignore next - data is defined when query succeeds; defensive fallback
-  const sortedMethods = data?.myPaymentMethods ?? [];
-  const paymentMethods = [...sortedMethods].sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
-  );
-
   // Track which method is having its QR deleted
   const [deletingQRMethod, setDeletingQRMethod] = useState<string | null>(null);
 
-  // Get list of existing names for validation
-  const existingNames = paymentMethods.map((m) => m.name);
-  // v8 ignore next - Dialog only opens when a method is selected; defensive fallback
-  const selectedName = selectedMethod?.name ?? '';
-  const isAnyMutationLoading = deleting;
+  // Dialogs need the selected method's name; the existing-names list for
+  // validation is derived inside PaymentMethodDialogs where it is consumed.
+  const selectedName = selectedMethod ? selectedMethod.name : '';
 
   if (loading) {
     return <LoadingState />;
@@ -350,64 +488,38 @@ export const PaymentMethodsPage: React.FC = () => {
       />
 
       {/* Payment Methods List */}
-      <Stack spacing={2}>
-        {paymentMethods.map((method) => (
-          <PaymentMethodCard
-            key={method.name}
-            method={method}
-            isReserved={isReservedName(method.name)}
-            onEdit={() => handleEdit(method)}
-            onDelete={() => handleDeleteClick(method)}
-            onUploadQR={() => handleQRUploadClick(method)}
-            onDeleteQR={() => {
-              void handleDeleteQRCode(method);
-            }}
-            isDeleting={isAnyMutationLoading || deletingQRMethod === method.name}
-            isUploadingQR={uploadingQR && selectedMethod?.name === method.name}
-          />
-        ))}
+      <PaymentMethodsList
+        data={data}
+        selectedMethod={selectedMethod}
+        uploadingQR={uploadingQR}
+        deletingQRMethod={deletingQRMethod}
+        anyMutationLoading={deleting}
+        onEdit={handleEdit}
+        onDelete={handleDeleteClick}
+        onUploadQR={handleQRUploadClick}
+        onDeleteQR={handleDeleteQRCode}
+      />
 
-        {paymentMethods.length === 0 && (
-          <EmptyState
-            title="No Payment Methods Yet"
-            message="Cash and Check are always available. Add custom methods and QR codes for apps like Venmo or PayPal."
-          />
-        )}
-      </Stack>
-
-      {/* Dialogs */}
-      <CreatePaymentMethodDialog
-        open={createDialogOpen}
-        onClose={closeCreateDialog}
+      <PaymentMethodDialogs
+        createOpen={createDialogOpen}
+        createIsLoading={creating}
+        data={data}
         onCreate={handleCreate}
-        existingNames={existingNames}
-        isLoading={creating}
-      />
-
-      <EditPaymentMethodDialog
-        open={editDialogOpen}
-        onClose={closeEditDialog}
-        onUpdate={handleUpdate}
+        onCloseCreate={closeCreateDialog}
+        editOpen={editDialogOpen}
+        editIsLoading={updating}
         currentName={selectedName}
-        existingNames={existingNames}
-        isLoading={updating}
-      />
-
-      <DeletePaymentMethodDialog
-        open={deleteDialogOpen}
-        onClose={closeDeleteDialog}
+        onUpdate={handleUpdate}
+        onCloseEdit={closeEditDialog}
+        deleteOpen={deleteDialogOpen}
+        deleteIsLoading={deleting}
         onDelete={handleDelete}
-        methodName={selectedName}
-        isLoading={deleting}
-      />
-
-      <QRUploadDialog
-        open={qrUploadDialogOpen}
-        onClose={closeQrUploadDialog}
+        onCloseDelete={closeDeleteDialog}
+        qrOpen={qrUploadDialogOpen}
+        qrIsLoading={uploadingQR}
+        qrError={qrUploadError}
         onUpload={handleQRUpload}
-        methodName={selectedName}
-        isLoading={uploadingQR}
-        uploadError={qrUploadError}
+        onCloseQr={closeQrUploadDialog}
       />
     </Box>
   );

@@ -11,7 +11,69 @@ import sys
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TextIO, cast
+
+#: Extra key names whose values are never emitted in the clear. Keys are
+#: matched case-insensitively against these lowercase names, so ``customerPhone``
+#: and ``qrCodeUrl`` are caught alongside ``email``. This is the structural
+#: backstop for redaction: individual call sites still mask explicitly with
+#: :func:`mask_email`, but a new call site that forgets cannot leak PII.
+_SENSITIVE_KEYS = frozenset(
+    {"email", "username", "phone", "customerphone", "address", "qrcodeurl", "password", "sharedcampaigncode"}
+)
+#: Sensitive keys whose value is an address and can therefore be masked
+#: partially instead of dropped entirely.
+_MASKABLE_KEYS = frozenset({"email", "username"})
+
+
+def _redact_value(key: str, value: Any) -> Any:
+    """Mask ``value`` when ``key`` names a sensitive field, recursing otherwise."""
+    normalized = key.lower()
+    if normalized in _SENSITIVE_KEYS and "mask" not in normalized:
+        return mask_email(value) if normalized in _MASKABLE_KEYS else "***"
+    return _redact_nested(value)
+
+
+def _redact_nested(value: Any) -> Any:
+    """Return a copy of ``value`` with sensitive fields masked at any depth."""
+    if isinstance(value, dict):
+        return {key: _redact_value(key, item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_nested(item) for item in value]
+    return value
+
+
+def _redact_sensitive(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a NEW dict with sensitive values masked, without mutating ``entry``.
+
+    Masking recurses into nested dicts and lists, and keys are matched
+    case-insensitively against :data:`_SENSITIVE_KEYS`. Keys already named as
+    masked (e.g. ``maskedEmail``) are left untouched, and masking an
+    already-masked address is idempotent, so explicit :func:`mask_email` call
+    sites keep working unchanged.
+    """
+    return cast(Dict[str, Any], _redact_nested(entry))
+
+
+class _StdoutHandler(logging.StreamHandler[TextIO]):
+    """Stream handler that writes to the current ``sys.stdout`` at emit time.
+
+    Resolving ``sys.stdout`` when a record is emitted rather than binding it
+    once at construction keeps the JSON line visible to harnesses that swap
+    ``sys.stdout`` after import, such as pytest's ``capsys`` fixture.
+    """
+
+    @property
+    def stream(self) -> TextIO:
+        return sys.stdout
+
+    @stream.setter
+    def stream(self, value: TextIO) -> None:
+        pass
+
+
+_handler = _StdoutHandler(sys.stdout)
+_handler.setFormatter(logging.Formatter("%(message)s"))
 
 
 class StructuredLogger:
@@ -29,14 +91,14 @@ class StructuredLogger:
     def __init__(self, name: str, correlation_id: Optional[str] = None) -> None:
         self.logger = logging.getLogger(name)
         self.logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
+        if _handler not in self.logger.handlers:
+            self.logger.addHandler(_handler)
         self.correlation_id = correlation_id or str(uuid.uuid4())
 
     def _log(self, level: str, message: str, **kwargs: Any) -> None:
         """Internal method to emit structured JSON logs."""
-        level_num = getattr(logging, level, None)
-        if level_num is None or isinstance(level_num, str):
-            level_num = logging.getLevelName(level)
-        if isinstance(level_num, str):
+        level_num = logging.getLevelName(level)
+        if not isinstance(level_num, int):
             level_num = logging.INFO
         if not self.logger.isEnabledFor(level_num):
             return
@@ -53,6 +115,7 @@ class StructuredLogger:
         if isinstance(extra, dict):
             log_entry.update(extra)
         log_entry.update(kwargs)
+        log_entry = _redact_sensitive(log_entry)
 
         if exc_info:
             if exc_info is True:
@@ -65,7 +128,7 @@ class StructuredLogger:
         # Remove None values
         log_entry = {k: v for k, v in log_entry.items() if v is not None}
 
-        print(json.dumps(log_entry, default=str), file=sys.stdout, flush=True)
+        self.logger.log(level_num, json.dumps(log_entry, default=str))
 
     def info(self, message: str, **kwargs: Any) -> None:
         """Log info level message."""
@@ -137,3 +200,26 @@ def mask_email(email: Optional[str]) -> str:
     if len(local) == 1:
         return f"***@{domain}"
     return f"{local[0]}***@{domain}"
+
+
+def redact_secrets(exc: Exception, secret: Optional[str]) -> Exception:
+    """Strip a secret from an unexpected exception's message, in place.
+
+    The generic error handler logs ``error=str(e)``. A library that echoes a
+    request argument (a validation error, a service error carrying the request)
+    would therefore put a capability token in the log, so the scrub happens at
+    this boundary where the secret is known exactly and can be replaced
+    literally rather than pattern-matched. A message that never carried it is
+    left alone.
+
+    Args:
+        exc: The exception to scrub
+        secret: The secret string to redact, or None
+
+    Returns:
+        The same exception instance with its message redacted
+    """
+    text = str(exc)
+    if isinstance(secret, str) and secret and secret in text:
+        exc.args = (text.replace(secret, "[redacted]"),)
+    return exc

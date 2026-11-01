@@ -1,9 +1,15 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const profileId = ctx.args.input.profileId;
-    const dbProfileId = profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
-    const expectedOwner = 'ACCOUNT#' + ctx.identity.sub;
+    // Owned by lib/ids.js, same as verify_profile_write_access_fn.js, so both
+    // write-permission checks resolve a clean, unprefixed id to the same
+    // PROFILE# DB form; a re-inlined ternary here is caught by
+    // tests/unit/check_id_prefix_normalization.test.ts.
+    const dbProfileId = normalizeIdOrPrefix(profileId, 'PROFILE#');
+    // Idempotent: a sub that already carries ACCOUNT# is left alone.
+    const expectedOwner = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({

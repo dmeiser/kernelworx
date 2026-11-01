@@ -27,6 +27,26 @@ variable "api_certificate_arn" {
   default     = null
 }
 
+variable "public_orders_key_slots" {
+  description = <<EOF
+Which public-orders API-key slots exist (SEC-3 rotation model). "a" is the
+steady state (only the established key). "ab" is rotation phase 1 - add new:
+the rotation slot key is created and becomes the key the module output (and
+every frontend bundle) bakes, while the old key stays valid. "b" is rotation
+phase 3 - remove old: the established key is destroyed, actually revoking the
+leaked key. An expires-only edit is NOT a rotation: the provider updates
+expires in place and the key material never changes. See
+docs/PUBLIC_API_KEY_RUNBOOK.md.
+EOF
+  type        = string
+  default     = "a"
+
+  validation {
+    condition     = contains(["a", "ab", "b"], var.public_orders_key_slots)
+    error_message = "public_orders_key_slots must be one of \"a\" (steady state), \"ab\" (rotation phase 1: add new key), or \"b\" (rotation phase 3: old key removed)"
+  }
+}
+
 variable "certificate_validation" {
   description = "Certificate validation resource to ensure certificate is valid before use"
   type        = any

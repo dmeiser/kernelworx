@@ -49,16 +49,18 @@ interface SubmitParams {
 }
 
 export const useCreateCampaignSubmitHandler = (formState: FormState, isSharedCampaignMode: boolean = false) => {
-  const { isFormValid, validateProfileSelection, validateUnitFields } = useCreateCampaignValidation(
-    formState.profileId,
-    formState.campaignName,
-    formState.catalogId,
-    isSharedCampaignMode,
-    formState.unitType,
-    formState.unitNumber,
-    formState.city,
-    formState.state,
-  );
+  const { isFormValid, validateProfileSelection, validateUnitFields, validateCampaignYear } =
+    useCreateCampaignValidation(
+      formState.profileId,
+      formState.campaignName,
+      formState.catalogId,
+      isSharedCampaignMode,
+      formState.unitType,
+      formState.unitNumber,
+      formState.city,
+      formState.state,
+      formState.campaignYear,
+    );
 
   const { handleSubmit: submitCampaign } = useCreateCampaignSubmit();
 
@@ -72,17 +74,22 @@ export const useCreateCampaignSubmitHandler = (formState: FormState, isSharedCam
     [formState],
   );
 
+  /** The first validation failure, or null when the form may be submitted. */
+  const firstValidationError = useCallback((): string | null => {
+    for (const validate of [validateProfileSelection, validateUnitFields, validateCampaignYear]) {
+      const result = validate();
+      if (!result.isValid) {
+        return result.error || 'Validation failed';
+      }
+    }
+    return null;
+  }, [validateProfileSelection, validateUnitFields, validateCampaignYear]);
+
   const handleSubmit = useCallback(
     async (params: SubmitParams) => {
-      const profileValidation = validateProfileSelection();
-      if (!profileValidation.isValid) {
-        handleValidationError(profileValidation.error || 'Validation failed');
-        return;
-      }
-
-      const unitValidation = validateUnitFields();
-      if (!unitValidation.isValid) {
-        handleValidationError(unitValidation.error || 'Validation failed');
+      const validationError = firstValidationError();
+      if (validationError) {
+        handleValidationError(validationError);
         return;
       }
 
@@ -120,7 +127,7 @@ export const useCreateCampaignSubmitHandler = (formState: FormState, isSharedCam
         formState.setSubmitting(false);
       }
     },
-    [validateProfileSelection, validateUnitFields, submitCampaign, formState, handleValidationError],
+    [firstValidationError, submitCampaign, formState, handleValidationError],
   );
 
   return { handleSubmit, isFormValid };

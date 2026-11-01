@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Python 3.14+** with `uv` package manager
+- **Python 3.14** with `uv` package manager — pinned in `.python-version`, so `uv` provisions and uses the same interpreter CI and AWS Lambda run (3.14); `requires-python = ">=3.14"` is a floor, not a license to develop on a newer minor.
 - **Node.js 24+** with `npm`
 - **AWS CLI v2** configured with appropriate credentials
 - **AWS Account** with permissions for IAM, DynamoDB, S3, Cognito, AppSync, ACM, Route 53, CloudFront, Lambda, SNS, CloudFormation, and CloudWatch/Billing
@@ -81,7 +81,7 @@ export TF_VAR_encryption_passphrase='your-passphrase'
 
 ```bash
 # Check Python version
-python --version  # Should be 3.14+
+python --version  # Should be 3.14 (the .python-version pin)
 
 # Check uv
 uv --version
@@ -158,7 +158,7 @@ cd tofu/application/environments/dev
 tofu import 'module.dynamodb.aws_dynamodb_table.accounts' table-name
 
 # Import existing S3 bucket
-tofu import 'module.s3.aws_s3_bucket.static_assets' bucket-name
+tofu import 'module.s3.aws_s3_bucket.static' bucket-name
 ```
 
 **Finding existing resources:**
@@ -307,6 +307,11 @@ cd frontend
 # They are only for local `vite dev` and ephemeral environments (see
 # frontend/.env.example); make sure no local .env / .env.local defining them
 # is present, or Vite will bake the absolute endpoints into the bundle.
+#
+# The public order pages (API-key auth) instead need the AppSync API key baked
+# into the same build — a replaced key with a stale bundle fails every public
+# call with Unauthorized until the next deploy:
+export VITE_APPSYNC_API_KEY=$(tofu -chdir=../tofu/application/environments/dev output -raw appsync_api_key)
 npm run build
 
 # Upload to S3

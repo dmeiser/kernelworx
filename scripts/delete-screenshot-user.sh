@@ -13,8 +13,14 @@
 
 set -e
 
+# Load environment variables from .env (same set -a/source pattern as
+# scripts/ephemeral-env.sh; the old `export $(grep ... | xargs)` split values on
+# whitespace and mangled quoted values).
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  set -a
+  # shellcheck source=/dev/null
+  source "./.env"
+  set +a
 else
   echo "Error: .env file not found"
   exit 1
@@ -35,5 +41,5 @@ aws cognito-idp admin-delete-user \
 echo "✅ Cognito user deleted."
 echo ""
 echo "To delete the associated DynamoDB data, sign in as Alex Kernel and use"
-echo "Account Settings -> Delete Account, or ask an admin to run the"
-echo "adminDeleteUser mutation for the account."
+echo "Account Settings -> Delete Account, or ask an admin to delete the account"
+echo "from the admin console."

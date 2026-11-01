@@ -38,7 +38,7 @@ describe('get_catalog_for_delete_fn response', () => {
 
     it('authorizes an MFA-verified admin for any catalog', () => {
         const ctx = makeCtx(
-            { 'cognito:groups': ['admin'], mfa: true },
+            { 'cognito:groups': ['ADMIN'], mfa: true },
             { ...baseCatalog, ownerAccountId: 'ACCOUNT#somebody-else' },
             'admin-123'
         );
@@ -83,13 +83,57 @@ describe('get_catalog_for_delete_fn response', () => {
 
     it('denies an admin without MFA with exactly "MFA required"', () => {
         const ctx = makeCtx(
-            { 'cognito:groups': ['admin'] }, // no mfa claim
+            { 'cognito:groups': ['ADMIN'] }, // no mfa claim
             { ...baseCatalog, ownerAccountId: 'ACCOUNT#somebody-else' },
             'admin-123'
         );
 
         assert.throws(() => response(ctx), /FORBIDDEN: MFA required/);
         assert.strictEqual(ctx.stash.authorized, undefined);
+    });
+
+    it('does not treat the lowercase group "admin" as admin (#504)', () => {
+        // The Cognito admin group is created out-of-band and is uppercase
+        // everywhere else in the codebase. A lowercase 'admin' group must not
+        // grant deleteCatalog over someone else's catalog, MFA or not.
+        for (const mfa of [true, false, undefined]) {
+            const ctx = makeCtx(
+                { 'cognito:groups': ['admin'], mfa },
+                { ...baseCatalog, ownerAccountId: 'ACCOUNT#somebody-else' },
+                'admin-123'
+            );
+
+            assert.throws(
+                () => response(ctx),
+                /FORBIDDEN: Not authorized to delete this catalog/,
+                `mfa=${String(mfa)} must not grant admin to the lowercase group`
+            );
+            assert.strictEqual(ctx.stash.authorized, undefined);
+        }
+    });
+
+    it('still authorizes the uppercase group even among other groups', () => {
+        const ctx = makeCtx(
+            { 'cognito:groups': ['some-other-group', 'ADMIN'], mfa: true },
+            { ...baseCatalog, ownerAccountId: 'ACCOUNT#somebody-else' },
+            'admin-123'
+        );
+
+        response(ctx);
+
+        assert.strictEqual(ctx.stash.authorized, true);
+    });
+
+    it('accepts a string-formatted groups claim (not just an array)', () => {
+        const ctx = makeCtx(
+            { 'cognito:groups': 'ADMIN', mfa: true },
+            { ...baseCatalog, ownerAccountId: 'ACCOUNT#somebody-else' },
+            'admin-123'
+        );
+
+        response(ctx);
+
+        assert.strictEqual(ctx.stash.authorized, true);
     });
 
     it('denies a non-admin non-owner', () => {

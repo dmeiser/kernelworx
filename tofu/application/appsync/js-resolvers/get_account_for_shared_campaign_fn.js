@@ -1,8 +1,9 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     // accountId has ACCOUNT# prefix in DynamoDB
-    const accountId = 'ACCOUNT#' + ctx.identity.sub;
+    const accountId = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ accountId: accountId })

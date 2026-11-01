@@ -9,6 +9,32 @@ the script's actual `--help` output or usage text.
 
 ## Scripts Reference
 
+### Run identifiers (ephemeral runs)
+
+The `<run-id>` argument accepted by `scripts/ephemeral-env.sh`,
+`scripts/recover-deploy.sh`, `scripts/recover-destroy.sh`, and
+`scripts/create-ephemeral-test-users.sh` is governed by this single contract —
+those four per-script argument lists all point here rather than restating it:
+
+- **Format** — must match `[A-Za-z0-9._-]+`.
+- **Provenance** — the `pr-<number>` value. Every call site forms it from a PR
+  number: `pull_request` events in `ephemeral-test.yml` (`up`),
+  `ephemeral-teardown-on-merge.yml` (`down`) and the workflow's nightly `sweep`
+  job (`down`, with the number parsed back out of the S3 state key), plus the
+  `workflow_dispatch` `pr_number` input in `manual-teardown.yml` and
+  `recover-environment.yml`.
+- **Enforcement** — `validate_run_id` in
+  `scripts/ephemeral-recover-common.sh` is the single owner of the rule. All four
+  shell entry points call it before any AWS call, so a traversal-shaped id such
+  as `../prod` or `pr-1/x` fails instead of reaching another environment's S3
+  state key (`application/ephemeral/<run-id>/terraform.tfstate`) or its
+  `-var="environment=$RUN_ID"` value.
+- **Python side** — `scripts/generate_integration_env.py` applies the identical
+  regex to its `ephemeral/<run-id>` stack selector before it runs `tofu init`.
+
+A new entry point that takes a run-id must validate it the same way before its
+first AWS call.
+
 ### `scripts/ephemeral-env.sh`
 
 **Manage ephemeral per-run test environments.**
@@ -24,7 +50,8 @@ the script's actual `--help` output or usage text.
 **Key flags/arguments:**
 
 - `<up|env|down>` — Required action
-- `<run-id>` — Required run identifier string
+- `<run-id>` — Required. See
+  [Run identifiers](#run-identifiers-ephemeral-runs) above.
 - The script sources `./.env` for `TF_VAR_encryption_passphrase` and AWS credentials.
 
 ### `scripts/recover-deploy.sh`
@@ -35,7 +62,8 @@ state file is missing.
 
 **Key flags/arguments:**
 
-- `<run-id>` — Required run identifier.
+- `<run-id>` — Required. See
+  [Run identifiers](#run-identifiers-ephemeral-runs) above.
 
 ### `scripts/recover-destroy.sh`
 
@@ -45,22 +73,28 @@ destroy orphaned resources for a run-id.** Imports whatever still exists, then r
 
 **Key flags/arguments:**
 
-- `<run-id>` — Required run identifier.
+- `<run-id>` — Required. See
+  [Run identifiers](#run-identifiers-ephemeral-runs) above.
 
 ### `scripts/appsync-ensure-resolver-order.sh`
 
-**Work around AWS AppSync provider ordering issues.** When a Terraform plan would destroy
-`aws_appsync_function` or `aws_appsync_datasource` resources, this script runs a
-targeted apply for the affected resolver(s) first, so the resolver drops its references
-to the old functions/data sources before the full apply deletes them.
+**Work around AWS AppSync provider ordering issues.** When an OpenTofu plan would destroy
+`aws_appsync_function` or `aws_appsync_datasource` resources, AWS refuses the delete while a
+resolver or function still references the object, and removing the object from the
+configuration also removes the dependency edge that ordered the destroy after the
+referencing updates. This script plans, derives every such planned deletion address from the
+plan JSON, and runs `tofu apply -exclude=<addr>` for each — applying everything except those
+destroys, so the reference-releasing updates land and the caller's normal apply performs
+the deletes. The target set is derived from the plan; there is no address list to maintain.
 
 **Key flags/arguments:**
 
 - `-d <tofu-dir>` — Target OpenTofu directory (defaults to CWD).
-- `-t <resolver-target>` — One or more `-target` addresses to apply first (e.g.
-  `module.appsync.aws_appsync_resolver.create_order`). Can be specified multiple times.
 - `-- <extra-tofu-args>` — Pass additional arguments through to the `tofu` commands
   (plan/apply).
+
+`-t` is rejected: a hand-maintained target list is what let the ordering bug survive every
+previous fix (#298-#301, then #750).
 
 ### `scripts/build-resolvers.mjs`
 
@@ -81,15 +115,27 @@ as `<run-id>-owner@kernelworx.test` etc. so they never collide with dev/prod use
 The Smoke user is pre-confirmed so smoke suites run without burning Cognito's daily
 email quota (#483); its credentials are exported as `TEST_SMOKE_EMAIL`/`TEST_SMOKE_PASSWORD`.
 
+Passwords never appear on a command line (#710): the credential-carrying Cognito calls
+read them from a `chmod 600` `mktemp` file via `--cli-input-json file://...`, removed by
+an `EXIT` trap, matching `scripts/provision-user-totp.sh`. The generated passwords reach
+the caller only through the `export TEST_*` block on stdout, which
+`scripts/ephemeral-env.sh` pipes into the CI environment; all human-readable logging
+goes to stderr.
+
 **Key flags/arguments:**
 
-- `<run-id>` — Required run identifier.
+- `<run-id>` — Required. See
+  [Run identifiers](#run-identifiers-ephemeral-runs) above; the script rejects a
+  non-matching value before its first Cognito call.
 - `<user-pool-id>` — Required Cognito User Pool ID.
+- `<client-id>` — Required App Client ID.
 
 ### `scripts/create-screenshot-user.sh`
 
 **Create the Alex Kernel screenshot/marketing user in Cognito.** Idempotent: safe to
-re-run if the user already exists.
+re-run if the user already exists. The password is passed to Cognito through a
+`chmod 600` `--cli-input-json` parameter file and is never printed (#710); it stays in
+`./.env` as `TEST_ALEX_PASSWORD`.
 
 **Key flags/arguments:** None. Loads `TEST_USER_POOL_ID`, `TEST_REGION`, `TEST_ALEX_EMAIL`,
 `TEST_ALEX_PASSWORD` from `./.env`.
@@ -100,6 +146,10 @@ re-run if the user already exists.
 Creates Owner, Contributor, and Read-only users, plus a pre-confirmed Smoke user when
 `TEST_SMOKE_EMAIL`/`TEST_SMOKE_PASSWORD` are set, so smoke suites don't burn Cognito's
 daily email quota (#483).
+
+Passwords are read from `./.env`, passed to Cognito through a `chmod 600`
+`--cli-input-json` parameter file, and never printed to stdout (#710) — the closing
+summary lists usernames only.
 
 **Key flags/arguments:** None. Requires `TEST_USER_POOL_ID`, `TEST_OWNER_EMAIL`,
 `TEST_OWNER_PASSWORD`, `TEST_REGION` in environment.
@@ -131,6 +181,42 @@ prefix. Dev-only script.
 **Key flags/arguments:** None. Requires `SHARES_TABLE_NAME` environment variable (or set
 via `.env`). Run with: `uv run python scripts/migrate_shares_prefix.py`.
 
+### `scripts/backfill_email_search_key.py`
+
+**One-off backfill: index existing accounts for admin email prefix search.** The accounts
+table's `emailSearchIndex` GSI (constant `emailSearchKey` + `email` range key) is sparse,
+so an account written before the index existed carries no `emailSearchKey` and would be
+invisible to `adminSearchUser` email search. This script conditionally sets the attribute
+on every account that is missing it, so re-running it while sign-ins keep writing is safe.
+
+**Deployment order (required):** deploy the account write path (the Cognito bootstrap
+trigger sets `emailSearchKey`) → run this script and then `--verify` until it reports zero
+remaining accounts → only then apply the table change that creates the index.
+
+**Key flags/arguments:** `--verify` reports accounts still missing the attribute, writes
+nothing, and exits non-zero while any remain (use it to gate the index rollout). Requires
+the `ACCOUNTS_TABLE_NAME` environment variable (or set via `.env`). Run with:
+`uv run python scripts/backfill_email_search_key.py [--verify]`.
+
+### `scripts/provision-user-totp.sh`
+
+**Provision (or re-provision) a Cognito TOTP device for a user and print the base32
+secret on stdout.** Re-provisioning always issues a fresh secret, and the script waits out
+the current 30-second TOTP window so the next sign-in does not resubmit a consumed code.
+Invoked by `create-test-users.sh`, `create-ephemeral-test-users.sh`, and the deploy
+smoke's TOTP step — normally you do not call it directly.
+
+**Key flags/arguments:**
+
+- `<user-pool-id>` — Cognito user pool that owns the user.
+- `<client-id>` — Pool client; must allow `USER_PASSWORD_AUTH` (see the `KernelWorx-Web`
+  client note in `AGENTS.md`).
+- `<username>` — User to provision the device for.
+- `PROVISION_USER_TOTP_PASSWORD` — **Required** in the environment. Since #569 the
+  password is no longer accepted as a fourth positional argument: process argv is
+  world-readable via `/proc/<pid>/cmdline` and `ps`, and the script refuses to start
+  without the variable rather than falling back to argv.
+
 ### `scripts/contrast_check.py`
 
 **WCAG contrast checker for KernelWorx brand colors.** Audits all text/background
@@ -160,6 +246,9 @@ credentials, comments) is preserved. A missing target file is created from the m
 committed template (`.env.example` / `frontend/.env.example`). Managed keys:
 `TEST_APPSYNC_ENDPOINT`, `TEST_USER_POOL_ID`, `TEST_USER_POOL_CLIENT_ID`, `TEST_REGION`,
 `E2E_BASE_URL` (when the stack exposes `site_url`), and the `VITE_*` frontend keys.
+The public-orders API-key vars (`TEST_APPSYNC_API_KEY`, `VITE_APPSYNC_API_KEY`) are
+managed only when the stack exposes the `appsync_api_key` output; on an older stack
+they are omitted and the template placeholder line is commented out instead.
 
 **Key flags/arguments:**
 
@@ -169,7 +258,10 @@ committed template (`.env.example` / `frontend/.env.example`). Managed keys:
 - `--outputs-json <file>` — Read a captured `tofu output -json` document instead of the
   live stack (no AWS access needed).
 - `--check` — Verify the existing file(s) without writing: managed keys must be present
-  and non-empty; with `--outputs-json`, values must also match the OpenTofu outputs.
+  and non-empty; with `--outputs-json`, values must also match the OpenTofu outputs. The
+  conditional API-key vars are the exception both ways: absent from both stack and file
+  they are reported as skipped, present in the file while absent from the stack they
+  count as stale.
 
 The live stack path sources `./.env` for `TF_VAR_encryption_passphrase` and AWS
 credentials and only runs `tofu init` (ephemeral backend selection) and
@@ -179,8 +271,13 @@ credentials and only runs `tofu init` (ephemeral backend selection) and
 
 **Common helpers for ephemeral environment recovery workflows.** Not intended to be run
 directly; sourced by `ephemeral-env.sh`, `recover-deploy.sh`, and `recover-destroy.sh`.
-Provides functions for env loading, backend initialization, S3 bucket emptying, stale
-lock cleanup, state recovery, resource importing, and CloudWatch log group cleanup.
+Provides functions for env loading, run-id validation, backend initialization, S3 bucket
+emptying, stale lock cleanup, state recovery, resource importing, and CloudWatch log
+group cleanup.
+
+`validate_run_id` is the single owner of the run-id rule; see
+[Run identifiers](#run-identifiers-ephemeral-runs) above for the contract it
+enforces and for the entry points that call it.
 
 **Key flags/arguments:** None (sourced library).
 
@@ -193,10 +290,11 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 **Build, test, lint, and deployment commands.** Top-level targets include:
 
 - `make all` — Format + lint + typecheck + test (backend + frontend)
-- `make ci` — Spellcheck + lint + typecheck + test (backend + frontend) + guards
+- `make ci` — Spellcheck + lint + typecheck + test (backend + frontend) + guards + js-resolvers
 - `make test` — Python unit tests
 - `make test-e2e` — Python E2E smoke tests
-- `make test-all` — All tests (unit + guards + frontend + integration + e2e)
+- `make test-all` — All tests (unit + guards + frontend + integration + e2e + js-resolvers)
+- `make js-resolvers` — AppSync JS resolver tests (node --test)
 - `make lint` — Run all linters
 - `make format` — Format all code
 - `make tflint` — Run tflint on OpenTofu code
@@ -206,7 +304,7 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 
 ### GitHub Actions workflows (`.github/workflows/`)
 
-- **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + complexity + test + guards)
+- **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + codegen-sync + complexity + test + guards + js-resolvers + infra lint)
 - **`deploy-dev.yml`** / **`deploy-prod.yml`** — Environment deployment workflows
 - **`deploy-shared.yml`** — Shared infrastructure (Cognito, CloudFront, WAF) deployment
 - **`ephemeral-test.yml`** — Ephemeral environment test creation/destruction
@@ -232,6 +330,8 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
 | Delete the Alex Kernel Cognito user (preserving data)       | `scripts/delete-screenshot-user.sh`        |
 | Delete test user catalogs                                   | `scripts/delete-test-catalogs.py`          |
 | Run shares table migration (dev only)                       | `scripts/migrate_shares_prefix.py`         |
+| Backfill accounts email prefix-search key                  | `scripts/backfill_email_search_key.py`     |
+| Provision a TOTP device for a test user                     | `scripts/provision-user-totp.sh`           |
 | Check WCAG contrast of brand colors                         | `scripts/contrast_check.py`                |
 | Sync Route53 DNS to CloudFlare                              | `scripts/sync-to-cloudflare.sh`            |
 | Generate integration test env config from tofu outputs      | `scripts/generate_integration_env.py`      |
@@ -258,7 +358,7 @@ lock cleanup, state recovery, resource importing, and CloudWatch log group clean
   environment.
 - Recovery scripts (`recover-deploy.sh`, `recover-destroy.sh`) source `ephemeral-recover-common.sh`
   and will fail loudly if the encryption passphrase is missing.
-- The `appsync-ensure-resolver-order.sh` script targets specific resolver/function addresses
-  identified in `tofu/application/modules/appsync/resolvers_mutations.tf` and
-  `resolvers_queries.tf`. The current pilot targets: `create_order`, `validate_payment_method_appsync`,
-  `create_seller_profile`, `create_campaign`, `update_my_account`, `list_my_shares`.
+- The `appsync-ensure-resolver-order.sh` script derives its `-exclude` addresses from the plan
+  JSON it produces itself, so no resolver/function address list is maintained in
+  `.github/workflows/deploy-shared.yml` or `scripts/ephemeral-env.sh`. If a deploy ever passes
+  a `-t` target again, `tests/unit/test_ephemeral_deploy_resolver_parity.py` fails.

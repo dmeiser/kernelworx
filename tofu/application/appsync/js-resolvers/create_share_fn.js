@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId, normalizeIdOrPrefix, stripIdPrefix } from './lib/ids.js';
 
 function validatePermissions(permissions) {
     if (!Array.isArray(permissions) || permissions.length === 0) {
@@ -22,7 +23,7 @@ export function request(ctx) {
 
     const input = ctx.args && ctx.args.input ? ctx.args.input : {};
     var targetAccountId = ctx.stash ? ctx.stash.targetAccountId : undefined;
-    const profileId = input.profileId || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
+    const profileId = (ctx.stash && ctx.stash.profile && ctx.stash.profile.profileId) || input.profileId || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
     const permissions = input.permissions || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.permissions : undefined);
 
     validatePermissions(permissions);
@@ -43,8 +44,8 @@ export function request(ctx) {
     }
     
     // Ensure targetAccountId has ACCOUNT# prefix
-    if (targetAccountId && !targetAccountId.startsWith('ACCOUNT#')) {
-        targetAccountId = `ACCOUNT#${targetAccountId}`;
+    if (targetAccountId) {
+        targetAccountId = normalizeId(targetAccountId, 'ACCOUNT#');
     }
     
     // Generate shareId for backward compatibility with tests
@@ -52,7 +53,7 @@ export function request(ctx) {
     const shareId = `SHARE#${targetAccountId}`;
     
     // Normalize profileId to ensure PROFILE# prefix is used when storing shares
-    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeIdOrPrefix(profileId, 'PROFILE#');
 
     const callerSub = ctx.identity && ctx.identity.sub ? ctx.identity.sub : '';
     const shareItem = {
@@ -61,7 +62,7 @@ export function request(ctx) {
         shareId: shareId,
         permissions: permissions,
         ownerAccountId: ownerAccountId,  // Store for BatchGetItem lookup
-        createdByAccountId: `ACCOUNT#${callerSub}`,
+        createdByAccountId: normalizeIdOrPrefix(callerSub, 'ACCOUNT#'),
         createdAt: now
     };
     
@@ -90,9 +91,7 @@ export function response(ctx) {
     // Return the share item with targetAccountId stripped of ACCOUNT# prefix
     // Keep profileId with PROFILE# prefix for consistency with createSellerProfile
     const shareItem = (ctx.stash && ctx.stash.shareItem) ? ctx.stash.shareItem : (ctx.result || {});
-    const cleanTargetAccountId = shareItem.targetAccountId && shareItem.targetAccountId.startsWith('ACCOUNT#')
-        ? shareItem.targetAccountId.substring(8)
-        : shareItem.targetAccountId;
+    const cleanTargetAccountId = stripIdPrefix(shareItem.targetAccountId, 'ACCOUNT#');
     
     return {
         ...shareItem,

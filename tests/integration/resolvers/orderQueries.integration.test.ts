@@ -680,7 +680,7 @@ describe('Order Query Operations Integration Tests', () => {
 
     test('Authorization: Non-shared user cannot get order', async () => {
       // ✅ FIXED Bug #22: getOrder now includes authorization via pipeline resolver
-      // Pipeline: QueryOrderFn → VerifyProfileReadAccessFn → CheckShareReadPermissionsFn → ReturnOrderFn
+      // Pipeline: QueryOrderFn → VerifyProfileReadAccessFn → VerifyProfileReadAccessStep2Fn → CheckShareReadPermissionsFn → ReturnOrderFn
       // Test: contributor tries to access order from unshared profile
       // Expected: Returns null (query permissions model - don't error)
       

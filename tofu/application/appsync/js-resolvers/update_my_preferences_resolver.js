@@ -1,7 +1,8 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
-    const accountId = 'ACCOUNT#' + ctx.identity.sub;
+    const accountId = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
     const preferences = ctx.args.preferences;
     const now = util.time.nowISO8601();
     

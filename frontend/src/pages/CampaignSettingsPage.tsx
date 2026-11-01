@@ -23,6 +23,7 @@ import {
   AlertTitle,
   FormControlLabel,
   Switch,
+  Snackbar,
 } from '@mui/material';
 import { Delete as DeleteIcon, Warning as WarningIcon } from '@mui/icons-material';
 import {
@@ -33,12 +34,19 @@ import {
   LIST_MY_CATALOGS,
   LIST_CAMPAIGNS_BY_PROFILE,
 } from '../lib/graphql';
+import { useCampaignPublicOrderSettings } from '../hooks/useCampaignPublicOrderSettings';
 import { LoadingState } from '../components/LoadingState';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { UnitInfoSection } from '../components/UnitInfoSection';
+import { PublicSettingsShareSection } from '../components/public/PublicSettingsShareSection';
+import { PublicSettingsCapNotice } from '../components/public/PublicSettingsCapNotice';
+import { PublicSettingsAckCheckboxes } from '../components/public/PublicSettingsAckCheckboxes';
+import { PublicSettingsMethodChecklist } from '../components/public/PublicSettingsMethodChecklist';
+import { PublicSettingsActions } from '../components/public/PublicSettingsActions';
 import { ensureCampaignId, ensureCatalogId, ensureProfileId, toUrlId } from '../lib/ids';
 import { dateToISO } from '../lib/date-utils';
 import type { GqlCampaign, GqlCatalog } from '../types';
+const PUBLIC_ORDER_CAP = 500;
 
 /* eslint-disable complexity */
 
@@ -265,7 +273,30 @@ const initializeFormFromCampaign = (
   }
 };
 
-export const CampaignSettingsPage: React.FC = () => {
+// Helper to format public order mutation error messages
+const getPublicOrderMutationErrorMessage = (
+  error: { operation: string; message: string } | null,
+): string => {
+  if (!error) return '';
+  switch (error.operation) {
+    case 'rotate':
+      return `Failed to rotate share token: the token is STILL ACTIVE. ${error.message}`;
+    case 'save':
+      return `Failed to save public order settings: ${error.message}`;
+    case 'enable':
+      return `Failed to enable public orders: ${error.message}`;
+    case 'disable':
+      return `Failed to disable public orders: ${error.message}`;
+    default:
+      return `Operation failed: ${error.message}`;
+  }
+};
+
+interface CampaignSettingsPageProps {
+  isOwner?: boolean;
+}
+
+export const CampaignSettingsPage: React.FC<CampaignSettingsPageProps> = ({ isOwner = true }) => {
   const { profileId: encodedProfileId, campaignId: encodedCampaignId } = useParams<{
     profileId: string;
     campaignId: string;
@@ -317,6 +348,30 @@ export const CampaignSettingsPage: React.FC = () => {
   const publicCatalogs = getPublicCatalogs(publicCatalogsData);
   const myCatalogs = getMyCatalogs(myCatalogsData);
   const allCatalogs = getAllCatalogs(publicCatalogs, myCatalogs);
+
+  // Fetch public order settings
+  const {
+    settings: publicOrderSettings,
+    loading: publicOrderLoading,
+    updating: publicOrderUpdating,
+    setField: setPublicOrderField,
+    save: savePublicOrderSettings,
+    rotateToken: rotatePublicOrderToken,
+    disable: disablePublicOrderSettings,
+    enable: enablePublicOrderSettings,
+    draft: publicOrderDraft,
+    availablePaymentMethods: publicOrderAvailablePaymentMethods,
+    setPaymentAckAccepted: setPublicOrderPaymentAck,
+    setDisclosureAckAccepted: setPublicOrderDisclosureAck,
+    paymentAckAccepted: publicOrderPaymentAck,
+    disclosureAckAccepted: publicOrderDisclosureAck,
+    acknowledgementsAccepted: publicOrderAcknowledgementsAccepted,
+    queryError: publicOrderQueryError,
+    refetch: refetchPublicOrderSettings,
+    isNotFound: publicOrderIsNotFound,
+    mutationError: publicOrderMutationError,
+    clearMutationError: clearPublicOrderMutationError,
+  } = useCampaignPublicOrderSettings({ campaignId: isOwner ? dbCampaignId : null });
 
   // Initialize form when campaign loads
   React.useEffect(() => {
@@ -544,6 +599,96 @@ export const CampaignSettingsPage: React.FC = () => {
           readOnly={hasSharedCampaignCode(campaign)}
         />
       </Paper>
+
+      {/* Public Orders */}
+      {isOwner && (
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Public Orders
+          </Typography>
+          {publicOrderMutationError && (
+            <Snackbar
+              open={Boolean(publicOrderMutationError)}
+              autoHideDuration={8000}
+              onClose={clearPublicOrderMutationError}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            >
+              <Alert
+                severity="error"
+                onClose={clearPublicOrderMutationError}
+                sx={{ width: '100%' }}
+              >
+                {getPublicOrderMutationErrorMessage(publicOrderMutationError)}
+              </Alert>
+            </Snackbar>
+          )}
+          {publicOrderLoading && !publicOrderSettings && <LoadingState minHeight="200px" />}
+          {!publicOrderLoading && publicOrderQueryError && !publicOrderIsNotFound && (
+            <Alert
+              severity="error"
+              action={
+                <Button color="inherit" size="small" onClick={() => void refetchPublicOrderSettings?.()}>
+                  Retry
+                </Button>
+              }
+              sx={{ mb: 2 }}
+            >
+              Failed to load public order settings.
+            </Alert>
+          )}
+          {!publicOrderLoading && (publicOrderIsNotFound || (!publicOrderSettings && !publicOrderQueryError)) && (
+            <Typography variant="body2" color="text.secondary">
+              Public order settings not available for this campaign.
+            </Typography>
+          )}
+          {publicOrderSettings && !publicOrderLoading && (
+            <>
+              <PublicSettingsShareSection
+                campaignId={publicOrderSettings.campaignId}
+                shareToken={publicOrderSettings.token}
+                campaignName={publicOrderSettings.campaignName}
+              />
+              <PublicSettingsCapNotice
+                publicOrderCount={publicOrderSettings.publicOrderCount}
+                maxOrders={PUBLIC_ORDER_CAP}
+              />
+              <Stack spacing={3}>
+                <PublicSettingsAckCheckboxes
+                  paymentAckAccepted={publicOrderPaymentAck}
+                  disclosureAckAccepted={publicOrderDisclosureAck}
+                  onPaymentAckChange={setPublicOrderPaymentAck}
+                  onDisclosureAckChange={setPublicOrderDisclosureAck}
+                  disabled={publicOrderUpdating}
+                />
+                <PublicSettingsMethodChecklist
+                  availablePaymentMethods={publicOrderAvailablePaymentMethods}
+                  allowedPaymentMethods={publicOrderDraft.allowedPaymentMethods}
+                  onChange={(methods) => setPublicOrderField('allowedPaymentMethods', methods)}
+                  disabled={publicOrderUpdating}
+                />
+                <PublicSettingsActions
+                  enabled={publicOrderSettings.enabled}
+                  canEnable={publicOrderAcknowledgementsAccepted && publicOrderDraft.allowedPaymentMethods.length > 0}
+                  canSave={!publicOrderSettings.enabled || publicOrderAcknowledgementsAccepted}
+                  onRotate={() => {
+                    void rotatePublicOrderToken();
+                  }}
+                  onDisable={() => {
+                    void disablePublicOrderSettings();
+                  }}
+                  onEnable={() => {
+                    void enablePublicOrderSettings();
+                  }}
+                  saving={publicOrderUpdating}
+                  onSave={() => {
+                    void savePublicOrderSettings();
+                  }}
+                />
+              </Stack>
+            </>
+          )}
+        </Paper>
+      )}
 
       {/* Danger Zone */}
       <Paper

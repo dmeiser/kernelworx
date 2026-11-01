@@ -158,3 +158,18 @@ resource "aws_appsync_datasource" "admin_operations" {
     function_arn = var.lambda_function_arns["admin-operations"]
   }
 }
+
+# Public buyer order offer + receipt (API key auth mode, #679). One unit
+# resolver per public read field, both on this Lambda; the handler dispatches
+# on info.fieldName. The publicCreateOrder mutation is a separate pipeline on
+# the DynamoDB datasources and does not touch this datasource.
+resource "aws_appsync_datasource" "public_orders" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "PublicOrdersDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["public-orders"]
+  }
+}

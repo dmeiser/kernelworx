@@ -26,17 +26,14 @@ import {
   MenuItem,
   Checkbox,
   FormControlLabel,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
 } from '@mui/material';
-import { ArrowBack as BackIcon, Save as SaveIcon, ExpandMore as ExpandMoreIcon } from '@mui/icons-material';
+import { ArrowBack as BackIcon, Save as SaveIcon } from '@mui/icons-material';
 import { useCreateCampaignPageSetup } from '../hooks/useCreateCampaignPageSetup';
 import { CatalogSection } from '../components/CatalogSection';
-import { StateAutocomplete } from '../components/StateAutocomplete';
+import { CampaignYearField } from '../components/CampaignYearField';
 import { PageHeader } from '../components/PageHeader';
 import { LoadingState } from '../components/LoadingState';
-import { UNIT_TYPES } from '../constants/unitTypes';
+import { UnitInfoSection } from '../components/UnitInfoSection';
 import { brand } from '../lib/theme';
 import type { GqlSharedCampaign, GqlSellerProfile } from '../types';
 
@@ -149,19 +146,12 @@ const CampaignNameYearSection: React.FC<CampaignNameYearSectionProps> = ({
           fullWidth
           disabled={submitting}
         />
-        <TextField
+        <CampaignYearField
           label="Year"
-          type="number"
           value={campaignYear}
-          onChange={(e) => onCampaignYearChange(parseInt(e.target.value, 10))}
-          required
+          onChange={onCampaignYearChange}
           disabled={submitting}
           sx={{ minWidth: { xs: '100%', sm: 120 } }}
-          inputProps={{
-            min: 2020,
-            max: new Date().getFullYear() + 5,
-            step: 1,
-          }}
         />
       </Stack>
     </Stack>
@@ -211,93 +201,6 @@ const DateRangeSection: React.FC<DateRangeSectionProps> = ({
     </Stack>
   </Box>
 );
-
-interface UnitInfoSectionProps {
-  unitType: string;
-  onUnitTypeChange: (value: string) => void;
-  unitNumber: string;
-  onUnitNumberChange: (value: string) => void;
-  city: string;
-  onCityChange: (value: string) => void;
-  state: string;
-  onStateChange: (value: string) => void;
-  submitting: boolean;
-  expanded: boolean;
-  onExpandChange: (expanded: boolean) => void;
-}
-
-const UnitInfoSection: React.FC<UnitInfoSectionProps> = ({
-  unitType,
-  onUnitTypeChange,
-  unitNumber,
-  onUnitNumberChange,
-  city,
-  onCityChange,
-  state,
-  onStateChange,
-  submitting,
-  expanded,
-  onExpandChange,
-}) => {
-  const fieldDisabled = submitting || !unitType;
-
-  return (
-    <Accordion expanded={expanded} onChange={(_, isExpanded) => onExpandChange(isExpanded)}>
-      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-        <Typography>
-          Unit Information (Optional){' '}
-          {unitType && (
-            <span>
-              {' '}
-              - {unitType} {unitNumber}
-            </span>
-          )}
-        </Typography>
-      </AccordionSummary>
-      <AccordionDetails>
-        <Stack spacing={2} sx={{ width: '100%' }}>
-          <Alert severity="info">
-            Adding unit information enables participation in unit reports and allows coordination with other unit
-            members.
-          </Alert>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-            <FormControl fullWidth disabled={submitting}>
-              <InputLabel>Unit Type</InputLabel>
-              <Select value={unitType} onChange={(e) => onUnitTypeChange(e.target.value)} label="Unit Type">
-                {UNIT_TYPES.map((option) => (
-                  <MenuItem key={`unit-${option.value}`} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              fullWidth
-              label="Unit Number"
-              type="number"
-              value={unitNumber}
-              onChange={(e) => onUnitNumberChange(e.target.value)}
-              disabled={fieldDisabled}
-              inputProps={{ min: 1, step: 1 }}
-              helperText={unitType ? 'Required' : 'Select unit type first'}
-            />
-          </Stack>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-            <TextField
-              fullWidth
-              label="City"
-              value={city}
-              onChange={(e) => onCityChange(e.target.value)}
-              disabled={fieldDisabled}
-              helperText={unitType ? 'Required for unit identification' : ''}
-            />
-            <StateAutocomplete value={state} onChange={onStateChange} disabled={fieldDisabled} fullWidth />
-          </Stack>
-        </Stack>
-      </AccordionDetails>
-    </Accordion>
-  );
-};
 
 interface SharedCampaignSectionProps {
   sharedCampaign: GqlSharedCampaign;

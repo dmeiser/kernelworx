@@ -2,6 +2,7 @@
  * Validate update payment method request.
  */
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const accountId = ctx.identity.sub;
@@ -30,7 +31,7 @@ export function request(ctx) {
     ctx.stash.newName = newName;
     ctx.stash.newLower = newLower;
 
-    const key = { accountId: `ACCOUNT#${accountId}` };
+    const key = { accountId: normalizeIdOrPrefix(accountId, 'ACCOUNT#') };
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues(key),
@@ -56,6 +57,7 @@ export function response(ctx) {
     }
 
     ctx.stash.existingMethods = methods;
+    ctx.stash.existingQrCodeUrl = exists.qrCodeUrl || null;
 
     // Carry the raw read preferences snapshot so the mutation step can apply an
     // optimistic lock (preferences = :readPrefs) against concurrent writes.

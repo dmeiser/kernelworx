@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 function parseIsoToMs(dateStr) {
     if (typeof dateStr !== 'string') {
@@ -19,9 +20,7 @@ export function request(ctx) {
     const input = ctx.args && ctx.args.input ? ctx.args.input : {};
     const profile = ctx.stash && ctx.stash.profile ? ctx.stash.profile : {};
     const rawProfileId = input.profileId || profile.profileId;
-    const dbProfileId = (typeof rawProfileId === 'string' && rawProfileId.startsWith('PROFILE#'))
-        ? rawProfileId
-        : 'PROFILE#' + rawProfileId;
+    const dbProfileId = normalizeIdOrPrefix(rawProfileId, 'PROFILE#');
 
     const sharedCampaign = ctx.stash && ctx.stash.sharedCampaign;
 
@@ -80,9 +79,7 @@ export function request(ctx) {
     if (!rawCatalogId || (typeof rawCatalogId === 'string' && rawCatalogId.trim() === '')) {
         util.error('catalog_id is required', 'INVALID_INPUT');
     }
-    const catalogId = (typeof rawCatalogId === 'string' && rawCatalogId.startsWith('CATALOG#'))
-        ? rawCatalogId
-        : 'CATALOG#' + rawCatalogId;
+    const catalogId = normalizeIdOrPrefix(rawCatalogId, 'CATALOG#');
 
     // Date range validation
     if (startDate && endDate) {

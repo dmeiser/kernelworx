@@ -3,6 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { GraphQLFormattedError } from 'graphql';
+import { CombinedGraphQLErrors } from '@apollo/client/errors';
 import type { ApolloLikeError } from './api-utils';
 import {
   ok,
@@ -20,6 +21,39 @@ import {
   parseNumber,
   parseInt,
 } from './api-utils';
+
+/**
+ * The error Apollo Client v4 actually throws at runtime: `CombinedGraphQLErrors`
+ * carries the GraphQL error list as `.errors`, not the v3 `.graphQLErrors`.
+ * The code-under-test must recognize this shape or every error-code decision
+ * degrades to "unknown" in the real app (the public receipt page then shows a
+ * transient load failure for a dead link instead of the unavailable screen).
+ */
+function createV4GraphQLError(extensions: Record<string, unknown>): CombinedGraphQLErrors {
+  return new CombinedGraphQLErrors({
+    data: null,
+    errors: [{ message: 'server says no', locations: [], path: ['field'], extensions }],
+  });
+}
+
+/**
+ * The shape AppSync ACTUALLY returns for resolver-emitted errors (asserted
+ * against the live stack by tests/integration/resolvers/publicOrders):
+ * `util.error(message, type)` puts `errorType` on the error's top level, and
+ * the Lambda passthrough/unit resolvers' 4th util.error argument comes back as
+ * a top-level `errorInfo` object — neither lands in `extensions`.
+ */
+function createV4AppSyncError(fields: {
+  message: string;
+  errorType?: string;
+  errorInfo?: { errorCode?: string };
+  extensions?: Record<string, unknown>;
+}): CombinedGraphQLErrors {
+  return new CombinedGraphQLErrors({
+    data: null,
+    errors: [{ locations: [], path: ['field'], ...fields }],
+  });
+}
 
 // Helper to create mock Apollo errors
 function createApolloError(
@@ -98,6 +132,10 @@ describe('isApolloLikeError', () => {
 
   it('should return false for object without graphQLErrors array', () => {
     expect(isApolloLikeError({ graphQLErrors: 'not an array' })).toBe(false);
+  });
+
+  it('should return true for Apollo Client v4 CombinedGraphQLErrors', () => {
+    expect(isApolloLikeError(createV4GraphQLError({ errorCode: 'NOT_FOUND' }))).toBe(true);
   });
 });
 
@@ -388,6 +426,49 @@ describe('isForbiddenError', () => {
 });
 
 describe('isNotFoundError', () => {
+  it('should recognize NOT_FOUND carried by an Apollo Client v4 CombinedGraphQLErrors', () => {
+    const error = createV4GraphQLError({ errorCode: 'NOT_FOUND' });
+    expect(getErrorCode(error)).toBe('NOT_FOUND');
+    expect(isNotFoundError(error)).toBe(true);
+  });
+
+  it('should read the AppSync-native top-level errorType a JS resolver util.error emits', () => {
+    // Real AppSync shape: util.error(message, type) -> top-level errorType,
+    // no extensions at all. This is what a tampered public receipt token gets.
+    const error = createV4AppSyncError({ message: 'Receipt not available', errorType: 'NOT_FOUND' });
+    expect(getErrorCode(error)).toBe('NOT_FOUND');
+    expect(isNotFoundError(error)).toBe(true);
+    expect(getErrorMessage(error, 'fallback')).toBe('Receipt not available');
+  });
+
+  it('should read errorInfo.errorCode the Lambda passthrough/unit resolvers emit', () => {
+    // util.error(message, code, null, { errorCode }) -> top-level errorInfo.
+    const error = createV4AppSyncError({
+      message: 'Receipt not available',
+      errorType: 'NOT_FOUND',
+      errorInfo: { errorCode: 'NOT_FOUND' },
+    });
+    expect(getErrorCode(error)).toBe('NOT_FOUND');
+    expect(isNotFoundError(error)).toBe(true);
+  });
+
+  it('should prefer errorInfo.errorCode over the util.error type argument', () => {
+    const error = createV4AppSyncError({
+      message: 'Payment method is not available for this seller',
+      errorType: 'INVALID_INPUT',
+      errorInfo: { errorCode: 'PUBLIC_METHOD_UNAVAILABLE' },
+    });
+    expect(getErrorCode(error)).toBe('PUBLIC_METHOD_UNAVAILABLE');
+  });
+
+  it('should read the server message from a CombinedGraphQLErrors', () => {
+    const error = new CombinedGraphQLErrors({
+      data: null,
+      errors: [{ message: 'Receipt not available', locations: [], path: ['publicGetOrderReceipt'], extensions: {} }],
+    });
+    expect(getErrorMessage(error, 'fallback')).toBe('Receipt not available');
+  });
+
   it('should return true for NOT_FOUND code', () => {
     const error = createApolloError('Not found', [
       {

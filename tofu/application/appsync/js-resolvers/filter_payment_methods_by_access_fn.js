@@ -42,18 +42,19 @@ export function response(ctx) {
     const allMethods = [...globalMethods, ...filteredMethods];
 
     // Sort alphabetically (case-insensitive) using APPSYNC_JS-compatible approach:
-    // 1. Add lowercase sortKey to each method
-    // 2. Extract and sort keys using default .sort()
-    // 3. Reorder methods based on sorted keys
-    const withKeys = allMethods.map(m => ({ ...m, sortKey: m.name.toLowerCase() }));
-    const sortedKeys = withKeys.map(m => m.sortKey);
+    // Build the lookup index once, sort the keys, and reorder.
+    // NOTE: relies on case-insensitively-unique payment method names, enforced by
+    // payment_methods.py:_check_duplicate_name and validate_create_payment_method_fn.js.
+    const byKey = {};
+    for (const m of allMethods) {
+        byKey[m.name.toLowerCase()] = m;
+    }
+    const sortedKeys = Object.keys(byKey);
     sortedKeys.sort();
 
-    // Reorder based on sorted keys and strip the sortKey
-    const sorted = sortedKeys.map(k => withKeys.find(m => m.sortKey === k));
-    const result = sorted.map(m => ({
-        name: m.name,
-        qrCodeUrl: m.qrCodeUrl,
+    const result = sortedKeys.map(k => ({
+        name: byKey[k].name,
+        qrCodeUrl: byKey[k].qrCodeUrl,
     }));
 
     return result;

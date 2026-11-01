@@ -22,7 +22,5 @@ export function response(ctx) {
     
     // Authorized - return the campaign with field mapping
     const campaign = ctx.stash.campaign;
-    // Map DynamoDB field campaignId to GraphQL field campaignId
-    campaign.campaignId = campaign.campaignId;
     return campaign;
 }

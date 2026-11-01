@@ -13,6 +13,8 @@ describe('lookup_order_fn request', () => {
         assert.strictEqual(result.operation, 'GetItem');
         assert.strictEqual(result.key.campaignId, 'CAMPAIGN#campaign-123');
         assert.strictEqual(result.key.orderId, 'ORDER#campaign-123#550e8400-e29b-41d4-a716-446655440000');
+        // Strongly-consistent base-table read, so getOrder right after createOrder sees the row.
+        assert.strictEqual(result.consistentRead, true);
     });
 
     it('falls back to GSI Query for legacy order IDs', () => {

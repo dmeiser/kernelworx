@@ -26,6 +26,19 @@ resource "aws_appsync_function" "update_campaign" {
   code = file("${local.js_resolvers_dir}/update_campaign_fn.js")
 }
 
+resource "aws_appsync_function" "verify_update_catalog_access" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.catalogs.name
+  name        = "VerifyUpdateCatalogAccessFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_update_catalog_access_fn.js")
+}
+
 resource "aws_appsync_function" "lookup_campaign_for_delete" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.campaigns.name
@@ -62,11 +75,13 @@ resource "aws_appsync_function" "delete_campaign_orders" {
     runtime_version = "1.0.0"
   }
 
-  # WARNING: templatefile() interpolates every `${...}` sequence in the source as a
-  # Terraform variable reference. The bundled source keeps only the intended
-  # `${table_name}` placeholder; any JS template literal added to the source will
-  # either fail the plan or be silently substituted. Do not add `${...}` to the
-  # source without also switching this to file() (#284 defers that switch).
+  # templatefile() reads the esbuild bundle in appsync/dist/, which strips
+  # ordinary comments, so a dollar-brace sequence that survives bundling is
+  # interpolated as a Terraform expression: in a string literal it aborts every
+  # plan/apply with "Invalid expression". `${table_name}` is the only intended
+  # placeholder; escape a literal as `$${...}` or switch this to file()
+  # (#284 defers that switch). Enforced by
+  # tests/unit/check_templatefile_escaping.test.ts (#570).
   code = templatefile("${local.js_resolvers_dir}/delete_campaign_orders_fn.js", {
     table_name = var.dynamodb_table_names.orders
   })
@@ -351,4 +366,171 @@ resource "aws_appsync_function" "refresh_latest_campaign_write" {
   }
 
   code = file("${local.js_resolvers_dir}/refresh_latest_campaign_write_fn.js")
+}
+
+# === #679 rev 7 public-order settings (campaign-keyed, owner-only) ===
+
+# Locator, first in both settings pipelines. The Campaigns base table is keyed
+# {profileId, campaignId}, so a campaignId alone cannot address the row: this
+# reads the campaignId-index GSI purely to learn the partition key, and hands
+# the located item to the write-access pair through ctx.stash.campaign. The GSI
+# row is a locator only - ownership is decided by the pair's consistent
+# base-table read (#438) and the settings are re-read consistently below.
+resource "aws_appsync_function" "locate_campaign_public_settings" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "LocateCampaignPublicSettingsFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/locate_campaign_public_settings_fn.js")
+}
+
+# Authoritative settings read of getCampaignPublicOrderSettings. Rev 7 stores
+# the publicOrders map on the campaign item, so one strongly consistent GetItem
+# returns the settings, the lifetime counter, and the campaign's own name and
+# active state. Keyed by the located partition key, so a campaignId belonging to
+# another profile is a GetItem miss rather than a cross-account read.
+resource "aws_appsync_function" "lookup_campaign_public_settings" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "LookupCampaignPublicSettingsFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lookup_campaign_public_settings_fn.js")
+}
+
+# Campaign gate of updateCampaignPublicOrderSettings: a caller who does not
+# own the profile is refused FORBIDDEN by verify_public_settings_owner two
+# steps earlier, so the consistent GetItem miss here answers NOT_FOUND only
+# for a campaign deleted between the locator read and this read. When the save
+# is actually publishing (enabling from an off state), the campaign must be
+# active and carry a catalog. Disable, method-list and rotate-token saves stay
+# allowed over an inactive campaign so the seller always has a working off
+# switch and token revocation path.
+resource "aws_appsync_function" "validate_campaign_settings_write" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "ValidateCampaignSettingsWriteFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_campaign_settings_write_fn.js")
+}
+
+# Conditioned UpdateItem writing the campaign's publicOrders map. The
+# attribute_not_exists(publicOrders.#token) guard is what makes a concurrent
+# first-enable lose instead of overwriting the share token, and
+# attribute_exists(campaignId) (the table's range key) makes a concurrent
+# campaign delete win instead of leaving settings on a row that is going away -
+# which is also why rev 7 needs no campaign-delete auto-disable hook.
+resource "aws_appsync_function" "write_campaign_public_order_settings" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "WriteCampaignPublicOrderSettingsFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/write_campaign_public_order_settings_fn.js")
+}
+
+# =============================================================================
+# publicCreateOrder pipeline functions - campaign locator + cap gate (#679)
+# =============================================================================
+
+# Step 1: locate the campaign through the campaignId-index GSI. A GSI locator
+# only; the consistent read in step 2 is what authorizes (#545). A pipeline may
+# list a function id only once (#438), so each step is its own function resource.
+resource "aws_appsync_function" "validate_public_token" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "ValidatePublicTokenFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_public_token_fn.js")
+}
+
+# Step 2: the strong campaign read carrying the token, active, cap pre-check,
+# allowlist, ack, and input-bound checks; stashes the campaign + catalogId.
+resource "aws_appsync_function" "validate_public_token_step2" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "ValidatePublicTokenStep2Fn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/validate_public_token_step2_fn.js")
+}
+
+# Step 3: the per-share-token fixed-window throttle (SEC-6). A blind atomic
+# UpdateItem on a tiny item in the public-order-throttles table; the condition
+# is the rate bound. Rejects with the campaign-cap limit error shape.
+resource "aws_appsync_function" "throttle_public_order_create" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.public_order_throttles.name
+  name        = "ThrottlePublicOrderCreateFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/throttle_public_order_create_fn.js")
+}
+
+# Step 6: the cap CONDITION (atomic ADD on the campaign). Runs before the write.
+resource "aws_appsync_function" "increment_public_order_count" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "IncrementPublicOrderCountFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/increment_public_order_count_fn.js")
+}
+
+# #746: maintain the denormalized Campaign.totalOrders / Campaign.totalRevenue
+# counters on the campaign item. Runs AFTER the order write in the
+# authenticated order-write pipelines (createOrder, updateOrder, deleteOrder);
+# each lists it at most once (#438), and the same function resource is
+# reusable across pipelines. The delta travels on ctx.stash.totalsDelta,
+# stashed by the preceding write step. publicCreateOrder cannot use this step
+# (its resolver is at AppSync's 10-function cap), so its totals update rides
+# inside create_public_order's TransactWriteItems instead. The VTL field
+# resolvers serve the counter when present and fall back to their old
+# per-campaign queries for unmigrated rows.
+resource "aws_appsync_function" "sync_campaign_totals" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "SyncCampaignTotalsFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/sync_campaign_totals_fn.js")
 }

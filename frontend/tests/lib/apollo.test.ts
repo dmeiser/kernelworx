@@ -34,6 +34,18 @@ describe('lib/apollo', () => {
       expect(mapErrorCodeToMessage('FORBIDDEN', 'MFA required')).toBe('MFA required');
       expect(mapErrorCodeToMessage(undefined, 'MFA required')).toBe('MFA required');
     });
+
+    it('maps RESOURCE_BUSY to a generic message instead of the server text', () => {
+      // The server's RESOURCE_BUSY message is an internal detail; the operator
+      // must never see the table name, key counts, or underlying SDK error.
+      const serverMessage = 'DynamoDB BatchGetItem failed to return 7 keys after retries';
+      const msg = mapErrorCodeToMessage('RESOURCE_BUSY', serverMessage);
+
+      expect(msg).not.toBe(serverMessage);
+      expect(msg).not.toContain('BatchGetItem');
+      expect(msg).not.toContain('keys');
+      expect(msg).toBe('This operation could not be completed right now. Please try again.');
+    });
   });
 
   describe('getAuthContext', () => {

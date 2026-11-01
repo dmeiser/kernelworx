@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 /**
  * listMyShares pipeline - function 1 of 2.
@@ -24,13 +25,6 @@ import { util } from '@aws-appsync/utils';
 
 const MAX_PAGE_LIMIT = 100;
 
-function normalizeAccountId(accountId) {
-    if (typeof accountId !== 'string') {
-        accountId = '';
-    }
-    return accountId.startsWith('ACCOUNT#') ? accountId : `ACCOUNT#${accountId}`;
-}
-
 function hasAccessiblePermissions(permissions) {
     if (!Array.isArray(permissions) || permissions.length === 0) {
         return false;
@@ -44,7 +38,7 @@ function hasAccessiblePermissions(permissions) {
 }
 
 export function request(ctx) {
-    const targetAccountId = normalizeAccountId(ctx.identity && ctx.identity.sub);
+    const targetAccountId = normalizeIdOrPrefix(ctx.identity && ctx.identity.sub, 'ACCOUNT#');
     return {
         operation: 'Query',
         index: 'targetAccountId-index',

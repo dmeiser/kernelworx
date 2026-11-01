@@ -24,14 +24,14 @@ Integration tests validate AppSync resolvers by making real GraphQL requests aga
    aws cognito-idp admin-create-user \
      --user-pool-id <USER_POOL_ID> \
      --username integration-test-owner@example.com \
-     --temporary-password 'TempPass123!' \
+     --temporary-password 'TempPass123!Secure' \
      --message-action SUPPRESS
    
    # Contributor account
    aws cognito-idp admin-create-user \
      --user-pool-id <USER_POOL_ID> \
      --username integration-test-contributor@example.com \
-     --temporary-password 'TempPass123!' \
+     --temporary-password 'TempPass123!Secure' \
      --message-action SUPPRESS
    ```
 
@@ -46,9 +46,9 @@ Integration tests validate AppSync resolvers by making real GraphQL requests aga
    export TEST_USER_POOL_ID="us-east-1_xxxxxxxxx"
    export TEST_USER_POOL_CLIENT_ID="xxxxxxxxxxxxxxxxxxxxxxxxxx"
    export TEST_OWNER_EMAIL="integration-test-owner@example.com"
-   export TEST_OWNER_PASSWORD="PermPass123!"
+   export TEST_OWNER_PASSWORD="PermPass123!Secure"
    export TEST_CONTRIBUTOR_EMAIL="integration-test-contributor@example.com"
-   export TEST_CONTRIBUTOR_PASSWORD="PermPass123!"
+   export TEST_CONTRIBUTOR_PASSWORD="PermPass123!Secure"
    ```
 
    **Admin setup:** the owner test user must be a member of the Cognito `ADMIN`

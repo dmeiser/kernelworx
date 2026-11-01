@@ -8,10 +8,11 @@ import { util } from '@aws-appsync/utils';
  * catalog and could be used to create campaigns that are no longer tied to the
  * intended catalog.
  */
+import { normalizeIdOrPrefix } from './lib/ids.js';
+
 export function request(ctx) {
     const catalogId = ctx.args.catalogId;
-    // Normalize catalogId to ensure CATALOG# prefix
-    const dbCatalogId = catalogId && catalogId.startsWith('CATALOG#') ? catalogId : `CATALOG#${catalogId}`;
+    const dbCatalogId = normalizeIdOrPrefix(catalogId, 'CATALOG#');
 
     return {
         operation: 'Query',

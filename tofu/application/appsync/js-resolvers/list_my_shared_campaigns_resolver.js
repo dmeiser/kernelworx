@@ -1,7 +1,8 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix, stripIdPrefix } from './lib/ids.js';
 
 export function request(ctx) {
-    const createdBy = `ACCOUNT#${ctx.identity.sub}`;
+    const createdBy = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
     return {
         operation: 'Query',
         index: 'GSI1',
@@ -28,8 +29,8 @@ export function response(ctx) {
         
         if (item.isActive !== false) {
             // Normalize createdBy: strip ACCOUNT# prefix for GraphQL ID type
-            if (item && item.createdBy && item.createdBy.startsWith('ACCOUNT#')) {
-                item.createdBy = item.createdBy.substring(8);
+            if (item && item.createdBy) {
+                item.createdBy = stripIdPrefix(item.createdBy, 'ACCOUNT#');
             }
             activeItems.push(item);
         }

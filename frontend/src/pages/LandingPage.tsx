@@ -396,7 +396,7 @@ export const LandingPage: React.FC = () => {
                 <StepCard
                   number={2}
                   title="Take orders"
-                  description="Record customer orders, payment methods, and delivery details as sales come in."
+                  description="Record customer orders, payment methods, and contact details as sales come in."
                   illustration={
                     <svg viewBox="0 0 124 108" width="100%" height="100%" aria-hidden="true">
                       <rect
@@ -522,7 +522,7 @@ export const LandingPage: React.FC = () => {
               <FeatureZig
                 kicker="Reports"
                 title="Run reports"
-                description="Generate detailed sales reports in Excel or CSV format. Track totals, payments, and delivery status for any campaign."
+                description="Generate detailed sales reports in Excel or CSV format. Track totals and order details for any campaign."
                 image="/marketing/reports-page.png"
                 imageAlt="Sales report with CSV and Excel export buttons"
                 reverse

@@ -1,8 +1,9 @@
 """Tests for logging utilities."""
 
 import json
+import logging
 from decimal import Decimal
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from src.utils.logging import StructuredLogger, get_correlation_id, mask_email
 
@@ -186,6 +187,34 @@ class TestStructuredLogger:
         assert log_entry["level"] == "CUSTOM"
         assert log_entry["message"] == "Custom level message"
 
+    def test_output_reaches_handlers_on_logging_chain(self) -> None:
+        """Test that log records flow through the logging handler chain.
+
+        Regression test: the emitter used to bypass ``logging`` entirely, so
+        handlers added by the platform or other libraries never saw the lines.
+        """
+        logger = StructuredLogger("chain-test", "test-id")
+
+        received: List[logging.LogRecord] = []
+
+        class CaptureHandler(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                received.append(record)
+
+        capture = CaptureHandler()
+        root_logger = logging.getLogger()
+        root_logger.addHandler(capture)
+        try:
+            logger.info("Handler chain message")
+        finally:
+            root_logger.removeHandler(capture)
+
+        assert len(received) == 1
+        assert received[0].levelno == logging.INFO
+        log_entry = json.loads(received[0].getMessage())
+        assert log_entry["message"] == "Handler chain message"
+        assert log_entry["correlationId"] == "test-id"
+
 
 class TestGetCorrelationId:
     """Tests for get_correlation_id function."""
@@ -225,6 +254,131 @@ class TestGetCorrelationId:
         correlation_id = get_correlation_id(event)
 
         assert correlation_id == "appsync-123"
+
+
+class TestSensitiveKeyRedaction:
+    """Tests for structural (key-name based) redaction in the logger."""
+
+    def test_email_extra_is_masked(self, capsys: Any) -> None:
+        """A raw ``email=`` extra is masked by the logger itself (#544)."""
+        logger = StructuredLogger("redact-email", "test-id")
+
+        logger.info("Account lookup", email="user@example.com")
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["email"] == "u***@example.com"
+
+    def test_username_extra_is_masked(self, capsys: Any) -> None:
+        """A raw ``username=`` extra is masked by the logger itself (#544)."""
+        logger = StructuredLogger("redact-username", "test-id")
+
+        logger.info("Federated link", username="person@example.com")
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["username"] == "p***@example.com"
+
+    def test_email_extra_from_extra_dict_is_masked(self, capsys: Any) -> None:
+        """Sensitive keys arriving through ``extra=`` are redacted too."""
+        logger = StructuredLogger("redact-extra-dict", "test-id")
+
+        logger.info("Signup", extra={"email": "user@example.com", "provider": "Google"})
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["email"] == "u***@example.com"
+        assert log_entry["provider"] == "Google"
+
+    def test_non_email_sensitive_keys_are_replaced(self, capsys: Any) -> None:
+        """Sensitive non-email keys are replaced wholesale, not partially masked."""
+        logger = StructuredLogger("redact-others", "test-id")
+
+        logger.info(
+            "Order payload",
+            phone="+15555550123",
+            customerPhone="+15555550124",
+            address="1 Main St",
+            qrCodeUrl="payment-qr-codes/account-1/venmo.png",
+            password="hunter2",
+        )
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        for key in ("phone", "customerPhone", "address", "qrCodeUrl", "password"):
+            assert log_entry[key] == "***"
+
+    def test_already_masked_email_stays_masked(self, capsys: Any) -> None:
+        """Re-masking a value a call site already masked is a no-op."""
+        logger = StructuredLogger("redact-idempotent", "test-id")
+
+        logger.info("Deleted user", email=mask_email("user@example.com"))
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["email"] == "u***@example.com"
+
+    def test_keys_named_mask_are_left_alone(self, capsys: Any) -> None:
+        """A key that already says it is masked is not re-processed."""
+        logger = StructuredLogger("redact-mask-key", "test-id")
+
+        logger.info("Deleted user", maskedEmail="u***@example.com")
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["maskedEmail"] == "u***@example.com"
+
+    def test_non_string_sensitive_value_is_fully_masked(self, capsys: Any) -> None:
+        """A sensitive key whose value is not a string is fully masked."""
+        logger = StructuredLogger("redact-non-string", "test-id")
+
+        logger.info("Contact", email={"address": "user@example.com"})
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["email"] == "***"
+
+    def test_similar_but_ordinary_keys_are_not_redacted(self, capsys: Any) -> None:
+        """Keys that merely resemble a sensitive name keep their value."""
+        logger = StructuredLogger("redact-similar", "test-id")
+
+        logger.info("Order", emailVerified=True, order_id="ORDER#123")
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["emailVerified"] is True
+        assert log_entry["order_id"] == "ORDER#123"
+
+    def test_caller_dict_is_not_mutated(self) -> None:
+        """Redaction returns a new dict; the caller's extra dict keeps its values (#729)."""
+        logger = StructuredLogger("redact-no-mutate", "test-id")
+
+        payload = {"email": "user@example.com", "nested": {"password": "hunter2"}}
+        logger.info("Signup", extra=payload)
+
+        assert payload == {"email": "user@example.com", "nested": {"password": "hunter2"}}
+
+    def test_nested_dict_values_are_redacted(self, capsys: Any) -> None:
+        """Sensitive keys inside nested dicts are masked, case-insensitively (#729)."""
+        logger = StructuredLogger("redact-nested", "test-id")
+
+        logger.info(
+            "Nested payload",
+            payload={"user": {"Email": "user@example.com", "name": "Jane"}, "Password": "hunter2"},
+        )
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["payload"] == {"user": {"Email": "u***@example.com", "name": "Jane"}, "Password": "***"}
+
+    def test_sensitive_keys_inside_lists_are_redacted(self, capsys: Any) -> None:
+        """Sensitive keys inside list items are masked too (#729)."""
+        logger = StructuredLogger("redact-list", "test-id")
+
+        logger.info("Batch", items=[{"email": "user@example.com"}, {"order_id": "ORDER#123"}])
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["items"] == [{"email": "u***@example.com"}, {"order_id": "ORDER#123"}]
+
+    def test_shared_campaign_code_is_redacted(self, capsys: Any) -> None:
+        """A bearer sharedCampaignCode is never emitted in the clear (#729)."""
+        logger = StructuredLogger("redact-shared-code", "test-id")
+
+        logger.info("Share", sharedCampaignCode="SECRET-CODE-123")
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["sharedCampaignCode"] == "***"
 
 
 class TestMaskEmail:

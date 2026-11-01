@@ -4,15 +4,6 @@
 
 import { fetchAuthSession, signOut, type AuthSession } from 'aws-amplify/auth';
 
-export interface FederatedIdentity {
-  userId?: string;
-  providerName?: string;
-  providerType?: string;
-  issuer?: string | null;
-  primary?: boolean;
-  dateCreated?: number | string;
-}
-
 const isValidIdentityItem = (item: unknown): boolean => {
   if (typeof item !== 'object' || item === null) return false;
   const providerName = (item as { providerName?: unknown }).providerName;

@@ -1,9 +1,10 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const profileId = ctx.args.profileId;
-    const dbProfileId = profileId && profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
-    const expectedOwner = ctx.identity.sub.startsWith('ACCOUNT#') ? ctx.identity.sub : 'ACCOUNT#' + ctx.identity.sub;
+    const dbProfileId = normalizeIdOrPrefix(profileId, 'PROFILE#');
+    const expectedOwner = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
     ctx.stash.profileId = dbProfileId;
     return {
         operation: 'GetItem',

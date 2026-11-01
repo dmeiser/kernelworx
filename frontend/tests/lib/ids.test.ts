@@ -5,9 +5,7 @@ import {
   ensureProfileId,
   ensureCampaignId,
   ensureCatalogId,
-  ensureProductId,
   ensureOrderId,
-  ensureAccountId,
   toUrlId,
 } from '../../src/lib/ids';
 
@@ -78,21 +76,9 @@ describe('lib/ids', () => {
     });
   });
 
-  describe('ensureProductId', () => {
-    it('adds PRODUCT# prefix', () => {
-      expect(ensureProductId('abc-123')).toBe('PRODUCT#abc-123');
-    });
-  });
-
   describe('ensureOrderId', () => {
     it('adds ORDER# prefix', () => {
       expect(ensureOrderId('abc-123')).toBe('ORDER#abc-123');
-    });
-  });
-
-  describe('ensureAccountId', () => {
-    it('adds ACCOUNT# prefix', () => {
-      expect(ensureAccountId('abc-123')).toBe('ACCOUNT#abc-123');
     });
   });
 

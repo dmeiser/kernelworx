@@ -19,6 +19,8 @@ import { CombinedGraphQLErrors } from '@apollo/client/errors';
 import type { GraphQLFormattedError } from 'graphql';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { isMfaRequiredError, MFA_REQUIRED_ERROR_CODE } from './mfaErrors';
+import { extractErrorCode, mapErrorCodeToMessage as mapSharedErrorCodeToMessage } from './errorCodes';
+import type { GraphQLErrorExtensions } from './errorCodes';
 
 /**
  * HTTP link to AppSync endpoint
@@ -68,7 +70,7 @@ const authLink = setContext(
  * GraphQL error with extensions
  */
 interface GraphQLErrorWithExtensions extends GraphQLFormattedError {
-  extensions?: { errorCode?: string; code?: string; errorType?: string };
+  extensions?: GraphQLErrorExtensions;
 }
 
 /**
@@ -107,13 +109,6 @@ const dispatchGraphQLErrorEvent = (
       }),
     );
   }
-};
-
-const extractErrorCode = (extensions: GraphQLErrorWithExtensions['extensions']): string | undefined => {
-  if (!extensions) {
-    return undefined;
-  }
-  return extensions.errorCode || extensions.code || extensions.errorType;
 };
 
 const processGraphQLError = (err: GraphQLFormattedError, operationName: string | undefined): void => {
@@ -166,47 +161,16 @@ export const handleApolloError = ({ operation, error }: ErrorLink.ErrorHandlerOp
 const errorLink = new ErrorLink(handleApolloError);
 
 /**
- * Map GraphQL error codes to user-friendly messages
+ * Map GraphQL error codes to user-friendly messages.
+ *
+ * Wraps the shared mapping with the MFA-required special case: this is an
+ * authenticated-client concern (degraded UI state), so it stays here rather
+ * than in the client-neutral `errorCodes` module.
  */
 export function mapErrorCodeToMessage(errorCode: string | undefined, defaultMessage: string): string {
   if (defaultMessage === 'MFA required') return 'MFA required';
   if (errorCode === MFA_REQUIRED_ERROR_CODE) return 'MFA required';
-  if (!errorCode) return defaultMessage;
-
-  const errorMessages: Record<string, string> = {
-    // Authorization errors
-    FORBIDDEN: 'You do not have permission to perform this action.',
-    UNAUTHORIZED: 'Please sign in to continue.',
-
-    // Validation errors
-    VALIDATION_ERROR: 'Please check your input and try again.',
-    INVALID_INPUT: 'Invalid input provided.',
-
-    // Not found errors
-    NOT_FOUND: 'The requested resource was not found.',
-    PROFILE_NOT_FOUND: 'Profile not found.',
-    CAMPAIGN_NOT_FOUND: 'Campaign not found.',
-    ORDER_NOT_FOUND: 'Order not found.',
-
-    // Conflict errors
-    ALREADY_EXISTS: 'This item already exists.',
-    DUPLICATE_ENTRY: 'A duplicate entry was detected.',
-
-    // Invite/sharing errors
-    INVITE_EXPIRED: 'This invite code has expired.',
-    INVITE_NOT_FOUND: 'Invalid invite code.',
-    ALREADY_SHARED: 'This profile is already shared with this user.',
-
-    // Campaign/order errors
-    CAMPAIGN_LOCKED: 'This campaign is locked and cannot be modified.',
-    ORDER_ALREADY_DELETED: 'This order has already been deleted.',
-
-    // Generic errors
-    INTERNAL_ERROR: 'An internal error occurred. Please try again.',
-    SERVICE_UNAVAILABLE: 'Service temporarily unavailable. Please try again later.',
-  };
-
-  return errorMessages[errorCode] || defaultMessage;
+  return mapSharedErrorCodeToMessage(errorCode, defaultMessage);
 }
 
 /**

@@ -11,7 +11,7 @@ of the wiring contract:
   passthrough JS code and an APPSYNC_JS runtime, and none are converted to
   PIPELINE resolvers.
 - No resolver on any other datasource carries that code: it forwards an
-  admin-shaped payload (`identity.claims`, `prev.result.paymentMethods`), so
+  admin-shaped payload (`identity.claims`, `info.fieldName`, `requestId`), so
   other datasources must not reuse it. Decorator-wrapped handlers on other
   Lambda datasources use `lambda_unit_resolver.js` instead (see
   test_lambda_unit_resolver_wiring.py).
@@ -33,12 +33,11 @@ PASSTHROUGH_RESOLVER = "lambda_passthrough_resolver.js"
 
 EXPECTED_ADMIN_FIELDS = {
     "adminResetUserPassword",
-    "adminDeleteUser",
+    "adminPurgeUserAccount",
     "adminDeleteUserOrders",
     "adminDeleteUserCampaigns",
     "adminDeleteUserShares",
     "adminDeleteUserProfiles",
-    "adminDeleteUserCatalogs",
     "createManagedCatalog",
     "adminDeleteShare",
     "adminUpdateCampaignSharedCode",

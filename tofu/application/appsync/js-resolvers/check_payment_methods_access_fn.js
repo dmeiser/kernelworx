@@ -5,6 +5,7 @@
  * whether they can see QR codes based on ownership/WRITE/READ permissions.
  */
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const profile = ctx.stash.profile;
@@ -17,9 +18,18 @@ export function request(ctx) {
     // Store owner account ID for next steps (already has ACCOUNT# prefix)
     ctx.stash.ownerAccountId = profile.ownerAccountId;
     
-    // Check if caller is owner (profile.ownerAccountId has ACCOUNT# prefix)
-    const callerAccountId = callerId.startsWith('ACCOUNT#') ? callerId : `ACCOUNT#${callerId}`;
-    if (profile.ownerAccountId === callerAccountId) {
+    // Check if caller is owner (profile.ownerAccountId has ACCOUNT# prefix).
+    // Ownership check (#545):
+    // Only trust ownership if verified by the strongly consistent base-table
+    // GetItem in step 1 (ctx.stash.isOwner === true).
+    // If ctx.stash.isOwner is undefined (e.g. standalone test), fall back to
+    // checking profile.ownerAccountId for backward compatibility.
+    const callerAccountId = normalizeIdOrPrefix(callerId, 'ACCOUNT#');
+    const isOwner = ctx.stash.isOwner !== undefined
+        ? ctx.stash.isOwner === true
+        : profile.ownerAccountId === callerAccountId;
+
+    if (isOwner) {
         ctx.stash.accessLevel = 'OWNER';
         ctx.stash.canSeeQR = true;
         // Return NOOP GetItem - must have operation for data source
@@ -31,7 +41,7 @@ export function request(ctx) {
     
     // Check if caller has share access in the shares table
     // Shares table uses profileId (with PROFILE# prefix) and targetAccountId (with ACCOUNT# prefix)
-    const dbProfileId = profile.profileId.startsWith('PROFILE#') ? profile.profileId : `PROFILE#${profile.profileId}`;
+    const dbProfileId = normalizeIdOrPrefix(profile.profileId, 'PROFILE#');
     
     return {
         operation: 'GetItem',

@@ -22,6 +22,7 @@
  *    the same active-only filter, so behavior never regresses for them.
  */
 import { util, runtime } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     if (ctx.source.latestCampaign) {
@@ -30,7 +31,7 @@ export function request(ctx) {
 
     const profileId = ctx.source.profileId;
     // Add PROFILE# prefix for DynamoDB if not present
-    const dbProfileId = profileId.startsWith('PROFILE#') ? profileId : `PROFILE#${profileId}`;
+    const dbProfileId = normalizeIdOrPrefix(profileId, 'PROFILE#');
 
     const latestCampaignId = ctx.source.latestCampaignId;
     if (latestCampaignId) {

@@ -47,6 +47,20 @@ def reset_dynamodb_state() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def reset_payment_methods_s3_singleton() -> Generator[None, None, None]:
+    """Reset the memoized S3 client after every test to prevent cross-test leaks.
+
+    Mirrors ``reset_dynamodb_state``: the PERF-1 singleton is scoped to a Lambda
+    invocation in production, so tests must not inherit it from an earlier test's
+    (already torn down) moto server.
+    """
+    yield
+    from src.utils import payment_methods
+
+    payment_methods._s3_client_singleton = None
+
+
+@pytest.fixture(autouse=True)
 def aws_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     """Set fake AWS credentials and table names for every test.
 

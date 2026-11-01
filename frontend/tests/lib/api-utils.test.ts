@@ -13,6 +13,10 @@ import {
   formatCurrency,
   parseNumber,
   parseInt as safeParseInt,
+  mapPublicSubmissionErrorMessage,
+  isBuyerFacingMessage,
+  PUBLIC_CHECKOUT_GENERIC_ERROR,
+  PUBLIC_CHECKOUT_NETWORK_ERROR,
 } from '../../src/lib/api-utils';
 import type { ApolloLikeError } from '../../src/lib/api-utils';
 
@@ -303,4 +307,140 @@ describe('lib/api-utils', () => {
       expect(safeParseInt(undefined, -2)).toBe(-2);
     });
   });
+
+  // The public checkout pages are anonymous: whoever reads this text may be an
+  // attacker probing the link, and the two failure modes have to be closed at
+  // once — an unmapped code echoing a raw DynamoDB fault, and a specific
+  // INVALID_INPUT sentence flattened to a generic one.
+  describe('mapPublicSubmissionErrorMessage', () => {
+    const gql = (message: string, code?: string): ApolloLikeError =>
+      ({
+        graphQLErrors: [code === undefined ? { message } : { message, extensions: { code } }],
+        networkError: undefined,
+      }) as unknown as ApolloLikeError;
+
+    it('preserves the backend INVALID_INPUT wording', () => {
+      expect(mapPublicSubmissionErrorMessage(gql('ZIP code must be 5 or 9 digits', 'INVALID_INPUT'))).toBe(
+        'ZIP code must be 5 or 9 digits',
+      );
+    });
+
+    it('preserves INVALID_INPUT carried in extensions.errorCode', () => {
+      const error = {
+        graphQLErrors: [{ message: 'Payment method is required', extensions: { errorCode: 'INVALID_INPUT' } }],
+      } as unknown as ApolloLikeError;
+      expect(mapPublicSubmissionErrorMessage(error)).toBe('Payment method is required');
+    });
+
+    it('replaces an INVALID_INPUT message that betrays the stack', () => {
+      const leaky = gql(
+        'ConditionalCheckFailedException operation error DynamoDB: PutItem https://service.us-east-1.amazonaws.com/',
+        'INVALID_INPUT',
+      );
+      const shown = mapPublicSubmissionErrorMessage(leaky);
+      expect(shown).toBe(PUBLIC_CHECKOUT_GENERIC_ERROR);
+      expect(shown).not.toMatch(/dynamodb|amazonaws|conditionalcheck/i);
+    });
+
+    it('maps an unrecognized code to the generic sentence rather than the raw message', () => {
+      const raw = 'Request has expired';
+      expect(mapPublicSubmissionErrorMessage(gql(raw, 'SomeBrandNewCode'))).toBe(PUBLIC_CHECKOUT_GENERIC_ERROR);
+    });
+
+    it('maps a codeless GraphQL error to the generic sentence', () => {
+      expect(mapPublicSubmissionErrorMessage(gql('Validation error: "totalAmount" must be a number'))).toBe(
+        PUBLIC_CHECKOUT_GENERIC_ERROR,
+      );
+    });
+
+    it('names a dead link for every not-found spelling', () => {
+      for (const code of ['NOT_FOUND', 'CAMPAIGN_NOT_FOUND', 'ORDER_NOT_FOUND', 'FORBIDDEN', 'UNAUTHENTICATED']) {
+        expect(mapPublicSubmissionErrorMessage(gql('nope', code))).toBe('This order link is no longer available.');
+      }
+    });
+
+    it('names the campaign cap separately from a dead link', () => {
+      expect(mapPublicSubmissionErrorMessage(gql('full', 'PUBLIC_ORDER_LIMIT_EXCEEDED'))).toBe(
+        'This campaign has reached its public order limit.',
+      );
+    });
+
+    it('keeps a retryable failure worded as retryable', () => {
+      expect(mapPublicSubmissionErrorMessage(gql('busy', 'RESOURCE_BUSY'))).toBe(
+        'The order could not be placed right now. Please try again.',
+      );
+      expect(mapPublicSubmissionErrorMessage(gql('busy', 'ConflictException'))).toBe(
+        'The order could not be placed right now. Please try again.',
+      );
+    });
+
+    it('blames the connection when no server answer came back', () => {
+      const network = {
+        graphQLErrors: [],
+        networkError: new Error('Failed to fetch'),
+      } as unknown as ApolloLikeError;
+      expect(mapPublicSubmissionErrorMessage(network)).toBe(PUBLIC_CHECKOUT_NETWORK_ERROR);
+    });
+
+    it('treats a bare fetch failure as a transport problem', () => {
+      expect(mapPublicSubmissionErrorMessage(new Error('fetch failed'))).not.toBe('fetch failed');
+      expect(mapPublicSubmissionErrorMessage(new Error('Network request failed'))).toBe(
+        PUBLIC_CHECKOUT_NETWORK_ERROR,
+      );
+    });
+
+    it('never returns an empty string', () => {
+      expect(mapPublicSubmissionErrorMessage(undefined)).toBe(PUBLIC_CHECKOUT_GENERIC_ERROR);
+      expect(mapPublicSubmissionErrorMessage(gql(''))).toBe(PUBLIC_CHECKOUT_GENERIC_ERROR);
+    });
+  });
+
+  describe('isBuyerFacingMessage', () => {
+    it('accepts ordinary sentences the resolvers write', () => {
+      expect(isBuyerFacingMessage('Address is missing required fields: city')).toBe(true);
+    });
+
+    it('rejects infrastructure wording', () => {
+      for (const leaky of [
+        'ResourceInUseException: table is being created',
+        'ThrottlingException: rate exceeded',
+        'AccessDeniedException: not authorized to perform',
+        'An error occurred (InternalServerError) when calling the SendEmail operation',
+        'cannot deserialize the request body',
+        'Traceback (most recent call last):',
+      ]) {
+        expect(isBuyerFacingMessage(leaky)).toBe(false);
+      }
+    });
+
+    it('rejects an empty or absurdly long message', () => {
+      expect(isBuyerFacingMessage('   ')).toBe(false);
+      expect(isBuyerFacingMessage('x'.repeat(501))).toBe(false);
+    });
+  });
+
+  describe('formatCurrency', () => {
+    it('formats the default currency to two decimals', () => {
+      expect(formatCurrency(1234.5)).toBe('$1,234.50');
+    });
+
+    it('renders a missing amount as zero', () => {
+      expect(formatCurrency(null)).toBe('$0.00');
+      expect(formatCurrency(undefined)).toBe('$0.00');
+    });
+
+    it('returns the same formatter result for repeated calls in one currency', () => {
+      // The formatter is built once per currency and reused across list rows.
+      expect(formatCurrency(10, 'EUR')).toBe(formatCurrency(10, 'EUR'));
+    });
+  });
+
+
+describe('coverage gaps', () => {
+  it('returns undefined when an apollo-like error has no graphql errors', () => {
+    const error = { errors: [] } as unknown as ApolloLikeError;
+    expect(getErrorCode(error)).toBeUndefined();
+  });
+});
+
 });

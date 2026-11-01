@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 function buildUnitCampaignKey(unitType, unitNumber, city, state, campaignName, campaignYear) {
     const unitNumStr = '' + unitNumber;
@@ -7,12 +8,13 @@ function buildUnitCampaignKey(unitType, unitNumber, city, state, campaignName, c
 }
 
 function normalizeCatalogId(catalogId) {
+    // Only non-null values reach this helper: request()/response() skip null,
+    // and rejectExplicitNulls rejects an explicit null up front because
+    // Campaign.catalogId is ID! (#659). The guard matches the pre-#534 shape.
     if (catalogId === null || catalogId === undefined) {
         return null;
     }
-    return (typeof catalogId === 'string' && catalogId.startsWith('CATALOG#'))
-        ? catalogId
-        : 'CATALOG#' + catalogId;
+    return normalizeIdOrPrefix(catalogId, 'CATALOG#');
 }
 
 function hasUnitUpdate(input) {
@@ -70,10 +72,28 @@ function getUpdatedUnitField(input, campaign, field) {
     return input[field] !== undefined ? input[field] : campaign[field];
 }
 
+// Fields the Campaign output type declares non-null; an explicit null would
+// persist NULL into DynamoDB and make every read of the campaign fail.
+const NON_NULLABLE_OUTPUT_FIELDS = ['campaignName', 'campaignYear', 'isActive', 'catalogId'];
+
+function rejectExplicitNulls(input) {
+    for (const field of NON_NULLABLE_OUTPUT_FIELDS) {
+        // The APPSYNC_JS runtime can surface an omitted nullable input field
+        // with a null value, so a value check alone cannot tell an explicit
+        // null from an omitted field; key presence can (same contract as
+        // #506's update_order_fn / validate_payment_method_fn).
+        if (Object.hasOwn(input, field) && input[field] === null) {
+            util.error(field + ' cannot be null', 'INVALID_INPUT');
+            return;
+        }
+    }
+}
+
 export function request(ctx) {
     const campaign = ctx.stash.campaign;
     const input = ctx.args.input || ctx.args;
 
+    rejectExplicitNulls(input);
     validateUnitUpdate(input, campaign);
 
     // Build update expression dynamically
@@ -89,11 +109,14 @@ export function request(ctx) {
     const campaignName = getUpdatedUnitField(input, campaign, 'campaignName');
     const campaignYear = getUpdatedUnitField(input, campaign, 'campaignYear');
 
-    if (input.campaignName !== undefined) {
+    // SET branches for non-nullable-output fields also skip a null value: an
+    // omitted field can surface as null in this runtime and must leave the
+    // stored value untouched (an explicit null was rejected above).
+    if (input.campaignName !== undefined && input.campaignName !== null) {
         updates.push('campaignName = :campaignName');
         exprValues[':campaignName'] = input.campaignName;
     }
-    if (input.campaignYear !== undefined) {
+    if (input.campaignYear !== undefined && input.campaignYear !== null) {
         updates.push('campaignYear = :campaignYear');
         exprValues[':campaignYear'] = input.campaignYear;
     }
@@ -105,12 +128,12 @@ export function request(ctx) {
         updates.push('endDate = :endDate');
         exprValues[':endDate'] = input.endDate;
     }
-    if (input.catalogId !== undefined) {
+    if (input.catalogId !== undefined && input.catalogId !== null) {
         updates.push('catalogId = :catalogId');
         // Normalize catalogId to DB format (CATALOG#...)
         exprValues[':catalogId'] = normalizeCatalogId(input.catalogId);
     }
-    if (input.isActive !== undefined) {
+    if (input.isActive !== undefined && input.isActive !== null) {
         updates.push('isActive = :isActive');
         exprValues[':isActive'] = input.isActive;
     }
@@ -122,14 +145,22 @@ export function request(ctx) {
         updates.push('unitNumber = :unitNumber');
         exprValues[':unitNumber'] = input.unitNumber;
     }
-    if (input.city !== undefined) {
+    // Key presence distinguishes an explicit null (clear the field) from an
+    // omitted field, whose value may read as null in this runtime and must
+    // not trigger a REMOVE.
+    if (Object.hasOwn(input, 'city') && input.city !== null) {
         updates.push('city = :city');
         exprValues[':city'] = input.city;
+    } else if (Object.hasOwn(input, 'city') && input.city === null) {
+        removes.push('city');
     }
-    if (input.state !== undefined) {
+    if (Object.hasOwn(input, 'state') && input.state !== null) {
         updates.push('#state = :state');
         exprNames['#state'] = 'state';
         exprValues[':state'] = input.state;
+    } else if (Object.hasOwn(input, 'state') && input.state === null) {
+        removes.push('#state');
+        exprNames['#state'] = 'state';
     }
 
     // Recompute unitCampaignKey whenever unit fields, name, or year change and unit info is present
@@ -201,11 +232,12 @@ export function response(ctx) {
     // Start with existing campaign data to preserve all fields
     const result = { ...campaign };
 
-    // Apply updates
-    if (input.campaignName !== undefined) {
+    // Apply updates. Same presence/null gating as request(): an omitted field
+    // can surface as null here and must not overwrite the stored value.
+    if (input.campaignName !== undefined && input.campaignName !== null) {
         result.campaignName = input.campaignName;
     }
-    if (input.campaignYear !== undefined) {
+    if (input.campaignYear !== undefined && input.campaignYear !== null) {
         result.campaignYear = input.campaignYear;
     }
     if (input.startDate !== undefined) {
@@ -214,10 +246,10 @@ export function response(ctx) {
     if (input.endDate !== undefined) {
         result.endDate = input.endDate;
     }
-    if (input.catalogId !== undefined) {
+    if (input.catalogId !== undefined && input.catalogId !== null) {
         result.catalogId = normalizeCatalogId(input.catalogId);
     }
-    if (input.isActive !== undefined) {
+    if (input.isActive !== undefined && input.isActive !== null) {
         result.isActive = input.isActive;
     }
     if (input.unitType !== undefined) {
@@ -226,10 +258,10 @@ export function response(ctx) {
     if (input.unitNumber !== undefined) {
         result.unitNumber = input.unitNumber;
     }
-    if (input.city !== undefined) {
+    if (Object.hasOwn(input, 'city')) {
         result.city = input.city;
     }
-    if (input.state !== undefined) {
+    if (Object.hasOwn(input, 'state')) {
         result.state = input.state;
     }
 

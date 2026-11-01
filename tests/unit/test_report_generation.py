@@ -3,11 +3,13 @@
 Updated for multi-table design (campaigns, orders tables).
 """
 
+import csv
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import Any, Dict
+from unittest.mock import patch
 
 import boto3
 import openpyxl
@@ -15,12 +17,64 @@ import pytest
 
 from src.handlers.report_generation import request_campaign_report
 from src.utils.errors import ErrorCode
+from src.utils.report_limits import OrderGraphBudget, order_graph_bytes
 
 
 def get_orders_table() -> Any:
     """Get orders table for testing."""
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
     return dynamodb.Table("kernelworx-orders-v2-ue1-dev")
+
+
+def _wide_orders(campaign_id: str, count: int, profile_id: str = "PROFILE#test-profile") -> list[Dict[str, Any]]:
+    """Build a run of realistically wide bulk-popcorn orders."""
+    return [
+        {
+            "orderId": f"ORDER#2f1c9d4a-8b3e-4a21-9c77-1f0d5e6a7b8c-{index}",
+            "campaignId": campaign_id,
+            "profileId": profile_id,
+            "customerName": "Alexandra Montgomery-Whitfield",
+            "customerPhone": "+1 (217) 555-0142",
+            "customerAddress": {
+                "street": "1234 Old Country Road Apt 12B",
+                "city": "Springfield",
+                "state": "IL",
+                "zipCode": "62704",
+            },
+            "paymentMethod": "VENMO",
+            "totalAmount": Decimal("3000.00"),
+            "lineItems": [
+                {
+                    "productId": f"PRODUCT#7d9a1c2e-4b3a-4c8d-9e0f-1a2b3c4d5e6f-{item}",
+                    "productName": "White Chocolate Caramel Popcorn (16oz Bucket)",
+                    "quantity": 12,
+                    "pricePerUnit": Decimal("12.50"),
+                    "subtotal": Decimal("150.00"),
+                }
+                for item in range(20)
+            ],
+            "createdAt": "2025-09-15T10:00:00+00:00",
+        }
+        for index in range(count)
+    ]
+
+
+def _ceiling_override(max_bytes: int) -> Any:
+    """Return an ``OrderGraphBudget`` stand-in that enforces a test-sized ceiling."""
+
+    def factory(subject: str, _max_bytes: int) -> OrderGraphBudget:
+        return OrderGraphBudget(subject, max_bytes)
+
+    return factory
+
+
+def _stored_orders(campaign_id: str) -> list[Dict[str, Any]]:
+    """Return a campaign's orders exactly as the handler reads them back from DynamoDB."""
+    response = get_orders_table().query(
+        KeyConditionExpression="campaignId = :campaign_id",
+        ExpressionAttributeValues={":campaign_id": campaign_id},
+    )
+    return list(response["Items"])
 
 
 @pytest.fixture
@@ -116,11 +170,17 @@ class TestRequestCampaignReport:
         # Check headers (row 1 - new format without title row)
         assert ws.cell(row=1, column=1).value == "Name"
         assert ws.cell(row=1, column=2).value == "Phone"
-        assert ws.cell(row=1, column=3).value == "Address"
+        assert ws.cell(row=1, column=3).value == "Email"
+        assert ws.cell(row=1, column=4).value == "Address"
 
         # Check data rows (starting at row 2)
         assert ws.cell(row=2, column=1).value == "John Doe"
         assert ws.cell(row=3, column=1).value == "Jane Smith"
+
+        # The buyer email column is honest both ways: the order that carries one
+        # shows it, the order that does not leaves the cell empty (#D5).
+        assert ws.cell(row=3, column=3).value == "jane@example.com"
+        assert ws.cell(row=2, column=3).value in (None, "")
 
     def test_owner_can_generate_csv_report(
         self,
@@ -158,9 +218,10 @@ class TestRequestCampaignReport:
         csv_content = obj["Body"].read().decode("utf-8")
 
         # Check headers and data
-        assert "Name,Phone,Address" in csv_content
+        assert "Name,Phone,Email,Address" in csv_content
         assert "John Doe" in csv_content
         assert "Jane Smith" in csv_content
+        assert "jane@example.com" in csv_content
 
     def test_contributor_with_read_can_generate_report(
         self,
@@ -322,8 +383,8 @@ class TestRequestCampaignReport:
         obj = s3_bucket.get_object(Bucket=bucket_name, Key=objects["Contents"][0]["Key"])
         csv_content = obj["Body"].read().decode("utf-8")
 
-        # Should have headers but no data rows (just Name,Phone,Address,Total)
-        assert "Name,Phone,Address,Total" in csv_content
+        # Should have headers but no data rows (just Name,Phone,Email,Address,Total)
+        assert "Name,Phone,Email,Address,Total" in csv_content
         lines = csv_content.strip().split("\n")
         assert len(lines) == 1  # Only header row
 
@@ -380,7 +441,7 @@ class TestRequestCampaignReport:
 
         mock_s3.generate_presigned_url = fake_generate_presigned_url
 
-        monkeypatch.setattr("src.handlers.report_generation._get_s3_client", lambda: mock_s3)
+        monkeypatch.setattr("src.handlers.report_generation.s3_client", mock_s3)
 
         event = {
             **appsync_event,
@@ -603,6 +664,7 @@ class TestSanitizeReportValue:
                 "orderId": "ORDER#1",
                 "customerName": "=cmd|'/C calc'!A0",
                 "customerPhone": "+1234567890",
+                "customerEmail": "=HYPERLINK(http://evil)",
                 "customerAddress": {"street": "@SUM(A:A)"},
                 "paymentMethod": "CASH",
                 "totalAmount": Decimal("10.00"),
@@ -613,6 +675,7 @@ class TestSanitizeReportValue:
         csv_content = csv_bytes.decode("utf-8")
         assert "'=cmd|'/C calc'!A0" in csv_content
         assert "'+1234567890" in csv_content
+        assert "'=HYPERLINK(http://evil)" in csv_content
         assert "'@SUM(A:A)" in csv_content
 
     def test_formula_injection_neutralized_in_xlsx(self) -> None:
@@ -624,6 +687,7 @@ class TestSanitizeReportValue:
                 "orderId": "ORDER#1",
                 "customerName": "=cmd|'/C calc'!A0",
                 "customerPhone": "+1234567890",
+                "customerEmail": "=HYPERLINK(http://evil)",
                 "customerAddress": {"street": "@SUM(A:A)"},
                 "paymentMethod": "CASH",
                 "totalAmount": Decimal("10.00"),
@@ -635,4 +699,176 @@ class TestSanitizeReportValue:
         ws = wb.active
         assert ws.cell(row=2, column=1).value == "'=cmd|'/C calc'!A0"
         assert ws.cell(row=2, column=2).value == "'+1234567890"
-        assert ws.cell(row=2, column=3).value == "'@SUM(A:A)"
+        assert ws.cell(row=2, column=3).value == "'=HYPERLINK(http://evil)"
+        assert ws.cell(row=2, column=4).value == "'@SUM(A:A)"
+
+
+class TestReportBuyerEmailColumn:
+    """Tests for the buyer ``customerEmail`` column of the campaign report.
+
+    The enable-time disclosure tells the seller that a public buyer's contact
+    details - email included - appear in unit reports and exports, so the
+    report must actually carry the address (public-orders spec §9 D5, §11).
+    Orders that carry no email must leave the cell empty rather than invent one.
+    """
+
+    @staticmethod
+    def _orders() -> list[Dict[str, Any]]:
+        return [
+            {
+                "orderId": "ORDER#public",
+                "customerName": "Ada Lovelace",
+                "customerPhone": "555-0100",
+                "customerEmail": "ada@example.com",
+                "customerAddress": {"street": "1 Analytical Way", "city": "London"},
+                "paymentMethod": "CASH",
+                "totalAmount": Decimal("12.00"),
+                "lineItems": [{"productName": "Product A", "quantity": 1}],
+            },
+            {
+                "orderId": "ORDER#authenticated",
+                "customerName": "No Email Buyer",
+                "customerPhone": "555-0101",
+                "customerAddress": {},
+                "paymentMethod": "CHECK",
+                "totalAmount": Decimal("3.00"),
+                "lineItems": [{"productName": "Product A", "quantity": 1}],
+            },
+        ]
+
+    def test_csv_carries_the_email_column_in_its_own_column(self) -> None:
+        """The Email column sits between Phone and Address and carries the buyer address."""
+        from src.handlers.report_generation import _generate_csv_report
+
+        rows = list(csv.reader(StringIO(_generate_csv_report(self._orders()).decode("utf-8"))))
+        assert rows[0] == ["Name", "Phone", "Email", "Address", "Product A", "Total"]
+        assert rows[1][:4] == ["Ada Lovelace", "555-0100", "ada@example.com", "1 Analytical Way, London"]
+        assert rows[2][:4] == ["No Email Buyer", "555-0101", "", ""]
+
+    def test_xlsx_carries_the_email_column_in_its_own_column(self) -> None:
+        """The XLSX header and row cells agree with the CSV column order."""
+        from src.handlers.report_generation import _generate_excel_report
+
+        wb = openpyxl.load_workbook(BytesIO(_generate_excel_report(self._orders())))
+        ws = wb.active
+        assert [ws.cell(row=1, column=col).value for col in range(1, 7)] == [
+            "Name",
+            "Phone",
+            "Email",
+            "Address",
+            "Product A",
+            "Total",
+        ]
+        assert ws.cell(row=2, column=3).value == "ada@example.com"
+        assert ws.cell(row=3, column=3).value in (None, "")
+        assert ws.cell(row=2, column=4).value == "1 Analytical Way, London"
+
+    def test_product_columns_stay_aligned_after_the_new_column(self) -> None:
+        """The per-product columns and the Total column shift right by exactly one."""
+        from src.handlers.report_generation import _generate_excel_report
+
+        wb = openpyxl.load_workbook(BytesIO(_generate_excel_report(self._orders())))
+        ws = wb.active
+        assert ws.cell(row=2, column=5).value == 1
+        assert ws.cell(row=2, column=6).value == 12.0
+
+
+class TestCampaignReportOrderGraphCeiling:
+    """Tests for the order-graph ceiling on the campaign report path (#533, #577).
+
+    The report holds every order of a campaign at once and builds the whole
+    workbook in memory, so a campaign with a very large order graph would
+    exhaust the Lambda's budget instead of returning a report. The ceiling is
+    measured in the bytes an order serialises to, charged on each order as it is
+    read, and is sized from the memory of the function it runs in rather than
+    from the response quota the unit report is bound by.
+    """
+
+    def test_campaign_over_the_budget_returns_resource_busy(
+        self,
+        dynamodb_table: Any,
+        s3_bucket: Any,
+        sample_profile: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
+        sample_orders: list[Dict[str, Any]],
+        sample_campaign_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """A campaign whose orders exceed the budget fails with a typed RESOURCE_BUSY error."""
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
+        }
+        budget_bytes = sum(order_graph_bytes(order) for order in _stored_orders(sample_campaign_id)) - 1
+
+        with patch("src.handlers.report_generation.OrderGraphBudget", _ceiling_override(budget_bytes)):
+            result = request_campaign_report(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+        assert "too large" in result["message"]
+
+        # Nothing is uploaded when the ceiling is reached.
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name)["KeyCount"] == 0
+
+    def test_campaign_within_the_budget_still_generates_the_report(
+        self,
+        dynamodb_table: Any,
+        s3_bucket: Any,
+        sample_profile: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
+        sample_orders: list[Dict[str, Any]],
+        sample_campaign_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """A campaign whose orders fit the budget still generates its report."""
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "csv"}},
+        }
+        budget_bytes = sum(order_graph_bytes(order) for order in _stored_orders(sample_campaign_id))
+
+        with patch("src.handlers.report_generation.OrderGraphBudget", _ceiling_override(budget_bytes)):
+            result = request_campaign_report(event, lambda_context)
+
+        assert result["status"] == "COMPLETED"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name)["KeyCount"] == 1
+
+    def test_a_realistic_season_exports_under_the_default_ceiling(
+        self,
+        dynamodb_table: Any,
+        s3_bucket: Any,
+        sample_profile: Dict[str, Any],
+        sample_campaign: Dict[str, Any],
+        sample_orders: list[Dict[str, Any]],
+        sample_campaign_id: str,
+        appsync_event: Dict[str, Any],
+        lambda_context: Any,
+    ) -> None:
+        """A realistic full season of wide orders exports with the real ceiling in force.
+
+        150 orders of 20 line items is a large but ordinary season for one
+        campaign, run through the handler with no budget injected, so this is the
+        export that a ceiling sized for the memory it runs in must not break.
+        """
+        event = {
+            **appsync_event,
+            "arguments": {"input": {"campaignId": sample_campaign_id, "format": "xlsx"}},
+        }
+        self._seed_wide_orders(sample_campaign_id, sample_orders[0]["profileId"], 150)
+
+        result = request_campaign_report(event, lambda_context)
+
+        assert result["status"] == "COMPLETED"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        assert s3_bucket.list_objects_v2(Bucket=bucket_name)["KeyCount"] == 1
+
+    def _seed_wide_orders(self, campaign_id: str, profile_id: str, count: int) -> None:
+        """Insert a run of realistic bulk-popcorn orders into the orders table."""
+        orders_table = get_orders_table()
+        for order in _wide_orders(campaign_id, count, profile_id):
+            orders_table.put_item(Item=order)

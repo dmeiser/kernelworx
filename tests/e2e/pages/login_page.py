@@ -18,11 +18,10 @@ class LoginPage(BasePage):
 
     Selector notes:
 
-    * ``input[type="email"]`` – MUI ``TextField`` with ``type="email"``.
-      TODO: add ``data-testid="email-input"`` to the production component
-      if more specificity is needed later.
-    * ``input[type="password"]`` – MUI ``TextField`` with ``type="password"``.
-      TODO: add ``data-testid="password-input"`` to the production component.
+    * ``input[type="email"]`` – MUI ``TextField`` with ``type="email"``;
+      unambiguous on the login form so no synthetic test ID is needed.
+    * ``input[type="password"]`` – MUI ``TextField`` with ``type="password"``;
+      unambiguous on the login form so no synthetic test ID is needed.
     * ``button[type="submit"]`` – the *Sign In* button.
     * ``[role="alert"]`` – MUI ``<Alert>`` component used for error messages.
     """
@@ -30,11 +29,11 @@ class LoginPage(BasePage):
     PATH: str = "/login"
 
     # ------------------------------------------------------------------
-    # Raw selector strings (no data-testid in production component yet)
+    # Selector strings (verified against custom login form in LoginPage.tsx)
     # ------------------------------------------------------------------
 
-    _EMAIL_SEL: str = 'input[type="email"]'  # TODO: verify selector
-    _PASSWORD_SEL: str = 'input[type="password"]'  # TODO: verify selector
+    _EMAIL_SEL: str = 'input[type="email"]'
+    _PASSWORD_SEL: str = 'input[type="password"]'
     _SUBMIT_NAME: str = "Sign In"
 
     def __init__(self, page: Page) -> None:

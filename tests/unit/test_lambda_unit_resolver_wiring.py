@@ -51,6 +51,7 @@ EXPECTED_UNIT_FIELDS = {
     "aws_appsync_datasource.transfer_ownership.name": {"transferProfileOwnership"},
     "aws_appsync_datasource.request_qr_upload.name": {"requestPaymentMethodQRCodeUpload"},
     "aws_appsync_datasource.delete_qr_code.name": {"deletePaymentMethodQRCode"},
+    "aws_appsync_datasource.public_orders.name": {"publicGetOrderOffer", "publicGetOrderReceipt"},
 }
 
 

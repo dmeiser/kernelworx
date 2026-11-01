@@ -16,6 +16,7 @@
  * owner/profile context, exactly as the old field resolver did.
  */
 import { util, runtime } from '@aws-appsync/utils';
+import { stripIdPrefix } from './lib/ids.js';
 
 function extractS3Key(qrCodeUrl) {
     if (!qrCodeUrl.startsWith('http')) {
@@ -57,9 +58,7 @@ export function request(ctx) {
     // For myPaymentMethods the owner is the caller; for
     // paymentMethodsForProfile it comes from the profile in the stash.
     let ownerAccountId = ctx.stash.ownerAccountId || ctx.identity.sub;
-    if (ownerAccountId && ownerAccountId.startsWith('ACCOUNT#')) {
-        ownerAccountId = ownerAccountId.substring(8);
-    }
+    ownerAccountId = stripIdPrefix(ownerAccountId, 'ACCOUNT#');
 
     return {
         operation: 'Invoke',

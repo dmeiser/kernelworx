@@ -5,32 +5,35 @@ Implements:
 - requestCampaignReport: Generate Excel/CSV report for campaign data
 """
 
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, Dict, List, cast
-
-import boto3
+from typing import TYPE_CHECKING, Any, Dict
 
 if TYPE_CHECKING:  # pragma: no cover
     from mypy_boto3_s3.client import S3Client
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.appsync_types import get_caller_id, require_str
     from utils.auth import check_profile_access
+    from utils.boto import get_s3_client
     from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.ids import ensure_campaign_id
     from utils.logging import get_logger
-    from utils.pagination import query_all_items
+    from utils.pagination import query_all_items_iter
+    from utils.report_limits import MAX_CAMPAIGN_REPORT_GRAPH_BYTES, OrderGraphBudget
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.appsync_types import get_caller_id, require_str
     from ..utils.auth import check_profile_access
+    from ..utils.boto import get_s3_client
     from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.ids import ensure_campaign_id
     from ..utils.logging import get_logger
-    from ..utils.pagination import query_all_items
+    from ..utils.pagination import query_all_items_iter
+    from ..utils.report_limits import MAX_CAMPAIGN_REPORT_GRAPH_BYTES, OrderGraphBudget
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -47,16 +50,16 @@ else:  # pragma: no cover
 # Report pre-signed URL lifetime in seconds (3 hours)
 REPORT_URL_EXPIRATION_SECONDS = 3 * 60 * 60
 
+# Contact columns written before the per-product columns, in both report formats.
+# Email is one of them: the enable-time disclosure tells the seller that public
+# buyers' contact details "appear in unit reports/exports", and that is only
+# true of the report itself once this column carries the buyer's email address
+# (public-orders spec §9 D5 / §11). Orders placed without one - every
+# authenticated order and every pre-feature row - leave the cell empty.
+REPORT_CONTACT_HEADERS = ["Name", "Phone", "Email", "Address"]
+
 # Module-level proxy that tests can monkeypatch
 s3_client: "S3Client | None" = None
-
-
-def _get_s3_client() -> "S3Client":
-    """Return the S3 client (module-level override for tests, otherwise a fresh boto3 client)."""
-    global s3_client
-    if s3_client is not None:
-        return s3_client
-    return boto3.client("s3", endpoint_url=os.getenv("S3_ENDPOINT"))
 
 
 def _generate_report_content(orders: list[Dict[str, Any]], report_format: str) -> tuple[bytes, str, str]:
@@ -92,10 +95,12 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
 
     try:
         # Extract arguments - GraphQL passes campaignId, but we store as campaignId in DynamoDB
-        args = event["arguments"]["input"]
-        campaign_id = ensure_campaign_id(args["campaignId"])  # Normalize CAMPAIGN# prefix
+        args = event.get("arguments", {}).get("input", {})
+        campaign_id = ensure_campaign_id(require_str(args, "campaignId"))  # Normalize CAMPAIGN# prefix
         report_format = args.get("format", "xlsx")  # xlsx or csv
-        caller_account_id = event["identity"]["sub"]
+        caller_account_id = get_caller_id(event)
+        if not caller_account_id:
+            raise AppError(ErrorCode.UNAUTHORIZED, "Authentication required")
 
         logger.info(
             "Generating campaign report",
@@ -127,7 +132,7 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         exports_bucket = get_required_env("EXPORTS_BUCKET")
         s3_key = f"reports/{profile_id}/{campaign_id}/{report_id}.{file_extension}"
 
-        s3 = _get_s3_client()
+        s3 = get_s3_client(s3_client)
         s3.put_object(
             Bucket=exports_bucket,
             Key=s3_key,
@@ -159,8 +164,9 @@ def request_campaign_report(event: Dict[str, Any], context: Any) -> Dict[str, An
         return result
 
     except AppError as e:
-        # Typed AppError logging stays: the decorator re-raises AppError
-        # unchanged but does not log it.
+        # Typed AppError logging stays: the decorator does not log AppErrors
+        # and converts the raised AppError to the __isError payload returned
+        # to AppSync instead of re-raising (#329), so this raise must stay.
         logger.error("AppError in request_campaign_report", error_code=e.error_code, error_message=e.message)
         raise
 
@@ -182,21 +188,32 @@ def _get_campaign(table: Any, campaign_id: str) -> Dict[str, Any] | None:
 
 
 def _get_campaign_orders(table: Any, campaign_id: str) -> list[Dict[str, Any]]:
-    """Get all orders for a campaign (V2: Direct PK query since PK=campaignId)."""
+    """Get all orders for a campaign (V2: Direct PK query since PK=campaignId).
+
+    The report writes one row per order - and for XLSX builds the whole workbook
+    in memory - so a campaign with a very large order graph would exhaust the
+    Lambda's budget instead of returning a report. Orders are streamed and each
+    one is charged to the shared order-graph ceiling as it is read, so the order
+    that would cross it is never collected into the report (#533, #577).
+    """
     # V2 schema: Orders table has PK=campaignId, SK=orderId
     # No GSI needed - direct query on the partition key
-    return cast(
-        List[Dict[str, Any]],
-        query_all_items(
-            table,
-            {
-                "KeyConditionExpression": "campaignId = :campaign_id",
-                "ExpressionAttributeValues": {
-                    ":campaign_id": campaign_id,
-                },
+    budget = OrderGraphBudget("This campaign's", MAX_CAMPAIGN_REPORT_GRAPH_BYTES)
+    orders: list[Dict[str, Any]] = []
+
+    for order in query_all_items_iter(
+        table,
+        {
+            "KeyConditionExpression": "campaignId = :campaign_id",
+            "ExpressionAttributeValues": {
+                ":campaign_id": campaign_id,
             },
-        ),
-    )
+        },
+    ):
+        budget.admit(order)
+        orders.append(order)
+
+    return orders
 
 
 def _format_city_state_zip(address: Dict[str, Any]) -> str:
@@ -240,6 +257,20 @@ def _sanitize_report_value(value: Any) -> Any:
     return value
 
 
+def _get_contact_cells(order: Dict[str, Any]) -> list[Any]:
+    """Return the order's contact cells in ``REPORT_CONTACT_HEADERS`` order.
+
+    Both report formats read their leading columns here, so the CSV header and
+    the XLSX header cannot drift from the values either format writes.
+    """
+    return [
+        order.get("customerName", ""),
+        order.get("customerPhone", ""),
+        order.get("customerEmail", ""),
+        _format_address(order.get("customerAddress", {})),
+    ]
+
+
 def _get_product_quantities(order: Dict[str, Any]) -> dict[str, int]:
     """Get product quantities for an order, summing duplicates."""
     quantities: dict[str, int] = {}
@@ -259,15 +290,11 @@ def _generate_csv_report(orders: list[Dict[str, Any]]) -> bytes:
     writer = csv.writer(output)
 
     all_products = _get_unique_products(orders)
-    headers = [_sanitize_report_value(h) for h in (["Name", "Phone", "Address"] + all_products + ["Total"])]
+    headers = [_sanitize_report_value(h) for h in (REPORT_CONTACT_HEADERS + all_products + ["Total"])]
     writer.writerow(headers)
 
     for order in orders:
-        row = [
-            _sanitize_report_value(order.get("customerName", "")),
-            _sanitize_report_value(order.get("customerPhone", "")),
-            _sanitize_report_value(_format_address(order.get("customerAddress", {}))),
-        ]
+        row = [_sanitize_report_value(cell) for cell in _get_contact_cells(order)]
         quantities = _get_product_quantities(order)
         for product in all_products:
             row.append(_sanitize_report_value(quantities.get(product, "")))
@@ -293,12 +320,12 @@ def _write_excel_order_row(
     ws: Any, row_idx: int, order: Dict[str, Any], all_products: list[str], headers: list[str]
 ) -> None:
     """Write a single order row to Excel worksheet."""
-    ws.cell(row=row_idx, column=1, value=_sanitize_report_value(order.get("customerName", "")))
-    ws.cell(row=row_idx, column=2, value=_sanitize_report_value(order.get("customerPhone", "")))
-    ws.cell(row=row_idx, column=3, value=_sanitize_report_value(_format_address(order.get("customerAddress", {}))))
+    contact_cells = _get_contact_cells(order)
+    for col_idx, cell in enumerate(contact_cells, start=1):
+        ws.cell(row=row_idx, column=col_idx, value=_sanitize_report_value(cell))
 
     quantities = _get_product_quantities(order)
-    for col_idx, product in enumerate(all_products, start=4):
+    for col_idx, product in enumerate(all_products, start=len(contact_cells) + 1):
         ws.cell(row=row_idx, column=col_idx, value=_sanitize_report_value(quantities.get(product, "")))
     ws.cell(row=row_idx, column=len(headers), value=float(order.get("totalAmount", 0)))
 
@@ -324,7 +351,7 @@ def _generate_excel_report(orders: list[Dict[str, Any]]) -> bytes:
     ws.title = "Orders"
 
     all_products = _get_unique_products(orders)
-    headers = ["Name", "Phone", "Address"] + all_products + ["Total"]
+    headers = REPORT_CONTACT_HEADERS + all_products + ["Total"]
 
     _write_excel_headers(ws, headers)
     for row_idx, order in enumerate(orders, start=2):

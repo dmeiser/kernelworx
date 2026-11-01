@@ -41,6 +41,7 @@ from collections.abc import Generator
 from pathlib import Path
 
 import boto3
+import pluggy
 import pytest
 from boto3.dynamodb.conditions import Attr, Key
 from dotenv import load_dotenv
@@ -50,6 +51,7 @@ from tests.e2e.pages.catalogs_page import CatalogsPage
 from tests.e2e.pages.dashboard_page import DashboardPage
 from tests.e2e.pages.share_page import SharePage
 from tests.e2e.utils.auth import login_as_contributor, login_as_owner, login_as_readonly
+from tests.e2e.utils.public_orders import setup_public_orders
 
 # ---------------------------------------------------------------------------
 # Environment setup
@@ -59,6 +61,45 @@ from tests.e2e.utils.auth import login_as_contributor, login_as_owner, login_as_
 #   /repo/tests/e2e/conftest.py  →  /repo/.env)
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(dotenv_path=_REPO_ROOT / ".env")
+
+# ---------------------------------------------------------------------------
+# Browser console capture
+#
+# The ephemeral e2e runs have no Playwright trace/video artifacts, so a page
+# that fails to render gives no browser-side evidence. These helpers collect
+# console messages and uncaught page errors for the lifetime of a page and
+# dump them into the pytest output only when the test that used the page
+# failed.
+# ---------------------------------------------------------------------------
+
+
+def _attach_console_log(page: Page, sink: list[str]) -> None:
+    """Record console messages and uncaught errors on *page* into *sink*."""
+    page.on("console", lambda msg: sink.append(f"[console:{msg.type}] {msg.text}"))
+    page.on("pageerror", lambda exc: sink.append(f"[pageerror] {exc}"))
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None]
+) -> Generator[None, pluggy.Result[pytest.TestReport], None]:
+    """Attach the call-phase report to the item so fixtures can see failures."""
+    # The makereport hook's result IS the TestReport (pytest uses the wrapper
+    # chain's outcome object for it), hence the report in the Result type.
+    outcome: pluggy.Result[pytest.TestReport] = yield
+    report = outcome.get_result()
+    setattr(item, f"rep_{report.when}", report)
+
+
+def _dump_console_log_on_failure(request: pytest.FixtureRequest, sink: list[str]) -> None:
+    """Print the captured browser log when the test using this fixture failed."""
+    report = getattr(request.node, "rep_call", None)
+    if report is not None and report.failed and sink:
+        print("\n--- browser console (captured on failure) ---")
+        for line in sink[-100:]:
+            print(line)
+        print("--- end browser console ---")
+
 
 #: Seller name used when ``ensure_owner_profile`` must create a profile from scratch.
 _OWNER_ENSURE_PROFILE_NAME: str = "Test Scout"
@@ -309,7 +350,13 @@ def ensure_managed_catalog() -> Generator[None, None, None]:
     Fresh ephemeral per-PR environments start with no managed catalogs, which
     causes the Managed Catalogs tab to render an empty state.  This fixture
     inserts a minimal ``ADMIN_MANAGED`` catalog directly into DynamoDB only
-    when none already exists, and only in non-production/non-dev tables.
+    in non-production/non-dev tables.
+
+    Ephemeral stacks are REUSED across runs of the same PR, so an existing
+    managed catalog is REPAIRED, not skipped: its product list is overwritten
+    with the canonical one. A skip-if-exists left a fixture bug (a string
+    price) in place forever on a reused stack, making every order placed
+    against the campaign fail server-side while the fixture looked healthy.
 
     Environment protection
     ----------------------
@@ -319,8 +366,8 @@ def ensure_managed_catalog() -> Generator[None, None, None]:
 
     Scope
     -----
-    ``session`` — the check and optional insertion run only once per pytest
-    session.
+    ``session`` — the check, repair, and optional insertion run only once per
+    pytest session.
 
     autouse
     -------
@@ -335,6 +382,22 @@ def ensure_managed_catalog() -> Generator[None, None, None]:
         yield
         return
 
+    # Numeric, not str: catalog prices are DynamoDB N attributes (every catalog
+    # created through the API stores a number), and the order-create money path
+    # (lib/line_items.js enrichLineItems, shared by public and authenticated
+    # creates) rejects a String price with INVALID_INPUT. A str price here made
+    # every order placed against this campaign fail server-side while the offer
+    # page still rendered, because the Python offer read coerces stored values
+    # via as_float.
+    canonical_products = [
+        {
+            "productId": "PRODUCT#e2e-managed-1",
+            "productName": "E2E Managed Popcorn",
+            "price": 15,
+            "sortOrder": 1,
+        }
+    ]
+
     try:
         region = os.getenv("AWS_REGION", "us-east-1")
         dynamodb = boto3.resource("dynamodb", region_name=region)
@@ -347,31 +410,33 @@ def ensure_managed_catalog() -> Generator[None, None, None]:
             & (Attr("isDeleted").not_exists() | Attr("isDeleted").eq(False)),
             ProjectionExpression="catalogId",
         )
-        if response.get("Items"):
-            yield
-            return
+        existing_ids = [item["catalogId"] for item in response.get("Items", [])]
 
+        # Repair reused stacks: overwrite the product list on every existing
+        # managed catalog so a stale row from an earlier run (or an earlier
+        # fixture version) can never shape what this run orders against.
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        catalog_id = f"CATALOG#e2e-managed-smoke-{int(time.time())}"
-        table.put_item(
-            Item={
-                "catalogId": catalog_id,
-                "catalogName": "E2E Managed Smoke Catalog",
-                "catalogType": "ADMIN_MANAGED",
-                "isPublic": True,
-                "isPublicStr": "true",
-                "products": [
-                    {
-                        "productId": "PRODUCT#e2e-managed-1",
-                        "productName": "E2E Managed Popcorn",
-                        "price": "15",
-                        "sortOrder": 1,
-                    }
-                ],
-                "createdAt": now,
-                "updatedAt": now,
-            }
-        )
+        for catalog_id in existing_ids:
+            table.update_item(
+                Key={"catalogId": catalog_id},
+                UpdateExpression="SET products = :products, updatedAt = :now",
+                ExpressionAttributeValues={":products": canonical_products, ":now": now},
+            )
+
+        if not existing_ids:
+            catalog_id = f"CATALOG#e2e-managed-smoke-{int(time.time())}"
+            table.put_item(
+                Item={
+                    "catalogId": catalog_id,
+                    "catalogName": "E2E Managed Smoke Catalog",
+                    "catalogType": "ADMIN_MANAGED",
+                    "isPublic": True,
+                    "isPublicStr": "true",
+                    "products": canonical_products,
+                    "createdAt": now,
+                    "updatedAt": now,
+                }
+            )
     except Exception as exc:
         raise RuntimeError(f"Failed to ensure ADMIN_MANAGED catalog exists in {table_name}: {exc}") from exc
 
@@ -451,25 +516,65 @@ def ensure_readonly_share(browser: Browser) -> Generator[None, None, None]:
         readonly_context.close()
 
 
+@pytest.fixture(scope="session")
+def public_orders_setup(browser: Browser, ensure_owner_catalog: None) -> dict[str, str]:
+    """Public-order fixture data: a dedicated profile, campaign and share URL.
+
+    Scope
+    -----
+    ``session`` — the profile, campaign, QR payment method and enablement are
+    created once per run and shared by every suite that needs a live share URL
+    (``test_smoke_public_orders`` and the ``test_smoke_auth_boundary``
+    extension). The enable-time acknowledgements are therefore accepted exactly
+    once per run, which is what lets the acknowledgement UI be asserted at all
+    (it renders its "must accept" state only while the stored acknowledgement
+    version lags the current constant).
+
+    autouse
+    -------
+    ``False`` — opt in by declaring ``public_orders_setup`` as a parameter.
+
+    Returns:
+        The dict described by
+        :func:`tests.e2e.utils.public_orders.setup_public_orders`.
+    """
+    return setup_public_orders(browser)
+
+
 @pytest.fixture(scope="function")
-def owner_page(page: Page) -> Generator[Page, None, None]:
+def owner_page(page: Page, request: pytest.FixtureRequest) -> Generator[Page, None, None]:
     """Yield a browser Page already logged in as the owner test user."""
-    login_as_owner(page)
-    yield page
+    console_log: list[str] = []
+    _attach_console_log(page, console_log)
+    try:
+        login_as_owner(page)
+        yield page
+    finally:
+        _dump_console_log_on_failure(request, console_log)
 
 
 @pytest.fixture(scope="function")
-def contributor_page(page: Page) -> Generator[Page, None, None]:
+def contributor_page(page: Page, request: pytest.FixtureRequest) -> Generator[Page, None, None]:
     """Yield a browser Page already logged in as the contributor test user."""
-    login_as_contributor(page)
-    yield page
+    console_log: list[str] = []
+    _attach_console_log(page, console_log)
+    try:
+        login_as_contributor(page)
+        yield page
+    finally:
+        _dump_console_log_on_failure(request, console_log)
 
 
 @pytest.fixture(scope="function")
-def readonly_page(page: Page) -> Generator[Page, None, None]:
+def readonly_page(page: Page, request: pytest.FixtureRequest) -> Generator[Page, None, None]:
     """Yield a browser Page already logged in as the read-only test user."""
-    login_as_readonly(page)
-    yield page
+    console_log: list[str] = []
+    _attach_console_log(page, console_log)
+    try:
+        login_as_readonly(page)
+        yield page
+    finally:
+        _dump_console_log_on_failure(request, console_log)
 
 
 # ---------------------------------------------------------------------------

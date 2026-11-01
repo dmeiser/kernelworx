@@ -7,7 +7,7 @@ import '../setup.ts';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ApolloClient, gql, HttpLink, InMemoryCache } from '@apollo/client';
 import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
-import { deleteCatalogWithRetry, deleteTestAccounts, waitForGSIConsistency } from '../setup/testData';
+import { deleteCampaign, deleteCatalogWithRetry, deleteTestAccounts, waitForGSIConsistency } from '../setup/testData';
 
 // Helper to create unauthenticated client
 const createUnauthenticatedClient = () => {
@@ -88,12 +88,6 @@ const SHARE_DIRECT = gql`
 const DELETE_PROFILE = gql`
   mutation DeleteProfile($profileId: ID!) {
     deleteSellerProfile(profileId: $profileId)
-  }
-`;
-
-const DELETE_CAMPAIGN = gql`
-  mutation DeleteCampaign($campaignId: ID!) {
-    deleteCampaign(campaignId: $campaignId)
   }
 `;
 
@@ -207,26 +201,34 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         });
         const campaignId = campaignData.createCampaign.campaignId;
 
-        // Act: Query campaign
-        const { data } = await ownerClient.query({
-          query: GET_CAMPAIGN,
-          variables: { campaignId: campaignId },
-          fetchPolicy: 'network-only',
-        });
+        // Act: Poll getCampaign until the campaignId-index GSI projects the
+        // newly created campaign (Bug #21 eventual consistency), then read it.
+        const campaigns = await waitForGSIConsistency(
+          async () => {
+            const res = await ownerClient.query({
+              query: GET_CAMPAIGN,
+              variables: { campaignId: campaignId },
+              fetchPolicy: 'network-only',
+            });
+            return res.data?.getCampaign ? [res.data.getCampaign] : [];
+          },
+          (items) => items.length > 0,
+          10,
+          1000
+        );
 
         // Assert
-        expect(data.getCampaign).toBeDefined();
-        expect(data.getCampaign.campaignId).toBe(campaignId);
-        expect(data.getCampaign.profileId).toBe(profileId);
-        expect(data.getCampaign.campaignName).toContain('Campaign');
-        expect(data.getCampaign.startDate).toBe('2025-01-01T00:00:00Z');
-        expect(data.getCampaign.endDate).toBe('2025-12-31T23:59:59Z');
-        expect(data.getCampaign.catalogId).toBe(catalogId);
-        expect(data.getCampaign.createdAt).toBeDefined();
-        expect(data.getCampaign.updatedAt).toBeDefined();
+        expect(campaigns[0].campaignId).toBe(campaignId);
+        expect(campaigns[0].profileId).toBe(profileId);
+        expect(campaigns[0].campaignName).toContain('Campaign');
+        expect(campaigns[0].startDate).toBe('2025-01-01T00:00:00Z');
+        expect(campaigns[0].endDate).toBe('2025-12-31T23:59:59Z');
+        expect(campaigns[0].catalogId).toBe(catalogId);
+        expect(campaigns[0].createdAt).toBeDefined();
+        expect(campaigns[0].updatedAt).toBeDefined();
         
         // Cleanup
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+        await deleteCampaign(ownerClient, campaignId);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       }, 15000); // Extended timeout for GSI consistency
@@ -299,7 +301,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         expect(campaigns[0].campaignId).toBe(campaignId);
         
         // Cleanup
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+        await deleteCampaign(ownerClient, campaignId);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
@@ -350,20 +352,28 @@ describe('Campaign Query Resolvers Integration Tests', () => {
           },
         });
 
-        // Act: Readonly user queries campaign
-        const { data } = await readonlyClient.query({
-          query: GET_CAMPAIGN,
-          variables: { campaignId: campaignId },
-          fetchPolicy: 'network-only',
-        });
+        // Act: Poll getCampaign until the campaignId-index GSI projects the
+        // newly created campaign (Bug #21 eventual consistency), then read it.
+        const campaigns = await waitForGSIConsistency(
+          async () => {
+            const res = await readonlyClient.query({
+              query: GET_CAMPAIGN,
+              variables: { campaignId: campaignId },
+              fetchPolicy: 'network-only',
+            });
+            return res.data?.getCampaign ? [res.data.getCampaign] : [];
+          },
+          (items) => items.length > 0,
+          10,
+          1000
+        );
 
         // Assert
-        expect(data.getCampaign).toBeDefined();
-        expect(data.getCampaign.campaignId).toBe(campaignId);
+        expect(campaigns[0].campaignId).toBe(campaignId);
         
         // Cleanup
         await ownerClient.mutate({ mutation: REVOKE_SHARE, variables: { input: { profileId, targetAccountId: readonlyAccountId } } });
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+        await deleteCampaign(ownerClient, campaignId);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
@@ -413,7 +423,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         expect(data.getCampaign).toBeNull();
         
         // Cleanup
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+        await deleteCampaign(ownerClient, campaignId);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
@@ -463,7 +473,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         ).rejects.toThrow();
         
         // Cleanup
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+        await deleteCampaign(ownerClient, campaignId);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
@@ -536,8 +546,8 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         expect(data.listCampaignsByProfile.campaigns[1].campaignId).toBeDefined();
         
         // Cleanup
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId1 } });
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId2 } });
+        await deleteCampaign(ownerClient, campaignId1);
+        await deleteCampaign(ownerClient, campaignId2);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
@@ -639,10 +649,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         expect(beforeCampaignIds).toContain(campaignIdToDelete);
 
         // Delete one campaign
-        await ownerClient.mutate({
-          mutation: DELETE_CAMPAIGN,
-          variables: { campaignId: campaignIdToDelete },
-        });
+        await deleteCampaign(ownerClient, campaignIdToDelete);
 
         // Act: List campaigns again
         const { data: afterDelete } = await ownerClient.query({
@@ -658,7 +665,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         expect(afterCampaignIds).not.toContain(campaignIdToDelete);
 
         // Cleanup
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignIdToKeep } });
+        await deleteCampaign(ownerClient, campaignIdToKeep);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       }, 15000);
@@ -711,7 +718,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         expect(data.listCampaignsByProfile.campaigns.length).toBeGreaterThan(0);
         
         // Cleanup
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+        await deleteCampaign(ownerClient, campaignId);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
@@ -775,7 +782,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         
         // Cleanup
         await ownerClient.mutate({ mutation: REVOKE_SHARE, variables: { input: { profileId, targetAccountId: readonlyAccountId } } });
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+        await deleteCampaign(ownerClient, campaignId);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
@@ -845,7 +852,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         expect(data.listCampaignsByProfile.campaigns).toEqual([]);
         
         // Cleanup
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+        await deleteCampaign(ownerClient, campaignId);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
@@ -895,7 +902,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
         ).rejects.toThrow();
         
         // Cleanup
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+        await deleteCampaign(ownerClient, campaignId);
         await deleteCatalogWithRetry(ownerClient, catalogId);
         await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
       });
@@ -959,19 +966,28 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       );
       const campaignId = campaigns[0].campaignId;
 
-      // Act
-      const { data } = await ownerClient.query({
-        query: GET_CAMPAIGN,
-        variables: { campaignId: campaignId },
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll getCampaign until the campaignId-index GSI projects the
+      // newly created campaign (Bug #21 eventual consistency), then read it.
+      const visibleCampaigns = await waitForGSIConsistency(
+        async () => {
+          const res = await ownerClient.query({
+            query: GET_CAMPAIGN,
+            variables: { campaignId: campaignId },
+            fetchPolicy: 'network-only',
+          });
+          return res.data?.getCampaign ? [res.data.getCampaign] : [];
+        },
+        (items) => items.length > 0,
+        10,
+        1000
+      );
 
       // Assert
-      expect(data.getCampaign.endDate).toBeNull();
-      expect(data.getCampaign.startDate).toBe('2025-01-01T00:00:00Z');
+      expect(visibleCampaigns[0].endDate).toBeNull();
+      expect(visibleCampaigns[0].startDate).toBe('2025-01-01T00:00:00Z');
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+      await deleteCampaign(ownerClient, campaignId);
       await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
@@ -1011,19 +1027,28 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       });
       const campaignId = campaignData.createCampaign.campaignId;
 
-      // Act
-      const { data } = await ownerClient.query({
-        query: GET_CAMPAIGN,
-        variables: { campaignId: campaignId },
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll getCampaign until the campaignId-index GSI projects the
+      // newly created campaign (Bug #21 eventual consistency), then read it.
+      const campaigns = await waitForGSIConsistency(
+        async () => {
+          const res = await ownerClient.query({
+            query: GET_CAMPAIGN,
+            variables: { campaignId: campaignId },
+            fetchPolicy: 'network-only',
+          });
+          return res.data?.getCampaign ? [res.data.getCampaign] : [];
+        },
+        (items) => items.length > 0,
+        10,
+        1000
+      );
 
       // Assert
-      expect(data.getCampaign.startDate).toBe('2025-01-01T00:00:00Z');
-      expect(data.getCampaign.endDate).toBe('2025-06-30T23:59:59Z');
+      expect(campaigns[0].startDate).toBe('2025-01-01T00:00:00Z');
+      expect(campaigns[0].endDate).toBe('2025-06-30T23:59:59Z');
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+      await deleteCampaign(ownerClient, campaignId);
       await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
@@ -1079,7 +1104,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       const campaignId2 = campaign2Data.createCampaign.campaignId;
 
       // Delete one campaign
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId1 } });
+      await deleteCampaign(ownerClient, campaignId1);
 
       // Act
       const { data } = await ownerClient.query({
@@ -1093,7 +1118,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       expect(data.listCampaignsByProfile.campaigns[0].campaignId).toBe(campaignId2);
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: campaignId2 } });
+      await deleteCampaign(ownerClient, campaignId2);
       await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
@@ -1246,7 +1271,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       // Cleanup
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: orderId1 } });
       await ownerClient.mutate({ mutation: DELETE_ORDER, variables: { orderId: orderId2 } });
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+      await deleteCampaign(ownerClient, campaignId);
       await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
@@ -1315,7 +1340,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       expect(campaigns[0].catalog.products[0].price).toBe(12.50);
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+      await deleteCampaign(ownerClient, campaignId);
       await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
@@ -1354,19 +1379,30 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       });
       const campaignId = campaignData.createCampaign.campaignId;
 
-      // Act: Get campaign with computed fields
-      const { data } = await ownerClient.query({
-        query: GET_CAMPAIGN_WITH_COMPUTED,
-        variables: { campaignId: campaignId },
-        fetchPolicy: 'network-only',
-      });
+      // Act: Poll getCampaign until the campaignId-index GSI projects the
+      // newly created campaign (Bug #21 eventual consistency), then read its
+      // computed fields. A read straight after createCampaign can return null
+      // for a campaign that exists.
+      const campaigns = await waitForGSIConsistency(
+        async () => {
+          const res = await ownerClient.query({
+            query: GET_CAMPAIGN_WITH_COMPUTED,
+            variables: { campaignId: campaignId },
+            fetchPolicy: 'network-only',
+          });
+          return res.data?.getCampaign ? [res.data.getCampaign] : [];
+        },
+        (items) => items.length > 0,
+        10,
+        1000
+      );
 
-      // Assert: Should return 0 for both computed fields (or null)
-      expect(data.getCampaign.totalOrders).toBe(0);
-      expect(data.getCampaign.totalRevenue).toBe(0);
+      // Assert: Should return 0 for both computed fields
+      expect(campaigns[0].totalOrders).toBe(0);
+      expect(campaigns[0].totalRevenue).toBe(0);
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+      await deleteCampaign(ownerClient, campaignId);
       await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     });
@@ -1444,7 +1480,7 @@ describe('Campaign Query Resolvers Integration Tests', () => {
 
       // Cleanup
       for (const campaignId of campaignIds) {
-        await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId } });
+        await deleteCampaign(ownerClient, campaignId);
       }
       await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
@@ -1545,9 +1581,9 @@ describe('Campaign Query Resolvers Integration Tests', () => {
       expect(pastCampaigns.length + activeCampaigns.length + futureCampaigns.length).toBe(3);
 
       // Cleanup
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: pastCampaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: activeCampaignId } });
-      await ownerClient.mutate({ mutation: DELETE_CAMPAIGN, variables: { campaignId: futureCampaignId } });
+      await deleteCampaign(ownerClient, pastCampaignId);
+      await deleteCampaign(ownerClient, activeCampaignId);
+      await deleteCampaign(ownerClient, futureCampaignId);
       await deleteCatalogWithRetry(ownerClient, catalogId);
       await ownerClient.mutate({ mutation: DELETE_PROFILE, variables: { profileId } });
     }, 60000);

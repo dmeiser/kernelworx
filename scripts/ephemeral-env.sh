@@ -54,6 +54,10 @@ if [ -z "$RUN_ID" ]; then
   exit 1
 fi
 
+if ! validate_run_id "$RUN_ID"; then
+  exit 1
+fi
+
 STATE_KEY="application/ephemeral/${RUN_ID}/terraform.tfstate"
 
 cd "$ENV_DIR"
@@ -73,40 +77,6 @@ build_lambda_layer() {
   (cd "$ROOT_DIR" && uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python")
 }
 
-cleanup_cloudwatch_log_groups() {
-  log "🧹 Cleaning up pre-existing CloudWatch log groups for run: $RUN_ID"
-  local region="${AWS_REGION:-us-east-1}"
-  local suffix="-${RUN_ID}"
-  local log_groups
-
-  log_groups=$(aws logs describe-log-groups \
-    --log-group-name-prefix "/aws/lambda/kernelworx-" \
-    --region "$region" \
-    --query 'logGroups[*].logGroupName' \
-    --output text)
-
-  if [ -z "$log_groups" ] || [ "$log_groups" = "None" ]; then
-    log "   No existing log groups found."
-    return 0
-  fi
-
-  local found=0
-  for name in $log_groups; do
-    case "$name" in
-      *"$suffix")
-        log "   Deleting log group: $name"
-        aws logs delete-log-group --log-group-name "$name" --region "$region" || true
-        found=1
-        ;;
-    esac
-  done
-
-  if [ "$found" -eq 0 ]; then
-    log "   No existing log groups found for this run."
-  fi
-}
-
-
 case "$ACTION" in
   up)
     log "🚀 Bringing up ephemeral environment: $RUN_ID"
@@ -117,12 +87,14 @@ case "$ACTION" in
     build_lambda_layer
 
     log "📦 Initializing OpenTofu backend..."
-    tofu init -input=false \
+    # -reconfigure: a prior init in this workspace may have saved another run-id's state key.
+    tofu init -input=false -reconfigure \
       -backend-config="key=$STATE_KEY" \
       -backend-config="bucket=$STATE_BUCKET" \
       -backend-config="region=$STATE_REGION"
 
-    cleanup_cloudwatch_log_groups
+    REGION="${AWS_REGION:-us-east-1}"
+    cleanup_cloudwatch_log_groups_for_run "$RUN_ID" "$REGION"
     cleanup_stale_lock "$RUN_ID"
 
     log "📋 Planning and applying ephemeral stack..."
@@ -130,21 +102,15 @@ case "$ACTION" in
     log "📦 Building AppSync JS resolvers..."
     ensure_resolvers_built
 
-    # AppSync rejects deleting pipeline functions or data sources that are still referenced
-    # by a resolver. If the plan would destroy any AppSync functions or data sources, update
-    # the affected resolver(s)/function(s) first so the full apply can delete them.
-    # Targets cover all Lambda→JS migrations that removed a Lambda data source:
-    #   create_order (pipeline fn set), validate_payment_method_appsync (data_source switch #299),
-    #   create_seller_profile (#300), create_campaign (#301), update_my_account (#298),
-    #   list_my_shares (#334).
+    # AppSync rejects deleting a pipeline function or data source that a resolver or function
+    # still references, and removing such a resource from the config removes the edge that
+    # ordered its destroy after the referencing objects' updates. The guard plans, derives
+    # every planned aws_appsync_function / aws_appsync_datasource deletion address from the
+    # plan JSON, and applies everything else with `-exclude=<addr>` so those references are
+    # released before the full apply below performs the deletes. The target set is derived,
+    # not hand-maintained — see scripts/appsync-ensure-resolver-order.sh.
     "$ROOT_DIR/scripts/appsync-ensure-resolver-order.sh" \
       -d "$ENV_DIR" \
-      -t module.appsync.aws_appsync_resolver.create_order \
-      -t module.appsync.aws_appsync_function.validate_payment_method_appsync \
-      -t module.appsync.aws_appsync_resolver.create_seller_profile \
-      -t module.appsync.aws_appsync_resolver.create_campaign \
-      -t module.appsync.aws_appsync_resolver.update_my_account \
-      -t module.appsync.aws_appsync_resolver.list_my_shares \
       -- -var="environment=$RUN_ID"
 
     tofu apply -input=false -auto-approve -var="environment=$RUN_ID"
@@ -160,12 +126,19 @@ case "$ACTION" in
     log ""
     TEST_REGION="${AWS_REGION:-us-east-1}"
     COGNITO_DOMAIN=$(tofu output -raw cognito_domain)
+    APPSYNC_API_KEY=$(tofu output -raw appsync_api_key 2>/dev/null) || true
     echo "export TEST_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
+    if [ -n "$APPSYNC_API_KEY" ]; then
+      echo "export TEST_APPSYNC_API_KEY=$APPSYNC_API_KEY"
+    fi
     echo "export TEST_USER_POOL_ID=$USER_POOL_ID"
     echo "export TEST_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
     echo "export TEST_REGION=$TEST_REGION"
     echo "export E2E_BASE_URL=http://localhost:4173"
     echo "export VITE_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
+    if [ -n "$APPSYNC_API_KEY" ]; then
+      echo "export VITE_APPSYNC_API_KEY=$APPSYNC_API_KEY"
+    fi
     echo "export VITE_APPSYNC_REGION=$TEST_REGION"
     echo "export VITE_COGNITO_USER_POOL_ID=$USER_POOL_ID"
     echo "export VITE_COGNITO_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
@@ -183,16 +156,33 @@ case "$ACTION" in
     ;;
 
   env)
+    # Re-init before reading output: the workspace's saved backend-config may point
+    # at another run-id's state (or at nothing), so `tofu output` would fail or read
+    # the wrong stack. -reconfigure points the backend at this run's own state
+    # object; no state migration. Same init the `up` and `down` branches run.
+    tofu init -input=false -reconfigure \
+      -backend-config="key=$STATE_KEY" \
+      -backend-config="bucket=$STATE_BUCKET" \
+      -backend-config="region=$STATE_REGION"
     TEST_REGION="${AWS_REGION:-us-east-1}"
     COGNITO_DOMAIN=$(tofu output -raw cognito_domain)
+    APPSYNC_API_KEY=$(tofu output -raw appsync_api_key 2>/dev/null) || true
     log "📤 Environment exports for existing stack: $RUN_ID"
     log ""
     echo "export TEST_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
+    if [ -n "$APPSYNC_API_KEY" ]; then
+      echo "export TEST_APPSYNC_API_KEY=$APPSYNC_API_KEY"
+    else
+      log "⚠️  appsync_api_key output is absent from this stack's state; the stack has not yet deployed the public-orders feature, so TEST_APPSYNC_API_KEY/VITE_APPSYNC_API_KEY are omitted"
+    fi
     echo "export TEST_USER_POOL_ID=$(tofu output -raw cognito_user_pool_id)"
     echo "export TEST_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
     echo "export TEST_REGION=$TEST_REGION"
     echo "export E2E_BASE_URL=http://localhost:4173"
     echo "export VITE_APPSYNC_ENDPOINT=$(tofu output -raw appsync_api_url)"
+    if [ -n "$APPSYNC_API_KEY" ]; then
+      echo "export VITE_APPSYNC_API_KEY=$APPSYNC_API_KEY"
+    fi
     echo "export VITE_APPSYNC_REGION=$TEST_REGION"
     echo "export VITE_COGNITO_USER_POOL_ID=$(tofu output -raw cognito_user_pool_id)"
     echo "export VITE_COGNITO_USER_POOL_CLIENT_ID=$(tofu output -raw cognito_client_id)"
@@ -224,7 +214,11 @@ case "$ACTION" in
     echo "# placeholder" > "$LAYER_DIR/python/.placeholder"
 
     # Re-init is required in case the workspace was cleaned since the up run.
-    tofu init -input=false \
+    # -reconfigure is required because the sweep tears down many run-ids from one
+    # workspace: each passes a different state key, and OpenTofu treats that saved
+    # backend-config difference as a backend change. Re-configuring from the flags
+    # below points the backend at this run's own state object; no state migration.
+    tofu init -input=false -reconfigure \
       -backend-config="key=$STATE_KEY" \
       -backend-config="bucket=$STATE_BUCKET" \
       -backend-config="region=$STATE_REGION"

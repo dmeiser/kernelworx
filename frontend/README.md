@@ -79,6 +79,7 @@ browser). See `.env.example` for the full list:
 | Variable | Purpose |
 | --- | --- |
 | `VITE_APPSYNC_ENDPOINT` | Direct AppSync URL (`...appsync-api.us-east-1.amazonaws.com/graphql`). Required for `vite dev`; unset for dev/prod builds (same-origin `/graphql`). |
+| `VITE_APPSYNC_API_KEY` | AppSync API key for the API-key public order pages (`/o/...`, `/r/...`); read from `tofu output appsync_api_key`. Transport credential, not a secret — the share/receipt token in the page URL is the authorization. Must be baked into dev/prod builds. |
 | `VITE_APPSYNC_REGION` | AppSync region, e.g. `us-east-1`. |
 | `VITE_COGNITO_USER_POOL_ID` / `VITE_COGNITO_USER_POOL_CLIENT_ID` | Cognito user pool and app client. |
 | `VITE_COGNITO_DOMAIN` | Cognito custom domain (e.g. `login.dev.kernelworx.app`). Required for `vite dev`; unset for same-origin builds. |
@@ -135,17 +136,26 @@ see `../tests/e2e/README.md` and `TESTING.md`.
 ## Lint, typecheck, format, spellcheck
 
 ```bash
-npm run lint              # ESLint (also enforces complexity <= 5, max-depth <= 3)
-npm run lint:complexity   # the two complexity rules as a one-off report
+npm run lint              # ESLint (complexity <= 5, max-depth <= 3) + the complexity-disable ratchet
 npm run typecheck         # tsc -b --noEmit && tsc -p tsconfig.test.json --noEmit
 npm run format            # Prettier over src/**/*.{ts,tsx}
 npm run spellcheck        # cspell against the root cspell.json
 ```
+
+Because `complexity` can be switched off per function with an
+`eslint-disable` directive, `npm run lint` also runs
+`scripts/check-complexity-disables.mjs`, which fails if the total number of
+`complexity` disables exceeds the committed baseline in
+`scripts/complexity-disables.baseline` (a shrink-only work queue, issue #532).
+After removing directives, ratchet the baseline down with
+`node scripts/check-complexity-disables.mjs --update`; raising the baseline is
+refused and must be a deliberate, reviewed edit to the file.
 
 TypeScript is split across three configs: `tsconfig.app.json` (application code,
 strict), `tsconfig.node.json` (Vite config), and `tsconfig.test.json` (adds the
 `tests/` tree and Vitest globals).
 
 CI runs the spellcheck from the repo root, then `npm run lint`, `npm run typecheck`,
-and `npm run test -- --coverage` on every PR (`.github/workflows/ci.yml`, `frontend`
-job).
+the generated-types sync gate (`npm run codegen` followed by `git diff --exit-code` on
+`src/types/graphql-generated.ts`), and `npm run test -- --coverage` on every PR
+(`.github/workflows/ci.yml`, `frontend` job).

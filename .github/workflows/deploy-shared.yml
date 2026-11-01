@@ -99,6 +99,7 @@ jobs:
     outputs:
       user_pool_id: ${{ steps.tofu_outputs.outputs.user_pool_id }}
       client_id: ${{ steps.tofu_outputs.outputs.client_id }}
+      appsync_api_key: ${{ steps.tofu_outputs.outputs.appsync_api_key }}
     environment:
       name: ${{ inputs.environment }}
     env:
@@ -205,7 +206,16 @@ jobs:
         run: |
           tofu apply -replace=module.appsync.aws_appsync_resolver.delete_seller_profile -auto-approve
 
-      - name: Ensure AppSync resolver updates precede function deletions
+      # One-time migration (#665): the custom CloudFront response headers
+      # policies `security` and `auth_security` were retired in favour of the
+      # AWS-managed SecurityHeadersPolicy. CloudFront rejects deleting a
+      # response headers policy while a cache behaviour still references it
+      # (ResponseHeadersPolicyInUse), and the apply is what disassociates the
+      # behaviours, so the plan must not contain the destroy. Removing the
+      # resources from state first keeps the plan valid; the orphaned policies
+      # in AWS are deleted by the step that runs after the apply.
+      - name: Forget retired CloudFront response headers policies
+        id: forget_response_headers_policies
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
           TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
@@ -214,26 +224,53 @@ jobs:
           TF_IN_AUTOMATION: "true"
         working-directory: ${{ inputs.tofu-directory }}
         run: |
-          # AppSync rejects deleting pipeline functions or data sources that are still referenced
-          # by a resolver. If the plan would destroy any AppSync functions or data sources, apply
-          # the affected pipeline resolver(s) first so the saved plan can delete
-          # them without hitting BadRequestException.
+          # Anchored to the response-headers policy type only: the managed
+          # cache/origin-request policies the distribution references must
+          # never be forgotten here.
+          retired=$(tofu state list 2>/dev/null | grep -E 'aws_cloudfront_response_headers_policy\.' || true)
+          retired_ids=""
+          if [ -z "$retired" ]; then
+            echo "No retired CloudFront response headers policies in state; nothing to forget."
+          else
+            for addr in $retired; do
+              policy_id=$(tofu state show -no-color "$addr" | awk -F'"' '/^[ \t]*id[ \t]*=/ {print $2; exit}')
+              echo "Forgetting $addr (cloudfront id: $policy_id)"
+              tofu state rm "$addr"
+              retired_ids="$retired_ids $policy_id"
+            done
+          fi
+          # Single-line space-separated ids for the post-apply cleanup step.
+          echo "retired_policy_ids=${retired_ids# }" >> "$GITHUB_OUTPUT"
+
+      # Runs after the state-forget migration above and immediately before the
+      # saved plan is created: the guard itself applies every planned change
+      # except the deferred AppSync destroys, so any pre-apply state surgery has
+      # to be finished when it runs, and a guard failure aborts the deploy before
+      # the saved plan exists.
+      - name: Ensure AppSync reference-releasing updates precede function/datasource deletes
+        env:
+          TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
+          TF_VAR_google_client_id: ${{ secrets.TF_VAR_GOOGLE_CLIENT_ID }}
+          TF_VAR_google_client_secret: ${{ secrets.TF_VAR_GOOGLE_CLIENT_SECRET }}
+          TF_VAR_github_token: ${{ github.token }}
+          TF_IN_AUTOMATION: "true"
+        working-directory: ${{ inputs.tofu-directory }}
+        run: |
+          # AppSync rejects deleting a pipeline function or data source that a resolver or
+          # function still references. Removing such a resource from the configuration also
+          # removes the edge that ordered its destroy after the referencing objects' updates,
+          # so the apply walks the destroy nodes first and aborts before any reference-
+          # releasing update runs (#750: 13 consecutive failed deploys, every later merge
+          # replaying the identical BadRequestException).
           #
-          # Targets cover all migrations that removed a Lambda data source or restructured a
-          # resolver's pipeline function list:
-          #   - create_order: original guard target (pipeline fn set changes)
-          #   - validate_payment_method_appsync: fn switched data_source to accounts (#299)
-          #   - create_seller_profile: resolver switched data_source to profiles (#300)
-          #   - create_campaign: resolver switched from Lambda DS to pipeline (#301)
-          #   - update_my_account: resolver switched data_source to accounts (#298)
-          #   - list_my_shares: resolver switched from Lambda DS to pipeline (#334)
-          "$GITHUB_WORKSPACE/scripts/appsync-ensure-resolver-order.sh" \
-            -t module.appsync.aws_appsync_resolver.create_order \
-            -t module.appsync.aws_appsync_function.validate_payment_method_appsync \
-            -t module.appsync.aws_appsync_resolver.create_seller_profile \
-            -t module.appsync.aws_appsync_resolver.create_campaign \
-            -t module.appsync.aws_appsync_resolver.update_my_account \
-            -t module.appsync.aws_appsync_resolver.list_my_shares
+          # The guard derives its own targets: it plans, reads every planned
+          # aws_appsync_function / aws_appsync_datasource deletion address out of the plan
+          # JSON, and applies everything else with `-exclude=<addr>`. The reference-releasing
+          # updates land there, and the saved plan below only destroys objects nothing
+          # references any more. There is deliberately no hand-maintained target list — the
+          # derivation covers every future consolidation without a human remembering to
+          # extend it.
+          "$GITHUB_WORKSPACE/scripts/appsync-ensure-resolver-order.sh"
 
       - name: OpenTofu plan
         env:
@@ -259,6 +296,40 @@ jobs:
         working-directory: ${{ inputs.tofu-directory }}
         run: tofu apply -auto-approve tfplan
 
+      # One-time migration (#665), continued: the apply above is what
+      # disassociates the cache behaviours from the retired custom response
+      # headers policies, so only now can the orphaned AWS policies be deleted
+      # (CloudFront refuses while a behaviour still references one). Ids were
+      # captured from state before the removal; empty means a previous deploy
+      # already cleaned up. The delete API requires the current ETag via
+      # --if-match (InvalidIfMatchVersion otherwise); already-deleted policies
+      # are logged, not failures.
+      - name: Delete orphaned CloudFront response headers policies
+        if: ${{ success() }}
+        env:
+          RETIRED_POLICY_IDS: ${{ steps.forget_response_headers_policies.outputs.retired_policy_ids }}
+        run: |
+          if [ -z "$RETIRED_POLICY_IDS" ]; then
+            echo "No retired response headers policies to delete; nothing to do."
+            exit 0
+          fi
+          for policy_id in $RETIRED_POLICY_IDS; do
+            etag=$(aws cloudfront get-response-headers-policy --id "$policy_id" --query 'ResponseHeadersPolicy.ETag' --output text 2>aws_err.txt || true)
+            if [ -z "$etag" ] || grep -q 'NoSuchResponseHeadersPolicy' aws_err.txt; then
+              echo "Response headers policy $policy_id already deleted; continuing."
+              continue
+            fi
+            if aws cloudfront delete-response-headers-policy --id "$policy_id" --if-match "$etag" 2>aws_err.txt; then
+              echo "Deleted orphaned CloudFront response headers policy $policy_id"
+            elif grep -q 'NoSuchResponseHeadersPolicy' aws_err.txt; then
+              echo "Response headers policy $policy_id already deleted; continuing."
+            else
+              echo "::warning::Failed to delete orphaned response headers policy $policy_id; continuing."
+              cat aws_err.txt
+            fi
+          done
+          rm -f aws_err.txt
+
       - name: Extract OpenTofu outputs for frontend
         id: tofu_outputs
         env:
@@ -274,6 +345,14 @@ jobs:
           echo "site_url=$(tofu output -raw site_url)" >> $GITHUB_OUTPUT
           echo "static_assets_bucket=$(tofu output -raw static_assets_bucket)" >> $GITHUB_OUTPUT
           echo "cloudfront_distribution_id=$(tofu output -raw cloudfront_distribution_id)" >> $GITHUB_OUTPUT
+          # The public-orders API key is a Terraform output threaded into the
+          # frontend build environment as VITE_APPSYNC_API_KEY (it grants only
+          # the @aws_api_key fields; the per-campaign share token in the URL is
+          # the authorization), so it is not a secret here. The public pages
+          # read it from the build via their key-only Apollo client, so a build
+          # MUST pick up this value in the same run: a replaced key with a stale
+          # bundle fails every public call Unauthorized until the next deploy.
+          echo "appsync_api_key=$(tofu output -raw appsync_api_key)" >> $GITHUB_OUTPUT
 
       - name: Build and deploy frontend
         env:
@@ -285,6 +364,7 @@ jobs:
           # frontend derives the OAuth domain from the site URL. Ephemeral
           # environments set both to absolute values (no CloudFront there).
           VITE_APPSYNC_REGION: ${{ secrets.AWS_REGION }}
+          VITE_APPSYNC_API_KEY: ${{ steps.tofu_outputs.outputs.appsync_api_key }}
           VITE_COGNITO_USER_POOL_ID: ${{ steps.tofu_outputs.outputs.user_pool_id }}
           VITE_COGNITO_USER_POOL_CLIENT_ID: ${{ steps.tofu_outputs.outputs.client_id }}
           VITE_OAUTH_REDIRECT_SIGNIN: ${{ steps.tofu_outputs.outputs.site_url }}
@@ -303,7 +383,7 @@ jobs:
   smoke-tests:
     name: Post-deploy smoke tests (${{ inputs.environment }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     needs: deploy
     if: ${{ needs.deploy.result == 'success' && inputs.e2e-base-url != '' }}
     environment:
@@ -384,6 +464,54 @@ jobs:
 
           echo "Smoke tests target: $E2E_BASE_URL"
 
+      - name: Assert static brand assets are served
+        if: ${{ inputs.e2e-base-url != '' }}
+        env:
+          E2E_BASE_URL: ${{ inputs.e2e-base-url }}
+        run: |
+          # Static-object drift assertion. On 2026-10-06 logo.svg and
+          # logo-rotating.svg broke on BOTH dev and prod after deploys that
+          # verifiably uploaded them (dev run 37525653122, prod run
+          # 37178810183). The 2026-10-10 root-cause proof (issue #689): the
+          # objects were never deleted - the #665 `/l*` ordered cache
+          # behavior (Cognito auth origin) shadows every root path starting
+          # with `/l`, so CloudFront sent /logo.svg to Cognito, got a 404,
+          # and served the SPA index.html fallback (HTTP 200, text/html)
+          # while every other gate stayed green. The assets were renamed to
+          # kernelworx-logo*.svg (KW-LOGO-PATHFIX-1) so no auth pattern can
+          # shadow them; the probes below guard against the object actually
+          # vanishing at the origin again (no CI path deletes keys - this
+          # workflow's `s3 sync` omits `--delete` - but a manual
+          # `frontend/deploy.sh` sync from a partial tree does use `--delete`).
+          # Every deploy re-uploads all of frontend/public/, so a failure here
+          # turns silent breakage into a red deploy.
+          tmpreq="$(mktemp -d)"
+          trap 'rm -rf "$tmpreq"' EXIT
+          for path in /kernelworx-logo.svg /kernelworx-logo-rotating.svg /favicon.svg; do
+            url="$E2E_BASE_URL$path"
+            if ! code=$(curl -sS --max-time 30 -o "$tmpreq/asset.body" -D "$tmpreq/asset.headers" -w '%{http_code}' "$url"); then
+              echo "::error::GET $url failed (transport error) - the site is unreachable"
+              exit 1
+            fi
+            if [ "$code" != "200" ]; then
+              echo "::error::$url returned HTTP $code - the static object is missing at the origin"
+              exit 1
+            fi
+            content_type=$(tr -d '\r' < "$tmpreq/asset.headers" | awk '{ if (tolower($1) == "content-type:") print tolower($2) }')
+            case "$content_type" in
+              image/svg+xml*) ;;
+              *)
+                echo "::error::$url served content-type '$content_type' instead of image/svg+xml - the SPA index.html fallback means the static object is missing at the origin"
+                exit 1
+                ;;
+            esac
+            if ! grep -qi '<svg' "$tmpreq/asset.body"; then
+              echo "::error::$url served content-type image/svg+xml but a body with no <svg element"
+              exit 1
+            fi
+            echo "OK: $url ($content_type, $(wc -c < "$tmpreq/asset.body") bytes)"
+          done
+
       - name: Validate test users
         env:
           TEST_OWNER_EMAIL: ${{ secrets.TEST_OWNER_EMAIL }}
@@ -456,6 +584,12 @@ jobs:
           # recovered from Cognito), and the new secret is exported for the
           # smoke tests below. Local runs refresh it via
           # scripts/create-test-users.sh.
+          #
+          # Must be the tofu-managed KernelWorx-Web app client
+          # (module.cognito.client_id). Never fall back to
+          # `list-user-pool-clients --max-results 1`: it returns the first
+          # client in pool order and breaks provisioning (#567; see AGENTS.md).
+          # Stop here rather than guessing.
           CLIENT_ID="${{ needs.deploy.outputs.client_id }}"
           if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" = "None" ]; then
             CLIENT_ID=$(aws cognito-idp list-user-pool-clients \
@@ -464,11 +598,8 @@ jobs:
               --query 'UserPoolClients[?ClientName==`KernelWorx-Web`].ClientId | [0]' --output text)
           fi
           if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" = "None" ]; then
-            CLIENT_ID=$(aws cognito-idp list-user-pool-clients \
-              --user-pool-id "$TEST_USER_POOL_ID" \
-              --region "$AWS_REGION" \
-              --max-results 1 \
-              --query 'UserPoolClients[0].ClientId' --output text)
+            echo "::error::Deploy job exported no client_id and the pool $TEST_USER_POOL_ID has no KernelWorx-Web app client; cannot resolve the app client for TOTP provisioning" >&2
+            exit 1
           fi
 
           # The password goes through the environment, never a positional
@@ -491,6 +622,25 @@ jobs:
           TEST_READONLY_PASSWORD: ${{ secrets.TEST_READONLY_PASSWORD }}
           TEST_USER_POOL_ID: ${{ secrets.TEST_USER_POOL_ID }}
           TEST_REGION: ${{ secrets.AWS_REGION }}
+          # Scripted auth-boundary probes (test_smoke_auth_boundary.py) and the
+          # through-site-origin API-key call (test_smoke_public_orders.py). The
+          # key is not a secret here: it grants only the @aws_api_key fields.
+          # The endpoint is the site origin's /graphql, NOT the appsync_api_url
+          # output: that URL contains the AWS region, which is a configured
+          # repository secret, and Actions refuses to set any step or job output
+          # whose value contains a secret (deploy run 39112162724: "Skip output
+          # 'appsync_api_url' since it may contain secret"), which left the
+          # variable empty and skipped both probes. Going through the site origin
+          # is also the stronger assertion - it proves the distribution forwards
+          # the key-only request and that AppSync still refuses the key on
+          # Cognito-only fields.
+          TEST_APPSYNC_ENDPOINT: ${{ inputs.e2e-base-url }}/graphql
+          TEST_APPSYNC_API_KEY: ${{ needs.deploy.outputs.appsync_api_key }}
+          # A recipient verified in the sending account's SES sandbox. Unset (the
+          # default) leaves the emailed-order test on its honest "the email did
+          # not go out, the order did" branch; set it to exercise the send-
+          # succeeded branch.
+          E2E_SES_TEST_RECIPIENT: ${{ vars.E2E_SES_TEST_RECIPIENT }}
           TEST_OWNER_TOTP_SECRET: ${{ env.TEST_OWNER_TOTP_SECRET }}
           RUN_ACCOUNT_DELETION: "1"
           # In CI, fail the job if pre/post cleanup cannot run successfully.

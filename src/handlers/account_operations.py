@@ -7,22 +7,27 @@ Handles user account management including deleting user accounts.
 import os
 from typing import TYPE_CHECKING, Any, Dict
 
-import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
+
+# Sibling handler modules use a same-package relative import, which resolves both
+# in the Lambda zip (package `handlers`) and in unit tests (package `src.handlers`).
+from .deletion_cascade import delete_all_user_data, run_deletion_steps
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
-    from utils.cognito import retry_on_transient_errors
-    from utils.dynamodb import tables
+    from utils.appsync_types import get_caller_id
+    from utils.boto import get_cognito_client
+    from utils.cognito import is_transient_cognito_error, retry_on_transient_errors
+    from utils.cognito_filters import cognito_user_filter
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
-    from utils.payment_methods import delete_all_user_qr_codes
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.cognito import retry_on_transient_errors
-    from ..utils.dynamodb import tables
+    from ..utils.appsync_types import get_caller_id
+    from ..utils.boto import get_cognito_client
+    from ..utils.cognito import is_transient_cognito_error, retry_on_transient_errors
+    from ..utils.cognito_filters import cognito_user_filter
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
-    from ..utils.payment_methods import delete_all_user_qr_codes
 
 # The decorator stays typed for mypy via the relative import below; at runtime
 # the absolute import resolves in the Lambda zip (package `utils`) and the
@@ -39,70 +44,14 @@ else:  # pragma: no cover
 logger = get_logger(__name__)
 
 
-def _delete_user_s3_reports(account_id: str, logger: Any) -> int:
-    """Delete all S3 report objects and versions for all profiles owned by the user.
-
-    Returns the count of deleted S3 report versions.
-    """
-    from .admin_operations import _get_user_profiles, _normalize_account_id
-    from .delete_profile_cascade import _delete_s3_reports
-
-    db_account_id = _normalize_account_id(account_id)
-    profiles = _get_user_profiles(db_account_id)
-    total_deleted = 0
-    for profile in profiles:
-        profile_id = profile.get("profileId")
-        if profile_id:
-            total_deleted += _delete_s3_reports(str(profile_id))
-
-    logger.info("Deleted user S3 reports", account_id=account_id, count=total_deleted)
-    return total_deleted
-
-
-def _delete_all_user_data(account_id: str, logger: Any = None) -> None:
-    """Delete all user data from DynamoDB and S3 using shared deletion internals."""
-    from .admin_operations import (
-        _delete_inbound_shares,
-        _delete_invites_for_owned_profiles,
-        _delete_user_campaigns,
-        _delete_user_orders,
-        _delete_user_profiles,
-        _delete_user_shares,
-        _normalize_account_id,
-    )
-
-    log = logger or get_logger(__name__)
-
-    _delete_user_orders(account_id, log)
-    _delete_user_campaigns(account_id, log)
-    _delete_user_shares(account_id, log)
-    _delete_invites_for_owned_profiles(account_id, log)
-    _delete_inbound_shares(account_id, log)
-    _delete_user_s3_reports(account_id, log)
-    _delete_user_profiles(account_id, log)
-    # Catalogs are preserved per product design and should never be deleted.
-    # Delete payment method QR codes from S3 per captain decision
-    delete_all_user_qr_codes(account_id, log)
-
-    account_id_key = _normalize_account_id(account_id)
-    try:
-        tables.accounts.delete_item(Key={"accountId": account_id_key})
-        log.info("Deleted account from DynamoDB", account_id=account_id_key)
-    except ClientError as e:
-        log.error("Failed to delete account from DynamoDB", error=str(e), account_id=account_id_key)
-        raise
-    log.info("Deleted all user data from DynamoDB")
-
-
 def _lookup_cognito_user_with_retry(cognito: Any, user_pool_id: str, account_id: str) -> str | None:
     """Look up Cognito username by sub with retry for transient errors."""
-    # Validate before interpolating into the Cognito filter to prevent
-    # quote-injection / filter breakage (#124, #441).
-    from .admin_operations import _validate_sub_for_filter
-
-    _validate_sub_for_filter(account_id)
+    # Building the filter validates and quotes the value in one step, so the value that
+    # was checked is the value sent (#124, #441, #560). The transient-fault backoff stays
+    # with the shared retry helper landed in #580.
+    filter_expression = cognito_user_filter("sub", account_id)
     users_response = retry_on_transient_errors(
-        cognito.list_users, UserPoolId=user_pool_id, Filter=f'sub = "{account_id}"', Limit=1
+        cognito.list_users, UserPoolId=user_pool_id, Filter=filter_expression, Limit=1
     )
     users = users_response.get("Users", [])
     if users:
@@ -130,6 +79,33 @@ def _delete_user_from_cognito(
     logger.info(f"Deleted user from Cognito: {username}")
 
 
+def _lookup_cognito_user_for_deletion(cognito: Any, user_pool_id: str, account_id: str, logger: Any) -> str | None:
+    """Pre-check lookup for the self-service deletion, with the Cognito fault classification.
+
+    Mirrors the admin purge's ``_find_cognito_user_by_sub``: a lookup failure
+    aborts before any DynamoDB data is deleted, and a transient Cognito fault
+    that survived the retry wrapper stays retryable (``RESOURCE_BUSY``, #291).
+    """
+    try:
+        username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id)
+    except (ClientError, BotoCoreError) as error:
+        # A retryable Cognito fault is a retryable outcome even when the retry
+        # wrapper is already exhausted (#291): emit RESOURCE_BUSY, not a
+        # permanent failure. BotoCoreError is a transport fault, so it lands
+        # here too; nothing has been deleted yet, so the retry is safe.
+        error_code = ErrorCode.RESOURCE_BUSY if is_transient_cognito_error(error) else ErrorCode.INTERNAL_ERROR
+        message = (
+            "Failed to delete account. Retry to complete the deletion."
+            if error_code == ErrorCode.RESOURCE_BUSY
+            else "Failed to delete account"
+        )
+        logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(error), exc_info=True)
+        raise AppError(error_code, message) from error
+    if not username:
+        logger.warning(f"User not found in Cognito with sub: {account_id}")
+    return username
+
+
 @with_error_handling(error_message="Failed to delete account")
 def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     """
@@ -148,11 +124,13 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
         True if account was deleted successfully
 
     Raises:
-        AppError: If deletion error occurs
+        AppError: If deletion error occurs. When the data sweep succeeded but
+            the Cognito delete failed, the error names the partial state so
+            the caller knows the account needs a retry to complete.
     """
     logger.info("delete_my_account handler invoked")
 
-    account_id = (event.get("identity") or {}).get("sub")
+    account_id = get_caller_id(event)
     if not account_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
     logger.info(f"Deleting account for: {account_id}")
@@ -161,26 +139,38 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     if not user_pool_id:
         raise AppError(ErrorCode.INTERNAL_ERROR, "USER_POOL_ID not configured")
 
-    cognito = boto3.client("cognito-idp")
+    cognito = get_cognito_client()
 
-    # Handler-specific Cognito error handling stays in this try block: the
+    # Pre-check Cognito lookup to fail early on authorization/network/config issues.
+    # Handler-specific Cognito error handling stays in this handler: the
     # decorator only covers the generic unexpected-exception path, not typed
     # ClientError mapping.
-    try:
-        # Pre-check Cognito lookup to fail early on authorization/network/config issues
-        try:
-            username = _lookup_cognito_user_with_retry(cognito, user_pool_id, account_id)
-            if not username:
-                logger.warning(f"User not found in Cognito with sub: {account_id}")
-        except ClientError as e:
-            logger.error("Cognito lookup failed before deletion", account_id=account_id, error=str(e), exc_info=True)
-            raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
+    username = _lookup_cognito_user_for_deletion(cognito, user_pool_id, account_id, logger)
 
-        _delete_all_user_data(account_id, logger)
-        _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger)
-        logger.info("Account deletion completed successfully")
-        return True
+    # The data sweep runs before the Cognito delete and is safe to re-run, so a
+    # retry after any failure below converges; a sweep failure leaves the
+    # Cognito user untouched. Both phases and their failure classification live
+    # in the shared helper so the two deletion paths report them identically.
+    run_deletion_steps(
+        sweep=lambda: delete_all_user_data(account_id, logger),
+        delete_cognito=lambda: _delete_user_from_cognito(cognito, user_pool_id, account_id, username, logger),
+        logger=logger,
+        log_context={"account_id": account_id},
+        sweep_log_message="Data sweep failed before the Cognito delete; the Cognito user is untouched",
+        sweep_retry_message=(
+            "Data sweep failed before the Cognito delete; the Cognito user is "
+            "untouched. Retry to complete the deletion."
+        ),
+        sweep_fatal_message="Failed to delete account data",
+        partial_retry_message=(
+            "Account data was deleted but the Cognito user could not be confirmed deleted; "
+            "retry to complete the deletion"
+        ),
+        partial_fatal_message=(
+            "Account data was deleted but the Cognito user could not be confirmed deleted; "
+            "complete the deletion manually in Cognito"
+        ),
+    )
 
-    except ClientError as e:
-        logger.error("Cognito error during account deletion", account_id=account_id, error=str(e), exc_info=True)
-        raise AppError(ErrorCode.INTERNAL_ERROR, "Failed to delete account")
+    logger.info("Account deletion completed successfully")
+    return True

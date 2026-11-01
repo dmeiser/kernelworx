@@ -24,7 +24,7 @@ import { useNavigate, type NavigateFunction } from 'react-router-dom';
 import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
 import { useAuth } from '../contexts/AuthContext';
 
-const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{15,}$/;
 const CONFIRM_CODE_REGEX = /^\d{6}$/;
 const POST_RESET_REDIRECT_MS = 1500;
 const RESEND_COOLDOWN_MS = 30000;
@@ -37,7 +37,7 @@ const CONFIRM_ERROR_MESSAGES: Record<string, string> = {
   CodeMismatchException: 'Invalid confirmation code. Please check and try again.',
   ExpiredCodeException: 'This code has expired. Please request a new one.',
   InvalidPasswordException:
-    'Password does not meet requirements: minimum 8 characters with uppercase, lowercase, numbers, and symbols.',
+    'Password does not meet requirements: minimum 15 characters with uppercase, lowercase, numbers, and symbols.',
   // UserNotFoundException is handled separately to avoid account enumeration.
 };
 
@@ -56,7 +56,7 @@ function validatePassword(password: string, confirmPassword: string): string | n
     return 'Password and confirmation are required';
   }
   if (!PASSWORD_REGEX.test(password)) {
-    return 'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol';
+    return 'Password must be at least 15 characters and include uppercase, lowercase, number, and symbol';
   }
   if (password !== confirmPassword) {
     return 'Passwords do not match';
@@ -164,6 +164,15 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     return true;
   };
 
+  const requestResetCode = async (trimmedEmail: string): Promise<boolean> => {
+    try {
+      await resetPassword({ username: trimmedEmail });
+      return false;
+    } catch (err: unknown) {
+      return handleRequestError(err);
+    }
+  };
+
   const handleRequestCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -176,16 +185,14 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     }
 
     setLoading(true);
-    try {
-      await resetPassword({ username: trimmedEmail });
-    } catch (err: unknown) {
-      if (handleRequestError(err)) {
-        setLoading(false);
-        return;
-      }
+    const failed = await requestResetCode(trimmedEmail);
+    if (failed) {
+      setLoading(false);
+      return;
     }
     setCodeSent(true);
     setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
+    startResendCooldown();
     setLoading(false);
   };
 
@@ -202,15 +209,14 @@ function useForgotPasswordState(navigate: NavigateFunction): ForgotPasswordState
     }
 
     setLoading(true);
-    try {
-      await resetPassword({ username: trimmedEmail });
-      setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
-      startResendCooldown();
-    } catch (err: unknown) {
-      handleRequestError(err);
-    } finally {
+    const failed = await requestResetCode(trimmedEmail);
+    if (failed) {
       setLoading(false);
+      return;
     }
+    setSuccess(`If an account exists for ${trimmedEmail}, a reset code has been sent.`);
+    startResendCooldown();
+    setLoading(false);
   };
 
   const handleConfirmReset = async (e: React.FormEvent) => {
@@ -415,7 +421,7 @@ const ConfirmResetForm: React.FC<ConfirmResetFormProps> = ({
         fullWidth
         autoComplete="new-password"
         disabled={loading}
-        helperText="Minimum 8 characters with uppercase, lowercase, numbers, and symbols"
+        helperText="Minimum 15 characters with uppercase, lowercase, numbers, and symbols"
         slotProps={{ htmlInput: { 'data-testid': 'new-password' } }}
       />
       <TextField
@@ -499,7 +505,7 @@ const PageHeader: React.FC<{ codeSent: boolean }> = ({ codeSent }) => (
         flexWrap: 'wrap',
       }}
     >
-      <Box component="img" src="/logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
+      <Box component="img" src="/kernelworx-logo.svg" alt="KernelWorx mark" sx={{ width: 32, height: 32 }} />
       <Typography
         variant="h5"
         sx={{

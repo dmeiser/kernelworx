@@ -18,7 +18,7 @@ if [[ "$OSTYPE" == "linux"* ]] || [[ "$OSTYPE" == "darwin"* ]]; then
         echo "✅ Added to /etc/hosts"
     fi
 else
-    echo "⚠️  Windows detected. Please manually add this line to C:\\Windows\\System32\\drivers\\etc\\hosts:"
+    printf '%s\n' "⚠️  Windows detected. Please manually add this line to C:\\Windows\\System32\\drivers\\etc\\hosts:"
     echo "   127.0.0.1  local.dev.appworx.app"
     echo ""
 fi

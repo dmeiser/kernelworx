@@ -65,28 +65,40 @@ This section documents the key patterns and shared utilities used throughout the
 
 ### Backend Python Patterns
 
-#### Centralized Validation (`src/utils/validation.py`)
+#### Resolver argument and unit validation (`src/utils/appsync_types.py`, `src/utils/validation.py`)
 
-All input validation for Lambda handlers should use the centralized validation module:
+Lambda handlers that read resolver arguments should use the shared readers, which enforce the schema types and bounds before the handler indexes into the raw event, raising a typed `INVALID_INPUT` `AppError`:
 
 ```python
-from utils.validation import (
-    validate_required_fields,
-    validate_unit_number,
-    validate_unit_fields,
-)
+from utils.appsync_types import require_int, require_str, require_unit_number
 
-# Validate required fields are present
-validate_required_fields(data, ["profileId", "campaignName"])
+# Require a non-empty string argument
+profile_id = require_str(input_args, "profileId")
 
-# Validate unit number format (optional field)
-validate_unit_number(unit_number, required=False)
+# Require an integer argument
+campaign_year = require_int(arguments, "campaignYear")
 
-# Validate complete unit information
-validate_unit_fields(unit_type, unit_number, city, state)
+# Require a scout unit number (positive integer)
+unit_number = require_unit_number(arguments, "unitNumber")
 ```
 
-All validation functions raise `AppError` with `ErrorCode.INVALID_INPUT` on failure.
+The caller ID is read with `get_caller_id(event)` from the same module; never hand-inline `event["identity"]["sub"]`, which raises `KeyError` on an unauthenticated invocation (`tests/unit/test_caller_id_helper.py` guards this).
+
+Validation failures raise `AppError` with `ErrorCode.INVALID_INPUT`. The equivalent rules are also enforced in the AppSync JS resolvers in `tofu/application/appsync/js-resolvers/`.
+
+#### Cognito user filters (`src/utils/cognito_filters.py`)
+
+Cognito's `ListUsers` `Filter` is a string-interpolated query language, so never hand-write one. Build every user filter with the shared formatter, which validates the value and returns the finished expression:
+
+```python
+from utils.cognito_filters import cognito_user_filter
+
+cognito.list_users(UserPoolId=pool_id, Filter=cognito_user_filter("sub", account_id), Limit=1)
+cognito.list_users(UserPoolId=pool_id, Filter=cognito_user_filter("email_prefix", query), Limit=50)
+cognito.list_users(UserPoolId=pool_id, Filter=cognito_user_filter("email", email, email_shape="strict"), Limit=1)
+```
+
+Fields are `sub`, `email`, and `email_prefix` (`email ^=`, starts-with); `email_shape` is `loose` (default) or `strict` and only applies to `email`. See the module docstring for the rules and `tests/unit/test_cognito_filter_call_sites.py` for the call-site table.
 
 #### DynamoDB Utilities (`src/utils/dynamodb.py`)
 
@@ -112,6 +124,29 @@ hard-coded fallback table name, and never hard-code an environment-specific tabl
 result. When a handler needs the name for a raw call (e.g. `BatchGetItem` on the resource),
 read it from the accessor: `tables.catalogs.table_name`.
 
+#### AWS Clients (`src/utils/boto.py`)
+
+Build S3 and admin-Cognito clients with the shared factories, not a local `boto3.client(...)`:
+
+```python
+from utils.boto import get_cognito_client, get_s3_client
+
+cognito = get_cognito_client()
+s3 = get_s3_client()
+```
+
+Endpoint overrides (`S3_ENDPOINT`, `COGNITO_ENDPOINT`) are read and validated in exactly that
+module — a set value must be an `http(s)` URL with a host, so an override is honored
+everywhere it applies or raises, never silently dropped by one call site. The `get_s3_client`
+override argument exists only for the pre-existing per-module `s3_client` test seam
+(`src/utils/payment_methods.py`, `src/handlers/report_generation.py`,
+`src/handlers/delete_profile_cascade.py`); production code passes nothing.
+
+Deliberate exceptions: the `pre-token-generation` trigger builds its Cognito client once at
+module scope for warm-start connection reuse (#458), and the account-deletion and pre-signup
+handlers build per-call Cognito clients. `DYNAMODB_ENDPOINT` is still read unvalidated in
+`src/utils/dynamodb.py` (#523).
+
 #### ID Generation (`src/utils/ids.py`)
 
 Use centralized ID normalization helpers for consistent prefixed IDs:
@@ -126,6 +161,12 @@ profile_id = ensure_prefix("PROFILE", user_input)
 raw_id = strip_prefix(profile_id)
 ```
 
+`build_unit_campaign_key` owns the `unitCampaignKey-index` partition-key layout
+(`unitType#unitNumber#city#state#campaignName#campaignYear`). Unit reporting, unit catalog
+listing, and the campaign write path (`CreateCampaignInput.build_unit_campaign_key`) all use
+it, so the layout has exactly one definition and no call site rebuilds the string. The format
+cannot change without a data migration.
+
 #### Error Handling (`src/utils/errors.py`)
 
 Use `AppError` for all application errors:
@@ -137,6 +178,11 @@ raise AppError(ErrorCode.INVALID_INPUT, "Profile name is required")
 raise AppError(ErrorCode.NOT_FOUND, "Campaign not found")
 raise AppError(ErrorCode.UNAUTHORIZED, "Not authorized to view this profile")
 ```
+
+Do not translate a failed DynamoDB/Cognito lookup yourself, and never return the survivors of an
+`asyncio.gather(..., return_exceptions=True)` as the answer to a list query: a truncated list reads
+as "none in use" and gets acted on. `admin_operations._raise_batch_lookup_error` (one failure) and
+`_raise_gather_failures` (a collected list) own that classification — see AGENTS.md.
 
 #### Cognito Retries (`src/utils/cognito.py`)
 
