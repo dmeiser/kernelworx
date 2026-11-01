@@ -23,13 +23,14 @@ from .deletion_cascade import (
     delete_user_profiles,
     delete_user_shares,
     get_user_profiles,
-    normalize_account_id,
 )
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
+    from utils.ids import ensure_account_id
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
+    from ..utils.ids import ensure_account_id
     from ..utils.logging import get_logger
 
 # The decorator stays typed for mypy via the relative import below; at runtime
@@ -46,7 +47,7 @@ else:  # pragma: no cover
 
 def _user_profiles_for(account_id: str) -> list[Dict[str, Any]]:
     """Sweep the profiles table once for a per-domain admin deletion."""
-    return get_user_profiles(normalize_account_id(account_id))
+    return get_user_profiles(ensure_account_id(account_id))
 
 
 @with_error_handling(error_message="Failed to delete user orders")
