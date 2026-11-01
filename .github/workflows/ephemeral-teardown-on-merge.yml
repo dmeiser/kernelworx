@@ -44,4 +44,5 @@ jobs:
       - name: Tear down ephemeral environment
         env:
           TF_VAR_encryption_passphrase: ${{ secrets.TF_VAR_ENCRYPTION_PASSPHRASE }}
-        run: scripts/ephemeral-env.sh down "pr-${{ github.event.pull_request.number }}"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: scripts/ephemeral-env.sh down "pr-${PR_NUMBER}"
