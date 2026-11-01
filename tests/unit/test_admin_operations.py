@@ -7390,6 +7390,45 @@ class TestAdminOperationExceptionHandlers:
             assert result == []
             assert mock_tables.accounts.scan.call_count == 1
 
+    def test_search_user_scan_bounds_by_evaluated_items(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A page that evaluates items but returns none still consumes the budget (#757)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "needle"},
+        }
+
+        with (
+            patch("src.handlers.admin_user_operations.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_user_operations.tables") as mock_tables,
+            patch("src.handlers.admin_user_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_user_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            # DynamoDB evaluated 1000 removed/filtered items but returned none.
+            mock_tables.accounts.scan.return_value = {
+                "Items": [],
+                "ScannedCount": 1000,
+                "LastEvaluatedKey": {"accountId": "ACCOUNT#removed"},
+            }
+            mock_client.list_users.return_value = {"Users": []}
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
+
+            result = admin_search_user(event, lambda_context)
+
+            assert result == []
+            assert mock_tables.accounts.scan.call_count == 1
+
     def test_search_user_scan_stops_at_the_page_cap(
         self,
         admin_appsync_event: Dict[str, Any],

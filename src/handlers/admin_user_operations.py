@@ -386,7 +386,7 @@ def _filter_matching_accounts(
 
 def _scan_accounts_page(
     paginator_params: Dict[str, Any], page_size: int
-) -> tuple[list[Dict[str, Any]], Dict[str, Any] | None]:
+) -> tuple[list[Dict[str, Any]], Dict[str, Any] | None, int]:
     """Scan one bounded page of accounts. Returns (items, last_evaluated_key).
 
     ``Limit`` caps how many items this request reads and ``ProjectionExpression``
@@ -402,7 +402,11 @@ def _scan_accounts_page(
     )
     items = response.get("Items", [])
     last_key = response.get("LastEvaluatedKey")
-    return items, last_key
+    # ``ScannedCount`` is the number of items DynamoDB evaluated for this page;
+    # ``len(items)`` is only the subset it returned. The safety budget must bound
+    # the former so a table of removed/filtered items cannot blow past it.
+    scanned_count = response.get("ScannedCount", len(items))
+    return items, last_key, scanned_count
 
 
 # Limit search results to prevent overwhelming responses.
@@ -498,10 +502,15 @@ def _scan_accounts_page_into(
     max_results: int,
     page_size: int,
 ) -> tuple[int, Dict[str, Any] | None]:
-    """Scan one page and append its matching accounts to matches. Returns (page_size, last_key)."""
-    items, last_key = _scan_accounts_page(paginator_params, page_size)
+    """Scan one page and append its matching accounts to matches. Returns (scanned_count, last_key).
+
+    ``scanned_count`` is the number of items DynamoDB *evaluated* (``ScannedCount``),
+    not the number it returned, so the safety budget bounds scan capacity even
+    when a page evaluates items that are filtered out or removed.
+    """
+    items, last_key, scanned_count = _scan_accounts_page(paginator_params, page_size)
     _filter_matching_accounts(items, query_lower, matches, max_results)
-    return len(items), last_key
+    return scanned_count, last_key
 
 
 def _scan_is_truncated(scanned_count: int, pages: int, last_count: int, last_key: Dict[str, Any] | None) -> bool:
