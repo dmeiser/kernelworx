@@ -299,4 +299,20 @@ describe('usePasskeys defensive paths', () => {
     expect(amplifyAuth.listWebAuthnCredentials).not.toHaveBeenCalled();
     expect(result.current.pendingConfirmation).toBeNull();
   });
+
+  it('returns early when confirming a delete with no credential id', async () => {
+    const { result } = renderHook(() => usePasskeys());
+
+    act(() => {
+      result.current.handleDeletePasskey('');
+    });
+    expect(result.current.pendingConfirmation).not.toBeNull();
+
+    await act(async () => {
+      await result.current.confirmPasskeyAction();
+    });
+
+    expect(amplifyAuth.deleteWebAuthnCredential).not.toHaveBeenCalled();
+  });
+
 });

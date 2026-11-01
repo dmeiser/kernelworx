@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 function validatePermissions(permissions) {
     if (!Array.isArray(permissions) || permissions.length === 0) {
@@ -31,7 +32,7 @@ function resolveExpiryDays(expiresInDays) {
 
 export function request(ctx) {
     const input = ctx.args.input;
-    const profileId = input.profileId;
+    const profileId = normalizeIdOrPrefix(input.profileId, 'PROFILE#');
     const permissions = input.permissions;
     const callerAccountId = ctx.identity.sub;
 

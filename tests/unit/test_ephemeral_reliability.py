@@ -393,6 +393,42 @@ class TestCleanupStaleLock:
         rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
         assert rm_calls, "Stale lock from the same host must be deleted"
 
+    def test_crafted_lock_timestamp_is_data_not_python_source(self, repo_root: Path, tmp_env: Path) -> None:
+        """`Created` comes from the S3 `.tflock` object body, so it must reach the age
+        snippet as an argument, never as interpolated Python source (#730): crafted
+        content must not be able to run code, and an unparseable timestamp must fall
+        back to "fresh" rather than deleting the lock."""
+        recorded = tmp_env / "aws_calls.txt"
+        marker = tmp_env / "pwned"
+        lock_file = tmp_env / "lock.json"
+        payload = f'2024-01-01T00:00:00Z" + __import__("os").popen("touch {marker}").read() + "'
+        lock_file.write_text(json.dumps({"Created": payload, "Who": "runner@other-host"}))
+        result = self._source_and_call(
+            repo_root,
+            tmp_env,
+            f"""
+            #!/bin/bash
+            echo "$@" >> "{recorded}"
+            case "$1 $2" in
+              "s3api head-object")
+                exit 0
+                ;;
+              "s3 cp")
+                cat "{lock_file}"
+                ;;
+              "s3 rm")
+                echo "removed"
+                ;;
+            esac
+            exit 0
+            """,
+        )
+        assert result.returncode == 0, result.stderr
+        assert not marker.exists(), "lock content must never be evaluated as Python source"
+        assert "Lock appears fresh" in result.stderr
+        rm_calls = [line for line in recorded.read_text().splitlines() if line.startswith("s3 rm")]
+        assert not rm_calls, "an unparseable lock timestamp must not be treated as stale"
+
 
 class TestRecoverStateIfMissing:
     """recover_state_if_missing is exercised through ephemeral-env.sh down,
