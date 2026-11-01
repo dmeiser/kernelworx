@@ -355,8 +355,6 @@ module "cloudfront" {
   static_bucket_id              = module.s3.static_bucket_id
   static_bucket_arn             = module.s3.static_bucket_arn
   static_bucket_regional_domain = module.s3.static_bucket_regional_domain
-  exports_bucket_name           = module.s3.exports_bucket_name
-  aws_region                    = var.aws_region
 
   # #165: one CLOUDFRONT-scope WAF on the distribution (the only WAF).
   web_acl_id = module.waf.web_acl_arn
@@ -377,7 +375,6 @@ module "waf" {
 
   name_prefix        = local.name_prefix
   environment        = var.environment
-  log_retention_days = var.environment == "prod" ? 30 : 7
   github_token       = var.github_token
 }
 
