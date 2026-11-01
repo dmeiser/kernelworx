@@ -165,12 +165,11 @@ from `./.env`.
 
 ### `scripts/delete-test-catalogs.py`
 
-**Delete managed catalogs owned by test users.** Scans the DynamoDB catalogs table for
-items where `GSI1PK` matches `MANAGED_CATALOG#{sub}` for each test user, then deletes
-their METADATA items.
+**Delete catalogs owned by test users.** Queries the `ownerAccountId-index` GSI for
+each test user's `ACCOUNT#{sub}` and deletes the matching catalogs by `catalogId`.
 
-**Key flags/arguments:** None. Reads `DYNAMODB_TABLE_NAME`, `AWS_REGION`, `TEST_USER_POOL_ID`,
-and test user emails from environment.
+**Key flags/arguments:** None. Reads `CATALOGS_TABLE_NAME` (or `DYNAMODB_TABLE_NAME`),
+`AWS_REGION`, `TEST_USER_POOL_ID`, and test user emails from environment.
 
 ### `scripts/migrate_shares_prefix.py`
 
