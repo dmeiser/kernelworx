@@ -170,6 +170,7 @@ jobs:
             frontend/deploy.sh \
             frontend/setup-local-dev.sh \
             scripts/appsync-ensure-resolver-order.sh \
+            scripts/build-lambda-layer.sh \
             scripts/create-ephemeral-test-users.sh \
             scripts/create-screenshot-user.sh \
             scripts/create-test-users.sh \
