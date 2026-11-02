@@ -33,6 +33,7 @@ anytown
 apperror
 AppSync
 appworx
+argjson
 aria
 arn
 assertable

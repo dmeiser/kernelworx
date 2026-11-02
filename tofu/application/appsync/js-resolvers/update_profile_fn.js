@@ -1,11 +1,14 @@
 import { util } from '@aws-appsync/utils';
 import { validateSellerName } from './lib/validate_seller_name.js';
+import { validateUnitFields } from './lib/validate_unit_fields.js';
 
 export function request(ctx) {
     const profile = ctx.stash.profile;
     const input = ctx.args.input;
     const now = util.time.nowISO8601();
     const sellerName = validateSellerName(input.sellerName);
+    // Rejects invalid unitType/unitNumber up front; only provided fields come back.
+    const unitFields = validateUnitFields(input);
 
     // Build update expression
     const expressionParts = ['sellerName = :sellerName', 'updatedAt = :updatedAt'];
@@ -13,6 +16,18 @@ export function request(ctx) {
         ':sellerName': sellerName,
         ':updatedAt': now
     };
+
+    // Add unitType if provided
+    if (unitFields.unitType !== undefined) {
+        expressionParts.push('unitType = :unitType');
+        expressionValues[':unitType'] = unitFields.unitType;
+    }
+
+    // Add unitNumber if provided
+    if (unitFields.unitNumber !== undefined) {
+        expressionParts.push('unitNumber = :unitNumber');
+        expressionValues[':unitNumber'] = unitFields.unitNumber;
+    }
     
     // NEW STRUCTURE: Update using ownerAccountId + profileId keys
     return {
@@ -37,10 +52,15 @@ export function response(ctx) {
     const input = ctx.args.input;
     const now = util.time.nowISO8601();
     
-    // Return the updated profile with merged fields
+    // Return the updated profile with merged fields. The unit fields reuse the
+    // same "provided" rule as request(), so an explicit null keeps the stored
+    // value in the response instead of reporting a null that DynamoDB never wrote.
+    const unitFields = validateUnitFields(input);
     return {
         ...profile,
         sellerName: validateSellerName(input.sellerName),
+        unitType: unitFields.unitType !== undefined ? unitFields.unitType : profile.unitType,
+        unitNumber: unitFields.unitNumber !== undefined ? unitFields.unitNumber : profile.unitNumber,
         updatedAt: now
     };
 }

@@ -20,6 +20,16 @@ describe('query_campaign_fn request', () => {
             ':campaignId': 'CAMPAIGN#c1',
         });
     });
+
+    // #717: the GSI key is the DB form, so an unprefixed campaignId made getCampaign
+    // report a campaign that exists as not found.
+    it('normalizes an unprefixed campaignId to the DB form', () => {
+        const result = request({ args: { campaignId: 'c1' } });
+
+        assert.deepStrictEqual(result.query.expressionValues, {
+            ':campaignId': 'CAMPAIGN#c1',
+        });
+    });
 });
 
 describe('query_campaign_fn response', () => {

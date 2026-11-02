@@ -11,32 +11,48 @@ import sys
 import traceback
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, TextIO
+from typing import Any, Dict, Optional, TextIO, cast
 
 #: Extra key names whose values are never emitted in the clear. Keys are
 #: matched case-insensitively against these lowercase names, so ``customerPhone``
 #: and ``qrCodeUrl`` are caught alongside ``email``. This is the structural
 #: backstop for redaction: individual call sites still mask explicitly with
 #: :func:`mask_email`, but a new call site that forgets cannot leak PII.
-_SENSITIVE_KEYS = frozenset({"email", "username", "phone", "customerphone", "address", "qrcodeurl", "password"})
+_SENSITIVE_KEYS = frozenset(
+    {"email", "username", "phone", "customerphone", "address", "qrcodeurl", "password", "sharedcampaigncode"}
+)
 #: Sensitive keys whose value is an address and can therefore be masked
 #: partially instead of dropped entirely.
 _MASKABLE_KEYS = frozenset({"email", "username"})
 
 
-def _redact_sensitive(entry: Dict[str, Any]) -> Dict[str, Any]:
-    """Return ``entry`` with sensitive top-level values masked.
+def _redact_value(key: str, value: Any) -> Any:
+    """Mask ``value`` when ``key`` names a sensitive field, recursing otherwise."""
+    normalized = key.lower()
+    if normalized in _SENSITIVE_KEYS and "mask" not in normalized:
+        return mask_email(value) if normalized in _MASKABLE_KEYS else "***"
+    return _redact_nested(value)
 
-    Keys already named as masked (e.g. ``maskedEmail``) are left untouched, and
-    masking an already-masked address is idempotent, so explicit
-    :func:`mask_email` call sites keep working unchanged.
+
+def _redact_nested(value: Any) -> Any:
+    """Return a copy of ``value`` with sensitive fields masked at any depth."""
+    if isinstance(value, dict):
+        return {key: _redact_value(key, item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_nested(item) for item in value]
+    return value
+
+
+def _redact_sensitive(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a NEW dict with sensitive values masked, without mutating ``entry``.
+
+    Masking recurses into nested dicts and lists, and keys are matched
+    case-insensitively against :data:`_SENSITIVE_KEYS`. Keys already named as
+    masked (e.g. ``maskedEmail``) are left untouched, and masking an
+    already-masked address is idempotent, so explicit :func:`mask_email` call
+    sites keep working unchanged.
     """
-    for key, value in entry.items():
-        normalized = key.lower()
-        if normalized not in _SENSITIVE_KEYS or "mask" in normalized:
-            continue
-        entry[key] = mask_email(value) if normalized in _MASKABLE_KEYS else "***"
-    return entry
+    return cast(Dict[str, Any], _redact_nested(entry))
 
 
 class _StdoutHandler(logging.StreamHandler[TextIO]):

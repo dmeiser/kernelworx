@@ -86,7 +86,7 @@ const useFederatedStatus = (isFederatedProp?: boolean) => {
     };
   }, [isFederatedProp]);
 
-  return isFederated ?? false;
+  return isFederated;
 };
 
 export const MfaSetupRequiredState: React.FC<MfaSetupRequiredStateProps> = ({
