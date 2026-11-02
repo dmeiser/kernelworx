@@ -5,10 +5,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { RouteErrorBoundary } from './RouteErrorBoundary';
+import { RouteErrorBoundary, isChunkLoadError } from './RouteErrorBoundary';
 
 const ThrowingChild: React.FC = () => {
-  throw new Error('Test route error');
+  throw new Error('Failed to fetch dynamically imported module');
 };
 
 describe('RouteErrorBoundary', () => {
@@ -34,7 +34,6 @@ describe('RouteErrorBoundary', () => {
 
     expect(screen.getByText(/This page failed to load/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /reload page/i })).toBeInTheDocument();
-    expect(screen.getByText('Test route error')).toBeInTheDocument();
 
     consoleError.mockRestore();
   });
@@ -56,6 +55,71 @@ describe('RouteErrorBoundary', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /reload page/i }));
     expect(reloadMock).toHaveBeenCalled();
+
+    consoleError.mockRestore();
+  });
+});
+
+import { ErrorBoundary } from './ErrorBoundary';
+
+describe('RouteErrorBoundary non-chunk errors', () => {
+  it('lets non-chunk runtime errors fall through to the outer ErrorBoundary without exposing raw text', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const NonChunkThrowingChild: React.FC = () => {
+      throw new Error('Sensitive internal details');
+    };
+
+    render(
+      <ErrorBoundary>
+        <RouteErrorBoundary>
+          <NonChunkThrowingChild />
+        </RouteErrorBoundary>
+      </ErrorBoundary>,
+    );
+
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    expect(screen.queryByText(/This page failed to load/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Sensitive internal details')).not.toBeInTheDocument();
+
+    consoleError.mockRestore();
+  });
+});
+
+
+describe('isChunkLoadError', () => {
+  it('returns false for non-Error values', () => {
+    expect(isChunkLoadError(null)).toBe(false);
+    expect(isChunkLoadError(undefined)).toBe(false);
+  });
+
+  it('returns true when the error name is ChunkLoadError', () => {
+    const error = new Error('something else');
+    error.name = 'ChunkLoadError';
+    expect(isChunkLoadError(error)).toBe(true);
+  });
+
+  it('returns true for chunk-load messages', () => {
+    expect(isChunkLoadError(new Error('Failed to fetch dynamically imported module'))).toBe(true);
+    expect(isChunkLoadError(new Error('Loading chunk 123 failed'))).toBe(true);
+  });
+
+  it('returns false for ordinary runtime errors', () => {
+    expect(isChunkLoadError(new Error('Test route error'))).toBe(false);
+  });
+});
+
+
+describe('RouteErrorBoundary componentDidCatch', () => {
+  it('skips the chunk-load log for non-chunk errors', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const instance = new (RouteErrorBoundary as any)({ children: null });
+
+    instance.componentDidCatch(new Error('ordinary runtime error'), {} as React.ErrorInfo);
+
+    const loggedChunkError = consoleError.mock.calls.some(
+      (call) => call[0] === 'Route chunk load error:',
+    );
+    expect(loggedChunkError).toBe(false);
 
     consoleError.mockRestore();
   });

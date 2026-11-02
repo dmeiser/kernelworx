@@ -434,35 +434,6 @@ resource "aws_appsync_resolver" "get_unit_report" {
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
-# listUnitCatalogs (Lambda)
-resource "aws_appsync_resolver" "list_unit_catalogs" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Query"
-  field       = "listUnitCatalogs"
-  data_source = aws_appsync_datasource.list_unit_catalogs.name
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
-}
-
-# listUnitCampaignCatalogs (Lambda)
-resource "aws_appsync_resolver" "list_unit_campaign_catalogs" {
-  api_id      = aws_appsync_graphql_api.main.id
-  type        = "Query"
-  field       = "listUnitCampaignCatalogs"
-  data_source = aws_appsync_datasource.list_unit_campaign_catalogs.name
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
-}
 
 # === PAYMENT METHODS QUERIES ===
 

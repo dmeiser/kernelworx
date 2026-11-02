@@ -117,6 +117,28 @@ describe('MfaSetupRequiredState', () => {
       expect(screen.queryByLabelText(/Verification Code/i)).not.toBeInTheDocument();
     });
 
+    it('does not trigger TOTP setup while federated status is unresolved (undefined case)', async () => {
+      vi.mocked(amplifyAuth.fetchAuthSession).mockResolvedValue({
+        tokens: {
+          idToken: {
+            payload: {
+              identities: [{ providerName: 'Google' }],
+            },
+          },
+        },
+      } as any);
+
+      render(<MfaSetupRequiredState autoOpenDialog={true} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByRole('heading', { name: /Admin access requires a password sign-in/i }).length).toBeGreaterThan(0);
+      });
+
+      // Resolves as federated without a premature AssociateSoftwareToken call
+      expect(amplifyAuth.setUpTOTP).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText(/Verification Code/i)).not.toBeInTheDocument();
+    });
+
     it('handles Sign Out button click for federated user', async () => {
       const user = userEvent.setup();
       render(<MfaSetupRequiredState isFederated={true} />);
@@ -165,4 +187,21 @@ describe('MfaSetupRequiredState', () => {
     backSpy.mockRestore();
     vi.restoreAllMocks();
   });
+
+  it('closes the federated dialog through handleClose', async () => {
+    const user = userEvent.setup();
+    render(<MfaSetupRequiredState autoOpenDialog={true} isFederated={true} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    const back = screen.getAllByRole('button', { name: /Back/i })[0];
+    await user.click(back);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
 });

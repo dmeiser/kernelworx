@@ -266,10 +266,7 @@ module "lambda" {
     # #354 (chunk 4 of #326): account/reporting-domain handlers use the scoped
     # account-reporting execution role. delete-account stays on the admin role
     # (#121, which takes precedence in the lambda module's role resolution).
-    "request-report"              = module.iam.lambda_account_reporting_execution_role_arn
     "list-catalogs-in-use"        = module.iam.lambda_account_reporting_execution_role_arn
-    "list-unit-catalogs"          = module.iam.lambda_account_reporting_execution_role_arn
-    "list-unit-campaign-catalogs" = module.iam.lambda_account_reporting_execution_role_arn
     # #355 (chunk 5 of #326, final): the Cognito post-auth account-bootstrap
     # trigger uses its own scoped role (accounts table only). The monolithic
     # shared role is retired.
@@ -345,8 +342,6 @@ module "cloudfront" {
   static_bucket_id              = module.s3.static_bucket_id
   static_bucket_arn             = module.s3.static_bucket_arn
   static_bucket_regional_domain = module.s3.static_bucket_regional_domain
-  exports_bucket_name           = module.s3.exports_bucket_name
-  aws_region                    = var.aws_region
 
   # #165: one CLOUDFRONT-scope WAF on the distribution (the only WAF).
   web_acl_id = module.waf.web_acl_arn
@@ -368,7 +363,6 @@ module "waf" {
   name_prefix         = local.name_prefix
   environment         = var.environment
   managed_rule_action = "Block"
-  log_retention_days  = var.environment == "prod" ? 30 : 7
   github_token        = var.github_token
 }
 

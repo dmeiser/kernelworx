@@ -400,6 +400,7 @@ export const OrdersPage: React.FC = () => {
   // The order awaiting the seller's confirmation, or null when the dialog is
   // closed. The action is permanent, so it always goes through the dialog.
   const [confirmTarget, setConfirmTarget] = React.useState<GqlOrder | null>(null);
+  const [deleteTarget, setDeleteTarget] = React.useState<string | null>(null);
 
   const hasWritePermission = checkWritePermission(profile);
 
@@ -417,9 +418,7 @@ export const OrdersPage: React.FC = () => {
   };
 
   const handleDeleteOrder = async (orderId: string) => {
-    if (confirm('Are you sure you want to delete this order?')) {
-      await deleteOrder({ variables: { orderId: ensureOrderId(orderId) } });
-    }
+    await deleteOrder({ variables: { orderId: ensureOrderId(orderId) } });
   };
 
   const handleToggleSummary = () => {
@@ -458,7 +457,7 @@ export const OrdersPage: React.FC = () => {
         onCreateOrder={handleCreateOrder}
         onEditOrder={handleEditOrder}
         onDeleteOrder={(orderId) => {
-          void handleDeleteOrder(orderId);
+          setDeleteTarget(orderId);
         }}
         onConfirmPayment={handleConfirmPayment}
       />
@@ -475,6 +474,17 @@ export const OrdersPage: React.FC = () => {
           Mark the payment for {confirmTarget?.customerName} as received? This is permanent: a confirmed order cannot be
           moved back to pending.
         </Typography>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete order?"
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => handleDeleteOrder(deleteTarget!)}
+        confirmLabel="Delete"
+        confirmColor="error"
+        loadingLabel="Deleting..."
+      >
+        <Typography>Are you sure you want to delete this order?</Typography>
       </ConfirmDialog>
     </>
   );

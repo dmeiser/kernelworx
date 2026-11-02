@@ -33,29 +33,12 @@ from typing import TYPE_CHECKING, Any, Dict, NoReturn
 
 from botocore.exceptions import ClientError
 
-# Handle both Lambda (absolute) and unit test (relative) imports
+# Handle both Lambda (absolute) and unit test (relative) imports via the
+# centralized helper (#774).
 try:  # pragma: no cover
-    from utils.appsync_types import get_caller_id
-    from utils.auth import require_admin_mfa
-    from utils.dynamodb import TRANSIENT_ERROR_CODES
-    from utils.errors import AppError, ErrorCode
+    from utils.import_fallback import import_from_utils
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.appsync_types import get_caller_id
-    from ..utils.auth import require_admin_mfa
-    from ..utils.dynamodb import TRANSIENT_ERROR_CODES
-    from ..utils.errors import AppError, ErrorCode
-
-# The decorator stays typed for mypy via the relative import below; at runtime
-# the absolute import resolves in the Lambda zip (package `utils`) and the
-# relative fallback resolves in unit tests (package `src.handlers`).
-if TYPE_CHECKING:  # pragma: no cover
-    from ..utils.handlers import lambda_handler as with_error_handling
-else:  # pragma: no cover
-    try:
-        from utils.handlers import lambda_handler as with_error_handling
-    except ModuleNotFoundError:
-        from ..utils.handlers import lambda_handler as with_error_handling
-
+    from ..utils.import_fallback import import_from_utils
 
 # The account purge handler was extracted to its own module (#773) but stays
 # registered on this Lambda. The import is safe at module load because
@@ -106,6 +89,20 @@ from .admin_user_reads import (
     admin_get_user_profiles,
     admin_get_user_shared_campaigns,
 )
+
+# `utils` name bindings resolved through the centralized helper (#774).
+get_caller_id = import_from_utils("appsync_types", "get_caller_id")
+require_admin_mfa = import_from_utils("auth", "require_admin_mfa")
+TRANSIENT_ERROR_CODES = import_from_utils("dynamodb", "TRANSIENT_ERROR_CODES")
+AppError, ErrorCode = import_from_utils("errors", "AppError", "ErrorCode")
+
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the helper resolves it in the Lambda zip (package `utils`) and in unit tests
+# (package `src.utils`).
+if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    with_error_handling = import_from_utils("handlers", "lambda_handler")
 
 # DynamoDB/Cognito throttling codes: the lookup is retryable, so surface a
 # RESOURCE_BUSY error instead of silently incomplete admin data (#291, #456).

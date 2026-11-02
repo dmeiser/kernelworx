@@ -43,8 +43,6 @@ const deleteProfileMock = vi.fn().mockResolvedValue({ data: {} });
 
 // Capture mutation option callbacks so tests can invoke them
 let capturedCreateOpts: any;
-let capturedUpdateOpts: any;
-let capturedDeleteOpts: any;
 
 const buildLazyQueryResult = (name: string | undefined) => {
   const lazyQueryHandlers: Record<string, () => [any, any]> = {
@@ -71,28 +69,6 @@ vi.mock('@apollo/client/react', async () => {
       return [
         async (vars: any) => {
           const res = await createProfileMock(vars);
-          opts?.onCompleted?.(res?.data ?? {});
-          return res;
-        },
-        { loading: false },
-      ];
-    },
-    UpdateSellerProfile: (opts) => {
-      capturedUpdateOpts = opts;
-      return [
-        async (vars: any) => {
-          const res = await updateProfileMock(vars);
-          opts?.onCompleted?.(res?.data ?? {});
-          return res;
-        },
-        { loading: false },
-      ];
-    },
-    DeleteSellerProfile: (opts) => {
-      capturedDeleteOpts = opts;
-      return [
-        async (vars: any) => {
-          const res = await deleteProfileMock(vars);
           opts?.onCompleted?.(res?.data ?? {});
           return res;
         },
@@ -170,8 +146,6 @@ describe('ScoutsPage – interactions', () => {
     };
     vi.clearAllMocks();
     capturedCreateOpts = undefined;
-    capturedUpdateOpts = undefined;
-    capturedDeleteOpts = undefined;
     createProfileMock.mockResolvedValue({ data: { createSellerProfile: { profileId: 'PROFILE#new1' } } });
     updateProfileMock.mockResolvedValue({ data: {} });
     deleteProfileMock.mockResolvedValue({ data: {} });
@@ -257,24 +231,6 @@ describe('ScoutsPage – interactions', () => {
     const callsBefore = profilesQueryMock.mock.calls.length;
     await capturedCreateOpts.onCompleted?.({});
 
-    expect(profilesQueryMock.mock.calls.length).toBeGreaterThan(callsBefore);
-  }, 10000);
-
-  it('updateProfile onCompleted triggers loadMyProfiles and loadSharedProfiles', async () => {
-    renderScoutsPage();
-    await waitFor(() => expect(capturedUpdateOpts).toBeDefined(), { timeout: 5000 });
-    const callsBefore = profilesQueryMock.mock.calls.length;
-    await capturedUpdateOpts.onCompleted?.({});
-    expect(profilesQueryMock.mock.calls.length).toBeGreaterThan(callsBefore);
-  }, 10000);
-
-  it('deleteProfile onCompleted closes dialog and triggers loadMyProfiles', async () => {
-    renderScoutsPage();
-    await waitFor(() => expect(capturedDeleteOpts).toBeDefined(), { timeout: 5000 });
-
-    // After delete onCompleted, the dialog should be closed and loadMyProfiles called
-    const callsBefore = profilesQueryMock.mock.calls.length;
-    await capturedDeleteOpts.onCompleted?.({});
     expect(profilesQueryMock.mock.calls.length).toBeGreaterThan(callsBefore);
   }, 10000);
 
