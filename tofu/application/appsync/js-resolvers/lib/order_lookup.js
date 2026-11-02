@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId } from './ids.js';
 
 /**
  * Shared order lookup, used by the getOrder query (query_order_fn) and the
@@ -24,7 +25,7 @@ export function parseEmbeddedCampaignId(orderId) {
     if (parts.length !== 3 || !parts[1] || !parts[2]) {
         return null;
     }
-    return 'CAMPAIGN#' + parts[1];
+    return normalizeId(parts[1], 'CAMPAIGN#');
 }
 
 /**

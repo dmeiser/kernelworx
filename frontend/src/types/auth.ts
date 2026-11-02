@@ -10,7 +10,7 @@ export interface Account {
   city?: string;
   state?: string;
   unitType?: string;
-  unitNumber?: string;
+  unitNumber?: number | null;
   isAdmin: boolean;
   createdAt: string;
   updatedAt: string;

@@ -7,7 +7,6 @@ Handles user account management including deleting user accounts.
 import os
 from typing import TYPE_CHECKING, Any, Dict
 
-import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 # Sibling handler modules use a same-package relative import, which resolves both
@@ -17,12 +16,14 @@ from .deletion_cascade import delete_all_user_data, run_deletion_steps
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
     from utils.appsync_types import get_caller_id
+    from utils.boto import get_cognito_client
     from utils.cognito import is_transient_cognito_error, retry_on_transient_errors
     from utils.cognito_filters import cognito_user_filter
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils.appsync_types import get_caller_id
+    from ..utils.boto import get_cognito_client
     from ..utils.cognito import is_transient_cognito_error, retry_on_transient_errors
     from ..utils.cognito_filters import cognito_user_filter
     from ..utils.errors import AppError, ErrorCode
@@ -138,7 +139,7 @@ def delete_my_account(event: Dict[str, Any], context: Any) -> bool:
     if not user_pool_id:
         raise AppError(ErrorCode.INTERNAL_ERROR, "USER_POOL_ID not configured")
 
-    cognito = boto3.client("cognito-idp")
+    cognito = get_cognito_client()
 
     # Pre-check Cognito lookup to fail early on authorization/network/config issues.
     # Handler-specific Cognito error handling stays in this handler: the

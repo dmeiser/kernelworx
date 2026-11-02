@@ -23,7 +23,7 @@ export function request(ctx) {
 
     const input = ctx.args && ctx.args.input ? ctx.args.input : {};
     var targetAccountId = ctx.stash ? ctx.stash.targetAccountId : undefined;
-    const profileId = input.profileId || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
+    const profileId = (ctx.stash && ctx.stash.profile && ctx.stash.profile.profileId) || input.profileId || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
     const permissions = input.permissions || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.permissions : undefined);
 
     validatePermissions(permissions);
