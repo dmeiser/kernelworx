@@ -10,7 +10,7 @@ export function request(ctx) {
     // Rejects invalid unitType/unitNumber up front; only provided fields come back.
     const unitFields = validateUnitFields(input);
 
-    // Build update expression dynamically to include optional unit fields
+    // Build update expression
     const expressionParts = ['sellerName = :sellerName', 'updatedAt = :updatedAt'];
     const expressionValues = {
         ':sellerName': sellerName,
