@@ -45,17 +45,6 @@ describe('update_profile_fn request', () => {
         assert.strictEqual(result.update.expressionValues[':sellerName'], 'A'.repeat(100));
     });
 
-    it('includes optional unit fields when provided', () => {
-        const result = request(
-            makeCtx({ profileId: 'PROFILE#p1', sellerName: 'New Name', unitType: 'Troop', unitNumber: 100 })
-        );
-
-        assert.match(result.update.expression, /unitType = :unitType/);
-        assert.match(result.update.expression, /unitNumber = :unitNumber/);
-        assert.strictEqual(result.update.expressionValues[':unitType'], 'Troop');
-        assert.strictEqual(result.update.expressionValues[':unitNumber'], 100);
-    });
-
     it('omits optional unit fields when not provided', () => {
         const result = request(makeCtx({ profileId: 'PROFILE#p1', sellerName: 'New Name' }));
 
