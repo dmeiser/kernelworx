@@ -167,16 +167,18 @@ locals {
   # FactorConfiguration. Over-triggering is harmless: set-user-pool-mfa-config
   # is idempotent. If a new variable is added to the pool, add it here too.
   user_pool_input_hash = sha1(jsonencode({
-    name_prefix                  = var.name_prefix
-    region_abbrev                = var.region_abbrev
-    environment                  = var.environment
-    aws_region                   = var.aws_region
-    sms_role_arn                 = var.sms_role_arn
-    enable_webauthn              = var.enable_webauthn
-    web_authn_relying_party_id   = var.web_authn_relying_party_id
-    pre_signup_lambda_arn        = var.pre_signup_lambda_arn
-    post_auth_lambda_arn         = var.post_auth_lambda_arn
-    post_confirmation_lambda_arn = var.post_confirmation_lambda_arn
+    name_prefix                     = var.name_prefix
+    region_abbrev                   = var.region_abbrev
+    environment                     = var.environment
+    aws_region                      = var.aws_region
+    sms_role_arn                    = var.sms_role_arn
+    enable_webauthn                 = var.enable_webauthn
+    web_authn_relying_party_id      = var.web_authn_relying_party_id
+    pre_signup_lambda_arn           = var.pre_signup_lambda_arn
+    post_auth_lambda_arn            = var.post_auth_lambda_arn
+    post_confirmation_lambda_arn    = var.post_confirmation_lambda_arn
+    pre_token_generation_lambda_arn = var.pre_token_generation_lambda_arn
+    deletion_protection             = var.environment == "prod" ? "ACTIVE" : "INACTIVE"
   }))
 }
 
@@ -186,8 +188,20 @@ resource "aws_cognito_user_pool" "main" {
   deletion_protection = var.environment == "prod" ? "ACTIVE" : "INACTIVE"
 
   # Username configuration
-  username_attributes      = ["email"]
-  auto_verified_attributes = ["email"]
+  username_attributes = ["email"]
+  # Email is intentionally NOT auto-verified. Native signups confirm the
+  # supplied address via Cognito's verification-code flow (the frontend handles
+  # nextStep CONFIRM_SIGN_UP, then confirmSignUp). Auto-verifying email would
+  # let an attacker squat a victim's verified email with a native signup -
+  # auto-confirmed AND email_verified - which defeats the fail-closed guard in
+  # src/handlers/pre_signup.py. That guard only links a federated identity to a
+  # CONFIRMED, email-verified account, so a squat must stay unconfirmed and
+  # unverified to be refused; auto-verification makes both guards pass. (#503)
+  #
+  # The user_attribute_update_settings block is deliberately absent too: Cognito
+  # rejects a pool whose attributes_require_verification_before_update names an
+  # attribute not in auto_verified_attributes, so the two settings move
+  # together. Email changes still go through the verification-code flow. (#503)
 
   # Password policy
   # OWASP floor for pools where MFA is OPTIONAL: minimum 15 characters.
@@ -242,11 +256,6 @@ resource "aws_cognito_user_pool" "main" {
       min_length = 0
       max_length = 2048
     }
-  }
-
-  # User attribute update settings
-  user_attribute_update_settings {
-    attributes_require_verification_before_update = ["email"]
   }
 
   # WebAuthn / passkey sign-in
