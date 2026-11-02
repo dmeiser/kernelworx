@@ -52,41 +52,6 @@ resource "aws_appsync_function" "lookup_campaign_for_delete" {
   code = file("${local.js_resolvers_dir}/lookup_campaign_for_delete_fn.js")
 }
 
-resource "aws_appsync_function" "query_campaign_orders_for_delete" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.orders.name
-  name        = "QueryCampaignOrdersForDeleteFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/query_campaign_orders_for_delete_fn.js")
-}
-
-resource "aws_appsync_function" "delete_campaign_orders" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.orders.name
-  name        = "DeleteCampaignOrdersFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  # templatefile() reads the esbuild bundle in appsync/dist/, which strips
-  # ordinary comments, so a dollar-brace sequence that survives bundling is
-  # interpolated as a Terraform expression: in a string literal it aborts every
-  # plan/apply with "Invalid expression". `${table_name}` is the only intended
-  # placeholder; escape a literal as `$${...}` or switch this to file()
-  # (#284 defers that switch). Enforced by
-  # tests/unit/check_templatefile_escaping.test.ts (#570).
-  code = templatefile("${local.js_resolvers_dir}/delete_campaign_orders_fn.js", {
-    table_name = var.dynamodb_table_names.orders
-  })
-}
-
 resource "aws_appsync_function" "delete_campaign_orders_lambda" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.delete_campaign_orders.name

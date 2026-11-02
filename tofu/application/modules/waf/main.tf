@@ -58,12 +58,6 @@ variable "managed_rule_action" {
   }
 }
 
-variable "log_retention_days" {
-  description = "CloudWatch log group retention in days"
-  type        = number
-  default     = 7
-}
-
 variable "github_token" {
   description = "Optional GitHub token for authenticating calls to api.github.com/meta to avoid IP rate limits"
   type        = string
