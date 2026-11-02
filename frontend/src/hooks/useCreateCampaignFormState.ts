@@ -99,8 +99,11 @@ export const useCreateCampaignFormState = () => {
     [setValue, resetValues],
   );
 
-  return {
-    ...values,
-    ...formSetters,
-  };
+  return useMemo(
+    () => ({
+      ...values,
+      ...formSetters,
+    }),
+    [values, formSetters],
+  );
 };

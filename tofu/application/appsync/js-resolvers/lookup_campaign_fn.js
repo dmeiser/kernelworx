@@ -1,7 +1,11 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
-    const campaignId = ctx.args.campaignId || ctx.args.input.campaignId;
+    const campaignId = normalizeIdOrPrefix(
+        ctx.args.campaignId || ctx.args.input.campaignId,
+        'CAMPAIGN#',
+    );
     // Query campaignId-index GSI to find the campaign (V2: PK=profileId, SK=campaignId)
     return {
         operation: 'Query',

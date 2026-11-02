@@ -88,6 +88,25 @@ class TestGenerateQrCodePresignedUrl:
         assert result != existing_url
         assert "X-Amz-Signature=" in result or "Signature=" in result
 
+    def test_accepts_prefixed_owner_account_id(self, s3_bucket: Any) -> None:
+        """A direct invocation carrying ACCOUNT#-prefixed ownerAccountId still authorizes (#729)."""
+        owner_account_id = "account-123"
+        s3_key = f"payment-qr-codes/{owner_account_id}/venmo.png"
+        bucket_name = os.environ.get("EXPORTS_BUCKET", "test-exports-bucket")
+        s3_bucket.put_object(Bucket=bucket_name, Key=s3_key, Body=b"fake-qr-data")
+
+        event: Dict[str, Any] = {
+            "qrCodeUrl": f"https://bucket.s3.amazonaws.com/{s3_key}",
+            "ownerAccountId": f"ACCOUNT#{owner_account_id}",
+            "identity": {"sub": owner_account_id},
+            "methodName": "Venmo",
+            "s3Key": s3_key,
+        }
+
+        result = generate_qr_code_presigned_url(event, None)
+
+        assert result is not None
+
     def test_rejects_already_presigned_url_for_non_owner(self) -> None:
         """Test that a non-owner cannot receive an already-presigned URL (regression: #122)."""
         existing_url = "https://bucket.s3.amazonaws.com/key?X-Amz-Signature=abc123&other=params"

@@ -3,6 +3,7 @@
  */
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField, Stack, MenuItem } from '@mui/material';
 import type { UseProfileEditReturn } from '../../hooks/useProfileEdit';
+import { UNIT_TYPES } from '../../constants/unitTypes';
 
 interface EditProfileDialogProps {
   profileHook: UseProfileEditReturn;
@@ -58,13 +59,11 @@ export const EditProfileDialog: React.FC<EditProfileDialogProps> = ({ profileHoo
             fullWidth
             helperText="Optional"
           >
-            <MenuItem value="">None</MenuItem>
-            <MenuItem value="Pack">Pack</MenuItem>
-            <MenuItem value="Troop">Troop</MenuItem>
-            <MenuItem value="Crew">Crew</MenuItem>
-            <MenuItem value="Ship">Ship</MenuItem>
-            <MenuItem value="Post">Post</MenuItem>
-            <MenuItem value="Club">Club</MenuItem>
+            {UNIT_TYPES.map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
           </TextField>
           <TextField
             label="Unit Number"

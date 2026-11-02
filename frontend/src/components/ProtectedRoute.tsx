@@ -86,10 +86,23 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requir
     [loading, isAuthenticated, requireAdmin, isAdmin, isMfaRequired],
   );
 
+  const fullPath = `${location.pathname}${location.search}`;
+
+  React.useEffect(() => {
+    if (routeState === 'login') {
+      const safeRedirect = getSafeRedirect(fullPath, '/home');
+      sessionStorage.setItem('oauth_redirect', safeRedirect);
+    }
+  }, [routeState, fullPath]);
+
   if (routeState === 'login') {
-    const safeRedirect = getSafeRedirect(location.pathname, '/home');
-    sessionStorage.setItem('oauth_redirect', safeRedirect);
-    return <Navigate to="/login" state={{ from: { pathname: location.pathname } }} replace />;
+    return (
+      <Navigate
+        to="/login"
+        state={{ from: { pathname: location.pathname, search: location.search } }}
+        replace
+      />
+    );
   }
 
   const blockedView = renderBlockedState(routeState);

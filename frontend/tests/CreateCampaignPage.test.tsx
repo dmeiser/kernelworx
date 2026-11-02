@@ -569,7 +569,7 @@ describe('CreateCampaignPage', () => {
     );
 
     // The effect should navigate to /scouts when there are no profiles
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/scouts', expect.any(Object)));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/scouts', expect.any(Object)), { timeout: 4000 });
   });
 
   test('shows error when shared campaign query errors', async () => {

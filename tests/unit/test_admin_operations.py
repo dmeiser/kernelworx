@@ -757,6 +757,28 @@ class TestAdminListUsers:
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
             assert "Failed to list users" in result["message"]
+            assert "Failed to list users" in result["message"]
+
+    def test_cognito_list_users_transient_error(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        event = {**admin_appsync_event, "arguments": {}}
+        with patch("src.handlers.admin_user_operations.get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "ListUsers",
+            )
+            mock_get_client.return_value = mock_cognito
+            with patch("time.sleep"):
+                result = admin_list_users(event, lambda_context)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
 
     def test_group_lookup_error_handled_gracefully(
         self,
@@ -1073,6 +1095,9 @@ class TestAdminResetUserPassword:
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.NOT_FOUND
+            # The raw target email must never appear in the error/log stream (#729).
+            assert "notfound@example.com" not in result["message"]
+            assert "n***@example.com" in result["message"]
 
     def test_missing_user_pool_id_raises_error(
         self,
@@ -1122,6 +1147,30 @@ class TestAdminResetUserPassword:
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
 
+    def test_cognito_list_users_transient_error(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "test@example.com"},
+        }
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "ListUsers",
+            )
+            mock_get_client.return_value = mock_cognito
+            with patch("time.sleep"):
+                result = admin_reset_user_password(event, lambda_context)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+
     def test_cognito_reset_user_not_found(
         self,
         dynamodb_table: Any,
@@ -1150,6 +1199,31 @@ class TestAdminResetUserPassword:
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.NOT_FOUND
+
+    def test_cognito_reset_user_transient_error(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        event = {
+            **admin_appsync_event,
+            "arguments": {"email": "test@example.com"},
+        }
+        with patch("src.handlers.admin_credential_reset.get_cognito_client") as mock_get_client:
+            mock_cognito = MagicMock()
+            mock_cognito.list_users.return_value = {"Users": [{"Username": "test-user-123"}]}
+            mock_cognito.admin_reset_user_password.side_effect = ClientError(
+                {"Error": {"Code": "TooManyRequestsException", "Message": "Throttled"}},
+                "AdminResetUserPassword",
+            )
+            mock_get_client.return_value = mock_cognito
+            with patch("time.sleep"):
+                result = admin_reset_user_password(event, lambda_context)
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
 
     def test_cognito_invalid_parameter_exception(
         self,
@@ -1727,6 +1801,42 @@ class TestAdminPurgeUserAccount:
         # Nothing was deleted: the Cognito user and the accounts row survive.
         mock_cognito.admin_delete_user.assert_not_called()
         assert "Item" in get_accounts_table().get_item(Key={"accountId": f"ACCOUNT#{target_account_id}"})
+
+    def test_purge_refuses_surviving_profile_supplied_unprefixed(
+        self,
+        dynamodb_table: Any,
+        profiles_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """An unprefixed profile ID is normalized, so the guard still detects the surviving row (#698)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+        monkeypatch.setenv("ACCOUNTS_TABLE_NAME", "kernelworx-accounts-ue1-dev")
+
+        target_account_id = "target-user-123"
+        self._seed_account(target_account_id)
+        profiles_table.put_item(
+            Item={
+                "ownerAccountId": f"ACCOUNT#{target_account_id}",
+                "profileId": "PROFILE#p1",
+                "sellerName": "Still There",
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        event = {**admin_appsync_event, "arguments": {"accountId": target_account_id, "profileIds": ["p1"]}}
+
+        with patch("src.handlers.admin_account_purge.get_cognito_client") as mock_get_client:
+            mock_cognito = self._mock_cognito(target_account_id)
+            mock_get_client.return_value = mock_cognito
+
+            result = admin_purge_user_account(event, lambda_context)
+
+        assert result["__isError"] is True
+        assert result["errorCode"] == ErrorCode.CONFLICT
+        mock_cognito.admin_delete_user.assert_not_called()
 
     def test_succeeds_once_the_profiles_are_gone(
         self,
@@ -6514,6 +6624,35 @@ class TestAdminUpdateCampaignSharedCode:
         assert result["campaignId"] == "CAMPAIGN#c1"
         assert result["profileId"] == "PROFILE#p1"
 
+    def test_update_campaign_shared_code_log_does_not_leak_code(
+        self,
+        dynamodb_table: Any,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        campaigns_table: Any,
+        capsys: Any,
+    ) -> None:
+        """The INFO log records that the code was set, never the code itself (#729)."""
+        campaigns_table.put_item(
+            Item={
+                "profileId": "PROFILE#p1",
+                "campaignId": "CAMPAIGN#c1",
+                "campaignName": "Test Campaign",
+            }
+        )
+
+        admin_appsync_event["info"]["fieldName"] = "adminUpdateCampaignSharedCode"
+        admin_appsync_event["arguments"] = {
+            "campaignId": "c1",
+            "sharedCampaignCode": "NEWCODE",
+        }
+
+        lambda_handler(admin_appsync_event, lambda_context)
+
+        captured = capsys.readouterr().out
+        assert "NEWCODE" not in captured
+        assert '"has_shared_campaign_code": true' in captured
+
     def test_update_campaign_shared_code_remove(
         self,
         dynamodb_table: Any,
@@ -7241,6 +7380,45 @@ class TestAdminOperationExceptionHandlers:
             mock_tables.accounts.scan.return_value = {
                 "Items": [],
                 "LastEvaluatedKey": {"accountId": "ACCOUNT#empty-page"},
+            }
+            mock_client.list_users.return_value = {"Users": []}
+            mock_batch_names.return_value = {}
+            mock_batch_groups.return_value = {}
+
+            result = admin_search_user(event, lambda_context)
+
+            assert result == []
+            assert mock_tables.accounts.scan.call_count == 1
+
+    def test_search_user_scan_bounds_by_evaluated_items(
+        self,
+        admin_appsync_event: Dict[str, Any],
+        lambda_context: Any,
+        monkeypatch: Any,
+    ) -> None:
+        """A page that evaluates items but returns none still consumes the budget (#757)."""
+        monkeypatch.setenv("USER_POOL_ID", "test-pool-id")
+
+        event = {
+            **admin_appsync_event,
+            "info": {"fieldName": "adminSearchUser"},
+            "arguments": {"query": "needle"},
+        }
+
+        with (
+            patch("src.handlers.admin_user_operations.get_cognito_client") as mock_get_client,
+            patch("src.handlers.admin_user_operations.tables") as mock_tables,
+            patch("src.handlers.admin_user_operations._batch_get_display_names") as mock_batch_names,
+            patch("src.handlers.admin_user_operations._batch_get_user_groups") as mock_batch_groups,
+        ):
+            mock_client = MagicMock()
+            mock_get_client.return_value = mock_client
+
+            # DynamoDB evaluated 1000 removed/filtered items but returned none.
+            mock_tables.accounts.scan.return_value = {
+                "Items": [],
+                "ScannedCount": 1000,
+                "LastEvaluatedKey": {"accountId": "ACCOUNT#removed"},
             }
             mock_client.list_users.return_value = {"Users": []}
             mock_batch_names.return_value = {}

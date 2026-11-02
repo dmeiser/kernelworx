@@ -1,5 +1,7 @@
 """Tests for Cognito callback and logout URL configurations across environments."""
 
+import json
+import re
 from pathlib import Path
 
 import hcl2
@@ -191,6 +193,7 @@ def test_cognito_webauthn_and_mfa_configuration():
         "var.pre_signup_lambda_arn",
         "var.post_auth_lambda_arn",
         "var.post_confirmation_lambda_arn",
+        "var.pre_token_generation_lambda_arn",
     ):
         assert needle in hash_expr, f"user_pool_input_hash must cover {needle}"
 
@@ -203,3 +206,40 @@ def test_cognito_webauthn_and_mfa_configuration():
     assert "set-user-pool-mfa-config" in cmd
     assert "FactorConfiguration=MULTI_FACTOR_WITH_USER_VERIFICATION" in cmd
     assert "UserVerification=required" in cmd
+
+
+def test_user_pool_input_hash_covers_all_pool_variables():
+    """Assert every variable referenced by aws_cognito_user_pool.main is included
+    in local.user_pool_input_hash (regression test for #701).
+
+    If a variable feeding the pool is omitted from user_pool_input_hash, updates to
+    that variable will emit UpdateUserPool without triggering
+    terraform_data.webauthn_factor_configuration, silently resetting
+    FactorConfiguration to SINGLE_FACTOR in Cognito.
+    """
+    doc = load_hcl(TF_APP / "modules" / "cognito" / "main.tf")
+    user_pool = None
+    for entry in doc.get("resource", []):
+        for k, v in entry.items():
+            if k.strip('"') == "aws_cognito_user_pool":
+                user_pool = v.get("main") or v.get('"main"')
+
+    assert user_pool is not None, "aws_cognito_user_pool.main must exist"
+
+    # Exclude lifecycle meta-arguments (prevent_destroy is OpenTofu engine metadata,
+    # not an AWS Cognito User Pool resource attribute, and does not trigger UpdateUserPool).
+    pool_attrs = {k: v for k, v in user_pool.items() if k != "lifecycle"}
+    pool_vars = set(re.findall(r"var\.([a-zA-Z0-9_]+)", json.dumps(pool_attrs)))
+
+    locs = get_locals(doc)
+    assert "user_pool_input_hash" in locs, "local user_pool_input_hash must exist"
+    hash_expr = locs["user_pool_input_hash"]
+    hash_vars = set(re.findall(r"var\.([a-zA-Z0-9_]+)", hash_expr))
+
+    missing = pool_vars - hash_vars
+    assert not missing, f"local.user_pool_input_hash is missing pool variables: {missing}"
+
+    # Also assert specific attributes explicitly mentioned in #701:
+    assert "var.pre_token_generation_lambda_arn" in hash_expr
+    assert "deletion_protection" in hash_expr
+

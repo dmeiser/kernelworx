@@ -9,14 +9,14 @@ interface Account {
   city?: string;
   state?: string;
   unitType?: string;
-  unitNumber?: string;
+  unitNumber?: number | null;
 }
 
 // Get string field with default
 const getField = (value: string | undefined): string => value ?? '';
 
 // Get unit number as string with default
-const getUnitNumber = (value: string | undefined): string => {
+const getUnitNumber = (value: number | null | undefined): string => {
   return value?.toString() ?? '';
 };
 

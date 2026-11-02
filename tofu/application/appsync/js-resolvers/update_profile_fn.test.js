@@ -62,6 +62,33 @@ describe('update_profile_fn request', () => {
         assert.doesNotMatch(result.update.expression, /unitType/);
         assert.doesNotMatch(result.update.expression, /unitNumber/);
     });
+
+    it('omits optional unit fields when passed explicit null', () => {
+        const result = request(
+            makeCtx({ profileId: 'PROFILE#p1', sellerName: 'New Name', unitType: null, unitNumber: null })
+        );
+
+        assert.doesNotMatch(result.update.expression, /unitType/);
+        assert.doesNotMatch(result.update.expression, /unitNumber/);
+        assert.strictEqual(result.update.expressionValues[':unitType'], undefined);
+        assert.strictEqual(result.update.expressionValues[':unitNumber'], undefined);
+    });
+
+    it('rejects a unitType outside the whitelist', () => {
+        assert.throws(
+            () => request(makeCtx({ profileId: 'PROFILE#p1', sellerName: 'New Name', unitType: 'Den' })),
+            /INVALID_INPUT: unitType must be one of: Crew, Pack, Post, Ship, Troop/
+        );
+    });
+
+    it('rejects an invalid unitNumber before writing anything', () => {
+        for (const unitNumber of ['42', 0, -1, 2.5]) {
+            assert.throws(
+                () => request(makeCtx({ profileId: 'PROFILE#p1', sellerName: 'New Name', unitNumber })),
+                /INVALID_INPUT: unitNumber must be a positive integer/
+            );
+        }
+    });
 });
 
 describe('update_profile_fn response', () => {
@@ -76,6 +103,53 @@ describe('update_profile_fn response', () => {
         assert.strictEqual(res.sellerName, 'New Name');
         assert.strictEqual(res.ownerAccountId, 'ACCOUNT#sub-user-123');
         assert.strictEqual(res.profileId, 'PROFILE#p1');
+    });
+
+    it('echoes the unit fields it actually wrote', () => {
+        const ctx = {
+            stash: { profile: { ...PROFILE, unitType: 'Pack', unitNumber: 4 } },
+            args: { input: { profileId: 'PROFILE#p1', sellerName: 'New Name', unitType: 'Troop', unitNumber: 100 } },
+            result: {},
+        };
+
+        const res = response(ctx);
+        assert.strictEqual(res.unitType, 'Troop');
+        assert.strictEqual(res.unitNumber, 100);
+    });
+
+    it('keeps the stored unit fields when the input passes null', () => {
+        const stored = { ...PROFILE, unitType: 'Troop', unitNumber: 100 };
+        const input = { profileId: 'PROFILE#p1', sellerName: 'New Name', unitType: null, unitNumber: null };
+
+        const res = response({ stash: { profile: stored }, args: { input }, result: {} });
+        assert.strictEqual(res.unitType, 'Troop');
+        assert.strictEqual(res.unitNumber, 100);
+
+        // response() must not disagree with request() on the same input.
+        const req = request({ stash: { profile: stored }, args: { input } });
+        assert.doesNotMatch(req.update.expression, /unitType|unitNumber/);
+    });
+
+    it('keeps the stored unit fields when the input omits them', () => {
+        const ctx = {
+            stash: { profile: { ...PROFILE, unitType: 'Ship', unitNumber: 9 } },
+            args: { input: { profileId: 'PROFILE#p1', sellerName: 'New Name' } },
+            result: {},
+        };
+
+        const res = response(ctx);
+        assert.strictEqual(res.unitType, 'Ship');
+        assert.strictEqual(res.unitNumber, 9);
+    });
+
+    it('rejects an invalid unit value in response() too', () => {
+        const ctx = {
+            stash: { profile: PROFILE },
+            args: { input: { profileId: 'PROFILE#p1', sellerName: 'New Name', unitType: 'Den' } },
+            result: {},
+        };
+
+        assert.throws(() => response(ctx), /INVALID_INPUT: unitType must be one of/);
     });
 
     it('throws error when ctx.error is present', () => {
