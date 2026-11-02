@@ -167,16 +167,18 @@ locals {
   # FactorConfiguration. Over-triggering is harmless: set-user-pool-mfa-config
   # is idempotent. If a new variable is added to the pool, add it here too.
   user_pool_input_hash = sha1(jsonencode({
-    name_prefix                  = var.name_prefix
-    region_abbrev                = var.region_abbrev
-    environment                  = var.environment
-    aws_region                   = var.aws_region
-    sms_role_arn                 = var.sms_role_arn
-    enable_webauthn              = var.enable_webauthn
-    web_authn_relying_party_id   = var.web_authn_relying_party_id
-    pre_signup_lambda_arn        = var.pre_signup_lambda_arn
-    post_auth_lambda_arn         = var.post_auth_lambda_arn
-    post_confirmation_lambda_arn = var.post_confirmation_lambda_arn
+    name_prefix                     = var.name_prefix
+    region_abbrev                   = var.region_abbrev
+    environment                     = var.environment
+    aws_region                      = var.aws_region
+    sms_role_arn                    = var.sms_role_arn
+    enable_webauthn                 = var.enable_webauthn
+    web_authn_relying_party_id      = var.web_authn_relying_party_id
+    pre_signup_lambda_arn           = var.pre_signup_lambda_arn
+    post_auth_lambda_arn            = var.post_auth_lambda_arn
+    post_confirmation_lambda_arn    = var.post_confirmation_lambda_arn
+    pre_token_generation_lambda_arn = var.pre_token_generation_lambda_arn
+    deletion_protection             = var.environment == "prod" ? "ACTIVE" : "INACTIVE"
   }))
 }
 
