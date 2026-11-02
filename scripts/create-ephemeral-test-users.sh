@@ -65,6 +65,31 @@ generate_password() {
   echo "${prefix}Aa1!"
 }
 
+# Credentials must never sit on a command line: a running process's argv is
+# world-readable on Linux via /proc/<pid>/cmdline and shows up in `ps`, so any
+# co-tenant on the CI runner could read a generated password there (#710). The
+# password rides in a private mktemp file passed with --cli-input-json
+# file://..., the same shape as scripts/provision-user-totp.sh (#569/#597), and
+# the EXIT trap removes the file on every exit path, including the aborts below.
+CRED_PARAMS_FILE=$(mktemp)
+chmod 600 "$CRED_PARAMS_FILE"
+trap 'rm -f "$CRED_PARAMS_FILE"' EXIT
+
+# Rewrite the parameter file for each credential-carrying call: $1 is the
+# Cognito input member holding the secret (TemporaryPassword or Password).
+# Built with python3 so a password containing JSON metacharacters is escaped,
+# and the value travels through the environment rather than this argv.
+write_password_params() {
+  local key=$1
+  local password=$2
+  KW_PARAM_KEY="$key" KW_PARAM_PASSWORD="$password" python3 - "$CRED_PARAMS_FILE" <<'PY'
+import json, os, sys
+
+with open(sys.argv[1], "w") as handle:
+    json.dump({os.environ["KW_PARAM_KEY"]: os.environ["KW_PARAM_PASSWORD"]}, handle)
+PY
+}
+
 # Cognito error codes this script branches on. Both appear in the aws CLI's
 # stderr as "(<Code>) when calling the <Operation> operation: <message>".
 USERNAME_EXISTS_EXCEPTION="UsernameExistsException"
@@ -87,11 +112,12 @@ set_user_password() {
   local attempt=1
   local error=""
   while [ "$attempt" -le "$PASSWORD_SET_ATTEMPTS" ]; do
+    write_password_params Password "$password"
     error=$(aws cognito-idp admin-set-user-password \
       --user-pool-id "$USER_POOL_ID" \
       --username "$email" \
-      --password "$password" \
       --permanent \
+      --cli-input-json "file://$CRED_PARAMS_FILE" \
       --region "$REGION" 2>&1) && return 0
     # A missing user is not a transient condition: no number of retries can
     # make the password call succeed, and the caller never created the user.
@@ -136,11 +162,12 @@ create_or_update_user() {
   # password step then failed against a user that was never created, hiding the
   # real cause. Surface it and abort instead.
   local create_error=""
+  write_password_params TemporaryPassword "$password"
   if ! create_error=$(aws cognito-idp admin-create-user \
     --user-pool-id "$USER_POOL_ID" \
     --username "$email" \
     --message-action SUPPRESS \
-    --temporary-password "$password" \
+    --cli-input-json "file://$CRED_PARAMS_FILE" \
     --region "$REGION" 2>&1); then
     case "$create_error" in
       *"An error occurred ($USERNAME_EXISTS_EXCEPTION) when calling the "*)
@@ -198,6 +225,11 @@ OWNER_TOTP_SECRET=$(PROVISION_USER_TOTP_PASSWORD="$OWNER_PASSWORD" \
   "$USER_POOL_ID" "$CLIENT_ID" "$OWNER_EMAIL")
 
 log ""
+# The export block IS the caller contract: scripts/ephemeral-env.sh pipes this
+# script's stdout through `grep '^export '` into the CI environment, so the
+# generated passwords reach the test harnesses through a pipe to the caller
+# rather than through a terminal, a log, or argv (#710). Everything the script
+# logs for humans goes to stderr instead.
 echo "export TEST_OWNER_EMAIL=$OWNER_EMAIL"
 echo "export TEST_OWNER_PASSWORD=$OWNER_PASSWORD"
 echo "export TEST_OWNER_TOTP_SECRET=$OWNER_TOTP_SECRET"

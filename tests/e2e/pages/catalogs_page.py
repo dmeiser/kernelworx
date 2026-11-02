@@ -300,8 +300,10 @@ class CatalogsPage(BasePage):
         Args:
             name: Catalog name to delete.
         """
-        self.page.once("dialog", lambda dlg: dlg.accept())
         self._delete_button_for(name).click()
+        dialog = self.wait_for_dialog("Delete catalog?")
+        dialog.get_by_role("button", name="Delete", exact=True).click()
+        expect(dialog).to_be_hidden(timeout=15_000)
         self.wait_for_loading()
         # Wait for the row to disappear from the list before returning.
         expect(self._catalog_row(name).first).to_be_hidden(timeout=15_000)

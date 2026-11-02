@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeId, stripIdPrefix } from './ids.js';
 
 /**
  * Shared order lookup, used by the getOrder query (query_order_fn) and the
@@ -16,7 +17,7 @@ import { util } from '@aws-appsync/utils';
  * routes the caller to the GSI fallback.
  */
 export function parseEmbeddedCampaignId(orderId) {
-    if (typeof orderId !== 'string' || !orderId.startsWith('ORDER#')) {
+    if (typeof orderId !== 'string' || stripIdPrefix(orderId, 'ORDER#') === orderId) {
         return null;
     }
     const parts = orderId.split('#');
@@ -24,7 +25,7 @@ export function parseEmbeddedCampaignId(orderId) {
     if (parts.length !== 3 || !parts[1] || !parts[2]) {
         return null;
     }
-    return 'CAMPAIGN#' + parts[1];
+    return normalizeId(parts[1], 'CAMPAIGN#');
 }
 
 /**

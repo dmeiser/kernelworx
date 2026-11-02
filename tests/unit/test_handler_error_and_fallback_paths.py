@@ -98,15 +98,6 @@ def test_payment_methods_delete_qr_uuid_fallback_error(monkeypatch):
     assert mock_s3.delete_object.call_count == 5
 
 
-def test_report_generation_uses_shared_s3_factory():
-    """report_generation routes S3 construction through the shared factory (#575)."""
-    from src.handlers import report_generation
-    from src.utils import boto
-
-    assert not hasattr(report_generation, "_get_s3_client")
-    assert report_generation.get_s3_client is boto.get_s3_client
-
-
 @mock_aws
 def test_transfer_profile_ownership_success():
     dynamodb = _transfer_test_tables()

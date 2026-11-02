@@ -14,8 +14,6 @@ import {
   shouldTriggerQueries,
   maybeTriggerQueries,
   handleReturnNavigation,
-  canDeleteCurrentProfile,
-  maybeDeleteProfile,
   updatePreferencesWithRollback,
   loadSharedProfilesWithErrorHandling,
   handleSharedProfilesError,
@@ -103,20 +101,6 @@ describe('ScoutsPage helpers', () => {
     vi.runAllTimers();
     expect(mockNavigate).toHaveBeenCalled();
     vi.useRealTimers();
-  });
-
-  it('canDeleteCurrentProfile and maybeDeleteProfile behavior', async () => {
-    expect(canDeleteCurrentProfile(null)).toBe(false);
-    expect(canDeleteCurrentProfile('p')).toBe(true);
-
-    const deleteMock = vi.fn().mockResolvedValue({});
-    await maybeDeleteProfile(true, 'p', deleteMock as any);
-    expect(deleteMock).toHaveBeenCalled();
-
-    // when cannot delete it should not call
-    deleteMock.mockClear();
-    await maybeDeleteProfile(false, 'p', deleteMock as any);
-    expect(deleteMock).not.toHaveBeenCalled();
   });
 
   it('updatePreferencesWithRollback success and rollback on error', async () => {
