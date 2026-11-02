@@ -9,48 +9,43 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from botocore.exceptions import ClientError
 
-# Handle both Lambda (absolute) and unit test (relative) imports
+# Handle both Lambda (absolute) and unit test (relative) imports via the
+# centralized helper (#774).
 try:  # pragma: no cover
-    from utils.appsync_types import get_caller_id
-    from utils.boto import get_s3_client
-    from utils.dynamodb import get_required_env, tables
-    from utils.errors import AppError, ErrorCode
-    from utils.ids import ensure_account_id
-    from utils.logging import get_logger
-    from utils.payment_methods import (
-        _delete_qr_if_exists,
-        _mutate_payment_methods,
-        generate_qr_code_s3_key,
-        get_payment_methods,
-        is_reserved_name,
-        validate_qr_s3_key,
-    )
+    from utils.import_fallback import import_from_utils
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.appsync_types import get_caller_id
-    from ..utils.boto import get_s3_client
-    from ..utils.dynamodb import get_required_env, tables
-    from ..utils.errors import AppError, ErrorCode
-    from ..utils.ids import ensure_account_id
-    from ..utils.logging import get_logger
-    from ..utils.payment_methods import (
-        _delete_qr_if_exists,
-        _mutate_payment_methods,
-        generate_qr_code_s3_key,
-        get_payment_methods,
-        is_reserved_name,
-        validate_qr_s3_key,
-    )
+    from ..utils.import_fallback import import_from_utils
+
+get_caller_id = import_from_utils("appsync_types", "get_caller_id")
+get_s3_client = import_from_utils("boto", "get_s3_client")
+get_required_env, tables = import_from_utils("dynamodb", "get_required_env", "tables")
+AppError, ErrorCode = import_from_utils("errors", "AppError", "ErrorCode")
+ensure_account_id = import_from_utils("ids", "ensure_account_id")
+get_logger = import_from_utils("logging", "get_logger")
+(
+    _delete_qr_if_exists,
+    _mutate_payment_methods,
+    generate_qr_code_s3_key,
+    get_payment_methods,
+    is_reserved_name,
+    validate_qr_s3_key,
+) = import_from_utils(
+    "payment_methods",
+    "_delete_qr_if_exists",
+    "_mutate_payment_methods",
+    "generate_qr_code_s3_key",
+    "get_payment_methods",
+    "is_reserved_name",
+    "validate_qr_s3_key",
+)
 
 # The decorator stays typed for mypy via the relative import below; at runtime
-# the absolute import resolves in the Lambda zip (package `utils`) and the
-# relative fallback resolves in unit tests (package `src.handlers`).
+# the helper resolves it in the Lambda zip (package `utils`) and in unit tests
+# (package `src.utils`).
 if TYPE_CHECKING:  # pragma: no cover
     from ..utils.handlers import lambda_handler as with_error_handling
 else:  # pragma: no cover
-    try:
-        from utils.handlers import lambda_handler as with_error_handling
-    except ModuleNotFoundError:
-        from ..utils.handlers import lambda_handler as with_error_handling
+    with_error_handling = import_from_utils("handlers", "lambda_handler")
 
 
 def _extract_and_validate_caller(event: Dict[str, Any]) -> str:

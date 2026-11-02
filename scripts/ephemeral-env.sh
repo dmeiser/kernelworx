@@ -229,6 +229,14 @@ case "$ACTION" in
     log "📦 Building AppSync JS resolvers..."
     ensure_resolvers_built
 
+    # AppSync rejects deleting pipeline functions or data sources that are still
+    # referenced by a resolver. Run the same ordering guard as `up` (in destroy
+    # mode) so resolver references are removed before the full destroy deletes
+    # the functions/data sources they reference.
+    "$ROOT_DIR/scripts/appsync-ensure-resolver-order.sh" \
+      -d "$ENV_DIR" \
+      -- -destroy -var="environment=$RUN_ID"
+
     log "💥 Destroying AWS resources..."
     if tofu destroy -input=false -auto-approve -var="environment=$RUN_ID"; then
       log "🧹 Deleting state objects..."
