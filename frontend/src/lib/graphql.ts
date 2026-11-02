@@ -398,20 +398,6 @@ export const DELETE_ORDER = gql`
   }
 `;
 
-export const REQUEST_CAMPAIGN_REPORT = gql`
-  mutation RequestCampaignReport($input: RequestCampaignReportInput!) {
-    requestCampaignReport(input: $input) {
-      reportId
-      campaignId
-      profileId
-      reportUrl
-      status
-      createdAt
-      expiresAt
-    }
-  }
-`;
-
 export const CREATE_PROFILE_INVITE = gql`
   mutation CreateProfileInvite($input: CreateProfileInviteInput!) {
     createProfileInvite(input: $input) {
@@ -428,19 +414,6 @@ export const CREATE_PROFILE_INVITE = gql`
 export const REDEEM_PROFILE_INVITE = gql`
   mutation RedeemProfileInvite($input: RedeemProfileInviteInput!) {
     redeemProfileInvite(input: $input) {
-      shareId
-      profileId
-      targetAccountId
-      permissions
-      createdAt
-      createdByAccountId
-    }
-  }
-`;
-
-export const SHARE_PROFILE_DIRECT = gql`
-  mutation ShareProfileDirect($input: ShareProfileDirectInput!) {
-    shareProfileDirect(input: $input) {
       shareId
       profileId
       targetAccountId
@@ -540,20 +513,6 @@ export const GET_UNIT_REPORT = gql`
           }
         }
       }
-    }
-  }
-`;
-
-export const LIST_UNIT_CATALOGS = gql`
-  ${CATALOG_FRAGMENT}
-  query ListUnitCatalogs($unitType: String!, $unitNumber: Int!, $campaignName: String!, $campaignYear: Int!) {
-    listUnitCatalogs(
-      unitType: $unitType
-      unitNumber: $unitNumber
-      campaignName: $campaignName
-      campaignYear: $campaignYear
-    ) {
-      ...CatalogFields
     }
   }
 `;
@@ -658,29 +617,6 @@ export const FIND_SHARED_CAMPAIGNS = gql`
 // ============================================================================
 // Unit Campaign Catalogs Query (replacement for listUnitCatalogs)
 // ============================================================================
-
-export const LIST_UNIT_CAMPAIGN_CATALOGS = gql`
-  ${CATALOG_FRAGMENT}
-  query ListUnitCampaignCatalogs(
-    $unitType: String!
-    $unitNumber: Int!
-    $city: String!
-    $state: String!
-    $campaignName: String!
-    $campaignYear: Int!
-  ) {
-    listUnitCampaignCatalogs(
-      unitType: $unitType
-      unitNumber: $unitNumber
-      city: $city
-      state: $state
-      campaignName: $campaignName
-      campaignYear: $campaignYear
-    ) {
-      ...CatalogFields
-    }
-  }
-`;
 
 // ============================================================================
 // Campaign shared campaign Mutations

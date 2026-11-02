@@ -14,17 +14,6 @@ resource "aws_appsync_datasource" "list_catalogs_in_use" {
 }
 
 
-resource "aws_appsync_datasource" "request_report" {
-  api_id           = aws_appsync_graphql_api.main.id
-  name             = "RequestReportDS"
-  type             = "AWS_LAMBDA"
-  service_role_arn = var.appsync_service_role_arn
-
-  lambda_config {
-    function_arn = var.lambda_function_arns["request-report"]
-  }
-}
-
 resource "aws_appsync_datasource" "unit_reporting" {
   api_id           = aws_appsync_graphql_api.main.id
   name             = "UnitReportingDS"
@@ -33,28 +22,6 @@ resource "aws_appsync_datasource" "unit_reporting" {
 
   lambda_config {
     function_arn = var.lambda_function_arns["unit-reporting"]
-  }
-}
-
-resource "aws_appsync_datasource" "list_unit_catalogs" {
-  api_id           = aws_appsync_graphql_api.main.id
-  name             = "ListUnitCatalogsDS"
-  type             = "AWS_LAMBDA"
-  service_role_arn = var.appsync_service_role_arn
-
-  lambda_config {
-    function_arn = var.lambda_function_arns["list-unit-catalogs"]
-  }
-}
-
-resource "aws_appsync_datasource" "list_unit_campaign_catalogs" {
-  api_id           = aws_appsync_graphql_api.main.id
-  name             = "ListUnitCampaignCatalogsDS"
-  type             = "AWS_LAMBDA"
-  service_role_arn = var.appsync_service_role_arn
-
-  lambda_config {
-    function_arn = var.lambda_function_arns["list-unit-campaign-catalogs"]
   }
 }
 
