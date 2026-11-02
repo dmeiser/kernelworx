@@ -110,6 +110,15 @@ const util = {
 const UTIL_NAMESPACES = new Set<unknown>([util, utilTime, utilDynamodb, math]);
 
 function callMethod(target: unknown, name: string, args: unknown[]): unknown {
+  if (typeof target === 'string') {
+    if (name === 'startsWith') return target.startsWith(String(args[0]));
+    if (name === 'substring') {
+      if (args.length <= 1) return target.substring(Number(args[0]));
+      return target.substring(Number(args[0]), Number(args[1]));
+    }
+    if (name === 'length') return target.length;
+    if (name === 'replace') return target.replace(String(args[0]), String(args[1]));
+  }
   if (Array.isArray(target)) {
     if (name === 'size') return target.length;
     if (name === 'isEmpty') return target.length === 0;

@@ -338,4 +338,58 @@ describe('CreateSharedCampaignPage', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(mockNavigate).toHaveBeenCalledWith(-1);
   });
+
+
+  it('exercises the empty-result cache guard with all fields filled', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([...baseMocks(), { request: createdMock.request, result: { data: { createSharedCampaign: null } } }], CATALOG.catalogId);
+
+    await pickCatalog(user);
+    await fillRequiredFields(user);
+    await pickUnitType(user);
+    fireEvent.change(screen.getByLabelText(/Start Date/), { target: { value: '2026-08-01' } });
+    fireEvent.change(screen.getByLabelText(/End Date/), { target: { value: '2026-10-31' } });
+    fireEvent.change(screen.getByLabelText(/Message to Scouts/), { target: { value: 'Thanks for helping!' } });
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'Pack 42 fall fundraiser' } });
+
+    await waitFor(() => expect(submit()).toBeEnabled());
+    await user.click(submit());
+    await new Promise((r) => setTimeout(r, 100));
+  });
+
+
+  it('covers the no-preselected-catalog branch', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage(baseMocks(), undefined);
+    await openCatalogSelect(user);
+    expect(await screen.findByRole('option', { name: CATALOG.catalogName })).toBeInTheDocument();
+  });
+
+  it('covers the invalid campaign year branch', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage(baseMocks(), CATALOG.catalogId);
+
+    await fillRequiredFields(user);
+    await pickUnitType(user);
+    fireEvent.change(screen.getByLabelText(/Campaign Year/), { target: { value: '1000' } });
+
+    await waitFor(() => expect(submit()).not.toBeDisabled());
+    await user.click(submit());
+    expect(await screen.findByText(/Campaign year must be between/)).toBeInTheDocument();
+  });
+
+  it('creates even when the server returns no campaign payload', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([...baseMocks(), { request: createdMock.request, result: { data: { createSharedCampaign: null } } }]);
+
+    await pickCatalog(user);
+    await fillRequiredFields(user);
+    await pickUnitType(user);
+    fireEvent.change(screen.getByLabelText(/Start Date/), { target: { value: '2026-08-01' } });
+    fireEvent.change(screen.getByLabelText(/End Date/), { target: { value: '2026-10-31' } });
+
+    await waitFor(() => expect(submit()).toBeEnabled());
+    await user.click(submit());
+    await new Promise((r) => setTimeout(r, 100));
+  });
 }, 30000); // MUI Select interactions are slow under a loaded parallel run

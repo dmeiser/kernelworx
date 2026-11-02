@@ -601,8 +601,8 @@ PY
 
 cleanup_cloudwatch_log_groups_for_run() {
   local run_id="$1"
+  local region="${2:-${AWS_REGION:-us-east-1}}"
   log "🧹 Cleaning up CloudWatch log groups for run: $run_id"
-  local region="${AWS_REGION:-us-east-1}"
   local suffix="-${run_id}"
   local log_groups=""
   local log_next_token=""
@@ -707,11 +707,11 @@ cleanup_stale_lock() {
 
   if [ -n "$lock_created" ]; then
     local lock_age_seconds
-    lock_age_seconds=$(python3 - <<PY
+    lock_age_seconds=$(python3 - "$lock_created" <<'PY'
 from datetime import datetime, timezone
 import sys
 try:
-    last = datetime.fromisoformat("${lock_created}".replace('Z', '+00:00'))
+    last = datetime.fromisoformat(sys.argv[1].replace('Z', '+00:00'))
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
     print(int((datetime.now(timezone.utc) - last).total_seconds()))

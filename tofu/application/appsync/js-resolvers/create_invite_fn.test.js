@@ -55,6 +55,46 @@ describe('create_invite_fn request', () => {
         assert.strictEqual(ctx.stash.expiresAtISO, '2024-01-08T00:00:00.000Z');
     });
 
+    it('normalizes an unprefixed profileId to PROFILE# (regression #699)', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'p1',
+                    permissions: ['READ'],
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.attributeValues.profileId, 'PROFILE#p1');
+        assert.strictEqual(ctx.stash.profileId, 'PROFILE#p1');
+    });
+
+    it('leaves an already-prefixed profileId unchanged (regression #699)', () => {
+        const ctx = {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    permissions: ['READ'],
+                },
+            },
+            stash: {
+                profile: { ownerAccountId: 'ACCOUNT#owner1' },
+            },
+            identity: { sub: 'owner1' },
+        };
+
+        const result = request(ctx);
+
+        assert.strictEqual(result.attributeValues.profileId, 'PROFILE#p1');
+        assert.strictEqual(ctx.stash.profileId, 'PROFILE#p1');
+    });
+
     it('accepts WRITE as the only permission', () => {
         const ctx = {
             args: {

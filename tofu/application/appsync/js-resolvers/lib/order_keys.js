@@ -1,7 +1,7 @@
 // Shared ORDER#<campaign>#<suffix> key grammar for public (and authenticated)
 // orders (KW-784 DRY-11 JS half). One builder/parser so the shape cannot drift
 // across resolvers that mint or read an order id.
-import { stripIdPrefix } from './ids.js';
+import { normalizeId, stripIdPrefix } from './ids.js';
 
 export function buildOrderKey(campaignId, suffix) {
     const campaignWithoutPrefix = stripIdPrefix(campaignId, 'CAMPAIGN#');
@@ -17,7 +17,7 @@ export function parseOrderKey(orderId) {
         return null;
     }
     return {
-        campaignId: 'CAMPAIGN#' + parts[1],
+        campaignId: normalizeId(parts[1], 'CAMPAIGN#'),
         suffix: parts[2]
     };
 }

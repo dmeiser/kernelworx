@@ -410,8 +410,6 @@ export type GqlMutation = {
   publicCreateOrder: GqlPublicOrderReceipt;
   /** Redeem an invite code to grant the caller access to a profile. Returns the created share. */
   redeemProfileInvite: GqlShare;
-  /** Generate an Excel or CSV report for a campaign and store it in S3. Returns the report with a pre-signed download URL. */
-  requestCampaignReport: GqlCampaignReport;
   /** Get pre-signed S3 credentials to upload a QR code for one of the caller's payment methods. */
   requestPaymentMethodQRCodeUpload: GqlS3UploadInfo;
   /** Remove a share's access to a profile the caller owns. Returns true on success. */
@@ -578,11 +576,6 @@ export type GqlMutation_PublicCreateOrderArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_RedeemProfileInviteArgs = {
   input: GqlRedeemProfileInviteInput;
-};
-
-/** The root mutation object for the KernelWorx API. */
-export type GqlMutation_RequestCampaignReportArgs = {
-  input: GqlRequestCampaignReportInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -949,10 +942,6 @@ export type GqlQuery = {
   listOrdersByCampaign: GqlOrderConnection;
   /** List the shares (access grants) on a profile. The caller must have write access to the profile. */
   listSharesByProfile: Array<GqlShare>;
-  /** List the distinct catalogs used by campaigns in a unit and season (matched with city and state), limited to profiles the caller can read. */
-  listUnitCampaignCatalogs: Array<GqlCatalog>;
-  /** List the distinct catalogs used by campaigns in a unit and season, limited to profiles the caller can read. */
-  listUnitCatalogs: Array<GqlCatalog>;
   /** The payment methods available to the caller: the caller's stored custom methods plus the built-in "Cash" and "Check" methods, sorted by name. */
   myPaymentMethods: Array<GqlPaymentMethod>;
   /** The payment methods stored for a profile's owner. The caller must have access to the profile; READ-only callers see the method names but not their QR codes (qrCodeUrl is null). */
@@ -1081,24 +1070,6 @@ export type GqlQuery_ListSharesByProfileArgs = {
 };
 
 /** The root query object for the KernelWorx API. */
-export type GqlQuery_ListUnitCampaignCatalogsArgs = {
-  campaignName: Scalars['String']['input'];
-  campaignYear: Scalars['Int']['input'];
-  city: Scalars['String']['input'];
-  state: Scalars['String']['input'];
-  unitNumber: Scalars['Int']['input'];
-  unitType: Scalars['String']['input'];
-};
-
-/** The root query object for the KernelWorx API. */
-export type GqlQuery_ListUnitCatalogsArgs = {
-  campaignName: Scalars['String']['input'];
-  campaignYear: Scalars['Int']['input'];
-  unitNumber: Scalars['Int']['input'];
-  unitType: Scalars['String']['input'];
-};
-
-/** The root query object for the KernelWorx API. */
 export type GqlQuery_PaymentMethodsForProfileArgs = {
   profileId: Scalars['ID']['input'];
 };
@@ -1120,14 +1091,6 @@ export type GqlQuery_PublicGetOrderReceiptArgs = {
 export type GqlRedeemProfileInviteInput = {
   /** The invite code to redeem. */
   inviteCode: Scalars['ID']['input'];
-};
-
-/** Input for requestCampaignReport. Requests a generated Excel or CSV report for a campaign. */
-export type GqlRequestCampaignReportInput = {
-  /** The ID of the campaign to generate the report for (the caller must have read access to its profile). */
-  campaignId: Scalars['ID']['input'];
-  /** The report format: "xlsx" or "csv". Defaults to "xlsx" if omitted. */
-  format?: InputMaybe<Scalars['String']['input']>;
 };
 
 /** Input for revokeShare. Removes a share's access to a profile (owner only). */
@@ -2159,24 +2122,6 @@ export type GqlDeleteOrderMutationVariables = Exact<{
 
 export type GqlDeleteOrderMutation = { __typename?: 'Mutation'; deleteOrder: boolean };
 
-export type GqlRequestCampaignReportMutationVariables = Exact<{
-  input: GqlRequestCampaignReportInput;
-}>;
-
-export type GqlRequestCampaignReportMutation = {
-  __typename?: 'Mutation';
-  requestCampaignReport: {
-    __typename?: 'CampaignReport';
-    reportId: string;
-    campaignId: string;
-    profileId: string;
-    reportUrl?: string | null | undefined;
-    status: string;
-    createdAt: string;
-    expiresAt?: string | null | undefined;
-  };
-};
-
 export type GqlCreateProfileInviteMutationVariables = Exact<{
   input: GqlCreateProfileInviteInput;
 }>;
@@ -2201,23 +2146,6 @@ export type GqlRedeemProfileInviteMutationVariables = Exact<{
 export type GqlRedeemProfileInviteMutation = {
   __typename?: 'Mutation';
   redeemProfileInvite: {
-    __typename?: 'Share';
-    shareId: string;
-    profileId: string;
-    targetAccountId: string;
-    permissions: Array<GqlPermissionType>;
-    createdAt: string;
-    createdByAccountId: string;
-  };
-};
-
-export type GqlShareProfileDirectMutationVariables = Exact<{
-  input: GqlShareProfileDirectInput;
-}>;
-
-export type GqlShareProfileDirectMutation = {
-  __typename?: 'Mutation';
-  shareProfileDirect: {
     __typename?: 'Share';
     shareId: string;
     profileId: string;
@@ -2364,34 +2292,6 @@ export type GqlGetUnitReportQuery = {
     | undefined;
 };
 
-export type GqlListUnitCatalogsQueryVariables = Exact<{
-  unitType: Scalars['String']['input'];
-  unitNumber: Scalars['Int']['input'];
-  campaignName: Scalars['String']['input'];
-  campaignYear: Scalars['Int']['input'];
-}>;
-
-export type GqlListUnitCatalogsQuery = {
-  __typename?: 'Query';
-  listUnitCatalogs: Array<{
-    __typename?: 'Catalog';
-    catalogId: string;
-    catalogName: string;
-    catalogType: GqlCatalogType;
-    isPublic: boolean;
-    createdAt: string;
-    updatedAt: string;
-    products: Array<{
-      __typename?: 'Product';
-      productId: string;
-      productName: string;
-      description?: string | null | undefined;
-      price: number;
-      sortOrder: number;
-    }>;
-  }>;
-};
-
 export type GqlSharedCampaignFieldsFragment = {
   __typename?: 'SharedCampaign';
   sharedCampaignCode: string;
@@ -2519,36 +2419,6 @@ export type GqlFindSharedCampaignsQuery = {
     isActive: boolean;
     createdAt: string;
     catalog?: { __typename?: 'Catalog'; catalogId: string; catalogName: string } | null | undefined;
-  }>;
-};
-
-export type GqlListUnitCampaignCatalogsQueryVariables = Exact<{
-  unitType: Scalars['String']['input'];
-  unitNumber: Scalars['Int']['input'];
-  city: Scalars['String']['input'];
-  state: Scalars['String']['input'];
-  campaignName: Scalars['String']['input'];
-  campaignYear: Scalars['Int']['input'];
-}>;
-
-export type GqlListUnitCampaignCatalogsQuery = {
-  __typename?: 'Query';
-  listUnitCampaignCatalogs: Array<{
-    __typename?: 'Catalog';
-    catalogId: string;
-    catalogName: string;
-    catalogType: GqlCatalogType;
-    isPublic: boolean;
-    createdAt: string;
-    updatedAt: string;
-    products: Array<{
-      __typename?: 'Product';
-      productId: string;
-      productName: string;
-      description?: string | null | undefined;
-      price: number;
-      sortOrder: number;
-    }>;
   }>;
 };
 

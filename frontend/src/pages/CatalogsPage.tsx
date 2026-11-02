@@ -33,6 +33,7 @@ import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { PageHeader } from '../components/PageHeader';
 import { CatalogEditorDialog } from '../components/CatalogEditorDialog';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   LIST_MANAGED_CATALOGS,
   LIST_MY_CATALOGS,
@@ -407,6 +408,7 @@ export const CatalogsPage: React.FC = () => {
   const [currentTab, setCurrentTab] = useState(0);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingCatalog, setEditingCatalog] = useState<GqlCatalog | null>(null);
+  const [catalogToDelete, setCatalogToDelete] = useState<{ catalogId: string; catalogName: string } | null>(null);
 
   const { publicCatalogs, myCatalogs, myOwnedCatalogIds, catalogsInUse, isLoading, errorMessage, mutations } =
     useCatalogsPageData();
@@ -421,10 +423,8 @@ export const CatalogsPage: React.FC = () => {
     setEditorOpen(true);
   };
 
-  const handleDeleteCatalog = async (catalogId: string, catalogName: string) => {
-    const confirmed = confirm(`Are you sure you want to delete "${catalogName}"? This action cannot be undone.`);
-    if (!confirmed) return;
-    await mutations.deleteCatalog({ variables: { catalogId } });
+  const handleDeleteCatalog = async (catalog: { catalogId: string; catalogName: string }) => {
+    await mutations.deleteCatalog({ variables: { catalogId: catalog.catalogId } });
   };
 
   const handleViewCatalog = (catalogId: string) => {
@@ -460,7 +460,7 @@ export const CatalogsPage: React.FC = () => {
         myOwnedCatalogIds={myOwnedCatalogIds}
         onEdit={handleEditCatalog}
         onDelete={(catalogId, catalogName) => {
-          void handleDeleteCatalog(catalogId, catalogName);
+          setCatalogToDelete({ catalogId, catalogName });
         }}
         onCreateCatalog={handleCreateCatalog}
         onView={handleViewCatalog}
@@ -471,6 +471,19 @@ export const CatalogsPage: React.FC = () => {
         onSave={handleSaveCatalog}
         initialCatalog={editingCatalog}
       />
+      <ConfirmDialog
+        open={catalogToDelete !== null}
+        title="Delete catalog?"
+        onClose={() => setCatalogToDelete(null)}
+        onConfirm={() => handleDeleteCatalog(catalogToDelete!)}
+        confirmLabel="Delete"
+        confirmColor="error"
+        loadingLabel="Deleting..."
+      >
+        <Typography>
+          Are you sure you want to delete "{catalogToDelete?.catalogName}"? This action cannot be undone.
+        </Typography>
+      </ConfirmDialog>
     </>
   );
 };

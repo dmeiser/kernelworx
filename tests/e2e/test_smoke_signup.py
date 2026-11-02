@@ -4,7 +4,6 @@ In dev and ephemeral environments, test users (including the smoke test user)
 are pre-created and confirmed during environment provisioning (via
 ``admin_create_user`` and ``admin_set_user_password`` with message suppression)
 so native sign-ups do not burn the account's 50-emails/day Cognito email quota.
-Signups stay closed from self-confirmation in the pre-signup Lambda.
 
 Design decisions
 ----------------

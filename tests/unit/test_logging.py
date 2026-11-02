@@ -341,6 +341,45 @@ class TestSensitiveKeyRedaction:
         assert log_entry["emailVerified"] is True
         assert log_entry["order_id"] == "ORDER#123"
 
+    def test_caller_dict_is_not_mutated(self) -> None:
+        """Redaction returns a new dict; the caller's extra dict keeps its values (#729)."""
+        logger = StructuredLogger("redact-no-mutate", "test-id")
+
+        payload = {"email": "user@example.com", "nested": {"password": "hunter2"}}
+        logger.info("Signup", extra=payload)
+
+        assert payload == {"email": "user@example.com", "nested": {"password": "hunter2"}}
+
+    def test_nested_dict_values_are_redacted(self, capsys: Any) -> None:
+        """Sensitive keys inside nested dicts are masked, case-insensitively (#729)."""
+        logger = StructuredLogger("redact-nested", "test-id")
+
+        logger.info(
+            "Nested payload",
+            payload={"user": {"Email": "user@example.com", "name": "Jane"}, "Password": "hunter2"},
+        )
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["payload"] == {"user": {"Email": "u***@example.com", "name": "Jane"}, "Password": "***"}
+
+    def test_sensitive_keys_inside_lists_are_redacted(self, capsys: Any) -> None:
+        """Sensitive keys inside list items are masked too (#729)."""
+        logger = StructuredLogger("redact-list", "test-id")
+
+        logger.info("Batch", items=[{"email": "user@example.com"}, {"order_id": "ORDER#123"}])
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["items"] == [{"email": "u***@example.com"}, {"order_id": "ORDER#123"}]
+
+    def test_shared_campaign_code_is_redacted(self, capsys: Any) -> None:
+        """A bearer sharedCampaignCode is never emitted in the clear (#729)."""
+        logger = StructuredLogger("redact-shared-code", "test-id")
+
+        logger.info("Share", sharedCampaignCode="SECRET-CODE-123")
+
+        log_entry = json.loads(capsys.readouterr().out.strip())
+        assert log_entry["sharedCampaignCode"] == "***"
+
 
 class TestMaskEmail:
     """Tests for mask_email helper."""

@@ -113,10 +113,8 @@ def step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Step:
 
 
 def run_step(step: Step, tmp_path: Path, client_id: str, **env: str) -> subprocess.CompletedProcess[str]:
-    script = step.script.replace(CLIENT_ID_EXPRESSION, client_id)
-    assert CLIENT_ID_EXPRESSION not in script
     return subprocess.run(
-        ["bash", "-c", script],
+        ["bash", "-c", step.script],
         capture_output=True,
         text=True,
         check=False,
@@ -128,6 +126,7 @@ def run_step(step: Step, tmp_path: Path, client_id: str, **env: str) -> subproce
             "TEST_OWNER_PASSWORD": "Sup3rSecret-Pa55word",
             "TEST_USER_POOL_ID": POOL_ID,
             "AWS_REGION": "us-east-1",
+            "CLIENT_ID": client_id,
             **env,
         },
     )
