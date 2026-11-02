@@ -5,11 +5,11 @@ import { normalizeId, stripIdPrefix } from './ids.js';
 
 export function buildOrderKey(campaignId, suffix) {
     const campaignWithoutPrefix = stripIdPrefix(campaignId, 'CAMPAIGN#');
-    return 'ORDER#' + campaignWithoutPrefix + '#' + suffix;
+    return normalizeId(campaignWithoutPrefix + '#' + suffix, 'ORDER#');
 }
 
 export function parseOrderKey(orderId) {
-    if (typeof orderId !== 'string' || !orderId.startsWith('ORDER#')) {
+    if (typeof orderId !== 'string' || stripIdPrefix(orderId, 'ORDER#') === orderId) {
         return null;
     }
     const parts = orderId.split('#');

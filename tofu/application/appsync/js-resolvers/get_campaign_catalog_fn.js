@@ -16,6 +16,9 @@ export function request(ctx) {
     if (prevResult !== undefined && prevResult !== null) {
         return runtime.earlyReturn(prevResult);
     }
+    if (!ctx.source || !ctx.source.catalogId) {
+        return runtime.earlyReturn(null);
+    }
     return {
         operation: 'GetItem',
         key: util.dynamodb.toMapValues({ catalogId: ctx.source.catalogId })
