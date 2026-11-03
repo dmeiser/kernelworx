@@ -417,11 +417,14 @@ def create_unit_invite(event, context):
     marker_sk = f"IDEM#{key}"
     try:
         m = _units().get_item(Key={"pk": marker_pk, "sk": marker_sk}, ConsistentRead=True).get("Item")
-    except Exception:
+        print("DEBUG marker lookup", marker_pk, marker_sk, m)
+    except Exception as e:
+        print("DEBUG marker err", e)
         m = None
     if m and m.get("inviteCode"):
         code = m["inviteCode"]
         inv = _units().get_item(Key={"pk": f"INVITE#{code}", "sk": f"UNIT#{unit_id}"}, ConsistentRead=True).get("Item")
+        print("DEBUG inv fetch", code, inv)
         if inv:
             return inv
     code = uuid.uuid4().hex[:16].upper()
@@ -462,6 +465,9 @@ def revoke_unit_invite(event, context):
     code = args.get("inviteCode")
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
+    resp = _units().get_item(Key={"pk": f"INVITE#{code}", "sk": f"UNIT#{unit_id}"}, ConsistentRead=True)
+    if not resp.get("Item"):
+        raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
     _units().delete_item(Key={"pk": f"INVITE#{code}", "sk": f"UNIT#{unit_id}"})
     return True
 
