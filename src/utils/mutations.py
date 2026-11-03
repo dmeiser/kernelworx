@@ -50,7 +50,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, cast
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .dynamodb import TRANSIENT_ERROR_CODES, get_dynamodb_client, is_transient_client_error
+from .dynamodb import get_dynamodb_client, is_transient_client_error
 from .errors import AppError, ErrorCode
 from .logging import get_logger
 
@@ -67,6 +67,13 @@ logger = get_logger(__name__)
 # capacity arithmetic (about 29 products for an immediate sale, about 21 for
 # worst-case mixed We Owe) is derived from this number.
 MAX_TRANSACTION_ACTIONS: int = 90
+
+# The throttling spellings DynamoDB reports as PER-ITEM CancellationReason
+# codes inside TransactionCanceledException. They are not the top-level
+# Error.Code spellings in :data:`src.utils.dynamodb.TRANSIENT_ERROR_CODES`:
+# the service uses ``ThrottlingError`` / ``ProvisionedThroughputExceeded``
+# at the per-item level (see the CancellationReason Code enum).
+PER_ITEM_THROTTLE_CODES: frozenset[str] = frozenset({"ThrottlingError", "ProvisionedThroughputExceeded"})
 
 # Marker retention (API contract §3.1: "retained for seven days"; impact map
 # §4.1: one numeric epoch-seconds attribute across all aggregate tables).
@@ -417,7 +424,7 @@ def classify_transaction_error(exc: BaseException, *, operation: str) -> AppErro
             # cancellation payload, so the per-item codes are consulted before
             # the conflict verdict and any one of them promotes the whole
             # transaction to the retryable RESOURCE_BUSY.
-            throttle_codes = [c for c in _cancellation_summary(exc) if c in TRANSIENT_ERROR_CODES]
+            throttle_codes = [c for c in _cancellation_summary(exc) if c in PER_ITEM_THROTTLE_CODES]
             if throttle_codes:
                 logger.warning(
                     "Transaction cancelled by throttling",

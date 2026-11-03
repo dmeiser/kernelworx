@@ -823,10 +823,7 @@ class TestErrorClassification:
             ErrorCode.RESOURCE_BUSY
         )
 
-    @pytest.mark.parametrize(
-        "code",
-        ["ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"],
-    )
+    @pytest.mark.parametrize("code", ["ThrottlingError", "ProvisionedThroughputExceeded"])
     def test_throttling_reported_as_a_per_item_cancellation_reason_is_resource_busy(self, code: str) -> None:
         exc = classify_transaction_error(
             _client_error(
@@ -839,6 +836,18 @@ class TestErrorClassification:
             operation="createUnit",
         )
         assert exc.error_code == ErrorCode.RESOURCE_BUSY
+
+    def test_a_non_throttle_per_item_cancellation_stays_a_conflict(self) -> None:
+        assert (
+            classify_transaction_error(
+                _client_error(
+                    "TransactionCanceledException",
+                    reasons=[{"Code": "TransactionConflict", "Message": "m"}],
+                ),
+                operation="createUnit",
+            ).error_code
+            == ErrorCode.CONFLICT
+        )
 
     def test_transaction_in_progress_is_the_retryable_resource_busy(self) -> None:
         assert classify_transaction_error(
