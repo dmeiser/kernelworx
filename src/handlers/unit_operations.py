@@ -230,6 +230,7 @@ def create_unit(event, context):
         )
     except Exception:
         _units().put_item(Item=item)
+        _units().put_item(Item=grant_item)
         exec_result = None
     if isinstance(exec_result, dict):
         return exec_result
