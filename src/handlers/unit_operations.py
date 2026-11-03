@@ -108,11 +108,78 @@ def _marker_keys(actor: Any, operation: str, scope: Any, key: str) -> Any:
     )
 
 
-def create_unit(event: Dict[str, Any], context: Any) -> Any:
-    args = event.get("arguments", {}).get("input", {}) or {}
-    caller = get_caller_id(event)
-    if not caller:
-        raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
+def _require_key(args: Dict[str, Any]) -> Any:
+    idempotency = args.get("idempotency", {}) or {}
+    key = idempotency.get("idempotencyKey")
+    if not key:
+        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    return key
+
+
+def _decimal_unit_number(value: Any) -> Any:
+    try:
+        from decimal import Decimal
+
+        if isinstance(value, Decimal):
+            return int(value)
+    except Exception:
+        pass
+    return value
+
+
+def _check_expected_version(args: Dict[str, Any], item: Dict[str, Any]) -> None:
+    version_input = args.get("version", {}) or {}
+    expected = version_input.get("expectedVersion")
+    if expected is None:
+        expected = args.get("expectedVersion")
+    if expected is not None and int(expected) != int(item.get("version", 0)):
+        raise AppError(ErrorCode.CONFLICT, "Version mismatch")
+
+
+def _staged_version_put(item: Dict[str, Any], expected_version: Any) -> Any:
+    return {
+        "TableName": _units().name,
+        "Item": {k: _serialize(v) for k, v in item.items()},
+        "ConditionExpression": "#v = :v",
+        "ExpressionAttributeNames": {"#v": "version"},
+        "ExpressionAttributeValues": {":v": _serialize(expected_version)},
+    }
+
+
+def _versioned_fallback_put(item: Dict[str, Any], unit_id: Any, snapshot_version: int) -> Any:
+    try:
+        _units().put_item(
+            Item=item,
+            ConditionExpression="#v = :v",
+            ExpressionAttributeNames={"#v": "version"},
+            ExpressionAttributeValues={":v": snapshot_version},
+        )
+    except ClientError as put_exc:
+        if put_exc.response.get("Error", {}).get("Code", "") != "ConditionalCheckFailedException":
+            raise
+        committed = _get_unit(unit_id)
+        if committed is None:
+            raise
+        return committed
+    return item
+
+
+def _query_exact_metadata_duplicates(md_key: str, exclude_unit_id: Any = None) -> list[Any]:
+    try:
+        resp = _units().query(
+            IndexName="metadataKey-createdAt-index",
+            KeyConditionExpression="metadataKey = :m",
+            ExpressionAttributeValues={":m": md_key},
+        )
+        if exclude_unit_id is None:
+            return list(resp.get("Items", []))
+        return [x for x in resp.get("Items", []) if x.get("unitId") != exclude_unit_id]
+    except Exception:
+        return []
+
+
+def _bootstrap_unit_fields(args: Dict[str, Any]) -> tuple[Any, Any, Any, Any, Any]:
+    """Normalized identity inputs for createUnit: type, number, city, state, timezone."""
     unit_type = args.get("unitType")
     unit_number = args.get("unitNumber")
     try:
@@ -131,16 +198,53 @@ def create_unit(event: Dict[str, Any], context: Any) -> Any:
         raise AppError(ErrorCode.INVALID_INPUT, "Missing required unit fields")
     if not _validate_timezone(timezone_):
         raise AppError(ErrorCode.INVALID_INPUT, "Invalid timezone")
+    return unit_type, unit_number, city, state, timezone_
+
+
+def _bootstrap_unit_policies(args: Dict[str, Any]) -> tuple[str, str]:
     split_default = args.get("splitDefault") or "EQUAL"
     if split_default not in VALID_SPLIT:
         raise AppError(ErrorCode.INVALID_INPUT, "Invalid splitDefault")
     council = args.get("councilNeedBasis") or "PHYSICAL_STOCK"
     if council not in VALID_BASIS:
         raise AppError(ErrorCode.INVALID_INPUT, "Invalid councilNeedBasis")
-    idempotency = args.get("idempotency", {}) or {}
-    key = idempotency.get("idempotencyKey")
-    if not key:
-        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    return split_default, council
+
+
+def _execute_create_or_rebuild(
+    runner: Any,
+    mk: Any,
+    plan: Any,
+    fp: Any,
+    unit_id: str,
+    load_result: Any,
+    item: Dict[str, Any],
+    grant_item: Dict[str, Any],
+) -> Any:
+    """Run the bootstrap transaction; on transport fault replay data is rebuilt inline."""
+    try:
+        exec_result = runner.execute(
+            mk, plan, operation="createUnit", fingerprint=fp, result_id=unit_id, load_result=load_result
+        )
+    except AppError as exc:
+        if not isinstance(exc.__cause__, BotoCoreError):
+            raise
+        _units().put_item(Item=item)
+        _units().put_item(Item=grant_item)
+        exec_result = None
+    if isinstance(exec_result, dict):
+        return exec_result
+    return {"unit": item, "grant": grant_item}
+
+
+def create_unit(event: Dict[str, Any], context: Any) -> Any:
+    args = event.get("arguments", {}).get("input", {}) or {}
+    caller = get_caller_id(event)
+    if not caller:
+        raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
+    unit_type, unit_number, city, state, timezone_ = _bootstrap_unit_fields(args)
+    split_default, council = _bootstrap_unit_policies(args)
+    key = _require_key(args)
     runner = IdempotentMutationRunner()
     mk = _marker_keys(caller, "createUnit", "BOOTSTRAP", key)
     fp = normalized_fingerprint(
@@ -166,15 +270,7 @@ def create_unit(event: Dict[str, Any], context: Any) -> Any:
         return replayed
     duplicate_confirmed = bool(args.get("duplicateConfirmed", False))
     md_key = _metadata_key(unit_type, unit_number, city, state)
-    try:
-        resp = _units().query(
-            IndexName="metadataKey-createdAt-index",
-            KeyConditionExpression="metadataKey = :m",
-            ExpressionAttributeValues={":m": md_key},
-        )
-        existing = resp.get("Items", [])
-    except Exception:
-        existing = []
+    existing = _query_exact_metadata_duplicates(md_key)
     if existing and not duplicate_confirmed:
         raise AppError(ErrorCode.CONFLICT, "Exact metadata match requires duplicateConfirmed")
     unit_id = str(uuid.uuid4())
@@ -212,24 +308,41 @@ def create_unit(event: Dict[str, Any], context: Any) -> Any:
     runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
     plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in item.items()}})
     plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in grant_item.items()}})
-    try:
-        exec_result = runner.execute(
-            mk,
-            plan,
-            operation="createUnit",
-            fingerprint=fp,
-            result_id=unit_id,
-            load_result=load_bootstrap_result,
-        )
-    except AppError as exc:
-        if not isinstance(exc.__cause__, BotoCoreError):
-            raise
-        _units().put_item(Item=item)
-        _units().put_item(Item=grant_item)
-        exec_result = None
-    if isinstance(exec_result, dict):
-        return exec_result
-    return {"unit": item, "grant": grant_item}
+    return _execute_create_or_rebuild(runner, mk, plan, fp, unit_id, load_bootstrap_result, item, grant_item)
+
+
+def _validate_provided_settings(args: Dict[str, Any]) -> None:
+    """Optional-field validation for updateUnit (only values actually present)."""
+    if args.get("timezone") is not None and not _validate_timezone(args["timezone"]):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid timezone")
+    if args.get("splitDefault") is not None and args["splitDefault"] not in VALID_SPLIT:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid splitDefault")
+    if args.get("councilNeedBasis") is not None and args["councilNeedBasis"] not in VALID_BASIS:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid councilNeedBasis")
+
+
+def _updated_metadata_key(args: Dict[str, Any], item: Dict[str, Any], unit_id: Any) -> str:
+    """Resolved post-update metadataKey, running the exact-duplicate check on change."""
+    new_type = item.get("unitType") if args.get("unitType") is None else args.get("unitType")
+    new_number = item.get("unitNumber") if args.get("unitNumber") is None else args.get("unitNumber")
+    new_city = item.get("city") if args.get("city") is None else args.get("city")
+    new_state = item.get("state") if args.get("state") is None else args.get("state")
+    if isinstance(new_city, str):
+        new_city = new_city.strip()
+    md_key = _metadata_key(new_type, new_number, new_city, new_state)
+    if md_key == item.get("metadataKey"):
+        return md_key
+    duplicate_confirmed = bool(args.get("duplicateConfirmed", False))
+    existing = _query_exact_metadata_duplicates(md_key, exclude_unit_id=unit_id)
+    if existing and not duplicate_confirmed:
+        raise AppError(ErrorCode.CONFLICT, "Exact metadata match requires duplicateConfirmed")
+    return md_key
+
+
+def _apply_unit_field_updates(args: Dict[str, Any], item: Dict[str, Any]) -> None:
+    for f in ("unitType", "unitNumber", "city", "state", "displayName", "timezone", "splitDefault", "councilNeedBasis"):
+        if args.get(f) is not None:
+            item[f] = args[f]
 
 
 def update_unit(event: Dict[str, Any], context: Any) -> Any:
@@ -238,19 +351,11 @@ def update_unit(event: Dict[str, Any], context: Any) -> Any:
     unit_id = args.get("unitId")
     if not unit_id:
         raise AppError(ErrorCode.INVALID_INPUT, "unitId is required")
-    try:
-        from decimal import Decimal
-
-        if isinstance(args.get("unitNumber"), Decimal):
-            args["unitNumber"] = int(args["unitNumber"])
-    except Exception:
-        pass
+    if args.get("unitNumber") is not None:
+        args["unitNumber"] = _decimal_unit_number(args["unitNumber"])
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
-    idempotency = args.get("idempotency", {}) or {}
-    key = idempotency.get("idempotencyKey")
-    if not key:
-        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    key = _require_key(args)
     runner = IdempotentMutationRunner()
     mk = _marker_keys(caller, "updateUnit", unit_id, key)
     fp = normalized_fingerprint(
@@ -263,60 +368,31 @@ def update_unit(event: Dict[str, Any], context: Any) -> Any:
     item = resp.get("Item")
     if not item:
         raise AppError(ErrorCode.NOT_FOUND, "Unit not found")
-    version_input = args.get("version", {}) or {}
-    expected = version_input.get("expectedVersion")
-    if expected is None:
-        expected = args.get("expectedVersion")
-    if expected is not None and int(expected) != int(item.get("version", 0)):
-        raise AppError(ErrorCode.CONFLICT, "Version mismatch")
-    # settings validation
-    if args.get("timezone") is not None and not _validate_timezone(args["timezone"]):
-        raise AppError(ErrorCode.INVALID_INPUT, "Invalid timezone")
-    if args.get("splitDefault") is not None and args["splitDefault"] not in VALID_SPLIT:
-        raise AppError(ErrorCode.INVALID_INPUT, "Invalid splitDefault")
-    if args.get("councilNeedBasis") is not None and args["councilNeedBasis"] not in VALID_BASIS:
-        raise AppError(ErrorCode.INVALID_INPUT, "Invalid councilNeedBasis")
-    # duplicate check
-    new_type = item.get("unitType") if args.get("unitType") is None else args.get("unitType")
-    new_number = item.get("unitNumber") if args.get("unitNumber") is None else args.get("unitNumber")
-    new_city = item.get("city") if args.get("city") is None else args.get("city")
-    new_state = item.get("state") if args.get("state") is None else args.get("state")
-    if isinstance(new_city, str):
-        new_city = new_city.strip()
-    md_key = _metadata_key(new_type, new_number, new_city, new_state)
-    duplicate_confirmed = bool(args.get("duplicateConfirmed", False))
-    if md_key != item.get("metadataKey"):
-        try:
-            resp = _units().query(
-                IndexName="metadataKey-createdAt-index",
-                KeyConditionExpression="metadataKey = :m",
-                ExpressionAttributeValues={":m": md_key},
-            )
-            existing = [x for x in resp.get("Items", []) if x.get("unitId") != unit_id]
-        except Exception:
-            existing = []
-        if existing and not duplicate_confirmed:
-            raise AppError(ErrorCode.CONFLICT, "Exact metadata match requires duplicateConfirmed")
+    _check_expected_version(args, item)
+    _validate_provided_settings(args)
+    md_key = _updated_metadata_key(args, item, unit_id)
     # apply updates
     snapshot_version = int(item.get("version", 0))
-    for f in ("unitType", "unitNumber", "city", "state", "displayName", "timezone", "splitDefault", "councilNeedBasis"):
-        if args.get(f) is not None:
-            item[f] = args[f]
+    _apply_unit_field_updates(args, item)
     item["metadataKey"] = md_key
     item["version"] = snapshot_version + 1
     item["updatedAt"] = _now()
     plan = WritePlan()
     runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
-    plan.add(
-        "Put",
-        {
-            "TableName": _units().name,
-            "Item": {k: _serialize(v) for k, v in item.items()},
-            "ConditionExpression": "#v = :v",
-            "ExpressionAttributeNames": {"#v": "version"},
-            "ExpressionAttributeValues": {":v": _serialize(snapshot_version)},
-        },
-    )
+    plan.add("Put", _staged_version_put(item, snapshot_version))
+    return _execute_update_or_fallback(runner, mk, plan, fp, unit_id, item, snapshot_version)
+
+
+def _execute_update_or_fallback(
+    runner: Any,
+    mk: Any,
+    plan: Any,
+    fp: Any,
+    unit_id: Any,
+    item: Dict[str, Any],
+    snapshot_version: int,
+) -> Any:
+    """Run the update transaction; on transport fault re-put the stale snapshot."""
     try:
         runner.execute(
             mk,
@@ -330,21 +406,7 @@ def update_unit(event: Dict[str, Any], context: Any) -> Any:
     except AppError as exc:
         if not isinstance(exc.__cause__, BotoCoreError):
             raise
-        try:
-            _units().put_item(
-                Item=item,
-                ConditionExpression="#v = :v",
-                ExpressionAttributeNames={"#v": "version"},
-                ExpressionAttributeValues={":v": snapshot_version},
-            )
-        except ClientError as put_exc:
-            if put_exc.response.get("Error", {}).get("Code", "") != "ConditionalCheckFailedException":
-                raise
-            committed = _get_unit(unit_id)
-            if committed is None:
-                raise
-            return committed
-        return item
+        return _versioned_fallback_put(item, unit_id, snapshot_version)
 
 
 def revoke_unit_access_grant(event: Dict[str, Any], context: Any) -> Any:
@@ -354,10 +416,7 @@ def revoke_unit_access_grant(event: Dict[str, Any], context: Any) -> Any:
     account_id = args.get("accountId")
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
-    idempotency = args.get("idempotency", {}) or {}
-    key = idempotency.get("idempotencyKey")
-    if not key:
-        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    key = _require_key(args)
     runner = IdempotentMutationRunner()
     mk = _marker_keys(caller, "revokeUnitAccessGrant", f"{unit_id}#{account_id}", key)
     fp = normalized_fingerprint({"unitId": unit_id, "accountId": account_id})
@@ -370,12 +429,7 @@ def revoke_unit_access_grant(event: Dict[str, Any], context: Any) -> Any:
     item = resp.get("Item")
     if not item:
         raise AppError(ErrorCode.NOT_FOUND, "Unit not found")
-    version_input = args.get("version", {}) or {}
-    expected = version_input.get("expectedVersion")
-    if expected is None:
-        expected = args.get("expectedVersion")
-    if expected is not None and int(expected) != int(item.get("version", 0)):
-        raise AppError(ErrorCode.CONFLICT, "Version mismatch")
+    _check_expected_version(args, item)
     if int(item.get("adminCount", 0)) <= 1:
         raise AppError(ErrorCode.CONFLICT, "Cannot revoke last admin")
     grant = (
@@ -395,16 +449,7 @@ def revoke_unit_access_grant(event: Dict[str, Any], context: Any) -> Any:
             "Key": {"pk": _serialize(grant["pk"]), "sk": _serialize(grant["sk"])},
         },
     )
-    plan.add(
-        "Put",
-        {
-            "TableName": _units().name,
-            "Item": {k: _serialize(v) for k, v in item.items()},
-            "ConditionExpression": "#v = :v",
-            "ExpressionAttributeNames": {"#v": "version"},
-            "ExpressionAttributeValues": {":v": _serialize(int(item["version"]) - 1)},
-        },
-    )
+    plan.add("Put", _staged_version_put(item, int(item["version"]) - 1))
     runner.execute(
         mk,
         plan,
@@ -416,41 +461,46 @@ def revoke_unit_access_grant(event: Dict[str, Any], context: Any) -> Any:
     return item
 
 
-def create_unit_invite(event: Dict[str, Any], context: Any) -> Any:
-    args = event.get("arguments", {}).get("input", {}) or {}
-    caller = get_caller_id(event)
-    unit_id = args.get("unitId")
-    if not _is_unit_admin(caller, unit_id):
-        raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
-    idempotency = args.get("idempotency", {}) or {}
-    key = idempotency.get("idempotencyKey")
-    if not key:
-        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
-    active = 0
+def _invite_is_active(item: Any) -> bool:
+    """Expired/unparseable rows are filtered out; unparsable counts as still active."""
+    if not str(item.get("pk", "")).startswith("INVITE#"):
+        return False
+    try:
+        exp = datetime.fromisoformat(str(item.get("expiresAt")).replace("Z", "+00:00"))
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+    except Exception:
+        return True
+    return exp >= datetime.now(timezone.utc)
+
+
+def _count_active_invites(unit_id: Any) -> int:
     try:
         resp = _units().query(
             IndexName="unitId-createdAt-index",
             KeyConditionExpression="unitId = :u",
             ExpressionAttributeValues={":u": unit_id},
         )
+        active = 0
         for x in resp.get("Items", []):
-            if not str(x.get("pk", "")).startswith("INVITE#"):
-                continue
-            try:
-                exp = datetime.fromisoformat(str(x.get("expiresAt")).replace("Z", "+00:00"))
-                if exp.tzinfo is None:
-                    exp = exp.replace(tzinfo=timezone.utc)
-                if exp < datetime.now(timezone.utc):
-                    continue
-            except Exception:
-                pass
-            active += 1
+            if _invite_is_active(x):
+                active += 1
     except Exception as exc:
         raise AppError(
             ErrorCode.RESOURCE_BUSY,
             "Temporarily unable to count active invites. Please retry.",
         ) from exc
-    if active >= _MAX_ACTIVE_INVITES:
+    return active
+
+
+def create_unit_invite(event: Dict[str, Any], context: Any) -> Any:
+    args = event.get("arguments", {}).get("input", {}) or {}
+    caller = get_caller_id(event)
+    unit_id = args.get("unitId")
+    if not _is_unit_admin(caller, unit_id):
+        raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
+    key = _require_key(args)
+    if _count_active_invites(unit_id) >= _MAX_ACTIVE_INVITES:
         raise AppError(ErrorCode.CONFLICT, "Too many active invites")
     runner = IdempotentMutationRunner()
     mk = _marker_keys(caller, "createUnitInvite", unit_id, key)
@@ -505,6 +555,28 @@ def revoke_unit_invite(event: Dict[str, Any], context: Any) -> bool:
     return True
 
 
+def _invite_expired(item: Dict[str, Any]) -> bool:
+    """Redeem-time expiry: unparseable expiresAt is treated as expired."""
+    try:
+        exp = datetime.fromisoformat(item["expiresAt"].replace("Z", "+00:00"))
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+    except Exception:
+        return True
+    return exp < datetime.now(timezone.utc)
+
+
+def _stage_redeem_meta(plan: Any, unit_id: Any) -> None:
+    meta = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True).get("Item")
+    if not meta:
+        return
+    snapshot_version = int(meta.get("version", 0))
+    meta["adminCount"] = int(meta.get("adminCount", 1)) + 1
+    meta["version"] = snapshot_version + 1
+    meta["updatedAt"] = _now()
+    plan.add("Put", _staged_version_put(meta, snapshot_version))
+
+
 def _count_redeem_failure(account_id: str) -> None:
     """Atomically count one failed redemption attempt (data model §6.6).
 
@@ -539,6 +611,23 @@ def _count_redeem_failure(account_id: str) -> None:
         )
 
 
+def _query_invite_row(code: Any) -> Any:
+    try:
+        return _units().query(
+            KeyConditionExpression="pk = :pk", ExpressionAttributeValues={":pk": f"INVITE#{code}"}, ConsistentRead=True
+        )
+    except Exception:
+        return _units().query(KeyConditionExpression="pk = :pk", ExpressionAttributeValues={":pk": f"INVITE#{code}"})
+
+
+def _redeem_existing_grant(unit_id: Any, caller: Any) -> Any:
+    try:
+        gresp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
+        return gresp.get("Item")
+    except Exception:
+        return None
+
+
 def redeem_unit_invite(event: Dict[str, Any], context: Any) -> Any:
     args = event.get("arguments", {}).get("input", {}) or {}
     caller = get_caller_id(event)
@@ -558,12 +647,7 @@ def redeem_unit_invite(event: Dict[str, Any], context: Any) -> Any:
     if handled:
         return repl
     # query by pk prefix
-    try:
-        resp = _units().query(
-            KeyConditionExpression="pk = :pk", ExpressionAttributeValues={":pk": f"INVITE#{code}"}, ConsistentRead=True
-        )
-    except Exception:
-        resp = _units().query(KeyConditionExpression="pk = :pk", ExpressionAttributeValues={":pk": f"INVITE#{code}"})
+    resp = _query_invite_row(code)
     items = resp.get("Items", [])
     if not items:
         _count_redeem_failure(caller)
@@ -571,26 +655,10 @@ def redeem_unit_invite(event: Dict[str, Any], context: Any) -> Any:
     inv = items[0]
     unit_id = inv["unitId"]
     # existing grant?
-    try:
-        gresp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
-        existing_grant = gresp.get("Item")
-    except Exception:
-        existing_grant = None
+    existing_grant = _redeem_existing_grant(unit_id, caller)
     if existing_grant:
         return existing_grant
-    # expiry check
-    from datetime import datetime as dt
-
-    try:
-        exp = dt.fromisoformat(inv["expiresAt"].replace("Z", "+00:00"))
-        if exp.tzinfo is None:
-            exp = exp.replace(tzinfo=timezone.utc)
-        if exp < datetime.now(timezone.utc):
-            _count_redeem_failure(caller)
-            raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
-    except AppError:
-        raise
-    except Exception:
+    if _invite_expired(inv):
         _count_redeem_failure(caller)
         raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
     # one transaction: marker insert, grant, invite burn, adminCount sync
@@ -623,22 +691,7 @@ def redeem_unit_invite(event: Dict[str, Any], context: Any) -> Any:
             "ExpressionAttributeNames": {"#pk": "pk"},
         },
     )
-    meta = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True).get("Item")
-    if meta:
-        snapshot_version = int(meta.get("version", 0))
-        meta["adminCount"] = int(meta.get("adminCount", 1)) + 1
-        meta["version"] = snapshot_version + 1
-        meta["updatedAt"] = _now()
-        plan.add(
-            "Put",
-            {
-                "TableName": _units().name,
-                "Item": {k: _serialize(v) for k, v in meta.items()},
-                "ConditionExpression": "#v = :v",
-                "ExpressionAttributeNames": {"#v": "version"},
-                "ExpressionAttributeValues": {":v": _serialize(snapshot_version)},
-            },
-        )
+    _stage_redeem_meta(plan, unit_id)
     runner.execute(
         mk,
         plan,
@@ -648,6 +701,26 @@ def redeem_unit_invite(event: Dict[str, Any], context: Any) -> Any:
         load_result=load_redeem_grant,
     )
     return grant_item
+
+
+def _cursor_start(args: Dict[str, Any]) -> tuple[int, int]:
+    limit, cursor = _parse_page(args)
+    if not cursor:
+        return 0, limit
+    try:
+        start = int(cursor)
+    except ValueError:
+        start = 0
+    return start, limit
+
+
+def _paged_result(items: list[Any], args: Dict[str, Any], project: Any = None) -> Dict[str, Any]:
+    start, limit = _cursor_start(args)
+    page_items = items[start : start + limit]
+    if project is not None:
+        page_items = [out for out in (project(x) for x in page_items) if out is not None]
+    next_cursor = str(start + limit) if start + limit < len(items) else None
+    return {"items": page_items, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
 
 
 def my_units(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -664,25 +737,14 @@ def my_units(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception:
         grants = []
     grants.sort(key=lambda g: g.get("unitId", ""))
-    limit, cursor = _parse_page(args)
-    if cursor:
-        try:
-            start = int(cursor)
-        except ValueError:
-            start = 0
-    else:
-        start = 0
-    page_grants = grants[start : start + limit]
-    units = []
-    for g in page_grants:
+
+    def grant_meta(g: Any) -> Any:
         uid = g.get("unitId")
         if not uid:
-            continue
-        meta = _units().get_item(Key={"pk": _unit_pk(uid), "sk": "METADATA"}, ConsistentRead=True).get("Item")
-        if meta:
-            units.append(meta)
-    next_cursor = str(start + limit) if start + limit < len(grants) else None
-    return {"items": units, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
+            return None
+        return _units().get_item(Key={"pk": _unit_pk(uid), "sk": "METADATA"}, ConsistentRead=True).get("Item")
+
+    return _paged_result(grants, args, project=grant_meta)
 
 
 def unit(event: Dict[str, Any], context: Any) -> Any:
@@ -712,17 +774,7 @@ def unit_admins(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception:
         grants = []
     grants.sort(key=lambda g: g.get("sk", ""))
-    limit, cursor = _parse_page(args)
-    if cursor:
-        try:
-            start = int(cursor)
-        except ValueError:
-            start = 0
-    else:
-        start = 0
-    page_items = grants[start : start + limit]
-    next_cursor = str(start + limit) if start + limit < len(grants) else None
-    return {"items": page_items, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
+    return _paged_result(grants, args)
 
 
 def _parse_page(args: Dict[str, Any]) -> tuple[int, Any]:
@@ -739,12 +791,8 @@ def _parse_page(args: Dict[str, Any]) -> tuple[int, Any]:
     return limit, page.get("cursor")
 
 
-def unit_invites(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    args = event.get("arguments", {}) or {}
-    unit_id = args.get("unitId")
-    caller = get_caller_id(event)
-    if not _is_unit_admin(caller, unit_id):
-        raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
+def _unit_invite_rows(unit_id: Any) -> list[Any]:
+    """Invites for a unit that are not expired (unparseable rows stay active)."""
     try:
         resp = _units().query(
             IndexName="unitId-createdAt-index",
@@ -752,32 +800,17 @@ def unit_invites(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             ExpressionAttributeValues={":u": unit_id},
         )
     except Exception:
-        resp = {"Items": []}
-    now = datetime.now(timezone.utc)
-    items = []
-    for x in resp.get("Items", []):
-        if not str(x.get("pk", "")).startswith("INVITE#"):
-            continue
-        try:
-            exp = datetime.fromisoformat(str(x.get("expiresAt")).replace("Z", "+00:00"))
-            if exp.tzinfo is None:
-                exp = exp.replace(tzinfo=timezone.utc)
-            if exp < now:
-                continue
-        except Exception:
-            pass
-        items.append(x)
-    limit, cursor = _parse_page(args)
-    if cursor:
-        try:
-            start = int(cursor)
-        except ValueError:
-            start = 0
-    else:
-        start = 0
-    page_items = items[start : start + limit]
-    next_cursor = str(start + limit) if start + limit < len(items) else None
-    return {"items": page_items, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
+        return []
+    return [x for x in resp.get("Items", []) if _invite_is_active(x)]
+
+
+def unit_invites(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    args = event.get("arguments", {}) or {}
+    unit_id = args.get("unitId")
+    caller = get_caller_id(event)
+    if not _is_unit_admin(caller, unit_id):
+        raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
+    return _paged_result(_unit_invite_rows(unit_id), args)
 
 
 _HANDLERS = {
