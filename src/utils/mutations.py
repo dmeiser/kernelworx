@@ -547,9 +547,7 @@ def classify_transaction_error(exc: BaseException, *, operation: str) -> AppErro
 # The ValidationException message fragments DynamoDB uses for a transaction
 # that names too many items or touches one item with more than one action.
 _OVERSIZE_OR_DUPLICATE_MARKERS = (
-    "too many items",
     "more than 100 items",
-    "one action on an item",
     "multiple operations on one item",
 )
 

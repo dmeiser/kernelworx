@@ -1045,7 +1045,7 @@ class TestErrorClassification:
         "message",
         [
             "Transaction request cannot include more than 100 items",
-            "Transaction requests can only contain one action on an item",
+            "Transaction request cannot include multiple operations on one item",
         ],
     )
     def test_oversize_or_duplicate_transaction_maps_to_operation_too_large(self, message: str) -> None:
