@@ -28,8 +28,10 @@ live once instead of in every resolver:
 5. `CONFLICT` / `RESOURCE_BUSY` classification. A cancelled transaction (a
    failed condition - a stale `expectedVersion`, an already-consumed invite, a
    guard that moved) is a non-retryable `CONFLICT`; throttling is the retryable
-   `RESOURCE_BUSY`. The classification reuses the repo's single transient-error
-   set rather than re-declaring it.
+   `RESOURCE_BUSY`. Two distinct, correctly-scoped code sets feed the split:
+   top-level fault codes go through ``src.utils.dynamodb``'s transient-error
+   set, while per-item ``CancellationReasons`` throttling uses this module's
+   own ``PER_ITEM_THROTTLE_CODES`` spellings.
 
 Out of scope here by contract: the finalization-feasibility preflight (data
 model §8.10) is a per-mutation computation over domain state, so each mutation
