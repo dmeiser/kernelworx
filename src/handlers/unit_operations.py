@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 """Lambda resolver for Show & Sell Unit operations (batch A)."""
 
 import uuid
