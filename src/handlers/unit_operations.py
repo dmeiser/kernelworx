@@ -517,6 +517,20 @@ def unit_admins(event, context):
     return {"items": items, "pageInfo": {"endCursor": None, "hasNextPage": False}}
 
 
+def _parse_page(args):
+    page = args.get("page") or {}
+    limit = page.get("limit", 50)
+    try:
+        limit = int(limit)
+    except TypeError, ValueError:
+        limit = 50
+    if limit < 1:
+        limit = 1
+    if limit > 100:
+        limit = 100
+    return limit, page.get("cursor")
+
+
 def unit_invites(event, context):
     args = event.get("arguments", {}) or {}
     unit_id = args.get("unitId")
