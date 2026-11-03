@@ -111,7 +111,8 @@ class TestCreateUnitInvite:
         second = lambda_handler(event, None)
         assert not second.get("__isError"), second
         assert second["inviteCode"] == first["inviteCode"]
-        assert len(_invite_items(units, fx.PACK_3149)) == 2  # seeded only
+        # 2 seeded Pack 3149 invites (active + expired) + 1 created; the retry adds nothing.
+        assert len(_invite_items(units, fx.PACK_3149)) == 3
 
 
 # ---------------------------------------------------------------------------
