@@ -484,8 +484,10 @@ def create_public_order_throttles_table_schema() -> dict[str, Any]:
     contracts share it: the public-order share-token window
     ("<shareToken>#<windowStartEpoch>") and the Unit-invite redemption window
     ("UNIT_INVITE_REDEMPTION#<accountId>#WINDOW#<yyyy-MM-ddTHH>"). Not part of
-    ``get_all_table_schemas``/``create_all_tables``: no Stage 1 test fixture
-    writes throttles yet, and the existing fixture-count contract stays exact.
+    ``get_all_table_schemas``/``create_all_tables``: the 10-table
+    fixture-count contract stays exact, and tests that exercise the §6.6
+    counters create this table explicitly (see
+    tests/unit/test_unit_invites.py).
     """
     return {
         "TableName": "kernelworx-public-order-throttles-ue1-dev",

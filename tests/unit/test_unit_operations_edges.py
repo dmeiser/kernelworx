@@ -34,8 +34,7 @@ _INJECTED = ClientError(
 )
 # A genuine transport fault: the one exception class the DEF-11 fallback is
 # authorized to contain (mutations.py classifies service verdicts). EndpointConnectionError is a BotoCoreError subclass.
-_TRANSPORT_FAULT = EndpointConnectionError(endpoint_url="https://dynamodb-fault.invalid"
-)
+_TRANSPORT_FAULT = EndpointConnectionError(endpoint_url="https://dynamodb-fault.invalid")
 
 
 class _FlakyTable:
@@ -138,9 +137,7 @@ def _create_public_order_throttles_table() -> Any:
 
 
 def _fault_throttles(monkeypatch: pytest.MonkeyPatch, predicate: Callable[[str, Dict[str, Any]], bool]) -> None:
-    monkeypatch.setattr(
-        uop, "_throttles", lambda: _FlakyTable(_create_public_order_throttles_table(), predicate)
-    )
+    monkeypatch.setattr(uop, "_throttles", lambda: _FlakyTable(_create_public_order_throttles_table(), predicate))
 
 
 def _create_input(**overrides: Any) -> Dict[str, Any]:
@@ -573,7 +570,9 @@ class TestUpdateUnitEdges:
         assert stored["displayName"] != "Raced Away"
         assert stored["version"] == 1
 
-    def test_retry_hash_ignores_key_padding_and_version_envelope(self, units_table: Any, seeded: Dict[str, Any]) -> None:
+    def test_retry_hash_ignores_key_padding_and_version_envelope(
+        self, units_table: Any, seeded: Dict[str, Any]
+    ) -> None:
         """F7: the updateUnit fingerprint carries request content only - the
         idempotencyKey and the version envelope are not part of it, so a replay
         sent with a padded key and without the version object still replays."""
@@ -655,9 +654,9 @@ class TestUpdateUnitEdges:
 
         monkeypatch.setattr(mutations, "_get_client", lambda: _FailingClient())
         monkeypatch.setattr(uop, "_units", lambda: _RacingTable(units_table))
-        stored_before = units_table.get_item(
-            Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True
-        )["Item"]
+        stored_before = units_table.get_item(Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True)[
+            "Item"
+        ]
         payload = _ok(
             lambda_handler(
                 fx.unit_operation_event(
@@ -676,9 +675,9 @@ class TestUpdateUnitEdges:
         assert payload["unitId"] == fx.PACK_3149
         assert payload.get("displayName") != "Raced Away By Fallback Put"
         assert payload["version"] == stored_before["version"]
-        stored_after = units_table.get_item(
-            Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True
-        )["Item"]
+        stored_after = units_table.get_item(Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True)[
+            "Item"
+        ]
         assert stored_after == stored_before
 
     def test_fallback_put_condition_failure_with_missing_unit_raises(
@@ -781,9 +780,7 @@ class TestUpdateUnitEdges:
             None,
         )
         assert isinstance(payload, dict) and payload.get("__isError") is True, payload
-        stored = units_table.get_item(
-            Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True
-        )["Item"]
+        stored = units_table.get_item(Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True)["Item"]
         assert stored["displayName"] != "Double Fault"
 
 
@@ -877,11 +874,9 @@ class TestRevokeEdges:
         assert stored["adminCount"] == 2
         assert stored["version"] == 1
         assert (
-            units_table
-            .get_item(
+            units_table.get_item(
                 Key={"pk": f"UNIT#{fx.CREW_529}", "sk": f"GRANT#{fx.account_id('Avery')}"}, ConsistentRead=True
-            )
-            .get("Item")
+            ).get("Item")
             is not None
         )
 
@@ -1001,9 +996,7 @@ class TestCreateInviteEdges:
         )
         fx.assert_is_error(payload, "INTERNAL_ERROR")
 
-    def test_completed_marker_replays_verdict_without_reminting(
-        self, units_table: Any, seeded: Dict[str, Any]
-    ) -> None:
+    def test_completed_marker_replays_verdict_without_reminting(self, units_table: Any, seeded: Dict[str, Any]) -> None:
         """A COMPLETED marker is always the answer, even when its result row is
         gone: the replay verdict is returned verbatim - no marker deletion, no
         re-run, and no second active invite is minted."""
@@ -1366,7 +1359,9 @@ class TestQueryEdges:
     def test_my_units_index_query_failure_returns_empty(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _fault(units_table, monkeypatch, lambda op, _kw: op == "query" and _kw.get("IndexName") == "accountId-unitId-index")
+        _fault(
+            units_table, monkeypatch, lambda op, _kw: op == "query" and _kw.get("IndexName") == "accountId-unitId-index"
+        )
         payload = _ok(lambda_handler(fx.unit_operation_event("myUnits", "Avery"), None))
         assert payload["items"] == []
         assert payload["pageInfo"]["hasNextPage"] is False

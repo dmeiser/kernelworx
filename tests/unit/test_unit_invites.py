@@ -213,9 +213,9 @@ class TestRedeemUnitInvite:
                 lambda_handler(_redeem("Devon", f"SHAPE{n:012d}", f"throttle-shape-{n}"), None),
                 "NOT_FOUND",
             )
-        item = throttles.get_item(
-            Key={"key": f"UNIT_INVITE_REDEMPTION#{fx.account_id('Devon')}#WINDOW#{window}"}
-        )["Item"]
+        item = throttles.get_item(Key={"key": f"UNIT_INVITE_REDEMPTION#{fx.account_id('Devon')}#WINDOW#{window}"})[
+            "Item"
+        ]
         assert int(item["attempts"]) == 3
         assert item["windowStart"] == window
         assert int(item["expiresAt"]) > int(now.timestamp())

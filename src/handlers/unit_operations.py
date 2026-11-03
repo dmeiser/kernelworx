@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict
 
 from botocore.exceptions import BotoCoreError, ClientError
 
@@ -19,14 +19,18 @@ except ModuleNotFoundError:
     from ..utils.mutations import IdempotentMutationRunner, WritePlan, marker_keys, normalized_fingerprint
 
 AppError, ErrorCode = import_from_utils("errors", "AppError", "ErrorCode")
-with_error_handling = import_from_utils("handlers", "lambda_handler")
 get_logger = import_from_utils("logging", "get_logger")
 
+# The decorator stays typed for mypy via the relative import below; at runtime
+# the absolute import resolves in the Lambda zip (package `utils`) and the
+# relative fallback resolves in unit tests (package `src.handlers`).
 if TYPE_CHECKING:  # pragma: no cover
-    pass
+    from ..utils.handlers import lambda_handler as with_error_handling
+else:  # pragma: no cover
+    with_error_handling = import_from_utils("handlers", "lambda_handler")
 
 
-def _serialize(value):
+def _serialize(value: Any) -> Any:
     from boto3.dynamodb.types import TypeSerializer
 
     return TypeSerializer().serialize(value)
@@ -44,11 +48,11 @@ _FAILURE_WINDOW_LIMIT = 10
 _FAILURE_WINDOW_HOURS = 2
 
 
-def _units():
+def _units() -> Any:
     return tables.units
 
 
-def _throttles():
+def _throttles() -> Any:
     return tables.public_order_throttles
 
 
@@ -56,12 +60,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _get_unit(unit_id: str):
+def _get_unit(unit_id: str) -> Any:
     resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
     return resp.get("Item")
 
 
-def _unit_pk(unit_id: str) -> str:
+def _unit_pk(unit_id: Any) -> str:
     return f"UNIT#{unit_id}"
 
 
@@ -77,15 +81,15 @@ def _validate_timezone(tz: str) -> bool:
         return False
 
 
-def _trim(value):
+def _trim(value: Any) -> Any:
     return value.strip() if isinstance(value, str) else value
 
 
-def _metadata_key(unit_type, unit_number, city, state) -> str:
+def _metadata_key(unit_type: Any, unit_number: Any, city: Any, state: Any) -> str:
     return f"{_trim(unit_type)}#{unit_number}#{_trim(city)}#{_trim(state)}".lower()
 
 
-def _is_unit_admin(caller_id: str, unit_id: str) -> bool:
+def _is_unit_admin(caller_id: Any, unit_id: Any) -> bool:
     try:
         resp = _units().get_item(Key={"pk": f"UNIT#{unit_id}", "sk": f"GRANT#{caller_id}"}, ConsistentRead=True)
     except Exception:
@@ -93,7 +97,7 @@ def _is_unit_admin(caller_id: str, unit_id: str) -> bool:
     return resp.get("Item") is not None
 
 
-def _marker_keys(actor: str, operation: str, scope: str, key: str):
+def _marker_keys(actor: Any, operation: str, scope: Any, key: str) -> Any:
     return marker_keys(
         actor_id=actor,
         operation=operation,
@@ -104,7 +108,7 @@ def _marker_keys(actor: str, operation: str, scope: str, key: str):
     )
 
 
-def create_unit(event, context):
+def create_unit(event: Dict[str, Any], context: Any) -> Any:
     args = event.get("arguments", {}).get("input", {}) or {}
     caller = get_caller_id(event)
     if not caller:
@@ -149,7 +153,7 @@ def create_unit(event, context):
         drop_none=True,
     )
 
-    def load_bootstrap_result(rid):
+    def load_bootstrap_result(rid: str) -> Dict[str, Any]:
         return {
             "unit": _get_unit(rid),
             "grant": _units()
@@ -228,7 +232,7 @@ def create_unit(event, context):
     return {"unit": item, "grant": grant_item}
 
 
-def update_unit(event, context):
+def update_unit(event: Dict[str, Any], context: Any) -> Any:
     args = event.get("arguments", {}).get("input", {}) or {}
     caller = get_caller_id(event)
     unit_id = args.get("unitId")
@@ -343,7 +347,7 @@ def update_unit(event, context):
         return item
 
 
-def revoke_unit_access_grant(event, context):
+def revoke_unit_access_grant(event: Dict[str, Any], context: Any) -> Any:
     args = event.get("arguments", {}).get("input", {}) or {}
     caller = get_caller_id(event)
     unit_id = args.get("unitId")
@@ -412,7 +416,7 @@ def revoke_unit_access_grant(event, context):
     return item
 
 
-def create_unit_invite(event, context):
+def create_unit_invite(event: Dict[str, Any], context: Any) -> Any:
     args = event.get("arguments", {}).get("input", {}) or {}
     caller = get_caller_id(event)
     unit_id = args.get("unitId")
@@ -452,7 +456,7 @@ def create_unit_invite(event, context):
     mk = _marker_keys(caller, "createUnitInvite", unit_id, key)
     fp = normalized_fingerprint({"unitId": unit_id})
 
-    def load_invite(rid):
+    def load_invite(rid: str) -> Any:
         return _units().get_item(Key={"pk": f"INVITE#{rid}", "sk": f"UNIT#{unit_id}"}, ConsistentRead=True).get("Item")
 
     handled, repl = runner.replay_or_reject(mk, fp, operation="createUnitInvite", load_result=load_invite)
@@ -487,7 +491,7 @@ def create_unit_invite(event, context):
     return item
 
 
-def revoke_unit_invite(event, context):
+def revoke_unit_invite(event: Dict[str, Any], context: Any) -> bool:
     args = event.get("arguments", {}).get("input", {}) or {}
     caller = get_caller_id(event)
     unit_id = args.get("unitId")
@@ -535,7 +539,7 @@ def _count_redeem_failure(account_id: str) -> None:
         )
 
 
-def redeem_unit_invite(event, context):
+def redeem_unit_invite(event: Dict[str, Any], context: Any) -> Any:
     args = event.get("arguments", {}).get("input", {}) or {}
     caller = get_caller_id(event)
     if not caller:
@@ -547,7 +551,7 @@ def redeem_unit_invite(event, context):
     mk = _marker_keys(caller, "redeemUnitInvite", code, key)
     fp = normalized_fingerprint({"inviteCode": code})
 
-    def load_redeem_grant(rid):
+    def load_redeem_grant(rid: str) -> Any:
         return _units().get_item(Key={"pk": _unit_pk(rid), "sk": f"GRANT#{caller}"}, ConsistentRead=True).get("Item")
 
     handled, repl = runner.replay_or_reject(mk, fp, operation="redeemUnitInvite", load_result=load_redeem_grant)
@@ -646,7 +650,7 @@ def redeem_unit_invite(event, context):
     return grant_item
 
 
-def my_units(event, context):
+def my_units(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     args = event.get("arguments", {}) or {}
     caller = get_caller_id(event)
     grants = []
@@ -681,7 +685,7 @@ def my_units(event, context):
     return {"items": units, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
 
 
-def unit(event, context):
+def unit(event: Dict[str, Any], context: Any) -> Any:
     args = event.get("arguments", {}) or {}
     unit_id = args.get("unitId")
     caller = get_caller_id(event)
@@ -691,7 +695,7 @@ def unit(event, context):
     return resp.get("Item")
 
 
-def unit_admins(event, context):
+def unit_admins(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     args = event.get("arguments", {}) or {}
     unit_id = args.get("unitId")
     caller = get_caller_id(event)
@@ -721,7 +725,7 @@ def unit_admins(event, context):
     return {"items": page_items, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
 
 
-def _parse_page(args):
+def _parse_page(args: Dict[str, Any]) -> tuple[int, Any]:
     page = args.get("page") or {}
     limit = page.get("limit", 50)
     try:
@@ -735,7 +739,7 @@ def _parse_page(args):
     return limit, page.get("cursor")
 
 
-def unit_invites(event, context):
+def unit_invites(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     args = event.get("arguments", {}) or {}
     unit_id = args.get("unitId")
     caller = get_caller_id(event)
@@ -791,7 +795,7 @@ _HANDLERS = {
 
 
 @with_error_handling(error_message="Failed to execute unit operation")
-def lambda_handler(event, context):
+def lambda_handler(event: Dict[str, Any], context: Any) -> Any:
     field = event.get("info", {}).get("fieldName", "")
     handler = _HANDLERS.get(field)
     if not handler:
