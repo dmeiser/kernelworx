@@ -236,6 +236,13 @@ def update_unit(event, context):
     unit_id = args.get("unitId")
     if not unit_id:
         raise AppError(ErrorCode.INVALID_INPUT, "unitId is required")
+    try:
+        from decimal import Decimal
+
+        if isinstance(args.get("unitNumber"), Decimal):
+            args["unitNumber"] = int(args["unitNumber"])
+    except Exception:
+        pass
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
     idempotency = args.get("idempotency", {}) or {}
