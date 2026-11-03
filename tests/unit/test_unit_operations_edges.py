@@ -826,37 +826,39 @@ class TestCreateInviteEdges:
         )
         fx.assert_is_error(payload, "INTERNAL_ERROR")
 
-    def test_marker_replay_without_invite_mints_new_code(self, units_table: Any, seeded: Dict[str, Any]) -> None:
-        """A completed §8.9 marker whose invite row is gone is reaped: the retry
-        mints a fresh code instead of replaying a dead result."""
-        fp = normalized_fingerprint({"unitId": fx.TROOP_7150})
+    def test_completed_marker_replays_verdict_without_reminting(
+        self, units_table: Any, seeded: Dict[str, Any]
+    ) -> None:
+        """A COMPLETED marker is always the answer, even when its result row is
+        gone: the replay verdict is returned verbatim - no marker deletion, no
+        re-run, and no second active invite is minted."""
+        mk_pk = marker_partition_key(fx.account_id("Riley"), "createUnitInvite", fx.TROOP_7150)
+        mk_sk = marker_sort_key("stale-replay-key")
         units_table.put_item(
             Item={
-                "pk": marker_partition_key(fx.account_id("Riley"), "createUnitInvite", fx.TROOP_7150),
-                "sk": marker_sort_key("stale-replay-key"),
-                "fingerprint": fp,
+                "pk": mk_pk,
+                "sk": mk_sk,
+                "fingerprint": normalized_fingerprint({"unitId": fx.TROOP_7150}),
                 "status": MARKER_STATUS_COMPLETED,
                 "resultId": "ZZZZZZZZZZZZZZZZ",
                 "expiresAtEpoch": int(datetime.now(timezone.utc).timestamp()) + 86400,
             }
         )
-        payload = _ok(
-            lambda_handler(
-                fx.unit_operation_event(
-                    "createUnitInvite",
-                    "Riley",
-                    input={"unitId": fx.TROOP_7150, "idempotency": {"idempotencyKey": "stale-replay-key"}},
-                ),
-                None,
-            )
+        before = [i for i in units_table.scan()["Items"] if str(i.get("pk", "")).startswith("INVITE#")]
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "createUnitInvite",
+                "Riley",
+                input={"unitId": fx.TROOP_7150, "idempotency": {"idempotencyKey": "stale-replay-key"}},
+            ),
+            None,
         )
-        assert payload["inviteCode"] != "ZZZZZZZZZZZZZZZZ"
-        assert (
-            units_table.get_item(
-                Key={"pk": f"INVITE#{payload['inviteCode']}", "sk": f"UNIT#{fx.TROOP_7150}"}, ConsistentRead=True
-            ).get("Item")
-            is not None
-        )
+        assert payload is None
+        after = [i for i in units_table.scan()["Items"] if str(i.get("pk", "")).startswith("INVITE#")]
+        assert len(after) == len(before)
+        marker = units_table.get_item(Key={"pk": mk_pk, "sk": mk_sk}, ConsistentRead=True).get("Item")
+        assert marker is not None
+        assert marker["status"] == MARKER_STATUS_COMPLETED
 
     def test_marker_write_fault_refuses_to_mint(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
@@ -967,30 +969,40 @@ class TestRedeemEdges:
         )
         assert "Item" not in grant
 
-    def test_marker_with_missing_grant_proceeds(self, units_table: Any, seeded: Dict[str, Any]) -> None:
-        """A completed marker whose grant row is gone is reaped and the live
-        invite is re-redeemable: the stale marker never wedges the caller."""
+    def test_completed_marker_replays_verdict_without_regranting(
+        self, units_table: Any, seeded: Dict[str, Any]
+    ) -> None:
+        """A COMPLETED redeem marker is always the answer, even when its grant
+        row is gone: the replay verdict is returned verbatim - no marker
+        deletion, no re-run, and no second grant under the same key."""
+        mk_pk = marker_partition_key(fx.account_id("Devon"), "redeemUnitInvite", "TRP7150ACTIVE001")
+        mk_sk = marker_sort_key("rk-stale-grant")
         units_table.put_item(
             Item={
-                "pk": marker_partition_key(fx.account_id("Devon"), "redeemUnitInvite", "TRP7150ACTIVE001"),
-                "sk": marker_sort_key("rk-stale-grant"),
+                "pk": mk_pk,
+                "sk": mk_sk,
                 "fingerprint": normalized_fingerprint({"inviteCode": "TRP7150ACTIVE001"}),
                 "status": MARKER_STATUS_COMPLETED,
                 "resultId": fx.TROOP_7150,
                 "expiresAtEpoch": int(datetime.now(timezone.utc).timestamp()) + 86400,
             }
         )
-        payload = _ok(
-            lambda_handler(
-                fx.unit_operation_event(
-                    "redeemUnitInvite",
-                    "Devon",
-                    input={"inviteCode": "TRP7150ACTIVE001", "idempotency": {"idempotencyKey": "rk-stale-grant"}},
-                ),
-                None,
-            )
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "redeemUnitInvite",
+                "Devon",
+                input={"inviteCode": "TRP7150ACTIVE001", "idempotency": {"idempotencyKey": "rk-stale-grant"}},
+            ),
+            None,
         )
-        assert payload["sk"] == f"GRANT#{fx.account_id('Devon')}"
+        assert payload is None
+        grant = units_table.get_item(
+            Key={"pk": f"UNIT#{fx.TROOP_7150}", "sk": f"GRANT#{fx.account_id('Devon')}"}, ConsistentRead=True
+        )
+        assert "Item" not in grant
+        marker = units_table.get_item(Key={"pk": mk_pk, "sk": mk_sk}, ConsistentRead=True).get("Item")
+        assert marker is not None
+        assert marker["status"] == MARKER_STATUS_COMPLETED
 
     def test_throttle_counter_write_failure_swallowed(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch

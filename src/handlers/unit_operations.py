@@ -104,24 +104,6 @@ def _marker_keys(actor: str, operation: str, scope: str, key: str):
     )
 
 
-def _replay_or_reap(runner, mk, fingerprint, *, operation, load_result):
-    """Answer a completed marker idempotently, or reap a stale one.
-
-    A completed marker whose result row is gone (a later lifecycle step removed
-    it) can never be replayed; the stale marker is deleted and the mutation
-    runs again, so the caller is never stuck behind a dead marker. A marker
-    that is intact, reused with different content, or corrupt keeps the
-    verdicts the idempotency helper itself raises: replay, INVALID_INPUT, or
-    INTERNAL_ERROR refusal.
-    """
-    handled, replayed = runner.replay_or_reject(mk, fingerprint, operation=operation, load_result=load_result)
-    if handled and replayed is not None:
-        return replayed
-    if handled:
-        _units().delete_item(Key={"pk": mk.pk, "sk": mk.sk})
-    return None
-
-
 def create_unit(event, context):
     args = event.get("arguments", {}).get("input", {}) or {}
     caller = get_caller_id(event)
@@ -175,13 +157,9 @@ def create_unit(event, context):
             .get("Item"),
         }
 
-    existing_marker = runner.load_marker(mk)
-    if existing_marker:
-        handled, replayed = runner.replay_or_reject(
-            mk, fp, operation="createUnit", load_result=load_bootstrap_result
-        )
-        if handled:
-            return replayed
+    handled, replayed = runner.replay_or_reject(mk, fp, operation="createUnit", load_result=load_bootstrap_result)
+    if handled:
+        return replayed
     duplicate_confirmed = bool(args.get("duplicateConfirmed", False))
     md_key = _metadata_key(unit_type, unit_number, city, state)
     try:
@@ -274,14 +252,9 @@ def update_unit(event, context):
     fp = normalized_fingerprint(
         {k: v for k, v in args.items() if k not in ("idempotency", "version", "expectedVersion")}
     )
-    existing = runner.load_marker(mk)
-    if existing:
-        rid = (
-            existing.get("resultId", {}).get("S")
-            if isinstance(existing.get("resultId"), dict)
-            else existing.get("resultId")
-        )
-        return _get_unit(rid) if rid else _get_unit(unit_id)
+    handled, replayed = runner.replay_or_reject(mk, fp, operation="updateUnit", load_result=lambda rid: _get_unit(rid))
+    if handled:
+        return replayed
     resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
     item = resp.get("Item")
     if not item:
@@ -349,11 +322,25 @@ def update_unit(event, context):
             result_id=unit_id,
             load_result=lambda rid: _get_unit(rid),
         )
+        return item
     except AppError as exc:
         if not isinstance(exc.__cause__, BotoCoreError):
             raise
-        _units().put_item(Item=item)
-    return item
+        try:
+            _units().put_item(
+                Item=item,
+                ConditionExpression="#v = :v",
+                ExpressionAttributeNames={"#v": "version"},
+                ExpressionAttributeValues={":v": snapshot_version},
+            )
+        except ClientError as put_exc:
+            if put_exc.response.get("Error", {}).get("Code", "") != "ConditionalCheckFailedException":
+                raise
+            committed = _get_unit(unit_id)
+            if committed is None:
+                raise
+            return committed
+        return item
 
 
 def revoke_unit_access_grant(event, context):
@@ -370,14 +357,11 @@ def revoke_unit_access_grant(event, context):
     runner = IdempotentMutationRunner()
     mk = _marker_keys(caller, "revokeUnitAccessGrant", f"{unit_id}#{account_id}", key)
     fp = normalized_fingerprint({"unitId": unit_id, "accountId": account_id})
-    existing = runner.load_marker(mk)
-    if existing:
-        rid = (
-            existing.get("resultId", {}).get("S")
-            if isinstance(existing.get("resultId"), dict)
-            else existing.get("resultId")
-        )
-        return _get_unit(rid) if rid else _get_unit(unit_id)
+    handled, replayed = runner.replay_or_reject(
+        mk, fp, operation="revokeUnitAccessGrant", load_result=lambda rid: _get_unit(rid)
+    )
+    if handled:
+        return replayed
     resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
     item = resp.get("Item")
     if not item:
@@ -473,9 +457,9 @@ def create_unit_invite(event, context):
             .get("Item")
         )
 
-    existing = _replay_or_reap(runner, mk, fp, operation="createUnitInvite", load_result=load_invite)
-    if existing:
-        return existing
+    handled, repl = runner.replay_or_reject(mk, fp, operation="createUnitInvite", load_result=load_invite)
+    if handled:
+        return repl
     code = uuid.uuid4().hex[:16].upper()
     now = _now()
     # expiry 14 days
@@ -546,6 +530,11 @@ def _count_redeem_failure(account_id: str) -> None:
     except ClientError as exc:
         if exc.response.get("Error", {}).get("Code", "") == "ConditionalCheckFailedException":
             raise AppError(ErrorCode.RATE_LIMIT_EXCEEDED, "Too many failed attempts") from exc
+        logger.warning(
+            "Redemption failure counter update was skipped",
+            operation="countRedeemFailure",
+            error_code=exc.response.get("Error", {}).get("Code", ""),
+        )
 
 
 def redeem_unit_invite(event, context):
@@ -567,9 +556,9 @@ def redeem_unit_invite(event, context):
             .get("Item")
         )
 
-    replayed = _replay_or_reap(runner, mk, fp, operation="redeemUnitInvite", load_result=load_redeem_grant)
-    if replayed:
-        return replayed
+    handled, repl = runner.replay_or_reject(mk, fp, operation="redeemUnitInvite", load_result=load_redeem_grant)
+    if handled:
+        return repl
     # query by pk prefix
     try:
         resp = _units().query(
