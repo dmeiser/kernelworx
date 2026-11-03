@@ -50,7 +50,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, cast
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .dynamodb import get_dynamodb_client, is_transient_client_error
+from .dynamodb import TRANSIENT_ERROR_CODES, get_dynamodb_client, is_transient_client_error
 from .errors import AppError, ErrorCode
 from .logging import get_logger
 
@@ -412,14 +412,29 @@ def classify_transaction_error(exc: BaseException, *, operation: str) -> AppErro
             # TransactionCanceledException is a transaction whose conditions did
             # not hold; ConditionalCheckFailedException is the same verdict on a
             # single-item write (the marker back-fill). Neither is retryable as
-            # sent: the caller must re-read.
+            # sent - UNLESS the transaction was cancelled by throttling: the
+            # throttle arrives as a PER-ITEM CancellationReasons code inside the
+            # cancellation payload, so the per-item codes are consulted before
+            # the conflict verdict and any one of them promotes the whole
+            # transaction to the retryable RESOURCE_BUSY.
+            throttle_codes = [c for c in _cancellation_summary(exc) if c in TRANSIENT_ERROR_CODES]
+            if throttle_codes:
+                logger.warning(
+                    "Transaction cancelled by throttling",
+                    operation=operation,
+                    cancellation_reasons=throttle_codes,
+                )
+                return AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to write. Please retry.")
             logger.warning(
                 "Transaction cancelled",
                 operation=operation,
                 cancellation_reasons=_cancellation_summary(exc),
             )
             return AppError(ErrorCode.CONFLICT, "The resource changed underneath this request. Re-read and try again.")
-        if is_transient_client_error(exc):
+        if code == "TransactionInProgressException" or is_transient_client_error(exc):
+            # TransactionInProgressException carries AWS retry guidance; it is
+            # the same "the request may yet succeed" family as throttling.
+            logger.warning("Transaction blocked by in-flight activity", operation=operation, error_code=code)
             return AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to write. Please retry.")
         logger.error("Transaction failed", operation=operation, error=str(exc), error_code=code)
         return AppError(ErrorCode.INTERNAL_ERROR, "Failed to save changes")
@@ -558,9 +573,10 @@ class IdempotentMutationRunner:
 
         Raises:
             AppError: INVALID_INPUT for the same key with a different
-                fingerprint; CONFLICT with ``OPERATION_TOO_LARGE``-shaped
-                detail for a race; RESOURCE_BUSY when the prior attempt is
-                still in flight.
+                fingerprint; INTERNAL_ERROR for a corrupt marker (a status we
+                do not recognize, or a completed marker with no replayable
+                result). An in-flight marker is replayed, and the marker race
+                surfaces as RESOURCE_BUSY only in :meth:`execute`.
         """
         marker = self.load_marker(keys)
         if marker is None:

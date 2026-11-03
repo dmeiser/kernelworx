@@ -823,6 +823,28 @@ class TestErrorClassification:
             ErrorCode.RESOURCE_BUSY
         )
 
+    @pytest.mark.parametrize(
+        "code",
+        ["ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"],
+    )
+    def test_throttling_reported_as_a_per_item_cancellation_reason_is_resource_busy(self, code: str) -> None:
+        exc = classify_transaction_error(
+            _client_error(
+                "TransactionCanceledException",
+                reasons=[
+                    {"Code": "ConditionalCheckFailed", "Message": "m"},
+                    {"Code": code, "Message": "m"},
+                ],
+            ),
+            operation="createUnit",
+        )
+        assert exc.error_code == ErrorCode.RESOURCE_BUSY
+
+    def test_transaction_in_progress_is_the_retryable_resource_busy(self) -> None:
+        assert classify_transaction_error(
+            _client_error("TransactionInProgressException"), operation="createUnit"
+        ).error_code == (ErrorCode.RESOURCE_BUSY)
+
     def test_a_transport_fault_is_retryable_not_a_service_verdict(self) -> None:
         exc = EndpointConnectionError(endpoint_url="https://dynamodb.us-east-1.amazonaws.com")
         assert classify_transaction_error(exc, operation="createUnit").error_code == ErrorCode.RESOURCE_BUSY
