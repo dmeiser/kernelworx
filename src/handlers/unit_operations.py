@@ -417,14 +417,11 @@ def create_unit_invite(event, context):
     marker_sk = f"IDEM#{key}"
     try:
         m = _units().get_item(Key={"pk": marker_pk, "sk": marker_sk}, ConsistentRead=True).get("Item")
-        print("DEBUG marker lookup", marker_pk, marker_sk, m)
-    except Exception as e:
-        print("DEBUG marker err", e)
+    except Exception:
         m = None
     if m and m.get("inviteCode"):
         code = m["inviteCode"]
         inv = _units().get_item(Key={"pk": f"INVITE#{code}", "sk": f"UNIT#{unit_id}"}, ConsistentRead=True).get("Item")
-        print("DEBUG inv fetch", code, inv)
         if inv:
             return inv
     code = uuid.uuid4().hex[:16].upper()
