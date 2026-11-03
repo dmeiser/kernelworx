@@ -295,12 +295,6 @@ def revoke_unit_access_grant(event, context):
     account_id = args.get("accountId")
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
-    resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
-    item = resp.get("Item")
-    if not item:
-        raise AppError(ErrorCode.NOT_FOUND, "Unit not found")
-    if int(item.get("adminCount", 0)) <= 1:
-        raise AppError(ErrorCode.CONFLICT, "Cannot revoke last admin")
     idempotency = args.get("idempotency", {}) or {}
     key = idempotency.get("idempotencyKey")
     if not key:
@@ -317,7 +311,18 @@ def revoke_unit_access_grant(event, context):
     fp = normalized_fingerprint({"unitId": unit_id, "accountId": account_id})
     existing = runner.load_marker(mk)
     if existing:
-        return _get_unit(unit_id)
+        rid = (
+            existing.get("resultId", {}).get("S")
+            if isinstance(existing.get("resultId"), dict)
+            else existing.get("resultId")
+        )
+        return _get_unit(rid) if rid else _get_unit(unit_id)
+    resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
+    item = resp.get("Item")
+    if not item:
+        raise AppError(ErrorCode.NOT_FOUND, "Unit not found")
+    if int(item.get("adminCount", 0)) <= 1:
+        raise AppError(ErrorCode.CONFLICT, "Cannot revoke last admin")
     # delete grant
     _units().delete_item(Key={"pk": _unit_pk(unit_id), "sk": f"GRANT#{account_id}"})
     item["adminCount"] = int(item["adminCount"]) - 1
