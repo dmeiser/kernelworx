@@ -126,17 +126,19 @@ def create_unit(event, context):
     )
     existing_marker = runner.load_marker(mk)
     if existing_marker:
-        rid = (
-            existing_marker.get("resultId", {}).get("S")
-            if isinstance(existing_marker.get("resultId"), dict)
-            else existing_marker.get("resultId")
+        handled, replayed = runner.replay_or_reject(
+            mk,
+            fp,
+            operation="createUnit",
+            load_result=lambda r: {
+                "unit": _get_unit(r),
+                "grant": _units()
+                .get_item(Key={"pk": _unit_pk(r), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
+                .get("Item"),
+            },
         )
-        return {
-            "unit": _get_unit(rid),
-            "grant": _units()
-            .get_item(Key={"pk": _unit_pk(rid), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
-            .get("Item"),
-        }
+        if handled:
+            return replayed
     duplicate_confirmed = bool(args.get("duplicateConfirmed", False))
     md_key = _metadata_key(unit_type, unit_number, city, state)
     try:
