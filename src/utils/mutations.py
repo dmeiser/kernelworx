@@ -20,7 +20,11 @@ live once instead of in every resolver:
    operation atomic: there is no window in which a marker exists but the
    business rows do not. `ConditionCheckItem` is not permission to call
    `TransactWriteItems` (impact map §4.2), so the caller's role must grant the
-   action on every table named here.
+   action on every table named here. ``execute()`` enforces this by refusing
+   any plan whose first action is not the marker's conditional Put: a plan that
+   could commit without the marker would tell the caller the write failed when
+   the post-commit marker flip is rejected, and the caller's retry would
+   double-apply it.
 4. 90-action write-plan counting. A plan over `MAX_TRANSACTION_ACTIONS` fails
    before any DynamoDB call with `CONFLICT` and `OPERATION_TOO_LARGE` in its
    details (data model §8.10). Field maxima are not independently composable,
@@ -77,6 +81,18 @@ MAX_TRANSACTION_ACTIONS: int = 90
 # at the per-item level (see the CancellationReason Code enum).
 PER_ITEM_THROTTLE_CODES: frozenset[str] = frozenset({"ThrottlingError", "ProvisionedThroughputExceeded"})
 
+# The PER-ITEM CancellationReason code for "another transaction touched this
+# item concurrently". Per-item TransactionConflict and top-level
+# TransactionConflictException are the same retryable contention family as
+# throttling (spec 3.3: contention is RESOURCE_BUSY, never a conflict verdict):
+# the client must back off and resend, not re-read and recompute.
+PER_ITEM_CONTENTION_CODES: frozenset[str] = frozenset({"TransactionConflict"})
+
+# DynamoDB hard caps a partition key at 1024 bytes; the marker PK is assembled
+# from three validated segments, each allowed hundreds of characters, so the
+# assembly itself must enforce the wire limit.
+_PK_MAX_BYTES = 1024
+
 # Marker retention (API contract §3.1: "retained for seven days"; impact map
 # §4.1: one numeric epoch-seconds attribute across all aggregate tables).
 MARKER_TTL_SECONDS: int = 7 * 24 * 60 * 60
@@ -104,7 +120,6 @@ _SCOPE_MAX_CHARS = 512
 _MARKER_CORRUPT_MESSAGE = "Idempotency marker is unreadable; refusing to re-run the mutation."
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
-_WHITESPACE_RUN = re.compile(r"\s+")
 _KEY_SAFE = re.compile(r"^[A-Za-z0-9#:_\-.]+$")
 
 
@@ -119,7 +134,11 @@ def _canonical_scalar(value: Any) -> Optional[str]:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, str):
-        return json.dumps(_WHITESPACE_RUN.sub(" ", value.strip()))
+        # Trim padding only. Internal whitespace is content: "Ann  Marie" and
+        # "Ann Marie" are different strings and must not alias to one
+        # fingerprint (identifiers and enum values never contain whitespace,
+        # so trimming cannot alias two codes).
+        return json.dumps(value.strip())
     if isinstance(value, (int, float)):
         if isinstance(value, float) and not math.isfinite(value):
             raise TypeError(f"non-finite number in fingerprint input: {value!r}")
@@ -131,17 +150,23 @@ def _canonical_scalar(value: Any) -> Optional[str]:
     return None
 
 
-def _canonical_mapping(value: Mapping[Any, Any]) -> str:
-    """Canonical form of a mapping: keys sorted, ``None`` values dropped.
+def _canonical_mapping(value: Mapping[Any, Any], *, drop_none: bool) -> str:
+    """Canonical form of a mapping: keys sorted, ``None`` values kept by default.
 
-    Dropping nulls is the GraphQL-shape rule (an omitted optional argument and
-    an explicit null are the same request). A mapping that ends up with no
-    entries renders as ``{"":null}`` so it stays distinguishable from a mapping
-    that was empty to begin with, and two different payloads can never render to
-    the same string.
+    An explicit null is kept distinct from an omitted key, because for most
+    mutations they are different requests (omitted = leave unchanged, null =
+    clear). Create-shaped payloads, where GraphQL already equates an omitted
+    optional argument with an explicit null, pass ``drop_none=True`` to opt
+    into null-dropping. A mapping whose entries all end up dropped renders as
+    ``{"":null}`` so it stays distinguishable from a mapping that was empty to
+    begin with, and two different payloads can never render to the same string.
     """
     entries = sorted(((str(k), v) for k, v in value.items()), key=lambda entry: entry[0])
-    parts = [f"{json.dumps(key)}:{_canonical_json(item)}" for key, item in entries if item is not None]
+    parts = [
+        f"{json.dumps(key)}:{_canonical_json(item, drop_none=drop_none)}"
+        for key, item in entries
+        if not (drop_none and item is None)
+    ]
     if not parts:
         # An all-null mapping and a genuinely empty one must not collide, or
         # "send displayName: null" and "send no fields" would fingerprint alike.
@@ -149,35 +174,41 @@ def _canonical_mapping(value: Mapping[Any, Any]) -> str:
     return "{" + ",".join(parts) + "}"
 
 
-def _canonical_json(value: Any) -> str:
+def _canonical_json(value: Any, *, drop_none: bool) -> str:
     """Serialize ``value`` to canonical JSON, raising ``TypeError`` when it is not data.
 
     Normalization rules are fixed so a fingerprint is stable across client
     libraries - the contract normalizes the request's *content*, not the bytes a
     client happened to send: mapping keys sorted (field order never matters),
-    strings trimmed with internal whitespace runs collapsed (identifiers and
-    enum values never contain whitespace, so this cannot alias two codes, and a
-    snapshot text is hashed on its content rather than client padding), and
-    non-JSON types raising rather than being coerced - silently accepting an
-    unhashable shape is how a fingerprint stops being a fingerprint.
+    strings trimmed at both ends (internal whitespace is content and is
+    preserved, so two different texts never hash alike), explicit nulls kept
+    distinct from omitted keys unless ``drop_none`` is set (create-shaped
+    payloads only), and non-JSON types raising rather than being coerced -
+    silently accepting an unhashable shape is how a fingerprint stops being a
+    fingerprint.
     """
     scalar = _canonical_scalar(value)
     if scalar is not None:
         return scalar
     if isinstance(value, Mapping):
-        return _canonical_mapping(value)
+        return _canonical_mapping(value, drop_none=drop_none)
     if isinstance(value, (list, tuple)):
-        return "[" + ",".join(_canonical_json(item) for item in value) + "]"
+        return "[" + ",".join(_canonical_json(item, drop_none=drop_none) for item in value) + "]"
     raise TypeError(f"unsupported value in fingerprint input: {type(value).__name__}")
 
 
-def normalized_fingerprint(payload: Mapping[str, Any]) -> str:
+def normalized_fingerprint(payload: Mapping[str, Any], *, drop_none: bool = False) -> str:
     """Return the fingerprint of a mutation request payload.
 
     Args:
         payload: The operation's meaningful arguments. The caller must exclude
             the ``idempotencyKey`` itself (it is in the marker key, and folding
             it in would make a replay of the same request look different).
+        drop_none: Create-shaped payloads only. GraphQL equates an omitted
+            optional argument with an explicit null on a create, so createUnit
+            passes ``drop_none=True``; for updates, where omitted (leave
+            unchanged) and null (clear the field) are different requests, the
+            default keeps explicit nulls distinct.
 
     Returns:
         A ``sha256:<hex>`` string. The algorithm prefix makes a later change to
@@ -188,7 +219,7 @@ def normalized_fingerprint(payload: Mapping[str, Any]) -> str:
         AppError: INVALID_INPUT when the payload cannot be canonicalized.
     """
     try:
-        canonical = _canonical_json(payload)
+        canonical = _canonical_json(payload, drop_none=drop_none)
     except TypeError as exc:
         raise AppError(ErrorCode.INVALID_INPUT, "Request content cannot be fingerprinted") from exc
     return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
@@ -221,6 +252,17 @@ def _validate_scope(scope: str) -> str:
     return value
 
 
+def _escape_key_segment(segment: str) -> str:
+    """Escape the key-segment delimiter inside one marker partition-key segment.
+
+    ``actor = "a#b", operation = "c"`` and ``actor = "a", operation = "b#c"``
+    would both render ``IDEM#a#b#c#...`` without escaping, letting two different
+    requests share one marker. '%' is not a legal segment character (see
+    :data:`_KEY_SAFE`), so '%23' is an unambiguous escape.
+    """
+    return segment.replace("#", "%23")
+
+
 def marker_partition_key(actor_id: str, operation: str, scope: str) -> str:
     """The marker's partition key: actor + operation type + resource scope.
 
@@ -229,9 +271,18 @@ def marker_partition_key(actor_id: str, operation: str, scope: str) -> str:
     invite's deletion), or :data:`BOOTSTRAP_SCOPE` for Unit creation. Keeping
     all three segments in the key is what makes the conditional insert the
     uniqueness guard: another caller's identical key, or the same caller's
-    second operation, can never collide with this one.
+    second operation, can never collide with this one. Each segment has the
+    delimiter escaped (see :func:`_escape_key_segment`) and the assembled key
+    is capped at DynamoDB's 1024-byte partition-key limit.
     """
-    return f"{MARKER_PK_PREFIX}#{_validate_scope(actor_id)}#{_validate_scope(operation)}#{_validate_scope(scope)}"
+    pk = (
+        f"{MARKER_PK_PREFIX}#{_escape_key_segment(_validate_scope(actor_id))}"
+        f"#{_escape_key_segment(_validate_scope(operation))}"
+        f"#{_escape_key_segment(_validate_scope(scope))}"
+    )
+    if len(pk.encode("utf-8")) > _PK_MAX_BYTES:
+        raise AppError(ErrorCode.INVALID_INPUT, "idempotency marker key exceeds the partition-key size limit")
+    return pk
 
 
 def marker_sort_key(idempotency_key: str) -> str:
@@ -319,8 +370,11 @@ class WritePlan:
     """
 
     def __init__(self, max_actions: int = MAX_TRANSACTION_ACTIONS) -> None:
-        if max_actions < 1 or max_actions > 100:
-            raise ValueError("max_actions must stay within DynamoDB's 100-item transaction cap")
+        # The budget is a product contract (data model §8.10), not a tuning
+        # knob: a caller must not be able to buy back headroom DynamoDB's
+        # 100-item cap was leaving unused. 91 was never an acceptable plan.
+        if max_actions < 1 or max_actions > MAX_TRANSACTION_ACTIONS:
+            raise ValueError(f"max_actions must stay within the {MAX_TRANSACTION_ACTIONS}-action write budget")
         self._max_actions = max_actions
         self._items: list[dict[str, Any]] = []
         self._tables: set[str] = set()
@@ -358,6 +412,11 @@ class WritePlan:
         table = item.get("TableName")
         if not isinstance(table, str) or not table:
             raise AppError(ErrorCode.INVALID_INPUT, "transaction action is missing TableName")
+        if action == "ConditionCheck" and not item.get("ConditionExpression"):
+            # A condition check with no condition can never fail, so it is not a
+            # guard at all - staging one hides a missing version check behind an
+            # action that looks like concurrency control.
+            raise AppError(ErrorCode.INVALID_INPUT, "a ConditionCheck must carry a ConditionExpression")
         if len(self._items) >= self._max_actions:
             logger.warning(
                 "Write plan exceeds the transaction budget",
@@ -404,9 +463,13 @@ def classify_transaction_error(exc: BaseException, *, operation: str) -> AppErro
     A cancelled transaction means one of our conditions did not hold - a stale
     ``expectedVersion``, an already-consumed invite, a moved guard - so the
     client must re-read and retry the whole read/compute/write sequence, not
-    just resend: that is ``CONFLICT``. Throttling and other transport faults
-    are the retryable ``RESOURCE_BUSY``. Anything else is an internal failure,
-    logged with the operation name and reported without an internal payload.
+    just resend: that is ``CONFLICT``. Retryable contention - throttling,
+    per-item ``TransactionConflict``, top-level ``TransactionInProgress`` /
+    ``TransactionConflictException``, transport faults - is the retryable
+    ``RESOURCE_BUSY`` (spec 3.3). A ``ValidationException`` rejecting the
+    transaction's size or shape maps to ``CONFLICT`` / ``OPERATION_TOO_LARGE``.
+    Anything else is an internal failure, logged with the operation name and
+    reported without an internal payload.
 
     Args:
         exc: The exception raised by the transaction call.
@@ -421,17 +484,22 @@ def classify_transaction_error(exc: BaseException, *, operation: str) -> AppErro
             # TransactionCanceledException is a transaction whose conditions did
             # not hold; ConditionalCheckFailedException is the same verdict on a
             # single-item write (the marker back-fill). Neither is retryable as
-            # sent - UNLESS the transaction was cancelled by throttling: the
-            # throttle arrives as a PER-ITEM CancellationReasons code inside the
-            # cancellation payload, so the per-item codes are consulted before
-            # the conflict verdict and any one of them promotes the whole
-            # transaction to the retryable RESOURCE_BUSY.
-            throttle_codes = [c for c in _cancellation_summary(exc) if c in PER_ITEM_THROTTLE_CODES]
-            if throttle_codes:
+            # sent - UNLESS the transaction was cancelled by retryable
+            # contention: a per-item throttle or a per-item TransactionConflict
+            # arrives as a CancellationReasons code inside the cancellation
+            # payload, so the per-item codes are consulted before the conflict
+            # verdict and any one of them promotes the whole transaction to the
+            # retryable RESOURCE_BUSY (spec 3.3).
+            retryable_reasons = [
+                c
+                for c in _cancellation_summary(exc)
+                if c in PER_ITEM_THROTTLE_CODES or c in PER_ITEM_CONTENTION_CODES
+            ]
+            if retryable_reasons:
                 logger.warning(
-                    "Transaction cancelled by throttling",
+                    "Transaction cancelled by retryable contention",
                     operation=operation,
-                    cancellation_reasons=throttle_codes,
+                    cancellation_reasons=retryable_reasons,
                 )
                 return AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to write. Please retry.")
             logger.warning(
@@ -440,9 +508,30 @@ def classify_transaction_error(exc: BaseException, *, operation: str) -> AppErro
                 cancellation_reasons=_cancellation_summary(exc),
             )
             return AppError(ErrorCode.CONFLICT, "The resource changed underneath this request. Re-read and try again.")
-        if code == "TransactionInProgressException" or is_transient_client_error(exc):
-            # TransactionInProgressException carries AWS retry guidance; it is
-            # the same "the request may yet succeed" family as throttling.
+        if code == "ValidationException" and _is_oversize_or_duplicate_transaction(exc):
+            # The plan helper caps every plan at MAX_TRANSACTION_ACTIONS, but a
+            # caller-side bug can still stage two actions on one item; DynamoDB
+            # rejects that transaction with a ValidationException. It is the
+            # caller's content at fault, so it maps to the same CONFLICT /
+            # OPERATION_TOO_LARGE contract as an oversized plan, not an
+            # internal error.
+            logger.warning(
+                "Transaction rejected as oversized or duplicated",
+                operation=operation,
+                error=str(exc),
+            )
+            return AppError(
+                ErrorCode.CONFLICT,
+                "This request is too large for one atomic write. Split it into smaller independent requests.",
+                details={
+                    "subcode": ErrorCode.OPERATION_TOO_LARGE,
+                    "reduction": "Split the operation into independent requests that each fit the write budget.",
+                },
+            )
+        if code in ("TransactionInProgressException", "TransactionConflictException") or is_transient_client_error(exc):
+            # TransactionInProgressException and TransactionConflictException
+            # carry AWS retry guidance: another request touched the item set
+            # concurrently, so resend after a backoff rather than re-reading.
             logger.warning("Transaction blocked by in-flight activity", operation=operation, error_code=code)
             return AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to write. Please retry.")
         logger.error("Transaction failed", operation=operation, error=str(exc), error_code=code)
@@ -453,6 +542,22 @@ def classify_transaction_error(exc: BaseException, *, operation: str) -> AppErro
         return AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to write. Please retry.")
     logger.error("Transaction failed unexpectedly", operation=operation, error=str(exc))
     return AppError(ErrorCode.INTERNAL_ERROR, "Failed to save changes")
+
+
+# The ValidationException message fragments DynamoDB uses for a transaction
+# that names too many items or touches one item with more than one action.
+_OVERSIZE_OR_DUPLICATE_MARKERS = (
+    "too many items",
+    "more than 100 items",
+    "one action on an item",
+    "multiple operations on one item",
+)
+
+
+def _is_oversize_or_duplicate_transaction(exc: ClientError) -> bool:
+    """True when a ValidationException rejects the transaction's shape, not its auth."""
+    message = str(exc.response.get("Error", {}).get("Message", "")).lower()
+    return any(marker in message for marker in _OVERSIZE_OR_DUPLICATE_MARKERS)
 
 
 def _cancellation_reasons(exc: ClientError) -> list[dict[str, Any]]:
@@ -468,6 +573,23 @@ def _cancellation_reasons(exc: ClientError) -> list[dict[str, Any]]:
 def _cancellation_summary(exc: ClientError) -> list[str]:
     """Machine-safe one-token-per-reason summary (never the item payload)."""
     return [str(reason.get("Code", "UNKNOWN")) for reason in _cancellation_reasons(exc)]
+
+
+def _is_marker_put(action: Mapping[str, Any], keys: MarkerKeys) -> bool:
+    """True when a staged action is THIS mutation's conditional marker insert.
+
+    The marker Put is identified by table plus the exact key pair, and it must
+    carry a condition - an unconditional marker Put would not be a uniqueness
+    guard, and :meth:`IdempotentMutationRunner.execute` refuses to commit any
+    plan whose first action is not this item.
+    """
+    put = action.get("Put")
+    if not isinstance(put, dict):
+        return False
+    if put.get("TableName") != keys.table_name or not put.get("ConditionExpression"):
+        return False
+    item = put.get("Item")
+    return isinstance(item, dict) and item.get("pk") == {"S": keys.pk} and item.get("sk") == {"S": keys.sk}
 
 
 def _is_marker_condition_rejection(exc: BaseException) -> bool:
@@ -664,6 +786,22 @@ class IdempotentMutationRunner:
         items = plan.transact_items()
         if not items:
             raise AppError(ErrorCode.INVALID_INPUT, "A mutation must stage at least one write action")
+        if plan.action_count > MAX_TRANSACTION_ACTIONS:
+            # WritePlan.add enforces its own budget; this re-check closes the
+            # loop on the contract ceiling itself, so a plan object that did
+            # not come out of WritePlan cannot bypass the 90-action limit
+            # either (data model §8.10).
+            raise WritePlan.too_large_error(plan.action_count)
+        if not _is_marker_put(items[0], keys):
+            # The marker insert is what makes the retry contract answerable: a
+            # plan that committed without it would leave a caller whose
+            # post-commit marker flip fails holding a committed write it was
+            # told failed - and its retry would apply the write twice. Refuse
+            # the plan before any DynamoDB call is made.
+            raise AppError(
+                ErrorCode.INVALID_INPUT,
+                "the write plan must stage this mutation's conditional idempotency marker Put as its first action",
+            )
         try:
             self._get_client().transact_write_items(TransactItems=cast(Any, items))
         except (ClientError, BotoCoreError) as exc:
@@ -732,11 +870,12 @@ class IdempotentMutationRunner:
                 },
                 ExpressionAttributeValues={
                     ":completed": {"S": MARKER_STATUS_COMPLETED},
+                    ":in_flight": {"S": MARKER_STATUS_IN_FLIGHT},
                     ":resultId": {"S": result_id},
                     ":now": {"S": utc_now_iso()},
                     ":fingerprint": {"S": fingerprint},
                 },
-                ConditionExpression="#fingerprint = :fingerprint",
+                ConditionExpression="#fingerprint = :fingerprint AND #status = :in_flight",
             )
         except (ClientError, BotoCoreError) as exc:
             raise classify_transaction_error(exc, operation="completeIdempotencyMarker") from exc

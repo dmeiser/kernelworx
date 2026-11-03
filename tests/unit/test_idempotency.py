@@ -133,13 +133,23 @@ class TestFingerprint:
         b = normalized_fingerprint({"y": "two", "x": 1})
         assert a == b
 
-    def test_padding_and_whitespace_runs_are_normalized(self) -> None:
-        assert normalized_fingerprint({"city": "  Austin   TX "}) == normalized_fingerprint({"city": "Austin TX"})
+    def test_padding_is_normalized_but_internal_whitespace_is_content(self) -> None:
+        """Trimmed text is one request regardless of client padding, but two
+        different strings never alias: "Ann  Marie" and "Ann Marie" are
+        different display names and must fingerprint differently."""
+        assert normalized_fingerprint({"city": "  Austin  "}) == normalized_fingerprint({"city": "Austin"})
+        assert normalized_fingerprint({"name": "Ann  Marie"}) != normalized_fingerprint({"name": "Ann Marie"})
 
-    def test_omitted_and_explicit_null_are_the_same_request(self) -> None:
-        """GraphQL makes these one request, so a retry that drops an unset
-        optional argument must still replay rather than fail."""
-        assert normalized_fingerprint({"a": 1, "b": None}) == normalized_fingerprint({"a": 1})
+    def test_explicit_null_is_distinct_from_omitted_unless_the_caller_drops_nulls(self) -> None:
+        """Default: an explicit null is a different request from an omitted key
+        (for updates, omitted = leave unchanged while null = clear the field).
+        Create-shaped payloads opt in with drop_none=True, because GraphQL
+        equates an omitted optional argument with an explicit null on a create,
+        and a retry that drops an unset optional argument must still replay."""
+        assert normalized_fingerprint({"a": 1, "b": None}) != normalized_fingerprint({"a": 1})
+        assert normalized_fingerprint({"a": 1, "b": None}, drop_none=True) == normalized_fingerprint(
+            {"a": 1}, drop_none=True
+        )
 
     def test_null_valued_mapping_stays_distinguishable_from_an_empty_one(self) -> None:
         assert normalized_fingerprint({"b": None}) != normalized_fingerprint({})
@@ -185,7 +195,10 @@ class TestFingerprint:
 class TestMarkerKeys:
     def test_key_carries_actor_operation_and_scope(self) -> None:
         keys = _keys()
-        assert keys.pk == f"IDEM#ACCOUNT#alex#createUnit#{BOOTSTRAP_SCOPE}"
+        # '#' inside a segment is escaped ('%23'), so the actor segment
+        # ACCOUNT#alex renders as ACCOUNT%23alex and cannot blur into the
+        # operation/scope boundaries.
+        assert keys.pk == f"IDEM#ACCOUNT%23alex#createUnit#{BOOTSTRAP_SCOPE}"
         assert keys.sk == "IDEM#k-1"
 
     @pytest.mark.parametrize(
@@ -202,7 +215,24 @@ class TestMarkerKeys:
         invite row is deleted), joinCode for a Campaign join, and the fixed
         bootstrap scope for Unit creation."""
         keys = _keys(operation=operation, scope=scope)
-        assert keys.pk.endswith(f"{operation}#{scope}")
+        # '#' is escaped inside segments, so a scope that itself carries the
+        # delimiter cannot blur the segment boundaries.
+        assert keys.pk.endswith(f"{operation}#{scope.replace('#', '%23')}")
+
+    def test_hash_delimiter_is_escaped_inside_partition_key_segments(self) -> None:
+        """actor/operation/scope tuples that differ only in where the '#' falls
+        must not assemble to the same partition key."""
+        joined = marker_partition_key("A#B", "op", "scope")
+        assert joined == "IDEM#A%23B#op#scope"
+        assert marker_partition_key("A", "B#op", "scope") != joined
+        assert marker_partition_key("A", "op", "B#scope") != joined
+
+    def test_assembled_partition_key_is_capped_at_the_dynamodb_limit(self) -> None:
+        with pytest.raises(AppError) as exc:
+            marker_partition_key("x" * 512, "op", "y" * 512)
+        assert exc.value.error_code == ErrorCode.INVALID_INPUT
+        # The largest key that fits is still accepted.
+        assert marker_partition_key("x" * 500, "op", "y" * 500).startswith("IDEM#")
 
     def test_another_account_with_the_same_key_gets_its_own_marker(self) -> None:
         """The tenant-authorization guard's marker half: a caller cannot consume
@@ -324,7 +354,14 @@ class TestWritePlan:
         runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id="UNIT#u-1")
         plan.add("Put", _unit_put("u-1"))
         plan.add(
-            "ConditionCheck", {"TableName": UNITS_TABLE, "Key": {"pk": {"S": "UNIT#u-1"}, "sk": {"S": "METADATA"}}}
+            "ConditionCheck",
+            {
+                "TableName": UNITS_TABLE,
+                "Key": {"pk": {"S": "UNIT#u-1"}, "sk": {"S": "METADATA"}},
+                "ConditionExpression": "#version = :expected",
+                "ExpressionAttributeNames": {"#version": "version"},
+                "ExpressionAttributeValues": {":expected": {"N": "3"}},
+            },
         )
         plan.add("Delete", {"TableName": UNITS_TABLE, "Key": {"pk": {"S": "x"}, "sk": {"S": "y"}}})
         plan.add("Update", {"TableName": UNITS_TABLE, "Key": {"pk": {"S": "x"}, "sk": {"S": "z"}}})
@@ -339,14 +376,30 @@ class TestWritePlan:
             plan.add("Put", {"Item": {}})
         assert exc.value.error_code == ErrorCode.INVALID_INPUT
 
+    def test_condition_check_without_a_condition_expression_is_invalid_input(self) -> None:
+        """A condition check that cannot fail is not a guard; staging one would
+        let a mutation look version-checked while racing freely."""
+        plan = WritePlan()
+        with pytest.raises(AppError) as exc:
+            plan.add(
+                "ConditionCheck", {"TableName": UNITS_TABLE, "Key": {"pk": {"S": "x"}, "sk": {"S": "y"}}}
+            )
+        assert exc.value.error_code == ErrorCode.INVALID_INPUT
+
     def test_plan_reports_the_tables_it_touches_for_iam_scope_review(self) -> None:
         plan = WritePlan()
         plan.add("Put", {"TableName": "other-table", "Item": {"pk": {"S": "x"}}})
         assert plan.tables == frozenset({"other-table"})
 
-    def test_budget_cannot_be_raised_past_the_service_cap(self) -> None:
+    def test_budget_cannot_be_raised_past_the_contract_cap(self) -> None:
+        """The 90-action budget is a product contract (data model §8.10), not a
+        per-call tuning knob: 91-100 was never an acceptable plan, even though
+        DynamoDB's own cap is 100."""
         with pytest.raises(ValueError):
             WritePlan(max_actions=101)
+        with pytest.raises(ValueError):
+            WritePlan(max_actions=MAX_TRANSACTION_ACTIONS + 1)
+        assert WritePlan(max_actions=MAX_TRANSACTION_ACTIONS).max_actions == MAX_TRANSACTION_ACTIONS
 
 
 def _client_under_mock() -> Any:
@@ -693,6 +746,126 @@ class TestExecute:
                 runner.execute(keys, WritePlan(), operation="createUnit", fingerprint="sha256:x")
             assert exc.value.error_code == ErrorCode.INVALID_INPUT
 
+    def test_execute_refuses_a_marker_less_plan_and_driving_it_twice_writes_nothing(self) -> None:
+        """execute() owns the marker. A plan whose first action is not the
+        conditional marker Put must never commit: the old behavior committed the
+        business write, then classified the post-commit marker flip's
+        ConditionalCheckFailed as CONFLICT - the caller was told the write
+        failed, retried, and applied it twice. Driving the refused plan twice
+        proves nothing partial landed in between."""
+        with mock_aws():
+            client = _client()
+            runner = IdempotentMutationRunner(client)
+            keys = _keys()
+            fingerprint = normalized_fingerprint(_payload())
+            marker_less = WritePlan()
+            marker_less.add("Put", _unit_put("u-1"))
+            for _ in range(2):
+                with pytest.raises(AppError) as exc:
+                    runner.execute(
+                        keys, marker_less, operation="createUnit", fingerprint=fingerprint, result_id="UNIT#u-1"
+                    )
+                assert exc.value.error_code == ErrorCode.INVALID_INPUT
+                assert client.scan(TableName=UNITS_TABLE)["Count"] == 0, (
+                    "a marker-less plan must not commit anything, on any attempt"
+                )
+
+    @pytest.mark.parametrize(
+        "first_action",
+        [
+            # Not a Put at all.
+            {"Delete": {"TableName": UNITS_TABLE, "Key": {"pk": {"S": "x"}, "sk": {"S": "y"}}}},
+            # A Put on a different table - even with the marker's exact key pair.
+            {
+                "Put": {
+                    "TableName": "other-table",
+                    "Item": {"pk": {"S": "IDEM#x"}, "sk": {"S": "IDEM#k-1"}},
+                    "ConditionExpression": "attribute_not_exists(#pk)",
+                }
+            },
+            # A Put with no item body at all.
+            {"Put": {"TableName": UNITS_TABLE, "ConditionExpression": "attribute_not_exists(#pk)"}},
+        ],
+    )
+    def test_the_first_action_must_be_a_put_with_the_marker_key_on_the_marker_table(
+        self, first_action: dict[str, Any]
+    ) -> None:
+        with mock_aws():
+            client = _client()
+            runner = IdempotentMutationRunner(client)
+            keys = _keys()
+            fingerprint = normalized_fingerprint(_payload())
+            plan = WritePlan()
+            plan.add(next(iter(first_action)), first_action[next(iter(first_action))])
+            # The marker rides second: the parametrized action opens the plan.
+            runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id="UNIT#u-1")
+            with pytest.raises(AppError) as exc:
+                runner.execute(keys, plan, operation="createUnit", fingerprint=fingerprint, result_id="UNIT#u-1")
+            assert exc.value.error_code == ErrorCode.INVALID_INPUT
+            assert client.scan(TableName=UNITS_TABLE)["Count"] == 0
+
+    def test_the_first_action_must_be_the_conditional_marker_put(self) -> None:
+        """A marker-shaped Put without its condition, or with a different sort
+        key, is not the uniqueness guard either - the plan is refused pre-write.
+        A plan whose marker was staged after a business action is likewise
+        refused: the marker must open the transaction."""
+        with mock_aws():
+            client = _client()
+            runner = IdempotentMutationRunner(client)
+            keys = _keys()
+            fingerprint = normalized_fingerprint(_payload())
+            marker_item = build_marker_item(keys, fingerprint=fingerprint, result_id="UNIT#u-1")
+
+            unconditional = WritePlan()
+            # The marker's exact key pair, but with NO condition: an
+            # unconditional marker Put is not a uniqueness guard.
+            unconditional.add("Put", {"TableName": UNITS_TABLE, "Item": marker_item})
+
+            wrong_sort = WritePlan()
+            wrong_sort.add(
+                "Put",
+                {
+                    "TableName": UNITS_TABLE,
+                    "Item": {**marker_item, "sk": {"S": "IDEM#someone-else"}},
+                    "ConditionExpression": "attribute_not_exists(#pk)",
+                },
+            )
+
+            business_first = WritePlan()
+            business_first.add("Put", _unit_put("u-1"))
+            runner.stage_marker(business_first, keys, fingerprint=fingerprint, result_id="UNIT#u-1")
+
+            for plan in (unconditional, wrong_sort, business_first):
+                with pytest.raises(AppError) as exc:
+                    runner.execute(keys, plan, operation="createUnit", fingerprint=fingerprint, result_id="UNIT#u-1")
+                assert exc.value.error_code == ErrorCode.INVALID_INPUT
+            assert client.scan(TableName=UNITS_TABLE)["Count"] == 0
+
+    def test_execute_rechecks_the_final_action_count(self) -> None:
+        """The budget cap is re-asserted against the plan that actually reaches
+        execute(), so a plan object that did not come out of WritePlan cannot
+        bypass the 90-action ceiling (data model §8.10)."""
+
+        class OversizeStub:
+            action_count = MAX_TRANSACTION_ACTIONS + 1
+
+            def transact_items(self) -> list[dict[str, Any]]:
+                return [{"Put": {"TableName": UNITS_TABLE}}] * (MAX_TRANSACTION_ACTIONS + 1)
+
+        client = MagicMock()
+        runner = IdempotentMutationRunner(client)
+        with pytest.raises(AppError) as exc:
+            runner.execute(
+                _keys(),
+                cast(WritePlan, OversizeStub()),
+                operation="createUnit",
+                fingerprint="sha256:x",
+                result_id="UNIT#u-1",
+            )
+        assert exc.value.error_code == ErrorCode.CONFLICT
+        assert exc.value.details["subcode"] == ErrorCode.OPERATION_TOO_LARGE
+        client.transact_write_items.assert_not_called()
+
     def test_marker_staging_requires_a_result_id(self) -> None:
         runner = IdempotentMutationRunner(MagicMock())
         with pytest.raises(AppError) as exc:
@@ -837,17 +1010,58 @@ class TestErrorClassification:
         )
         assert exc.error_code == ErrorCode.RESOURCE_BUSY
 
-    def test_a_non_throttle_per_item_cancellation_stays_a_conflict(self) -> None:
+    def test_a_non_retryable_per_item_cancellation_stays_a_conflict(self) -> None:
+        """A failed condition (not throttling, not contention) is the non-retryable
+        re-read-and-recompute verdict."""
         assert (
             classify_transaction_error(
                 _client_error(
                     "TransactionCanceledException",
-                    reasons=[{"Code": "TransactionConflict", "Message": "m"}],
+                    reasons=[{"Code": "ConditionalCheckFailed", "Message": "m"}],
                 ),
                 operation="createUnit",
             ).error_code
             == ErrorCode.CONFLICT
         )
+
+    def test_per_item_transaction_conflict_is_retryable_contention(self) -> None:
+        """Per-item TransactionConflict is the same retryable contention family as
+        throttling (spec 3.3): resend after a backoff, not re-read/recompute."""
+        exc = classify_transaction_error(
+            _client_error(
+                "TransactionCanceledException",
+                reasons=[{"Code": "TransactionConflict", "Message": "m"}],
+            ),
+            operation="createUnit",
+        )
+        assert exc.error_code == ErrorCode.RESOURCE_BUSY
+
+    def test_top_level_transaction_conflict_is_retryable_contention(self) -> None:
+        assert classify_transaction_error(
+            _client_error("TransactionConflictException"), operation="createUnit"
+        ).error_code == (ErrorCode.RESOURCE_BUSY)
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "Transaction request cannot include more than 100 items",
+            "Transaction requests can only contain one action on an item",
+        ],
+    )
+    def test_oversize_or_duplicate_transaction_maps_to_operation_too_large(self, message: str) -> None:
+        exc = classify_transaction_error(
+            _client_error("ValidationException", message=message), operation="createUnit"
+        )
+        assert exc.error_code == ErrorCode.CONFLICT
+        assert exc.details["subcode"] == ErrorCode.OPERATION_TOO_LARGE
+
+    def test_an_unrelated_validation_exception_stays_internal(self) -> None:
+        """Only the size/duplicate shape is remapped; an unexpected
+        ValidationException is still an internal failure, not a client conflict."""
+        assert classify_transaction_error(
+            _client_error("ValidationException", message="One or more parameter values were invalid"),
+            operation="createUnit",
+        ).error_code == (ErrorCode.INTERNAL_ERROR)
 
     def test_transaction_in_progress_is_the_retryable_resource_busy(self) -> None:
         assert classify_transaction_error(
