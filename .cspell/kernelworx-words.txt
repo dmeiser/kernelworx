@@ -175,6 +175,7 @@ GraphQL
 GraphQLAPIId
 Grotesque
 gstatic
+gsis
 hashable
 hashlib
 HMAC
@@ -312,6 +313,8 @@ paymentMethods
 picklist
 pipefail
 pkeys
+pitr
+PITR
 playwright
 popstate
 ppid
@@ -360,6 +363,7 @@ returncode
 reinstantiating
 reusability
 rname
+replayable
 rollup
 rtok
 route53
@@ -416,6 +420,7 @@ stdlib
 strikethrough
 stylesheet
 subclasses
+subcodes
 subcomponent
 subcomponents
 submenu

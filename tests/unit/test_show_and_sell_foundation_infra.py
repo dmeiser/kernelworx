@@ -241,12 +241,7 @@ def test_table_arns_table_names_and_individual_outputs_cover_the_new_tables():
 def test_all_environments_pass_the_new_keys_to_the_lambda_module():
     for environment in ENVIRONMENT_DIRS:
         doc = _load(REPO_ROOT / "tofu" / "application" / "environments" / environment / "main.tf")
-        raw = next(
-            body
-            for entry in doc.get("module", [])
-            for name, body in entry.items()
-            if _norm(name) == "lambda"
-        )
+        raw = next(body for entry in doc.get("module", []) for name, body in entry.items() if _norm(name) == "lambda")
         lambda_module = raw[0] if isinstance(raw, list) else raw
         table_names = lambda_module["table_names"]
         for key in (*NEW_TABLES, "public_order_throttles"):
@@ -263,7 +258,9 @@ def test_lambda_module_exports_the_new_table_names_to_every_function():
     common_env = locals_body["common_env"]
     for key, env_var in ENV_VARS.items():
         assert env_var in common_env, f"common_env is missing {env_var}"
-        assert _norm(common_env[env_var]) == f"var.table_names.{key}", f"common_env.{env_var} must read the module variable"
+        assert _norm(common_env[env_var]) == f"var.table_names.{key}", (
+            f"common_env.{env_var} must read the module variable"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -297,9 +294,7 @@ def test_ephemeral_env_exports_the_new_tables_in_up_and_env_only():
         for label, (start, end) in blocks.items():
             block = lines[start:end]
             per_block[label] = sum(
-                1
-                for line in block
-                if line == f'    echo "export {env_var}=kernelworx-{slug}-ue1-${{RUN_ID}}"'
+                1 for line in block if line == f'    echo "export {env_var}=kernelworx-{slug}-ue1-${{RUN_ID}}"'
             )
         assert per_block == {"up": 1, "env": 1, "down": 0}, (
             f"{env_var} must be exported exactly once in up and env and never in down; got {per_block}"

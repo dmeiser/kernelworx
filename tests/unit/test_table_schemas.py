@@ -357,7 +357,9 @@ class TestUnitCampaignsTableSchema:
         ]
 
     def test_has_the_four_contracted_indexes_including_catalog_usage_guard(self):
-        indexes = {gsi["IndexName"]: gsi["KeySchema"] for gsi in create_unit_campaigns_table_schema()["GlobalSecondaryIndexes"]}
+        indexes = {
+            gsi["IndexName"]: gsi["KeySchema"] for gsi in create_unit_campaigns_table_schema()["GlobalSecondaryIndexes"]
+        }
         assert set(indexes) == {
             "unitId-createdAt-index",
             "campaignId-index",

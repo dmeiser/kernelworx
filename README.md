@@ -28,7 +28,7 @@ KernelWorx is an open-source, serverless application designed for Scouting Ameri
 ### Backend
 - **AWS AppSync** (GraphQL API)
 - **AWS Lambda** (Python 3.14)
-- **Amazon DynamoDB** (eight separate tables)
+- **Amazon DynamoDB** (separate tables, not a single-table design — see `docs/SCHEMA.md`)
 - **Amazon Cognito** (Google social login and native email/password)
 - **Amazon S3** (static hosting + report exports)
 - **Amazon CloudFront** (CDN)
