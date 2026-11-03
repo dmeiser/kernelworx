@@ -467,6 +467,20 @@ def revoke_unit_invite(event, context):
     return True
 
 
+def _increment_throttle_counter(pk):
+    try:
+        item = _units().get_item(Key={"pk": pk, "sk": "METADATA"}, ConsistentRead=True).get("Item") or {
+            "pk": pk,
+            "sk": "METADATA",
+            "count": 0,
+        }
+        item["count"] = int(item.get("count", 0)) + 1
+        item["expiresAtEpoch"] = int((datetime.now(timezone.utc) + timedelta(hours=2)).timestamp())
+        _units().put_item(Item=item)
+    except Exception:
+        pass
+
+
 def redeem_unit_invite(event, context):
     args = event.get("arguments", {}).get("input", {}) or {}
     caller = get_caller_id(event)
@@ -494,6 +508,18 @@ def redeem_unit_invite(event, context):
         if False
         else None
     )
+    # throttle check
+    nowdt = datetime.now(timezone.utc)
+    hour_key = nowdt.strftime("%Y-%m-%dT%H")
+    throttle_pk = f"THROTTLE#unit_invite#{caller}#{hour_key}"
+    try:
+        titem = _units().get_item(Key={"pk": throttle_pk, "sk": "METADATA"}, ConsistentRead=True).get("Item")
+        if titem and int(titem.get("count", 0)) >= 10:
+            raise AppError(ErrorCode.RATE_LIMIT_EXCEEDED, "Too many failed attempts")
+    except AppError:
+        raise
+    except Exception:
+        pass
     # query by pk prefix
     try:
         resp = _units().query(
@@ -503,9 +529,18 @@ def redeem_unit_invite(event, context):
         resp = _units().query(KeyConditionExpression="pk = :pk", ExpressionAttributeValues={":pk": f"INVITE#{code}"})
     items = resp.get("Items", [])
     if not items:
+        _increment_throttle_counter(throttle_pk)
         raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
     inv = items[0]
     unit_id = inv["unitId"]
+    # existing grant?
+    try:
+        gresp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
+        existing_grant = gresp.get("Item")
+    except Exception:
+        existing_grant = None
+    if existing_grant:
+        return existing_grant
     # expiry check
     from datetime import datetime as dt
 
@@ -514,6 +549,7 @@ def redeem_unit_invite(event, context):
         if exp.tzinfo is None:
             exp = exp.replace(tzinfo=timezone.utc)
         if exp < datetime.now(timezone.utc):
+            _increment_throttle_counter(throttle_pk)
             raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
     except AppError:
         raise
