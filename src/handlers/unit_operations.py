@@ -1,9 +1,7 @@
-from datetime import timedelta
-
 """Lambda resolver for Show & Sell Unit operations (batch A)."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 try:  # pragma: no cover
@@ -36,8 +34,6 @@ def _serialize(value):
 
     return TypeSerializer().serialize(value)
 
-
-from datetime import timedelta
 
 logger = get_logger(__name__)
 _ts = None
@@ -431,7 +427,6 @@ def create_unit_invite(event, context):
     code = uuid.uuid4().hex[:16].upper()
     now = _now()
     # expiry 14 days
-    from datetime import timedelta
 
     expires = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
     expires_epoch = int((datetime.now(timezone.utc) + timedelta(days=14)).timestamp())
