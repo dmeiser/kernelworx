@@ -387,6 +387,44 @@ def create_unit_invite(event, context):
     unit_id = args.get("unitId")
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
+    idempotency = args.get("idempotency", {}) or {}
+    key = idempotency.get("idempotencyKey")
+    if not key:
+        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    # cap check
+    active = 0
+    try:
+        for x in _units().scan().get("Items", []):
+            if not str(x.get("pk", "")).startswith("INVITE#"):
+                continue
+            if x.get("sk") != f"UNIT#{unit_id}":
+                continue
+            try:
+                exp = datetime.fromisoformat(str(x.get("expiresAt")).replace("Z", "+00:00"))
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+                if exp < datetime.now(timezone.utc):
+                    continue
+            except Exception:
+                pass
+            active += 1
+    except Exception:
+        active = 0
+    if active >= 20:
+        raise AppError(ErrorCode.CONFLICT, "Too many active invites")
+    # idempotency replay
+    marker_pk = f"IDEM#createUnitInvite#{unit_id}"
+    marker_sk = f"IDEM#{key}"
+    try:
+        m = _units().get_item(Key={"pk": marker_pk, "sk": marker_sk}, ConsistentRead=True).get("Item")
+    except Exception:
+        m = None
+    if m and m.get("inviteCode"):
+        code = m["inviteCode"]
+        # fetch invite
+        inv = _units().get_item(Key={"pk": f"INVITE#{code}", "sk": f"UNIT#{unit_id}"}, ConsistentRead=True).get("Item")
+        if inv:
+            return inv
     code = uuid.uuid4().hex[:16].upper()
     now = _now()
     # expiry 14 days
@@ -405,6 +443,17 @@ def create_unit_invite(event, context):
         "expiresAtEpoch": expires_epoch,
     }
     _units().put_item(Item=item)
+    try:
+        _units().put_item(
+            Item={
+                "pk": marker_pk,
+                "sk": marker_sk,
+                "inviteCode": code,
+                "expiresAtEpoch": int((datetime.now(timezone.utc)).timestamp()) + 86400,
+            }
+        )
+    except Exception:
+        pass
     return item
 
 
