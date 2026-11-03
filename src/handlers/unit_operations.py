@@ -126,7 +126,11 @@ def create_unit(event, context):
     )
     existing_marker = runner.load_marker(mk)
     if existing_marker:
-        rid = existing_marker.get("resultId")
+        rid = (
+            existing_marker.get("resultId", {}).get("S")
+            if isinstance(existing_marker.get("resultId"), dict)
+            else existing_marker.get("resultId")
+        )
         return {
             "unit": _get_unit(rid),
             "grant": _units()
