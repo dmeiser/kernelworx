@@ -11,6 +11,9 @@ except ModuleNotFoundError:  # pragma: no cover
 
 get_caller_id = import_from_utils("appsync_types", "get_caller_id")
 tables = import_from_utils("dynamodb", "tables")
+from boto3.dynamodb.types import TypeSerializer as _TS
+
+_ts = _TS()
 AppError, ErrorCode = import_from_utils("errors", "AppError", "ErrorCode")
 with_error_handling = import_from_utils("handlers", "lambda_handler")
 get_logger = import_from_utils("logging", "get_logger")
@@ -24,6 +27,8 @@ if TYPE_CHECKING:  # pragma: no cover
     pass
 
 logger = get_logger(__name__)
+VALID_SPLIT = {"EQUAL", "TIME_WORKED"}
+VALID_BASIS = {"PHYSICAL_STOCK", "AFTER_ASSIGNMENTS"}
 
 
 def _units():
@@ -36,6 +41,12 @@ def _now() -> str:
 
 def _unit_pk(unit_id: str) -> str:
     return f"UNIT#{unit_id}"
+
+
+def _validate_timezone(tz: str) -> bool:
+    if tz == "UTC":
+        return True
+    return "/" in str(tz)
 
 
 def _metadata_key(unit_type, unit_number, city, state) -> str:
@@ -57,6 +68,13 @@ def create_unit(event, context):
         raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
     unit_type = args.get("unitType")
     unit_number = args.get("unitNumber")
+    try:
+        from decimal import Decimal
+
+        if isinstance(unit_number, Decimal):
+            unit_number = int(unit_number)
+    except Exception:
+        pass
     city = args.get("city")
     if isinstance(city, str):
         city = city.strip()
@@ -64,13 +82,33 @@ def create_unit(event, context):
     timezone_ = args.get("timezone")
     if not (unit_type and unit_number is not None and city and state and timezone_):
         raise AppError(ErrorCode.INVALID_INPUT, "Missing required unit fields")
+    if not _validate_timezone(timezone_):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid timezone")
+    split_default = args.get("splitDefault") or "EQUAL"
+    if split_default not in VALID_SPLIT:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid splitDefault")
+    council = args.get("councilNeedBasis") or "PHYSICAL_STOCK"
+    if council not in VALID_BASIS:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid councilNeedBasis")
+    duplicate_confirmed = bool(args.get("duplicateConfirmed", False))
+    md_key = _metadata_key(unit_type, unit_number, city, state)
+    try:
+        resp = _units().query(
+            IndexName="metadataKey-createdAt-index",
+            KeyConditionExpression="metadataKey = :m",
+            ExpressionAttributeValues={":m": md_key},
+        )
+        existing = resp.get("Items", [])
+    except Exception:
+        existing = []
+    if existing and not duplicate_confirmed:
+        raise AppError(ErrorCode.CONFLICT, "Exact metadata match requires duplicateConfirmed")
     idempotency = args.get("idempotency", {}) or {}
     key = idempotency.get("idempotencyKey")
     if not key:
         raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
     unit_id = str(uuid.uuid4())
     now = _now()
-    md_key = _metadata_key(unit_type, unit_number, city, state)
     display = args.get("displayName") or f"{unit_type} {unit_number} - {city}, {state}"
     item = {
         "pk": _unit_pk(unit_id),
@@ -83,8 +121,8 @@ def create_unit(event, context):
         "displayName": display,
         "metadataKey": md_key,
         "timezone": timezone_,
-        "splitDefault": args.get("splitDefault") or "EQUAL",
-        "councilNeedBasis": args.get("councilNeedBasis") or "PHYSICAL_STOCK",
+        "splitDefault": split_default,
+        "councilNeedBasis": council,
         "adminCount": 1,
         "version": 1,
         "createdAt": now,
@@ -106,19 +144,39 @@ def create_unit(event, context):
         from ..utils.mutations import WritePlan, marker_keys, normalized_fingerprint
 
     runner = IdempotentMutationRunner()
-    mk = marker_keys(actor_id=caller, operation="createUnit", scope="BOOTSTRAP", idempotency_key=key)
-    fp = normalized_fingerprint({"unitType": unit_type, "unitNumber": unit_number, "city": city, "state": state})
+    mk = marker_keys(
+        actor_id=caller,
+        operation="createUnit",
+        scope="BOOTSTRAP",
+        idempotency_key=key,
+        table_key="units",
+        table_name=_units().name if hasattr(_units(), "name") else "units",
+    )
+    fp = normalized_fingerprint(
+        {
+            "unitType": unit_type,
+            "unitNumber": int(unit_number) if unit_number is not None else None,
+            "city": city,
+            "state": state,
+        },
+        drop_none=True,
+    )
     plan = WritePlan()
     runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
-    plan.add("Put", {"TableName": "units", "Item": item})
-    plan.add("Put", {"TableName": "units", "Item": grant_item})
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _ts.serialize(v) for k, v in item.items()}})
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _ts.serialize(v) for k, v in grant_item.items()}})
     runner.execute(
         mk,
         plan,
         operation="createUnit",
         fingerprint=fp,
         result_id=unit_id,
-        load_result=lambda rid: {"unit": item, "grant": grant_item},
+        load_result=lambda rid: {
+            "unit": _get_unit(rid),
+            "grant": _units()
+            .get_item(Key={"pk": _unit_pk(rid), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
+            .get("Item"),
+        },
     )
     return {"unit": item, "grant": grant_item}
 
@@ -139,13 +197,38 @@ def update_unit(event, context):
     expected = version_input.get("expectedVersion")
     if expected is not None and int(expected) != int(item.get("version", 0)):
         raise AppError(ErrorCode.CONFLICT, "Version mismatch")
+    idempotency = args.get("idempotency", {}) or {}
+    key = idempotency.get("idempotencyKey")
+    if not key:
+        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    runner = IdempotentMutationRunner()
+    mk = marker_keys(
+        actor_id=caller,
+        operation="updateUnit",
+        scope=unit_id,
+        idempotency_key=key,
+        table_key="units",
+        table_name=_units().name if hasattr(_units(), "name") else "units",
+    )
+    fp = normalized_fingerprint(args)
+    existing = runner.load_marker(mk)
+    if existing:
+        return _get_unit(unit_id)
     # apply updates
     for f in ("unitType", "unitNumber", "city", "state", "displayName", "timezone", "splitDefault", "councilNeedBasis"):
         if args.get(f) is not None:
             item[f] = args[f]
     item["version"] = int(item.get("version", 0)) + 1
     item["updatedAt"] = _now()
-    _units().put_item(Item=item)
+    plan = WritePlan()
+    runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _ts.serialize(v) for k, v in item.items()}})
+    try:
+        runner.execute(
+            mk, plan, operation="updateUnit", fingerprint=fp, result_id=unit_id, load_result=lambda rid: _get_unit(rid)
+        )
+    except Exception:
+        _units().put_item(Item=item)
     return item
 
 
@@ -162,12 +245,42 @@ def revoke_unit_access_grant(event, context):
         raise AppError(ErrorCode.NOT_FOUND, "Unit not found")
     if int(item.get("adminCount", 0)) <= 1:
         raise AppError(ErrorCode.CONFLICT, "Cannot revoke last admin")
+    idempotency = args.get("idempotency", {}) or {}
+    key = idempotency.get("idempotencyKey")
+    if not key:
+        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    runner = IdempotentMutationRunner()
+    mk = marker_keys(
+        actor_id=caller,
+        operation="revokeUnitAccessGrant",
+        scope=f"{unit_id}#{account_id}",
+        idempotency_key=key,
+        table_key="units",
+        table_name=_units().name if hasattr(_units(), "name") else "units",
+    )
+    fp = normalized_fingerprint({"unitId": unit_id, "accountId": account_id})
+    existing = runner.load_marker(mk)
+    if existing:
+        return _get_unit(unit_id)
     # delete grant
     _units().delete_item(Key={"pk": _unit_pk(unit_id), "sk": f"GRANT#{account_id}"})
     item["adminCount"] = int(item["adminCount"]) - 1
     item["version"] = int(item.get("version", 0)) + 1
     item["updatedAt"] = _now()
-    _units().put_item(Item=item)
+    plan = WritePlan()
+    runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _ts.serialize(v) for k, v in item.items()}})
+    try:
+        runner.execute(
+            mk,
+            plan,
+            operation="revokeUnitAccessGrant",
+            fingerprint=fp,
+            result_id=unit_id,
+            load_result=lambda rid: _get_unit(rid),
+        )
+    except Exception:
+        _units().put_item(Item=item)
     return item
 
 
