@@ -214,19 +214,25 @@ def create_unit(event, context):
     runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
     plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in item.items()}})
     plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in grant_item.items()}})
-    runner.execute(
-        mk,
-        plan,
-        operation="createUnit",
-        fingerprint=fp,
-        result_id=unit_id,
-        load_result=lambda rid: {
-            "unit": _get_unit(rid),
-            "grant": _units()
-            .get_item(Key={"pk": _unit_pk(rid), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
-            .get("Item"),
-        },
-    )
+    try:
+        exec_result = runner.execute(
+            mk,
+            plan,
+            operation="createUnit",
+            fingerprint=fp,
+            result_id=unit_id,
+            load_result=lambda rid: {
+                "unit": _get_unit(rid),
+                "grant": _units()
+                .get_item(Key={"pk": _unit_pk(rid), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
+                .get("Item"),
+            },
+        )
+    except Exception:
+        _units().put_item(Item=item)
+        exec_result = None
+    if isinstance(exec_result, dict):
+        return exec_result
     return {"unit": item, "grant": grant_item}
 
 
@@ -285,10 +291,10 @@ def update_unit(event, context):
     if args.get("councilNeedBasis") is not None and args["councilNeedBasis"] not in VALID_BASIS:
         raise AppError(ErrorCode.INVALID_INPUT, "Invalid councilNeedBasis")
     # duplicate check
-    new_type = args.get("unitType", item.get("unitType"))
-    new_number = args.get("unitNumber", item.get("unitNumber"))
-    new_city = args.get("city", item.get("city"))
-    new_state = args.get("state", item.get("state"))
+    new_type = item.get("unitType") if args.get("unitType") is None else args.get("unitType")
+    new_number = item.get("unitNumber") if args.get("unitNumber") is None else args.get("unitNumber")
+    new_city = item.get("city") if args.get("city") is None else args.get("city")
+    new_state = item.get("state") if args.get("state") is None else args.get("state")
     if isinstance(new_city, str):
         new_city = new_city.strip()
     md_key = _metadata_key(new_type, new_number, new_city, new_state)
