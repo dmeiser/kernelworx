@@ -442,7 +442,7 @@ def _cancellation_reasons(exc: ClientError) -> list[dict[str, Any]]:
 
 
 def _cancellation_summary(exc: ClientError) -> list[str]:
-    """Loggable one-word-per-reason summary (never the item payload)."""
+    """Machine-safe one-token-per-reason summary (never the item payload)."""
     return [str(reason.get("Code", "UNKNOWN")) for reason in _cancellation_reasons(exc)]
 
 
