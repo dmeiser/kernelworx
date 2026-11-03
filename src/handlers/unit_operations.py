@@ -389,6 +389,20 @@ def redeem_unit_invite(event, context):
     if not caller:
         raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity required")
     code = args.get("inviteCode")
+    idempotency = args.get("idempotency", {}) or {}
+    key = idempotency.get("idempotencyKey") or "default"
+    marker_pk = f"IDEM#redeemUnitInvite#{code}"
+    marker_sk = f"IDEM#{key}"
+    try:
+        m = _units().get_item(Key={"pk": marker_pk, "sk": marker_sk}, ConsistentRead=True).get("Item")
+    except Exception:
+        m = None
+    if m:
+        uid = m.get("unitId")
+        if uid:
+            g = _units().get_item(Key={"pk": _unit_pk(uid), "sk": f"GRANT#{caller}"}, ConsistentRead=True).get("Item")
+            if g:
+                return g
     resp = (
         _units().get_item(
             Key={"pk": f"INVITE#{code}", "sk": None} if False else {"pk": f"INVITE#{code}"}, ConsistentRead=True
@@ -442,6 +456,17 @@ def redeem_unit_invite(event, context):
         meta["version"] = int(meta.get("version", 0)) + 1
         meta["updatedAt"] = _now()
         _units().put_item(Item=meta)
+    try:
+        _units().put_item(
+            Item={
+                "pk": marker_pk,
+                "sk": marker_sk,
+                "unitId": unit_id,
+                "expiresAtEpoch": int((datetime.now(timezone.utc)).timestamp()) + 86400,
+            }
+        )
+    except Exception:
+        pass
     return grant_item
 
 
