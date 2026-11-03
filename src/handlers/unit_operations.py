@@ -270,10 +270,39 @@ def update_unit(event, context):
         expected = args.get("expectedVersion")
     if expected is not None and int(expected) != int(item.get("version", 0)):
         raise AppError(ErrorCode.CONFLICT, "Version mismatch")
+    # settings validation
+    if args.get("timezone") is not None and not _validate_timezone(args["timezone"]):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid timezone")
+    if args.get("splitDefault") is not None and args["splitDefault"] not in VALID_SPLIT:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid splitDefault")
+    if args.get("councilNeedBasis") is not None and args["councilNeedBasis"] not in VALID_BASIS:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid councilNeedBasis")
+    # duplicate check
+    new_type = args.get("unitType", item.get("unitType"))
+    new_number = args.get("unitNumber", item.get("unitNumber"))
+    new_city = args.get("city", item.get("city"))
+    new_state = args.get("state", item.get("state"))
+    if isinstance(new_city, str):
+        new_city = new_city.strip()
+    md_key = _metadata_key(new_type, new_number, new_city, new_state)
+    duplicate_confirmed = bool(args.get("duplicateConfirmed", False))
+    if md_key != item.get("metadataKey"):
+        try:
+            resp = _units().query(
+                IndexName="metadataKey-createdAt-index",
+                KeyConditionExpression="metadataKey = :m",
+                ExpressionAttributeValues={":m": md_key},
+            )
+            existing = [x for x in resp.get("Items", []) if x.get("unitId") != unit_id]
+        except Exception:
+            existing = []
+        if existing and not duplicate_confirmed:
+            raise AppError(ErrorCode.CONFLICT, "Exact metadata match requires duplicateConfirmed")
     # apply updates
     for f in ("unitType", "unitNumber", "city", "state", "displayName", "timezone", "splitDefault", "councilNeedBasis"):
         if args.get(f) is not None:
             item[f] = args[f]
+    item["metadataKey"] = md_key
     item["version"] = int(item.get("version", 0)) + 1
     item["updatedAt"] = _now()
     plan = WritePlan()
