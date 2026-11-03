@@ -57,7 +57,8 @@ def create_unit(event, context):
     unit_type = args.get("unitType")
     unit_number = args.get("unitNumber")
     city = args.get("city")
-    city = city.strip() if isinstance(city, str) else city
+    if isinstance(city, str):
+        city = city.strip()
     state = args.get("state")
     timezone_ = args.get("timezone")
     if not (unit_type and unit_number is not None and city and state and timezone_):
@@ -66,14 +67,7 @@ def create_unit(event, context):
     key = idempotency.get("idempotencyKey")
     if not key:
         raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
-    runner = IdempotentMutationRunner()
-    mk = marker_keys(actor_id=caller, operation="createUnit", scope="BOOTSTRAP", idempotency_key=key)
-    existing = runner.load_marker(mk)
-    if existing:
-        # replay: return stored result id? Minimal: reconstruct
-        pass
     unit_id = str(uuid.uuid4())
-    grant_id = caller
     now = _now()
     md_key = _metadata_key(unit_type, unit_number, city, state)
     display = args.get("displayName") or f"{unit_type} {unit_number} - {city}, {state}"
@@ -105,26 +99,15 @@ def create_unit(event, context):
         "createdByAccountId": caller,
         "createdAt": now,
     }
-    plan_items = [
-        ("Put", {"TableName": "units", "Item": item}),
-        ("Put", {"TableName": "units", "Item": grant_item}),
-    ]
-    # marker put first
-    runner.stage_marker(None, mk, fingerprint=md_key, result_id=unit_id) if False else None
-    # Use direct transact via runner.execute with a WritePlan
-    from ..utils.mutations import WritePlan
+    from ..utils.mutations import WritePlan, marker_keys, normalized_fingerprint
+    runner = IdempotentMutationRunner()
+    mk = marker_keys(actor_id=caller, operation="createUnit", scope="BOOTSTRAP", idempotency_key=key)
+    fp = normalized_fingerprint({"unitType": unit_type, "unitNumber": unit_number, "city": city, "state": state})
     plan = WritePlan()
-    marker_item = {
-        "pk": f"IDEM#{caller}#createUnit#BOOTSTRAP",
-        "sk": f"IDEM#{key}",
-        "expiresAtEpoch": 9999999999,
-        "resultId": unit_id,
-        "fingerprint": md_key,
-    }
-    plan.add("Put", {"TableName": "units", "Item": marker_item}) if False else None
-    # Simpler: just put items
-    _units().put_item(Item=item)
-    _units().put_item(Item=grant_item)
+    runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
+    plan.add("Put", {"TableName": "units", "Item": item})
+    plan.add("Put", {"TableName": "units", "Item": grant_item})
+    runner.execute(mk, plan, operation="createUnit", fingerprint=fp, result_id=unit_id, load_result=lambda rid: {"unit": item, "grant": grant_item})
     return {"unit": item, "grant": grant_item}
 
 
