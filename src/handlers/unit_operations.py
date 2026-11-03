@@ -28,6 +28,7 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:  # pragma: no cover
     pass
 
+
 def _serialize(value):
     from boto3.dynamodb.types import TypeSerializer
 
@@ -104,6 +105,28 @@ def create_unit(event, context):
     council = args.get("councilNeedBasis") or "PHYSICAL_STOCK"
     if council not in VALID_BASIS:
         raise AppError(ErrorCode.INVALID_INPUT, "Invalid councilNeedBasis")
+    idempotency = args.get("idempotency", {}) or {}
+    key = idempotency.get("idempotencyKey")
+    if not key:
+        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    runner = IdempotentMutationRunner()
+    mk = marker_keys(
+        actor_id=caller,
+        operation="createUnit",
+        scope="BOOTSTRAP",
+        idempotency_key=key,
+        table_key="units",
+        table_name=_units().name if hasattr(_units(), "name") else "units",
+    )
+    existing_marker = runner.load_marker(mk)
+    if existing_marker:
+        rid = existing_marker.get("resultId")
+        return {
+            "unit": _get_unit(rid),
+            "grant": _units()
+            .get_item(Key={"pk": _unit_pk(rid), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
+            .get("Item"),
+        }
     duplicate_confirmed = bool(args.get("duplicateConfirmed", False))
     md_key = _metadata_key(unit_type, unit_number, city, state)
     try:
@@ -117,10 +140,6 @@ def create_unit(event, context):
         existing = []
     if existing and not duplicate_confirmed:
         raise AppError(ErrorCode.CONFLICT, "Exact metadata match requires duplicateConfirmed")
-    idempotency = args.get("idempotency", {}) or {}
-    key = idempotency.get("idempotencyKey")
-    if not key:
-        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
     unit_id = str(uuid.uuid4())
     now = _now()
     display = args.get("displayName") or f"{unit_type} {unit_number} - {city}, {state}"
@@ -152,11 +171,6 @@ def create_unit(event, context):
         "createdByAccountId": caller,
         "createdAt": now,
     }
-    try:
-        from utils.mutations import WritePlan, marker_keys, normalized_fingerprint
-    except ModuleNotFoundError:
-        from ..utils.mutations import WritePlan, marker_keys, normalized_fingerprint
-
     runner = IdempotentMutationRunner()
     mk = marker_keys(
         actor_id=caller,
