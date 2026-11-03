@@ -35,6 +35,8 @@ def _serialize(value):
     return TypeSerializer().serialize(value)
 
 
+from datetime import timedelta
+
 logger = get_logger(__name__)
 _ts = None
 VALID_SPLIT = {"EQUAL", "TIME_WORKED"}
