@@ -105,6 +105,15 @@ MARKER_TTL_ATTRIBUTE: str = "expiresAtEpoch"
 MARKER_STATUS_IN_FLIGHT = "IN_FLIGHT"
 MARKER_STATUS_COMPLETED = "COMPLETED"
 
+# The marker Put's uniqueness guard: the whole ConditionExpression is fixture
+# equality against this string (placeholder alias included), and the alias must
+# bind to the marker key's real partition attribute. Anything else - a
+# condition this token merely appears inside (an OR whose other disjunct is
+# always true, say), an inverted shape, or a binding to some other attribute -
+# is not a uniqueness guard and must never open a mutation's transaction.
+MARKER_PUT_CONDITION: str = "attribute_not_exists(#pk)"
+MARKER_GUARD_ATTRIBUTE: str = "pk"
+
 # Marker key layout. `BOOTSTRAP` is the fixed scope for Unit creation, whose
 # marker must not depend on the Unit it is about to create (data model §8.9).
 MARKER_PK_PREFIX = "IDEM"
@@ -597,32 +606,17 @@ def _cancellation_summary(exc: ClientError) -> list[str]:
     return [str(reason.get("Code", "UNKNOWN")) for reason in _cancellation_reasons(exc)]
 
 
-_GUARD_ALIAS_RE = re.compile(r"attribute_not_exists\(\s*(#[\w]+|\w+)\s*\)")
-
-
-def _carries_marker_uniqueness_guard(condition: str, names: Mapping[Any, Any]) -> bool:
-    """True when the condition's ``attribute_not_exists`` terms resolve to ``pk``.
-
-    The marker's uniqueness guard must exist-check the marker key's partition
-    attribute itself. An ``attribute_not_exists`` placeholder aliased to any
-    other attribute (one no item carries, say) is an always-true condition, so
-    it is not a guard at all - and :meth:`IdempotentMutationRunner.execute`
-    refuses to commit any plan whose first action is not this item.
-    A bare, unaliased ``pk`` placeholder is equally guard-shaped.
-    """
-    return any(
-        alias == "pk" if not alias.startswith("#") else names.get(alias) == "pk"
-        for alias in _GUARD_ALIAS_RE.findall(condition)
-    )
-
-
 def _is_marker_put(action: Mapping[str, Any], keys: MarkerKeys) -> bool:
     """True when a staged action is THIS mutation's conditional marker insert.
 
     The marker Put is identified by table plus the exact key pair, and its
-    condition must be the uniqueness guard on the marker key itself - an
-    unconditional marker Put, or one whose ``attribute_not_exists`` is aliased
-    to an attribute other than ``pk``, would not be a uniqueness guard, and
+    condition must be this helper's own staged uniqueness guard, structurally:
+    the whole ConditionExpression equal to ``MARKER_PUT_CONDITION`` AND its
+    placeholder bound to the marker key's real partition attribute. An
+    unconditional marker Put, or one whose condition merely CONTAINS
+    ``attribute_not_exists`` (defeated inside an ``OR`` whose other disjunct is
+    always true, or inverted), or whose binding points anywhere other than the
+    marker key, is not a uniqueness guard, and
     :meth:`IdempotentMutationRunner.execute` refuses to commit any plan whose
     first action is not this item.
     """
@@ -633,9 +627,9 @@ def _is_marker_put(action: Mapping[str, Any], keys: MarkerKeys) -> bool:
         return False
     condition = put.get("ConditionExpression")
     names = put.get("ExpressionAttributeNames")
-    if not isinstance(condition, str) or not condition:
+    if condition != MARKER_PUT_CONDITION:
         return False
-    if not _carries_marker_uniqueness_guard(condition, names if isinstance(names, dict) else {}):
+    if not isinstance(names, dict) or names.get("#pk") != MARKER_GUARD_ATTRIBUTE:
         return False
     item = put.get("Item")
     return isinstance(item, dict) and item.get("pk") == {"S": keys.pk} and item.get("sk") == {"S": keys.sk}
@@ -893,8 +887,8 @@ class IdempotentMutationRunner:
             {
                 "TableName": keys.table_name,
                 "Item": build_marker_item(keys, fingerprint=fingerprint, result_id=result_id),
-                "ConditionExpression": "attribute_not_exists(#pk)",
-                "ExpressionAttributeNames": {"#pk": "pk"},
+                "ConditionExpression": MARKER_PUT_CONDITION,
+                "ExpressionAttributeNames": {"#pk": MARKER_GUARD_ATTRIBUTE},
                 "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
             },
         )

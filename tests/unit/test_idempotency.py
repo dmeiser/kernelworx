@@ -845,11 +845,41 @@ class TestExecute:
                 },
             )
 
+            or_defeated_guard = WritePlan()
+            # The same class smuggled inside an OR: a real-looking
+            # attribute_not_exists token, but the other disjunct is always true,
+            # so the whole condition never blocks any insert.
+            or_defeated_guard.add(
+                "Put",
+                {
+                    "TableName": UNITS_TABLE,
+                    "Item": dict(marker_item),
+                    "ConditionExpression": "attribute_not_exists(#real) OR attribute_not_exists(#pk)",
+                    "ExpressionAttributeNames": {
+                        "#real": "someNonexistentAttribute",
+                        "#pk": "pk",
+                    },
+                },
+            )
+
+            inverted_guard = WritePlan()
+            # The NOT-inverted shape would block every insert instead of guarding
+            # the uniqueness race - also not the guard the contract stages.
+            inverted_guard.add(
+                "Put",
+                {
+                    "TableName": UNITS_TABLE,
+                    "Item": dict(marker_item),
+                    "ConditionExpression": "NOT attribute_not_exists(#pk)",
+                    "ExpressionAttributeNames": {"#pk": "pk"},
+                },
+            )
+
             business_first = WritePlan()
             business_first.add("Put", _unit_put("u-1"))
             runner.stage_marker(business_first, keys, fingerprint=fingerprint, result_id="UNIT#u-1")
 
-            for plan in (unconditional, wrong_sort, defeated_guard, business_first):
+            for plan in (unconditional, wrong_sort, defeated_guard, or_defeated_guard, inverted_guard, business_first):
                 with pytest.raises(AppError) as exc:
                     runner.execute(keys, plan, operation="createUnit", fingerprint=fingerprint, result_id="UNIT#u-1")
                 assert exc.value.error_code == ErrorCode.INVALID_INPUT
