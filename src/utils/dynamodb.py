@@ -265,6 +265,26 @@ class TableAccessor:
         """Get shared campaigns table instance."""
         return self._get_table("shared_campaigns")
 
+    @property
+    def units(self) -> "Table":
+        """Get Units table instance (Show & Sell Stage 1)."""
+        return self._get_table("units")
+
+    @property
+    def unit_campaigns(self) -> "Table":
+        """Get Unit Campaigns table instance (Show & Sell Stage 1)."""
+        return self._get_table("unit_campaigns")
+
+    @property
+    def public_order_throttles(self) -> "Table":
+        """Get public order throttles table instance.
+
+        One table carries two independent counter contracts: the public-order
+        share-token window and the Unit-invite redemption window (data model
+        §6.6). Key prefixes keep them apart; access is scoped per handler.
+        """
+        return self._get_table("public_order_throttles")
+
 
 # Singleton instance for import
 tables = TableAccessor()

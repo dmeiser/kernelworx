@@ -13,6 +13,8 @@ from tests.unit.table_schemas import (
     create_profiles_table_schema,
     create_shared_campaigns_table_schema,
     create_shares_table_schema,
+    create_unit_campaigns_table_schema,
+    create_units_table_schema,
     get_all_table_schemas,
 )
 
@@ -211,10 +213,10 @@ class TestSharedCampaignsTableSchema:
 class TestGetAllTableSchemas:
     """Tests for get_all_table_schemas function."""
 
-    def test_returns_all_eight_schemas(self):
-        """Function returns all 8 table schemas."""
+    def test_returns_all_ten_schemas(self):
+        """Function returns all 10 table schemas."""
         schemas = get_all_table_schemas()
-        assert len(schemas) == 8
+        assert len(schemas) == 10
 
     def test_all_schemas_have_table_name(self):
         """All schemas have a TableName key."""
@@ -239,7 +241,7 @@ class TestTableNames:
     """Tests for TABLE_NAMES constant."""
 
     def test_has_all_tables(self):
-        """TABLE_NAMES includes all 8 tables."""
+        """TABLE_NAMES includes all 10 tables."""
         expected_keys = {
             "accounts",
             "catalogs",
@@ -249,6 +251,8 @@ class TestTableNames:
             "shares",
             "invites",
             "shared_campaigns",
+            "units",
+            "unit_campaigns",
         }
         assert set(TABLE_NAMES.keys()) == expected_keys
 
@@ -263,9 +267,9 @@ class TestCreateAllTables:
     """Tests for create_all_tables function."""
 
     def test_creates_all_tables(self, aws_credentials, dynamodb_resource):
-        """Function creates all 8 tables."""
+        """Function creates all 10 tables."""
         tables = create_all_tables(dynamodb_resource)
-        assert len(tables) == 8
+        assert len(tables) == 10
 
     def test_returns_dict_with_correct_keys(self, aws_credentials, dynamodb_resource):
         """Function returns dict with expected table keys."""
@@ -279,6 +283,8 @@ class TestCreateAllTables:
             "shares",
             "invites",
             "shared_campaigns",
+            "units",
+            "unit_campaigns",
         }
         assert set(tables.keys()) == expected_keys
 
@@ -288,6 +294,92 @@ class TestCreateAllTables:
         # Each table should have a table_name attribute
         for name, table in tables.items():
             assert table.table_name is not None
+
+
+class TestUnitsTableSchema:
+    """Tests for the Show & Sell Units table schema (data model §6.1)."""
+
+    def test_table_name(self):
+        schema = create_units_table_schema()
+        assert schema["TableName"] == "kernelworx-units-ue1-dev"
+
+    def test_key_schema_is_pk_sk(self):
+        """Item collections share one pk/sk pair (UNIT#, INVITE#, IDEM# prefixes)."""
+        schema = create_units_table_schema()
+        assert schema["KeySchema"] == [
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ]
+
+    def test_has_the_three_contracted_indexes(self):
+        gsi_names = {gsi["IndexName"] for gsi in create_units_table_schema()["GlobalSecondaryIndexes"]}
+        assert gsi_names == {
+            "accountId-unitId-index",
+            "unitId-createdAt-index",
+            "metadataKey-createdAt-index",
+        }
+
+    def test_index_key_shapes(self):
+        indexes = {gsi["IndexName"]: gsi["KeySchema"] for gsi in create_units_table_schema()["GlobalSecondaryIndexes"]}
+        assert indexes["accountId-unitId-index"] == [
+            {"AttributeName": "accountId", "KeyType": "HASH"},
+            {"AttributeName": "unitId", "KeyType": "RANGE"},
+        ]
+        assert indexes["unitId-createdAt-index"] == [
+            {"AttributeName": "unitId", "KeyType": "HASH"},
+            {"AttributeName": "createdAt", "KeyType": "RANGE"},
+        ]
+        assert indexes["metadataKey-createdAt-index"] == [
+            {"AttributeName": "metadataKey", "KeyType": "HASH"},
+            {"AttributeName": "createdAt", "KeyType": "RANGE"},
+        ]
+
+    def test_ttl_is_expires_at_epoch(self):
+        """UnitInvite TTL is `expiresAtEpoch` - numeric epoch seconds, distinct from
+        the legacy invites table's `expiresAt`. Idempotency markers reuse the same
+        attribute name with a different (seven-day) horizon."""
+        schema = create_units_table_schema()
+        assert schema["TimeToLiveSpecification"] == {"AttributeName": "expiresAtEpoch", "Enabled": True}
+
+
+class TestUnitCampaignsTableSchema:
+    """Tests for the Show & Sell Unit Campaigns table schema (data model §6.2)."""
+
+    def test_table_name(self):
+        schema = create_unit_campaigns_table_schema()
+        assert schema["TableName"] == "kernelworx-unit-campaigns-ue1-dev"
+
+    def test_key_schema_is_pk_sk(self):
+        schema = create_unit_campaigns_table_schema()
+        assert schema["KeySchema"] == [
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ]
+
+    def test_has_the_four_contracted_indexes_including_catalog_usage_guard(self):
+        indexes = {gsi["IndexName"]: gsi["KeySchema"] for gsi in create_unit_campaigns_table_schema()["GlobalSecondaryIndexes"]}
+        assert set(indexes) == {
+            "unitId-createdAt-index",
+            "campaignId-index",
+            "profileId-unitCampaignId-index",
+            "catalogId-index",
+        }
+        # catalogId-index is HASH-only: the catalog soft-delete usage guard is a
+        # Query on it, never a Scan (impact map §3.3).
+        assert indexes["catalogId-index"] == [{"AttributeName": "catalogId", "KeyType": "HASH"}]
+        assert indexes["profileId-unitCampaignId-index"] == [
+            {"AttributeName": "profileId", "KeyType": "HASH"},
+            {"AttributeName": "unitCampaignId", "KeyType": "RANGE"},
+        ]
+
+    def test_every_gsi_key_attribute_is_declared(self):
+        """DynamoDB rejects a table whose index key attribute is undeclared, so the
+        mock schema must declare exactly what the indexes use."""
+        schema = create_unit_campaigns_table_schema()
+        declared = {a["AttributeName"] for a in schema["AttributeDefinitions"]}
+        for gsi in schema["GlobalSecondaryIndexes"]:
+            for key in gsi["KeySchema"]:
+                assert key["AttributeName"] in declared, f"{gsi['IndexName']} uses undeclared {key['AttributeName']}"
 
 
 @pytest.fixture

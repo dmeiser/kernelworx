@@ -648,6 +648,273 @@ resource "aws_dynamodb_table" "public_order_throttles" {
 }
 
 # ============================================================================
+# Units Table (Show & Sell Stage 1 — docs/specs/show_sell/SHOW_AND_SELL_DATA_MODEL.md §6.1)
+# PK: pk, SK: sk
+#   UNIT#<unitId>       / METADATA                    Unit
+#   UNIT#<unitId>       / GRANT#<accountId>           UnitAccessGrant
+#   UNIT#<unitId>       / PAYMENT#<normalizedName>    UnitPaymentMethod (Stage 4 write path)
+#   INVITE#<inviteCode> / UNIT#<unitId>               UnitInvite
+#   IDEM#<actorId>#<operationType>#<scope> / IDEM#<idempotencyKey>            idempotency marker
+#     (the marker SK is `IDEM#<idempotencyKey>`; the bootstrap scope for
+#      createUnit is `BOOTSTRAP`, so the marker never depends on the Unit it
+#      creates — data model §8.9)
+# GSI: accountId-unitId-index (accountId, unitId)   grants for "my Units" discovery
+# GSI: unitId-createdAt-index (unitId, createdAt)   invites for Unit administration;
+#      sparse — only invite items carry both attributes
+# GSI: metadataKey-createdAt-index (metadataKey, createdAt)
+#      possible-duplicate lookup; WARNING ONLY — metadataKey is never unique and
+#      never authorizes anything (data model §5.1 invariant)
+# TTL: expiresAtEpoch (epoch seconds)
+#   Two item classes use this one attribute name with DIFFERENT horizons and
+#   must not be confused: a UnitInvite item carries its own expiry (max 14
+#   days out, data model §5.3), while an idempotency marker carries the common
+#   seven-day marker horizon (impact map §4.1). Application-side expiry checks
+#   remain load-bearing — DynamoDB TTL only reclaims storage and can lag.
+#
+# Direct grant authorization and invite redemption use strongly consistent
+# base-table reads (PK/SK are constructed from the credential or the id), never
+# a GSI; the GSIs only serve list/discovery pages.
+# ============================================================================
+resource "aws_dynamodb_table" "units" {
+  name                        = "${var.name_prefix}-units${local.table_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "pk"
+  range_key                   = "sk"
+  deletion_protection_enabled = var.enable_deletion_protection
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+
+  attribute {
+    name = "accountId"
+    type = "S"
+  }
+
+  attribute {
+    name = "unitId"
+    type = "S"
+  }
+
+  attribute {
+    name = "createdAt"
+    type = "S"
+  }
+
+  attribute {
+    name = "metadataKey"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "accountId-unitId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "accountId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "unitId"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "unitId-createdAt-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "unitId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "metadataKey-createdAt-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "metadataKey"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
+  }
+
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = false
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+# ============================================================================
+# Unit Campaigns Table (Show & Sell Stage 1 — data model §6.2)
+# PK: pk, SK: sk
+#   UNIT_CAMPAIGN#<unitCampaignId>                                / METADATA                      UnitCampaign
+#   UNIT_CAMPAIGN#<unitCampaignId>                                / MEMBERSHIP#<profileId>        UnitCampaignMembership
+#   PROFILE#<profileId>                                           / COMMITMENT_GUARD              ScoutCommitmentGuard (Stage 3)
+#   PROFILE#<profileId>                                           / COMMITMENT#<startAt>#<unitCampaignId>#<slotId>
+#                                                                                                 ScoutCommitment projection (Stage 3)
+#   JOIN_CODE#<joinCode>                                          / UNIT_CAMPAIGN#<unitCampaignId> join-code pointer
+#   SCOUT_CAMPAIGN#<campaignId>                                   / MEMBERSHIP_GUARD              ScoutCampaignMembershipGuard
+#   UNIT_CAMPAIGN#<unitCampaignId>#SCOUT_CAMPAIGN#<campaignId>    / SHOW_AND_SELL_TOTAL           ScoutCampaignShowAndSellTotal (Stage 5)
+# GSI: unitId-createdAt-index (unitId, createdAt)          Unit Campaign list
+# GSI: campaignId-index (campaignId)                       membership lookup by Scout Campaign
+# GSI: profileId-unitCampaignId-index (profileId, unitCampaignId)
+#          membership/commitment discovery
+# GSI: catalogId-index (catalogId)                         catalog-usage guard for Unit Campaign
+#          references (a catalog referenced by any Unit Campaign is in use and
+#          cannot be soft-deleted as unused, impact map §3.3); never used for
+#          authorization, and its presence is what keeps that guard a Query
+#          rather than a Scan.
+#
+# The join-code pointer, the membership guard, and the membership row are all
+# reached by constructed-key strongly consistent base-table reads; join-code and
+# membership checks in mutations never read a GSI (data model §6.2).
+# ============================================================================
+resource "aws_dynamodb_table" "unit_campaigns" {
+  name                        = "${var.name_prefix}-unit-campaigns${local.table_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "pk"
+  range_key                   = "sk"
+  deletion_protection_enabled = var.enable_deletion_protection
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+
+  attribute {
+    name = "unitId"
+    type = "S"
+  }
+
+  attribute {
+    name = "createdAt"
+    type = "S"
+  }
+
+  attribute {
+    name = "campaignId"
+    type = "S"
+  }
+
+  attribute {
+    name = "profileId"
+    type = "S"
+  }
+
+  attribute {
+    name = "unitCampaignId"
+    type = "S"
+  }
+
+  attribute {
+    name = "catalogId"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "unitId-createdAt-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "unitId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "campaignId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "campaignId"
+      key_type       = "HASH"
+    }
+  }
+
+  global_secondary_index {
+    name            = "profileId-unitCampaignId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "profileId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "unitCampaignId"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "catalogId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "catalogId"
+      key_type       = "HASH"
+    }
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = false
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+# ============================================================================
 # Outputs
 # ============================================================================
 output "table_arns" {
@@ -662,6 +929,8 @@ output "table_arns" {
     invites                = aws_dynamodb_table.invites.arn
     shared_campaigns       = aws_dynamodb_table.shared_campaigns.arn
     public_order_throttles = aws_dynamodb_table.public_order_throttles.arn
+    units                  = aws_dynamodb_table.units.arn
+    unit_campaigns         = aws_dynamodb_table.unit_campaigns.arn
   }
 }
 
@@ -677,6 +946,8 @@ output "table_names" {
     invites                = aws_dynamodb_table.invites.name
     shared_campaigns       = aws_dynamodb_table.shared_campaigns.name
     public_order_throttles = aws_dynamodb_table.public_order_throttles.name
+    units                  = aws_dynamodb_table.units.name
+    unit_campaigns         = aws_dynamodb_table.unit_campaigns.name
   }
 }
 
@@ -719,4 +990,23 @@ output "invites_table_name" {
 output "shared_campaigns_table_name" {
   description = "Name of the shared campaigns DynamoDB table"
   value       = aws_dynamodb_table.shared_campaigns.name
+}
+
+# The throttle table already existed but carried no individual output: the
+# Show & Sell Unit-invite redemption throttle reuses it under a distinct key
+# contract (data model §6.6, impact map §4.4), and that handler needs the name
+# as a single-purpose environment value rather than a map index.
+output "public_order_throttles_table_name" {
+  description = "Name of the public order throttles DynamoDB table"
+  value       = aws_dynamodb_table.public_order_throttles.name
+}
+
+output "units_table_name" {
+  description = "Name of the Units DynamoDB table"
+  value       = aws_dynamodb_table.units.name
+}
+
+output "unit_campaigns_table_name" {
+  description = "Name of the Unit Campaigns DynamoDB table"
+  value       = aws_dynamodb_table.unit_campaigns.name
 }
