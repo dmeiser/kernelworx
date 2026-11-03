@@ -2,7 +2,7 @@
 
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING
 
 try:  # pragma: no cover
     from utils.import_fallback import import_from_utils
@@ -16,14 +16,15 @@ with_error_handling = import_from_utils("handlers", "lambda_handler")
 get_logger = import_from_utils("logging", "get_logger")
 # mutations optional
 try:
-    from utils.mutations import IdempotentMutationRunner, marker_keys
+    from utils.mutations import IdempotentMutationRunner
 except ModuleNotFoundError:
-    from ..utils.mutations import IdempotentMutationRunner, marker_keys
+    from ..utils.mutations import IdempotentMutationRunner
 
 if TYPE_CHECKING:  # pragma: no cover
     pass
 
 logger = get_logger(__name__)
+
 
 def _units():
     return tables.units
@@ -99,7 +100,11 @@ def create_unit(event, context):
         "createdByAccountId": caller,
         "createdAt": now,
     }
-    from ..utils.mutations import WritePlan, marker_keys, normalized_fingerprint
+    try:
+        from utils.mutations import WritePlan, marker_keys, normalized_fingerprint
+    except ModuleNotFoundError:
+        from ..utils.mutations import WritePlan, marker_keys, normalized_fingerprint
+
     runner = IdempotentMutationRunner()
     mk = marker_keys(actor_id=caller, operation="createUnit", scope="BOOTSTRAP", idempotency_key=key)
     fp = normalized_fingerprint({"unitType": unit_type, "unitNumber": unit_number, "city": city, "state": state})
@@ -107,7 +112,14 @@ def create_unit(event, context):
     runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
     plan.add("Put", {"TableName": "units", "Item": item})
     plan.add("Put", {"TableName": "units", "Item": grant_item})
-    runner.execute(mk, plan, operation="createUnit", fingerprint=fp, result_id=unit_id, load_result=lambda rid: {"unit": item, "grant": grant_item})
+    runner.execute(
+        mk,
+        plan,
+        operation="createUnit",
+        fingerprint=fp,
+        result_id=unit_id,
+        load_result=lambda rid: {"unit": item, "grant": grant_item},
+    )
     return {"unit": item, "grant": grant_item}
 
 
@@ -169,6 +181,7 @@ def create_unit_invite(event, context):
     now = _now()
     # expiry 14 days
     from datetime import timedelta
+
     expires = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
     expires_epoch = int((datetime.now(timezone.utc) + timedelta(days=14)).timestamp())
     item = {
@@ -202,10 +215,18 @@ def redeem_unit_invite(event, context):
     if not caller:
         raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity required")
     code = args.get("inviteCode")
-    resp = _units().get_item(Key={"pk": f"INVITE#{code}", "sk": None} if False else {"pk": f"INVITE#{code}"}, ConsistentRead=True) if False else None
+    resp = (
+        _units().get_item(
+            Key={"pk": f"INVITE#{code}", "sk": None} if False else {"pk": f"INVITE#{code}"}, ConsistentRead=True
+        )
+        if False
+        else None
+    )
     # query by pk prefix
     try:
-        resp = _units().query(KeyConditionExpression="pk = :pk", ExpressionAttributeValues={":pk": f"INVITE#{code}"}, ConsistentRead=True)
+        resp = _units().query(
+            KeyConditionExpression="pk = :pk", ExpressionAttributeValues={":pk": f"INVITE#{code}"}, ConsistentRead=True
+        )
     except Exception:
         resp = _units().query(KeyConditionExpression="pk = :pk", ExpressionAttributeValues={":pk": f"INVITE#{code}"})
     items = resp.get("Items", [])
@@ -215,6 +236,7 @@ def redeem_unit_invite(event, context):
     unit_id = inv["unitId"]
     # expiry check
     from datetime import datetime as dt
+
     try:
         if dt.fromisoformat(inv["expiresAt"].replace("Z", "+00:00")) < datetime.now(timezone.utc):
             raise AppError(ErrorCode.NOT_FOUND, "Invite expired")
@@ -248,7 +270,11 @@ def my_units(event, context):
     caller = get_caller_id(event)
     # query GSI accountId-unitId-index
     try:
-        resp = _units().query(IndexName="accountId-unitId-index", KeyConditionExpression="accountId = :a", ExpressionAttributeValues={":a": caller})
+        resp = _units().query(
+            IndexName="accountId-unitId-index",
+            KeyConditionExpression="accountId = :a",
+            ExpressionAttributeValues={":a": caller},
+        )
     except Exception:
         resp = {"Items": []}
     grants = resp.get("Items", [])
@@ -279,7 +305,10 @@ def unit_admins(event, context):
     caller = get_caller_id(event)
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
-    resp = _units().query(KeyConditionExpression="pk = :pk AND begins_with(sk, :sk)", ExpressionAttributeValues={":pk": _unit_pk(unit_id), ":sk": "GRANT#"})
+    resp = _units().query(
+        KeyConditionExpression="pk = :pk AND begins_with(sk, :sk)",
+        ExpressionAttributeValues={":pk": _unit_pk(unit_id), ":sk": "GRANT#"},
+    )
     items = resp.get("Items", [])
     return {"items": items, "pageInfo": {"endCursor": None, "hasNextPage": False}}
 
@@ -292,7 +321,11 @@ def unit_invites(event, context):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
     # query GSI unitId-createdAt-index (sparse)
     try:
-        resp = _units().query(IndexName="unitId-createdAt-index", KeyConditionExpression="unitId = :u", ExpressionAttributeValues={":u": unit_id})
+        resp = _units().query(
+            IndexName="unitId-createdAt-index",
+            KeyConditionExpression="unitId = :u",
+            ExpressionAttributeValues={":u": unit_id},
+        )
     except Exception:
         resp = {"Items": []}
     return {"items": resp.get("Items", []), "pageInfo": {"endCursor": None, "hasNextPage": False}}
