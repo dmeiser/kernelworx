@@ -134,6 +134,11 @@ locals {
       timeout     = 30
       memory_size = 256
     }
+    "unit-operations" = {
+      handler     = "handlers.unit_operations.lambda_handler"
+      timeout     = 30
+      memory_size = 256
+    }
     "unit-reporting" = {
       handler     = "handlers.campaign_reporting.get_unit_report"
       timeout     = 60
