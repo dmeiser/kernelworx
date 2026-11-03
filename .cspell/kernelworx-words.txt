@@ -151,6 +151,7 @@ exportable
 falsey
 favicons
 fieldset
+fileobj
 fileName
 finditer
 findme
@@ -165,6 +166,7 @@ fromisoformat
 fullWidth
 getfail
 getobject
+getunitreport
 getsizeof
 getters
 getvalue

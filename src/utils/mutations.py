@@ -480,9 +480,7 @@ def _contention_or_conflict_batch_error(exc: ClientError, operation: str) -> App
     (spec 3.3).
     """
     retryable_reasons = [
-        c
-        for c in _cancellation_summary(exc)
-        if c in PER_ITEM_THROTTLE_CODES or c in PER_ITEM_CONTENTION_CODES
+        c for c in _cancellation_summary(exc) if c in PER_ITEM_THROTTLE_CODES or c in PER_ITEM_CONTENTION_CODES
     ]
     if retryable_reasons:
         logger.warning(

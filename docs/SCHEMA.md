@@ -267,6 +267,7 @@ Global Secondary Indexes:
 | `JOIN_CODE#<joinCode>` / `UNIT_CAMPAIGN#<unitCampaignId>` | join-code pointer |
 | `SCOUT_CAMPAIGN#<campaignId>` / `MEMBERSHIP_GUARD` | ScoutCampaignMembershipGuard |
 | `UNIT_CAMPAIGN#<unitCampaignId>#SCOUT_CAMPAIGN#<campaignId>` / `SHOW_AND_SELL_TOTAL` | Show-and-Sell totals (Stage 5) |
+| `IDEM#<actorId>#<operationType>#<scope>` / `IDEM#<idempotencyKey>` | idempotency marker (join now, sales later; §8.9) |
 
 TTL: `expiresAtEpoch` (epoch seconds) — campaign-scoped idempotency markers (join
 now, sales later; data model §8.9) share the units table's marker TTL attribute

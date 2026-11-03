@@ -381,9 +381,7 @@ class TestWritePlan:
         let a mutation look version-checked while racing freely."""
         plan = WritePlan()
         with pytest.raises(AppError) as exc:
-            plan.add(
-                "ConditionCheck", {"TableName": UNITS_TABLE, "Key": {"pk": {"S": "x"}, "sk": {"S": "y"}}}
-            )
+            plan.add("ConditionCheck", {"TableName": UNITS_TABLE, "Key": {"pk": {"S": "x"}, "sk": {"S": "y"}}})
         assert exc.value.error_code == ErrorCode.INVALID_INPUT
 
     def test_plan_reports_the_tables_it_touches_for_iam_scope_review(self) -> None:
@@ -1093,9 +1091,7 @@ class TestErrorClassification:
         ],
     )
     def test_oversize_or_duplicate_transaction_maps_to_operation_too_large(self, message: str) -> None:
-        exc = classify_transaction_error(
-            _client_error("ValidationException", message=message), operation="createUnit"
-        )
+        exc = classify_transaction_error(_client_error("ValidationException", message=message), operation="createUnit")
         assert exc.error_code == ErrorCode.CONFLICT
         assert exc.details["subcode"] == ErrorCode.OPERATION_TOO_LARGE
 
