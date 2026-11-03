@@ -407,6 +407,10 @@ def create_unit_campaigns_table_schema() -> dict[str, Any]:
     - campaignId-index: membership lookup by Scout Campaign
     - profileId-unitCampaignId-index: membership/commitment discovery
     - catalogId-index: catalog-usage guard for Unit Campaign references
+    Key structure also hosts campaign-scoped idempotency markers
+    (IDEM#<actorId>#<operationType>#<scope> / IDEM#<idempotencyKey>; data model
+    §8.9 - join now, sales later), so the marker TTL is armed here exactly as
+    on the units table.
     """
     return {
         "TableName": "kernelworx-unit-campaigns-ue1-dev",
@@ -457,7 +461,19 @@ def create_unit_campaigns_table_schema() -> dict[str, Any]:
             },
         ],
         "BillingMode": "PAY_PER_REQUEST",
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": True},
     }
+
+
+# Tables that host idempotency markers (data model §8.9). The marker's
+# seven-day TTL (MARKER_TTL_ATTRIBUTE, "expiresAtEpoch") must be armed on
+# EVERY one of them: a marker written to a table without TTL would silently
+# live forever instead of expiring. Tests enumerate this tuple rather than
+# pinning one table's TTL, so a new marker-capable table cannot land
+# un-armed. The marker-capable set is exactly the Show & Sell aggregate
+# tables the marker key contract names; the legacy `invites` table is NOT
+# marker-capable (its TTL stays the string `expiresAt`).
+MARKER_CAPABLE_TABLE_KEYS = ("units", "unit_campaigns")
 
 
 def create_public_order_throttles_table_schema() -> dict[str, Any]:

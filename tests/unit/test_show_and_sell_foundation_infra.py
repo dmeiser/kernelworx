@@ -7,8 +7,11 @@ and that nothing else in the suite covers:
   data model §6.1/§6.2 key and GSI layout, the UnitInvite TTL on
   `expiresAtEpoch`, and reuse of the existing PITR / encryption / tagging /
   deletion-protection variables (no per-table overrides that could drift).
-- `units` carries the TTL; `unit_campaigns` deliberately does NOT, so the
-  UnitInvite TTL and the marker TTL convention cannot be confused.
+- EVERY marker-capable table arms the marker TTL on `expiresAtEpoch`
+  (data model §8.9): unit-scoped markers land in `units`, campaign-scoped
+  markers (join now, sales later) land in `unit_campaigns`. The test
+  enumerates the shared `MARKER_CAPABLE_TABLE_KEYS` contract instead of
+  pinning one table, so a new marker-capable table cannot land un-armed.
 - `catalogId-index` exists on `unit_campaigns`: the catalog soft-delete usage
   guard for Unit Campaign references must be a Query, never a Scan
   (impact map §3.3).
@@ -18,9 +21,16 @@ and that nothing else in the suite covers:
   (data model §6.6, impact map §4.4).
 - All three environments pass the three new keys into the Lambda module, and
   the module exports them to every function (`PUBLIC_ORDER_THROTTLES_TABLE_NAME`
-  included). Env visibility never replaces scoped IAM: no handler in this wave
-  touches the new tables, so no domain role is widened (AGENTS.md role-split
-  rule; the Unit domain roles land with their handlers).
+  included). Env visibility never replaces scoped IAM: `units` and
+  `unit_campaigns` are excluded from the broad admin-role and AppSync DynamoDB
+  policies (gate verdict (f) on PR #912) and served ONLY by the new
+  unit / unit-campaign domain roles, whose inline policies carry
+  `dynamodb:TransactWriteItems` scoped to the one table plus its indexes for
+  the shared idempotent write helper. The roles are exported as module outputs
+  and imported by the recovery script; each environment wires them into
+  `lambda_domain_role_arns` per function key as the Unit handlers land (Stage 1
+  ships no Unit function keys, and the lambda module fails plan loudly for any
+  key missing from the map).
 - `scripts/ephemeral-env.sh` exports the new table names in both the `up` and
   `env` blocks, and `.env.example` carries an override placeholder for each.
 
@@ -39,12 +49,20 @@ import hcl2
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DYNAMODB_TF = REPO_ROOT / "tofu" / "application" / "modules" / "dynamodb" / "main.tf"
+IAM_TF = REPO_ROOT / "tofu" / "application" / "modules" / "iam" / "main.tf"
 LAMBDA_TF = REPO_ROOT / "tofu" / "application" / "modules" / "lambda" / "main.tf"
 EPHEMERAL_ENV_SCRIPT = REPO_ROOT / "scripts" / "ephemeral-env.sh"
 ENV_EXAMPLE = REPO_ROOT / ".env.example"
 ENVIRONMENT_DIRS = ("dev", "prod", "ephemeral")
 
 NEW_TABLES = ("units", "unit_campaigns")
+
+# The Show & Sell domain roles (gate verdict (f) on PR #912): each is the ONLY
+# IAM grant on its table, scoped to the table plus its GSIs.
+DOMAIN_ROLES = {
+    "lambda_unit_execution": "units",
+    "lambda_unit_campaign_execution": "unit_campaigns",
+}
 
 # logical table key -> Lambda environment variable name (impact map §4.4).
 ENV_VARS = {
@@ -167,24 +185,41 @@ def test_every_gsi_key_attribute_is_declared():
                 assert attribute in declared, f"{label}/{name} uses undeclared attribute {attribute}"
 
 
-def test_units_ttl_is_expires_at_epoch_and_unit_campaigns_carries_no_ttl():
-    """The UnitInvite TTL is numeric epoch seconds on `expiresAtEpoch`.
+def test_every_marker_capable_table_arms_the_marker_ttl():
+    """The marker TTL is numeric epoch seconds on `expiresAtEpoch`, armed on
+    EVERY table markers can land in (data model §8.9): unit-scoped markers in
+    `units`, campaign-scoped markers (join now, sales later) in
+    `unit_campaigns`. Enumerating the shared contract tuple - not pinning one
+    table and asserting another's absence - is what keeps a future
+    marker-capable table from landing without its TTL armed.
 
-    `unit_campaigns` has no TTL block: the seven-day idempotency-marker TTL is a
-    shared attribute-NAME convention, not a reason to arm TTL on a table that
-    has no expiring item class yet (data model §8.9, impact map §4.1). Keeping
-    the two apart is what stops a marker horizon being mistaken for an invite
-    expiry.
+    This mirrors the moto fixture contract in
+    `test_table_schemas.py::TestMarkerTtlContract`.
     """
-    units = _table("units")
-    ttl = units.get("ttl")
-    assert isinstance(ttl, list) and len(ttl) == 1, "units must declare exactly one ttl block"
-    assert _norm(ttl[0]["attribute_name"]) == "expiresAtEpoch"
-    assert ttl[0]["enabled"] is True
-    assert "ttl" not in _table("unit_campaigns"), (
-        "unit_campaigns has no expiring item class in Stage 1; arming TTL there "
-        "would blur the UnitInvite TTL vs marker TTL distinction the spec calls out"
-    )
+    from tests.unit.table_schemas import MARKER_CAPABLE_TABLE_KEYS
+
+    assert set(MARKER_CAPABLE_TABLE_KEYS) == {"units", "unit_campaigns"}
+    for label in MARKER_CAPABLE_TABLE_KEYS:
+        ttl = _table(label).get("ttl")
+        assert isinstance(ttl, list) and len(ttl) == 1, f"{label} must declare exactly one ttl block"
+        assert _norm(ttl[0]["attribute_name"]) == "expiresAtEpoch"
+        assert ttl[0]["enabled"] is True
+
+
+def _data_documents(doc: dict, data_type: str) -> dict[str, dict]:
+    """Return {label: body} for every data source document of the given type."""
+    found: dict[str, dict] = {}
+    for entry in doc.get("data", []):
+        for type_name, bodies in entry.items():
+            if _norm(type_name) != data_type:
+                continue
+            for label, attrs in bodies.items():
+                found[_norm(label)] = attrs[0] if isinstance(attrs, list) else attrs
+    return found
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else [value]
 
 
 def test_new_tables_reuse_the_existing_pitr_encryption_and_lifecycle_variables():
@@ -218,6 +253,82 @@ def test_names_follow_the_module_naming_convention():
         name = str(_table(label)["name"]).strip('"')
         expected = f"${{var.name_prefix}}-{slug}${{local.table_suffix}}"
         assert name == expected, f"{label} name must be {expected!r}, got {name!r}"
+
+
+# ---------------------------------------------------------------------------
+# Least-privilege IAM (gate verdict (f) on PR #912)
+# ---------------------------------------------------------------------------
+
+
+def test_unit_domain_roles_exist_with_the_scoped_transact_write_grant():
+    """The unit / unit-campaign domain roles are the only IAM grants on the two
+    tables, scoped to the one table plus its GSIs, and they carry
+    `dynamodb:TransactWriteItems` - the shared mutation helper's marker insert
+    rides inside every Show & Sell mutation's transaction (data model §8.9,
+    impact map §4.2)."""
+    doc = _load(IAM_TF)
+    roles = _resources(doc, "aws_iam_role")
+    policies = _resources(doc, "aws_iam_role_policy")
+    attachments = _resources(doc, "aws_iam_role_policy_attachment")
+    documents = _data_documents(doc, "aws_iam_policy_document")
+    for role_label, table_key in DOMAIN_ROLES.items():
+        policy_label = role_label.replace("_execution", "_dynamodb")
+        basic_label = role_label.replace("_execution", "_basic")
+        assert role_label in roles, f"missing aws_iam_role.{role_label}"
+        # hcl2 keeps interpolations as "${...}" wrappers; compare the raw form.
+        assert policies.get(policy_label, {}).get("role") == f"${{aws_iam_role.{role_label}.id}}"
+        assert attachments.get(basic_label, {}).get("role") == f"${{aws_iam_role.{role_label}.name}}"
+
+        statements = _as_list(documents[policy_label]["statement"])
+        assert len(statements) == 1, f"{policy_label} must be a single scoped statement"
+        actions = {_norm(action) for action in _as_list(statements[0]["actions"])}
+        assert "dynamodb:TransactWriteItems" in actions, f"{policy_label} must grant TransactWriteItems"
+        # Scoped to exactly the domain table and its indexes - never the broad
+        # table list, and never the other domain's table.
+        resources = [str(resource) for resource in _as_list(statements[0]["resources"])]
+        # hcl2 keeps the quoted form for the interpolated index ARN.
+        assert resources == [
+            f'${{var.dynamodb_table_arns["{table_key}"]}}',
+            f'"${{var.dynamodb_table_arns["{table_key}"]}}/index/*"',
+        ], f"{policy_label} resources must be the {table_key} table plus its indexes only: {resources}"
+        other = set(NEW_TABLES) - {table_key}
+        assert not any(other_table in resource for resource in resources for other_table in other)
+
+
+def test_unit_domain_role_names_follow_the_module_and_recovery_convention():
+    """The recovery script resolves each role as `kernelworx-<slug><suffix>`, so
+    the name pattern is part of the recovery contract."""
+    roles = _resources(_load(IAM_TF), "aws_iam_role")
+    for role_label, slug in (
+        ("lambda_unit_execution", "lambda-unit-exec"),
+        ("lambda_unit_campaign_execution", "lambda-unit-campaign-exec"),
+    ):
+        name = str(roles[role_label]["name"]).strip('"')
+        assert name == f"${{var.name_prefix}}-{slug}${{local.role_suffix}}", (
+            f"{role_label} name must be ${{var.name_prefix}}-{slug}${{local.role_suffix}}, got {name!r}"
+        )
+
+
+def test_broad_dynamodb_policies_exclude_the_domain_scoped_tables():
+    """`units` and `unit_campaigns` must not ride the broad admin-role and
+    AppSync table lists: those policies build from the locals filtered here, so
+    the widening the gate rejected cannot silently return."""
+    doc = _load(IAM_TF)
+    locals_body = doc["locals"][0]
+    scoped_keys = {_norm(key) for key in _as_list(locals_body["domain_scoped_table_keys"])}
+    assert scoped_keys == set(NEW_TABLES)
+    broad = str(locals_body["broad_table_arns"])
+    assert "!contains(local.domain_scoped_table_keys, k)" in broad, (
+        "the broad table list must exclude the domain-scoped keys"
+    )
+    assert _norm(str(locals_body["dynamodb_table_arns"])) == "local.broad_table_arns"
+    assert "local.broad_table_arns" in str(locals_body["dynamodb_index_arns"])
+    # The admin-role and AppSync documents both consume the filtered locals.
+    for document in ("lambda_dynamodb", "appsync_dynamodb"):
+        resources = _as_list(_data_documents(doc, "aws_iam_policy_document")[document]["statement"])[0]["resources"]
+        assert [_norm(str(resource)) for resource in _as_list(resources)] == [
+            "concat(local.dynamodb_table_arns, local.dynamodb_index_arns)"
+        ]
 
 
 # ---------------------------------------------------------------------------

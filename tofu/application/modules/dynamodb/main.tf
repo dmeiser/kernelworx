@@ -788,6 +788,8 @@ resource "aws_dynamodb_table" "units" {
 #   JOIN_CODE#<joinCode>                                          / UNIT_CAMPAIGN#<unitCampaignId> join-code pointer
 #   SCOUT_CAMPAIGN#<campaignId>                                   / MEMBERSHIP_GUARD              ScoutCampaignMembershipGuard
 #   UNIT_CAMPAIGN#<unitCampaignId>#SCOUT_CAMPAIGN#<campaignId>    / SHOW_AND_SELL_TOTAL           ScoutCampaignShowAndSellTotal (Stage 5)
+#   IDEM#<actorId>#<operationType>#<scope>                        / IDEM#<idempotencyKey>         idempotency marker (join now, sales
+#                                                                                                 later; TTL expiresAtEpoch, §8.9)
 # GSI: unitId-createdAt-index (unitId, createdAt)          Unit Campaign list
 # GSI: campaignId-index (campaignId)                       membership lookup by Scout Campaign
 # GSI: profileId-unitCampaignId-index (profileId, unitCampaignId)
@@ -897,6 +899,15 @@ resource "aws_dynamodb_table" "unit_campaigns" {
       attribute_name = "catalogId"
       key_type       = "HASH"
     }
+  }
+
+  # Campaign-scoped idempotency markers (join now, sales later) land in this
+  # table and carry the seven-day marker TTL on the shared attribute name
+  # (data model §8.9, impact map §4.1). In-place arming per gate verdict (g):
+  # application-side expiry checks remain load-bearing - TTL only reclaims.
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
   }
 
   point_in_time_recovery {

@@ -16,7 +16,7 @@ graph LR
     H["🔄 SHARED_CAMPAIGNS<br/>PK: sharedCampaignCode<br/>GSI: createdBy+createdAt, unitCampaignKey, catalogId-index"]
     I["⏰ PUBLIC_ORDER_THROTTLES<br/>PK: key<br/>TTL: expiresAt"]
     J["🏫 UNITS<br/>PK: pk + sk<br/>GSI: accountId-unitId-index, unitId-createdAt-index, metadataKey-createdAt-index<br/>TTL: expiresAtEpoch"]
-    K["📅 UNIT_CAMPAIGNS<br/>PK: pk + sk<br/>GSI: unitId-createdAt-index, campaignId-index, profileId-unitCampaignId-index, catalogId-index"]
+    K["📅 UNIT_CAMPAIGNS<br/>PK: pk + sk<br/>GSI: unitId-createdAt-index, campaignId-index, profileId-unitCampaignId-index, catalogId-index<br/>TTL: expiresAtEpoch (idempotency markers)"]
     
     B -->|created by| A
     A -->|creates| J
@@ -205,22 +205,32 @@ Global Secondary Indexes:
 | unitCampaignKey | String | GSI2 - Unit lookup |
 
 ### public_order_throttles
-Primary Key: `key` (String) — `<counterKey>#<windowStartEpoch>`
+Primary Key: `key` (String) — shape depends on the counter contract (below)
 TTL: `expiresAt` (epoch seconds)
 Global Secondary Indexes: none
 
-One abuse-guard table carrying two independent counter contracts: the anonymous
-`publicCreateOrder` share-token write throttle and the Unit-invite redemption window.
-Each counter is one small item per (key, 60-second window), atomically `ADD`ed by a
-throttle step, and reads are GetItem-free (a blind UpdateItem keyed by construction).
-TTL is load-bearing only for storage reclamation — the window in the key means an
-expired item is never read.
+One abuse-guard table carrying two INDEPENDENT counter contracts with different
+key shapes and windows; they never mix (data model §6.6):
+
+- Public-order share-token write throttle: key `<shareToken>#<windowStartEpoch>`,
+  one small item per (share token, 60-second window), atomically `ADD`ed by the
+  `publicCreateOrder` throttle step. Reads are GetItem-free (a blind UpdateItem
+  keyed by construction).
+- Unit-invite redemption throttle: key
+  `UNIT_INVITE_REDEMPTION#<accountId>#WINDOW#<yyyy-MM-ddTHH>`, one item per
+  (account, UTC hour), with `windowStart` / `attempts` attributes. Only FAILED
+  redemption attempts increment the counter; attempt 11 in one UTC hour is
+  rejected with `RATE_LIMIT_EXCEEDED`. A valid redemption, or a valid retry of
+  an already-completed idempotent request, does not increment the counter.
+
+TTL is load-bearing only for storage reclamation — the window lives in the key,
+so an expired item is never read.
 
 ### units
 Primary Key: `pk` + `sk` (Composite)
 Global Secondary Indexes:
 - `accountId-unitId-index` (accountId + unitId) - grants for "my Units" discovery
-- `unitId-createdAt-index` (unitId + createdAt) - invites for Unit administration; sparse, only invite items carry both attributes
+- `unitId-createdAt-index` (unitId + createdAt) - invites for Unit administration; sparse on non-invite items. It is NOT invite-only: any unit-scoped item carrying both attributes projects (data model §6.1)
 - `metadataKey-createdAt-index` (metadataKey + createdAt) - possible-duplicate lookup only; `metadataKey` is never unique and never authorizes anything
 
 TTL: `expiresAtEpoch` (epoch seconds)
@@ -258,9 +268,11 @@ Global Secondary Indexes:
 | `SCOUT_CAMPAIGN#<campaignId>` / `MEMBERSHIP_GUARD` | ScoutCampaignMembershipGuard |
 | `UNIT_CAMPAIGN#<unitCampaignId>#SCOUT_CAMPAIGN#<campaignId>` / `SHOW_AND_SELL_TOTAL` | Show-and-Sell totals (Stage 5) |
 
-No TTL. The join-code pointer, the membership guard, and the membership row are all
-reached by constructed-key strongly consistent base-table reads; join-code and
-membership checks in mutations never read a GSI.
+TTL: `expiresAtEpoch` (epoch seconds) — campaign-scoped idempotency markers (join
+now, sales later; data model §8.9) share the units table's marker TTL attribute
+and horizon convention. The join-code pointer, the membership guard, and the
+membership row are all reached by constructed-key strongly consistent base-table
+reads; join-code and membership checks in mutations never read a GSI.
 
 ## Query Flows
 

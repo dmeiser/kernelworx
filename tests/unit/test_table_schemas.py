@@ -3,6 +3,7 @@
 import pytest
 
 from tests.unit.table_schemas import (
+    MARKER_CAPABLE_TABLE_KEYS,
     TABLE_NAMES,
     create_accounts_table_schema,
     create_all_tables,
@@ -17,6 +18,13 @@ from tests.unit.table_schemas import (
     create_units_table_schema,
     get_all_table_schemas,
 )
+
+# Marker-capable table key -> fixture factory (data model §8.9). Mirrored by
+# the tofu contract test in test_show_and_sell_foundation_infra.py.
+MARKER_FACTORIES = {
+    "units": create_units_table_schema,
+    "unit_campaigns": create_unit_campaigns_table_schema,
+}
 
 
 class TestAccountsTableSchema:
@@ -339,6 +347,24 @@ class TestUnitsTableSchema:
         the legacy invites table's `expiresAt`. Idempotency markers reuse the same
         attribute name with a different (seven-day) horizon."""
         schema = create_units_table_schema()
+        assert schema["TimeToLiveSpecification"] == {"AttributeName": "expiresAtEpoch", "Enabled": True}
+
+
+class TestMarkerTtlContract:
+    """Every marker-capable table arms the marker TTL in its moto fixture.
+
+    Markers land in Show & Sell aggregate tables (unit-scoped in `units`,
+    campaign-scoped in `unit_campaigns`; data model §8.9). Enumerating the
+    shared contract tuple - rather than pinning one table and asserting
+    another's absence - is what keeps a future marker-capable table from
+    landing with no TTL at all.
+    """
+
+    @pytest.mark.parametrize("key", MARKER_CAPABLE_TABLE_KEYS)
+    def test_marker_ttl_is_numeric_epoch_seconds(self, key: str):
+        """The TTL is numeric epoch seconds on `expiresAtEpoch`, distinct from
+        the legacy invites table's string `expiresAt`."""
+        schema = MARKER_FACTORIES[key]()
         assert schema["TimeToLiveSpecification"] == {"AttributeName": "expiresAtEpoch", "Enabled": True}
 
 
