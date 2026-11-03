@@ -17,11 +17,12 @@ grant returns the current grant without incrementing adminCount).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.handlers.unit_operations import lambda_handler
 from tests.unit import show_sell_fixtures as fx
+from tests.unit.test_unit_operations_edges import _create_public_order_throttles_table
 
 
 def _seed(units_table: Any) -> Any:
@@ -189,11 +190,49 @@ class TestRedeemUnitInvite:
     def test_throttle_eleventh_failed_attempt_in_hour_is_rate_limited(self, units_table: Any) -> None:
         """Data model §6.6: only failed attempts count; attempt 11 in one UTC hour is RATE_LIMIT_EXCEEDED."""
         _seed(units_table)
+        _create_public_order_throttles_table()
         for n in range(10):
             payload = lambda_handler(_redeem("Devon", f"BOGUS{n:011d}", f"throttle-{n}"), None)
             fx.assert_is_error(payload, "NOT_FOUND")
         eleventh = lambda_handler(_redeem("Devon", "BOGUS0000000099", "throttle-10"), None)
         fx.assert_is_error(eleventh, "RATE_LIMIT_EXCEEDED")
+        # later failed attempts stay rate limited and the counter keeps its window shape
+        twelfth = lambda_handler(_redeem("Devon", "BOGUS0000000100", "throttle-11"), None)
+        fx.assert_is_error(twelfth, "RATE_LIMIT_EXCEEDED")
+
+    def test_failed_attempts_write_the_documented_throttle_shape(self, units_table: Any) -> None:
+        """Data model §6.6: the counter lives in the public_order_throttles table under
+        UNIT_INVITE_REDEMPTION#<accountId>#WINDOW#<yyyy-MM-ddTHH>, with windowStart /
+        attempts attributes and an epoch-second TTL horizon."""
+        _seed(units_table)
+        throttles = _create_public_order_throttles_table()
+        now = datetime.now(tz=timezone.utc)
+        window = now.strftime("%Y-%m-%dT%H")
+        for n in range(3):
+            fx.assert_is_error(
+                lambda_handler(_redeem("Devon", f"SHAPE{n:012d}", f"throttle-shape-{n}"), None),
+                "NOT_FOUND",
+            )
+        item = throttles.get_item(
+            Key={"key": f"UNIT_INVITE_REDEMPTION#{fx.account_id('Devon')}#WINDOW#{window}"}
+        )["Item"]
+        assert int(item["attempts"]) == 3
+        assert item["windowStart"] == window
+        assert int(item["expiresAt"]) > int(now.timestamp())
+        # no counter rows were ever written to the units table
+        assert not [i for i in units_table.scan()["Items"] if str(i.get("pk", "")).startswith("THROTTLE#")]
+
+    def test_valid_redemption_does_not_increment_the_counter(self, units_table: Any) -> None:
+        """A successful redemption (and an identical replay of one) leaves the
+        failure counter untouched."""
+        units = _seed(units_table)
+        throttles = _create_public_order_throttles_table()
+        payload = lambda_handler(_redeem("Devon", "PKT3149ACTIVE001", "throttle-valid"), None)
+        assert not payload.get("__isError"), payload
+        replay = lambda_handler(_redeem("Devon", "PKT3149ACTIVE001", "throttle-valid"), None)
+        assert not replay.get("__isError"), replay
+        assert throttles.scan()["Items"] == []
+        assert _get_unit(units, fx.PACK_3149)["adminCount"] == 2
 
 
 # ---------------------------------------------------------------------------

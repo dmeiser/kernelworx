@@ -883,10 +883,9 @@ resource "aws_iam_role_policy" "lambda_public_orders_ses" {
 # §4.2: ConditionCheckItem alone is not permission to call TransactWriteItems).
 # Scope is the `units` table and its GSIs only - markers, units, grants,
 # invites, and payment methods all live in the one aggregate table (data model
-# §6.1/§8.9). No S3, Cognito, or AppSync permissions: no Unit handler touches
-# those services. The Unit-invite redemption throttle (`public_order_throttles`
-# under the §6.6 key contract) is added to this role's scope with the
-# redeemUnitInvite handler slice, as its own review line.
+# §6.1/§8.9), and the Unit-invite redemption failure counter lives in
+# `public_order_throttles` under the §6.6 key contract. No S3, Cognito, or
+# AppSync permissions: no Unit handler touches those services.
 
 resource "aws_iam_role" "lambda_unit_execution" {
   name = "${var.name_prefix}-lambda-unit-exec${local.role_suffix}"
@@ -923,6 +922,8 @@ data "aws_iam_policy_document" "lambda_unit_dynamodb" {
     resources = [
       var.dynamodb_table_arns["units"],
       "${var.dynamodb_table_arns["units"]}/index/*",
+      # The Unit-invite redemption failure counter (data model §6.6).
+      var.dynamodb_table_arns["public_order_throttles"],
     ]
   }
 }

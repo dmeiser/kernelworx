@@ -16,15 +16,25 @@ from decimal import Decimal
 from typing import Any, Callable, Dict
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 from src.handlers import unit_operations as uop
 from src.handlers.unit_operations import lambda_handler
+from src.utils.mutations import (
+    MARKER_STATUS_COMPLETED,
+    marker_partition_key,
+    marker_sort_key,
+    normalized_fingerprint,
+)
 from tests.unit import show_sell_fixtures as fx
 
 _INJECTED = ClientError(
     {"Error": {"Code": "InternalServerError", "Message": "injected fault"}},
     "injected",
+)
+# A genuine transport fault: the one exception class the DEF-11 fallback is
+# authorized to contain (mutations.py classifies service verdicts). EndpointConnectionError is a BotoCoreError subclass.
+_TRANSPORT_FAULT = EndpointConnectionError(endpoint_url="https://dynamodb-fault.invalid"
 )
 
 
@@ -66,14 +76,71 @@ def _ok(payload: Any) -> Any:
     return payload
 
 
-def _pk_startswith(prefix: str) -> Callable[[str, Dict[str, Any]], bool]:
-    """Fault any op (get/put/delete) touching a row whose ``pk`` starts with ``prefix``."""
+def _wire_pk(kwargs: Dict[str, Any]) -> str:
+    """Read one row's pk from a Key/Item body in plain or wire (typed) form."""
+    body = kwargs.get("Key") or kwargs.get("Item") or {}
+    pk = body.get("pk", "")
+    if isinstance(pk, dict):
+        return str(pk.get("S", ""))
+    return str(pk)
 
-    def predicate(_op: str, kwargs: Dict[str, Any]) -> bool:
-        row = kwargs.get("Key") or kwargs.get("Item") or {}
-        return str(row.get("pk", "")).startswith(prefix)
+
+def _marker_operations(segment: str) -> Callable[[str, Dict[str, Any]], bool]:
+    """Fault writes touching an idempotency marker whose pk carries ``segment``.
+
+    Marker keys follow the data model §8.9 actor-scoped layout
+    (``IDEM#<actor>#<operation>#<scope>``); the handler helper names the
+    physical table, so predicates match on the operation segment.
+    """
+
+    def predicate(op: str, kwargs: Dict[str, Any]) -> bool:
+        pk = _wire_pk(kwargs)
+        return pk.startswith("IDEM#") and segment in pk
 
     return predicate
+
+
+class _FaultingClient:
+    """Plain-client stand-in for ``src.utils.mutations._get_client`` faults.
+
+    Marker reads and transactions go through the wire-form client, not the
+    resource table, so fault injection for those operations happens here.
+    """
+
+    def __init__(self, transact_exc: Exception = None, get_item_exc: Exception = None) -> None:
+        self._transact_exc = transact_exc
+        self._get_item_exc = get_item_exc
+
+    def get_item(self, **_kwargs: Any) -> Dict[str, Any]:
+        if self._get_item_exc is not None:
+            raise self._get_item_exc
+        return {}
+
+    def transact_write_items(self, **_kwargs: Any) -> None:
+        if self._transact_exc is not None:
+            raise self._transact_exc
+
+
+def _create_public_order_throttles_table() -> Any:
+    """Create the §6.6 throttles table (excluded from create_all_tables on
+    purpose so the seeded fixture-count contract stays exact)."""
+    import boto3
+
+    from tests.unit import table_schemas as schemas
+
+    schema = schemas.create_public_order_throttles_table_schema()
+    ttl = schema.pop("TimeToLiveSpecification", None)
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    table = dynamodb.create_table(**schema)
+    if ttl is not None:
+        dynamodb.meta.client.update_time_to_live(TableName=table.table_name, TimeToLiveSpecification=ttl)
+    return table
+
+
+def _fault_throttles(monkeypatch: pytest.MonkeyPatch, predicate: Callable[[str, Dict[str, Any]], bool]) -> None:
+    monkeypatch.setattr(
+        uop, "_throttles", lambda: _FlakyTable(_create_public_order_throttles_table(), predicate)
+    )
 
 
 def _create_input(**overrides: Any) -> Dict[str, Any]:
@@ -164,10 +231,49 @@ class TestCreateUnitEdges:
         # execute()'s real replay path answers with the committed result.
         assert again["unit"]["unitId"] == first["unit"]["unitId"]
 
+    def test_marker_race_verdict_reaches_the_caller(
+        self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An idempotency-key race surfaces as RESOURCE_BUSY and must never be
+        overridden by the DEF-11 fallback, which would write a second Unit under
+        a key the winner already committed (F4 adjudication)."""
+        import src.utils.mutations as mutations
+
+        class _RacingClient:
+            def get_item(self, **_kwargs: Any) -> Dict[str, Any]:
+                return {}
+
+            def transact_write_items(self, **_kwargs: Any) -> None:
+                raise ClientError(
+                    {
+                        "Error": {"Code": "TransactionCanceledException", "Message": "cancelled"},
+                        "CancellationReasons": [
+                            {
+                                "Code": "ConditionalCheckFailed",
+                                "Message": "lost the marker race",
+                                "Item": {
+                                    "pk": {"S": "IDEM#someone#createUnit#BOOTSTRAP"},
+                                    "sk": {"S": "IDEM#race-key"},
+                                    "fingerprint": {"S": "sha256:opaque"},
+                                    "status": {"S": "COMPLETED"},
+                                },
+                            }
+                        ],
+                    },
+                    "TransactWriteItems",
+                )
+
+        monkeypatch.setattr(mutations, "_get_client", lambda: _RacingClient())
+        before = sum(1 for i in units_table.scan()["Items"] if i["sk"] == "METADATA")
+        payload = lambda_handler(fx.unit_operation_event("createUnit", "Emery", input=_create_input()), None)
+        fx.assert_is_error(payload, "RESOURCE_BUSY")
+        after = sum(1 for i in units_table.scan()["Items"] if i["sk"] == "METADATA")
+        assert after == before  # no fresh write was applied over the winner
+
     def test_write_failure_falls_back_to_direct_put(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """transact_write_items fault -> unit AND its creator grant must both persist.
+        """transact_write_items *transport* fault -> unit AND its creator grant must both persist.
 
         The transaction stages three writes (marker, unit, grant); a fallback
         that writes only the unit leaves adminCount=1 with no GRANT# row, so
@@ -181,7 +287,7 @@ class TestCreateUnitEdges:
                 return {}
 
             def transact_write_items(self, **_kwargs: Any) -> None:
-                raise _INJECTED
+                raise _TRANSPORT_FAULT
 
         monkeypatch.setattr(mutations, "_get_client", lambda: _FailingClient())
         payload = _ok(lambda_handler(fx.unit_operation_event("createUnit", "Emery", input=_create_input()), None))
@@ -406,7 +512,7 @@ class TestUpdateUnitEdges:
                 return {}
 
             def transact_write_items(self, **_kwargs: Any) -> None:
-                raise _INJECTED
+                raise _TRANSPORT_FAULT
 
         monkeypatch.setattr(mutations, "_get_client", lambda: _FailingClient())
         payload = _ok(
@@ -426,6 +532,84 @@ class TestUpdateUnitEdges:
         assert payload["displayName"] == "Fallback Applied"
         stored = units_table.get_item(Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True)["Item"]
         assert stored["displayName"] == "Fallback Applied"
+
+    def test_stale_condition_surface_verdict_not_silent_overwrite(
+        self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The version condition inside the transaction is the concurrency backstop:
+        a write whose snapshot was superseded between the pre-check and the
+        transaction surfaces CONFLICT verdict verbatim, never falling back over
+        the concurrent commit."""
+        import src.utils.mutations as mutations
+
+        class _ConflictingClient:
+            def get_item(self, **_kwargs: Any) -> Dict[str, Any]:
+                return {}
+
+            def transact_write_items(self, **_kwargs: Any) -> None:
+                raise ClientError(
+                    {
+                        "Error": {"Code": "TransactionCanceledException", "Message": "cancelled"},
+                        "CancellationReasons": [{"Code": "ConditionalCheckFailedException"}],
+                    },
+                    "TransactWriteItems",
+                )
+
+        monkeypatch.setattr(mutations, "_get_client", lambda: _ConflictingClient())
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "updateUnit",
+                "Avery",
+                input={
+                    "unitId": fx.PACK_3149,
+                    "displayName": "Raced Away",
+                    "idempotency": {"idempotencyKey": "edge-condition-update"},
+                },
+            ),
+            None,
+        )
+        fx.assert_is_error(payload, "CONFLICT")
+        stored = units_table.get_item(Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True)["Item"]
+        assert stored["displayName"] != "Raced Away"
+        assert stored["version"] == 1
+
+    def test_retry_hash_ignores_key_padding_and_version_envelope(self, units_table: Any, seeded: Dict[str, Any]) -> None:
+        """F7: the updateUnit fingerprint carries request content only - the
+        idempotencyKey and the version envelope are not part of it, so a replay
+        sent with a padded key and without the version object still replays."""
+        first = _ok(
+            lambda_handler(
+                fx.unit_operation_event(
+                    "updateUnit",
+                    "Avery",
+                    input={
+                        "unitId": fx.PACK_3149,
+                        "version": {"expectedVersion": 1},
+                        "displayName": "Normalized Replay",
+                        "idempotency": {"idempotencyKey": "edge-normalized-1"},
+                    },
+                ),
+                None,
+            )
+        )
+        assert first["version"] == 2
+        retry = lambda_handler(
+            fx.unit_operation_event(
+                "updateUnit",
+                "Avery",
+                input={
+                    "unitId": fx.PACK_3149,
+                    "displayName": "Normalized Replay",
+                    "idempotency": {"idempotencyKey": "  edge-normalized-1  "},
+                },
+            ),
+            None,
+        )
+        assert not retry.get("__isError"), retry
+        assert retry["unitId"] == fx.PACK_3149
+        assert retry["version"] == 2  # replay, not a second write
+        stored = units_table.get_item(Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True)["Item"]
+        assert stored["version"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -482,9 +666,12 @@ class TestRevokeEdges:
             "NOT_FOUND",
         )
 
-    def test_write_failure_falls_back_to_direct_put(
+    def test_transaction_fault_verdict_is_reported_not_faked(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The revoke transaction stages the grant delete, count decrement and
+        version bump atomically; a fault surfaces as RESOURCE_BUSY with zero
+        partial effects, and the retry re-rules from a clean read."""
         import src.utils.mutations as mutations
 
         class _FailingClient:
@@ -492,27 +679,63 @@ class TestRevokeEdges:
                 return {}
 
             def transact_write_items(self, **_kwargs: Any) -> None:
-                raise _INJECTED
+                raise _TRANSPORT_FAULT
 
         meta = units_table.get_item(Key={"pk": f"UNIT#{fx.CREW_529}", "sk": "METADATA"}, ConsistentRead=True)["Item"]
         meta["adminCount"] = 2
         units_table.put_item(Item=meta)
         monkeypatch.setattr(mutations, "_get_client", lambda: _FailingClient())
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "revokeUnitAccessGrant",
+                "Avery",
+                input={
+                    "unitId": fx.CREW_529,
+                    "accountId": fx.account_id("Avery"),
+                    "idempotency": {"idempotencyKey": "edge-fallback-revoke"},
+                },
+            ),
+            None,
+        )
+        fx.assert_is_error(payload, "RESOURCE_BUSY")
+        stored = units_table.get_item(Key={"pk": f"UNIT#{fx.CREW_529}", "sk": "METADATA"}, ConsistentRead=True)["Item"]
+        assert stored["adminCount"] == 2
+        assert stored["version"] == 1
+        assert (
+            units_table
+            .get_item(
+                Key={"pk": f"UNIT#{fx.CREW_529}", "sk": f"GRANT#{fx.account_id('Avery')}"}, ConsistentRead=True
+            )
+            .get("Item")
+            is not None
+        )
+
+    def test_missing_grant_is_an_idempotent_noop(self, units_table: Any, seeded: Dict[str, Any]) -> None:
+        """Revoking a grant that does not exist (wrong accountId, or a concurrent
+        admin already revoked it) must not decrement adminCount or bump version."""
+        meta = units_table.get_item(Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True)["Item"]
+        meta["adminCount"] = 2
+        units_table.put_item(Item=meta)
         payload = _ok(
             lambda_handler(
                 fx.unit_operation_event(
                     "revokeUnitAccessGrant",
                     "Avery",
                     input={
-                        "unitId": fx.CREW_529,
-                        "accountId": fx.account_id("Avery"),
-                        "idempotency": {"idempotencyKey": "edge-fallback-revoke"},
+                        "unitId": fx.PACK_3149,
+                        "accountId": fx.account_id("Emery"),
+                        "version": {"expectedVersion": 1},
+                        "idempotency": {"idempotencyKey": "edge-revoke-noop"},
                     },
                 ),
                 None,
             )
         )
-        assert payload["adminCount"] == 1
+        assert payload["unitId"] == fx.PACK_3149
+        assert payload["adminCount"] == 2
+        stored = units_table.get_item(Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True)["Item"]
+        assert stored["adminCount"] == 2
+        assert stored["version"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -562,44 +785,58 @@ class TestCreateInviteEdges:
         )
         assert payload["inviteCode"] not in {"NAIVE00000000001", "GARBAGE000000001"}
 
-    def test_scan_failure_still_creates(
+    def test_cap_count_fault_fails_closed(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _fault(units_table, monkeypatch, lambda op, _kwargs: op == "scan")
-        payload = _ok(
-            lambda_handler(
-                fx.unit_operation_event(
-                    "createUnitInvite",
-                    "Riley",
-                    input={"unitId": fx.TROOP_7150, "idempotency": {"idempotencyKey": "edge-scan-fault"}},
-                ),
-                None,
-            )
-        )
-        assert payload["inviteCode"]
+        """A fault inside the 20-active-cap count fails the request closed: writing
+        blind would silently waive the cap (F3/F5 adjudication)."""
 
-    def test_marker_read_failure_still_creates(
+        def predicate(op: str, kwargs: Dict[str, Any]) -> bool:
+            return op == "query" and kwargs.get("IndexName") == "unitId-createdAt-index"
+
+        _fault(units_table, monkeypatch, predicate)
+        before = len([i for i in units_table.scan()["Items"] if str(i["pk"]).startswith("INVITE#")])
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "createUnitInvite",
+                "Riley",
+                input={"unitId": fx.TROOP_7150, "idempotency": {"idempotencyKey": "edge-cap-fault-closed"}},
+            ),
+            None,
+        )
+        fx.assert_is_error(payload, "RESOURCE_BUSY")
+        after = len([i for i in units_table.scan()["Items"] if str(i["pk"]).startswith("INVITE#")])
+        assert after == before
+
+    def test_marker_read_fault_refuses_to_run(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _fault(units_table, monkeypatch, _pk_startswith("IDEM#createUnitInvite"))
-        payload = _ok(
-            lambda_handler(
-                fx.unit_operation_event(
-                    "createUnitInvite",
-                    "Riley",
-                    input={"unitId": fx.TROOP_7150, "idempotency": {"idempotencyKey": "edge-marker-read-fault"}},
-                ),
-                None,
-            )
+        """A marker read the handler cannot resolve means it cannot prove no
+        identical request succeeded: refusal without a fresh write."""
+        import src.utils.mutations as mutations
+
+        monkeypatch.setattr(mutations, "_get_client", lambda: _FaultingClient(get_item_exc=_INJECTED))
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "createUnitInvite",
+                "Riley",
+                input={"unitId": fx.TROOP_7150, "idempotency": {"idempotencyKey": "edge-marker-read-fault"}},
+            ),
+            None,
         )
-        assert payload["inviteCode"]
+        fx.assert_is_error(payload, "INTERNAL_ERROR")
 
     def test_marker_replay_without_invite_mints_new_code(self, units_table: Any, seeded: Dict[str, Any]) -> None:
+        """A completed §8.9 marker whose invite row is gone is reaped: the retry
+        mints a fresh code instead of replaying a dead result."""
+        fp = normalized_fingerprint({"unitId": fx.TROOP_7150})
         units_table.put_item(
             Item={
-                "pk": f"IDEM#createUnitInvite#{fx.TROOP_7150}",
-                "sk": "IDEM#stale-replay-key",
-                "inviteCode": "ZZZZZZZZZZZZZZZZ",
+                "pk": marker_partition_key(fx.account_id("Riley"), "createUnitInvite", fx.TROOP_7150),
+                "sk": marker_sort_key("stale-replay-key"),
+                "fingerprint": fp,
+                "status": MARKER_STATUS_COMPLETED,
+                "resultId": "ZZZZZZZZZZZZZZZZ",
                 "expiresAtEpoch": int(datetime.now(timezone.utc).timestamp()) + 86400,
             }
         )
@@ -621,21 +858,26 @@ class TestCreateInviteEdges:
             is not None
         )
 
-    def test_marker_write_failure_swallowed(
+    def test_marker_write_fault_refuses_to_mint(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _fault(units_table, monkeypatch, _pk_startswith("IDEM#createUnitInvite"))
-        payload = _ok(
-            lambda_handler(
-                fx.unit_operation_event(
-                    "createUnitInvite",
-                    "Riley",
-                    input={"unitId": fx.TROOP_7150, "idempotency": {"idempotencyKey": "edge-marker-write-fault"}},
-                ),
-                None,
-            )
+        """The invite and its marker commit atomically: a transaction fault writes
+        nothing (no un-marked active invite a retry would double)."""
+        import src.utils.mutations as mutations
+
+        monkeypatch.setattr(mutations, "_get_client", lambda: _FaultingClient(transact_exc=_INJECTED))
+        before = len([i for i in units_table.scan()["Items"] if str(i["pk"]).startswith("INVITE#")])
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "createUnitInvite",
+                "Riley",
+                input={"unitId": fx.TROOP_7150, "idempotency": {"idempotencyKey": "edge-marker-write-fault"}},
+            ),
+            None,
         )
-        assert payload["inviteCode"]
+        fx.assert_is_error(payload, "INTERNAL_ERROR")
+        after = len([i for i in units_table.scan()["Items"] if str(i["pk"]).startswith("INVITE#")])
+        assert after == before
 
 
 # ---------------------------------------------------------------------------
@@ -677,51 +919,64 @@ class TestRedeemEdges:
             "UNAUTHORIZED",
         )
 
-    def test_marker_read_failure_proceeds(
+    def test_marker_read_fault_refuses_to_run(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _fault(units_table, monkeypatch, _pk_startswith("IDEM#redeemUnitInvite"))
-        payload = _ok(
-            lambda_handler(
-                fx.unit_operation_event(
-                    "redeemUnitInvite",
-                    "Devon",
-                    input={
-                        "inviteCode": "TRP7150ACTIVE001",
-                        "idempotency": {"idempotencyKey": "edge-redeem-read-fault"},
-                    },
-                ),
-                None,
-            )
-        )
-        assert payload["sk"] == f"GRANT#{fx.account_id('Devon')}"
+        """A marker read the handler cannot resolve keeps the runner's verdict:
+        refusing beats minting a second grant under one key."""
+        import src.utils.mutations as mutations
 
-    def test_marker_without_unit_id_proceeds(self, units_table: Any, seeded: Dict[str, Any]) -> None:
+        monkeypatch.setattr(mutations, "_get_client", lambda: _FaultingClient(get_item_exc=_INJECTED))
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "redeemUnitInvite",
+                "Devon",
+                input={
+                    "inviteCode": "TRP7150ACTIVE001",
+                    "idempotency": {"idempotencyKey": "edge-redeem-read-fault"},
+                },
+            ),
+            None,
+        )
+        fx.assert_is_error(payload, "INTERNAL_ERROR")
+
+    def test_marker_without_result_ref_refuses_to_run(self, units_table: Any, seeded: Dict[str, Any]) -> None:
+        """A completed §8.9 marker with no result reference cannot be replayed:
+        the runner's refusal verdict reaches the caller instead of a re-run."""
         units_table.put_item(
             Item={
-                "pk": "IDEM#redeemUnitInvite#TRP7150ACTIVE001",
-                "sk": "IDEM#rk-no-unit-id",
+                "pk": marker_partition_key(fx.account_id("Devon"), "redeemUnitInvite", "TRP7150ACTIVE001"),
+                "sk": marker_sort_key("rk-no-result-ref"),
+                "fingerprint": normalized_fingerprint({"inviteCode": "TRP7150ACTIVE001"}),
+                "status": MARKER_STATUS_COMPLETED,
                 "expiresAtEpoch": int(datetime.now(timezone.utc).timestamp()) + 86400,
             }
         )
-        payload = _ok(
-            lambda_handler(
-                fx.unit_operation_event(
-                    "redeemUnitInvite",
-                    "Devon",
-                    input={"inviteCode": "TRP7150ACTIVE001", "idempotency": {"idempotencyKey": "rk-no-unit-id"}},
-                ),
-                None,
-            )
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "redeemUnitInvite",
+                "Devon",
+                input={"inviteCode": "TRP7150ACTIVE001", "idempotency": {"idempotencyKey": "rk-no-result-ref"}},
+            ),
+            None,
         )
-        assert payload["sk"] == f"GRANT#{fx.account_id('Devon')}"
+        fx.assert_is_error(payload, "INTERNAL_ERROR")
+        # Nothing was written below the refused replay.
+        grant = units_table.get_item(
+            Key={"pk": f"UNIT#{fx.TROOP_7150}", "sk": f"GRANT#{fx.account_id('Devon')}"}, ConsistentRead=True
+        )
+        assert "Item" not in grant
 
     def test_marker_with_missing_grant_proceeds(self, units_table: Any, seeded: Dict[str, Any]) -> None:
+        """A completed marker whose grant row is gone is reaped and the live
+        invite is re-redeemable: the stale marker never wedges the caller."""
         units_table.put_item(
             Item={
-                "pk": "IDEM#redeemUnitInvite#TRP7150ACTIVE001",
-                "sk": "IDEM#rk-stale-grant",
-                "unitId": fx.TROOP_7150,
+                "pk": marker_partition_key(fx.account_id("Devon"), "redeemUnitInvite", "TRP7150ACTIVE001"),
+                "sk": marker_sort_key("rk-stale-grant"),
+                "fingerprint": normalized_fingerprint({"inviteCode": "TRP7150ACTIVE001"}),
+                "status": MARKER_STATUS_COMPLETED,
+                "resultId": fx.TROOP_7150,
                 "expiresAtEpoch": int(datetime.now(timezone.utc).timestamp()) + 86400,
             }
         )
@@ -740,7 +995,9 @@ class TestRedeemEdges:
     def test_throttle_counter_write_failure_swallowed(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _fault(units_table, monkeypatch, _pk_startswith("THROTTLE#"))
+        """A genuinely unavailable failure counter stays best-effort: the
+        NOT_FOUND verdict for the attempt itself still reaches the caller."""
+        _fault_throttles(monkeypatch, lambda op, _kwargs: op == "update_item")
         fx.assert_is_error(
             lambda_handler(
                 fx.unit_operation_event(
@@ -752,22 +1009,6 @@ class TestRedeemEdges:
             ),
             "NOT_FOUND",
         )
-
-    def test_throttle_read_failure_ignored(
-        self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        _fault(units_table, monkeypatch, _pk_startswith("THROTTLE#"))
-        payload = _ok(
-            lambda_handler(
-                fx.unit_operation_event(
-                    "redeemUnitInvite",
-                    "Devon",
-                    input={"inviteCode": "TRP7150ACTIVE001", "idempotency": {"idempotencyKey": "edge-throttle-read"}},
-                ),
-                None,
-            )
-        )
-        assert payload["sk"] == f"GRANT#{fx.account_id('Devon')}"
 
     def test_consistent_query_failure_falls_back(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
@@ -888,24 +1129,33 @@ class TestRedeemEdges:
         )
         assert payload["sk"] == f"GRANT#{fx.account_id('Emery')}"
 
-    def test_marker_write_failure_swallowed(
+    def test_marker_write_fault_refuses_to_grant(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _fault(units_table, monkeypatch, _pk_startswith("IDEM#redeemUnitInvite"))
-        payload = _ok(
-            lambda_handler(
-                fx.unit_operation_event(
-                    "redeemUnitInvite",
-                    "Emery",
-                    input={
-                        "inviteCode": "PKT3149ACTIVE001",
-                        "idempotency": {"idempotencyKey": "edge-redeem-write-fault"},
-                    },
-                ),
-                None,
-            )
+        """Grant, invite burn and adminCount sync commit atomically with the
+        marker: a transaction fault writes nothing and surfaces verbatim."""
+        import src.utils.mutations as mutations
+
+        monkeypatch.setattr(mutations, "_get_client", lambda: _FaultingClient(transact_exc=_INJECTED))
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "redeemUnitInvite",
+                "Emery",
+                input={
+                    "inviteCode": "PKT3149ACTIVE001",
+                    "idempotency": {"idempotencyKey": "edge-redeem-write-fault"},
+                },
+            ),
+            None,
         )
-        assert payload["sk"] == f"GRANT#{fx.account_id('Emery')}"
+        fx.assert_is_error(payload, "INTERNAL_ERROR")
+        # the invite was not burned by the aborted transaction
+        assert (
+            units_table.get_item(
+                Key={"pk": "INVITE#PKT3149ACTIVE001", "sk": f"UNIT#{fx.PACK_3149}"}, ConsistentRead=True
+            ).get("Item")
+            is not None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -926,10 +1176,10 @@ class TestQueryEdges:
             lambda_handler(fx.unit_operation_event("unit", "Avery", arguments={"unitId": fx.PACK_3149}), None) is None
         )
 
-    def test_my_units_scan_failure_returns_empty(
+    def test_my_units_index_query_failure_returns_empty(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _fault(units_table, monkeypatch, lambda op, _kwargs: op == "scan")
+        _fault(units_table, monkeypatch, lambda op, _kw: op == "query" and _kw.get("IndexName") == "accountId-unitId-index")
         payload = _ok(lambda_handler(fx.unit_operation_event("myUnits", "Avery"), None))
         assert payload["items"] == []
         assert payload["pageInfo"]["hasNextPage"] is False
@@ -959,10 +1209,10 @@ class TestQueryEdges:
         payload = _ok(lambda_handler(fx.unit_operation_event("myUnits", "Avery"), None))
         assert sorted(u["unitId"] for u in payload["items"]) == sorted([fx.PACK_3149, fx.CREW_529])
 
-    def test_unit_admins_scan_failure_returns_empty(
+    def test_unit_admins_base_query_failure_returns_empty(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        _fault(units_table, monkeypatch, lambda op, _kwargs: op == "scan")
+        _fault(units_table, monkeypatch, lambda op, kw: op == "query" and "IndexName" not in kw)
         payload = _ok(
             lambda_handler(fx.unit_operation_event("unitAdmins", "Riley", arguments={"unitId": fx.TROOP_7150}), None)
         )

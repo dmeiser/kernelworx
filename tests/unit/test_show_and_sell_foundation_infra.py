@@ -58,10 +58,12 @@ ENVIRONMENT_DIRS = ("dev", "prod", "ephemeral")
 NEW_TABLES = ("units", "unit_campaigns")
 
 # The Show & Sell domain roles (gate verdict (f) on PR #912): each is the ONLY
-# IAM grant on its table, scoped to the table plus its GSIs.
+# IAM grant on its table, scoped to the table plus its GSIs. The unit role also
+# carries the Unit-invite redemption failure counter table (data model §6.6),
+# which no other role touches.
 DOMAIN_ROLES = {
-    "lambda_unit_execution": "units",
-    "lambda_unit_campaign_execution": "unit_campaigns",
+    "lambda_unit_execution": ("units", 'var.dynamodb_table_arns["public_order_throttles"]'),
+    "lambda_unit_campaign_execution": ("unit_campaigns", None),
 }
 
 # logical table key -> Lambda environment variable name (impact map §4.4).
@@ -271,7 +273,7 @@ def test_unit_domain_roles_exist_with_the_scoped_transact_write_grant():
     policies = _resources(doc, "aws_iam_role_policy")
     attachments = _resources(doc, "aws_iam_role_policy_attachment")
     documents = _data_documents(doc, "aws_iam_policy_document")
-    for role_label, table_key in DOMAIN_ROLES.items():
+    for role_label, extra_key in DOMAIN_ROLES.items():
         policy_label = role_label.replace("_execution", "_dynamodb")
         basic_label = role_label.replace("_execution", "_basic")
         assert role_label in roles, f"missing aws_iam_role.{role_label}"
@@ -287,10 +289,16 @@ def test_unit_domain_roles_exist_with_the_scoped_transact_write_grant():
         # table list, and never the other domain's table.
         resources = [str(resource) for resource in _as_list(statements[0]["resources"])]
         # hcl2 keeps the quoted form for the interpolated index ARN.
-        assert resources == [
+        table_key, extra = extra_key
+        expected = [
             f'${{var.dynamodb_table_arns["{table_key}"]}}',
             f'"${{var.dynamodb_table_arns["{table_key}"]}}/index/*"',
-        ], f"{policy_label} resources must be the {table_key} table plus its indexes only: {resources}"
+        ]
+        if extra is not None:
+            expected.append(f"${{{extra}}}")
+        assert resources == expected, (
+            f"{policy_label} resources must be the {table_key} table plus its indexes only: {resources}"
+        )
         other = set(NEW_TABLES) - {table_key}
         assert not any(other_table in resource for resource in resources for other_table in other)
 
