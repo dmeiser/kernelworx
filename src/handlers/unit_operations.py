@@ -238,14 +238,6 @@ def update_unit(event, context):
         raise AppError(ErrorCode.INVALID_INPUT, "unitId is required")
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
-    resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
-    item = resp.get("Item")
-    if not item:
-        raise AppError(ErrorCode.NOT_FOUND, "Unit not found")
-    version_input = args.get("version", {}) or {}
-    expected = version_input.get("expectedVersion")
-    if expected is not None and int(expected) != int(item.get("version", 0)):
-        raise AppError(ErrorCode.CONFLICT, "Version mismatch")
     idempotency = args.get("idempotency", {}) or {}
     key = idempotency.get("idempotencyKey")
     if not key:
@@ -262,7 +254,22 @@ def update_unit(event, context):
     fp = normalized_fingerprint(args)
     existing = runner.load_marker(mk)
     if existing:
-        return _get_unit(unit_id)
+        rid = (
+            existing.get("resultId", {}).get("S")
+            if isinstance(existing.get("resultId"), dict)
+            else existing.get("resultId")
+        )
+        return _get_unit(rid) if rid else _get_unit(unit_id)
+    resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
+    item = resp.get("Item")
+    if not item:
+        raise AppError(ErrorCode.NOT_FOUND, "Unit not found")
+    version_input = args.get("version", {}) or {}
+    expected = version_input.get("expectedVersion")
+    if expected is None:
+        expected = args.get("expectedVersion")
+    if expected is not None and int(expected) != int(item.get("version", 0)):
+        raise AppError(ErrorCode.CONFLICT, "Version mismatch")
     # apply updates
     for f in ("unitType", "unitNumber", "city", "state", "displayName", "timezone", "splitDefault", "councilNeedBasis"):
         if args.get(f) is not None:
