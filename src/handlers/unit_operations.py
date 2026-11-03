@@ -11,9 +11,11 @@ except ModuleNotFoundError:  # pragma: no cover
 
 get_caller_id = import_from_utils("appsync_types", "get_caller_id")
 tables = import_from_utils("dynamodb", "tables")
-from boto3.dynamodb.types import TypeSerializer as _TS
+try:
+    from utils.mutations import WritePlan, marker_keys, normalized_fingerprint
+except ModuleNotFoundError:
+    from ..utils.mutations import WritePlan, marker_keys, normalized_fingerprint
 
-_ts = _TS()
 AppError, ErrorCode = import_from_utils("errors", "AppError", "ErrorCode")
 with_error_handling = import_from_utils("handlers", "lambda_handler")
 get_logger = import_from_utils("logging", "get_logger")
@@ -26,7 +28,14 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:  # pragma: no cover
     pass
 
+def _serialize(value):
+    from boto3.dynamodb.types import TypeSerializer
+
+    return TypeSerializer().serialize(value)
+
+
 logger = get_logger(__name__)
+_ts = None
 VALID_SPLIT = {"EQUAL", "TIME_WORKED"}
 VALID_BASIS = {"PHYSICAL_STOCK", "AFTER_ASSIGNMENTS"}
 
@@ -37,6 +46,11 @@ def _units():
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _get_unit(unit_id: str):
+    resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
+    return resp.get("Item")
 
 
 def _unit_pk(unit_id: str) -> str:
@@ -163,8 +177,8 @@ def create_unit(event, context):
     )
     plan = WritePlan()
     runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
-    plan.add("Put", {"TableName": _units().name, "Item": {k: _ts.serialize(v) for k, v in item.items()}})
-    plan.add("Put", {"TableName": _units().name, "Item": {k: _ts.serialize(v) for k, v in grant_item.items()}})
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in item.items()}})
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in grant_item.items()}})
     runner.execute(
         mk,
         plan,
@@ -222,7 +236,7 @@ def update_unit(event, context):
     item["updatedAt"] = _now()
     plan = WritePlan()
     runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
-    plan.add("Put", {"TableName": _units().name, "Item": {k: _ts.serialize(v) for k, v in item.items()}})
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in item.items()}})
     try:
         runner.execute(
             mk, plan, operation="updateUnit", fingerprint=fp, result_id=unit_id, load_result=lambda rid: _get_unit(rid)
@@ -269,7 +283,7 @@ def revoke_unit_access_grant(event, context):
     item["updatedAt"] = _now()
     plan = WritePlan()
     runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
-    plan.add("Put", {"TableName": _units().name, "Item": {k: _ts.serialize(v) for k, v in item.items()}})
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in item.items()}})
     try:
         runner.execute(
             mk,
