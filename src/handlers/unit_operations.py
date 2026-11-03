@@ -523,7 +523,6 @@ def unit_invites(event, context):
     caller = get_caller_id(event)
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
-    # query GSI unitId-createdAt-index (sparse)
     try:
         resp = _units().query(
             IndexName="unitId-createdAt-index",
@@ -532,7 +531,31 @@ def unit_invites(event, context):
         )
     except Exception:
         resp = {"Items": []}
-    return {"items": resp.get("Items", []), "pageInfo": {"endCursor": None, "hasNextPage": False}}
+    now = datetime.now(timezone.utc)
+    items = []
+    for x in resp.get("Items", []):
+        if not str(x.get("pk", "")).startswith("INVITE#"):
+            continue
+        try:
+            exp = datetime.fromisoformat(str(x.get("expiresAt")).replace("Z", "+00:00"))
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp < now:
+                continue
+        except Exception:
+            pass
+        items.append(x)
+    limit, cursor = _parse_page(args)
+    if cursor:
+        try:
+            start = int(cursor)
+        except ValueError:
+            start = 0
+    else:
+        start = 0
+    page_items = items[start : start + limit]
+    next_cursor = str(start + limit) if start + limit < len(items) else None
+    return {"items": page_items, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
 
 
 _HANDLERS = {
