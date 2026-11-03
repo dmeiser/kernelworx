@@ -164,6 +164,39 @@ class TestCreateUnitEdges:
         # execute()'s real replay path answers with the committed result.
         assert again["unit"]["unitId"] == first["unit"]["unitId"]
 
+    def test_write_failure_falls_back_to_direct_put(
+        self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """transact_write_items fault -> unit AND its creator grant must both persist.
+
+        The transaction stages three writes (marker, unit, grant); a fallback
+        that writes only the unit leaves adminCount=1 with no GRANT# row, so
+        the unit is unadministrable and invisible to myUnits. Both rows are
+        the contract.
+        """
+        import src.utils.mutations as mutations
+
+        class _FailingClient:
+            def get_item(self, **_kwargs: Any) -> Dict[str, Any]:
+                return {}
+
+            def transact_write_items(self, **_kwargs: Any) -> None:
+                raise _INJECTED
+
+        monkeypatch.setattr(mutations, "_get_client", lambda: _FailingClient())
+        payload = _ok(lambda_handler(fx.unit_operation_event("createUnit", "Emery", input=_create_input()), None))
+        unit_id = payload["unit"]["unitId"]
+        assert (
+            units_table.get_item(Key={"pk": f"UNIT#{unit_id}", "sk": "METADATA"}, ConsistentRead=True).get("Item")
+            is not None
+        )
+        assert (
+            units_table.get_item(
+                Key={"pk": f"UNIT#{unit_id}", "sk": f"GRANT#{fx.account_id('Emery')}"}, ConsistentRead=True
+            ).get("Item")
+            is not None
+        )
+
     def test_duplicate_lookup_failure_allows_create(
         self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -297,6 +330,28 @@ class TestUpdateUnitEdges:
         )
         assert payload["city"] == before["city"]
         assert payload["metadataKey"] == before["metadataKey"]
+
+    def test_non_string_city_takes_no_strip_path(self, seeded: Dict[str, Any]) -> None:
+        """Defensive arc: a non-string city reaches the branch but skips strip().
+
+        Unreachable through AppSync (the GraphQL schema types ``city`` as
+        String), so this only pins that the handler does not 500 on the guard.
+        """
+        payload = _ok(
+            lambda_handler(
+                fx.unit_operation_event(
+                    "updateUnit",
+                    "Avery",
+                    input={
+                        "unitId": fx.PACK_3149,
+                        "city": 123,
+                        "idempotency": {"idempotencyKey": "edge-city-garbage"},
+                    },
+                ),
+                None,
+            )
+        )
+        assert payload["unitId"] == fx.PACK_3149
 
     def test_non_finite_decimal_unit_number_is_internal_error(self, seeded: Dict[str, Any]) -> None:
         fx.assert_is_error(
