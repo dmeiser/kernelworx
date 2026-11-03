@@ -23,8 +23,8 @@ import {
 import { useNavigate, type NavigateFunction } from 'react-router-dom';
 import { resetPassword, confirmResetPassword } from 'aws-amplify/auth';
 import { useAuth } from '../contexts/AuthContext';
+import { PASSWORD_REGEX } from '../lib/authUtils';
 
-const PASSWORD_REGEX = /^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{15,}$/;
 const CONFIRM_CODE_REGEX = /^\d{6}$/;
 const POST_RESET_REDIRECT_MS = 1500;
 const RESEND_COOLDOWN_MS = 30000;
