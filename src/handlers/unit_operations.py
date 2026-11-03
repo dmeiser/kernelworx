@@ -555,26 +555,35 @@ def redeem_unit_invite(event, context):
 
 
 def my_units(event, context):
+    args = event.get("arguments", {}) or {}
     caller = get_caller_id(event)
-    # query GSI accountId-unitId-index
+    grants = []
     try:
-        resp = _units().query(
-            IndexName="accountId-unitId-index",
-            KeyConditionExpression="accountId = :a",
-            ExpressionAttributeValues={":a": caller},
-        )
+        for x in _units().scan().get("Items", []):
+            if str(x.get("sk", "")).startswith("GRANT#") and x.get("accountId") == caller:
+                grants.append(x)
     except Exception:
-        resp = {"Items": []}
-    grants = resp.get("Items", [])
+        grants = []
+    grants.sort(key=lambda g: g.get("unitId", ""))
+    limit, cursor = _parse_page(args)
+    if cursor:
+        try:
+            start = int(cursor)
+        except ValueError:
+            start = 0
+    else:
+        start = 0
+    page_grants = grants[start : start + limit]
     units = []
-    for g in grants:
+    for g in page_grants:
         uid = g.get("unitId")
         if not uid:
             continue
         meta = _units().get_item(Key={"pk": _unit_pk(uid), "sk": "METADATA"}, ConsistentRead=True).get("Item")
         if meta:
             units.append(meta)
-    return {"items": units, "pageInfo": {"endCursor": None, "hasNextPage": False}}
+    next_cursor = str(start + limit) if start + limit < len(grants) else None
+    return {"items": units, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
 
 
 def unit(event, context):
@@ -593,12 +602,25 @@ def unit_admins(event, context):
     caller = get_caller_id(event)
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
-    resp = _units().query(
-        KeyConditionExpression="pk = :pk AND begins_with(sk, :sk)",
-        ExpressionAttributeValues={":pk": _unit_pk(unit_id), ":sk": "GRANT#"},
-    )
-    items = resp.get("Items", [])
-    return {"items": items, "pageInfo": {"endCursor": None, "hasNextPage": False}}
+    grants = []
+    try:
+        for x in _units().scan().get("Items", []):
+            if x.get("pk") == _unit_pk(unit_id) and str(x.get("sk", "")).startswith("GRANT#"):
+                grants.append(x)
+    except Exception:
+        grants = []
+    grants.sort(key=lambda g: g.get("sk", ""))
+    limit, cursor = _parse_page(args)
+    if cursor:
+        try:
+            start = int(cursor)
+        except ValueError:
+            start = 0
+    else:
+        start = 0
+    page_items = grants[start : start + limit]
+    next_cursor = str(start + limit) if start + limit < len(grants) else None
+    return {"items": page_items, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
 
 
 def _parse_page(args):
