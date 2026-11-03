@@ -421,7 +421,6 @@ def create_unit_invite(event, context):
         m = None
     if m and m.get("inviteCode"):
         code = m["inviteCode"]
-        # fetch invite
         inv = _units().get_item(Key={"pk": f"INVITE#{code}", "sk": f"UNIT#{unit_id}"}, ConsistentRead=True).get("Item")
         if inv:
             return inv
