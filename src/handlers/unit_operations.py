@@ -374,7 +374,9 @@ def revoke_unit_access_grant(event, context):
         raise AppError(ErrorCode.CONFLICT, "Version mismatch")
     if int(item.get("adminCount", 0)) <= 1:
         raise AppError(ErrorCode.CONFLICT, "Cannot revoke last admin")
-    grant = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": f"GRANT#{account_id}"}, ConsistentRead=True).get("Item")
+    grant = (
+        _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": f"GRANT#{account_id}"}, ConsistentRead=True).get("Item")
+    )
     if not grant:
         return item
     item["adminCount"] = int(item["adminCount"]) - 1
@@ -451,11 +453,7 @@ def create_unit_invite(event, context):
     fp = normalized_fingerprint({"unitId": unit_id})
 
     def load_invite(rid):
-        return (
-            _units()
-            .get_item(Key={"pk": f"INVITE#{rid}", "sk": f"UNIT#{unit_id}"}, ConsistentRead=True)
-            .get("Item")
-        )
+        return _units().get_item(Key={"pk": f"INVITE#{rid}", "sk": f"UNIT#{unit_id}"}, ConsistentRead=True).get("Item")
 
     handled, repl = runner.replay_or_reject(mk, fp, operation="createUnitInvite", load_result=load_invite)
     if handled:
@@ -550,11 +548,7 @@ def redeem_unit_invite(event, context):
     fp = normalized_fingerprint({"inviteCode": code})
 
     def load_redeem_grant(rid):
-        return (
-            _units()
-            .get_item(Key={"pk": _unit_pk(rid), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
-            .get("Item")
-        )
+        return _units().get_item(Key={"pk": _unit_pk(rid), "sk": f"GRANT#{caller}"}, ConsistentRead=True).get("Item")
 
     handled, repl = runner.replay_or_reject(mk, fp, operation="redeemUnitInvite", load_result=load_redeem_grant)
     if handled:

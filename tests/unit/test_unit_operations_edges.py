@@ -611,6 +611,181 @@ class TestUpdateUnitEdges:
         stored = units_table.get_item(Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True)["Item"]
         assert stored["version"] == 2
 
+    def test_fallback_put_condition_failure_returns_committed_state(
+        self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R3: the fallback Put carries the same version ConditionExpression as
+        the staged one. When the fallback Put itself loses the race (its
+        condition fails), the handler must read the committed state and return
+        it - never overwrite the concurrent commit, never silently undo it."""
+        import src.utils.mutations as mutations
+
+        condition_failed = ClientError(
+            {
+                "Error": {
+                    "Code": "ConditionalCheckFailedException",
+                    "Message": "the conditional request failed",
+                }
+            },
+            "PutItem",
+        )
+
+        class _RacingTable:
+            """Faults only the fallback Put; reads delegate to the real table."""
+
+            def __init__(self, real: Any) -> None:
+                self._real = real
+
+            @property
+            def name(self) -> str:
+                return self._real.name
+
+            def put_item(self, **_kwargs: Any) -> Dict[str, Any]:
+                raise condition_failed
+
+            def __getattr__(self, attr_name: str) -> Any:
+                return getattr(self._real, attr_name)
+
+        class _FailingClient:
+            def get_item(self, **_kwargs: Any) -> Dict[str, Any]:
+                return {}
+
+            def transact_write_items(self, **_kwargs: Any) -> None:
+                raise _TRANSPORT_FAULT
+
+        monkeypatch.setattr(mutations, "_get_client", lambda: _FailingClient())
+        monkeypatch.setattr(uop, "_units", lambda: _RacingTable(units_table))
+        stored_before = units_table.get_item(
+            Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True
+        )["Item"]
+        payload = _ok(
+            lambda_handler(
+                fx.unit_operation_event(
+                    "updateUnit",
+                    "Avery",
+                    input={
+                        "unitId": fx.PACK_3149,
+                        "displayName": "Raced Away By Fallback Put",
+                        "idempotency": {"idempotencyKey": "edge-fallback-race"},
+                    },
+                ),
+                None,
+            )
+        )
+        # The committed (concurrent) state is returned, not the stale snapshot.
+        assert payload["unitId"] == fx.PACK_3149
+        assert payload.get("displayName") != "Raced Away By Fallback Put"
+        assert payload["version"] == stored_before["version"]
+        stored_after = units_table.get_item(
+            Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True
+        )["Item"]
+        assert stored_after == stored_before
+
+    def test_fallback_put_condition_failure_with_missing_unit_raises(
+        self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If even the committed read comes back empty after a failed fallback
+        Put, the handler has nothing true to report and must re-raise."""
+        import src.utils.mutations as mutations
+
+        condition_failed = ClientError(
+            {
+                "Error": {
+                    "Code": "ConditionalCheckFailedException",
+                    "Message": "the conditional request failed",
+                }
+            },
+            "PutItem",
+        )
+
+        class _RacingTable:
+            def __init__(self, real: Any) -> None:
+                self._real = real
+
+            @property
+            def name(self) -> str:
+                return self._real.name
+
+            def put_item(self, **_kwargs: Any) -> Dict[str, Any]:
+                raise condition_failed
+
+            def __getattr__(self, attr_name: str) -> Any:
+                return getattr(self._real, attr_name)
+
+        class _FailingClient:
+            def get_item(self, **_kwargs: Any) -> Dict[str, Any]:
+                return {}
+
+            def transact_write_items(self, **_kwargs: Any) -> None:
+                raise _TRANSPORT_FAULT
+
+        monkeypatch.setattr(mutations, "_get_client", lambda: _FailingClient())
+        monkeypatch.setattr(uop, "_units", lambda: _RacingTable(units_table))
+        monkeypatch.setattr(uop, "_get_unit", lambda rid: None)
+        fx.assert_is_error(
+            lambda_handler(
+                fx.unit_operation_event(
+                    "updateUnit",
+                    "Avery",
+                    input={
+                        "unitId": fx.PACK_3149,
+                        "displayName": "Vanished Mid-flight",
+                        "idempotency": {"idempotencyKey": "edge-fallback-vanish"},
+                    },
+                ),
+                None,
+            ),
+            "INTERNAL_ERROR",
+        )
+
+    def test_fallback_put_unexpected_error_not_swallowed(
+        self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A generic service fault from the fallback Put is neither contained
+        nor swallowed: the handler surfaces the error verdict."""
+        import src.utils.mutations as mutations
+
+        class _FailingTable:
+            def __init__(self, real: Any) -> None:
+                self._real = real
+
+            @property
+            def name(self) -> str:
+                return self._real.name
+
+            def put_item(self, **_kwargs: Any) -> Dict[str, Any]:
+                raise _INJECTED
+
+            def __getattr__(self, attr_name: str) -> Any:
+                return getattr(self._real, attr_name)
+
+        class _FailingClient:
+            def get_item(self, **_kwargs: Any) -> Dict[str, Any]:
+                return {}
+
+            def transact_write_items(self, **_kwargs: Any) -> None:
+                raise _TRANSPORT_FAULT
+
+        monkeypatch.setattr(mutations, "_get_client", lambda: _FailingClient())
+        monkeypatch.setattr(uop, "_units", lambda: _FailingTable(units_table))
+        payload = lambda_handler(
+            fx.unit_operation_event(
+                "updateUnit",
+                "Avery",
+                input={
+                    "unitId": fx.PACK_3149,
+                    "displayName": "Double Fault",
+                    "idempotency": {"idempotencyKey": "edge-fallback-other-fault"},
+                },
+            ),
+            None,
+        )
+        assert isinstance(payload, dict) and payload.get("__isError") is True, payload
+        stored = units_table.get_item(
+            Key={"pk": f"UNIT#{fx.PACK_3149}", "sk": "METADATA"}, ConsistentRead=True
+        )["Item"]
+        assert stored["displayName"] != "Double Fault"
+
 
 # ---------------------------------------------------------------------------
 # revoke_unit_access_grant edges
@@ -1195,6 +1370,39 @@ class TestQueryEdges:
         payload = _ok(lambda_handler(fx.unit_operation_event("myUnits", "Avery"), None))
         assert payload["items"] == []
         assert payload["pageInfo"]["hasNextPage"] is False
+
+    def test_my_units_skips_grant_row_missing_unit_id(
+        self, units_table: Any, seeded: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A projected grant row without a unitId cannot name a unit, so the
+        page skips it (`continue`) rather than crashing on a malformed GetItem
+        key - the real GSI cannot project such a row, so the projection is
+        injected at the query boundary."""
+        avery = fx.account_id("Avery")
+
+        class _GraftedGrantTable:
+            def __init__(self, real: Any) -> None:
+                self._real = real
+
+            @property
+            def name(self) -> str:
+                return self._real.name
+
+            def query(self, **kwargs: Any) -> Dict[str, Any]:
+                resp = getattr(self._real, "query")(**kwargs)
+                if kwargs.get("IndexName") == "accountId-unitId-index":
+                    resp = {k: v for k, v in resp.items()}
+                    resp["Items"] = list(resp.get("Items", [])) + [
+                        {"pk": "UNIT#unit-ghost-unnamed", "sk": f"GRANT#{avery}", "accountId": avery}
+                    ]
+                return resp
+
+            def __getattr__(self, attr_name: str) -> Any:
+                return getattr(self._real, attr_name)
+
+        monkeypatch.setattr(uop, "_units", lambda: _GraftedGrantTable(units_table))
+        payload = _ok(lambda_handler(fx.unit_operation_event("myUnits", "Avery"), None))
+        assert sorted(u["unitId"] for u in payload["items"]) == sorted([fx.PACK_3149, fx.CREW_529])
 
     def test_my_units_bad_cursor_starts_at_zero(self, seeded: Dict[str, Any]) -> None:
         payload = _ok(
