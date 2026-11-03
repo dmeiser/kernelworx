@@ -1,7 +1,7 @@
 """Lambda resolver for Show & Sell Unit operations (batch A)."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 try:  # pragma: no cover
@@ -11,6 +11,11 @@ except ModuleNotFoundError:  # pragma: no cover
 
 get_caller_id = import_from_utils("appsync_types", "get_caller_id")
 tables = import_from_utils("dynamodb", "tables")
+try:
+    from utils.mutations import WritePlan, marker_keys, normalized_fingerprint
+except ModuleNotFoundError:
+    from ..utils.mutations import WritePlan, marker_keys, normalized_fingerprint
+
 AppError, ErrorCode = import_from_utils("errors", "AppError", "ErrorCode")
 with_error_handling = import_from_utils("handlers", "lambda_handler")
 get_logger = import_from_utils("logging", "get_logger")
@@ -23,7 +28,17 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:  # pragma: no cover
     pass
 
+
+def _serialize(value):
+    from boto3.dynamodb.types import TypeSerializer
+
+    return TypeSerializer().serialize(value)
+
+
 logger = get_logger(__name__)
+_ts = None
+VALID_SPLIT = {"EQUAL", "TIME_WORKED"}
+VALID_BASIS = {"PHYSICAL_STOCK", "AFTER_ASSIGNMENTS"}
 
 
 def _units():
@@ -34,8 +49,25 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _get_unit(unit_id: str):
+    resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
+    return resp.get("Item")
+
+
 def _unit_pk(unit_id: str) -> str:
     return f"UNIT#{unit_id}"
+
+
+def _validate_timezone(tz: str) -> bool:
+    if tz == "UTC":
+        return True
+    try:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(tz)
+        return True
+    except Exception:
+        return False
 
 
 def _metadata_key(unit_type, unit_number, city, state) -> str:
@@ -57,6 +89,13 @@ def create_unit(event, context):
         raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity is required")
     unit_type = args.get("unitType")
     unit_number = args.get("unitNumber")
+    try:
+        from decimal import Decimal
+
+        if isinstance(unit_number, Decimal):
+            unit_number = int(unit_number)
+    except Exception:
+        pass
     city = args.get("city")
     if isinstance(city, str):
         city = city.strip()
@@ -64,13 +103,66 @@ def create_unit(event, context):
     timezone_ = args.get("timezone")
     if not (unit_type and unit_number is not None and city and state and timezone_):
         raise AppError(ErrorCode.INVALID_INPUT, "Missing required unit fields")
+    if not _validate_timezone(timezone_):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid timezone")
+    split_default = args.get("splitDefault") or "EQUAL"
+    if split_default not in VALID_SPLIT:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid splitDefault")
+    council = args.get("councilNeedBasis") or "PHYSICAL_STOCK"
+    if council not in VALID_BASIS:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid councilNeedBasis")
     idempotency = args.get("idempotency", {}) or {}
     key = idempotency.get("idempotencyKey")
     if not key:
         raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    runner = IdempotentMutationRunner()
+    mk = marker_keys(
+        actor_id=caller,
+        operation="createUnit",
+        scope="BOOTSTRAP",
+        idempotency_key=key,
+        table_key="units",
+        table_name=_units().name if hasattr(_units(), "name") else "units",
+    )
+    fp = normalized_fingerprint(
+        {
+            "unitType": unit_type,
+            "unitNumber": int(unit_number) if unit_number is not None else None,
+            "city": city,
+            "state": state,
+        },
+        drop_none=True,
+    )
+    existing_marker = runner.load_marker(mk)
+    if existing_marker:
+        handled, replayed = runner.replay_or_reject(
+            mk,
+            fp,
+            operation="createUnit",
+            load_result=lambda r: {
+                "unit": _get_unit(r),
+                "grant": _units()
+                .get_item(Key={"pk": _unit_pk(r), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
+                .get("Item"),
+            },
+        )
+        if handled:
+            return replayed
+    duplicate_confirmed = bool(args.get("duplicateConfirmed", False))
+    md_key = _metadata_key(unit_type, unit_number, city, state)
+    try:
+        resp = _units().query(
+            IndexName="metadataKey-createdAt-index",
+            KeyConditionExpression="metadataKey = :m",
+            ExpressionAttributeValues={":m": md_key},
+        )
+        existing = resp.get("Items", [])
+    except Exception:
+        existing = []
+    if existing and not duplicate_confirmed:
+        raise AppError(ErrorCode.CONFLICT, "Exact metadata match requires duplicateConfirmed")
     unit_id = str(uuid.uuid4())
     now = _now()
-    md_key = _metadata_key(unit_type, unit_number, city, state)
     display = args.get("displayName") or f"{unit_type} {unit_number} - {city}, {state}"
     item = {
         "pk": _unit_pk(unit_id),
@@ -83,8 +175,8 @@ def create_unit(event, context):
         "displayName": display,
         "metadataKey": md_key,
         "timezone": timezone_,
-        "splitDefault": args.get("splitDefault") or "EQUAL",
-        "councilNeedBasis": args.get("councilNeedBasis") or "PHYSICAL_STOCK",
+        "splitDefault": split_default,
+        "councilNeedBasis": council,
         "adminCount": 1,
         "version": 1,
         "createdAt": now,
@@ -100,25 +192,40 @@ def create_unit(event, context):
         "createdByAccountId": caller,
         "createdAt": now,
     }
-    try:
-        from utils.mutations import WritePlan, marker_keys, normalized_fingerprint
-    except ModuleNotFoundError:
-        from ..utils.mutations import WritePlan, marker_keys, normalized_fingerprint
-
     runner = IdempotentMutationRunner()
-    mk = marker_keys(actor_id=caller, operation="createUnit", scope="BOOTSTRAP", idempotency_key=key)
-    fp = normalized_fingerprint({"unitType": unit_type, "unitNumber": unit_number, "city": city, "state": state})
+    mk = marker_keys(
+        actor_id=caller,
+        operation="createUnit",
+        scope="BOOTSTRAP",
+        idempotency_key=key,
+        table_key="units",
+        table_name=_units().name if hasattr(_units(), "name") else "units",
+    )
+    fp = normalized_fingerprint(
+        {
+            "unitType": unit_type,
+            "unitNumber": int(unit_number) if unit_number is not None else None,
+            "city": city,
+            "state": state,
+        },
+        drop_none=True,
+    )
     plan = WritePlan()
     runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
-    plan.add("Put", {"TableName": "units", "Item": item})
-    plan.add("Put", {"TableName": "units", "Item": grant_item})
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in item.items()}})
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in grant_item.items()}})
     runner.execute(
         mk,
         plan,
         operation="createUnit",
         fingerprint=fp,
         result_id=unit_id,
-        load_result=lambda rid: {"unit": item, "grant": grant_item},
+        load_result=lambda rid: {
+            "unit": _get_unit(rid),
+            "grant": _units()
+            .get_item(Key={"pk": _unit_pk(rid), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
+            .get("Item"),
+        },
     )
     return {"unit": item, "grant": grant_item}
 
@@ -129,23 +236,91 @@ def update_unit(event, context):
     unit_id = args.get("unitId")
     if not unit_id:
         raise AppError(ErrorCode.INVALID_INPUT, "unitId is required")
+    try:
+        from decimal import Decimal
+
+        if isinstance(args.get("unitNumber"), Decimal):
+            args["unitNumber"] = int(args["unitNumber"])
+    except Exception:
+        pass
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
+    idempotency = args.get("idempotency", {}) or {}
+    key = idempotency.get("idempotencyKey")
+    if not key:
+        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    runner = IdempotentMutationRunner()
+    mk = marker_keys(
+        actor_id=caller,
+        operation="updateUnit",
+        scope=unit_id,
+        idempotency_key=key,
+        table_key="units",
+        table_name=_units().name if hasattr(_units(), "name") else "units",
+    )
+    fp = normalized_fingerprint(args)
+    existing = runner.load_marker(mk)
+    if existing:
+        rid = (
+            existing.get("resultId", {}).get("S")
+            if isinstance(existing.get("resultId"), dict)
+            else existing.get("resultId")
+        )
+        return _get_unit(rid) if rid else _get_unit(unit_id)
     resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
     item = resp.get("Item")
     if not item:
         raise AppError(ErrorCode.NOT_FOUND, "Unit not found")
     version_input = args.get("version", {}) or {}
     expected = version_input.get("expectedVersion")
+    if expected is None:
+        expected = args.get("expectedVersion")
     if expected is not None and int(expected) != int(item.get("version", 0)):
         raise AppError(ErrorCode.CONFLICT, "Version mismatch")
+    # settings validation
+    if args.get("timezone") is not None and not _validate_timezone(args["timezone"]):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid timezone")
+    if args.get("splitDefault") is not None and args["splitDefault"] not in VALID_SPLIT:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid splitDefault")
+    if args.get("councilNeedBasis") is not None and args["councilNeedBasis"] not in VALID_BASIS:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid councilNeedBasis")
+    # duplicate check
+    new_type = args.get("unitType", item.get("unitType"))
+    new_number = args.get("unitNumber", item.get("unitNumber"))
+    new_city = args.get("city", item.get("city"))
+    new_state = args.get("state", item.get("state"))
+    if isinstance(new_city, str):
+        new_city = new_city.strip()
+    md_key = _metadata_key(new_type, new_number, new_city, new_state)
+    duplicate_confirmed = bool(args.get("duplicateConfirmed", False))
+    if md_key != item.get("metadataKey"):
+        try:
+            resp = _units().query(
+                IndexName="metadataKey-createdAt-index",
+                KeyConditionExpression="metadataKey = :m",
+                ExpressionAttributeValues={":m": md_key},
+            )
+            existing = [x for x in resp.get("Items", []) if x.get("unitId") != unit_id]
+        except Exception:
+            existing = []
+        if existing and not duplicate_confirmed:
+            raise AppError(ErrorCode.CONFLICT, "Exact metadata match requires duplicateConfirmed")
     # apply updates
     for f in ("unitType", "unitNumber", "city", "state", "displayName", "timezone", "splitDefault", "councilNeedBasis"):
         if args.get(f) is not None:
             item[f] = args[f]
+    item["metadataKey"] = md_key
     item["version"] = int(item.get("version", 0)) + 1
     item["updatedAt"] = _now()
-    _units().put_item(Item=item)
+    plan = WritePlan()
+    runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in item.items()}})
+    try:
+        runner.execute(
+            mk, plan, operation="updateUnit", fingerprint=fp, result_id=unit_id, load_result=lambda rid: _get_unit(rid)
+        )
+    except Exception:
+        _units().put_item(Item=item)
     return item
 
 
@@ -156,6 +331,28 @@ def revoke_unit_access_grant(event, context):
     account_id = args.get("accountId")
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
+    idempotency = args.get("idempotency", {}) or {}
+    key = idempotency.get("idempotencyKey")
+    if not key:
+        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    runner = IdempotentMutationRunner()
+    mk = marker_keys(
+        actor_id=caller,
+        operation="revokeUnitAccessGrant",
+        scope=f"{unit_id}#{account_id}",
+        idempotency_key=key,
+        table_key="units",
+        table_name=_units().name if hasattr(_units(), "name") else "units",
+    )
+    fp = normalized_fingerprint({"unitId": unit_id, "accountId": account_id})
+    existing = runner.load_marker(mk)
+    if existing:
+        rid = (
+            existing.get("resultId", {}).get("S")
+            if isinstance(existing.get("resultId"), dict)
+            else existing.get("resultId")
+        )
+        return _get_unit(rid) if rid else _get_unit(unit_id)
     resp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": "METADATA"}, ConsistentRead=True)
     item = resp.get("Item")
     if not item:
@@ -167,7 +364,20 @@ def revoke_unit_access_grant(event, context):
     item["adminCount"] = int(item["adminCount"]) - 1
     item["version"] = int(item.get("version", 0)) + 1
     item["updatedAt"] = _now()
-    _units().put_item(Item=item)
+    plan = WritePlan()
+    runner.stage_marker(plan, mk, fingerprint=fp, result_id=unit_id)
+    plan.add("Put", {"TableName": _units().name, "Item": {k: _serialize(v) for k, v in item.items()}})
+    try:
+        runner.execute(
+            mk,
+            plan,
+            operation="revokeUnitAccessGrant",
+            fingerprint=fp,
+            result_id=unit_id,
+            load_result=lambda rid: _get_unit(rid),
+        )
+    except Exception:
+        _units().put_item(Item=item)
     return item
 
 
@@ -177,10 +387,46 @@ def create_unit_invite(event, context):
     unit_id = args.get("unitId")
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
+    idempotency = args.get("idempotency", {}) or {}
+    key = idempotency.get("idempotencyKey")
+    if not key:
+        raise AppError(ErrorCode.INVALID_INPUT, "idempotencyKey is required")
+    # cap check
+    active = 0
+    try:
+        for x in _units().scan().get("Items", []):
+            if not str(x.get("pk", "")).startswith("INVITE#"):
+                continue
+            if x.get("sk") != f"UNIT#{unit_id}":
+                continue
+            try:
+                exp = datetime.fromisoformat(str(x.get("expiresAt")).replace("Z", "+00:00"))
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+                if exp < datetime.now(timezone.utc):
+                    continue
+            except Exception:
+                pass
+            active += 1
+    except Exception:
+        active = 0
+    if active >= 20:
+        raise AppError(ErrorCode.CONFLICT, "Too many active invites")
+    # idempotency replay
+    marker_pk = f"IDEM#createUnitInvite#{unit_id}"
+    marker_sk = f"IDEM#{key}"
+    try:
+        m = _units().get_item(Key={"pk": marker_pk, "sk": marker_sk}, ConsistentRead=True).get("Item")
+    except Exception:
+        m = None
+    if m and m.get("inviteCode"):
+        code = m["inviteCode"]
+        inv = _units().get_item(Key={"pk": f"INVITE#{code}", "sk": f"UNIT#{unit_id}"}, ConsistentRead=True).get("Item")
+        if inv:
+            return inv
     code = uuid.uuid4().hex[:16].upper()
     now = _now()
     # expiry 14 days
-    from datetime import timedelta
 
     expires = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
     expires_epoch = int((datetime.now(timezone.utc) + timedelta(days=14)).timestamp())
@@ -195,6 +441,17 @@ def create_unit_invite(event, context):
         "expiresAtEpoch": expires_epoch,
     }
     _units().put_item(Item=item)
+    try:
+        _units().put_item(
+            Item={
+                "pk": marker_pk,
+                "sk": marker_sk,
+                "inviteCode": code,
+                "expiresAtEpoch": int((datetime.now(timezone.utc)).timestamp()) + 86400,
+            }
+        )
+    except Exception:
+        pass
     return item
 
 
@@ -205,8 +462,25 @@ def revoke_unit_invite(event, context):
     code = args.get("inviteCode")
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
+    resp = _units().get_item(Key={"pk": f"INVITE#{code}", "sk": f"UNIT#{unit_id}"}, ConsistentRead=True)
+    if not resp.get("Item"):
+        raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
     _units().delete_item(Key={"pk": f"INVITE#{code}", "sk": f"UNIT#{unit_id}"})
     return True
+
+
+def _increment_throttle_counter(pk):
+    try:
+        item = _units().get_item(Key={"pk": pk, "sk": "METADATA"}, ConsistentRead=True).get("Item") or {
+            "pk": pk,
+            "sk": "METADATA",
+            "count": 0,
+        }
+        item["count"] = int(item.get("count", 0)) + 1
+        item["expiresAtEpoch"] = int((datetime.now(timezone.utc) + timedelta(hours=2)).timestamp())
+        _units().put_item(Item=item)
+    except Exception:
+        pass
 
 
 def redeem_unit_invite(event, context):
@@ -215,6 +489,20 @@ def redeem_unit_invite(event, context):
     if not caller:
         raise AppError(ErrorCode.UNAUTHORIZED, "Caller identity required")
     code = args.get("inviteCode")
+    idempotency = args.get("idempotency", {}) or {}
+    key = idempotency.get("idempotencyKey") or "default"
+    marker_pk = f"IDEM#redeemUnitInvite#{code}"
+    marker_sk = f"IDEM#{key}"
+    try:
+        m = _units().get_item(Key={"pk": marker_pk, "sk": marker_sk}, ConsistentRead=True).get("Item")
+    except Exception:
+        m = None
+    if m:
+        uid = m.get("unitId")
+        if uid:
+            g = _units().get_item(Key={"pk": _unit_pk(uid), "sk": f"GRANT#{caller}"}, ConsistentRead=True).get("Item")
+            if g:
+                return g
     resp = (
         _units().get_item(
             Key={"pk": f"INVITE#{code}", "sk": None} if False else {"pk": f"INVITE#{code}"}, ConsistentRead=True
@@ -222,6 +510,18 @@ def redeem_unit_invite(event, context):
         if False
         else None
     )
+    # throttle check
+    nowdt = datetime.now(timezone.utc)
+    hour_key = nowdt.strftime("%Y-%m-%dT%H")
+    throttle_pk = f"THROTTLE#unit_invite#{caller}#{hour_key}"
+    try:
+        titem = _units().get_item(Key={"pk": throttle_pk, "sk": "METADATA"}, ConsistentRead=True).get("Item")
+        if titem and int(titem.get("count", 0)) >= 10:
+            raise AppError(ErrorCode.RATE_LIMIT_EXCEEDED, "Too many failed attempts")
+    except AppError:
+        raise
+    except Exception:
+        pass
     # query by pk prefix
     try:
         resp = _units().query(
@@ -231,17 +531,32 @@ def redeem_unit_invite(event, context):
         resp = _units().query(KeyConditionExpression="pk = :pk", ExpressionAttributeValues={":pk": f"INVITE#{code}"})
     items = resp.get("Items", [])
     if not items:
+        _increment_throttle_counter(throttle_pk)
         raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
     inv = items[0]
     unit_id = inv["unitId"]
+    # existing grant?
+    try:
+        gresp = _units().get_item(Key={"pk": _unit_pk(unit_id), "sk": f"GRANT#{caller}"}, ConsistentRead=True)
+        existing_grant = gresp.get("Item")
+    except Exception:
+        existing_grant = None
+    if existing_grant:
+        return existing_grant
     # expiry check
     from datetime import datetime as dt
 
     try:
-        if dt.fromisoformat(inv["expiresAt"].replace("Z", "+00:00")) < datetime.now(timezone.utc):
-            raise AppError(ErrorCode.NOT_FOUND, "Invite expired")
+        exp = dt.fromisoformat(inv["expiresAt"].replace("Z", "+00:00"))
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            _increment_throttle_counter(throttle_pk)
+            raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
+    except AppError:
+        raise
     except Exception:
-        pass
+        raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
     # create grant
     now = _now()
     grant_item = {
@@ -263,30 +578,50 @@ def redeem_unit_invite(event, context):
         meta["version"] = int(meta.get("version", 0)) + 1
         meta["updatedAt"] = _now()
         _units().put_item(Item=meta)
+    try:
+        _units().put_item(
+            Item={
+                "pk": marker_pk,
+                "sk": marker_sk,
+                "unitId": unit_id,
+                "expiresAtEpoch": int((datetime.now(timezone.utc)).timestamp()) + 86400,
+            }
+        )
+    except Exception:
+        pass
     return grant_item
 
 
 def my_units(event, context):
+    args = event.get("arguments", {}) or {}
     caller = get_caller_id(event)
-    # query GSI accountId-unitId-index
+    grants = []
     try:
-        resp = _units().query(
-            IndexName="accountId-unitId-index",
-            KeyConditionExpression="accountId = :a",
-            ExpressionAttributeValues={":a": caller},
-        )
+        for x in _units().scan().get("Items", []):
+            if str(x.get("sk", "")).startswith("GRANT#") and x.get("accountId") == caller:
+                grants.append(x)
     except Exception:
-        resp = {"Items": []}
-    grants = resp.get("Items", [])
+        grants = []
+    grants.sort(key=lambda g: g.get("unitId", ""))
+    limit, cursor = _parse_page(args)
+    if cursor:
+        try:
+            start = int(cursor)
+        except ValueError:
+            start = 0
+    else:
+        start = 0
+    page_grants = grants[start : start + limit]
     units = []
-    for g in grants:
+    for g in page_grants:
         uid = g.get("unitId")
         if not uid:
             continue
         meta = _units().get_item(Key={"pk": _unit_pk(uid), "sk": "METADATA"}, ConsistentRead=True).get("Item")
         if meta:
             units.append(meta)
-    return {"items": units, "pageInfo": {"endCursor": None, "hasNextPage": False}}
+    next_cursor = str(start + limit) if start + limit < len(grants) else None
+    return {"items": units, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
 
 
 def unit(event, context):
@@ -305,12 +640,39 @@ def unit_admins(event, context):
     caller = get_caller_id(event)
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
-    resp = _units().query(
-        KeyConditionExpression="pk = :pk AND begins_with(sk, :sk)",
-        ExpressionAttributeValues={":pk": _unit_pk(unit_id), ":sk": "GRANT#"},
-    )
-    items = resp.get("Items", [])
-    return {"items": items, "pageInfo": {"endCursor": None, "hasNextPage": False}}
+    grants = []
+    try:
+        for x in _units().scan().get("Items", []):
+            if x.get("pk") == _unit_pk(unit_id) and str(x.get("sk", "")).startswith("GRANT#"):
+                grants.append(x)
+    except Exception:
+        grants = []
+    grants.sort(key=lambda g: g.get("sk", ""))
+    limit, cursor = _parse_page(args)
+    if cursor:
+        try:
+            start = int(cursor)
+        except ValueError:
+            start = 0
+    else:
+        start = 0
+    page_items = grants[start : start + limit]
+    next_cursor = str(start + limit) if start + limit < len(grants) else None
+    return {"items": page_items, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
+
+
+def _parse_page(args):
+    page = args.get("page") or {}
+    limit = page.get("limit", 50)
+    try:
+        limit = int(limit)
+    except TypeError, ValueError:
+        limit = 50
+    if limit < 1:
+        limit = 1
+    if limit > 100:
+        limit = 100
+    return limit, page.get("cursor")
 
 
 def unit_invites(event, context):
@@ -319,7 +681,6 @@ def unit_invites(event, context):
     caller = get_caller_id(event)
     if not _is_unit_admin(caller, unit_id):
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
-    # query GSI unitId-createdAt-index (sparse)
     try:
         resp = _units().query(
             IndexName="unitId-createdAt-index",
@@ -328,7 +689,31 @@ def unit_invites(event, context):
         )
     except Exception:
         resp = {"Items": []}
-    return {"items": resp.get("Items", []), "pageInfo": {"endCursor": None, "hasNextPage": False}}
+    now = datetime.now(timezone.utc)
+    items = []
+    for x in resp.get("Items", []):
+        if not str(x.get("pk", "")).startswith("INVITE#"):
+            continue
+        try:
+            exp = datetime.fromisoformat(str(x.get("expiresAt")).replace("Z", "+00:00"))
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp < now:
+                continue
+        except Exception:
+            pass
+        items.append(x)
+    limit, cursor = _parse_page(args)
+    if cursor:
+        try:
+            start = int(cursor)
+        except ValueError:
+            start = 0
+    else:
+        start = 0
+    page_items = items[start : start + limit]
+    next_cursor = str(start + limit) if start + limit < len(items) else None
+    return {"items": page_items, "pageInfo": {"endCursor": next_cursor, "hasNextPage": next_cursor is not None}}
 
 
 _HANDLERS = {
