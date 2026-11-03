@@ -831,11 +831,25 @@ class TestExecute:
                 },
             )
 
+            defeated_guard = WritePlan()
+            # The marker's exact key pair, and an attribute_not_exists that is
+            # aliased to an attribute no marker item carries: the condition is
+            # always true, so it is not an idempotency guard at all.
+            defeated_guard.add(
+                "Put",
+                {
+                    "TableName": UNITS_TABLE,
+                    "Item": dict(marker_item),
+                    "ConditionExpression": "attribute_not_exists(#pk)",
+                    "ExpressionAttributeNames": {"#pk": "someNonexistentAttribute"},
+                },
+            )
+
             business_first = WritePlan()
             business_first.add("Put", _unit_put("u-1"))
             runner.stage_marker(business_first, keys, fingerprint=fingerprint, result_id="UNIT#u-1")
 
-            for plan in (unconditional, wrong_sort, business_first):
+            for plan in (unconditional, wrong_sort, defeated_guard, business_first):
                 with pytest.raises(AppError) as exc:
                     runner.execute(keys, plan, operation="createUnit", fingerprint=fingerprint, result_id="UNIT#u-1")
                 assert exc.value.error_code == ErrorCode.INVALID_INPUT

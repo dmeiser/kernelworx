@@ -501,7 +501,9 @@ def get_all_table_schemas() -> list[dict[str, Any]]:
     Get all table schemas as a list.
 
     Returns:
-        List of table schema dictionaries suitable for dynamodb.create_table(**schema)
+        List of table schema dictionaries suitable for dynamodb.create_table(**schema),
+        in table order: accounts, catalogs, profiles, campaigns, orders,
+        shares, invites, shared_campaigns, units, unit_campaigns.
     """
     return [
         create_accounts_table_schema(),
@@ -534,6 +536,8 @@ def create_all_tables(dynamodb_resource: Any) -> dict[str, Any]:
         - shares: Shares table
         - invites: Invites table
         - shared_campaigns: Shared campaigns table
+        - units: Units table
+        - unit_campaigns: Unit campaigns table
     """
     tables: dict[str, Any] = {}
 

@@ -811,4 +811,13 @@ describe("Show & Sell Stage 1 - browser-only reporting (WEB-MIG-04)", () => {
     const badApiKey = ["type Unit {", "joinCode: String @aws_api_key", "}"].join("\n");
     expect(apiKeyOffenders(codeOnly(badApiKey))).toContain("Unit.joinCode");
   });
+
+  test("the parser sees capitalized fields, so smuggling there is caught", () => {
+    // A capitalized field name is legal SDL too; the guards see every field
+    // of every definition, whatever case its name begins with.
+    const badReport = ["type Unit {", "  ReportUrl: AWSURL", "}"].join("\n");
+    expect(reportOffenders(codeOnly(badReport))).toContain("Unit.ReportUrl");
+    const badApiKey = ["type Unit {", "  JoinCode: String @aws_api_key", "}"].join("\n");
+    expect(apiKeyOffenders(codeOnly(badApiKey))).toContain("Unit.JoinCode");
+  });
 });

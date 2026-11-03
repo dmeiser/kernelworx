@@ -457,6 +457,77 @@ def _get_client() -> "DynamoDBClient":
     return get_dynamodb_client()
 
 
+def _contention_or_conflict_batch_error(exc: ClientError, operation: str) -> AppError:
+    """The verdict for a transaction whose conditions did not hold.
+
+    TransactionCanceledException is a transaction whose conditions did
+    not hold; ConditionalCheckFailedException is the same verdict on a
+    single-item write (the marker back-fill). Neither is retryable as
+    sent - UNLESS the transaction was cancelled by retryable contention:
+    a per-item throttle or a per-item TransactionConflict arrives as a
+    CancellationReasons code inside the cancellation payload, so the
+    per-item codes are consulted before the conflict verdict and any one
+    of them promotes the whole transaction to the retryable RESOURCE_BUSY
+    (spec 3.3).
+    """
+    retryable_reasons = [
+        c
+        for c in _cancellation_summary(exc)
+        if c in PER_ITEM_THROTTLE_CODES or c in PER_ITEM_CONTENTION_CODES
+    ]
+    if retryable_reasons:
+        logger.warning(
+            "Transaction cancelled by retryable contention",
+            operation=operation,
+            cancellation_reasons=retryable_reasons,
+        )
+        return AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to write. Please retry.")
+    logger.warning(
+        "Transaction cancelled",
+        operation=operation,
+        cancellation_reasons=_cancellation_summary(exc),
+    )
+    return AppError(ErrorCode.CONFLICT, "The resource changed underneath this request. Re-read and try again.")
+
+
+def _is_oversize_validation_exception(exc: ClientError, code: str) -> bool:
+    """True when the service rejected the transaction's shape, not its content."""
+    return code == "ValidationException" and _is_oversize_or_duplicate_transaction(exc)
+
+
+def _oversize_or_duplicate_error(exc: ClientError, operation: str) -> AppError:
+    """The CONFLICT / ``OPERATION_TOO_LARGE`` verdict for an oversized plan."""
+    # The plan helper caps every plan at MAX_TRANSACTION_ACTIONS, but a
+    # caller-side bug can still stage two actions on one item; DynamoDB
+    # rejects that transaction with a ValidationException. It is the
+    # caller's content at fault, so it maps to the same CONFLICT /
+    # OPERATION_TOO_LARGE contract as an oversized plan, not an
+    # internal error.
+    logger.warning(
+        "Transaction rejected as oversized or duplicated",
+        operation=operation,
+        error=str(exc),
+    )
+    return AppError(
+        ErrorCode.CONFLICT,
+        "This request is too large for one atomic write. Split it into smaller independent requests.",
+        details={
+            "subcode": ErrorCode.OPERATION_TOO_LARGE,
+            "reduction": "Split the operation into independent requests that each fit the write budget.",
+        },
+    )
+
+
+def _is_top_level_contention(exc: ClientError, code: str) -> bool:
+    """True when the service reports in-flight concurrency at the top level.
+
+    TransactionInProgressException and TransactionConflictException
+    carry AWS retry guidance: another request touched the item set
+    concurrently, so resend after a backoff rather than re-reading.
+    """
+    return code in ("TransactionInProgressException", "TransactionConflictException") or is_transient_client_error(exc)
+
+
 def classify_transaction_error(exc: BaseException, *, operation: str) -> AppError:
     """Translate a failed ``TransactWriteItems`` into the contract's error code.
 
@@ -481,57 +552,10 @@ def classify_transaction_error(exc: BaseException, *, operation: str) -> AppErro
     if isinstance(exc, ClientError):
         code = exc.response.get("Error", {}).get("Code", "")
         if code in ("TransactionCanceledException", "ConditionalCheckFailedException"):
-            # TransactionCanceledException is a transaction whose conditions did
-            # not hold; ConditionalCheckFailedException is the same verdict on a
-            # single-item write (the marker back-fill). Neither is retryable as
-            # sent - UNLESS the transaction was cancelled by retryable
-            # contention: a per-item throttle or a per-item TransactionConflict
-            # arrives as a CancellationReasons code inside the cancellation
-            # payload, so the per-item codes are consulted before the conflict
-            # verdict and any one of them promotes the whole transaction to the
-            # retryable RESOURCE_BUSY (spec 3.3).
-            retryable_reasons = [
-                c
-                for c in _cancellation_summary(exc)
-                if c in PER_ITEM_THROTTLE_CODES or c in PER_ITEM_CONTENTION_CODES
-            ]
-            if retryable_reasons:
-                logger.warning(
-                    "Transaction cancelled by retryable contention",
-                    operation=operation,
-                    cancellation_reasons=retryable_reasons,
-                )
-                return AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to write. Please retry.")
-            logger.warning(
-                "Transaction cancelled",
-                operation=operation,
-                cancellation_reasons=_cancellation_summary(exc),
-            )
-            return AppError(ErrorCode.CONFLICT, "The resource changed underneath this request. Re-read and try again.")
-        if code == "ValidationException" and _is_oversize_or_duplicate_transaction(exc):
-            # The plan helper caps every plan at MAX_TRANSACTION_ACTIONS, but a
-            # caller-side bug can still stage two actions on one item; DynamoDB
-            # rejects that transaction with a ValidationException. It is the
-            # caller's content at fault, so it maps to the same CONFLICT /
-            # OPERATION_TOO_LARGE contract as an oversized plan, not an
-            # internal error.
-            logger.warning(
-                "Transaction rejected as oversized or duplicated",
-                operation=operation,
-                error=str(exc),
-            )
-            return AppError(
-                ErrorCode.CONFLICT,
-                "This request is too large for one atomic write. Split it into smaller independent requests.",
-                details={
-                    "subcode": ErrorCode.OPERATION_TOO_LARGE,
-                    "reduction": "Split the operation into independent requests that each fit the write budget.",
-                },
-            )
-        if code in ("TransactionInProgressException", "TransactionConflictException") or is_transient_client_error(exc):
-            # TransactionInProgressException and TransactionConflictException
-            # carry AWS retry guidance: another request touched the item set
-            # concurrently, so resend after a backoff rather than re-reading.
+            return _contention_or_conflict_batch_error(exc, operation)
+        if _is_oversize_validation_exception(exc, code):
+            return _oversize_or_duplicate_error(exc, operation)
+        if _is_top_level_contention(exc, code):
             logger.warning("Transaction blocked by in-flight activity", operation=operation, error_code=code)
             return AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to write. Please retry.")
         logger.error("Transaction failed", operation=operation, error=str(exc), error_code=code)
@@ -573,18 +597,45 @@ def _cancellation_summary(exc: ClientError) -> list[str]:
     return [str(reason.get("Code", "UNKNOWN")) for reason in _cancellation_reasons(exc)]
 
 
+_GUARD_ALIAS_RE = re.compile(r"attribute_not_exists\(\s*(#[\w]+|\w+)\s*\)")
+
+
+def _carries_marker_uniqueness_guard(condition: str, names: Mapping[Any, Any]) -> bool:
+    """True when the condition's ``attribute_not_exists`` terms resolve to ``pk``.
+
+    The marker's uniqueness guard must exist-check the marker key's partition
+    attribute itself. An ``attribute_not_exists`` placeholder aliased to any
+    other attribute (one no item carries, say) is an always-true condition, so
+    it is not a guard at all - and :meth:`IdempotentMutationRunner.execute`
+    refuses to commit any plan whose first action is not this item.
+    A bare, unaliased ``pk`` placeholder is equally guard-shaped.
+    """
+    return any(
+        alias == "pk" if not alias.startswith("#") else names.get(alias) == "pk"
+        for alias in _GUARD_ALIAS_RE.findall(condition)
+    )
+
+
 def _is_marker_put(action: Mapping[str, Any], keys: MarkerKeys) -> bool:
     """True when a staged action is THIS mutation's conditional marker insert.
 
-    The marker Put is identified by table plus the exact key pair, and it must
-    carry a condition - an unconditional marker Put would not be a uniqueness
-    guard, and :meth:`IdempotentMutationRunner.execute` refuses to commit any
-    plan whose first action is not this item.
+    The marker Put is identified by table plus the exact key pair, and its
+    condition must be the uniqueness guard on the marker key itself - an
+    unconditional marker Put, or one whose ``attribute_not_exists`` is aliased
+    to an attribute other than ``pk``, would not be a uniqueness guard, and
+    :meth:`IdempotentMutationRunner.execute` refuses to commit any plan whose
+    first action is not this item.
     """
     put = action.get("Put")
     if not isinstance(put, dict):
         return False
-    if put.get("TableName") != keys.table_name or not put.get("ConditionExpression"):
+    if put.get("TableName") != keys.table_name:
+        return False
+    condition = put.get("ConditionExpression")
+    names = put.get("ExpressionAttributeNames")
+    if not isinstance(condition, str) or not condition:
+        return False
+    if not _carries_marker_uniqueness_guard(condition, names if isinstance(names, dict) else {}):
         return False
     item = put.get("Item")
     return isinstance(item, dict) and item.get("pk") == {"S": keys.pk} and item.get("sk") == {"S": keys.sk}
