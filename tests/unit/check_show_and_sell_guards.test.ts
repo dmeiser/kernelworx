@@ -249,6 +249,21 @@ export function apiKeyOffenders(source: string): string[] {
       offenders.push(def.name);
     }
   }
+  // Field-level directives inside non-root object types: the legacy allowance
+  // is type-level on the six Legacy Public* types plus the three legacy root
+  // fields ONLY, so ANY field-level @aws_api_key on a non-root type is an
+  // offender no matter which list its owner type would sit on. (Root fields
+  // are covered by the first loop above.)
+  for (const def of parseDefinitions(source)) {
+    if (def.kind !== "type" || def.name === "Query" || def.name === "Mutation") {
+      continue;
+    }
+    for (const field of parseFields(def.body)) {
+      if (field.directives.includes(API_KEY)) {
+        offenders.push(`${def.name}.${field.name}`);
+      }
+    }
+  }
   return offenders;
 }
 
@@ -354,6 +369,23 @@ describe("Show & Sell Stage 1 - tenant authorization (AUTH)", () => {
       "}",
     ].join("\n");
     expect(apiKeyOffenders(bad)).toEqual(["unit", "Unit"]);
+  });
+
+  test("a field-level @aws_api_key inside any non-root type is rejected, even inside a legacy Public* type", () => {
+    const bad = [
+      "type PublicOrderReceipt @aws_api_key {",
+      "  orderId: ID!",
+      "  joinCode: String @aws_api_key",
+      "}",
+      "type Unit {",
+      "  unitId: ID!",
+      "  secret: String @aws_api_key",
+      "}",
+    ].join("\n");
+    expect(apiKeyOffenders(bad)).toEqual([
+      "PublicOrderReceipt.joinCode",
+      "Unit.secret",
+    ]);
   });
 
   test("a participant-safe type never exposes administrative fields (and a leaking schema is rejected)", () => {

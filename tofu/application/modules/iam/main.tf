@@ -917,6 +917,8 @@ data "aws_iam_policy_document" "lambda_unit_dynamodb" {
       # The shared mutation helper's marker insert rides inside every Show &
       # Sell mutation's TransactWriteItems (data model §8.9).
       "dynamodb:TransactWriteItems",
+      # Condition checks staged inside TransactWriteItems map to this action.
+      "dynamodb:ConditionCheckItem",
     ]
     resources = [
       var.dynamodb_table_arns["units"],
@@ -971,6 +973,7 @@ data "aws_iam_policy_document" "lambda_unit_campaign_dynamodb" {
       "dynamodb:BatchWriteItem",
       # Campaign-scoped markers ride inside the same TransactWriteItems.
       "dynamodb:TransactWriteItems",
+      "dynamodb:ConditionCheckItem",
     ]
     resources = [
       var.dynamodb_table_arns["unit_campaigns"],
