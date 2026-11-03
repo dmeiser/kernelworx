@@ -32,6 +32,7 @@ import {
   parseDefinitions,
   parseFields,
   returnTypeName,
+  rootFieldsByName,
   API_KEY,
   type Definition,
   type Field,
@@ -159,9 +160,9 @@ function fieldNameSet(def: Definition): Set<string> {
 }
 
 function rootFieldByName(rootName: "Query" | "Mutation", name: string): Field | undefined {
-  const def = BY_NAME.get(rootName);
-  if (!def) return undefined;
-  return parseFields(def.body).find((f) => f.name === name);
+  // Across ALL definitions of the root, extend blocks included: a field
+  // declared only in `extend type Query` is still served.
+  return rootFieldsByName(SCHEMA, rootName).find((f) => f.name === name);
 }
 
 describe("Show & Sell Stage 1 SDL (schema.graphql)", () => {

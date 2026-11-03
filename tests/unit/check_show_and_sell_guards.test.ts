@@ -2,15 +2,19 @@
  * Leaf 1.7.5 — static CI guards for the Show & Sell Stage 1 surface.
  *
  * Two guards, both read against the on-disk SDL through the shared parser (and,
- * for the reporting seam, the AppSync resolver wiring). These are the
- * "from day one" security guards the delivery checklist requires before any
- * resolver, table, or UI ships:
+ * for the reporting seam, the AppSync resolver wiring, the Lambda handlers, and
+ * the frontend callers). These are the "from day one" security guards the
+ * delivery checklist requires before any resolver, table, or UI ships:
  *
  *   1. TENANT AUTHORIZATION (AUTH-U / AUTH-P / AUTH-C + AC-45)
- *        - every Stage 1 operation has a Cognito-only auth path (present and
- *          directive-free); a missing operation or a directive on it is a hole;
- *        - no Show & Sell operation re-exposes an `@aws_api_key` surface;
- *        - no participant-safe type leaks an administrative field;
+ *        - every Stage 1 Unit operation AND every existing Profile-scoped
+ *          operation has a Cognito-only auth path (present and directive-free);
+ *          a missing operation or a directive on it is a hole;
+ *        - the @aws_api_key rule is whole-schema, not list-bound: the only
+ *          names that may carry it are the explicit legacy public-orders set;
+ *        - no participant-safe type leaks an administrative field; the
+ *          participant set is DERIVED from the `# participant-safe` marker in
+ *          the SDL, so a new participant type must opt in to be checked;
  *        - AC-45: administrative access is granted only by `createUnit` and
  *          `redeemUnitInvite` (a single-use credential), never by a
  *          self-service claim off legacy metadata - the SDL carries no
@@ -19,39 +23,67 @@
  *          same detectors the live schema is checked with.
  *
  *   2. BROWSER-ONLY REPORTING (WEB-MIG-04)
- *        - no new server-side report / document / ICS path; the two legacy
- *          report paths (`getUnitReport` and the S3 campaign-report family) are
- *          the only report-shaped names allowed, and the only pre-signed
- *          (AWSURL) output is the legacy `CampaignReport.reportUrl`;
+ *        - no new server-side report / document / ICS path. A complete new
+ *          server document path is SDL field + real AppSync resolver block +
+ *          handler writing the artifact to S3 + frontend caller, so the seam
+ *          guard reads ALL FOUR legs; the only live legacy path is
+ *          `getUnitReport` (in-response, no S3), and the only pre-signed
+ *          (AWSURL) output is `CampaignReport.reportUrl`;
+ *        - `reportId` / `reportUrl` are scoped to the `CampaignReport` owner
+ *          type - the same bare names on any other type are a new surface;
  *        - QR image GETs (`qrCodeUrl`, `unitPaymentMethodQrDownloadUrl`) are
- *          narrowly recognized as NON-reporting;
- *        - passing (clean) and failing (malicious SDL) fixtures exercise the
- *          same detector the live schema is checked with.
+ *          recognized by exact name as NON-reporting;
+ *        - passing (clean) and failing (malicious) fixtures exercise the same
+ *          detectors the live repo is checked with.
  *
  * The detector for each guard lives next to the fixture that proves it, so a
  * future SDL edit is rejected by the guard that owns the rule.
  */
 import { describe, test, expect } from "vitest";
+import { readFileSync, readdirSync } from "fs";
+import { join, relative } from "path";
+import { fileURLToPath } from "url";
 import {
   loadCodeOnlySchema,
+  loadSchema,
+  codeOnly,
   parseDefinitions,
   parseFields,
   returnTypeName,
   rootFields,
+  rootFieldsByName,
   urlFields,
   API_KEY,
   type Definition,
   type Field,
 } from "./show_and_sell_schema";
 
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
+const REPO_ROOT = join(__dirname, "..", "..");
+const APPSYNC_MODULE_DIR = join(REPO_ROOT, "tofu", "application", "modules", "appsync");
+const HANDLERS_DIR = join(REPO_ROOT, "src", "handlers");
+const FRONTEND_SRC_DIR = join(REPO_ROOT, "frontend", "src");
+
 const SCHEMA = loadCodeOnlySchema();
+const RAW_SCHEMA = loadSchema();
 const DEFINITIONS: Definition[] = parseDefinitions(SCHEMA);
 const BY_NAME = new Map(DEFINITIONS.map((d) => [d.name, d]));
 
+function* walkFiles(dir: string, extensions: string[]): Generator<string> {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      yield* walkFiles(full, extensions);
+    } else if (extensions.some((ext) => entry.name.endsWith(ext))) {
+      yield full;
+    }
+  }
+}
+
 function rootFieldByName(rootName: "Query" | "Mutation", name: string): Field | undefined {
-  const def = BY_NAME.get(rootName);
-  if (!def) return undefined;
-  return parseFields(def.body).find((f) => f.name === name);
+  // Across ALL definitions of the root, extend blocks included: a field
+  // declared only in `extend type Query` is still a real auth path.
+  return rootFieldsByName(SCHEMA, rootName).find((f) => f.name === name);
 }
 
 function definition(name: string): Definition {
@@ -60,7 +92,7 @@ function definition(name: string): Definition {
   return found as Definition;
 }
 
-// --- The Stage 1 operation surface (the auth paths that must exist) ---
+// --- The operation surface whose auth paths must exist (Unit + Profile) ---
 
 const SS_QUERY_FIELDS: string[] = [
   "myUnits",
@@ -85,6 +117,38 @@ const SS_MUTATION_FIELDS: string[] = [
   "updateUnitCampaign",
   "joinUnitCampaign",
   "removeUnitCampaignMembership",
+];
+
+/**
+ * The Profile-scoped seam: leaf 1.7.5 says "Unit/Profile auth paths", and
+ * these are the pre-existing Profile-domain operations a regression could
+ * re-directive (profile reads/writes, sharing, invites, ownership transfer).
+ */
+const PROFILE_QUERY_FIELDS: string[] = [
+  "getProfile",
+  "listMyProfiles",
+  "listSharesByProfile",
+  "listInvitesByProfile",
+  "paymentMethodsForProfile",
+];
+
+const PROFILE_MUTATION_FIELDS: string[] = [
+  "createSellerProfile",
+  "updateSellerProfile",
+  "deleteSellerProfile",
+  "createProfileInvite",
+  "deleteProfileInvite",
+  "redeemProfileInvite",
+  "shareProfileDirect",
+  "revokeShare",
+  "transferProfileOwnership",
+];
+
+const ALL_WATCHED_FIELDS: string[] = [
+  ...SS_QUERY_FIELDS,
+  ...SS_MUTATION_FIELDS,
+  ...PROFILE_QUERY_FIELDS,
+  ...PROFILE_MUTATION_FIELDS,
 ];
 
 /**
@@ -119,8 +183,25 @@ const ADMIN_FIELDS = new Set([
   "accountId",
 ]);
 
-/** The participant-safe types Stage 1 ships (the join preview). */
-const PARTICIPANT_TYPES: string[] = ["UnitCampaignJoinPreview"];
+/**
+ * The participant-safe set is DERIVED from the SDL, not hardcoded: a type
+ * opts in by carrying a `# participant-safe` marker comment directly above
+ * its declaration, and every marked type is then rejected if it exposes an
+ * administrative field. A new participant type without the marker is not
+ * checked at all - which the marker-existing test below makes loud.
+ */
+export function participantTypes(source: string): string[] {
+  const names: string[] = [];
+  // Marker comment lines may be followed by the type's docstring before the
+  // header, so the optional docstring block sits between the two.
+  const marked = /((?:^[ \t]*#[^\n]*\n)+)(?:"""[\s\S]*?"""[ \t]*\n)?^type\s+(\w+)[^\n]*\{/gm;
+  for (const match of source.matchAll(marked)) {
+    if (match[1].includes("participant-safe")) {
+      names.push(match[2]);
+    }
+  }
+  return names;
+}
 
 /** AC-45: verbs that mark a self-service admin-grant path off legacy metadata. */
 const LEGACY_CLAIM_RE = /(claim|adopt|transfer|recover|restore|migrate|import|sync|promote|reassign|assign)/i;
@@ -139,20 +220,32 @@ const SS_TYPE_NAMES: string[] = DEFINITIONS.filter(
 ).map((d) => d.name);
 
 /**
- * Show & Sell names (root fields and object types) carrying an
- * `@aws_api_key` directive - the API-key-only path the surface must never
- * offer. A compliant schema returns [].
+ * The ONLY names that may carry `@aws_api_key`: the pre-Show & Sell anonymous
+ * public-orders surface. The rule is whole-schema - a NEW field or type with
+ * the directive is an offender no matter which list it would or would not
+ * have been on. A compliant schema returns [].
  */
-export function apiKeyOffenders(source: string, seams: string[]): string[] {
-  const seamSet = new Set(seams);
+const LEGACY_API_KEY_SURFACE = new Set([
+  "publicGetOrderOffer",
+  "publicGetOrderReceipt",
+  "publicCreateOrder",
+  "PublicOrderOffer",
+  "PublicProduct",
+  "PublicPaymentMethod",
+  "PublicLineItem",
+  "PublicOrderReceipt",
+  "PublicOrderReceiptLookup",
+]);
+
+export function apiKeyOffenders(source: string): string[] {
   const offenders: string[] = [];
   for (const field of rootFields(source)) {
-    if (seamSet.has(field.name) && field.directives.includes(API_KEY)) {
+    if (field.directives.includes(API_KEY) && !LEGACY_API_KEY_SURFACE.has(field.name)) {
       offenders.push(field.name);
     }
   }
   for (const def of parseDefinitions(source)) {
-    if (seamSet.has(def.name) && def.directives.includes(API_KEY)) {
+    if (def.directives.includes(API_KEY) && !LEGACY_API_KEY_SURFACE.has(def.name)) {
       offenders.push(def.name);
     }
   }
@@ -208,7 +301,7 @@ export function legacyAdminClaimMutations(
 }
 
 describe("Show & Sell Stage 1 - tenant authorization (AUTH)", () => {
-  test("every Stage 1 operation has a Cognito-only auth path (present and directive-free)", () => {
+  test("every Unit and Profile operation has a Cognito-only auth path (present and directive-free)", () => {
     for (const name of SS_QUERY_FIELDS) {
       const field = rootFieldByName("Query", name);
       expect(field, `Query.${name} auth path is missing`).toBeDefined();
@@ -222,27 +315,36 @@ describe("Show & Sell Stage 1 - tenant authorization (AUTH)", () => {
       expect(field, `Mutation.${name} auth path is missing`).toBeDefined();
       expect(field!.directives, `${name} must be Cognito-only (directive-free)`).toEqual([]);
     }
+    // The Profile-scoped seam (leaf 1.7.5 says Unit/Profile auth paths).
+    for (const name of PROFILE_QUERY_FIELDS) {
+      const field = rootFieldByName("Query", name);
+      expect(field, `Query.${name} auth path is missing`).toBeDefined();
+      expect(field!.directives, `${name} must be Cognito-only (directive-free)`).toEqual([]);
+    }
+    for (const name of PROFILE_MUTATION_FIELDS) {
+      const field = rootFieldByName("Mutation", name);
+      expect(field, `Mutation.${name} auth path is missing`).toBeDefined();
+      expect(field!.directives, `${name} must be Cognito-only (directive-free)`).toEqual([]);
+    }
   });
 
-  test("no Show & Sell operation re-exposes an @aws_api_key surface", () => {
-    for (const name of SS_QUERY_FIELDS) {
-      expect(rootFieldByName("Query", name)!.directives, `${name} must not be API-key reachable`).not.toContain(
-        API_KEY,
-      );
+  test("the only @aws_api_key surface anywhere is the legacy public-orders set", () => {
+    // Whole-schema rule: an offender is any @aws_api_key field or type outside
+    // the explicit legacy set, no matter which list it sits on.
+    expect(apiKeyOffenders(SCHEMA)).toEqual([]);
+    // None of the watched Unit/Profile auth paths or Show & Sell types is
+    // API-key reachable either.
+    for (const name of ALL_WATCHED_FIELDS) {
+      const field = rootFieldByName("Query", name) ?? rootFieldByName("Mutation", name);
+      expect(field, `${name} is missing`).toBeDefined();
+      expect(field!.directives, `${name} must not be API-key reachable`).not.toContain(API_KEY);
     }
-    for (const name of SS_MUTATION_FIELDS) {
-      expect(rootFieldByName("Mutation", name)!.directives, `${name} must not be API-key reachable`).not.toContain(
-        API_KEY,
-      );
-    }
-    // No Show & Sell object type is API-key reachable either.
     for (const typeName of SS_TYPE_NAMES) {
       expect(definition(typeName).directives).not.toContain(API_KEY);
     }
-    expect(apiKeyOffenders(SCHEMA, [...SS_QUERY_FIELDS, ...SS_MUTATION_FIELDS, ...SS_TYPE_NAMES])).toEqual([]);
   });
 
-  test("a Show & Sell seam carrying @aws_api_key is rejected (failing fixture)", () => {
+  test("any new @aws_api_key surface is rejected (failing fixture)", () => {
     const bad = [
       "type Query {",
       "  unit(id: ID!): Unit @aws_api_key",
@@ -251,37 +353,32 @@ describe("Show & Sell Stage 1 - tenant authorization (AUTH)", () => {
       "  unitId: ID!",
       "}",
     ].join("\n");
-    expect(apiKeyOffenders(bad, ["unit", "Unit"])).toContain("unit");
-    expect(apiKeyOffenders(bad, ["unit", "Unit"])).toContain("Unit");
+    expect(apiKeyOffenders(bad)).toEqual(["unit", "Unit"]);
   });
 
   test("a participant-safe type never exposes administrative fields (and a leaking schema is rejected)", () => {
-    for (const typeName of PARTICIPANT_TYPES) {
+    const derived = participantTypes(RAW_SCHEMA);
+    // The marker is load-bearing: exactly the join preview opts in, and the
+    // check set cannot silently drift away from what the SDL declares.
+    expect(derived).toEqual(["UnitCampaignJoinPreview"]);
+    for (const typeName of derived) {
       expect(BY_NAME.get(typeName), `participant type ${typeName} is missing`).toBeDefined();
     }
-    expect(adminFieldLeaks(SCHEMA, PARTICIPANT_TYPES)).toEqual([]);
+    expect(adminFieldLeaks(SCHEMA, derived)).toEqual([]);
     const bad = [
-      "type Unit {",
-      "  unitId: ID!",
+      "# participant-safe: bare join code callers see this preview",
+      "type UnitJoinPreview {",
+      "  unitDisplayName: String!",
       "  joinCode: String!",
       "  ownerAccountId: ID!",
-      "  createdAt: AWSDateTime!",
       "}",
       "type UnitCampaign {",
       "  unitCampaignId: ID!",
       "  adminAccountId: ID!",
       "}",
-      "type UnitShare {",
-      "  shareId: ID!",
-      "  joinCode: String!",
-      "}",
     ].join("\n");
-    const leaks = adminFieldLeaks(bad, ["Unit", "UnitCampaign", "UnitShare"]);
-    expect(leaks).toContain("Unit.joinCode");
-    expect(leaks).toContain("Unit.ownerAccountId");
-    expect(leaks).toContain("Unit.createdAt");
-    expect(leaks).toContain("UnitCampaign.adminAccountId");
-    expect(leaks).toContain("UnitShare.joinCode");
+    const leaks = adminFieldLeaks(codeOnly(bad), participantTypes(bad));
+    expect(leaks).toEqual(["UnitJoinPreview.joinCode", "UnitJoinPreview.ownerAccountId"]);
   });
 
   test("AC-45: admin is granted only by createUnit/redeemUnitInvite, never from legacy metadata", () => {
@@ -351,24 +448,34 @@ const REPORT_BAD_ENDPOINTS = new Set([
 ]);
 
 /**
- * The two legacy report paths awaiting browser-only migration, expressed as the
- * only report-shaped names the schema may carry:
- *   1. getUnitReport -> UnitReport (live, in-response, no S3);
- *   2. the S3 campaign-report family (CampaignReport + reportId + reportUrl).
+ * The report-shaped names the schema may carry, and why each is there. Of the
+ * two legacy paths only getUnitReport is LIVE: it answers in-response with no
+ * S3 (the browser renders the UnitReport from data). The CampaignReport /
+ * reportId / reportUrl type family is pre-existing schema surface whose
+ * producing mutation (requestCampaignReport) was removed in #905; it stays
+ * allowlisted so dead legacy types do not trip the guard - it is NOT
+ * permission to extend the server-report surface. Any NEW report/document/ICS
+ * artifact must be browser-generated (WEB-MIG-04).
  */
-const LEGACY_REPORT_ALLOWLIST = new Set([
-  "getUnitReport",
-  "UnitReport",
-  "CampaignReport",
-  "reportId",
-  "reportUrl",
-]);
+const LEGACY_REPORT_NAMES = new Set(["getUnitReport", "UnitReport", "CampaignReport"]);
 
-/** Narrow QR image-GET recognition: these are file GETs, not reports. */
-const QR_GET_RE = /[Qq]r(Code|Download)Url$/;
+/**
+ * The ONLY pre-signed (AWSURL) output the schema may carry, owner-scoped:
+ * `reportUrl`/`reportId` are exempt from the report-shaped-name check only on
+ * the CampaignReport owner type; the same bare names on ANY other type are a
+ * new server report surface.
+ */
+const LEGACY_REPORT_URL = { owner: "CampaignReport", field: "reportUrl" } as const;
+
+/**
+ * Narrow QR image-GET recognition: the exact two names only (a regex such as
+ * /[Qq]r(Code|Download)Url$/ is an escape hatch - unitSalesReportQrDownloadUrl
+ * must NOT pass).
+ */
+const QR_GET_NAMES = new Set(["qrCodeUrl", "unitPaymentMethodQrDownloadUrl"]);
 
 function isReportArtifact(name: string): boolean {
-  if (LEGACY_REPORT_ALLOWLIST.has(name) || QR_GET_RE.test(name)) {
+  if (LEGACY_REPORT_NAMES.has(name) || QR_GET_NAMES.has(name)) {
     return false;
   }
   if (REPORT_BAD_ENDPOINTS.has(name)) {
@@ -376,21 +483,30 @@ function isReportArtifact(name: string): boolean {
   }
   const n = name.toLowerCase();
   // "sheet"/"document"/"invoice"/"export" catch the printable-artifact names;
-  // the ICS calendar endpoint is caught by REPORT_BAD_ENDPOINTS and, when it is
-  // served as a pre-signed URL, by the AWSURL seam below.
+  // "calendar"/"ics"/"pdf"/"workbook" catch the ICS and document formats; the
+  // ICS calendar endpoint named in REPORT_BAD_ENDPOINTS and, when it is served
+  // as a pre-signed URL, the AWSURL seam below cover the rest.
   return (
     n.includes("report") ||
     n.includes("export") ||
     n.includes("sheet") ||
     n.includes("document") ||
-    n.includes("invoice")
+    n.includes("invoice") ||
+    n.includes("calendar") ||
+    n.includes("pdf") ||
+    n.includes("workbook") ||
+    // An `ics` calendar artifact: the bare token, or a name ENDING in it
+    // (councilNeedsIcs) - no live field name ends in `ics`, and metrics-like
+    // collisions would be a loud, deliberate addition.
+    n.endsWith("ics") ||
+    /(?:^|[^a-z])ics(?:[^a-z]|$)/.test(n)
   );
 }
 
 /**
  * Every report/document/ICS-shaped name in a schema source that is not on the
- * legacy allowlist, plus every pre-signed (AWSURL) output field that is not the
- * legacy campaign reportUrl. A compliant schema returns [].
+ * legacy allowlist, plus every pre-signed (AWSURL) output field that is not
+ * the legacy CampaignReport.reportUrl. A compliant schema returns [].
  */
 function reportOffenders(source: string): string[] {
   const offenders: string[] = [];
@@ -399,17 +515,64 @@ function reportOffenders(source: string): string[] {
       offenders.push(def.name);
     }
     for (const field of parseFields(def.body)) {
+      // Owner-scoped exemption: reportId/reportUrl exist only on CampaignReport.
+      if (def.name === "CampaignReport" && (field.name === "reportUrl" || field.name === "reportId")) {
+        continue;
+      }
       if (isReportArtifact(field.name)) {
         offenders.push(`${def.name}.${field.name}`);
       }
     }
   }
   for (const entry of urlFields(source)) {
-    if (!(entry.owner === "CampaignReport" && entry.field.name === "reportUrl")) {
+    if (!(entry.owner === LEGACY_REPORT_URL.owner && entry.field.name === LEGACY_REPORT_URL.field)) {
       offenders.push(`${entry.owner}.${entry.field.name}`);
     }
   }
   return offenders;
+}
+
+// --- The reporting seam detectors (SDL + IaC + Lambda + frontend) ---
+
+/**
+ * Every `field = "<name>"` an AppSync resolver block wires (root or object
+ * field). This is the IaC leg of the reporting seam: a new server document
+ * path must be wired here before anything can call it.
+ */
+export function wiredResolverFields(tfSource: string): string[] {
+  return [...tfSource.matchAll(/\bfield\s*=\s*"(\w+)"/g)].map((match) => match[1]);
+}
+
+/** Report-shaped resolver wirings outside the one live legacy path. */
+export function reportResolverWiring(tfSource: string): string[] {
+  // Only getUnitReport may be wired: it is the live legacy in-response report
+  // (no S3). requestCampaignReport's wiring died with #905 and must not return.
+  return wiredResolverFields(tfSource).filter((name) => isReportArtifact(name) && name !== "getUnitReport");
+}
+
+/** True when a Lambda handler source writes an object into S3 (the artifact store). */
+export function handlerWritesS3Object(pySource: string): boolean {
+  return /\b(?:put_object|upload_fileobj|upload_file)\s*\(/.test(pySource);
+}
+
+/** Every GraphQL operation name declared in gql-tagged documents. */
+export function graphQLOperations(tsSource: string): string[] {
+  const names: string[] = [];
+  for (const doc of tsSource.matchAll(/gql`([\s\S]*?)`/g)) {
+    for (const op of doc[1].matchAll(/\b(?:query|mutation)\s+(\w+)/g)) {
+      names.push(op[1]);
+    }
+  }
+  return names;
+}
+
+/** Report-shaped GraphQL operations outside the one live legacy client. */
+export function reportFrontendOperations(tsSource: string): string[] {
+  // GetUnitReport is the live legacy client: the browser renders the report
+  // from the in-response data (no download URL is involved).
+  return graphQLOperations(tsSource).filter(
+    (name) => isReportArtifact(name) && name.toLowerCase() !== "getunitreport",
+  );
 }
 
 describe("Show & Sell Stage 1 - browser-only reporting (WEB-MIG-04)", () => {
@@ -417,14 +580,97 @@ describe("Show & Sell Stage 1 - browser-only reporting (WEB-MIG-04)", () => {
     expect(reportOffenders(SCHEMA), "a new server report/document/ICS path has appeared").toEqual([]);
   });
 
+  test("the reporting seam is guarded across SDL, resolver wiring, Lambda handlers, and frontend callers", () => {
+    // SDL leg (above) plus the three implementation legs: a complete new
+    // server document path cannot reach production with any leg unguarded.
+    const tfSources = ["resolvers_queries.tf", "resolvers_mutations.tf"].map((file) =>
+      readFileSync(join(APPSYNC_MODULE_DIR, file), "utf8"),
+    );
+    for (const source of tfSources) {
+      expect(reportResolverWiring(source), "a report-shaped AppSync resolver is wired").toEqual([]);
+    }
+
+    const handlerOffenders = [...walkFiles(HANDLERS_DIR, [".py"])]
+      .filter((file) => handlerWritesS3Object(readFileSync(file, "utf8")))
+      .map((file) => relative(REPO_ROOT, file));
+    expect(handlerOffenders, "a Lambda handler writes a report artifact to S3").toEqual([]);
+
+    // The generated type mirror is owned by the SDL guard; scan the hand-written
+    // client surface for report-shaped operations.
+    const frontendOffenders = [...walkFiles(FRONTEND_SRC_DIR, [".ts", ".tsx"])]
+      .filter((file) => !file.endsWith(join("types", "graphql-generated.ts")))
+      .flatMap((file) =>
+        reportFrontendOperations(readFileSync(file, "utf8")).map(
+          (name) => `${relative(FRONTEND_SRC_DIR, file)}:${name}`,
+        ),
+      );
+    expect(frontendOffenders, "a frontend caller uses a new server report operation").toEqual([]);
+  });
+
+  test("a complete new server document path is rejected at every seam (failing fixtures)", () => {
+    // SDL leg.
+    const badSdl = [
+      "type Query {",
+      "  councilNeedsReport: CouncilNeedsReport",
+      "}",
+      "type CouncilNeedsReport {",
+      "  rows: [String!]",
+      "}",
+    ].join("\n");
+    expect(reportOffenders(badSdl)).toContain("Query.councilNeedsReport");
+    expect(reportOffenders(badSdl)).toContain("CouncilNeedsReport");
+
+    // IaC leg: the resolver wiring for the new path.
+    const badTf = [
+      'resource "aws_appsync_resolver" "council_needs_report" {',
+      '  field = "councilNeedsReport"',
+      "}",
+    ].join("\n");
+    expect(reportResolverWiring(badTf)).toEqual(["councilNeedsReport"]);
+
+    // Lambda leg: the handler that uploads the artifact.
+    const badHandler = "def handler(event, context):\n    s3_client.put_object(Bucket=bucket, Key=key, Body=body)\n";
+    expect(handlerWritesS3Object(badHandler)).toBe(true);
+    expect(handlerWritesS3Object("def handler(event, context):\n    return table.get_item(Key=key)\n")).toBe(false);
+
+    // Frontend leg: the caller of the new operation.
+    const badClient = [
+      "export const GET_COUNCIL_NEEDS_REPORT = gql`",
+      "  query CouncilNeedsReport {",
+      "    councilNeedsReport { rows }",
+      "  }",
+      "`;",
+    ].join("\n");
+    expect(reportFrontendOperations(badClient)).toEqual(["CouncilNeedsReport"]);
+  });
+
   test("the only pre-signed (AWSURL) output is the legacy campaign reportUrl", () => {
     const urls = urlFields(SCHEMA).map((e) => `${e.owner}.${e.field.name}`);
     expect(urls).toEqual(["CampaignReport.reportUrl"]);
   });
 
+  test("reportUrl/reportId are scoped to the CampaignReport owner type (failing fixture)", () => {
+    // The same bare names on any OTHER type are a new server report surface.
+    const bad = [
+      "type Unit {",
+      "  unitId: ID!",
+      "  reportUrl: String",
+      "}",
+      "type SharedCampaign {",
+      "  reportId: ID!",
+      "}",
+    ].join("\n");
+    const offenders = reportOffenders(bad);
+    expect(offenders).toContain("Unit.reportUrl");
+    expect(offenders).toContain("SharedCampaign.reportId");
+  });
+
   test("QR image GETs are recognized as non-reporting (not flagged)", () => {
     expect(isReportArtifact("qrCodeUrl")).toBe(false);
     expect(isReportArtifact("unitPaymentMethodQrDownloadUrl")).toBe(false);
+    // The old regex escape hatch stays shut: a report name ending in a QR-ish
+    // suffix is still a report.
+    expect(isReportArtifact("unitSalesReportQrDownloadUrl")).toBe(true);
     // A schema whose only URL-ish field is a QR GET (a plain String) is clean.
     const qrClean = [
       "type PaymentMethod {",
@@ -439,6 +685,22 @@ describe("Show & Sell Stage 1 - browser-only reporting (WEB-MIG-04)", () => {
       "}",
     ].join("\n");
     expect(reportOffenders(qrClean)).toEqual([]);
+  });
+
+  test("the ICS/calendar/pdf/workbook formats are recognized (failing fixture)", () => {
+    const bad = [
+      "type Query {",
+      "  showAndSellSignupCalendar: String",
+      "  councilNeedsIcs: String",
+      "  unitSalesWorkbook: String",
+      "  priceListPdf: String",
+      "}",
+    ].join("\n");
+    const offenders = reportOffenders(bad);
+    expect(offenders).toContain("Query.showAndSellSignupCalendar");
+    expect(offenders).toContain("Query.councilNeedsIcs");
+    expect(offenders).toContain("Query.unitSalesWorkbook");
+    expect(offenders).toContain("Query.priceListPdf");
   });
 
   test("a new report/query path is rejected (failing fixture)", () => {
@@ -489,5 +751,22 @@ describe("Show & Sell Stage 1 - browser-only reporting (WEB-MIG-04)", () => {
       "}",
     ].join("\n");
     expect(reportOffenders(bad)).toContain("Unit.inventoryReportUrl");
+  });
+
+  test("the parser sees extended roots and four-space fields, so smuggling there is caught", () => {
+    // A hostile edit hiding the new path in an `extend type` block or behind
+    // four-space indentation must still parse - both shapes are legal SDL.
+    const bad = [
+      "extend type Query {",
+      "    councilNeedsReport: CouncilNeedsReport",
+      "}",
+      "type CouncilNeedsReport {",
+      "  rows: [String!]",
+      "}",
+    ].join("\n");
+    const code = codeOnly(bad);
+    expect(rootFieldsByName(code, "Query").map((f) => f.name)).toContain("councilNeedsReport");
+    expect(reportOffenders(code)).toContain("Query.councilNeedsReport");
+    expect(reportOffenders(code)).toContain("CouncilNeedsReport");
   });
 });

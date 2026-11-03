@@ -12,12 +12,17 @@
  * to it.
  *
  * The parser is anchored, not substring-based:
- *   - a definition header is `type|input|enum|interface <Name>` at column 0,
- *     and its body runs to the closing `}` at column 0 (field arguments use
- *     parentheses, so braces never nest in this schema);
- *   - a field entry starts at two spaces of indentation with an identifier
- *     followed by `(` or `:`; its closing `): Type! @directive` line starts
- *     with `)` and so never starts a new entry.
+ *   - a definition header is `(extend )?type|input|enum|interface <Name>` at
+ *     column 0, and its body runs to the closing `}` at column 0 (field
+ *     arguments use parentheses, so braces never nest in this schema); an
+ *     `extend` block reports the base kind, so every detector applies to
+ *     extended roots without a second code path;
+ *   - a field entry starts at ANY indentation with an identifier followed by
+ *     `(` or `:`, but only at parenthesis depth 0 - so a four-space field in a
+ *     drifted or extended block is seen, while a multi-line argument list's
+ *     indented argument lines (`first: Int` at depth 1) never parse as
+ *     fields. Its closing `): Type! @directive` line starts with `)` and so
+ *     never starts a new entry.
  */
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -32,6 +37,7 @@ export const API_KEY = "aws_api_key";
 export const COGNITO = "aws_cognito_user_pools";
 
 export interface Definition {
+  /** The base kind (`type`/`input`/`enum`/`interface`); an `extend` block reports the base kind. */
   kind: string;
   name: string;
   directives: string[];
@@ -71,14 +77,17 @@ export function loadCodeOnlySchema(): string {
 }
 
 /**
- * Parses top-level `type` / `input` / `enum` / `interface` definitions: the
+ * Parses top-level `(extend )?type|input|enum|interface` definitions: the
  * header is anchored at column 0, and the body runs to the closing brace at
  * column 0. A well-formed schema never leaves a definition unterminated, so a
  * missing close is a structural defect the guards must treat as a failure.
+ * `extend` blocks report the base kind, so a root split across a definition
+ * and one or more `extend type` blocks still exposes every field to every
+ * detector.
  */
 export function parseDefinitions(source: string): Definition[] {
   const definitions: Definition[] = [];
-  const header = /^(type|input|enum|interface)\s+(\w+)([^\n]*)$/gm;
+  const header = /^(?:extend\s+)?(type|input|enum|interface)\s+(\w+)([^\n]*)$/gm;
   for (const match of source.matchAll(header)) {
     const [, kind, name, rest] = match;
     const start = (match.index ?? 0) + match[0].length;
@@ -96,12 +105,30 @@ export function parseDefinitions(source: string): Definition[] {
   return definitions;
 }
 
-/** Parses the fields of one object definition body (see module header). */
+/**
+ * Parses the fields of one object definition body (see module header): a field
+ * starts at any indentation with a lower-case identifier followed by `(` or
+ * `:`, but only at parenthesis depth 0, so indented argument lines of a
+ * multi-line field never masquerade as fields and four-space fields are seen.
+ */
 export function parseFields(body: string): Field[] {
   const fields: Field[] = [];
   const starts: { name: string; index: number }[] = [];
-  for (const match of body.matchAll(/^ {2}([a-z]\w*)(?=[(:])/gm)) {
-    starts.push({ name: match[1], index: match.index ?? 0 });
+  let depth = 0;
+  let cursor = 0;
+  for (const line of body.split("\n")) {
+    const lineStart = cursor;
+    cursor += line.length + 1;
+    if (depth === 0) {
+      const match = line.match(/^ +([a-z]\w*)(?=[(:])/);
+      if (match) {
+        starts.push({ name: match[1], index: lineStart + (match.index ?? 0) });
+      }
+    }
+    for (const ch of line) {
+      if (ch === "(") depth += 1;
+      else if (ch === ")") depth = Math.max(0, depth - 1);
+    }
   }
   starts.forEach((entry, i) => {
     const end = i + 1 < starts.length ? starts[i + 1].index : body.length;
@@ -117,7 +144,7 @@ export function parseFields(body: string): Field[] {
 
 /** Base type name of a field's return type, with `!` and list brackets stripped. */
 export function returnTypeName(entry: string): string | null {
-  const tail = entry.match(/\):\s*([\w![\]]+)/) ?? entry.match(/^ {2}[a-z]\w*:\s*([\w![\]]+)/m);
+  const tail = entry.match(/\):\s*([\w![\]]+)/) ?? entry.match(/^ +[a-z]\w*:\s*([\w![\]]+)/m);
   if (!tail) {
     return null;
   }
@@ -144,6 +171,18 @@ export function allFields(source: string): { owner: string; kind: string; field:
 export function rootFields(source: string): Field[] {
   return parseDefinitions(source)
     .filter((d) => d.name === "Query" || d.name === "Mutation")
+    .flatMap((d) => parseFields(d.body));
+}
+
+/**
+ * Every field of one named root across ALL its definitions - the root block
+ * itself plus any `extend type` blocks. Looking only at the last definition
+ * (what a name-keyed map yields) would drop every field declared in an extend
+ * block, so root-field lookups must go through here.
+ */
+export function rootFieldsByName(source: string, rootName: "Query" | "Mutation"): Field[] {
+  return parseDefinitions(source)
+    .filter((d) => d.name === rootName)
     .flatMap((d) => parseFields(d.body));
 }
 

@@ -1097,6 +1097,9 @@ type UnitCampaignConnection {
   pageInfo: PageInfo!
 }
 
+# participant-safe: the 1.7.5 guard suite derives its participant-type set from
+# this marker; any type a bare join code or READ grant can see must carry it
+# and is then rejected if it exposes an administrative field.
 """The member-safe preview of a Unit Campaign, exposed to any authenticated account via the join code. Carries no join code, IDs, catalog ID, or settings."""
 type UnitCampaignJoinPreview {
   """The parent unit's display name."""
