@@ -61,7 +61,13 @@ def _unit_pk(unit_id: str) -> str:
 def _validate_timezone(tz: str) -> bool:
     if tz == "UTC":
         return True
-    return "/" in str(tz)
+    try:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(tz)
+        return True
+    except Exception:
+        return False
 
 
 def _metadata_key(unit_type, unit_number, city, state) -> str:
