@@ -385,10 +385,15 @@ def redeem_unit_invite(event, context):
     from datetime import datetime as dt
 
     try:
-        if dt.fromisoformat(inv["expiresAt"].replace("Z", "+00:00")) < datetime.now(timezone.utc):
-            raise AppError(ErrorCode.NOT_FOUND, "Invite expired")
+        exp = dt.fromisoformat(inv["expiresAt"].replace("Z", "+00:00"))
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
+    except AppError:
+        raise
     except Exception:
-        pass
+        raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
     # create grant
     now = _now()
     grant_item = {
