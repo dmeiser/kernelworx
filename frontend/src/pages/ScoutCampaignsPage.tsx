@@ -86,6 +86,7 @@ const CampaignsGrid: React.FC<CampaignsGridProps> = ({ campaigns, profileId, sec
               campaignId={campaign.campaignId}
               campaignName={campaign.campaignName}
               campaignYear={campaign.campaignYear}
+              isActive={campaign.isActive ?? true}
               totalOrders={campaign.totalOrders ?? undefined}
               totalRevenue={campaign.totalRevenue ?? undefined}
               profileId={profileId}

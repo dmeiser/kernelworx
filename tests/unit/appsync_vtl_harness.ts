@@ -9,8 +9,10 @@
  * so off-the-shelf Velocity engines cannot execute these templates.
  *
  * Supported subset: ## comments, #if/#else/#end, #set, #foreach, #end,
- * string literals with $reference interpolation, map/list literals,
- * $prop chains, method calls, and the operators || && == != >= <= > < !.
+ * #return(expr) (via renderVtlRequestTemplate, which exposes the early-return
+ * value), string literals with $reference interpolation, map/list literals,
+ * $prop chains, method calls, the $math.roundTo helper, and the operators
+ * || && == != >= <= > < !.
  * Unsupported directives fail loudly with an explicit error.
  */
 
@@ -57,6 +59,30 @@ const utilTime = {
   nowISO8601: () => FIXED_NOW,
 };
 
+// $math.roundTo(places, value) — AppSync rounds half-away-from-zero on the
+// exact decimal; this implementation rounds on the shortest decimal
+// representation, which agrees for every cent-quantized value the resolvers
+// handle (the float tails being rounded away live far from a half-cent tie).
+function roundTo(places: number, value: unknown): number {
+  const num = Number(value);
+  if (!Number.isFinite(num) || places < 0) return num;
+  const negative = num < 0 ? -1 : 1;
+  const text = Math.abs(num).toString();
+  const dot = text.indexOf('.');
+  const intPart = dot === -1 ? text : text.slice(0, dot);
+  const fracPart = dot === -1 ? '' : text.slice(dot + 1);
+  if (fracPart.length <= places) return num;
+  const kept = fracPart.slice(0, places);
+  const roundDigit = Number(fracPart[places]);
+  let keptNum = parseInt(kept === '' ? '0' : kept, 10);
+  if (roundDigit >= 5) keptNum += 1;
+  return negative * (parseInt(intPart, 10) + keptNum / Math.pow(10, places));
+}
+
+const math = {
+  roundTo,
+};
+
 const util = {
   isString: (value: unknown) => typeof value === 'string',
   isNumber: (value: unknown) => typeof value === 'number' && !Number.isNaN(value),
@@ -81,9 +107,18 @@ const util = {
   dynamodb: utilDynamodb,
 };
 
-const UTIL_NAMESPACES = new Set<unknown>([util, utilTime, utilDynamodb]);
+const UTIL_NAMESPACES = new Set<unknown>([util, utilTime, utilDynamodb, math]);
 
 function callMethod(target: unknown, name: string, args: unknown[]): unknown {
+  if (typeof target === 'string') {
+    if (name === 'startsWith') return target.startsWith(String(args[0]));
+    if (name === 'substring') {
+      if (args.length <= 1) return target.substring(Number(args[0]));
+      return target.substring(Number(args[0]), Number(args[1]));
+    }
+    if (name === 'length') return target.length;
+    if (name === 'replace') return target.replace(String(args[0]), String(args[1]));
+  }
   if (Array.isArray(target)) {
     if (name === 'size') return target.length;
     if (name === 'isEmpty') return target.length === 0;
@@ -211,6 +246,10 @@ type Expr =
   | { k: 'gt'; l: Expr; r: Expr }
   | { k: 'le'; l: Expr; r: Expr }
   | { k: 'lt'; l: Expr; r: Expr }
+  | { k: 'add'; l: Expr; r: Expr }
+  | { k: 'sub'; l: Expr; r: Expr }
+  | { k: 'mul'; l: Expr; r: Expr }
+  | { k: 'div'; l: Expr; r: Expr }
   | { k: 'not'; e: Expr }
   | { k: 'num'; v: number }
   | { k: 'bool'; v: boolean }
@@ -257,17 +296,45 @@ function parseEquality(cursor: Cursor): Expr {
 }
 
 function parseRelational(cursor: Cursor): Expr {
-  let left = parseUnary(cursor);
+  let left = parseAdditive(cursor);
   for (;;) {
     skipWs(cursor);
     const two = cursor.source.slice(cursor.index, cursor.index + 2);
     if (two === '>=' || two === '<=') {
       cursor.index += 2;
-      left = { k: two === '>=' ? 'ge' : 'le', l: left, r: parseUnary(cursor) };
+      left = { k: two === '>=' ? 'ge' : 'le', l: left, r: parseAdditive(cursor) };
     } else if (cursor.peek() === '>' || cursor.peek() === '<') {
       const char = cursor.peek()!;
       cursor.index += 1;
-      left = { k: char === '>' ? 'gt' : 'lt', l: left, r: parseUnary(cursor) };
+      left = { k: char === '>' ? 'gt' : 'lt', l: left, r: parseAdditive(cursor) };
+    } else return left;
+  }
+}
+
+function parseAdditive(cursor: Cursor): Expr {
+  let left = parseMultiplicative(cursor);
+  for (;;) {
+    skipWs(cursor);
+    if (cursor.peek() === '+') {
+      cursor.index += 1;
+      left = { k: 'add', l: left, r: parseMultiplicative(cursor) };
+    } else if (cursor.peek() === '-') {
+      cursor.index += 1;
+      left = { k: 'sub', l: left, r: parseMultiplicative(cursor) };
+    } else return left;
+  }
+}
+
+function parseMultiplicative(cursor: Cursor): Expr {
+  let left = parseUnary(cursor);
+  for (;;) {
+    skipWs(cursor);
+    if (cursor.peek() === '*') {
+      cursor.index += 1;
+      left = { k: 'mul', l: left, r: parseUnary(cursor) };
+    } else if (cursor.peek() === '/') {
+      cursor.index += 1;
+      left = { k: 'div', l: left, r: parseUnary(cursor) };
     } else return left;
   }
 }
@@ -418,7 +485,9 @@ function evalRef(ref: Ref, state: EvalState): unknown {
       ? state.ctx
       : ref.base === 'util'
         ? util
-        : undefined;
+        : ref.base === 'math'
+          ? math
+          : undefined;
   for (const op of ref.ops) {
     if (op.kind === 'prop') {
       value = (value as Record<string, unknown> | undefined)?.[op.name];
@@ -460,6 +529,14 @@ function evalExpr(expr: Expr, state: EvalState): unknown {
       return (evalExpr(expr.l, state) as number) <= (evalExpr(expr.r, state) as number);
     case 'lt':
       return (evalExpr(expr.l, state) as number) < (evalExpr(expr.r, state) as number);
+    case 'add':
+      return (evalExpr(expr.l, state) as number) + (evalExpr(expr.r, state) as number);
+    case 'sub':
+      return (evalExpr(expr.l, state) as number) - (evalExpr(expr.r, state) as number);
+    case 'mul':
+      return (evalExpr(expr.l, state) as number) * (evalExpr(expr.r, state) as number);
+    case 'div':
+      return (evalExpr(expr.l, state) as number) / (evalExpr(expr.r, state) as number);
     case 'not':
       return !truthy(evalExpr(expr.e, state));
     case 'num':
@@ -490,9 +567,10 @@ type Node =
   | { k: 'text'; value: string }
   | { k: 'set'; target: string; expr: Expr }
   | { k: 'if'; branches: Array<{ cond: Expr | null; body: Node[] }> }
-  | { k: 'foreach'; varName: string; iterable: Expr; body: Node[] };
+  | { k: 'foreach'; varName: string; iterable: Expr; body: Node[] }
+  | { k: 'return'; expr: Expr };
 
-const KNOWN_DIRECTIVES = new Set(['#if', '#set', '#foreach', '#else', '#end', '#elseif']);
+const KNOWN_DIRECTIVES = new Set(['#if', '#set', '#foreach', '#else', '#end', '#elseif', '#return']);
 
 function readDirectiveWord(cursor: Cursor): string | null {
   if (cursor.peek() !== '#') return null;
@@ -576,6 +654,8 @@ function parseNodes(cursor: Cursor): {
         iterable: parseExpr(match[2]),
         body: body.nodes,
       });
+    } else if (word === '#return') {
+      nodes.push({ k: 'return', expr: parseExpr(readParensBody(cursor)) });
     } else {
       return { nodes, terminator: word as '#else' | '#end' };
     }
@@ -599,16 +679,29 @@ function renderText(text: string, state: EvalState): string {
   return output;
 }
 
-function renderNodes(nodes: Node[], state: EvalState, output: string[]): void {
+/**
+ * Signal a `#return(...)` unwinds to: rendering stops and the evaluated value
+ * becomes the template result (for request templates, AppSync then skips the
+ * data source call entirely).
+ */
+interface RenderOutcome {
+  returned: boolean;
+  value?: unknown;
+}
+
+function renderNodes(nodes: Node[], state: EvalState, output: string[]): RenderOutcome {
   for (const node of nodes) {
     if (node.k === 'text') {
       output.push(renderText(node.value, state));
     } else if (node.k === 'set') {
       state.scope[node.target] = evalExpr(node.expr, state);
+    } else if (node.k === 'return') {
+      return { returned: true, value: evalExpr(node.expr, state) };
     } else if (node.k === 'if') {
       for (const branch of node.branches) {
         if (branch.cond === null || truthy(evalExpr(branch.cond, state))) {
-          renderNodes(branch.body, state, output);
+          const outcome = renderNodes(branch.body, state, output);
+          if (outcome.returned) return outcome;
           break;
         }
       }
@@ -619,10 +712,36 @@ function renderNodes(nodes: Node[], state: EvalState, output: string[]): void {
       }
       for (const item of items) {
         state.scope[node.varName] = item;
-        renderNodes(node.body, state, output);
+        const outcome = renderNodes(node.body, state, output);
+        if (outcome.returned) return outcome;
       }
     }
   }
+  return { returned: false };
+}
+
+export interface VtlRequestRender {
+  /** True when a `#return(...)` fired: the data source call is skipped and `value` is the resolver result. */
+  earlyReturn: boolean;
+  /** The value passed to `#return(...)`; undefined when `earlyReturn` is false. */
+  value: unknown;
+  /** The rendered template body (empty when `earlyReturn` fired). */
+  body: string;
+}
+
+/**
+ * Executes an AppSync request mapping template against the given AppSync
+ * context ({ ctx }), exposing both outcomes a request template can have:
+ * either it early-returns a value (`#return`, no data source call) or it
+ * renders the data source request document (`body`).
+ */
+export function renderVtlRequestTemplate(templateSource: string, ctx: unknown): VtlRequestRender {
+  idCounter = 0;
+  const parsed = parseNodes(new Cursor(templateSource));
+  if (parsed.terminator !== null) throw new Error(`Unexpected ${parsed.terminator}`);
+  const output: string[] = [];
+  const outcome = renderNodes(parsed.nodes, { ctx, scope: {} }, output);
+  return { earlyReturn: outcome.returned, value: outcome.value, body: output.join('') };
 }
 
 /**
@@ -631,10 +750,5 @@ function renderNodes(nodes: Node[], state: EvalState, output: string[]): void {
  * data sources that is the request JSON document.
  */
 export function renderVtlTemplate(templateSource: string, ctx: unknown): string {
-  idCounter = 0;
-  const parsed = parseNodes(new Cursor(templateSource));
-  if (parsed.terminator !== null) throw new Error(`Unexpected ${parsed.terminator}`);
-  const output: string[] = [];
-  renderNodes(parsed.nodes, { ctx, scope: {} }, output);
-  return output.join('');
+  return renderVtlRequestTemplate(templateSource, ctx).body;
 }

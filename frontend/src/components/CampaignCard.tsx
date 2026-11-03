@@ -13,8 +13,7 @@ interface CampaignCardProps {
   profileId: string;
   campaignName: string;
   campaignYear: number;
-  startDate?: string;
-  endDate?: string;
+  isActive?: boolean;
   totalOrders?: number;
   totalRevenue?: number;
 }
@@ -50,7 +49,7 @@ export const CampaignCard: React.FC<CampaignCardProps> = ({
   profileId,
   campaignName,
   campaignYear,
-  endDate,
+  isActive = true,
   totalOrders,
   totalRevenue,
 }) => {
@@ -59,8 +58,6 @@ export const CampaignCard: React.FC<CampaignCardProps> = ({
   const handleViewCampaign = () => {
     void navigate(`/scouts/${toUrlId(profileId)}/campaigns/${toUrlId(campaignId)}`);
   };
-
-  const isActive = !endDate || new Date(endDate) >= new Date();
 
   return (
     <Card elevation={2}>

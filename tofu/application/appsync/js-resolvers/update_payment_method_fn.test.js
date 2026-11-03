@@ -67,6 +67,11 @@ describe('update_payment_method_fn response', () => {
         assert.deepStrictEqual(response(ctx), { name: 'Cash App Card', qrCodeUrl: null });
     });
 
+    it('preserves the existing QR code URL on rename', () => {
+        const ctx = { stash: { newName: 'Cash App Card', existingQrCodeUrl: 'payment-qr-codes/user-123/method.png' } };
+        assert.deepStrictEqual(response(ctx), { name: 'Cash App Card', qrCodeUrl: 'payment-qr-codes/user-123/method.png' });
+    });
+
     it('maps ConditionalCheckFailedException to a retryable ConflictException', () => {
         const ctx = {
             stash: { newName: 'Cash App Card' },

@@ -16,8 +16,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.handlers.campaign_reporting import get_unit_report
-from src.handlers.list_unit_catalogs import list_unit_campaign_catalogs, list_unit_catalogs
-from src.handlers.report_generation import request_campaign_report
 from src.handlers.transfer_profile_ownership import lambda_handler as transfer_profile_ownership
 from src.utils.errors import ErrorCode
 
@@ -48,95 +46,6 @@ def ctx() -> MagicMock:
 
 def _event(arguments: Dict[str, Any], *, sub: str = "test-account-123") -> Dict[str, Any]:
     return {"arguments": arguments, "identity": {"sub": sub}}
-
-
-class TestListUnitCatalogsArgumentValidation:
-    """list_unit_catalogs must reject malformed arguments with INVALID_INPUT."""
-
-    @pytest.mark.parametrize("bad_arg", ["unitType", "campaignName"])
-    def test_missing_required_string_is_invalid_input(self, bad_arg: str, ctx: MagicMock) -> None:
-        args = {k: v for k, v in _VALID_UNIT_CATALOGS.items() if k != bad_arg}
-        result = list_unit_catalogs(_event(args), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_missing_unit_number_is_invalid_input(self, ctx: MagicMock) -> None:
-        args = {k: v for k, v in _VALID_UNIT_CATALOGS.items() if k != "unitNumber"}
-        result = list_unit_catalogs(_event(args), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    @pytest.mark.parametrize("bad_year", ["campaignName", "campaignYear"])
-    def test_missing_string_or_year_is_invalid_input(self, bad_year: str, ctx: MagicMock) -> None:
-        args = {k: v for k, v in _VALID_UNIT_CATALOGS.items() if k != bad_year}
-        result = list_unit_catalogs(_event(args), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    @pytest.mark.parametrize("bad_unit_number", ["abc", 0, -3])
-    def test_non_numeric_or_out_of_bounds_unit_number_is_invalid_input(
-        self, bad_unit_number: Any, ctx: MagicMock
-    ) -> None:
-        result = list_unit_catalogs(_event({**_VALID_UNIT_CATALOGS, "unitNumber": bad_unit_number}), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_non_numeric_campaign_year_is_invalid_input(self, ctx: MagicMock) -> None:
-        result = list_unit_catalogs(_event({**_VALID_UNIT_CATALOGS, "campaignYear": "next spring"}), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_non_integer_campaign_year_is_invalid_input(self, ctx: MagicMock) -> None:
-        result = list_unit_catalogs(_event({**_VALID_UNIT_CATALOGS, "campaignYear": ["2024"]}), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_missing_identity_is_unauthorized(self, ctx: MagicMock) -> None:
-        event = _event(_VALID_UNIT_CATALOGS)
-        del event["identity"]
-        result = list_unit_catalogs(event, ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
-
-
-class TestListUnitCampaignCatalogsArgumentValidation:
-    """list_unit_campaign_catalogs must reject malformed arguments with INVALID_INPUT."""
-
-    @pytest.mark.parametrize("bad_arg", ["unitType", "city", "state", "campaignName"])
-    def test_missing_required_string_is_invalid_input(self, bad_arg: str, ctx: MagicMock) -> None:
-        args = {k: v for k, v in _VALID_UNIT_CAMPAIGN.items() if k != bad_arg}
-        result = list_unit_campaign_catalogs(_event(args), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_missing_unit_number_is_invalid_input(self, ctx: MagicMock) -> None:
-        args = {k: v for k, v in _VALID_UNIT_CAMPAIGN.items() if k != "unitNumber"}
-        result = list_unit_campaign_catalogs(_event(args), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_non_numeric_unit_number_is_invalid_input(self, ctx: MagicMock) -> None:
-        result = list_unit_campaign_catalogs(_event({**_VALID_UNIT_CAMPAIGN, "unitNumber": "abc"}), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_zero_unit_number_is_invalid_input(self, ctx: MagicMock) -> None:
-        result = list_unit_campaign_catalogs(_event({**_VALID_UNIT_CAMPAIGN, "unitNumber": 0}), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_missing_campaign_year_is_invalid_input(self, ctx: MagicMock) -> None:
-        args = {k: v for k, v in _VALID_UNIT_CAMPAIGN.items() if k != "campaignYear"}
-        result = list_unit_campaign_catalogs(_event(args), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_missing_identity_is_unauthorized(self, ctx: MagicMock) -> None:
-        event = _event(_VALID_UNIT_CAMPAIGN)
-        del event["identity"]
-        result = list_unit_campaign_catalogs(event, ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
 
 class TestGetUnitReportArgumentValidation:
@@ -204,22 +113,3 @@ class TestTransferProfileOwnershipArgumentValidation:
         assert result["errorCode"] == ErrorCode.UNAUTHORIZED
 
 
-class TestRequestCampaignReportArgumentValidation:
-    """requestCampaignReport must reject malformed arguments with INVALID_INPUT."""
-
-    def test_missing_campaign_id_is_invalid_input(self, ctx: MagicMock) -> None:
-        result = request_campaign_report(_event({"input": {}}), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_missing_input_object_is_invalid_input(self, ctx: MagicMock) -> None:
-        result = request_campaign_report(_event({}), ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.INVALID_INPUT
-
-    def test_missing_identity_is_unauthorized(self, ctx: MagicMock) -> None:
-        event = _event({"input": {"campaignId": "CAMPAIGN#c1"}})
-        del event["identity"]
-        result = request_campaign_report(event, ctx)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.UNAUTHORIZED

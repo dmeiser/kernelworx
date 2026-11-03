@@ -10,22 +10,17 @@ import { Typography, Box, Button, Grid, Alert, Stack, Divider, FormControlLabel,
 import { Add as AddIcon, CardGiftcard as GiftIcon } from '@mui/icons-material';
 import { ProfileCard } from '../components/ProfileCard';
 import { CreateProfileDialog } from '../components/CreateProfileDialog';
-import { EditProfileDialog } from '../components/EditProfileDialog';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { EmptyState } from '../components/EmptyState';
 import { PageHeader } from '../components/PageHeader';
-import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   LIST_MY_PROFILES,
   LIST_MY_SHARES,
   CREATE_SELLER_PROFILE,
-  UPDATE_SELLER_PROFILE,
-  DELETE_SELLER_PROFILE,
   GET_MY_ACCOUNT,
   UPDATE_MY_PREFERENCES,
 } from '../lib/graphql';
-import { ensureProfileId } from '../lib/ids';
 import { fetchAllMyProfiles, type MyProfile } from '../lib/myProfiles';
 
 // Use the listMyProfiles page item as the Profile type for this page
@@ -144,13 +139,33 @@ const SharedProfilesSection: React.FC<{
 const shouldShowEmptyState = (myProfiles: Profile[], filteredSharedProfiles: Profile[], loading: boolean): boolean =>
   myProfiles.length === 0 && filteredSharedProfiles.length === 0 && !loading;
 
-// Helper to build preferences update variables
+// Helper to build preferences update variables from the live blob
 const buildPreferencesVariables = (preferences: { showReadOnlyProfiles: boolean }, newChecked: boolean) => ({
   preferences: JSON.stringify({
     ...preferences,
     showReadOnlyProfiles: newChecked,
   }),
 });
+
+// Helper to read the live preferences blob from the Apollo cache rather than
+// the possibly-default memo, so a toggle can never overwrite keys it never
+// saw (e.g. paymentMethods added before getMyAccount resolved) (#510).
+const readLivePreferences = (
+  apolloClient: ReturnType<typeof useApolloClient>,
+  fallback: { showReadOnlyProfiles: boolean },
+): { showReadOnlyProfiles: boolean } => {
+  try {
+    const data = apolloClient.readQuery<{ getMyAccount?: { preferences?: string } }>({
+      query: GET_MY_ACCOUNT,
+    });
+    if (data?.getMyAccount) {
+      return parsePreferences(data.getMyAccount.preferences);
+    }
+  } catch {
+    // Cache read failed (e.g. partial cache) — fall back to the memo.
+  }
+  return fallback;
+};
 
 // Helper to check if should open dialog on return path
 const shouldAutoOpenDialog = (returnPath: string | undefined, createDialogOpen: boolean): boolean =>
@@ -201,26 +216,6 @@ const handleReturnNavigation = (
         state: { fromProfileCreation: true },
       });
     }, 1500);
-  }
-};
-
-// Helper to check if can delete profile
-const canDeleteCurrentProfile = (deletingProfileId: string | null): boolean => Boolean(deletingProfileId);
-
-// Helper to conditionally delete profile
-const maybeDeleteProfile = async (
-  canDelete: boolean,
-  deletingProfileId: string | null,
-  deleteProfile: (options: { variables: { profileId: string } }) => Promise<unknown>,
-): Promise<void> => {
-  if (canDelete && deletingProfileId) {
-    const profileId = ensureProfileId(deletingProfileId);
-    /* v8 ignore start -- unreachable: ensureProfileId only returns null for falsy input, which is guarded above */
-    if (!profileId) return;
-    /* v8 ignore stop */
-    await deleteProfile({
-      variables: { profileId },
-    });
   }
 };
 
@@ -306,43 +301,11 @@ const ConditionalEmptyState: React.FC<{
     <EmptyState title="No Scouts Yet" message='Click "Create Scout" to add your first seller profile.' />
   ) : null;
 
-// Helper component for conditional editing dialog
-const ConditionalEditDialog: React.FC<{
-  editingProfile: EditingProfile | null;
-  onClose: () => void;
-  onSubmit: (profileId: string, sellerName: string) => Promise<void>;
-}> = ({ editingProfile, onClose, onSubmit }) => {
-  /* v8 ignore start -- unreachable: editingProfile state is never set in this component */
-  if (!editingProfile) return null;
-  return (
-    <EditProfileDialog
-      open={true}
-      profileId={editingProfile.profileId}
-      currentName={editingProfile.sellerName}
-      onClose={onClose}
-      onSubmit={onSubmit}
-    />
-  );
-  /* v8 ignore stop */
-};
-
-interface EditingProfile {
-  profileId: string;
-  sellerName: string;
-}
-
 export const ScoutsPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, loading: authLoading } = useAuth();
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [editingProfile, setEditingProfile] = useState<EditingProfile | null>(null);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [deletingProfileId, setDeletingProfileId] = useState<string | null>(null);
-
-  /* v8 ignore start -- Dialog backdrop click handlers cannot be simulated in jsdom */
-  const handleDeleteDialogDismiss = () => setDeleteConfirmOpen(false);
-  /* v8 ignore stop */
 
   // Check for return navigation from campaign shared campaign flow
   const locationState = getLocationState(location.state as LocationState | null);
@@ -376,14 +339,17 @@ export const ScoutsPage: React.FC = () => {
   // Update preferences mutation
   const [updatePreferences] = useMutation(UPDATE_MY_PREFERENCES);
 
+  // Apollo client for cache reads (declared before handlers that use it)
+  const apolloClient = useApolloClient();
+
   // Save preference to DynamoDB when it changes
   const handleToggleReadOnly = async (checked: boolean) => {
-    await updatePreferencesWithRollback(updatePreferences, preferences, checked, setShowReadOnlyProfiles);
+    const livePreferences = readLivePreferences(apolloClient, preferences);
+    await updatePreferencesWithRollback(updatePreferences, livePreferences, checked, setShowReadOnlyProfiles);
   };
 
   // Fetch owned profiles. listMyProfiles is server-side paginated (capped
   // pages, #328), so walk every nextToken page to get the full set.
-  const apolloClient = useApolloClient();
   const [myProfiles, setMyProfiles] = useState<Profile[]>([]);
   const [myProfilesLoaded, setMyProfilesLoaded] = useState(false);
   const [myProfilesLoading, setMyProfilesLoading] = useState(false);
@@ -447,41 +413,9 @@ export const ScoutsPage: React.FC = () => {
     },
   });
 
-  // Update profile mutation
-  const [updateProfile] = useMutation(UPDATE_SELLER_PROFILE, {
-    onCompleted: () => {
-      void loadMyProfiles();
-      void loadSharedProfiles();
-    },
-  });
-
-  // Delete profile mutation
-  const [deleteProfile, { loading: deletingProfile }] = useMutation(DELETE_SELLER_PROFILE, {
-    onCompleted: () => {
-      setDeleteConfirmOpen(false);
-      setDeletingProfileId(null);
-      void loadMyProfiles();
-    },
-  });
-
   const handleCreateProfile = async (sellerName: string) => {
     await createProfile({ variables: { sellerName } });
   };
-
-  /* v8 ignore start -- unreachable: editingProfile state is never set in this component */
-  const handleUpdateProfile = async (profileId: string, sellerName: string) => {
-    await updateProfile({
-      variables: { profileId: ensureProfileId(profileId), sellerName },
-    });
-  };
-  /* v8 ignore stop */
-
-  /* v8 ignore start -- unreachable: deleteConfirmOpen/deletingProfileId are never set in this component */
-  const handleDeleteProfile = async () => {
-    const canDelete = canDeleteCurrentProfile(deletingProfileId);
-    await maybeDeleteProfile(canDelete, deletingProfileId, deleteProfile);
-  };
-  /* v8 ignore stop */
 
   const myProfilesData = myProfilesLoaded ? { listMyProfiles: { profiles: myProfiles } } : undefined;
   const filteredSharedProfiles = filterSharedProfiles(sharedProfiles, showReadOnlyProfiles);
@@ -508,6 +442,7 @@ export const ScoutsPage: React.FC = () => {
                   onChange={(e) => {
                     void handleToggleReadOnly(e.target.checked);
                   }}
+                  disabled={!accountData?.getMyAccount}
                   size="small"
                 />
               }
@@ -558,28 +493,6 @@ export const ScoutsPage: React.FC = () => {
         onSubmit={handleCreateProfile}
       />
 
-      <ConditionalEditDialog
-        editingProfile={editingProfile}
-        onClose={() => setEditingProfile(null)}
-        onSubmit={handleUpdateProfile}
-      />
-
-      <ConfirmDialog
-        open={deleteConfirmOpen}
-        title="Delete Profile?"
-        onClose={handleDeleteDialogDismiss}
-        onConfirm={handleDeleteProfile}
-        confirmLabel="Delete Permanently"
-        confirmColor="error"
-        isLoading={deletingProfile}
-        loadingLabel="Deleting..."
-        maxWidth="xs"
-      >
-        <Typography color="text.secondary">
-          Are you sure you want to delete this profile? All campaigns and orders will be permanently deleted. This
-          action cannot be undone.
-        </Typography>
-      </ConfirmDialog>
     </Box>
   );
   /* v8 ignore stop */
@@ -602,8 +515,6 @@ export {
   shouldTriggerQueries,
   maybeTriggerQueries,
   handleReturnNavigation,
-  canDeleteCurrentProfile,
-  maybeDeleteProfile,
   updatePreferencesWithRollback,
   loadSharedProfilesWithErrorHandling,
   handleSharedProfilesError,

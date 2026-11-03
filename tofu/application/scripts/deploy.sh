@@ -11,10 +11,9 @@ EXTRA_FLAGS=("$@")
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+PROJECT_ROOT="$ROOT_DIR"
 ENV_DIR="$SCRIPT_DIR/../environments/$ENV"
 
-LAYER_DIR="$ROOT_DIR/.build/lambda-layer"
-LAYER_REQ="$LAYER_DIR/requirements.txt"
 
 # Load environment variables from root .env
 if [ -f "$ROOT_DIR/.env" ]; then
@@ -36,12 +35,7 @@ if [ -z "$TF_VAR_google_client_id" ] || [ -z "$TF_VAR_google_client_secret" ]; t
 fi
 
 build_lambda_layer() {
-    echo "📦 Building Lambda layer dependencies (prod-only)..."
-    rm -rf "$LAYER_DIR"
-    mkdir -p "$LAYER_DIR/python"
-
-    (cd "$ROOT_DIR" && uv export --no-dev --format requirements.txt --no-hashes > "$LAYER_REQ")
-    (cd "$ROOT_DIR" && uv pip install --requirement "$LAYER_REQ" --target "$LAYER_DIR/python")
+    "$ROOT_DIR/scripts/build-lambda-layer.sh"
 }
 
 # Tofu reads resolver code from the esbuild bundle; regenerate it so init/plan/apply
@@ -78,6 +72,18 @@ plan_is_fresh() {
 }
 
 main() {
+    if [[ ! -d "$ENV_DIR" ]]; then
+        echo "❌ Unknown environment directory: $ENV_DIR"
+        exit 1
+    fi
+    case "$ACTION" in
+        init|plan|apply|destroy|validate|fmt) ;;
+        *)
+            echo "Usage: $0 <env> <init|plan|apply|destroy|validate|fmt> [extra-flags]"
+            exit 1
+            ;;
+    esac
+
     cd "$ENV_DIR"
 
     echo ""
@@ -120,6 +126,7 @@ main() {
             tofu apply "${AUTO_APPROVE_FLAGS[@]}" "${EXTRA_FLAGS[@]}" tfplan
             rm tfplan
         fi
+        "${PROJECT_ROOT}/scripts/appsync-ensure-resolver-order.sh"
         ;;
     destroy)
         echo "⚠️  Are you sure? This will destroy all resources!"

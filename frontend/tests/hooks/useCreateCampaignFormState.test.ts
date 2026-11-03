@@ -63,4 +63,25 @@ describe('useCreateCampaignFormState', () => {
 
     expect(result.current.toastMessage).toBeNull();
   });
+
+  it('preserves object identity across rerenders when values do not change', () => {
+    const { result, rerender } = renderHook(() => useCreateCampaignFormState());
+    const initialReference = result.current;
+
+    rerender();
+
+    expect(result.current).toBe(initialReference);
+  });
+
+  it('updates object identity when a field value changes', () => {
+    const { result } = renderHook(() => useCreateCampaignFormState());
+    const initialReference = result.current;
+
+    act(() => {
+      result.current.setCampaignName('Fall Fundraiser');
+    });
+
+    expect(result.current).not.toBe(initialReference);
+    expect(result.current.campaignName).toBe('Fall Fundraiser');
+  });
 });

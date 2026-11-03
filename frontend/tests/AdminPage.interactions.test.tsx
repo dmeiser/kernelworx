@@ -534,6 +534,36 @@ describe('AdminPage - Reset Password', () => {
     });
   });
 
+  test('reset password reports an MFA-required error through the reset path', async () => {
+    const user = userEvent.setup();
+    const mocks = baseMocks([
+      {
+        request: { query: ADMIN_SEARCH_USER, variables: { query: 'test' } },
+        result: { data: { adminSearchUser: [mockAdminUser] } },
+      },
+      {
+        request: { query: ADMIN_RESET_USER_PASSWORD, variables: { email: 'test@example.com' } },
+        result: { errors: [new GraphQLError('MFA required', { extensions: { errorCode: 'MFA_REQUIRED' } })] },
+      },
+    ]);
+    renderAdmin(mocks);
+
+    fireEvent.change(screen.getByPlaceholderText(/search by email, name/i), { target: { value: 'test' } });
+    await user.click(screen.getByRole('button', { name: /search/i }));
+    await waitFor(() => expect(screen.getByText('test@example.com')).toBeInTheDocument());
+
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+
+    await user.click(screen.getByRole('button', { name: /Reset password for test@example.com/i }));
+    await user.click(screen.getByRole('button', { name: /send reset email/i }));
+
+    await waitFor(() => {
+      expect(dispatchSpy).toHaveBeenCalled();
+    });
+
+    dispatchSpy.mockRestore();
+  });
+
   test('closes snackbar after reset password', async () => {
     const user = userEvent.setup();
     const mocks = baseMocks([

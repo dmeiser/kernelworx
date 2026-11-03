@@ -136,6 +136,87 @@ describe('update_order_fn request', () => {
     assert.strictEqual(result.operation, 'UpdateItem');
     assert.match(result.update.expression, /customerName = :customerName/);
   });
+
+  it('stashes a count-zero totals delta when lineItems change the amount (#746)', () => {
+    const ctx = {
+      stash: {
+        order: {
+          campaignId: 'CAMPAIGN#c1',
+          orderId: 'ORDER#o1',
+          profileId: 'PROFILE#p1',
+          totalAmount: 5.97,
+        },
+        catalog: {
+          products: [{ productId: 'PROD1', productName: 'Popcorn', price: 10.0 }],
+        },
+      },
+      args: {
+        input: {
+          lineItems: [{ productId: 'PROD1', quantity: 1 }],
+        },
+      },
+    };
+
+    request(ctx);
+
+    assert.deepStrictEqual(ctx.stash.totalsDelta, {
+      profileId: 'PROFILE#p1',
+      campaignId: 'CAMPAIGN#c1',
+      count: 0,
+      revenue: 4.03,
+    });
+  });
+
+  it('rounds the float tail out of the totals delta (#746)', () => {
+    const ctx = {
+      stash: {
+        order: {
+          campaignId: 'CAMPAIGN#c1',
+          orderId: 'ORDER#o1',
+          profileId: 'PROFILE#p1',
+          totalAmount: 19.99,
+        },
+        catalog: {
+          products: [{ productId: 'PROD1', productName: 'Popcorn', price: 20.0 }],
+        },
+      },
+      args: {
+        input: {
+          lineItems: [{ productId: 'PROD1', quantity: 1 }],
+        },
+      },
+    };
+
+    request(ctx);
+
+    // 20.00 - 19.99 is 0.010000000000000231 in IEEE-754; the delta must be cents.
+    assert.strictEqual(ctx.stash.totalsDelta.revenue, 0.01);
+  });
+
+  it('stashes no totals delta when lineItems reproduce the current amount (#746)', () => {
+    const ctx = {
+      stash: {
+        order: {
+          campaignId: 'CAMPAIGN#c1',
+          orderId: 'ORDER#o1',
+          profileId: 'PROFILE#p1',
+          totalAmount: 5.97,
+        },
+        catalog: {
+          products: [{ productId: 'PROD1', productName: 'Popcorn', price: 1.99 }],
+        },
+      },
+      args: {
+        input: {
+          lineItems: [{ productId: 'PROD1', quantity: 3 }],
+        },
+      },
+    };
+
+    request(ctx);
+
+    assert.strictEqual(ctx.stash.totalsDelta, undefined);
+  });
 });
 
 // The order lifecycle slice: the seller's "payment confirmed" transition.

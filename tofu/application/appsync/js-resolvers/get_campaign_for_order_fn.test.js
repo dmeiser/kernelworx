@@ -18,6 +18,16 @@ describe('get_campaign_for_order_fn request', () => {
         assert.strictEqual(result.query.expression, 'campaignId = :campaignId');
         assert.strictEqual(result.query.expressionValues[':campaignId'], 'CAMPAIGN#c1');
     });
+
+    // #717: Step 1 of createOrder queried the GSI with the raw input, so an
+    // unprefixed campaignId failed with NOT_FOUND before create_order_fn (which
+    // does normalize) was ever reached.
+    it('normalizes an unprefixed campaignId to the DB form', () => {
+        const result = request({ args: { input: { campaignId: 'c1' } } });
+
+        assert.strictEqual(result.index, 'campaignId-index');
+        assert.strictEqual(result.query.expressionValues[':campaignId'], 'CAMPAIGN#c1');
+    });
 });
 
 describe('get_campaign_for_order_fn response', () => {

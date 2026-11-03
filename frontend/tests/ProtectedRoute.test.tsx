@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { ProtectedRoute } from '../src/components/ProtectedRoute';
 import { AuthProvider } from '../src/contexts/AuthContext';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import * as amplifyAuth from 'aws-amplify/auth';
 
 // Mock Apollo Client
@@ -27,6 +27,7 @@ vi.mock('../src/lib/apollo', () => ({
         },
       },
     }),
+    clearStore: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -116,13 +117,15 @@ const setupAuthMock = (params: AuthParams) => getAuthMockFn(params)();
 const renderWithRouter = (
   ui: React.ReactElement,
   params: AuthParams = {},
+  initialEntries: string[] = ['/protected'],
+  loginElement: React.ReactElement = <div>Login Page</div>,
 ) => {
   setupAuthMock(params);
   return render(
-    <MemoryRouter initialEntries={['/protected']}>
+    <MemoryRouter initialEntries={initialEntries}>
       <AuthProvider>
         <Routes>
-          <Route path="/login" element={<div>Login Page</div>} />
+          <Route path="/login" element={loginElement} />
           <Route path="/protected" element={ui} />
         </Routes>
       </AuthProvider>
@@ -310,5 +313,76 @@ describe('ProtectedRoute', () => {
     expect(screen.getAllByText(/social provider which cannot present MFA/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /Set Up MFA/i })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /Sign Out/i }).length).toBeGreaterThan(0);
+  });
+
+  it('preserves query parameters on redirect and stores target in sessionStorage', async () => {
+    sessionStorage.clear();
+
+    const LoginCapture = () => {
+      const location = useLocation();
+      return (
+        <div>
+          <div>Login Page</div>
+          <div data-testid="location-state">{JSON.stringify(location.state)}</div>
+        </div>
+      );
+    };
+
+    renderWithRouter(
+      <ProtectedRoute>
+        <div>Protected Content</div>
+      </ProtectedRoute>,
+      { isAuthenticated: false },
+      ['/protected?tab=active&sort=desc'],
+      <LoginCapture />,
+    );
+
+    await screen.findByText('Login Page');
+
+    const stateJson = JSON.parse(screen.getByTestId('location-state').textContent || '{}');
+    expect(stateJson.from).toEqual({
+      pathname: '/protected',
+      search: '?tab=active&sort=desc',
+    });
+    expect(sessionStorage.getItem('oauth_redirect')).toBe('/protected?tab=active&sort=desc');
+  });
+
+  it('writes oauth_redirect in an effect rather than during render', async () => {
+    sessionStorage.clear();
+    let storedValueDuringRender: string | null = 'not-checked';
+
+    const RenderInspector = () => {
+      storedValueDuringRender = sessionStorage.getItem('oauth_redirect');
+      return <div>Inspector</div>;
+    };
+
+    setupAuthMock({ isAuthenticated: false });
+    render(
+      <MemoryRouter initialEntries={['/protected?ref=banner']}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<div>Login Page</div>} />
+            <Route
+              path="/protected"
+              element={
+                <ProtectedRoute>
+                  <div>Protected Content</div>
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+          <RenderInspector />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    // During the render phase of the tree (when RenderInspector rendered after ProtectedRoute),
+    // the effect has not run yet, so oauth_redirect must not have been written yet.
+    expect(storedValueDuringRender).toBeNull();
+
+    await screen.findByText('Login Page');
+
+    // After commit and effect execution, oauth_redirect is populated.
+    expect(sessionStorage.getItem('oauth_redirect')).toBe('/protected?ref=banner');
   });
 });

@@ -1,4 +1,5 @@
 import { util } from '@aws-appsync/utils';
+import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     return {
@@ -24,6 +25,17 @@ export function response(ctx) {
     const catalog = ctx.result;
     if (catalog.isDeleted === true) {
         util.error('Catalog has been deleted', 'NOT_FOUND');
+    }
+
+    // #706: enforce the same visibility rule as getCatalog (#509) — a catalog
+    // may only be referenced by createSharedCampaign when it is public,
+    // admin-managed, or owned by the caller. Without this check any
+    // authenticated user could attach another user's private catalog to a
+    // shared campaign and read its products via the SharedCampaign.catalog
+    // field resolver (IDOR) or block the owner from deleting it (DoS).
+    const callerAccountId = normalizeIdOrPrefix(ctx.identity.sub, 'ACCOUNT#');
+    if (!(catalog.isPublic === true || catalog.catalogType === 'ADMIN_MANAGED' || catalog.ownerAccountId === callerAccountId)) {
+        util.error('Catalog not found', 'NOT_FOUND');
     }
 
     ctx.stash.catalog = catalog;

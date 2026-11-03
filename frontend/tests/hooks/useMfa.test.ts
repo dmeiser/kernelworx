@@ -59,7 +59,7 @@ describe('useMfa', () => {
     mockNativeSession();
     vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({
       sharedSecret: mockSharedSecret,
-      getSetupUri: vi.fn(() => new URL('otpauth://totp/PopcornManager:user?secret=JBSWY3DPEHPK3PXP')),
+      getSetupUri: vi.fn(() => new URL('otpauth://totp/KernelWorx:user?secret=JBSWY3DPEHPK3PXP')),
     } as any);
     (vi.mocked(QRCode.toDataURL) as any).mockResolvedValue(mockQrDataUrl);
     vi.mocked(amplifyAuth.verifyTOTPSetup).mockResolvedValue(undefined as any);
@@ -162,6 +162,22 @@ describe('useMfa', () => {
     expect(result.current.pendingConfirmation).toBeNull();
     expect(result.current.mfaSetupCode).toBe(mockSharedSecret);
     expect(result.current.qrCodeUrl).toBe(mockQrDataUrl);
+  });
+
+  it('labels the TOTP setup URI with the KernelWorx issuer (issue #722)', async () => {
+    // The issuer name is the label the authenticator app stores, so the User
+    // Settings enrollment path must match MfaSetupDialog's 'KernelWorx'; it
+    // previously passed the legacy 'PopcornManager' product name.
+    const getSetupUri = vi.fn(() => new URL('otpauth://totp/KernelWorx:user?secret=JBSWY3DPEHPK3PXP'));
+    vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({ sharedSecret: mockSharedSecret, getSetupUri } as any);
+
+    const { result } = renderHook(() => useMfa());
+    await act(async () => {
+      await result.current.handleSetupMFA();
+    });
+
+    expect(getSetupUri).toHaveBeenCalledWith('KernelWorx');
+    expect(QRCode.toDataURL).toHaveBeenCalledWith('otpauth://totp/KernelWorx:user?secret=JBSWY3DPEHPK3PXP');
   });
 
   it('verifies TOTP and updates preference to PREFERRED', async () => {
@@ -343,7 +359,7 @@ describe('useMfa error paths', () => {
     mockNativeSession();
     vi.mocked(amplifyAuth.setUpTOTP).mockResolvedValue({
       sharedSecret: mockSharedSecret,
-      getSetupUri: vi.fn(() => new URL('otpauth://totp/PopcornManager:user?secret=JBSWY3DPEHPK3PXP')),
+      getSetupUri: vi.fn(() => new URL('otpauth://totp/KernelWorx:user?secret=JBSWY3DPEHPK3PXP')),
     } as any);
     (vi.mocked(QRCode.toDataURL) as any).mockResolvedValue(mockQrDataUrl);
     vi.mocked(amplifyAuth.verifyTOTPSetup).mockResolvedValue(undefined as any);

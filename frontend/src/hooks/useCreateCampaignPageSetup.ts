@@ -1,44 +1,29 @@
 /**
  * Hook that initializes all the queries for CreateCampaignPage
  */
-import { useQuery } from '@apollo/client/react';
-import { useMemo } from 'react';
-import { GET_SHARED_CAMPAIGN } from '../lib/graphql';
 import { useCreateCampaignFormState } from './useCreateCampaignFormState';
 import { useSharedCampaignAndProfiles } from './useSharedCampaignAndProfiles';
 import { useCatalogsData } from './useCatalogsData';
 import { useProfileEffects } from './useProfileEffects';
 import { useProfileRefetch } from './useProfileRefetch';
 import { useSharedCampaignFormInit } from './useSharedCampaignFormInit';
-import { useSharedCampaignDiscovery } from './useSharedCampaignDiscovery';
-import { useSharedCampaignDiscoveryTrigger } from './useSharedCampaignDiscoveryTrigger';
 import { useCreateCampaignSubmitHandler } from './useCreateCampaignSubmitHandler';
 import { useNavigate } from 'react-router-dom';
-import type { GqlSharedCampaign } from '../types/graphql-generated';
 
 export const useCreateCampaignPageSetup = (effectiveSharedCampaignCode: string | undefined) => {
   const navigate = useNavigate();
-  const rawFormState = useCreateCampaignFormState();
-
-  // Memoize formState to prevent object reference from changing on every render
-  // This is critical for child components like CatalogSelection which rely on callback stability
-  const formState = useMemo(() => rawFormState, [rawFormState]);
-
-  // Query shared campaign
-  const {
-    data: sharedCampaignData,
-    loading: sharedCampaignLoading,
-    error: sharedCampaignError,
-  } = useQuery<{ getSharedCampaign: GqlSharedCampaign | null }>(GET_SHARED_CAMPAIGN, {
-    variables: { sharedCampaignCode: effectiveSharedCampaignCode },
-    skip: !effectiveSharedCampaignCode,
-  });
-
-  const sharedCampaign = sharedCampaignData?.getSharedCampaign;
+  const formState = useCreateCampaignFormState();
 
   // Use custom hooks for shared campaign and profiles
-  const { profiles, profilesLoading, refetchProfiles, isSharedCampaignMode } =
-    useSharedCampaignAndProfiles(effectiveSharedCampaignCode);
+  const {
+    sharedCampaign,
+    sharedCampaignLoading,
+    sharedCampaignError,
+    profiles,
+    profilesLoading,
+    refetchProfiles,
+    isSharedCampaignMode,
+  } = useSharedCampaignAndProfiles(effectiveSharedCampaignCode);
 
   // Use custom hooks for catalogs
   const { filteredPublicCatalogs, filteredMyCatalogs, catalogsLoading } = useCatalogsData(isSharedCampaignMode);
@@ -73,21 +58,6 @@ export const useCreateCampaignPageSetup = (effectiveSharedCampaignCode: string |
     formState.setState,
   );
 
-  // Shared campaign discovery
-  const { discoveredSharedCampaigns, debouncedFindSharedCampaigns } = useSharedCampaignDiscovery();
-
-  // Trigger shared campaign discovery
-  useSharedCampaignDiscoveryTrigger(
-    isSharedCampaignMode,
-    formState.unitType,
-    formState.unitNumber,
-    formState.city,
-    formState.state,
-    formState.campaignName,
-    formState.campaignYear,
-    debouncedFindSharedCampaigns,
-  );
-
   // Submit handler
   const { handleSubmit, isFormValid } = useCreateCampaignSubmitHandler(formState, isSharedCampaignMode);
 
@@ -102,7 +72,6 @@ export const useCreateCampaignPageSetup = (effectiveSharedCampaignCode: string |
     filteredPublicCatalogs,
     filteredMyCatalogs,
     catalogsLoading,
-    discoveredSharedCampaigns,
     handleSubmit,
     isFormValid,
     navigate,

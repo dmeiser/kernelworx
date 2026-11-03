@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isSafeRedirect, getSafeRedirect } from '../../src/lib/redirect';
+import { isSafeRedirect, getSafeRedirect, resolveRedirectFromState } from '../../src/lib/redirect';
 
 describe('redirect validation', () => {
   describe('isSafeRedirect', () => {
@@ -39,6 +39,47 @@ describe('redirect validation', () => {
       expect(getSafeRedirect('', '/home')).toBe('/home');
       expect(getSafeRedirect(null as unknown as string, '/home')).toBe('/home');
       expect(getSafeRedirect(undefined as unknown as string, '/home')).toBe('/home');
+    });
+  });
+
+  describe('resolveRedirectFromState', () => {
+    it('resolves string from value', () => {
+      expect(resolveRedirectFromState({ from: '/campaigns?tab=active' })).toBe('/campaigns?tab=active');
+      expect(resolveRedirectFromState({ from: '/dashboard' })).toBe('/dashboard');
+    });
+
+    it('resolves object from value with pathname and search query', () => {
+      expect(
+        resolveRedirectFromState({ from: { pathname: '/campaigns', search: '?tab=active&sort=desc' } }),
+      ).toBe('/campaigns?tab=active&sort=desc');
+    });
+
+    it('adds leading question mark to search if missing', () => {
+      expect(resolveRedirectFromState({ from: { pathname: '/campaigns', search: 'tab=active' } })).toBe(
+        '/campaigns?tab=active',
+      );
+    });
+
+    it('resolves object from value with pathname only', () => {
+      expect(resolveRedirectFromState({ from: { pathname: '/campaigns' } })).toBe('/campaigns');
+      expect(resolveRedirectFromState({ from: { pathname: '/campaigns', search: '' } })).toBe('/campaigns');
+    });
+
+    it('does not duplicate query if pathname already contains search', () => {
+      expect(
+        resolveRedirectFromState({ from: { pathname: '/campaigns?tab=active', search: '?tab=active' } }),
+      ).toBe('/campaigns?tab=active');
+    });
+
+    it('returns undefined for non-objects or missing from', () => {
+      expect(resolveRedirectFromState(null)).toBeUndefined();
+      expect(resolveRedirectFromState(undefined)).toBeUndefined();
+      expect(resolveRedirectFromState('not an object')).toBeUndefined();
+      expect(resolveRedirectFromState({})).toBeUndefined();
+      expect(resolveRedirectFromState({ from: null })).toBeUndefined();
+      expect(resolveRedirectFromState({ from: 123 })).toBeUndefined();
+      expect(resolveRedirectFromState({ from: { search: '?tab=active' } })).toBeUndefined();
+      expect(resolveRedirectFromState({ from: { pathname: 123 } })).toBeUndefined();
     });
   });
 });

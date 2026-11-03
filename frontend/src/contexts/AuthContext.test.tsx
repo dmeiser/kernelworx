@@ -10,9 +10,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act, renderHook } from '@testing-library/react';
 import { Hub } from 'aws-amplify/utils';
-import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth';
+import { fetchAuthSession, getCurrentUser, signIn } from 'aws-amplify/auth';
 import type { AuthSession } from 'aws-amplify/auth';
 import { apolloClient } from '../lib/apollo';
 import { AuthProvider, useAuth } from './AuthContext';
@@ -26,7 +26,10 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 vi.mock('../lib/apollo', () => ({
-  apolloClient: { query: vi.fn() },
+  apolloClient: {
+    query: vi.fn(),
+    clearStore: vi.fn().mockResolvedValue([]),
+  },
 }));
 
 const AuthProbe: React.FC = () => {
@@ -54,6 +57,7 @@ describe('AuthProvider signedIn auth event', () => {
     });
     vi.mocked(getCurrentUser).mockResolvedValue({ username: 'testuser', attributes: { sub: 'sub1' } } as never);
     vi.mocked(apolloClient.query).mockResolvedValue({ data: {} });
+    vi.mocked(apolloClient.clearStore).mockResolvedValue([]);
   });
 
   it('flips isAuthenticated to true when a signedIn auth event fires', async () => {
@@ -91,5 +95,60 @@ describe('AuthProvider signedIn auth event', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.getByTestId('auth')).toHaveTextContent('false');
+  });
+
+  it('deduplicates concurrent checkAuthSession() calls on password login (#741)', async () => {
+    sessionHasTokens = true;
+    vi.mocked(signIn).mockImplementation(async () => {
+      Hub.dispatch('auth', { event: 'signedIn' }, 'Auth');
+      return { isSignedIn: true } as unknown as any;
+    });
+
+    const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    vi.mocked(fetchAuthSession).mockClear();
+
+    await act(async () => {
+      await result.current.loginWithPassword('test@example.com', 'password123');
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(vi.mocked(fetchAuthSession)).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears Apollo store when signedOut auth event fires', async () => {
+    sessionHasTokens = true;
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('auth')).toHaveTextContent('true'));
+    vi.mocked(apolloClient.clearStore).mockClear();
+
+    Hub.dispatch('auth', { event: 'signedOut' }, 'Auth');
+
+    await waitFor(() => expect(apolloClient.clearStore).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('auth')).toHaveTextContent('false'));
+  });
+
+  it('clears Apollo store when tokenRefresh_failure auth event fires', async () => {
+    sessionHasTokens = true;
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('auth')).toHaveTextContent('true'));
+    vi.mocked(apolloClient.clearStore).mockClear();
+
+    Hub.dispatch('auth', { event: 'tokenRefresh_failure' }, 'Auth');
+
+    await waitFor(() => expect(apolloClient.clearStore).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('auth')).toHaveTextContent('false'));
   });
 });

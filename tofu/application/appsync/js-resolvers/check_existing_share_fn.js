@@ -3,7 +3,7 @@ import { normalizeId, normalizeIdOrPrefix, stripIdPrefix } from './lib/ids.js';
 
 export function request(ctx) {
     const input = ctx.args && ctx.args.input ? ctx.args.input : {};
-    const profileId = input.profileId || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
+    const profileId = (ctx.stash && ctx.stash.profile && ctx.stash.profile.profileId) || input.profileId || (ctx.stash && ctx.stash.invite ? ctx.stash.invite.profileId : undefined);
     const targetAccountId = ctx.stash ? ctx.stash.targetAccountId : undefined;
     
     // Ensure targetAccountId has ACCOUNT# prefix when querying the shares table

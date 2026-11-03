@@ -25,6 +25,7 @@ import {
 } from '@mui/material';
 import { Add as AddIcon, Share as ShareIcon, ArrowBack as BackIcon } from '@mui/icons-material';
 import { GET_CATALOG } from '../lib/graphql';
+import { ensureCatalogId } from '../lib/ids';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
 import type { GqlCatalog, GqlProduct } from '../types';
@@ -56,8 +57,8 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
   const { catalogId: catalogUuid } = useParams<{ catalogId: string }>();
   const navigate = useNavigate();
 
-  // Add CATALOG# prefix if not present - always compute this first
-  const catalogId = catalogUuid?.startsWith('CATALOG#') ? catalogUuid : `CATALOG#${catalogUuid}`;
+  // Normalize/ensure the CATALOG# prefix; null when no id is provided
+  const catalogId = ensureCatalogId(catalogUuid);
 
   // Always call hooks unconditionally - this is required by React rules
   const { data, loading, error } = useQuery<{ getCatalog: GqlCatalog }>(GET_CATALOG, {
@@ -69,29 +70,18 @@ export const CatalogPreviewPage: React.FC<CatalogPreviewPageProps> = ({
   const catalog: GqlCatalog | undefined = data?.getCatalog;
   const products: GqlProduct[] = useMemo(() => catalog?.products || [], [catalog?.products]);
 
-  React.useEffect(() => {
-    if (catalogId) {
-      localStorage.setItem(
-        'catalogPreviewPageLoaded',
-        JSON.stringify({ catalogId, timestamp: new Date().toISOString() }),
-      );
-    }
-  }, [catalogId]);
-
   // Handler functions
   const handleCreateCampaign = () => {
-    if (!catalogId) return;
     if (onCreateCampaign) {
-      onCreateCampaign(catalogId);
+      onCreateCampaign(catalogId!);
     } else {
       void navigate('/create-campaign', { state: { catalogId } });
     }
   };
 
   const handleCreateSharedCampaign = () => {
-    if (!catalogId) return;
     if (onCreateSharedCampaign) {
-      onCreateSharedCampaign(catalogId);
+      onCreateSharedCampaign(catalogId!);
     } else {
       void navigate('/shared-campaigns/create', { state: { catalogId } });
     }

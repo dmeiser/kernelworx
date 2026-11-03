@@ -27,26 +27,39 @@ resource "aws_appsync_resolver" "campaign_catalog" {
   code = file("${local.js_resolvers_dir}/campaign_catalog_pipeline_resolver.js")
 }
 
-# Campaign.totalOrders (VTL)
+# Campaign.totalOrders (JS, #746)
+# Migrated campaigns serve the denormalized counter from the item (zero
+# datastore calls); unmigrated ones fall back to the COUNT Query the field
+# always ran. APPSYNC_JS rather than VTL because VTL has no rounding helper.
 resource "aws_appsync_resolver" "campaign_total_orders" {
   api_id      = aws_appsync_graphql_api.main.id
   type        = "Campaign"
   field       = "totalOrders"
   data_source = aws_appsync_datasource.orders.name
 
-  request_template  = file("${local.mapping_templates_dir}/campaign_total_orders_request.vtl")
-  response_template = file("${local.mapping_templates_dir}/campaign_total_orders_response.vtl")
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/campaign_total_orders_resolver.js")
 }
 
-# Campaign.totalRevenue (VTL)
+# Campaign.totalRevenue (JS, #746)
+# Same two paths as totalOrders; the fallback SUM is rounded to cents in JS
+# (the VTL float sum drifted: 19.99 * 3 = 59.970000000000006).
 resource "aws_appsync_resolver" "campaign_total_revenue" {
   api_id      = aws_appsync_graphql_api.main.id
   type        = "Campaign"
   field       = "totalRevenue"
   data_source = aws_appsync_datasource.orders.name
 
-  request_template  = file("${local.mapping_templates_dir}/campaign_total_revenue_request.vtl")
-  response_template = file("${local.mapping_templates_dir}/campaign_total_revenue_response.vtl")
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/campaign_total_revenue_resolver.js")
 }
 
 # === SELLER PROFILE FIELD RESOLVERS ===

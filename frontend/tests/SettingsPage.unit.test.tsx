@@ -13,21 +13,16 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
-// Mock auth
+// Mock auth. isAdmin from useAuth is the ONLY thing that gates the Admin Console
+// button. There is deliberately no Apollo/useQuery mock: the component must not
+// issue a GraphQL query for admin status (GET_MY_ACCOUNT has no isAdmin field).
+// If the component regressed to useQuery(GET_MY_ACCOUNT), rendering without an
+// ApolloProvider would throw and these tests would fail.
 const mockLogout = vi.fn().mockResolvedValue(undefined);
+let mockIsAdmin = true;
 vi.mock('../src/contexts/AuthContext', () => ({
-  useAuth: () => ({ logout: mockLogout }),
+  useAuth: () => ({ logout: mockLogout, isAdmin: mockIsAdmin }),
 }));
-
-// We'll mock useQuery directly to avoid using MockedProvider which causes ESM issues in this env
-let mockAccountData: { isAdmin: boolean } = { isAdmin: true };
-vi.mock('@apollo/client/react', async () => {
-  const actual = await vi.importActual<any>('@apollo/client/react');
-  return {
-    ...actual,
-    useQuery: () => ({ data: { getMyAccount: mockAccountData }, loading: false, error: undefined }),
-  };
-});
 
 import { SettingsPage } from '../src/pages/SettingsPage';
 
@@ -35,11 +30,11 @@ describe('SettingsPage (unit)', () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     mockLogout.mockClear();
-    mockAccountData = { isAdmin: true };
+    mockIsAdmin = true;
   });
 
-  test('shows Admin Console when account is admin and navigates', async () => {
-    mockAccountData = { isAdmin: true };
+  test('shows Admin Console when useAuth().isAdmin is true and navigates', async () => {
+    mockIsAdmin = true;
 
     render(
       <MemoryRouter>
@@ -55,8 +50,8 @@ describe('SettingsPage (unit)', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/admin');
   });
 
-  test('does not show Admin Console for non-admin and signs out', async () => {
-    mockAccountData = { isAdmin: false };
+  test('does not show Admin Console when useAuth().isAdmin is false and signs out', async () => {
+    mockIsAdmin = false;
 
     render(
       <MemoryRouter>
@@ -67,7 +62,6 @@ describe('SettingsPage (unit)', () => {
     expect(await screen.findByText(/Account Settings/i)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Admin Console/i })).not.toBeInTheDocument();
 
-    // Click Sign Out
     const signOut = await screen.findByRole('button', { name: /Sign Out/i });
     await userEvent.click(signOut);
     expect(mockLogout).toHaveBeenCalled();

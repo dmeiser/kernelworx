@@ -156,6 +156,49 @@ def test_two_phase_read_owner_check_uses_distinct_functions() -> None:
         )
 
 
+def test_order_write_pipelines_sync_campaign_totals() -> None:
+    """#746: every order-write path keeps the denormalized
+    Campaign.totalOrders / Campaign.totalRevenue counters in sync.
+
+    The authenticated pipelines (createOrder, updateOrder, deleteOrder) run
+    the sync_campaign_totals step AFTER the write step, which stashes the
+    delta on ctx.stash.totalsDelta. publicCreateOrder cannot use that step:
+    its resolver already carries 10 functions, AppSync's hard cap (the
+    ephemeral apply fails with "A resolver can only be composed of 10
+    functions"), so its totals update rides INSIDE create_public_order's
+    TransactWriteItems instead - pinned by
+    create_public_order_fn.test.js. If a pipeline loses its sync step, list
+    views fall back to per-campaign COUNT/SUM queries - the 2*N pattern #746
+    removed.
+    """
+    sync = "${aws_appsync_function.sync_campaign_totals.function_id}"
+    write_step_by_pipeline = {
+        "create_order": "${aws_appsync_function.create_order.function_id}",
+        "update_order": "${aws_appsync_function.update_order.function_id}",
+        "delete_order": "${aws_appsync_function.delete_order.function_id}",
+    }
+    resolvers = _resolver_pipelines("resolvers_mutations.tf")
+    for pipeline_name, write_step in write_step_by_pipeline.items():
+        pipeline = resolvers[pipeline_name]
+        assert pipeline.count(sync) == 1, f"{pipeline_name} must list sync_campaign_totals exactly once"
+        assert pipeline.index(write_step) < pipeline.index(sync), (
+            f"{pipeline_name} must run sync_campaign_totals AFTER the order write "
+            "(the delta is stashed by the write step)"
+        )
+    # publicCreateOrder is at AppSync's 10-function resolver cap; its totals
+    # update must stay inside the write transaction, not a pipeline step.
+    public_pipeline = resolvers["public_create_order"]
+    assert sync not in public_pipeline, (
+        "public_create_order is at AppSync's 10-function cap; the totals update must "
+        "ride create_public_order's TransactWriteItems (see create_public_order_fn.js)"
+    )
+    # The delete pipeline verifies propagation after the delete; the counter
+    # sync sits between the write and the verification, which reads the stash.
+    delete_pipeline = resolvers["delete_order"]
+    verify = "${aws_appsync_function.verify_order_delete_propagation.function_id}"
+    assert delete_pipeline.index(sync) < delete_pipeline.index(verify)
+
+
 def test_two_phase_fetch_profile_check_uses_distinct_functions() -> None:
     functions: set[str] = set()
     for path in sorted(APPSYNC_DIR.glob("functions_*.tf")):

@@ -17,8 +17,8 @@ describe('get_catalog_for_shared_campaign_fn request', () => {
 
 describe('get_catalog_for_shared_campaign_fn response', () => {
     it('stashes and returns a non-deleted catalog', () => {
-        const catalog = { catalogId: 'catalog-abc', products: [] };
-        const ctx = { stash: {}, result: catalog };
+        const catalog = { catalogId: 'catalog-abc', products: [], ownerAccountId: 'ACCOUNT#user-1' };
+        const ctx = { stash: {}, result: catalog, identity: { sub: 'user-1' } };
 
         const result = response(ctx);
 
@@ -27,7 +27,7 @@ describe('get_catalog_for_shared_campaign_fn response', () => {
     });
 
     it('throws NOT_FOUND when the catalog does not exist', () => {
-        const ctx = { stash: {}, result: null };
+        const ctx = { stash: {}, result: null, identity: { sub: 'user-1' } };
 
         assert.throws(
             () => response(ctx),
@@ -36,7 +36,7 @@ describe('get_catalog_for_shared_campaign_fn response', () => {
     });
 
     it('throws NOT_FOUND when the catalog has been soft-deleted', () => {
-        const ctx = { stash: {}, result: { catalogId: 'catalog-abc', isDeleted: true } };
+        const ctx = { stash: {}, result: { catalogId: 'catalog-abc', isDeleted: true, ownerAccountId: 'ACCOUNT#user-1' }, identity: { sub: 'user-1' } };
 
         assert.throws(
             () => response(ctx),
@@ -44,10 +44,20 @@ describe('get_catalog_for_shared_campaign_fn response', () => {
         );
     });
 
+    it('throws NOT_FOUND when the catalog is private and not owned by the caller (#706)', () => {
+        const ctx = { stash: {}, result: { catalogId: 'catalog-abc', ownerAccountId: 'ACCOUNT#other-user' }, identity: { sub: 'user-1' } };
+
+        assert.throws(
+            () => response(ctx),
+            /NOT_FOUND: Catalog not found/
+        );
+    });
+
     it('throws propagated DynamoDB error when ctx.error is set', () => {
         const ctx = {
             stash: {},
             error: { message: 'DynamoDB timeout', type: 'INTERNAL_ERROR' },
+            identity: { sub: 'user-1' },
         };
 
         assert.throws(

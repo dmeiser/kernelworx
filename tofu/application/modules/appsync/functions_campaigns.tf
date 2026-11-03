@@ -26,6 +26,19 @@ resource "aws_appsync_function" "update_campaign" {
   code = file("${local.js_resolvers_dir}/update_campaign_fn.js")
 }
 
+resource "aws_appsync_function" "verify_update_catalog_access" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.catalogs.name
+  name        = "VerifyUpdateCatalogAccessFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/verify_update_catalog_access_fn.js")
+}
+
 resource "aws_appsync_function" "lookup_campaign_for_delete" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.campaigns.name
@@ -37,41 +50,6 @@ resource "aws_appsync_function" "lookup_campaign_for_delete" {
   }
 
   code = file("${local.js_resolvers_dir}/lookup_campaign_for_delete_fn.js")
-}
-
-resource "aws_appsync_function" "query_campaign_orders_for_delete" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.orders.name
-  name        = "QueryCampaignOrdersForDeleteFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/query_campaign_orders_for_delete_fn.js")
-}
-
-resource "aws_appsync_function" "delete_campaign_orders" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.orders.name
-  name        = "DeleteCampaignOrdersFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  # templatefile() reads the esbuild bundle in appsync/dist/, which strips
-  # ordinary comments, so a dollar-brace sequence that survives bundling is
-  # interpolated as a Terraform expression: in a string literal it aborts every
-  # plan/apply with "Invalid expression". `${table_name}` is the only intended
-  # placeholder; escape a literal as `$${...}` or switch this to file()
-  # (#284 defers that switch). Enforced by
-  # tests/unit/check_templatefile_escaping.test.ts (#570).
-  code = templatefile("${local.js_resolvers_dir}/delete_campaign_orders_fn.js", {
-    table_name = var.dynamodb_table_names.orders
-  })
 }
 
 resource "aws_appsync_function" "delete_campaign_orders_lambda" {
@@ -497,4 +475,27 @@ resource "aws_appsync_function" "increment_public_order_count" {
   }
 
   code = file("${local.js_resolvers_dir}/increment_public_order_count_fn.js")
+}
+
+# #746: maintain the denormalized Campaign.totalOrders / Campaign.totalRevenue
+# counters on the campaign item. Runs AFTER the order write in the
+# authenticated order-write pipelines (createOrder, updateOrder, deleteOrder);
+# each lists it at most once (#438), and the same function resource is
+# reusable across pipelines. The delta travels on ctx.stash.totalsDelta,
+# stashed by the preceding write step. publicCreateOrder cannot use this step
+# (its resolver is at AppSync's 10-function cap), so its totals update rides
+# inside create_public_order's TransactWriteItems instead. The VTL field
+# resolvers serve the counter when present and fall back to their old
+# per-campaign queries for unmigrated rows.
+resource "aws_appsync_function" "sync_campaign_totals" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "SyncCampaignTotalsFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/sync_campaign_totals_fn.js")
 }

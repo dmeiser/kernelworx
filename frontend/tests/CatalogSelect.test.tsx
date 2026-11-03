@@ -112,4 +112,23 @@ describe('CatalogSelect', () => {
 
     expect(screen.getByRole('combobox')).not.toHaveAttribute('aria-disabled', 'true');
   });
+
+  test('marks an admin-managed catalog in my catalogs as official', () => {
+    const onChange = vi.fn();
+    const officialMyCatalogs = [
+      { catalogId: 'CAT~9', catalogName: 'My Official', isPublic: false, catalogType: 'ADMIN_MANAGED' },
+    ] as unknown as any;
+    render(
+      <CatalogSelect
+        value=""
+        onChange={onChange}
+        myCatalogs={officialMyCatalogs}
+        publicCatalogs={[]}
+      />,
+    );
+
+    fireEvent.mouseDown(screen.getByRole('combobox'));
+    expect(screen.getByText(/My Official/)).toBeInTheDocument();
+  });
+
 });

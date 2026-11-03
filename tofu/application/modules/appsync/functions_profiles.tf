@@ -13,6 +13,36 @@ resource "aws_appsync_function" "get_my_account_exact" {
   code = file("${local.js_resolvers_dir}/get_my_account_exact_fn.js")
 }
 
+# Read step of the updateMyPreferences pipeline (#510): consistent GetItem
+# stashing the raw preferences snapshot for the write step's optimistic lock.
+resource "aws_appsync_function" "get_preferences_for_update" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.accounts.name
+  name        = "GetPreferencesForUpdateFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_preferences_for_update_fn.js")
+}
+
+# Write step of the updateMyPreferences pipeline (#510): replaces the
+# preferences blob conditioned on the snapshot the read step stashed.
+resource "aws_appsync_function" "update_my_preferences" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.accounts.name
+  name        = "UpdateMyPreferencesFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/update_my_preferences_resolver.js")
+}
+
 resource "aws_appsync_function" "ensure_my_account_exists" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.accounts.name

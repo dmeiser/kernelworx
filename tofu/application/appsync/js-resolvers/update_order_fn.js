@@ -159,8 +159,25 @@ export function request(ctx) {
         updates.push('lineItems = :lineItems');
         exprValues[':lineItems'] = enrichedLineItems;
 
+        const newTotal = totalAmountCents / 100;
         updates.push('totalAmount = :totalAmount');
-        exprValues[':totalAmount'] = totalAmountCents / 100;
+        exprValues[':totalAmount'] = newTotal;
+
+        // #746: denormalized-totals delta for sync_campaign_totals_fn. Only
+        // lineItems change totalAmount; the subtraction runs in floats, so it
+        // is rounded to cents here (all totals are cent-quantized) and the
+        // sync step rounds again as defense in depth. A zero delta is not
+        // stashed, so an amount-preserving edit costs no counter write.
+        const oldTotal = order && typeof order.totalAmount === 'number' ? order.totalAmount : 0;
+        const revenueDelta = Math.round((newTotal - oldTotal) * 100) / 100;
+        if (revenueDelta !== 0) {
+            ctx.stash.totalsDelta = {
+                profileId: order.profileId,
+                campaignId: order.campaignId,
+                count: 0,
+                revenue: revenueDelta
+            };
+        }
     }
 
     if (input.notes !== undefined) {

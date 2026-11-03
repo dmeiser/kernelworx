@@ -33,6 +33,7 @@ let mockAccountData: any = {
 };
 let mockMyProfilesError: Error | null = null;
 let mockMyProfilesLoading = false;
+let mockReadQueryError: Error | null = null;
 
 const profilesQueryMock = vi.fn();
 const loadAccountMock = vi.fn();
@@ -43,8 +44,6 @@ const deleteProfileMock = vi.fn().mockResolvedValue({ data: {} });
 
 // Capture mutation option callbacks so tests can invoke them
 let capturedCreateOpts: any;
-let capturedUpdateOpts: any;
-let capturedDeleteOpts: any;
 
 const buildLazyQueryResult = (name: string | undefined) => {
   const lazyQueryHandlers: Record<string, () => [any, any]> = {
@@ -77,28 +76,6 @@ vi.mock('@apollo/client/react', async () => {
         { loading: false },
       ];
     },
-    UpdateSellerProfile: (opts) => {
-      capturedUpdateOpts = opts;
-      return [
-        async (vars: any) => {
-          const res = await updateProfileMock(vars);
-          opts?.onCompleted?.(res?.data ?? {});
-          return res;
-        },
-        { loading: false },
-      ];
-    },
-    DeleteSellerProfile: (opts) => {
-      capturedDeleteOpts = opts;
-      return [
-        async (vars: any) => {
-          const res = await deleteProfileMock(vars);
-          opts?.onCompleted?.(res?.data ?? {});
-          return res;
-        },
-        { loading: false },
-      ];
-    },
     UpdateMyPreferences: (_opts) => {
       return [updatePreferencesMock, { loading: false }];
     },
@@ -112,8 +89,19 @@ vi.mock('@apollo/client/react', async () => {
   };
 
   // useApolloClient returns an instance whose query method serves both the
-  // paginated listMyProfiles connection and the shared-profiles list.
+  // paginated listMyProfiles connection and the shared-profiles list. The
+  // readQuery method backs the live preferences-blob read on toggle (#510).
   const useApolloClient = () => ({
+    readQuery: (options: any) => {
+      const name = getOpName(options?.query);
+      if (name === 'GetMyAccount') {
+        if (mockReadQueryError) {
+          throw mockReadQueryError;
+        }
+        return mockAccountData ? { getMyAccount: mockAccountData } : null;
+      }
+      return null;
+    },
     query: (options: any) => {
       const name = getOpName(options?.query);
       if (name === 'ListMyProfiles') {
@@ -163,6 +151,7 @@ describe('ScoutsPage – interactions', () => {
     mockSharedProfiles = [];
     mockMyProfilesError = null;
     mockMyProfilesLoading = false;
+    mockReadQueryError = null;
     mockAccountData = {
       accountId: 'acct-1',
       email: 'test@example.com',
@@ -170,8 +159,6 @@ describe('ScoutsPage – interactions', () => {
     };
     vi.clearAllMocks();
     capturedCreateOpts = undefined;
-    capturedUpdateOpts = undefined;
-    capturedDeleteOpts = undefined;
     createProfileMock.mockResolvedValue({ data: { createSellerProfile: { profileId: 'PROFILE#new1' } } });
     updateProfileMock.mockResolvedValue({ data: {} });
     deleteProfileMock.mockResolvedValue({ data: {} });
@@ -218,6 +205,67 @@ describe('ScoutsPage – interactions', () => {
     await waitFor(() => expect(updatePreferencesMock).toHaveBeenCalled(), { timeout: 3000 });
   }, 10000);
 
+  it('merges the live blob so a toggle cannot drop keys like paymentMethods (#510)', async () => {
+    mockAccountData = {
+      accountId: 'acct-1',
+      email: 'test@example.com',
+      preferences: JSON.stringify({
+        showReadOnlyProfiles: true,
+        paymentMethods: [{ name: 'Cash App', qrCodeUrl: null }],
+      }),
+    };
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
+    const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkbox).not.toBeNull();
+    fireEvent.click(checkbox!);
+
+    await waitFor(() => expect(updatePreferencesMock).toHaveBeenCalled(), { timeout: 3000 });
+    const variables = updatePreferencesMock.mock.calls[0][0].variables;
+    expect(JSON.parse(variables.preferences)).toEqual({
+      showReadOnlyProfiles: false,
+      paymentMethods: [{ name: 'Cash App', qrCodeUrl: null }],
+    });
+  }, 10000);
+
+  it('falls back to the memoized preferences when the cache read throws (#510)', async () => {
+    mockAccountData = {
+      accountId: 'acct-1',
+      email: 'test@example.com',
+      preferences: JSON.stringify({
+        showReadOnlyProfiles: true,
+        paymentMethods: [{ name: 'Venmo', qrCodeUrl: null }],
+      }),
+    };
+    mockReadQueryError = new Error('partial cache');
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
+    const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    fireEvent.click(checkbox!);
+
+    await waitFor(() => expect(updatePreferencesMock).toHaveBeenCalled(), { timeout: 3000 });
+    const variables = updatePreferencesMock.mock.calls[0][0].variables;
+    expect(JSON.parse(variables.preferences)).toEqual({
+      showReadOnlyProfiles: false,
+      paymentMethods: [{ name: 'Venmo', qrCodeUrl: null }],
+    });
+  }, 10000);
+
+  it('keeps the toggle disabled until getMyAccount has resolved (#510)', async () => {
+    mockAccountData = null;
+    renderScoutsPage();
+    await waitFor(() => expect(screen.getByText('Show read-only')).toBeInTheDocument(), { timeout: 5000 });
+
+    const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    expect(checkbox).not.toBeNull();
+    // The gate is the disabled attribute: real browsers never deliver a click
+    // to a disabled input (jsdom dispatches one anyway, so the no-fire path is
+    // covered by the attribute assertion alone).
+    expect(checkbox!.disabled).toBe(true);
+  }, 10000);
+
   // ── create profile mutations ──────────────────────────────────────────────
 
   it('opens create dialog and submitting calls createProfile mutation', async () => {
@@ -257,24 +305,6 @@ describe('ScoutsPage – interactions', () => {
     const callsBefore = profilesQueryMock.mock.calls.length;
     await capturedCreateOpts.onCompleted?.({});
 
-    expect(profilesQueryMock.mock.calls.length).toBeGreaterThan(callsBefore);
-  }, 10000);
-
-  it('updateProfile onCompleted triggers loadMyProfiles and loadSharedProfiles', async () => {
-    renderScoutsPage();
-    await waitFor(() => expect(capturedUpdateOpts).toBeDefined(), { timeout: 5000 });
-    const callsBefore = profilesQueryMock.mock.calls.length;
-    await capturedUpdateOpts.onCompleted?.({});
-    expect(profilesQueryMock.mock.calls.length).toBeGreaterThan(callsBefore);
-  }, 10000);
-
-  it('deleteProfile onCompleted closes dialog and triggers loadMyProfiles', async () => {
-    renderScoutsPage();
-    await waitFor(() => expect(capturedDeleteOpts).toBeDefined(), { timeout: 5000 });
-
-    // After delete onCompleted, the dialog should be closed and loadMyProfiles called
-    const callsBefore = profilesQueryMock.mock.calls.length;
-    await capturedDeleteOpts.onCompleted?.({});
     expect(profilesQueryMock.mock.calls.length).toBeGreaterThan(callsBefore);
   }, 10000);
 

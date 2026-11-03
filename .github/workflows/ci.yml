@@ -170,6 +170,7 @@ jobs:
             frontend/deploy.sh \
             frontend/setup-local-dev.sh \
             scripts/appsync-ensure-resolver-order.sh \
+            scripts/build-lambda-layer.sh \
             scripts/create-ephemeral-test-users.sh \
             scripts/create-screenshot-user.sh \
             scripts/create-test-users.sh \
@@ -247,6 +248,8 @@ jobs:
           cd tofu
           tflint --init
           tflint --chdir application/modules
+          tflint --chdir application/environments/dev
+          tflint --chdir application/environments/ephemeral
           tflint --chdir application/environments/prod
           tflint --chdir bootstrap
 

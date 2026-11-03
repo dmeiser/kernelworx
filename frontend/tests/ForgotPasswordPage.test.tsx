@@ -113,6 +113,7 @@ describe('ForgotPasswordPage', () => {
       expect(screen.getByRole('textbox', { name: 'Confirmation Code' })).toBeInTheDocument();
       expect(screen.getByTestId('new-password')).toBeInTheDocument();
       expect(screen.getByTestId('confirm-password')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Resend code in/i })).toBeDisabled();
     });
 
     test('treats UserNotFoundException as success to avoid account enumeration', async () => {
@@ -396,10 +397,13 @@ describe('ForgotPasswordPage', () => {
     });
 
     test('renders a resend-code button on the confirmation step', async () => {
-      expect(screen.getByRole('button', { name: 'Resend Code' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Resend code in/i })).toBeInTheDocument();
     });
 
     test('resends the reset code for the stored email', async () => {
+      act(() => {
+        vi.advanceTimersByTime(30000);
+      });
       fireEvent.click(screen.getByRole('button', { name: 'Resend Code' }));
 
       await waitFor(() => {
@@ -410,21 +414,21 @@ describe('ForgotPasswordPage', () => {
       );
     });
 
-    test('disables resend-code button during cooldown', async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Resend Code' }));
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /Resend code in/i })).toBeDisabled();
-      });
-
+    test('resend keeps generic success to avoid account enumeration', async () => {
+      vi.mocked(resetPassword).mockRejectedValueOnce(createNamedError('UserNotFoundException'));
       act(() => {
         vi.advanceTimersByTime(30000);
       });
+      fireEvent.click(screen.getByRole('button', { name: 'Resend Code' }));
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: 'Resend Code' })).toBeEnabled();
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          'If an account exists for user@example.com, a reset code has been sent.',
+        );
       });
+      expect(screen.getByRole('button', { name: /Resend code in/i })).toBeDisabled();
     });
+
   });
 
   test('navigates to login when Back to Login is clicked', () => {

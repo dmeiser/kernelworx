@@ -33,6 +33,7 @@ anytown
 apperror
 AppSync
 appworx
+argjson
 aria
 arn
 assertable
@@ -193,6 +194,7 @@ idps
 idpresponse
 ie
 ifdef
+IDOR
 IIFE
 impls
 importPath

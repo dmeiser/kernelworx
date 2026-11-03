@@ -5,7 +5,7 @@
  * Integrates with AppSync GraphQL API to fetch Account metadata.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { fetchAuthSession, signInWithRedirect, signIn, signOut, getCurrentUser } from 'aws-amplify/auth';
 import { Hub } from 'aws-amplify/utils';
 import { apolloClient } from '../lib/apollo';
@@ -121,9 +121,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   /**
-   * Check current auth session and load account data
+   * Check current auth session and load account data (single execution)
    */
-  const checkAuthSession = useCallback(async () => {
+  const runCheckAuthSession = useCallback(async () => {
     try {
       const session = await fetchAuthSession();
 
@@ -153,6 +153,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, [fetchAccountData]);
 
+  // Deduplicate concurrent calls: any number of callers that invoke
+  // checkAuthSession() while a check is already in flight share the same
+  // in-flight Promise instead of issuing duplicate fetchAuthSession(),
+  // getCurrentUser(), and GET_MY_ACCOUNT requests (#741).
+  const inflightCheckRef = useRef<Promise<void> | null>(null);
+  const checkAuthSession = useCallback(() => {
+    if (inflightCheckRef.current) {
+      return inflightCheckRef.current;
+    }
+    const promise = runCheckAuthSession().finally(() => {
+      inflightCheckRef.current = null;
+    });
+    inflightCheckRef.current = promise;
+    return promise;
+  }, [runCheckAuthSession]);
+
   /**
    * Initialize auth state on mount and listen for auth events
    */
@@ -167,10 +183,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setAccount(null);
         setHasValidTokens(false);
         setLoading(false);
+        void apolloClient.clearStore().catch(() => {});
       },
       onTokenRefreshFailure: () => {
         setAccount(null);
         setHasValidTokens(false);
+        void apolloClient.clearStore().catch(() => {});
       },
     });
 
@@ -212,15 +230,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Check if sign-in is complete or if there's a next step (MFA, etc.)
       if (result.isSignedIn) {
-        // Sign-in complete - refresh the auth session
+        // Sign-in complete - refresh the auth session (deduped against the
+        // `signedIn` auth event that Amplify dispatches concurrently).
         await checkAuthSession();
-        return result;
-      } else if (result.nextStep) {
-        // There's a next step (MFA challenge, new password required, etc.)
-        // Return the result so the UI can handle it
-        return result;
       }
-
       return result;
     },
     [checkAuthSession],
@@ -252,6 +265,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         (typeof window !== 'undefined' ? window.location.origin : '');
       const logoutUri = encodeURIComponent(rawLogoutUri);
       window.location.href = `https://${domain}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
+    } finally {
+      await apolloClient.clearStore().catch(() => {});
     }
   }, []);
 

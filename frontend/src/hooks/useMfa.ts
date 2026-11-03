@@ -56,7 +56,9 @@ const runMfaSetup = async (
   setMfaLoading(true);
   try {
     const totpSetupDetails = await setUpTOTP();
-    const setupUri = totpSetupDetails.getSetupUri('PopcornManager');
+    // The issuer label is what the authenticator app shows; both enrollment
+    // entry points must use the product name (issue #722).
+    const setupUri = totpSetupDetails.getSetupUri('KernelWorx');
     const qrDataUrl = await QRCode.toDataURL(setupUri.href);
 
     setMfaSetupCode(totpSetupDetails.sharedSecret);
