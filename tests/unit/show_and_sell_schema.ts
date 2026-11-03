@@ -17,9 +17,10 @@
  *     arguments use parentheses, so braces never nest in this schema); an
  *     `extend` block reports the base kind, so every detector applies to
  *     extended roots without a second code path;
- *   - a field entry starts at ANY indentation with an identifier followed by
- *     `(` or `:`, but only at parenthesis depth 0 - so a four-space field in a
- *     drifted or extended block is seen, while a multi-line argument list's
+ *   - a field entry starts at ANY indentation (zero included) with an
+ *     identifier followed by `(` or `:`, but only at parenthesis depth 0 - so
+ *     a field in a drifted, extended, or unindented block is seen, while a
+ *     multi-line argument list's
  *     indented argument lines (`first: Int` at depth 1) never parse as
  *     fields. Its closing `): Type! @directive` line starts with `)` and so
  *     never starts a new entry.
@@ -107,9 +108,10 @@ export function parseDefinitions(source: string): Definition[] {
 
 /**
  * Parses the fields of one object definition body (see module header): a field
- * starts at any indentation with a lower-case identifier followed by `(` or
- * `:`, but only at parenthesis depth 0, so indented argument lines of a
- * multi-line field never masquerade as fields and four-space fields are seen.
+ * starts at any indentation (zero included) with a lower-case identifier
+ * followed by `(` or `:`, but only at parenthesis depth 0, so indented
+ * argument lines of a multi-line field never masquerade as fields and both
+ * zero-indent and four-space fields are seen.
  */
 export function parseFields(body: string): Field[] {
   const fields: Field[] = [];
@@ -120,7 +122,7 @@ export function parseFields(body: string): Field[] {
     const lineStart = cursor;
     cursor += line.length + 1;
     if (depth === 0) {
-      const match = line.match(/^ +([a-z]\w*)(?=[(:])/);
+      const match = line.match(/^[ \t]*([a-z]\w*)(?=[(:])/);
       if (match) {
         starts.push({ name: match[1], index: lineStart + (match.index ?? 0) });
       }
@@ -144,7 +146,7 @@ export function parseFields(body: string): Field[] {
 
 /** Base type name of a field's return type, with `!` and list brackets stripped. */
 export function returnTypeName(entry: string): string | null {
-  const tail = entry.match(/\):\s*([\w![\]]+)/) ?? entry.match(/^ +[a-z]\w*:\s*([\w![\]]+)/m);
+  const tail = entry.match(/\):\s*([\w![\]]+)/) ?? entry.match(/^[ \t]*[a-z]\w*:\s*([\w![\]]+)/m);
   if (!tail) {
     return null;
   }

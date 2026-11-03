@@ -801,4 +801,14 @@ describe("Show & Sell Stage 1 - browser-only reporting (WEB-MIG-04)", () => {
     expect(reportOffenders(code)).toContain("Query.councilNeedsReport");
     expect(reportOffenders(code)).toContain("CouncilNeedsReport");
   });
+
+  test("the parser sees zero-indent fields, so smuggling there is caught", () => {
+    // A field at column 0 is legal SDL too: a zero-indent pre-signed report
+    // URL (AWSURL output seam) and a zero-indent @aws_api_key field must both
+    // surface to their guards instead of parsing as invisible.
+    const badReport = ["type Unit {", "reportUrl: AWSURL", "}"].join("\n");
+    expect(reportOffenders(codeOnly(badReport))).toContain("Unit.reportUrl");
+    const badApiKey = ["type Unit {", "joinCode: String @aws_api_key", "}"].join("\n");
+    expect(apiKeyOffenders(codeOnly(badApiKey))).toContain("Unit.joinCode");
+  });
 });
