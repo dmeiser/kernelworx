@@ -124,6 +124,15 @@ def create_unit(event, context):
         table_key="units",
         table_name=_units().name if hasattr(_units(), "name") else "units",
     )
+    fp = normalized_fingerprint(
+        {
+            "unitType": unit_type,
+            "unitNumber": int(unit_number) if unit_number is not None else None,
+            "city": city,
+            "state": state,
+        },
+        drop_none=True,
+    )
     existing_marker = runner.load_marker(mk)
     if existing_marker:
         handled, replayed = runner.replay_or_reject(
