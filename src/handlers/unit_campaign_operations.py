@@ -107,7 +107,7 @@ def _marker_keys(actor: Any, operation: str, scope: Any, key: str) -> Any:
     )
 
 
-def _require_key(args: Dict[str, Any]) -> str:
+def _require_key(args: Dict[str, Any]) -> Any:
     idempotency = args.get("idempotency", {}) or {}
     key = idempotency.get("idempotencyKey")
     if not key:
@@ -182,7 +182,7 @@ def _require_admin(caller: str, unit_id: str) -> None:
         raise AppError(ErrorCode.FORBIDDEN, "Unit Admin required")
 
 
-def _get_unit_campaign(unit_campaign_id: str) -> Dict[str, Any]:
+def _get_unit_campaign(unit_campaign_id: str) -> Any:
     """Strongly consistent base-table read of the Unit Campaign metadata row."""
     response = _uc().get_item(
         Key={"pk": f"{UNIT_CAMPAIGN_KEY_PREFIX}{unit_campaign_id}", "sk": METADATA_SK},
@@ -231,7 +231,7 @@ def _validate_join_code_shape(join_code: Any) -> str:
     return code
 
 
-def _get_join_target(join_code: str) -> Dict[str, Any]:
+def _get_join_target(join_code: str) -> Any:
     """Resolve a join code to the ACTIVE Unit Campaign it points at.
 
     Every miss - unknown code, dangling pointer, missing or inactive campaign -
@@ -259,7 +259,7 @@ def _get_join_target(join_code: str) -> Dict[str, Any]:
     return campaign
 
 
-def _catalog_usable_by(catalog_id: str, caller: str) -> Dict[str, Any]:
+def _catalog_usable_by(catalog_id: str, caller: str) -> Any:
     """Usable catalog per the #706/#509 visibility contract shared with getCatalog.
 
     Unknown, soft-deleted, or invisible catalogs are NOT_FOUND (never FORBIDDEN)
@@ -301,7 +301,7 @@ def _reserve_join_code() -> str:
     raise AppError(ErrorCode.INTERNAL_ERROR, "Could not allocate a unique join code")
 
 
-def _load_membership_result(result_id: str) -> Dict[str, Any]:
+def _load_membership_result(result_id: str) -> Any:
     """Load a membership by its stored result id ``<unitCampaignId>#<profileId>``."""
     unit_campaign_id, profile_id = result_id.split("#", 1)
     item = (
@@ -386,7 +386,7 @@ def _create_authz(bundle: Dict[str, Any], caller: str) -> None:
     _catalog_usable_by(bundle["catalog_id"], caller)
 
 
-def _create_fingerprint(args: Dict[str, Any]) -> str:
+def _create_fingerprint(args: Dict[str, Any]) -> Any:
     return normalized_fingerprint(
         {
             "unitId": args.get("unitId"),
@@ -399,7 +399,7 @@ def _create_fingerprint(args: Dict[str, Any]) -> str:
 
 
 @with_error_handling(error_message="Failed to create Unit campaign")
-def create_unit_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def create_unit_campaign(event: Dict[str, Any], context: Any) -> Any:
     """Create a Unit Campaign with a reusable join code (CAMP-M-01)."""
     caller = get_caller_id(event)
     if not caller:
@@ -471,7 +471,7 @@ def _update_input(args: Dict[str, Any]) -> Dict[str, Any]:
     return {"name": name, "year": year, "is_active": is_active}
 
 
-def _update_fingerprint(args: Dict[str, Any]) -> str:
+def _update_fingerprint(args: Dict[str, Any]) -> Any:
     # The concurrency version is not request content: a retry legitimately
     # carries a freshly read version, under either wire shape.
     return normalized_fingerprint(
@@ -495,7 +495,7 @@ def _apply_campaign_updates(current: Dict[str, Any], bundle: Dict[str, Any], cal
 
 
 @with_error_handling(error_message="Failed to update Unit campaign")
-def update_unit_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def update_unit_campaign(event: Dict[str, Any], context: Any) -> Any:
     """Update name/year/isActive; catalogId is immutable (CAMP-M-02, CAMP-M-02-02)."""
     caller = get_caller_id(event)
     if not caller:
@@ -556,7 +556,7 @@ def _run_update_transaction(
 # ---------------------------------------------------------------------------
 
 
-def _find_scout_campaign(campaign_id: str) -> Dict[str, Any]:
+def _find_scout_campaign(campaign_id: str) -> Any:
     """Locate the Scout campaign by GSI (discovery only), then read it consistently.
 
     The GSI query only locates the base-table key; every authorization and
@@ -579,7 +579,7 @@ def _find_scout_campaign(campaign_id: str) -> Dict[str, Any]:
     return campaign
 
 
-def _find_membership_for_campaign(unit_campaign_id: str, campaign_id: str) -> Optional[Dict[str, Any]]:
+def _find_membership_for_campaign(unit_campaign_id: str, campaign_id: str) -> Any:
     """The membership row (any status) linking this Scout campaign to this Unit Campaign."""
     response = _uc().query(
         IndexName="campaignId-index",
@@ -602,7 +602,7 @@ def _find_membership_for_campaign(unit_campaign_id: str, campaign_id: str) -> Op
     return None
 
 
-def _read_guard(campaign_id: str) -> Optional[Dict[str, Any]]:
+def _read_guard(campaign_id: str) -> Any:
     return (
         _uc()
         .get_item(
@@ -613,7 +613,7 @@ def _read_guard(campaign_id: str) -> Optional[Dict[str, Any]]:
     )
 
 
-def _require_guard(campaign_id: str) -> Dict[str, Any]:
+def _require_guard(campaign_id: str) -> Any:
     guard = _read_guard(campaign_id)
     if not guard:
         raise AppError(ErrorCode.NOT_FOUND, "Membership not found")
@@ -759,7 +759,7 @@ def _scout_link_wire_update(profile_id: str, campaign_id: str, unit_campaign: Di
     )
 
 
-def _join_fingerprint(bundle: Dict[str, Any]) -> str:
+def _join_fingerprint(bundle: Dict[str, Any]) -> Any:
     """Over the join pair: the code locates the Unit Campaign, campaignId the
     Scout campaign; a different pair under one key is IDEM-02."""
     return normalized_fingerprint({"joinCode": bundle["join_code"], "campaignId": bundle["campaign_id"]})
@@ -790,7 +790,7 @@ def _join_membership_wire_action(
     return _membership_wire_put(_join_membership_rejoin_item(membership, caller, now), previous_version)
 
 
-def _active_unit_ids_for_caller(caller: str) -> set:
+def _active_unit_ids_for_caller(caller: str) -> set[str]:
     """Unit ids the caller holds an ACTIVE membership in (units table §5.2).
 
     The accountId-unitId-index projects grant rows too, so the sk filter is
@@ -878,7 +878,7 @@ def _run_join_transaction(
 
 
 @with_error_handling(error_message="Failed to join Unit campaign")
-def join_unit_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def join_unit_campaign(event: Dict[str, Any], context: Any) -> Any:
     """Join a Scout campaign to a Unit Campaign by join code (CAMP-M-03).
 
     Single transaction: membership + guard + Campaign joined-scope link are
@@ -908,7 +908,7 @@ def join_unit_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     )
 
 
-def _remove_fingerprint(args: Dict[str, Any]) -> str:
+def _remove_fingerprint(args: Dict[str, Any]) -> Any:
     return normalized_fingerprint(
         {
             "unitCampaignId": args.get("unitCampaignId"),
@@ -950,7 +950,7 @@ def _guard_removal_wire_update(
     )
 
 
-def _require_membership(unit_campaign_id: str, profile_id: str) -> Dict[str, Any]:
+def _require_membership(unit_campaign_id: str, profile_id: str) -> Any:
     """Direct base-table membership read by (unitCampaignId, profileId)."""
     item = (
         _uc()
@@ -1023,7 +1023,7 @@ def _run_remove_transaction(
 
 
 @with_error_handling(error_message="Failed to remove Unit campaign membership")
-def remove_unit_campaign_membership(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def remove_unit_campaign_membership(event: Dict[str, Any], context: Any) -> Any:
     """Remove a membership (Unit Admin only); campaign history and Orders keep their scope."""
     caller = get_caller_id(event)
     if not caller:
@@ -1141,7 +1141,7 @@ def unit_campaign_join_info(event: Dict[str, Any], context: Any) -> Dict[str, An
 
 
 @with_error_handling(error_message="Failed to resolve Unit campaign")
-def unit_campaign(event: Dict[str, Any], context: Any) -> Optional[Dict[str, Any]]:
+def unit_campaign(event: Dict[str, Any], context: Any) -> Any:
     """Admin view of one Unit Campaign; non-admins get null (batch A `unit` precedent)."""
     caller = get_caller_id(event)
     if not caller:
@@ -1230,7 +1230,7 @@ def unit_campaign_roster(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     return _paged(items, args)
 
 
-def _dispatch(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def _dispatch(event: Dict[str, Any], context: Any) -> Any:
     field = (event.get("info") or {}).get("fieldName", "")
     handlers = {
         "createUnitCampaign": create_unit_campaign,

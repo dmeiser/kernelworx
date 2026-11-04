@@ -272,8 +272,11 @@ Global Secondary Indexes:
 TTL: `expiresAtEpoch` (epoch seconds) — campaign-scoped idempotency markers (join
 now, sales later; data model §8.9) share the units table's marker TTL attribute
 and horizon convention. The join-code pointer, the membership guard, and the
-membership row are all reached by constructed-key strongly consistent base-table
-reads; join-code and membership checks in mutations never read a GSI.
+membership row are all resolved to their base-table key and then read with a
+strongly consistent base-table read; a GSI query (`campaignId-index`) is used
+only as a locator — to map a Scout campaign to the membership row when the caller
+knows the campaign but not the profile — and never carries an authorization or
+write decision on its own (#438/#545 posture).
 
 ## Query Flows
 

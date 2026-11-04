@@ -94,6 +94,7 @@ ctype
 Cub
 customerphone
 cutover
+DANGLINGCODE
 Dataloader
 dateutils
 ddee
@@ -103,6 +104,7 @@ deepcopy
 defval
 delenv
 Delete
+DELETEDCATCODE
 Deregister
 designmd
 desyncs
@@ -159,6 +161,8 @@ getters
 getunitreport
 getvalue
 GEZDGNBVGY
+GHOSTCATCODE
+GHOSTUNITCODE
 giftcard
 GitHub
 GraphQL
@@ -205,6 +209,8 @@ isOwner
 isPublic
 jank
 JBSWY
+JOINCRW
+JOINPK
 jose
 José
 José's
@@ -424,6 +430,7 @@ slugifying
 snackbar
 someoneelse
 spreadsheetml
+SPRNG
 srcset
 standardly
 stateAbbrev
@@ -474,6 +481,7 @@ transferOwnership
 transpiled
 treeshake
 typeof
+ucco
 ue
 unaccented
 unadministrable
@@ -531,6 +539,7 @@ vitejs
 Vitest
 wcag
 webauthn
+WINT
 wordmark
 worktree
 worx
