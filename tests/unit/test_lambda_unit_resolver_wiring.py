@@ -11,7 +11,8 @@ python-hcl2) and assert the meaning of the wiring contract:
 
 - Every UNIT resolver on a decorator-wrapped Lambda datasource carries
   lambda_unit_resolver.js and an APPSYNC_JS runtime, and none are converted
-  to PIPELINE resolvers.
+  to PIPELINE resolvers (the unit_operations Show & Sell datasource is in
+  the map too, so its fields are checked like the rest).
 - The field set on those datasources is exactly the expected set (no
   resolver is left on the default VTL behavior, which cannot detect
   `__isError`).
@@ -49,6 +50,21 @@ EXPECTED_UNIT_FIELDS = {
     "aws_appsync_datasource.request_qr_upload.name": {"requestPaymentMethodQRCodeUpload"},
     "aws_appsync_datasource.delete_qr_code.name": {"deletePaymentMethodQRCode"},
     "aws_appsync_datasource.public_orders.name": {"publicGetOrderOffer", "publicGetOrderReceipt"},
+    # Show & Sell Stage 1 batch A: the unit_operations Lambda serves every
+    # Unit mutation/query through direct UNIT resolvers running
+    # lambda_unit_resolver.js (#329 __isError detection).
+    "aws_appsync_datasource.unit_operations.name": {
+        "createUnit",
+        "updateUnit",
+        "createUnitInvite",
+        "revokeUnitInvite",
+        "redeemUnitInvite",
+        "revokeUnitAccessGrant",
+        "myUnits",
+        "unit",
+        "unitAdmins",
+        "unitInvites",
+    },
 }
 
 

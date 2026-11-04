@@ -635,3 +635,60 @@ resource "aws_appsync_resolver" "public_order_receipt" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Unit operations (Lambda)
+resource "aws_appsync_resolver" "my_units" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "myUnits"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unit"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_admins" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitAdmins"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_invites" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitInvites"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
