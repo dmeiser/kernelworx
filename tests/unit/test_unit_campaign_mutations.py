@@ -376,7 +376,10 @@ def _update_event(
     expected_version: Any = 1,
     key: str = "update-key-1",
 ) -> dict:
-    input_: dict[str, Any] = {"unitCampaignId": unit_campaign_id, "expectedVersion": expected_version}
+    input_: dict[str, Any] = {
+        "unitCampaignId": unit_campaign_id,
+        "version": {"expectedVersion": expected_version},
+    }
     if name is not None:
         input_["campaignName"] = name
     if year is not None:
@@ -489,7 +492,7 @@ class TestUpdateUnitCampaign:
             "Avery",
             input={
                 "unitCampaignId": fx.PACK_3149_FALL,
-                "expectedVersion": 99,
+                "version": {"expectedVersion": 99},
                 "idempotency": {"idempotencyKey": "noop-key"},
             },
         )

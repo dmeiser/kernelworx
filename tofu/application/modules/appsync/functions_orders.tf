@@ -104,6 +104,19 @@ resource "aws_appsync_function" "get_campaign_for_order" {
   code = file("${local.js_resolvers_dir}/get_campaign_for_order_fn.js")
 }
 
+resource "aws_appsync_function" "campaign_base_read_for_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "CampaignBaseReadForOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/campaign_base_read_for_order_fn.js")
+}
+
 resource "aws_appsync_function" "get_catalog" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.catalogs.name

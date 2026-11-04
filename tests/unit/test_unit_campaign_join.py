@@ -15,7 +15,11 @@ Named contract tests:
   an expected-membership/guard version pair (VER-01 stale -> CONFLICT); the
   membership is retained with REMOVED status and the guard target is cleared,
   but the Campaign keeps its joined-scope link and Orders keep theirs
-  (API-FIX-05).
+  (API-FIX-05). The identity is the Scout campaign (the input carries
+  ``campaignId`` and the membership key's profile is resolved from it); the
+  guard update conditions on the guard still pointing at the Unit Campaign
+  being removed, so a stale re-remove of a REMOVED row while the campaign is
+  actively joined elsewhere cancels (the §8.2 at-most-one-ACTIVE invariant).
 """
 
 from __future__ import annotations
@@ -379,7 +383,7 @@ class TestJoinUnitCampaign:
         _seed(units_table, profiles_table, campaigns_table, shares_table, unit_campaigns_table, catalogs_table)
         devon = fx.PROFILES["Devon"]
         removed = lambda_handler(
-            _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, profile_id=devon["profileId"]), None
+            _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, campaign_id=devon["campaignId"]), None
         )
         assert not removed.get("__isError"), removed
         payload = _join("Devon", campaign_id=devon["campaignId"], join_code=FALL_CODE, key="join-key-9")
@@ -404,17 +408,20 @@ def _remove_event(
     caller: str,
     *,
     unit_campaign_id: str,
-    profile_id: str,
+    campaign_id: str,
     membership_version: Any = 1,
     guard_version: Any = 1,
     key: str = "remove-key-1",
 ) -> dict:
+    """The deployed input shape (RemoveUnitCampaignMembershipInput): the roster
+    identity is ``campaignId`` - the handler resolves the membership key's
+    profile from the Scout campaign."""
     return fx.unit_campaign_operation_event(
         "removeUnitCampaignMembership",
         caller,
         input={
             "unitCampaignId": unit_campaign_id,
-            "profileId": profile_id,
+            "campaignId": campaign_id,
             "expectedMembershipVersion": membership_version,
             "expectedGuardVersion": guard_version,
             "idempotency": {"idempotencyKey": key},
@@ -435,7 +442,7 @@ class TestRemoveUnitCampaignMembership:
         _seed(units_table, profiles_table, campaigns_table, shares_table, unit_campaigns_table, catalogs_table)
         devon = fx.PROFILES["Devon"]
         payload = lambda_handler(
-            _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, profile_id=devon["profileId"]), None
+            _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, campaign_id=devon["campaignId"]), None
         )
         assert not payload.get("__isError"), payload
         assert payload["status"] == "REMOVED"
@@ -466,7 +473,7 @@ class TestRemoveUnitCampaignMembership:
         _seed(units_table, profiles_table, campaigns_table, shares_table, unit_campaigns_table, catalogs_table)
         devon = fx.PROFILES["Devon"]
         payload = lambda_handler(
-            _remove_event("Devon", unit_campaign_id=fx.PACK_3149_FALL, profile_id=devon["profileId"]), None
+            _remove_event("Devon", unit_campaign_id=fx.PACK_3149_FALL, campaign_id=devon["campaignId"]), None
         )
         assert payload == {
             "__isError": True,
@@ -474,7 +481,7 @@ class TestRemoveUnitCampaignMembership:
             "message": "Unit Admin required",
         }
 
-    def test_unknown_membership_is_not_found(
+    def test_unknown_campaign_is_not_found(
         self,
         units_table: Any,
         profiles_table: Any,
@@ -483,10 +490,31 @@ class TestRemoveUnitCampaignMembership:
         unit_campaigns_table: Any,
         catalogs_table: Any,
     ) -> None:
+        """The roster identity is the Scout campaign; one that does not exist
+        cannot carry a membership, so the locator fails NOT_FOUND."""
         _seed(units_table, profiles_table, campaigns_table, shares_table, unit_campaigns_table, catalogs_table)
         fx.assert_is_error(
             lambda_handler(
-                _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, profile_id="PROFILE#ghost"), None
+                _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, campaign_id="CAMPAIGN#ghost"), None
+            ),
+            "NOT_FOUND",
+        )
+
+    def test_campaign_without_a_membership_is_not_found(
+        self,
+        units_table: Any,
+        profiles_table: Any,
+        campaigns_table: Any,
+        shares_table: Any,
+        unit_campaigns_table: Any,
+        catalogs_table: Any,
+    ) -> None:
+        """A Scout campaign with no membership row on this Unit Campaign."""
+        _seed(units_table, profiles_table, campaigns_table, shares_table, unit_campaigns_table, catalogs_table)
+        taylor = fx.PROFILES["Taylor"]
+        fx.assert_is_error(
+            lambda_handler(
+                _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, campaign_id=taylor["campaignId"]), None
             ),
             "NOT_FOUND",
         )
@@ -502,19 +530,20 @@ class TestRemoveUnitCampaignMembership:
     ) -> None:
         """A membership row without its guard is an inconsistent state."""
         _seed(units_table, profiles_table, campaigns_table, shares_table, unit_campaigns_table, catalogs_table)
+        taylor = fx.PROFILES["Taylor"]
         unit_campaigns_table.put_item(
             Item=fx.unit_campaign_membership_item(
                 fx.PACK_3149_FALL,
                 "unit-pack-3149-aurora",
-                "CAMPAIGN#orphan",
-                "PROFILE#orphan",
+                taylor["campaignId"],
+                taylor["profileId"],
                 joined_by="Avery",
                 version=1,
             )
         )
         fx.assert_is_error(
             lambda_handler(
-                _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, profile_id="PROFILE#orphan"), None
+                _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, campaign_id=taylor["campaignId"]), None
             ),
             "NOT_FOUND",
         )
@@ -534,7 +563,7 @@ class TestRemoveUnitCampaignMembership:
             _remove_event(
                 "Avery",
                 unit_campaign_id=fx.PACK_3149_FALL,
-                profile_id=devon["profileId"],
+                campaign_id=devon["campaignId"],
                 membership_version=9,
             ),
             None,
@@ -558,7 +587,7 @@ class TestRemoveUnitCampaignMembership:
             _remove_event(
                 "Avery",
                 unit_campaign_id=fx.PACK_3149_FALL,
-                profile_id=devon["profileId"],
+                campaign_id=devon["campaignId"],
                 guard_version=7,
             ),
             None,
@@ -581,7 +610,7 @@ class TestRemoveUnitCampaignMembership:
                 _remove_event(
                     "Avery",
                     unit_campaign_id=fx.PACK_3149_FALL,
-                    profile_id=devon["profileId"],
+                    campaign_id=devon["campaignId"],
                     **{field: "1"},
                 ),
                 None,
@@ -599,11 +628,11 @@ class TestRemoveUnitCampaignMembership:
     ) -> None:
         _seed(units_table, profiles_table, campaigns_table, shares_table, unit_campaigns_table, catalogs_table)
         devon = fx.PROFILES["Devon"]
-        event = _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, profile_id=devon["profileId"])
+        event = _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, campaign_id=devon["campaignId"])
         first = lambda_handler(event, None)
         assert not first.get("__isError"), first
         retry = lambda_handler(
-            _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, profile_id=devon["profileId"]), None
+            _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, campaign_id=devon["campaignId"]), None
         )
         assert retry == first
 
@@ -623,7 +652,7 @@ class TestRemoveUnitCampaignMembership:
         _seed_second_pack_campaign(unit_campaigns_table)
         devon = fx.PROFILES["Devon"]
         removed = lambda_handler(
-            _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, profile_id=devon["profileId"]), None
+            _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, campaign_id=devon["campaignId"]), None
         )
         assert not removed.get("__isError"), removed
         joined = _join("Devon", campaign_id=devon["campaignId"], join_code=WINTER_CODE, key="join-key-9")
@@ -642,3 +671,59 @@ class TestRemoveUnitCampaignMembership:
         campaign = _campaign_row(campaigns_table, devon["profileId"], devon["campaignId"])
         assert campaign["unitId"] == fx.PACK_3149
         assert campaign["unitCampaignId"] == WINTER_ID
+
+    def test_stale_re_remove_of_a_removed_row_cannot_unlink_the_active_join(
+        self,
+        units_table: Any,
+        profiles_table: Any,
+        campaigns_table: Any,
+        shares_table: Any,
+        unit_campaigns_table: Any,
+        catalogs_table: Any,
+    ) -> None:
+        """§8.2 guard tightening: after Devon's campaign left FALL and joined
+        WINTER, a stale re-remove of the still-visible REMOVED FALL row - whose
+        expectedMembershipVersion and expectedGuardVersion both match what the
+        roster and guard show - must cancel the transaction (CONFLICT), never
+        clear the guard of the WINTER join it now protects."""
+        _seed(units_table, profiles_table, campaigns_table, shares_table, unit_campaigns_table, catalogs_table)
+        _seed_second_pack_campaign(unit_campaigns_table)
+        devon = fx.PROFILES["Devon"]
+        removed = lambda_handler(
+            _remove_event("Avery", unit_campaign_id=fx.PACK_3149_FALL, campaign_id=devon["campaignId"]), None
+        )
+        assert not removed.get("__isError"), removed
+        joined = _join("Devon", campaign_id=devon["campaignId"], join_code=WINTER_CODE, key="join-key-9")
+        assert not joined.get("__isError"), joined
+        winter_guard = _guard_row(unit_campaigns_table, devon["campaignId"])
+        assert winter_guard["activeUnitCampaignId"] == WINTER_ID
+        assert winter_guard["membershipVersion"] == 1
+
+        # The UC1 admin sees the REMOVED FALL row (version 2) and the guard
+        # version (1) exactly as the roster/UI reports them.
+        payload = lambda_handler(
+            _remove_event(
+                "Avery",
+                unit_campaign_id=fx.PACK_3149_FALL,
+                campaign_id=devon["campaignId"],
+                membership_version=2,
+                guard_version=1,
+                key="remove-key-stale",
+            ),
+            None,
+        )
+        assert payload == {
+            "__isError": True,
+            "errorCode": "CONFLICT",
+            "message": "The resource changed underneath this request. Re-read and try again.",
+        }
+        # Nothing moved: WINTER stays the guard's target and its membership
+        # stays ACTIVE; the FALL row keeps its REMOVED version.
+        guard = _guard_row(unit_campaigns_table, devon["campaignId"])
+        assert guard["activeUnitCampaignId"] == WINTER_ID
+        assert guard["membershipVersion"] == 1
+        winter_membership = _membership_row(unit_campaigns_table, WINTER_ID, devon["profileId"])
+        assert winter_membership["status"] == "ACTIVE"
+        fall_membership = _membership_row(unit_campaigns_table, fx.PACK_3149_FALL, devon["profileId"])
+        assert fall_membership["status"] == "REMOVED"
+        assert fall_membership["version"] == 2

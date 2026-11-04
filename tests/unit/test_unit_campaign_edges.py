@@ -93,7 +93,7 @@ class TestValidationEdges:
         event = _event(
             "updateUnitCampaign",
             "Avery",
-            input={"campaignName": "x", "expectedVersion": 1, "idempotency": {"idempotencyKey": "k"}},
+            input={"campaignName": "x", "version": {"expectedVersion": 1}, "idempotency": {"idempotencyKey": "k"}},
         )
         fx.assert_is_error(lambda_handler(event, None), "INVALID_INPUT")
 
@@ -112,7 +112,7 @@ class TestValidationEdges:
             "removeUnitCampaignMembership",
             "Avery",
             input={
-                "profileId": "PROFILE#x",
+                "campaignId": "CAMPAIGN#x",
                 "expectedMembershipVersion": 1,
                 "expectedGuardVersion": 1,
                 "idempotency": {"idempotencyKey": "k"},
@@ -120,13 +120,13 @@ class TestValidationEdges:
         )
         fx.assert_is_error(lambda_handler(event, None), "INVALID_INPUT")
 
-    def test_remove_missing_profile_id(self, units_table: Any) -> None:
+    def test_remove_missing_campaign_id(self, units_table: Any) -> None:
         fx.seed_show_sell_fixtures(units_table)
         event = _event(
             "removeUnitCampaignMembership",
             "Avery",
             input={
-                "unitCampaignId": "uc-x",
+                "unitCampaignId": fx.PACK_3149_FALL,
                 "expectedMembershipVersion": 1,
                 "expectedGuardVersion": 1,
                 "idempotency": {"idempotencyKey": "k"},
@@ -195,7 +195,7 @@ class TestAuthEdges:
                 input={
                     "unitCampaignId": fx.PACK_3149_FALL,
                     "campaignName": "x",
-                    "expectedVersion": 1,
+                    "version": {"expectedVersion": 1},
                     "idempotency": {"idempotencyKey": "k"},
                 },
             ),
@@ -339,7 +339,7 @@ class TestRaceReplay:
                 {
                     "unitCampaignId": fx.PACK_3149_FALL,
                     "campaignName": "Race",
-                    "expectedVersion": 1,
+                    "version": {"expectedVersion": 1},
                     "idempotency": {"idempotencyKey": "k"},
                 },
             ),
@@ -357,7 +357,7 @@ class TestRaceReplay:
                 "Avery",
                 {
                     "unitCampaignId": fx.PACK_3149_FALL,
-                    "profileId": "PROFILE#prof-devon-fixture",
+                    "campaignId": "CAMPAIGN#camp-devon-fixture",
                     "expectedMembershipVersion": 1,
                     "expectedGuardVersion": 1,
                     "idempotency": {"idempotencyKey": "k"},

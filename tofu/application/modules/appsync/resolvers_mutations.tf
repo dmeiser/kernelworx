@@ -345,6 +345,11 @@ resource "aws_appsync_resolver" "create_order" {
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.validate_payment_method_appsync.function_id,
       aws_appsync_function.get_campaign_for_order.function_id,
+      # The locator's campaignId-index query cannot serve ConsistentRead, so
+      # the stashed projection may predate a just-committed join; the order
+      # must stamp the joined scope (ORD-API-01) from the strongly consistent
+      # base item this read replaces it with (#438/#545 posture).
+      aws_appsync_function.campaign_base_read_for_order.function_id,
       aws_appsync_function.get_catalog.function_id,
       aws_appsync_function.create_order.function_id,
       # #746: increment the denormalized campaign totals after the write.

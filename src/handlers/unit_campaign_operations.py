@@ -124,6 +124,20 @@ def _expected_version(args: Dict[str, Any], field: str) -> int:
     return raw
 
 
+def _expected_update_version(args: Dict[str, Any]) -> int:
+    """updateUnitCampaign's version rides the wire shape
+    ``args.version.expectedVersion`` (UpdateUnitCampaignInput.version is a
+    VersionedInput, schema.graphql); a top-level ``expectedVersion`` is the
+    direct-event fallback. The value the fingerprint excludes is the value
+    this reads: a wire replay that carries a freshly read version under one
+    key must fingerprint like the original under either shape."""
+    version_input = args.get("version")
+    raw = version_input.get("expectedVersion") if isinstance(version_input, dict) else None
+    if raw is None:
+        raw = args.get("expectedVersion")
+    return _expected_version({"expectedVersion": raw}, "expectedVersion")
+
+
 def _wire_put(table: Any, item: Dict[str, Any], condition: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     action: Dict[str, Any] = {"TableName": table.name, "Item": {k: _serialize(v) for k, v in item.items()}}
     if condition:
@@ -458,7 +472,11 @@ def _update_input(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _update_fingerprint(args: Dict[str, Any]) -> str:
-    return normalized_fingerprint({k: v for k, v in args.items() if k not in ("idempotency", "expectedVersion")})
+    # The concurrency version is not request content: a retry legitimately
+    # carries a freshly read version, under either wire shape.
+    return normalized_fingerprint(
+        {k: v for k, v in args.items() if k not in ("idempotency", "version", "expectedVersion")}
+    )
 
 
 def _apply_campaign_updates(current: Dict[str, Any], bundle: Dict[str, Any], caller: str, now: str) -> Dict[str, Any]:
@@ -500,7 +518,7 @@ def update_unit_campaign(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     current = _get_unit_campaign(unit_campaign_id)
     _require_admin(caller, current["unitId"])
     current_version = int(current.get("version", 1))
-    if _expected_version(args, "expectedVersion") != current_version:
+    if _expected_update_version(args) != current_version:
         raise AppError(ErrorCode.CONFLICT, "Unit campaign has been modified")
 
     next_item = _apply_campaign_updates(current, bundle, caller, _now())
@@ -915,16 +933,20 @@ def _membership_removal_wire_update(
 
 
 def _guard_removal_wire_update(
-    campaign_id: str, now: str, current_guard_version: int, next_version: int
+    campaign_id: str, unit_campaign_id: str, now: str, current_guard_version: int, next_version: int
 ) -> Dict[str, Any]:
-    """Guard cleared on removal; the Campaign joined-scope link is NOT touched."""
+    """Guard cleared on removal, and only when the guard still points at the
+    membership being removed: a stale re-remove of a REMOVED row while the
+    Scout campaign is actively joined to ANOTHER Unit Campaign must cancel the
+    transaction, not silently unlink the campaign it is joined to (§8.2).
+    The Campaign joined-scope link is NOT touched."""
     return _wire_update(
         _uc(),
         {"pk": f"{SCOUT_CAMPAIGN_KEY_PREFIX}{campaign_id}", "sk": MEMBERSHIP_GUARD_SK},
         "SET #mv = :mv, #u = :u REMOVE #a",
         {"#mv": "membershipVersion", "#u": "updatedAt", "#a": "activeUnitCampaignId"},
-        {":mv": next_version, ":u": now, ":pmv": current_guard_version},
-        "#mv = :pmv",
+        {":mv": next_version, ":u": now, ":pmv": current_guard_version, ":uc": unit_campaign_id},
+        "#mv = :pmv AND (attribute_not_exists(#a) OR #a = :uc)",
     )
 
 
@@ -976,7 +998,12 @@ def _run_remove_transaction(
         "Update",
         _membership_removal_wire_update(membership, caller, now, current_membership_version, next_membership_version),
     )
-    plan.add("Update", _guard_removal_wire_update(campaign_id, now, current_guard_version, next_membership_version))
+    plan.add(
+        "Update",
+        _guard_removal_wire_update(
+            campaign_id, membership["unitCampaignId"], now, current_guard_version, next_membership_version
+        ),
+    )
     result = runner.execute(
         mk,
         plan,
@@ -1005,12 +1032,13 @@ def remove_unit_campaign_membership(event: Dict[str, Any], context: Any) -> Dict
     unit_campaign_id = args.get("unitCampaignId")
     if not unit_campaign_id or not isinstance(unit_campaign_id, str):
         raise AppError(ErrorCode.INVALID_INPUT, "unitCampaignId is required")
-    profile_id = args.get("profileId")
-    if not profile_id or not isinstance(profile_id, str):
-        raise AppError(ErrorCode.INVALID_INPUT, "profileId is required")
+    # The roster identity is the Scout campaign (RemoveUnitCampaignMembershipInput
+    # carries campaignId, not profileId): its profile locates the membership key.
+    campaign_id = args.get("campaignId")
+    if not campaign_id or not isinstance(campaign_id, str):
+        raise AppError(ErrorCode.INVALID_INPUT, "campaignId is required")
     key = _require_key(args)
     fingerprint = _remove_fingerprint(args)
-    result_id = f"{unit_campaign_id}#{profile_id}"
     # Replay short-circuits before the state reads below (IDEM-01): a completed
     # retry replays even if access or versions have since changed.
     runner = IdempotentMutationRunner()
@@ -1021,10 +1049,13 @@ def remove_unit_campaign_membership(event: Dict[str, Any], context: Any) -> Dict
     if handled:
         return replayed
 
+    # GSI locate (discovery only), then the strongly consistent base read
+    # (#438/#545 posture): the profile the membership is keyed by.
+    profile_id = _find_scout_campaign(campaign_id)["profileId"]
     membership = _require_membership(unit_campaign_id, profile_id)
     _require_admin(caller, membership["unitId"])
-    campaign_id = membership["campaignId"]
-    guard = _require_guard(campaign_id)
+    guard_campaign_id = membership["campaignId"]
+    guard = _require_guard(guard_campaign_id)
     current_membership_version = _remove_version_checks(args, membership, guard)
     current_guard_version = int(guard.get("membershipVersion", 0))
 
@@ -1032,9 +1063,9 @@ def remove_unit_campaign_membership(event: Dict[str, Any], context: Any) -> Dict
         runner,
         mk,
         fingerprint,
-        result_id,
+        f"{unit_campaign_id}#{profile_id}",
         membership,
-        campaign_id,
+        guard_campaign_id,
         caller,
         current_membership_version,
         current_guard_version,

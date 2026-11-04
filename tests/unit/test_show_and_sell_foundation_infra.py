@@ -71,7 +71,8 @@ DOMAIN_ROLES = {
 # the unit_campaigns aggregate (full), campaigns (the joined-scope link + base
 # read + campaignId-index locator), profiles/shares (the WRITE-access check),
 # catalogs (usable-catalog check + join-preview name), and units (admin grant +
-# display-name reads). resources are compared in hcl2-decoded form.
+# display-name reads + the active-membership index query the join gates on).
+# resources are compared in hcl2-decoded form.
 UNIT_CAMPAIGN_ROLE_SCOPE = {
     "unit_campaigns": {
         "actions": {
@@ -94,7 +95,7 @@ UNIT_CAMPAIGN_ROLE_SCOPE = {
     "profiles": {"actions": {"dynamodb:GetItem", "dynamodb:Query"}, "indexes": True},
     "shares": {"actions": {"dynamodb:GetItem", "dynamodb:Query"}, "indexes": True},
     "catalogs": {"actions": {"dynamodb:GetItem"}, "indexes": False},
-    "units": {"actions": {"dynamodb:GetItem"}, "indexes": False},
+    "units": {"actions": {"dynamodb:GetItem", "dynamodb:Query"}, "indexes": True},
 }
 
 # logical table key -> Lambda environment variable name (impact map §4.4).

@@ -100,6 +100,24 @@ describe('create_public_order request', () => {
         assert.ok(!('customerPhone' in item));
         assert.ok(!('notes' in item));
     });
+
+    it('stamps the joined scope a joined-elsewhere createOrder stamps too (ORD-API-01 parity)', () => {
+        // The same spec sentence covers both writers: every new Order
+        // immutably captures the Campaign's joined scope at creation. The
+        // public path's stashed campaign is the step-2 strongly consistent
+        // GetItem, so a just-committed join is already visible here.
+        const req = request({ stash: makeStash({ campaign: { campaignId: 'CAMPAIGN#c1', unitId: 'unit-pack-3149-aurora', unitCampaignId: 'uc-pack-3149-fall-2026' } }) });
+        const item = req.transactItems[1].attributeValues;
+        assert.strictEqual(item.unitId, 'unit-pack-3149-aurora');
+        assert.strictEqual(item.unitCampaignId, 'uc-pack-3149-fall-2026');
+    });
+
+    it('writes no scope attributes for an independent campaign (served as null)', () => {
+        const req = request({ stash: makeStash() });
+        const item = req.transactItems[1].attributeValues;
+        assert.ok(!('unitId' in item));
+        assert.ok(!('unitCampaignId' in item));
+    });
 });
 
 describe('create_public_order response', () => {

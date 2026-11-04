@@ -229,3 +229,28 @@ def test_two_phase_fetch_profile_check_uses_distinct_functions() -> None:
         assert pipeline.index(step1) < pipeline.index(step2), (
             f"{query} must run the ownership read before the share-path lookup"
         )
+
+
+def test_create_order_stamps_scope_from_a_consistently_read_campaign() -> None:
+    """ORD-API-01: the joined scope (unitId / unitCampaignId) an Order captures
+    at creation must come from the campaigns table's base item. The createOrder
+    pipeline's locator (get_campaign_for_order) can only serve its campaign
+    from the campaignId-index GSI, which cannot read consistently, so a
+    just-committed joinUnitCampaign may not yet be projected there (the
+    #438/#545 eventually-consistent-GSI class); the base read step sits
+    between locator and write and replaces the stashed projection."""
+    resolvers = _resolver_pipelines("resolvers_mutations.tf")
+    pipeline = resolvers["create_order"]
+    locator = "${aws_appsync_function.get_campaign_for_order.function_id}"
+    base_read = "${aws_appsync_function.campaign_base_read_for_order.function_id}"
+    write = "${aws_appsync_function.create_order.function_id}"
+    assert base_read in pipeline, "create_order must run the consistent campaign base read"
+    assert pipeline.index(locator) < pipeline.index(base_read) < pipeline.index(write), (
+        "the consistent base read must refresh the stash after the GSI locator and before the order write"
+    )
+    # AppSync's hard 10-function cap leaves no slot for the public pipeline:
+    # its stashed campaign is already the step-2 strongly consistent GetItem
+    # (validate_public_token_step2), so the base read stays create_order-only.
+    assert (
+        resolvers["public_create_order"].count("${aws_appsync_function.campaign_base_read_for_order.function_id}") == 0
+    )

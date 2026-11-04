@@ -947,7 +947,8 @@ resource "aws_iam_role_policy" "lambda_unit_dynamodb" {
 # aggregate PLUS the exact tables the join reads/writes: campaigns (the
 # joined-scope link + base-table/GSI reads), profiles/shares (the WRITE-access
 # check), catalogs (usable-catalog check and join-preview name), and units
-# (admin grant + display-name reads). Batch B (KW-SS-S1-B-CAMPAIGNS) widened
+# (admin grant + display-name reads + the active-membership index query the
+# join gates on). Batch B (KW-SS-S1-B-CAMPAIGNS) widened
 # the wave-1 role from `unit_campaigns`-only to this set; that is the
 # intentional, spec-mandated shape (§8.2 names campaigns in the transaction),
 # not drift toward the retired monolithic role - every action below maps to a
@@ -1034,14 +1035,18 @@ data "aws_iam_policy_document" "lambda_unit_campaign_dynamodb" {
     ]
   }
 
-  # Unit Admin grant checks and the join-preview Unit display name.
+  # Unit Admin grant checks, the join-preview Unit display name, and the
+  # caller's active-unit-membership query (accountId-unitId-index) the join
+  # authorization reaches through _require_unit_membership.
   statement {
     effect = "Allow"
     actions = [
       "dynamodb:GetItem",
+      "dynamodb:Query",
     ]
     resources = [
       var.dynamodb_table_arns["units"],
+      "${var.dynamodb_table_arns["units"]}/index/*",
     ]
   }
 }
