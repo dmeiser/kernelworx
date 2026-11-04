@@ -940,11 +940,18 @@ resource "aws_iam_role_policy" "lambda_unit_dynamodb" {
 #
 # Scoped role for the Unit-campaign-domain handlers (unit campaign CRUD, roster
 # join/remove) that the Show & Sell stages add to the lambda module's function
-# map; same wiring and exclusion story as the unit role above. Scope is the
-# `unit_campaigns` table and its GSIs only - the join-code pointer, membership
-# guard, and membership rows (and the campaign-scoped idempotency markers,
-# including join and later sales, per data model §8.9) all live in the one
-# aggregate table (data model §6.2).
+# map; same wiring and exclusion story as the unit role above. The join
+# transaction is deliberately single-transaction (data model §8.2): the
+# membership row, the Scout-campaign guard, and the Campaign joined-scope link
+# commit all-or-nothing, so this role's DynamoDB scope is the `unit_campaigns`
+# aggregate PLUS the exact tables the join reads/writes: campaigns (the
+# joined-scope link + base-table/GSI reads), profiles/shares (the WRITE-access
+# check), catalogs (usable-catalog check and join-preview name), and units
+# (admin grant + display-name reads). Batch B (KW-SS-S1-B-CAMPAIGNS) widened
+# the wave-1 role from `unit_campaigns`-only to this set; that is the
+# intentional, spec-mandated shape (§8.2 names campaigns in the transaction),
+# not drift toward the retired monolithic role - every action below maps to a
+# concrete call in `handlers/unit_campaign_operations.py`.
 
 resource "aws_iam_role" "lambda_unit_campaign_execution" {
   name = "${var.name_prefix}-lambda-unit-campaign-exec${local.role_suffix}"
@@ -979,6 +986,62 @@ data "aws_iam_policy_document" "lambda_unit_campaign_dynamodb" {
     resources = [
       var.dynamodb_table_arns["unit_campaigns"],
       "${var.dynamodb_table_arns["unit_campaigns"]}/index/*",
+    ]
+  }
+
+  # The join transaction's joined-scope link on the Scout campaign, plus the
+  # consistent base read and campaignId-index locator that authorize it.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:UpdateItem",
+      # The join/remove transactions span unit_campaigns + campaigns, so IAM
+      # requires TransactWriteItems on every table named in the transaction.
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [
+      var.dynamodb_table_arns["campaigns"],
+      "${var.dynamodb_table_arns["campaigns"]}/index/*",
+    ]
+  }
+
+  # WRITE-access authorization on the Scout campaign's profile: base-table
+  # owner/share reads plus the profileId-index existence query (auth.py).
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+    ]
+    resources = [
+      var.dynamodb_table_arns["profiles"],
+      "${var.dynamodb_table_arns["profiles"]}/index/*",
+      var.dynamodb_table_arns["shares"],
+      "${var.dynamodb_table_arns["shares"]}/index/*",
+    ]
+  }
+
+  # Usable-catalog check (createUnitCampaign) and join-preview catalog name.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+    ]
+    resources = [
+      var.dynamodb_table_arns["catalogs"],
+    ]
+  }
+
+  # Unit Admin grant checks and the join-preview Unit display name.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+    ]
+    resources = [
+      var.dynamodb_table_arns["units"],
     ]
   }
 }

@@ -151,3 +151,14 @@ resource "aws_appsync_datasource" "unit_operations" {
     function_arn = var.lambda_function_arns["unit-operations"]
   }
 }
+
+resource "aws_appsync_datasource" "unit_campaign_operations" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "UnitCampaignOperationsDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["unit-campaign-operations"]
+  }
+}

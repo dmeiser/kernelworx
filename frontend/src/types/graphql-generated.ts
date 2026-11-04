@@ -147,6 +147,10 @@ export type GqlCampaign = {
   totalOrders?: Maybe<Scalars['Int']['output']>;
   /** The sum of totalAmount across this campaign's orders. */
   totalRevenue?: Maybe<Scalars['Float']['output']>;
+  /** The Unit Campaign this campaign is joined to, or null for an independent campaign. Set atomically by joinUnitCampaign; removal does not clear it (history retention). */
+  unitCampaignId?: Maybe<Scalars['ID']['output']>;
+  /** The Unit this campaign is joined to, or null for an independent campaign. Set atomically by joinUnitCampaign; removal does not clear it (history retention). */
+  unitId?: Maybe<Scalars['ID']['output']>;
   /** The scout unit number; set together with city and state when unitType is provided. */
   unitNumber?: Maybe<Scalars['Int']['output']>;
   /** The scout unit type, if the campaign is scoped to a unit. */
@@ -833,6 +837,10 @@ export type GqlOrder = {
   status?: Maybe<GqlOrderStatus>;
   /** The order's total amount (the sum of the line-item subtotals). */
   totalAmount: Scalars['Float']['output'];
+  /** The Unit Campaign the campaign was joined to when this order was created; null for an independent campaign. Captured immutably at order creation (API-FIX-05). */
+  unitCampaignId?: Maybe<Scalars['ID']['output']>;
+  /** The Unit the campaign was joined to when this order was created; null for an independent campaign. Captured immutably at order creation (API-FIX-05). */
+  unitId?: Maybe<Scalars['ID']['output']>;
   /** When the order was last updated. */
   updatedAt: Scalars['AWSDateTime']['output'];
 };

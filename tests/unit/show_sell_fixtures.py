@@ -27,6 +27,7 @@ another lane's data.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
@@ -151,6 +152,95 @@ SHARES: List[Dict[str, str]] = [
     {"owner": "Avery", "target": "Riley", "permissions": "READ"},
     {"owner": "Devon", "target": "Taylor", "permissions": "WRITE"},
 ]
+
+# ---------------------------------------------------------------------------
+# Unit Campaign fixtures (batch B, KW-SS-S1-B-CAMPAIGNS, data model §6.2):
+# Unit Campaign metadata rows, join-code pointers, memberships, and the
+# Scout-campaign guards. Join codes are exactly 16 characters (§6.6).
+# ---------------------------------------------------------------------------
+
+PACK_3149_FALL = "uc-pack-3149-fall-2026"
+CREW_529_SPRING = "uc-crew-529-spring-2027"
+PACK_3149_OLD = "uc-pack-3149-spring-2025"
+
+UNIT_CAMPAIGNS: Dict[str, Dict[str, Any]] = {
+    PACK_3149_FALL: {
+        "unitId": PACK_3149,
+        "campaignName": "Pack 3149 Fall Show & Sell",
+        "campaignYear": 2026,
+        "catalogId": "CATALOG#fixture-default",
+        "joinCode": "JOINPK3149FALL01",
+        "isActive": True,
+        "createdBy": "Avery",
+    },
+    CREW_529_SPRING: {
+        "unitId": CREW_529,
+        "campaignName": "Crew 529 Spring Show & Sell",
+        "campaignYear": 2027,
+        "catalogId": "CATALOG#fixture-public",
+        "joinCode": "JOINCRW529SPRNG1",
+        "isActive": True,
+        "createdBy": "Avery",
+    },
+    PACK_3149_OLD: {
+        "unitId": PACK_3149,
+        "campaignName": "Pack 3149 Spring 2025 Show & Sell",
+        "campaignYear": 2025,
+        "catalogId": "CATALOG#fixture-default",
+        "joinCode": "JOINPK3149OLD001",
+        "isActive": False,
+        "createdBy": "Avery",
+        # Distinct createdAt so newest-first listing order is deterministic
+        # (T0 is defined below this table; the literal keeps module order safe).
+        "createdAt": "2025-09-27T00:00:00+00:00",
+    },
+}
+
+# Scout campaigns already carrying the joined-scope link. Emery's renders the
+# removal case: the membership is REMOVED but the Campaign link is retained
+# (removal never rewrites history, API-FIX-05).
+JOINED_SCOUT_CAMPAIGNS: Dict[str, Any] = {
+    "Devon": (PACK_3149, PACK_3149_FALL),
+    "Riley": (CREW_529, CREW_529_SPRING),
+    "Emery": (PACK_3149, PACK_3149_OLD),
+}
+
+# Memberships keyed ``(unitCampaignId, owner)``.
+UNIT_CAMPAIGN_MEMBERSHIPS: Dict[Any, Dict[str, Any]] = {
+    (PACK_3149_FALL, "Devon"): {"status": "ACTIVE", "joinedBy": "Devon"},
+    (CREW_529_SPRING, "Riley"): {"status": "ACTIVE", "joinedBy": "Riley"},
+    (PACK_3149_OLD, "Emery"): {
+        "status": "REMOVED",
+        "joinedBy": "Emery",
+        "removedBy": "Avery",
+        "version": 2,
+    },
+}
+
+# Catalog fixtures behind the Unit Campaigns and the usability checks.
+CATALOGS: Dict[str, Dict[str, Any]] = {
+    "CATALOG#fixture-default": {
+        "catalogId": "CATALOG#fixture-default",
+        "catalogName": "Fixture Default Catalog",
+        "owner": "Avery",
+        "isPublic": False,
+    },
+    "CATALOG#fixture-public": {
+        "catalogId": "CATALOG#fixture-public",
+        "catalogName": "Fixture Public Catalog",
+        "isPublic": True,
+    },
+    "CATALOG#fixture-admin": {
+        "catalogId": "CATALOG#fixture-admin",
+        "catalogName": "Fixture Admin Catalog",
+        "catalogType": "ADMIN_MANAGED",
+    },
+    "CATALOG#fixture-deleted": {
+        "catalogId": "CATALOG#fixture-deleted",
+        "catalogName": "Fixture Deleted Catalog",
+        "isDeleted": True,
+    },
+}
 
 T0 = datetime(2026, 11, 1, tzinfo=timezone.utc)
 INVITE_TTL_DAYS = 14
@@ -321,11 +411,23 @@ def profile_item(owner: str, *, seller_name: Optional[str] = None) -> Dict[str, 
     }
 
 
-def campaign_item(owner: str, *, campaign_name: Optional[str] = None) -> Dict[str, Any]:
-    """A Scout Campaign row in the campaigns table (PK profileId, SK campaignId)."""
+def campaign_item(
+    owner: str,
+    *,
+    campaign_name: Optional[str] = None,
+    unit_id: Optional[str] = None,
+    unit_campaign_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """A Scout Campaign row in the campaigns table (PK profileId, SK campaignId).
+
+    ``unit_id``/``unit_campaign_id`` render the post-join joined-scope link the
+    join transaction writes (data model §6.1); omit both for an independent
+    campaign. Removal does not clear them, so a joined-history fixture keeps
+    them set.
+    """
     info = PROFILES[owner]
     now = T0.isoformat()
-    return {
+    item = {
         "profileId": info["profileId"],
         "campaignId": info["campaignId"],
         "campaignName": campaign_name or f"{owner}'s Fixture Campaign",
@@ -334,6 +436,10 @@ def campaign_item(owner: str, *, campaign_name: Optional[str] = None) -> Dict[st
         "catalogId": "CATALOG#fixture-default",
         "createdAt": now,
     }
+    if unit_id is not None and unit_campaign_id is not None:
+        item["unitId"] = unit_id
+        item["unitCampaignId"] = unit_campaign_id
+    return item
 
 
 def share_item(owner: str, target: str, permissions: str) -> Dict[str, Any]:
@@ -356,6 +462,8 @@ def seed_show_sell_fixtures(
     profiles_table: Any = None,
     campaigns_table: Any = None,
     shares_table: Any = None,
+    unit_campaigns_table: Any = None,
+    catalogs_table: Any = None,
 ) -> Dict[str, Any]:
     """Write every persona's fixture data and return a manifest.
 
@@ -414,7 +522,12 @@ def seed_show_sell_fixtures(
     written_campaigns: List[Dict[str, Any]] = []
     if campaigns_table is not None:
         for owner in PROFILES:
-            item = campaign_item(owner)
+            joined = JOINED_SCOUT_CAMPAIGNS.get(owner)
+            item = campaign_item(
+                owner,
+                unit_id=joined[0] if joined else None,
+                unit_campaign_id=joined[1] if joined else None,
+            )
             campaigns_table.put_item(Item=item)
             written_campaigns.append(item)
 
@@ -425,12 +538,32 @@ def seed_show_sell_fixtures(
             shares_table.put_item(Item=item)
             written_shares.append(item)
 
+    written_unit_campaigns: List[Dict[str, Any]] = []
+    if unit_campaigns_table is not None:
+        written_unit_campaigns = seed_unit_campaign_fixtures(unit_campaigns_table)
+
+    written_catalogs: List[Dict[str, Any]] = []
+    if catalogs_table is not None:
+        for spec in CATALOGS.values():
+            item = catalog_item(
+                spec["catalogId"],
+                spec["catalogName"],
+                owner=spec.get("owner"),
+                is_public=spec.get("isPublic", False),
+                catalog_type=spec.get("catalogType"),
+                is_deleted=spec.get("isDeleted", False),
+            )
+            catalogs_table.put_item(Item=item)
+            written_catalogs.append(item)
+
     return {
         "units": written_units,
         "invites": written_invites,
         "profiles": written_profiles,
         "campaigns": written_campaigns,
         "shares": written_shares,
+        "unit_campaigns": written_unit_campaigns,
+        "catalogs": written_catalogs,
     }
 
 
@@ -476,6 +609,292 @@ def snapshot_units(units_table: Any) -> Dict[str, Dict[str, Any]]:
     for item in resp.get("Items", []):
         snapshot[f"{item['pk']}|{item['sk']}"] = item
     return snapshot
+
+
+# ---------------------------------------------------------------------------
+# Unit Campaign builders and seeding (batch B, data model §6.2 key shapes).
+# ---------------------------------------------------------------------------
+
+
+def unit_campaign_item(
+    unit_campaign_id: str,
+    *,
+    unit_id: str,
+    campaign_name: str,
+    campaign_year: int,
+    catalog_id: str,
+    join_code: str,
+    is_active: bool = True,
+    created_by: str,
+    version: int = 1,
+    created_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    """A Unit Campaign at ``UNIT_CAMPAIGN#<id>`` / ``METADATA``."""
+    now = created_at or T0.isoformat()
+    return {
+        "pk": f"UNIT_CAMPAIGN#{unit_campaign_id}",
+        "sk": "METADATA",
+        "unitCampaignId": unit_campaign_id,
+        "unitId": unit_id,
+        "campaignName": campaign_name,
+        "campaignYear": campaign_year,
+        "catalogId": catalog_id,
+        "joinCode": join_code,
+        "isActive": is_active,
+        "version": version,
+        "createdByAccountId": account_id(created_by),
+        "updatedByAccountId": account_id(created_by),
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+
+def join_code_pointer_item(
+    join_code: str, unit_campaign_id: str, *, created_at: Optional[str] = None
+) -> Dict[str, Any]:
+    """The join-code pointer at ``JOIN_CODE#<code>`` / ``UNIT_CAMPAIGN#<id>`` (§6.2)."""
+    if len(join_code) != 16:
+        raise ValueError(f"joinCode must be exactly 16 characters, got {len(join_code)}")
+    return {
+        "pk": f"JOIN_CODE#{join_code}",
+        "sk": f"UNIT_CAMPAIGN#{unit_campaign_id}",
+        "unitCampaignId": unit_campaign_id,
+        "createdAt": created_at or T0.isoformat(),
+    }
+
+
+def unit_campaign_membership_item(
+    unit_campaign_id: str,
+    unit_id: str,
+    campaign_id: str,
+    profile_id: str,
+    *,
+    status: str = "ACTIVE",
+    joined_by: str,
+    joined_at: Optional[str] = None,
+    removed_by: Optional[str] = None,
+    removed_at: Optional[str] = None,
+    version: int = 1,
+) -> Dict[str, Any]:
+    """A membership at ``UNIT_CAMPAIGN#<id>`` / ``MEMBERSHIP#<profileId>`` (§6.2)."""
+    joined = joined_at or T0.isoformat()
+    item: Dict[str, Any] = {
+        "pk": f"UNIT_CAMPAIGN#{unit_campaign_id}",
+        "sk": f"MEMBERSHIP#{profile_id}",
+        "unitCampaignId": unit_campaign_id,
+        "unitId": unit_id,
+        "campaignId": campaign_id,
+        "profileId": profile_id,
+        "status": status,
+        "joinedByAccountId": account_id(joined_by),
+        "joinedAt": joined,
+        "version": version,
+    }
+    if removed_by is not None:
+        item["removedByAccountId"] = account_id(removed_by)
+        item["removedAt"] = removed_at or T0.isoformat()
+    return item
+
+
+def membership_guard_item(
+    campaign_id: str,
+    profile_id: str,
+    *,
+    active_unit_campaign_id: Optional[str] = None,
+    membership_version: int = 1,
+    updated_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    """The join guard at ``SCOUT_CAMPAIGN#<campaignId>`` / ``MEMBERSHIP_GUARD`` (§6.2).
+
+    ``active_unit_campaign_id=None`` is the removed/independent shape: the
+    attribute is absent (nullable), never a null value.
+    """
+    item: Dict[str, Any] = {
+        "pk": f"SCOUT_CAMPAIGN#{campaign_id}",
+        "sk": "MEMBERSHIP_GUARD",
+        "campaignId": campaign_id,
+        "profileId": profile_id,
+        "membershipVersion": membership_version,
+        "updatedAt": updated_at or T0.isoformat(),
+    }
+    if active_unit_campaign_id is not None:
+        item["activeUnitCampaignId"] = active_unit_campaign_id
+    return item
+
+
+def unit_membership_item(account: str, unit_id: str, *, status: str = "ACTIVE") -> Dict[str, Any]:
+    """A units-table membership at ``UNIT#<unitId>`` / ``MEMBERSHIP#<accountId>`` (§5.2).
+
+    NOT part of ``seed_show_sell_fixtures``: batch A cascade tests assert the
+    units table is empty afterwards, so batch B seeds these rows explicitly.
+    """
+    return {
+        "pk": f"UNIT#{unit_id}",
+        "sk": f"MEMBERSHIP#{account_id(account)}",
+        "accountId": account_id(account),
+        "unitId": unit_id,
+        "status": status,
+        "createdAt": T0.isoformat(),
+    }
+
+
+def seed_unit_memberships(units_table: Any) -> None:
+    """Units-table memberships the batch B join tests rely on (see UNITS)."""
+    for account, unit_id in (
+        ("Devon", "unit-pack-3149-aurora"),
+        ("Riley", "unit-pack-3149-aurora"),
+        ("Emery", "unit-pack-3149-aurora"),
+        ("Taylor", "unit-pack-3149-aurora"),
+    ):
+        units_table.put_item(Item=unit_membership_item(account, unit_id))
+
+
+def catalog_item(
+    catalog_id: str,
+    catalog_name: str,
+    *,
+    owner: Optional[str] = None,
+    is_public: bool = False,
+    catalog_type: Optional[str] = None,
+    is_deleted: bool = False,
+    products: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """A catalog row in the catalogs table (PK catalogId)."""
+    item: Dict[str, Any] = {
+        "catalogId": catalog_id,
+        "catalogName": catalog_name,
+        "isPublic": is_public,
+        "createdAt": T0.isoformat(),
+        "updatedAt": T0.isoformat(),
+    }
+    if owner is not None:
+        item["ownerAccountId"] = account_id(owner)
+    if catalog_type is not None:
+        item["catalogType"] = catalog_type
+    if is_deleted:
+        item["isDeleted"] = True
+    item["products"] = (
+        products
+        if products is not None
+        else [
+            {
+                "productId": f"{catalog_id}#prod-1",
+                "productName": f"{catalog_name} Product 1",
+                "description": "Fixture product",
+                # Decimal: boto3's serializer rejects float; AppSync serves
+                # the N attribute as the GraphQL Float price.
+                "price": Decimal("25.00"),
+                "sortOrder": 1,
+            }
+        ]
+    )
+    return item
+
+
+def seed_unit_campaign_fixtures(unit_campaigns_table: Any) -> List[Dict[str, Any]]:
+    """Write the Unit Campaign rows, join-code pointers, memberships, and guards.
+
+    The guard set is derived from the membership fixtures so the two can never
+    drift: one guard per Scout campaign that has (or had) a membership, its
+    ``membershipVersion`` mirroring the membership's version and its
+    ``activeUnitCampaignId`` set only while a membership is ACTIVE.
+    """
+    written: List[Dict[str, Any]] = []
+    for unit_campaign_id, spec in UNIT_CAMPAIGNS.items():
+        item = unit_campaign_item(
+            unit_campaign_id,
+            unit_id=spec["unitId"],
+            campaign_name=spec["campaignName"],
+            campaign_year=spec["campaignYear"],
+            catalog_id=spec["catalogId"],
+            join_code=spec["joinCode"],
+            is_active=spec["isActive"],
+            created_by=spec["createdBy"],
+            created_at=spec.get("createdAt"),
+        )
+        unit_campaigns_table.put_item(Item=item)
+        written.append(item)
+        pointer = join_code_pointer_item(spec["joinCode"], unit_campaign_id)
+        unit_campaigns_table.put_item(Item=pointer)
+        written.append(pointer)
+
+    guards: Dict[str, Dict[str, Any]] = {}
+    for (unit_campaign_id, owner), spec in UNIT_CAMPAIGN_MEMBERSHIPS.items():
+        info = PROFILES[owner]
+        membership = unit_campaign_membership_item(
+            unit_campaign_id,
+            UNIT_CAMPAIGNS[unit_campaign_id]["unitId"],
+            info["campaignId"],
+            info["profileId"],
+            status=spec["status"],
+            joined_by=spec["joinedBy"],
+            removed_by=spec.get("removedBy"),
+            version=spec.get("version", 1),
+        )
+        unit_campaigns_table.put_item(Item=membership)
+        written.append(membership)
+        guards[info["campaignId"]] = {
+            "profileId": info["profileId"],
+            "active": unit_campaign_id if spec["status"] == "ACTIVE" else None,
+            "membershipVersion": membership["version"],
+        }
+
+    for campaign_id, guard in guards.items():
+        item = membership_guard_item(
+            campaign_id,
+            guard["profileId"],
+            active_unit_campaign_id=guard["active"],
+            membership_version=guard["membershipVersion"],
+        )
+        unit_campaigns_table.put_item(Item=item)
+        written.append(item)
+
+    return written
+
+
+def cascade_delete_unit_campaign(
+    unit_campaigns_table: Any,
+    unit_campaign_id: str,
+    *,
+    join_code: Optional[str] = None,
+    campaign_ids: Optional[List[str]] = None,
+) -> None:
+    """Test-only Unit Campaign cascade: metadata, memberships, pointer, guards.
+
+    Mirrors what the Stage 3 product cascade will own; fixture cleanup cannot
+    go through the product's guarded removal path. Must never touch another
+    Unit Campaign's items.
+    """
+    unit_campaigns_table.delete_item(Key={"pk": f"UNIT_CAMPAIGN#{unit_campaign_id}", "sk": "METADATA"})
+    memberships = unit_campaigns_table.query(
+        KeyConditionExpression="pk = :pk AND begins_with(sk, :prefix)",
+        ExpressionAttributeValues={":pk": f"UNIT_CAMPAIGN#{unit_campaign_id}", ":prefix": "MEMBERSHIP#"},
+    )
+    for item in memberships.get("Items", []):
+        unit_campaigns_table.delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
+    if join_code is not None:
+        pointers = unit_campaigns_table.query(
+            KeyConditionExpression="pk = :pk",
+            ExpressionAttributeValues={":pk": f"JOIN_CODE#{join_code}"},
+        )
+        for item in pointers.get("Items", []):
+            unit_campaigns_table.delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
+    for campaign_id in campaign_ids or []:
+        unit_campaigns_table.delete_item(Key={"pk": f"SCOUT_CAMPAIGN#{campaign_id}", "sk": "MEMBERSHIP_GUARD"})
+
+
+def unit_campaign_operation_event(
+    field: str,
+    caller: Optional[str],
+    *,
+    input: Optional[Dict[str, Any]] = None,
+    arguments: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build the AppSync event the ``unit_campaign_operations`` Lambda dispatches on.
+
+    Same contract as :func:`unit_operation_event` for the batch B handler.
+    """
+    return unit_operation_event(field, caller, input=input, arguments=arguments)
 
 
 # ---------------------------------------------------------------------------

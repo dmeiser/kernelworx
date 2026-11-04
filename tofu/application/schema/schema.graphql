@@ -198,6 +198,10 @@ type Campaign {
   totalOrders: Int
   """The sum of totalAmount across this campaign's orders."""
   totalRevenue: Float
+  """The Unit this campaign is joined to, or null for an independent campaign. Set atomically by joinUnitCampaign; removal does not clear it (history retention)."""
+  unitId: ID
+  """The Unit Campaign this campaign is joined to, or null for an independent campaign. Set atomically by joinUnitCampaign; removal does not clear it (history retention)."""
+  unitCampaignId: ID
 }
 
 """A catalog of products that campaigns sell from.
@@ -310,6 +314,10 @@ type Order {
   createdAt: AWSDateTime!
   """When the order was last updated."""
   updatedAt: AWSDateTime!
+  """The Unit the campaign was joined to when this order was created; null for an independent campaign. Captured immutably at order creation (API-FIX-05)."""
+  unitId: ID
+  """The Unit Campaign the campaign was joined to when this order was created; null for an independent campaign. Captured immutably at order creation (API-FIX-05)."""
+  unitCampaignId: ID
 }
 
 """A page of Order results from listOrdersByCampaign, with a token for fetching the next page."""

@@ -283,6 +283,7 @@ module "lambda" {
     # Lambda uses its own scoped role (the anonymous-facing read path).
     "public-orders" = module.iam.lambda_public_orders_execution_role_arn
     "unit-operations" = module.iam.lambda_unit_execution_role_arn
+    "unit-campaign-operations" = module.iam.lambda_unit_campaign_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name
 

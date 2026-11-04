@@ -65,6 +65,20 @@ EXPECTED_UNIT_FIELDS = {
         "unitAdmins",
         "unitInvites",
     },
+    # Show & Sell Stage 1 batch B: the unit_campaign_operations Lambda serves
+    # the Unit Campaign mutations/queries through direct UNIT resolvers running
+    # lambda_unit_resolver.js (#329 __isError detection).
+    "aws_appsync_datasource.unit_campaign_operations.name": {
+        "createUnitCampaign",
+        "updateUnitCampaign",
+        "joinUnitCampaign",
+        "removeUnitCampaignMembership",
+        "unitCampaignJoinInfo",
+        "unitCampaign",
+        "unitCampaigns",
+        "unitCampaignCatalog",
+        "unitCampaignRoster",
+    },
 }
 
 

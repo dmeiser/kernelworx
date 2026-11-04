@@ -63,7 +63,38 @@ NEW_TABLES = ("units", "unit_campaigns")
 # which no other role touches.
 DOMAIN_ROLES = {
     "lambda_unit_execution": ("units", 'var.dynamodb_table_arns["public_order_throttles"]'),
-    "lambda_unit_campaign_execution": ("unit_campaigns", None),
+}
+
+# Batch B (KW-SS-S1-B-CAMPAIGNS): the join transaction is deliberately
+# single-transaction (data model §8.2), so the unit-campaign role spans the
+# exact tables the join reads/writes (see the role comment in iam/main.tf):
+# the unit_campaigns aggregate (full), campaigns (the joined-scope link + base
+# read + campaignId-index locator), profiles/shares (the WRITE-access check),
+# catalogs (usable-catalog check + join-preview name), and units (admin grant +
+# display-name reads). resources are compared in hcl2-decoded form.
+UNIT_CAMPAIGN_ROLE_SCOPE = {
+    "unit_campaigns": {
+        "actions": {
+            "dynamodb:GetItem",
+            "dynamodb:PutItem",
+            "dynamodb:UpdateItem",
+            "dynamodb:DeleteItem",
+            "dynamodb:Query",
+            "dynamodb:BatchGetItem",
+            "dynamodb:BatchWriteItem",
+            "dynamodb:TransactWriteItems",
+            "dynamodb:ConditionCheckItem",
+        },
+        "indexes": True,
+    },
+    "campaigns": {
+        "actions": {"dynamodb:GetItem", "dynamodb:Query", "dynamodb:UpdateItem", "dynamodb:TransactWriteItems"},
+        "indexes": True,
+    },
+    "profiles": {"actions": {"dynamodb:GetItem", "dynamodb:Query"}, "indexes": True},
+    "shares": {"actions": {"dynamodb:GetItem", "dynamodb:Query"}, "indexes": True},
+    "catalogs": {"actions": {"dynamodb:GetItem"}, "indexes": False},
+    "units": {"actions": {"dynamodb:GetItem"}, "indexes": False},
 }
 
 # logical table key -> Lambda environment variable name (impact map §4.4).
@@ -301,6 +332,42 @@ def test_unit_domain_roles_exist_with_the_scoped_transact_write_grant():
         )
         other = set(NEW_TABLES) - {table_key}
         assert not any(other_table in resource for resource in resources for other_table in other)
+
+
+def test_unit_campaign_role_scoped_to_the_single_join_transaction():
+    """Batch B: the unit-campaign role's statements are exactly the join
+    transaction's table set (data model §8.2) - no broad table list, no other
+    domain's tables - and every statement carries least-privilege actions."""
+    doc = _load(IAM_TF)
+    documents = _data_documents(doc, "aws_iam_policy_document")
+    statements = _as_list(documents["lambda_unit_campaign_dynamodb"]["statement"])
+
+    seen: dict[str, set[str]] = {}
+    for statement in statements:
+        actions = {_norm(action) for action in _as_list(statement["actions"])}
+        for resource in _as_list(statement["resources"]):
+            decoded = str(resource).strip('"')
+            match = re.search(r'dynamodb_table_arns\["([^"]+)"\]', decoded)
+            assert match, f"unexpected raw ARN grant: {decoded}"
+            table_key = match.group(1)
+            seen.setdefault(table_key, set()).update(actions)
+
+    assert set(seen) == set(UNIT_CAMPAIGN_ROLE_SCOPE), (
+        f"unit-campaign role must span exactly the join transaction's tables: {sorted(seen)}"
+    )
+    for table_key, expected in UNIT_CAMPAIGN_ROLE_SCOPE.items():
+        assert seen[table_key] == expected["actions"], (
+            f"{table_key} actions must be exactly {sorted(expected['actions'])}: {sorted(seen[table_key])}"
+        )
+        index_grants = [
+            str(resource)
+            for statement in statements
+            for resource in _as_list(statement["resources"])
+            if re.search(r'dynamodb_table_arns\["' + table_key + r'"\].*/index/\*', str(resource).strip('"'))
+        ]
+        assert bool(index_grants) == expected["indexes"], (
+            f"{table_key} index grant presence must be {expected['indexes']}"
+        )
 
 
 def test_unit_domain_role_names_follow_the_module_and_recovery_convention():
