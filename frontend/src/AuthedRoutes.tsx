@@ -75,6 +75,13 @@ const PaymentMethodsPage = lazyRoute(() =>
 );
 const HomePage = lazyRoute(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
 const StoryPage = lazyRoute(() => import('./pages/StoryPage').then((m) => ({ default: m.StoryPage })));
+const UnitsPage = lazyRoute(() => import('./pages/UnitsPage').then((m) => ({ default: m.default })));
+const UnitDetailPage = lazyRoute(() =>
+  import('./pages/UnitDetailPage').then((m) => ({ default: m.default })),
+);
+const JoinUnitCampaignPage = lazyRoute(() =>
+  import('./pages/JoinUnitCampaignPage').then((m) => ({ default: m.default })),
+);
 
 const PublicOrderPage = lazyRoute(() =>
   import('./pages/PublicOrderPage').then((m) => ({ default: m.PublicOrderPage })),
@@ -355,6 +362,34 @@ function AuthedRoutes() {
                   element={
                     <ProtectedAppRoute>
                       <PaymentMethodsPage />
+                    </ProtectedAppRoute>
+                  }
+                />
+
+                {/* Show & Sell Unit surface (batch C) */}
+                <Route
+                  path="/units"
+                  element={
+                    <ProtectedAppRoute>
+                      <UnitsPage />
+                    </ProtectedAppRoute>
+                  }
+                />
+
+                <Route
+                  path="/units/:unitId"
+                  element={
+                    <ProtectedAppRoute>
+                      <UnitDetailPage />
+                    </ProtectedAppRoute>
+                  }
+                />
+
+                <Route
+                  path="/join-unit-campaign"
+                  element={
+                    <ProtectedAppRoute>
+                      <JoinUnitCampaignPage />
                     </ProtectedAppRoute>
                   }
                 />

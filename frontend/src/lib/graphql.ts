@@ -928,3 +928,291 @@ export const UPDATE_CAMPAIGN_PUBLIC_ORDER_SETTINGS = gql`
   }
 `;
 
+// ---------------------------------------------------------------------------
+// Show & Sell Unit management (batch C, leaves 1.6.1-1.6.3)
+// ---------------------------------------------------------------------------
+
+export const UNIT_FRAGMENT = gql`
+  fragment UnitFields on Unit {
+    unitId
+    unitType
+    unitNumber
+    city
+    state
+    displayName
+    timezone
+    splitDefault
+    councilNeedBasis
+    adminCount
+    version
+    createdAt
+    updatedAt
+  }
+`;
+
+export const MY_UNITS = gql`
+  ${UNIT_FRAGMENT}
+  query MyUnits($page: PageInput) {
+    myUnits(page: $page) {
+      items {
+        ...UnitFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const GET_UNIT = gql`
+  ${UNIT_FRAGMENT}
+  query GetUnit($unitId: ID!) {
+    unit(unitId: $unitId) {
+      ...UnitFields
+    }
+  }
+`;
+
+export const CREATE_UNIT = gql`
+  ${UNIT_FRAGMENT}
+  mutation CreateUnit($input: CreateUnitInput!) {
+    createUnit(input: $input) {
+      unit {
+        ...UnitFields
+      }
+      grant {
+        accountId
+        role
+        unitId
+        createdAt
+      }
+    }
+  }
+`;
+
+export const UPDATE_UNIT = gql`
+  ${UNIT_FRAGMENT}
+  mutation UpdateUnit($input: UpdateUnitInput!) {
+    updateUnit(input: $input) {
+      ...UnitFields
+    }
+  }
+`;
+
+export const UNIT_GRANT_FRAGMENT = gql`
+  fragment UnitGrantFields on UnitAccessGrant {
+    accountId
+    email
+    name
+    role
+    unitId
+    createdAt
+    createdByAccountId
+  }
+`;
+
+export const UNIT_ADMINS = gql`
+  ${UNIT_GRANT_FRAGMENT}
+  query UnitAdmins($unitId: ID!, $page: PageInput) {
+    unitAdmins(unitId: $unitId, page: $page) {
+      items {
+        ...UnitGrantFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const UNIT_INVITES = gql`
+  query UnitInvites($unitId: ID!, $page: PageInput) {
+    unitInvites(unitId: $unitId, page: $page) {
+      items {
+        inviteCode
+        unitId
+        createdByAccountId
+        createdAt
+        expiresAt
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const CREATE_UNIT_INVITE = gql`
+  mutation CreateUnitInvite($input: CreateUnitInviteInput!) {
+    createUnitInvite(input: $input) {
+      inviteCode
+      unitId
+      createdByAccountId
+      createdAt
+      expiresAt
+    }
+  }
+`;
+
+export const REVOKE_UNIT_INVITE = gql`
+  mutation RevokeUnitInvite($input: RevokeUnitInviteInput!) {
+    revokeUnitInvite(input: $input)
+  }
+`;
+
+export const REDEEM_UNIT_INVITE = gql`
+  mutation RedeemUnitInvite($input: RedeemUnitInviteInput!) {
+    redeemUnitInvite(input: $input) {
+      accountId
+      role
+      unitId
+      createdAt
+    }
+  }
+`;
+
+export const REVOKE_UNIT_ACCESS_GRANT = gql`
+  ${UNIT_FRAGMENT}
+  mutation RevokeUnitAccessGrant($input: RevokeUnitAccessGrantInput!) {
+    revokeUnitAccessGrant(input: $input) {
+      ...UnitFields
+    }
+  }
+`;
+
+export const UNIT_CAMPAIGN_ADMIN_FRAGMENT = gql`
+  fragment UnitCampaignAdminFields on UnitCampaignAdmin {
+    unitCampaignId
+    unitId
+    campaignName
+    campaignYear
+    catalogId
+    joinCode
+    isActive
+    version
+    createdAt
+    updatedAt
+    createdByAccountId
+    updatedByAccountId
+  }
+`;
+
+export const UNIT_CAMPAIGNS = gql`
+  ${UNIT_CAMPAIGN_ADMIN_FRAGMENT}
+  query UnitCampaigns($unitId: ID!, $isActive: Boolean, $page: PageInput) {
+    unitCampaigns(unitId: $unitId, isActive: $isActive, page: $page) {
+      items {
+        ...UnitCampaignAdminFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const GET_UNIT_CAMPAIGN = gql`
+  ${UNIT_CAMPAIGN_ADMIN_FRAGMENT}
+  query GetUnitCampaign($unitCampaignId: ID!) {
+    unitCampaign(unitCampaignId: $unitCampaignId) {
+      ...UnitCampaignAdminFields
+    }
+  }
+`;
+
+export const CREATE_UNIT_CAMPAIGN = gql`
+  ${UNIT_CAMPAIGN_ADMIN_FRAGMENT}
+  mutation CreateUnitCampaign($input: CreateUnitCampaignInput!) {
+    createUnitCampaign(input: $input) {
+      ...UnitCampaignAdminFields
+    }
+  }
+`;
+
+export const UPDATE_UNIT_CAMPAIGN = gql`
+  ${UNIT_CAMPAIGN_ADMIN_FRAGMENT}
+  mutation UpdateUnitCampaign($input: UpdateUnitCampaignInput!) {
+    updateUnitCampaign(input: $input) {
+      ...UnitCampaignAdminFields
+    }
+  }
+`;
+
+export const UNIT_CAMPAIGN_CATALOG = gql`
+  query UnitCampaignCatalog($unitCampaignId: ID!) {
+    unitCampaignCatalog(unitCampaignId: $unitCampaignId) {
+      catalogId
+      catalogName
+      products {
+        productId
+        productName
+        price
+      }
+    }
+  }
+`;
+
+export const UNIT_CAMPAIGN_ROSTER = gql`
+  query UnitCampaignRoster($unitCampaignId: ID!, $status: MembershipStatus, $page: PageInput) {
+    unitCampaignRoster(unitCampaignId: $unitCampaignId, status: $status, page: $page) {
+      items {
+        campaignId
+        profileId
+        unitCampaignId
+        unitId
+        status
+        joinedAt
+        removedAt
+        joinedByAccountId
+        removedByAccountId
+        version
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const REMOVE_UNIT_CAMPAIGN_MEMBERSHIP = gql`
+  mutation RemoveUnitCampaignMembership($input: RemoveUnitCampaignMembershipInput!) {
+    removeUnitCampaignMembership(input: $input) {
+      campaignId
+      profileId
+      status
+      removedAt
+      version
+    }
+  }
+`;
+
+export const UNIT_CAMPAIGN_JOIN_INFO = gql`
+  query UnitCampaignJoinInfo($joinCode: String!) {
+    unitCampaignJoinInfo(joinCode: $joinCode) {
+      unitDisplayName
+      campaignName
+      campaignYear
+      catalogName
+      isActive
+    }
+  }
+`;
+
+export const JOIN_UNIT_CAMPAIGN = gql`
+  mutation JoinUnitCampaign($input: JoinUnitCampaignInput!) {
+    joinUnitCampaign(input: $input) {
+      campaignId
+      profileId
+      status
+      unitCampaignId
+      unitId
+      version
+    }
+  }
+`;
+

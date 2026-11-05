@@ -1,0 +1,183 @@
+/**
+ * UnitSettingsForm - edit a Unit's display metadata and settings.
+ *
+ * Part of the Show & Sell Unit surface (batch C, leaf 1.6.1). Wires `unit` and
+ * `updateUnit`. The unit type and number (the identity fingerprint) are not
+ * editable here — only display name, city, state, timezone, the default split,
+ * and the Council-need basis are. Each save carries the version the form last
+ * read, so a concurrent edit surfaces a CONFLICT instead of silently overwriting.
+ */
+
+import React, { useState } from 'react';
+import { useMutation, useQuery } from '@apollo/client/react';
+import { Alert, Box, Button, Divider, MenuItem, Stack, TextField, Typography } from '@mui/material';
+import { GET_UNIT, UPDATE_UNIT } from '../lib/graphql';
+import { getErrorCode, getErrorMessage } from '../lib/api-utils';
+import { mapErrorCodeToMessage } from '../lib/errorCodes';
+import { StateAutocomplete } from '../components/StateAutocomplete';
+import { LoadingState } from '../components/LoadingState';
+import { generatedUnitDisplayName, newUnitIdempotencyKey } from '../lib/unitForm';
+import type { GqlCouncilNeedBasis, GqlSplitMethod, GqlUnit } from '../types';
+
+const SPLIT_DEFAULTS: Array<{ value: GqlSplitMethod; label: string }> = [
+  { value: 'EQUAL', label: 'Split equally' },
+  { value: 'TIME_WORKED', label: 'Split by time worked' },
+];
+
+const COUNCIL_BASIS: Array<{ value: GqlCouncilNeedBasis; label: string }> = [
+  { value: 'PHYSICAL_STOCK', label: 'Present on physical stock in the kernel' },
+  { value: 'AFTER_ASSIGNMENTS', label: 'Present after applying assignments' },
+];
+
+interface EditableSettings {
+  displayName: string;
+  city: string;
+  state: string;
+  timezone: string;
+  splitDefault: GqlSplitMethod;
+  councilNeedBasis: GqlCouncilNeedBasis;
+}
+
+const settingsFromUnit = (unit: GqlUnit): EditableSettings => ({
+  displayName: unit.displayName ?? '',
+  city: unit.city,
+  state: unit.state,
+  timezone: unit.timezone,
+  splitDefault: unit.splitDefault,
+  councilNeedBasis: unit.councilNeedBasis,
+});
+
+const previewDisplayName = (unit: GqlUnit, settings: EditableSettings): string =>
+  settings.displayName.trim() || generatedUnitDisplayName(unit.unitType, unit.unitNumber, unit.city, unit.state);
+
+const SettingsLoadError: React.FC<{ error: Error }> = ({ error }) => (
+  <Alert severity="error" sx={{ my: 2 }}>
+    {error.message || 'Unable to load this unit.'}
+  </Alert>
+);
+
+const UnitSettingsFields: React.FC<{ unit: GqlUnit; onSaved?: (unit: GqlUnit) => void }> = ({ unit, onSaved }) => {
+  const [settings, setSettings] = useState<EditableSettings>(() => settingsFromUnit(unit));
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [updateUnit, { loading: saving }] = useMutation<{ updateUnit: GqlUnit }>(UPDATE_UNIT, {
+    refetchQueries: [{ query: GET_UNIT, variables: { unitId: unit.unitId } }],
+    onCompleted: (result) => {
+      onSaved?.(result.updateUnit);
+    },
+    onError: (e) => setSaveError(mapErrorCodeToMessage(getErrorCode(e), getErrorMessage(e))),
+  });
+
+  const setField = <K extends keyof EditableSettings>(key: K, value: EditableSettings[K]) =>
+    setSettings((prev) => ({ ...prev, [key]: value }));
+
+  const previewName = previewDisplayName(unit, settings);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaveError(null);
+    await updateUnit({
+      variables: {
+        input: {
+          unitId: unit.unitId,
+          version: { expectedVersion: unit.version },
+          displayName: settings.displayName.trim() || null,
+          city: settings.city,
+          state: settings.state,
+          timezone: settings.timezone,
+          splitDefault: settings.splitDefault,
+          councilNeedBasis: settings.councilNeedBasis,
+          idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+        },
+      },
+    });
+  };
+
+  return (
+    <Box component="form" noValidate onSubmit={(e) => void handleSave(e)}>
+      <Typography variant="h6" gutterBottom>
+        {unit.displayName ?? previewName}
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+        {unit.unitType} {unit.unitNumber} · {unit.city}, {unit.state} · {unit.adminCount} admin
+        {unit.adminCount === 1 ? '' : 's'}
+      </Typography>
+      <Stack spacing={2}>
+        {saveError && <Alert severity="error">{saveError}</Alert>}
+        <TextField
+          fullWidth
+          label="Display name (optional)"
+          value={settings.displayName}
+          onChange={(e) => setField('displayName', e.target.value)}
+          placeholder={previewName}
+          helperText={`Shown as "${previewName}" when left blank`}
+        />
+        <TextField
+          fullWidth
+          label="City"
+          value={settings.city}
+          onChange={(e) => setField('city', e.target.value)}
+        />
+        <StateAutocomplete
+          fullWidth
+          label="State"
+          value={settings.state}
+          onChange={(v) => setField('state', v)}
+        />
+        <TextField
+          fullWidth
+          label="Timezone (IANA)"
+          value={settings.timezone}
+          onChange={(e) => setField('timezone', e.target.value)}
+          helperText="Used for display and calendar generation"
+        />
+        <TextField
+          select
+          fullWidth
+          label="Default split"
+          value={settings.splitDefault}
+          onChange={(e) => setField('splitDefault', e.target.value as GqlSplitMethod)}
+        >
+          {SPLIT_DEFAULTS.map((o) => (
+            <MenuItem key={o.value} value={o.value}>
+              {o.label}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          select
+          fullWidth
+          label="Council-need basis"
+          value={settings.councilNeedBasis}
+          onChange={(e) => setField('councilNeedBasis', e.target.value as GqlCouncilNeedBasis)}
+        >
+          {COUNCIL_BASIS.map((o) => (
+            <MenuItem key={o.value} value={o.value}>
+              {o.label}
+            </MenuItem>
+          ))}
+        </TextField>
+        <Divider />
+        <Button type="submit" variant="contained" disabled={saving}>
+          {saving ? 'Saving…' : 'Save changes'}
+        </Button>
+      </Stack>
+    </Box>
+  );
+};
+
+export const UnitSettingsForm: React.FC<{
+  unitId: string;
+  /** Called after a successful save with the updated Unit. */
+  onSave?: (unit: GqlUnit) => void;
+}> = ({ unitId, onSave }) => {
+  const { data, loading, error } = useQuery<{ unit: GqlUnit }>(GET_UNIT, { variables: { unitId } });
+
+  if (loading) return <LoadingState minHeight="200px" />;
+  if (error) return <SettingsLoadError error={error} />;
+  const unit = data ? data.unit : null;
+  if (!unit) return null;
+
+  return <UnitSettingsFields key={unit.version} unit={unit} onSaved={onSave} />;
+};
+
+export default UnitSettingsForm;
