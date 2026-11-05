@@ -7,7 +7,7 @@
  */
 
 import React, { useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@apollo/client/react';
 import {
   Box,
@@ -374,7 +374,30 @@ const UnitsPage: React.FC = () => {
           </Button>
         }
       />
-      <RedeemUnitInviteCard onRedeemed={() => void refetch()} />
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+          gap: 2,
+          mb: 3,
+        }}
+      >
+        <RedeemUnitInviteCard onRedeemed={() => void refetch()} />
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="subtitle2" gutterBottom>
+              Join a unit campaign
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Have a join code for a unit campaign? Link one of your Scout Campaigns to it as a
+              participant.
+            </Typography>
+            <Button component={RouterLink} to="/join-unit-campaign" variant="outlined">
+              Join unit campaign
+            </Button>
+          </CardContent>
+        </Card>
+      </Box>
       {units.length === 0 ? (
         <EmptyState
           title="No units yet"

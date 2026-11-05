@@ -177,6 +177,15 @@ it('sends trimmed city and state so the server-composed display name matches the
   expect(sentVariables[0].input).toMatchObject({ city: 'Aurora', state: 'CO' });
 });
 
+it('offers a discoverable entry to the participant join flow beside the invite card', async () => {
+  renderPage([
+    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
+  ]);
+
+  const joinLink = await screen.findByRole('link', { name: /Join unit campaign/i });
+  expect(joinLink).toHaveAttribute('href', '/join-unit-campaign');
+});
+
 it('surfaces an error and a retry when loading the units fails', async () => {
   renderPage([
     {

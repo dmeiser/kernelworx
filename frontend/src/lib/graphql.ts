@@ -1115,15 +1115,6 @@ export const UNIT_CAMPAIGNS = gql`
   }
 `;
 
-export const GET_UNIT_CAMPAIGN = gql`
-  ${UNIT_CAMPAIGN_ADMIN_FRAGMENT}
-  query GetUnitCampaign($unitCampaignId: ID!) {
-    unitCampaign(unitCampaignId: $unitCampaignId) {
-      ...UnitCampaignAdminFields
-    }
-  }
-`;
-
 export const CREATE_UNIT_CAMPAIGN = gql`
   ${UNIT_CAMPAIGN_ADMIN_FRAGMENT}
   mutation CreateUnitCampaign($input: CreateUnitCampaignInput!) {
@@ -1187,18 +1178,6 @@ export const REMOVE_UNIT_CAMPAIGN_MEMBERSHIP = gql`
       status
       removedAt
       version
-    }
-  }
-`;
-
-export const UNIT_CAMPAIGN_JOIN_INFO = gql`
-  query UnitCampaignJoinInfo($joinCode: String!) {
-    unitCampaignJoinInfo(joinCode: $joinCode) {
-      unitDisplayName
-      campaignName
-      campaignYear
-      catalogName
-      isActive
     }
   }
 `;
