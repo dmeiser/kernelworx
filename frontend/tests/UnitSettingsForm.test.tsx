@@ -254,4 +254,7 @@ it('updates the timezone, default split, and council-need basis on interaction',
   fireEvent.mouseDown(screen.getByLabelText(/Council-need basis/i));
   await user.click(await screen.findByRole('option', { name: 'After assignments' }));
   expect(screen.getByDisplayValue('AFTER_ASSIGNMENTS')).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText(/State/i), { target: { value: 'Colorado' } });
+  expect(screen.getByDisplayValue('Colorado')).toBeInTheDocument();
 });

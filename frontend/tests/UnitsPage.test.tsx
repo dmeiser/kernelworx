@@ -260,3 +260,89 @@ it('normalizes the unit number in the create preview like the server (007 -> 7)'
   // The preview composes the number the way the server does (007 -> 7), not the raw string.
   expect(await screen.findByText(/Pack 7 - Aurora, CO/)).toBeInTheDocument();
 });
+
+it('updates the optional display name and timezone fields and closes on Cancel', async () => {
+  const user = userEvent.setup();
+  renderPage([{ request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) }]);
+
+  const createButtons = await screen.findAllByRole('button', { name: /^Create Unit$/i });
+  await user.click(createButtons[0]);
+  const dialog = await screen.findByRole('dialog');
+
+  fireEvent.change(within(dialog).getByLabelText(/Display name/i), { target: { value: 'My Pack' } });
+  fireEvent.change(within(dialog).getByLabelText(/Timezone/i), { target: { value: 'America/Chicago' } });
+  fireEvent.mouseDown(within(dialog).getByLabelText(/Default split/i));
+  await user.click(await screen.findByRole('option', { name: 'Split by time worked' }));
+  fireEvent.mouseDown(within(dialog).getByLabelText(/Council-need basis/i));
+  await user.click(await screen.findByRole('option', { name: 'After assignments' }));
+
+  await user.click(within(dialog).getByRole('button', { name: /^Cancel$/i }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+});
+
+it('blocks submit and names the first missing required field', async () => {
+  const user = userEvent.setup();
+  renderPage([{ request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) }]);
+
+  const createButtons = await screen.findAllByRole('button', { name: /^Create Unit$/i });
+  await user.click(createButtons[0]);
+  const dialog = await screen.findByRole('dialog');
+  await user.click(within(dialog).getByRole('button', { name: /^Create Unit$/i }));
+
+  expect(await screen.findByText(/Choose the unit type\./i)).toBeInTheDocument();
+});
+
+it('opens a unit\'s detail when its card is clicked', async () => {
+  const user = userEvent.setup();
+  renderPage([{ request: { query: MY_UNITS, variables: () => true }, result: myUnits([unit()]) }]);
+
+  const card = await screen.findByTestId('unit-card-unit-pack-3149-aurora');
+  await user.click(card);
+  await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/units/unit-pack-3149-aurora'));
+});
+
+it('offers Create Unit from the empty state and opens the dialog', async () => {
+  const user = userEvent.setup();
+  renderPage([{ request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) }]);
+
+  const createButtons = await screen.findAllByRole('button', { name: /^Create Unit$/i });
+  // The second "Create Unit" is the empty state's action (the first is the page header's).
+  await user.click(createButtons[createButtons.length - 1]);
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+});
+
+it('recovers from a units load failure when Retry is clicked', async () => {
+  const user = userEvent.setup();
+  renderPage([
+    {
+      request: { query: MY_UNITS, variables: () => true },
+      result: { errors: [new GraphQLError('The units list is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
+    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([unit()]) },
+  ]);
+
+  expect(await screen.findByRole('button', { name: /Retry/i })).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: /Retry/i }));
+  expect(await screen.findByText('Pack 3149 - Aurora, CO')).toBeInTheDocument();
+});
+
+it('surfaces a create failure without closing the dialog', async () => {
+  const user = userEvent.setup();
+  renderPage([
+    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
+    {
+      request: { query: CREATE_UNIT, variables: () => true },
+      result: { errors: [new GraphQLError('The unit could not be created.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
+  ]);
+
+  const createButtons = await screen.findAllByRole('button', { name: /^Create Unit$/i });
+  await user.click(createButtons[0]);
+  await screen.findByRole('dialog');
+  await fillCreateUnitForm(user);
+  const dialog = screen.getByRole('dialog');
+  await user.click(within(dialog).getByRole('button', { name: /^Create Unit$/i }));
+
+  expect(await screen.findByText(/An internal error occurred/i)).toBeInTheDocument();
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+});

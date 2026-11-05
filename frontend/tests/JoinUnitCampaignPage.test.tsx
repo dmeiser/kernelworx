@@ -162,6 +162,7 @@ it('surfaces a server error when the join code is rejected', async () => {
 });
 
 it('surfaces a campaign-load failure with a Retry and never shows the empty state', async () => {
+  const user = userEvent.setup();
   renderPage([
     {
       request: { query: LIST_MY_PROFILES, variables: match },
@@ -179,6 +180,7 @@ it('surfaces a campaign-load failure with a Retry and never shows the empty stat
   expect(await screen.findByRole('button', { name: /Retry/i })).toBeInTheDocument();
   expect(await screen.findByText(/The campaigns are unavailable\./i)).toBeInTheDocument();
   expect(screen.queryByText(/This profile has no campaigns yet/i)).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: /Retry/i }));
 });
 
 it('shows the empty state when the selected profile has no campaigns', async () => {
