@@ -147,6 +147,15 @@ export const CreateUnitDialog: React.FC<CreateUnitDialogProps> = ({ open, onClos
     else onClose();
   };
 
+  const routeCreateOutcome = (
+    outcome: { code?: string; unitId?: string; error?: string },
+    input: Record<string, unknown>,
+  ) => {
+    if (outcome.code === 'CONFLICT') setPendingInput(input);
+    else if (outcome.code) setFormError(outcome.error ?? 'Something went wrong.');
+    else finishCreate(outcome.unitId);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const validationError = validateUnitForm(form);
@@ -158,30 +167,31 @@ export const CreateUnitDialog: React.FC<CreateUnitDialogProps> = ({ open, onClos
     setSubmitting(true);
     createOutcome.current = {};
     const input = buildInput(false, newUnitIdempotencyKey());
-    await createUnit({ variables: { input } });
-    setSubmitting(false);
-    const outcome = createOutcome.current;
-    if (outcome.code === 'CONFLICT') {
-      setPendingInput(input);
-    } else if (outcome.code) {
-      setFormError(outcome.error ?? 'Something went wrong.');
-    } else {
-      finishCreate(outcome.unitId);
+    try {
+      await createUnit({ variables: { input } });
+    } catch {
+      // GraphQL errors are captured by the onError callback above; swallow to avoid an unhandled rejection.
     }
+    setSubmitting(false);
+    routeCreateOutcome(createOutcome.current, input);
   };
 
   const handleConfirmDuplicate = async () => {
     if (!pendingInput) return;
     createOutcome.current = {};
-    await createUnit({
-      variables: {
-        input: {
-          ...(pendingInput as object),
-          duplicateConfirmed: true,
-          idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+    try {
+      await createUnit({
+        variables: {
+          input: {
+            ...(pendingInput as object),
+            duplicateConfirmed: true,
+            idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+          },
         },
-      },
-    });
+      });
+    } catch {
+      // GraphQL errors are captured by the onError callback above; swallow to avoid an unhandled rejection.
+    }
     const outcome = createOutcome.current;
     if (outcome.code) {
       throw new Error(outcome.error ?? 'Something went wrong.');

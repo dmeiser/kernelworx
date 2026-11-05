@@ -75,21 +75,25 @@ const UnitSettingsFields: React.FC<{ unit: GqlUnit; onSaved?: (unit: GqlUnit) =>
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaveError(null);
-    await updateUnit({
-      variables: {
-        input: {
-          unitId: unit.unitId,
-          version: { expectedVersion: unit.version },
-          displayName: settings.displayName.trim() || null,
-          city: settings.city,
-          state: settings.state,
-          timezone: settings.timezone,
-          splitDefault: settings.splitDefault,
-          councilNeedBasis: settings.councilNeedBasis,
-          idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+    try {
+      await updateUnit({
+        variables: {
+          input: {
+            unitId: unit.unitId,
+            version: { expectedVersion: unit.version },
+            displayName: settings.displayName.trim() || null,
+            city: settings.city,
+            state: settings.state,
+            timezone: settings.timezone,
+            splitDefault: settings.splitDefault,
+            councilNeedBasis: settings.councilNeedBasis,
+            idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+          },
         },
-      },
-    });
+      });
+    } catch {
+      // GraphQL errors are surfaced by the onError callback; swallow to avoid an unhandled rejection.
+    }
   };
 
   return (

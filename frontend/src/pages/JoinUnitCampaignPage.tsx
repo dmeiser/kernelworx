@@ -119,15 +119,19 @@ const JoinForm: React.FC<{ profiles: GqlSellerProfile[] }> = ({ profiles }) => {
       setJoinError('Select a campaign and enter the join code.');
       return;
     }
-    await join({
-      variables: {
-        input: {
-          campaignId: selectedCampaignId,
-          joinCode: joinCode.trim(),
-          idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+    try {
+      await join({
+        variables: {
+          input: {
+            campaignId: selectedCampaignId,
+            joinCode: joinCode.trim(),
+            idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+          },
         },
-      },
-    });
+      });
+    } catch {
+      // GraphQL errors are surfaced by the onError callback; swallow to avoid an unhandled rejection.
+    }
   };
 
   return (

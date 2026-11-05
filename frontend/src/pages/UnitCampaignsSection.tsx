@@ -123,17 +123,21 @@ const CreateUnitCampaignDialog: React.FC<{
       return;
     }
     setError(null);
-    await createCampaign({
-      variables: {
-        input: {
-          unitId,
-          campaignName: name.trim(),
-          campaignYear: year,
-          catalogId,
-          idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+    try {
+      await createCampaign({
+        variables: {
+          input: {
+            unitId,
+            campaignName: name.trim(),
+            campaignYear: year,
+            catalogId,
+            idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+          },
         },
-      },
-    });
+      });
+    } catch {
+      // GraphQL errors are surfaced by the onError callback; swallow to avoid an unhandled rejection.
+    }
   };
 
   return (
@@ -204,18 +208,22 @@ const EditUnitCampaignDialog: React.FC<{
       return;
     }
     setError(null);
-    await updateCampaign({
-      variables: {
-        input: {
-          unitCampaignId: campaign.unitCampaignId,
-          version: { expectedVersion: campaign.version },
-          campaignName: name.trim(),
-          campaignYear: year,
-          isActive: active,
-          idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+    try {
+      await updateCampaign({
+        variables: {
+          input: {
+            unitCampaignId: campaign.unitCampaignId,
+            version: { expectedVersion: campaign.version },
+            campaignName: name.trim(),
+            campaignYear: year,
+            isActive: active,
+            idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+          },
         },
-      },
-    });
+      });
+    } catch {
+      // GraphQL errors are surfaced by the onError callback; swallow to avoid an unhandled rejection.
+    }
   };
 
   return (
@@ -344,17 +352,21 @@ const UnitCampaignDetail: React.FC<{
   const handleConfirmRemove = async () => {
     if (!removeTarget) return;
     removeOutcome.current = { state: 'pending', error: null };
-    await removeMembership({
-      variables: {
-        input: {
-          unitCampaignId: campaign.unitCampaignId,
-          campaignId: removeTarget.campaignId,
-          expectedMembershipVersion: removeTarget.version,
-          expectedGuardVersion: removeTarget.version,
-          idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+    try {
+      await removeMembership({
+        variables: {
+          input: {
+            unitCampaignId: campaign.unitCampaignId,
+            campaignId: removeTarget.campaignId,
+            expectedMembershipVersion: removeTarget.version,
+            expectedGuardVersion: removeTarget.version,
+            idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+          },
         },
-      },
-    });
+      });
+    } catch {
+      // GraphQL errors are captured by the onError callback; swallow to avoid an unhandled rejection.
+    }
     if (removeOutcome.current.state === 'error') {
       throw new Error(removeOutcome.current.error ?? 'Something went wrong.');
     }

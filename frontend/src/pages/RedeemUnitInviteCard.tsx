@@ -43,9 +43,13 @@ const RedeemUnitInviteCard: React.FC<RedeemUnitInviteCardProps> = ({ onRedeemed 
       setError('Enter the 16-character invite code.');
       return;
     }
-    await redeem({
-      variables: { input: { inviteCode: code.trim(), idempotency: { idempotencyKey: newUnitIdempotencyKey() } } },
-    });
+    try {
+      await redeem({
+        variables: { input: { inviteCode: code.trim(), idempotency: { idempotencyKey: newUnitIdempotencyKey() } } },
+      });
+    } catch {
+      // GraphQL errors are surfaced by the onError callback; swallow to avoid an unhandled rejection.
+    }
   };
 
   return (

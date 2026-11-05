@@ -40,6 +40,10 @@ import type { GqlUnit, GqlUnitAccessGrant, GqlUnitInvite } from '../types';
 
 type Outcome = { state: 'pending' | 'success' | 'error'; error: string | null };
 
+const throwIfError = (outcome: Outcome): void => {
+  if (outcome.state === 'error') throw new Error(outcome.error ?? 'Something went wrong.');
+};
+
 const anyLoading = (...flags: boolean[]): boolean => flags.some(Boolean);
 
 const computeIsLastAdmin = (unit: GqlUnit | undefined, accountId: string | null): boolean =>
@@ -285,42 +289,54 @@ const UnitAccessSection: React.FC<{ unitId: string }> = ({ unitId }) => {
 
   const handleCreateInvite = async () => {
     setInviteError(null);
-    await createInvite({
-      variables: {
-        input: { unitId, idempotency: { idempotencyKey: newUnitIdempotencyKey() } },
-      },
-    });
+    try {
+      await createInvite({
+        variables: {
+          input: { unitId, idempotency: { idempotencyKey: newUnitIdempotencyKey() } },
+        },
+      });
+    } catch {
+      // GraphQL errors are surfaced by the onError callback; swallow to avoid an unhandled rejection.
+    }
   };
 
   const handleConfirmRevokeAdmin = async () => {
     if (!revokeAdmin || !unit) return;
     adminOutcome.current = { state: 'pending', error: null };
-    await revokeGrant({
-      variables: {
-        input: {
-          unitId,
-          accountId: revokeAdmin.accountId,
-          version: { expectedVersion: unit.version },
-          idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+    try {
+      await revokeGrant({
+        variables: {
+          input: {
+            unitId,
+            accountId: revokeAdmin.accountId,
+            version: { expectedVersion: unit.version },
+            idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+          },
         },
-      },
-    });
-    if (adminOutcome.current.state === 'error') throw new Error(adminOutcome.current.error ?? 'Something went wrong.');
+      });
+    } catch {
+      // GraphQL errors are captured by the onError callback; swallow to avoid an unhandled rejection.
+    }
+    throwIfError(adminOutcome.current);
   };
 
   const handleConfirmRevokeInvite = async () => {
     if (!revokeInvite) return;
     inviteOutcome.current = { state: 'pending', error: null };
-    await revokeInviteMutation({
-      variables: {
-        input: {
-          unitId,
-          inviteCode: revokeInvite.inviteCode,
-          idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+    try {
+      await revokeInviteMutation({
+        variables: {
+          input: {
+            unitId,
+            inviteCode: revokeInvite.inviteCode,
+            idempotency: { idempotencyKey: newUnitIdempotencyKey() },
+          },
         },
-      },
-    });
-    if (inviteOutcome.current.state === 'error') throw new Error(inviteOutcome.current.error ?? 'Something went wrong.');
+      });
+    } catch {
+      // GraphQL errors are captured by the onError callback; swallow to avoid an unhandled rejection.
+    }
+    throwIfError(inviteOutcome.current);
   };
 
   if (loading) return <LoadingState minHeight="200px" />;
