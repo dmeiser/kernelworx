@@ -358,7 +358,10 @@ const UnitsPage: React.FC = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const { data, loading, error, refetch } = useQuery<{ myUnits: { items: GqlUnit[] } }>(MY_UNITS);
 
-  if (loading) return <LoadingState />;
+  // Show the loading state only on the initial fetch: a refetch (e.g. after a
+  // successful invite redemption) must keep the page mounted so
+  // RedeemUnitInviteCard's success confirmation survives the refetch.
+  if (loading && !data) return <LoadingState />;
   if (error) return <UnitsLoadError message={error.message || 'Unable to load your units.'} onRetry={() => void refetch()} />;
 
   const units = selectMyUnits(data);

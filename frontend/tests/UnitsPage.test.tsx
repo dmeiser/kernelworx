@@ -4,7 +4,7 @@ import { MockedProvider } from '@apollo/client/testing/react';
 import { GraphQLError } from 'graphql';
 import { BrowserRouter } from 'react-router-dom';
 import { vi, beforeEach } from 'vitest';
-import { MY_UNITS, CREATE_UNIT } from '../src/lib/graphql';
+import { MY_UNITS, CREATE_UNIT, REDEEM_UNIT_INVITE } from '../src/lib/graphql';
 import UnitsPage from '../src/pages/UnitsPage';
 
 const mockNavigate = vi.fn();
@@ -196,6 +196,38 @@ it('surfaces an error and a retry when loading the units fails', async () => {
 
   expect(await screen.findByText(/The units list is unavailable\./i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Retry/i })).toBeInTheDocument();
+});
+
+it('keeps the redeem success confirmation visible while MY_UNITS refetches', async () => {
+  const user = userEvent.setup();
+  renderPage([
+    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
+    {
+      request: { query: REDEEM_UNIT_INVITE, variables: () => true },
+      result: {
+        data: {
+          redeemUnitInvite: {
+            __typename: 'UnitAccessGrant',
+            accountId: 'avery-account',
+            role: 'UNIT_ADMIN',
+            unitId: 'unit-new',
+            createdAt: '2026-11-01T00:00:00+00:00',
+          },
+        },
+      },
+    },
+    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([unit({ unitId: 'unit-new' })]) },
+  ]);
+
+  await screen.findByText('Units');
+  await user.type(screen.getByLabelText(/Invite code/i), 'PKT3149ACTIVE001');
+  await user.click(screen.getByRole('button', { name: /^Redeem$/i }));
+
+  // The onRedeemed refetch lands: the redeemed unit now appears in the list...
+  expect(await screen.findByText('Pack 3149 - Aurora, CO')).toBeInTheDocument();
+  // ...and the card's success confirmation is still visible after the refetch settled,
+  // not wiped by the refetch-triggered remount.
+  expect(screen.getByText(/Invite redeemed/i)).toBeInTheDocument();
 });
 
 it('normalizes the unit number in the create preview like the server (007 -> 7)', async () => {
