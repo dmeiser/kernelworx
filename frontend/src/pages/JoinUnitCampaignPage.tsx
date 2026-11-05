@@ -9,17 +9,7 @@
 
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
-import {
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  MenuItem,
-  Paper,
-  Stack,
-  TextField,
-  Typography,
-} from '@mui/material';
+import { Alert, Box, Button, CircularProgress, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { LIST_MY_PROFILES, LIST_CAMPAIGNS_BY_PROFILE, JOIN_UNIT_CAMPAIGN } from '../lib/graphql';
 import { PageHeader } from '../components/PageHeader';
@@ -44,6 +34,15 @@ const Shell: React.FC<{ children: React.ReactNode; subtitle?: string }> = ({ chi
   </Box>
 );
 
+const CampaignLoadError: React.FC<{ error: Error; onRetry: () => void }> = ({ error, onRetry }) => (
+  <Box>
+    <ErrorAlert message={error.message || 'Unable to load your campaigns.'} />
+    <Button variant="outlined" sx={{ mt: 1 }} onClick={() => void onRetry()}>
+      Retry
+    </Button>
+  </Box>
+);
+
 const CampaignPicker: React.FC<{
   profileId: string;
   selectedCampaignId: string | null;
@@ -63,21 +62,10 @@ const CampaignPicker: React.FC<{
     );
   }
   if (error) {
-    return (
-      <Box>
-        <ErrorAlert message={error.message || 'Unable to load your campaigns.'} />
-        <Button variant="outlined" sx={{ mt: 1 }} onClick={() => void refetch().catch(() => undefined)}>
-          Retry
-        </Button>
-      </Box>
-    );
+    return <CampaignLoadError error={error} onRetry={() => void refetch().catch(() => undefined)} />;
   }
   if (campaigns.length === 0) {
-    return (
-      <Alert severity="info">
-        This profile has no campaigns yet. Create one before joining a unit campaign.
-      </Alert>
-    );
+    return <Alert severity="info">This profile has no campaigns yet. Create one before joining a unit campaign.</Alert>;
   }
   return (
     <TextField
@@ -180,8 +168,8 @@ const JoinForm: React.FC<{ profiles: GqlSellerProfile[] }> = ({ profiles }) => {
           </Stack>
         </form>
         <Typography variant="caption" color="text.secondary">
-          The join code is shown on the unit campaign's detail page. Joining links the selected campaign to that
-          unit campaign.
+          The join code is shown on the unit campaign's detail page. Joining links the selected campaign to that unit
+          campaign.
         </Typography>
       </Stack>
     </Paper>
@@ -189,9 +177,7 @@ const JoinForm: React.FC<{ profiles: GqlSellerProfile[] }> = ({ profiles }) => {
 };
 
 const JoinUnitCampaignPage: React.FC = () => {
-  const { data, loading, error } = useQuery<{ listMyProfiles: { profiles: GqlSellerProfile[] } }>(
-    LIST_MY_PROFILES,
-  );
+  const { data, loading, error } = useQuery<{ listMyProfiles: { profiles: GqlSellerProfile[] } }>(LIST_MY_PROFILES);
 
   if (loading) {
     return (

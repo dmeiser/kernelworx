@@ -38,11 +38,7 @@ import { mapErrorCodeToMessage } from '../lib/errorCodes';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { generatedUnitDisplayName, newUnitIdempotencyKey } from '../lib/unitForm';
 import RedeemUnitInviteCard from './RedeemUnitInviteCard';
-import type {
-  GqlCouncilNeedBasis,
-  GqlSplitMethod,
-  GqlUnit,
-} from '../types';
+import type { GqlCouncilNeedBasis, GqlSplitMethod, GqlUnit } from '../types';
 
 const FormError: React.FC<{ text: string | null }> = ({ text }) =>
   text ? (
@@ -307,17 +303,17 @@ export const CreateUnitDialog: React.FC<CreateUnitDialogProps> = ({ open, onClos
         confirmColor="warning"
       >
         <Typography>
-          A Unit with this exact type, number, city, and state already exists. Confirm to create a separate,
-          distinct Unit without merging them.
+          A Unit with this exact type, number, city, and state already exists. Confirm to create a separate, distinct
+          Unit without merging them.
         </Typography>
       </ConfirmDialog>
     </>
   );
 };
 
-const UnitsLoadError: React.FC<{ message: string; onRetry: () => void }> = ({ message, onRetry }) => (
+const UnitsLoadError: React.FC<{ message?: string; onRetry: () => void }> = ({ message, onRetry }) => (
   <Box>
-    <ErrorAlert message={message} />
+    <ErrorAlert message={message || 'Unable to load your units.'} />
     <Button variant="outlined" onClick={() => void onRetry()}>
       Retry
     </Button>
@@ -331,7 +327,11 @@ interface UnitCardProps {
 
 const UnitCard: React.FC<UnitCardProps> = ({ unit, onOpen }) => (
   <Card>
-    <CardActionArea onClick={() => void onOpen(unit.unitId)} sx={{ height: '100%' }} data-testid={`unit-card-${unit.unitId}`}>
+    <CardActionArea
+      onClick={() => void onOpen(unit.unitId)}
+      sx={{ height: '100%' }}
+      data-testid={`unit-card-${unit.unitId}`}
+    >
       <CardContent>
         <Typography variant="h6" gutterBottom>
           {unitDisplayName(unit)}
@@ -341,7 +341,9 @@ const UnitCard: React.FC<UnitCardProps> = ({ unit, onOpen }) => (
         </Typography>
         <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
           <Chip size="small" label={`${unit.adminCount} admin${unit.adminCount === 1 ? '' : 's'}`} />
-          <Typography variant="body2" color="text.secondary">·</Typography>
+          <Typography variant="body2" color="text.secondary">
+            ·
+          </Typography>
           <Chip
             size="small"
             color="info"
@@ -362,7 +364,7 @@ const UnitsPage: React.FC = () => {
   // successful invite redemption) must keep the page mounted so
   // RedeemUnitInviteCard's success confirmation survives the refetch.
   if (loading && !data) return <LoadingState />;
-  if (error) return <UnitsLoadError message={error.message || 'Unable to load your units.'} onRetry={() => void refetch()} />;
+  if (error) return <UnitsLoadError message={error.message} onRetry={() => void refetch()} />;
 
   const units = selectMyUnits(data);
 
@@ -392,8 +394,7 @@ const UnitsPage: React.FC = () => {
               Join a unit campaign
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              Have a join code for a unit campaign? Link one of your Scout Campaigns to it as a
-              participant.
+              Have a join code for a unit campaign? Link one of your Scout Campaigns to it as a participant.
             </Typography>
             <Button component={RouterLink} to="/join-unit-campaign" variant="outlined">
               Join unit campaign

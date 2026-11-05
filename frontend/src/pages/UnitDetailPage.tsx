@@ -73,11 +73,7 @@ const UnitDetailPage: React.FC = () => {
 
   return (
     <Box>
-      <PageHeader
-        title={unitTitle(unit)}
-        subtitle={`${unit.unitType} ${unit.unitNumber}`}
-        backButton={backToUnits}
-      />
+      <PageHeader title={unitTitle(unit)} subtitle={`${unit.unitType} ${unit.unitNumber}`} backButton={backToUnits} />
       <Tabs value={tab} onChange={(_, v: TabKey) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         {TABS.map((t) => (
           <Tab key={t.key} value={t.key} label={t.label} />

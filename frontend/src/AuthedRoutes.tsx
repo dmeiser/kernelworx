@@ -76,9 +76,7 @@ const PaymentMethodsPage = lazyRoute(() =>
 const HomePage = lazyRoute(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
 const StoryPage = lazyRoute(() => import('./pages/StoryPage').then((m) => ({ default: m.StoryPage })));
 const UnitsPage = lazyRoute(() => import('./pages/UnitsPage').then((m) => ({ default: m.default })));
-const UnitDetailPage = lazyRoute(() =>
-  import('./pages/UnitDetailPage').then((m) => ({ default: m.default })),
-);
+const UnitDetailPage = lazyRoute(() => import('./pages/UnitDetailPage').then((m) => ({ default: m.default })));
 const JoinUnitCampaignPage = lazyRoute(() =>
   import('./pages/JoinUnitCampaignPage').then((m) => ({ default: m.default })),
 );
@@ -144,280 +142,280 @@ function ProtectedAppRoute({ children, requireAdmin }: { children: React.ReactNo
 function AuthedRoutes() {
   return (
     <AuthProvider>
-            <Suspense fallback={<PageLoader />}>
-              <ScrollToHash />
-              <Routes>
-                {/* Public routes */}
-                <Route
-                  path="/"
-                  element={
-                    <PublicRoute>
-                      <LandingPage />
-                    </PublicRoute>
-                  }
-                />
-                <Route
-                  path="/login"
-                  element={
-                    <PublicRoute>
-                      <LoginPage />
-                    </PublicRoute>
-                  }
-                />
-                <Route
-                  path="/forgot-password"
-                  element={
-                    <PublicRoute>
-                      <ForgotPasswordPage />
-                    </PublicRoute>
-                  }
-                />
-                <Route
-                  path="/signup"
-                  element={
-                    <PublicRoute>
-                      <SignupPage />
-                    </PublicRoute>
-                  }
-                />
-                <Route
-                  path="/privacy"
-                  element={
-                    <PublicRoute>
-                      <PrivacyPolicyPage />
-                    </PublicRoute>
-                  }
-                />
-                <Route
-                  path="/story"
-                  element={
-                    <PublicRoute>
-                      <StoryPage />
-                    </PublicRoute>
-                  }
-                />
+      <Suspense fallback={<PageLoader />}>
+        <ScrollToHash />
+        <Routes>
+          {/* Public routes */}
+          <Route
+            path="/"
+            element={
+              <PublicRoute>
+                <LandingPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/login"
+            element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/forgot-password"
+            element={
+              <PublicRoute>
+                <ForgotPasswordPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/signup"
+            element={
+              <PublicRoute>
+                <SignupPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/privacy"
+            element={
+              <PublicRoute>
+                <PrivacyPolicyPage />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/story"
+            element={
+              <PublicRoute>
+                <StoryPage />
+              </PublicRoute>
+            }
+          />
 
-                {/* Shared Campaign short-link route */}
-                <Route
-                  path="/c/:sharedCampaignCode"
-                  element={
-                    <ProtectedAppRoute>
-                      <CreateCampaignPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          {/* Shared Campaign short-link route */}
+          <Route
+            path="/c/:sharedCampaignCode"
+            element={
+              <ProtectedAppRoute>
+                <CreateCampaignPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                {/* Manual create campaign route */}
-                <Route
-                  path="/create-campaign"
-                  element={
-                    <ProtectedAppRoute>
-                      <CreateCampaignPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          {/* Manual create campaign route */}
+          <Route
+            path="/create-campaign"
+            element={
+              <ProtectedAppRoute>
+                <CreateCampaignPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/accept-invite"
-                  element={
-                    <ProtectedAppRoute>
-                      <AcceptInvitePage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/accept-invite"
+            element={
+              <ProtectedAppRoute>
+                <AcceptInvitePage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                {/* Public order pages (API-key auth mode; the URL token is the authorization) */}
-                <Route
-                  path="/o/:campaignId/:token"
-                  element={
-                    <PublicRoute>
-                      <PublicOrderApollo>
-                        <PublicOrderPage />
-                      </PublicOrderApollo>
-                    </PublicRoute>
-                  }
-                />
-                <Route
-                  path="/r/:campaignId/:orderSuffix/:receiptToken"
-                  element={
-                    <PublicRoute>
-                      <PublicOrderApollo>
-                        <PublicReceiptPage />
-                      </PublicOrderApollo>
-                    </PublicRoute>
-                  }
-                />
+          {/* Public order pages (API-key auth mode; the URL token is the authorization) */}
+          <Route
+            path="/o/:campaignId/:token"
+            element={
+              <PublicRoute>
+                <PublicOrderApollo>
+                  <PublicOrderPage />
+                </PublicOrderApollo>
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/r/:campaignId/:orderSuffix/:receiptToken"
+            element={
+              <PublicRoute>
+                <PublicOrderApollo>
+                  <PublicReceiptPage />
+                </PublicOrderApollo>
+              </PublicRoute>
+            }
+          />
 
-                {/* Protected routes */}
-                <Route
-                  path="/home"
-                  element={
-                    <ProtectedAppRoute>
-                      <HomePage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          {/* Protected routes */}
+          <Route
+            path="/home"
+            element={
+              <ProtectedAppRoute>
+                <HomePage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/scouts"
-                  element={
-                    <ProtectedAppRoute>
-                      <ScoutsPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/scouts"
+            element={
+              <ProtectedAppRoute>
+                <ScoutsPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/scouts/:profileId/campaigns"
-                  element={
-                    <ProtectedAppRoute>
-                      <ScoutCampaignsPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/scouts/:profileId/campaigns"
+            element={
+              <ProtectedAppRoute>
+                <ScoutCampaignsPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/scouts/:profileId/manage"
-                  element={
-                    <ProtectedAppRoute>
-                      <ScoutManagementPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/scouts/:profileId/manage"
+            element={
+              <ProtectedAppRoute>
+                <ScoutManagementPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/scouts/:profileId/campaigns/:campaignId/*"
-                  element={
-                    <ProtectedAppRoute>
-                      <CampaignLayout />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/scouts/:profileId/campaigns/:campaignId/*"
+            element={
+              <ProtectedAppRoute>
+                <CampaignLayout />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/settings"
-                  element={
-                    <ProtectedAppRoute>
-                      <SettingsPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedAppRoute>
+                <SettingsPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/account/settings"
-                  element={
-                    <ProtectedAppRoute>
-                      <UserSettingsPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/account/settings"
+            element={
+              <ProtectedAppRoute>
+                <UserSettingsPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/catalogs/:catalogId/preview"
-                  element={
-                    <ProtectedAppRoute>
-                      <CatalogPreviewPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/catalogs/:catalogId/preview"
+            element={
+              <ProtectedAppRoute>
+                <CatalogPreviewPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/catalogs"
-                  element={
-                    <ProtectedAppRoute>
-                      <CatalogsPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/catalogs"
+            element={
+              <ProtectedAppRoute>
+                <CatalogsPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/campaign-reports"
-                  element={
-                    <ProtectedAppRoute>
-                      <CampaignReportsPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/campaign-reports"
+            element={
+              <ProtectedAppRoute>
+                <CampaignReportsPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/shared-campaigns"
-                  element={
-                    <ProtectedAppRoute>
-                      <SharedCampaignsPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/shared-campaigns"
+            element={
+              <ProtectedAppRoute>
+                <SharedCampaignsPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/shared-campaigns/create"
-                  element={
-                    <ProtectedAppRoute>
-                      <CreateSharedCampaignPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/shared-campaigns/create"
+            element={
+              <ProtectedAppRoute>
+                <CreateSharedCampaignPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/payment-methods"
-                  element={
-                    <ProtectedAppRoute>
-                      <PaymentMethodsPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/payment-methods"
+            element={
+              <ProtectedAppRoute>
+                <PaymentMethodsPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                {/* Show & Sell Unit surface (batch C) */}
-                <Route
-                  path="/units"
-                  element={
-                    <ProtectedAppRoute>
-                      <UnitsPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          {/* Show & Sell Unit surface (batch C) */}
+          <Route
+            path="/units"
+            element={
+              <ProtectedAppRoute>
+                <UnitsPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/units/:unitId"
-                  element={
-                    <ProtectedAppRoute>
-                      <UnitDetailPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/units/:unitId"
+            element={
+              <ProtectedAppRoute>
+                <UnitDetailPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/join-unit-campaign"
-                  element={
-                    <ProtectedAppRoute>
-                      <JoinUnitCampaignPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/join-unit-campaign"
+            element={
+              <ProtectedAppRoute>
+                <JoinUnitCampaignPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/admin"
-                  element={
-                    <ProtectedAppRoute requireAdmin>
-                      <AdminPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedAppRoute requireAdmin>
+                <AdminPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                <Route
-                  path="/admin/user-data/:accountId"
-                  element={
-                    <ProtectedAppRoute requireAdmin>
-                      <UserDataPage />
-                    </ProtectedAppRoute>
-                  }
-                />
+          <Route
+            path="/admin/user-data/:accountId"
+            element={
+              <ProtectedAppRoute requireAdmin>
+                <UserDataPage />
+              </ProtectedAppRoute>
+            }
+          />
 
-                {/* 404 catch-all */}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Suspense>
-            <DevFooter />
-          </AuthProvider>
+          {/* 404 catch-all */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
+      <DevFooter />
+    </AuthProvider>
   );
 }
 

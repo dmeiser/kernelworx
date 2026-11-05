@@ -39,7 +39,8 @@ const settingsFromUnit = (unit: GqlUnit): EditableSettings => ({
 });
 
 const previewDisplayName = (unit: GqlUnit, settings: EditableSettings): string =>
-  settings.displayName.trim() || generatedUnitDisplayName(unit.unitType, unit.unitNumber, settings.city.trim(), settings.state.trim());
+  settings.displayName.trim() ||
+  generatedUnitDisplayName(unit.unitType, unit.unitNumber, settings.city.trim(), settings.state.trim());
 
 const SettingsLoadError: React.FC<{ error: Error }> = ({ error }) => (
   <Alert severity="error" sx={{ my: 2 }}>
@@ -113,18 +114,8 @@ const UnitSettingsFields: React.FC<{ unit: GqlUnit; onSaved?: (unit: GqlUnit) =>
           placeholder={previewName}
           helperText={`Shown as "${previewName}" when left blank`}
         />
-        <TextField
-          fullWidth
-          label="City"
-          value={settings.city}
-          onChange={(e) => setField('city', e.target.value)}
-        />
-        <StateAutocomplete
-          fullWidth
-          label="State"
-          value={settings.state}
-          onChange={(v) => setField('state', v)}
-        />
+        <TextField fullWidth label="City" value={settings.city} onChange={(e) => setField('city', e.target.value)} />
+        <StateAutocomplete fullWidth label="State" value={settings.state} onChange={(v) => setField('state', v)} />
         <TextField
           fullWidth
           label="Timezone (IANA)"

@@ -52,12 +52,7 @@ import {
 import { getErrorCode, getErrorMessage } from '../lib/api-utils';
 import { mapErrorCodeToMessage } from '../lib/errorCodes';
 import { newUnitIdempotencyKey } from '../lib/unitForm';
-import type {
-  GqlCatalog,
-  GqlUnitCampaignAdmin,
-  GqlUnitCampaignCatalog,
-  GqlUnitCampaignMembership,
-} from '../types';
+import type { GqlCatalog, GqlUnitCampaignAdmin, GqlUnitCampaignCatalog, GqlUnitCampaignMembership } from '../types';
 
 const statusLabel = (status: GqlUnitCampaignMembership['status']): string =>
   status === 'ACTIVE' ? 'Active' : 'Removed';
@@ -75,6 +70,35 @@ const selectUnitCampaigns = (
 const selectRoster = (
   data: { unitCampaignRoster: { items: GqlUnitCampaignMembership[] } } | undefined,
 ): GqlUnitCampaignMembership[] => (data ? data.unitCampaignRoster.items : []);
+
+// Derives every value the create dialog renders from in one place, so the dialog
+// component itself stays below the complexity gate (composeCatalogOptions owns
+// the error/busy/loading composition).
+const composeCreateCatalogOptions = (args: {
+  myData: { listMyCatalogs: GqlCatalog[] } | undefined;
+  managedData: { listManagedCatalogs: GqlCatalog[] } | undefined;
+  myError: Error | undefined;
+  managedError: Error | undefined;
+  myLoading: boolean;
+  managedLoading: boolean;
+  submitting: boolean;
+}): {
+  myCatalogs: GqlCatalog[];
+  publicCatalogs: GqlCatalog[];
+  catalogError: boolean;
+  loadingCatalogs: boolean;
+  busy: boolean;
+} => {
+  const { myData, managedData, myError, managedError, myLoading, managedLoading, submitting } = args;
+  const myCatalogs = selectMyCatalogs(myData);
+  const publicCatalogs = selectManagedCatalogs(managedData).filter(
+    (c) => !myCatalogs.some((m) => m.catalogId === c.catalogId),
+  );
+  const catalogError = Boolean(myError || managedError);
+  const loadingCatalogs = Boolean(myLoading || managedLoading);
+  const busy = [submitting, myLoading, managedLoading].some(Boolean) || catalogError;
+  return { myCatalogs, publicCatalogs, catalogError, loadingCatalogs, busy };
+};
 
 const CreateUnitCampaignDialog: React.FC<{
   open: boolean;
@@ -97,7 +121,12 @@ const CreateUnitCampaignDialog: React.FC<{
     onError: (e) => setError(mapErrorCodeToMessage(getErrorCode(e), getErrorMessage(e))),
   });
 
-  const { data: myData, loading: myLoading, error: myError, refetch: myRefetch } = useQuery<{
+  const {
+    data: myData,
+    loading: myLoading,
+    error: myError,
+    refetch: myRefetch,
+  } = useQuery<{
     listMyCatalogs: GqlCatalog[];
   }>(LIST_MY_CATALOGS, { skip: !open });
   const {
@@ -107,11 +136,15 @@ const CreateUnitCampaignDialog: React.FC<{
     refetch: managedRefetch,
   } = useQuery<{ listManagedCatalogs: GqlCatalog[] }>(LIST_MANAGED_CATALOGS, { skip: !open });
 
-  const myCatalogs = selectMyCatalogs(myData);
-  const managedCatalogs = selectManagedCatalogs(managedData);
-  const filteredPublic = managedCatalogs.filter((c) => !myCatalogs.some((m) => m.catalogId === c.catalogId));
-  const catalogError = Boolean(myError || managedError);
-  const busy = [submitting, myLoading, managedLoading].some(Boolean) || catalogError;
+  const { myCatalogs, publicCatalogs, catalogError, loadingCatalogs, busy } = composeCreateCatalogOptions({
+    myData,
+    managedData,
+    myError,
+    managedError,
+    myLoading,
+    managedLoading,
+    submitting,
+  });
 
   const retryCatalogs = () => {
     void myRefetch().catch(() => undefined);
@@ -153,12 +186,20 @@ const CreateUnitCampaignDialog: React.FC<{
       <DialogTitle>Create Show &amp; Sell campaign</DialogTitle>
       <Box component="form" noValidate onSubmit={(e) => void handleSubmit(e)}>
         <DialogContent>
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
           {catalogError && (
             <Alert
               severity="error"
               sx={{ mb: 2 }}
-              action={<Button color="inherit" size="small" onClick={retryCatalogs}>Retry</Button>}
+              action={
+                <Button color="inherit" size="small" onClick={retryCatalogs}>
+                  Retry
+                </Button>
+              }
             >
               Unable to load the catalogs.
             </Alert>
@@ -177,8 +218,8 @@ const CreateUnitCampaignDialog: React.FC<{
             value={catalogId}
             onChange={setCatalogId}
             myCatalogs={myCatalogs}
-            publicCatalogs={filteredPublic}
-            loading={myLoading || managedLoading}
+            publicCatalogs={publicCatalogs}
+            loading={loadingCatalogs}
             fullWidth
             required
             label="Catalog (immutable after creation)"
@@ -248,7 +289,11 @@ const EditUnitCampaignDialog: React.FC<{
       <DialogTitle>Edit campaign</DialogTitle>
       <Box component="form" noValidate onSubmit={(e) => void handleSubmit(e)}>
         <DialogContent>
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
           <TextField
             fullWidth
             required
@@ -289,7 +334,12 @@ const CampaignRoster: React.FC<{
     unitCampaignRoster: { items: GqlUnitCampaignMembership[] };
   }>(UNIT_CAMPAIGN_ROSTER, { variables: { unitCampaignId: campaign.unitCampaignId } });
 
-  if (loading) return <Typography variant="body2" color="text.secondary">Loading roster…</Typography>;
+  if (loading)
+    return (
+      <Typography variant="body2" color="text.secondary">
+        Loading roster…
+      </Typography>
+    );
   if (error) return <Alert severity="error">Unable to load the roster.</Alert>;
 
   const items = selectRoster(data);
@@ -322,7 +372,11 @@ const RosterRow: React.FC<RosterRowProps> = ({ membership, onRemove }) => (
     <Box>
       <Typography>
         {membership.campaignId}{' '}
-        <Chip size="small" color={membership.status === 'ACTIVE' ? 'success' : 'default'} label={statusLabel(membership.status)} />
+        <Chip
+          size="small"
+          color={membership.status === 'ACTIVE' ? 'success' : 'default'}
+          label={statusLabel(membership.status)}
+        />
       </Typography>
       <Typography variant="caption" color="text.secondary">
         Joined {new Date(membership.joinedAt).toLocaleDateString()}
@@ -343,10 +397,9 @@ const UnitCampaignDetail: React.FC<{
   campaign: GqlUnitCampaignAdmin;
   onEdit: (c: GqlUnitCampaignAdmin) => void;
 }> = ({ campaign, onEdit }) => {
-  const catalogQuery = useQuery<{ unitCampaignCatalog: GqlUnitCampaignCatalog }>(
-    UNIT_CAMPAIGN_CATALOG,
-    { variables: { unitCampaignId: campaign.unitCampaignId } },
-  );
+  const catalogQuery = useQuery<{ unitCampaignCatalog: GqlUnitCampaignCatalog }>(UNIT_CAMPAIGN_CATALOG, {
+    variables: { unitCampaignId: campaign.unitCampaignId },
+  });
   const [removeTarget, setRemoveTarget] = useState<GqlUnitCampaignMembership | null>(null);
   const removeOutcome = useRef<{ state: 'pending' | 'success' | 'error'; error: string | null }>({
     state: 'pending',
@@ -398,11 +451,7 @@ const UnitCampaignDetail: React.FC<{
           severity="error"
           sx={{ mb: 1 }}
           action={
-            <Button
-              color="inherit"
-              size="small"
-              onClick={() => void catalogQuery.refetch().catch(() => undefined)}
-            >
+            <Button color="inherit" size="small" onClick={() => void catalogQuery.refetch().catch(() => undefined)}>
               Retry
             </Button>
           }
@@ -415,7 +464,11 @@ const UnitCampaignDetail: React.FC<{
           {campaign.campaignName} ({campaign.campaignYear})
         </Typography>
         <Stack direction="row" spacing={1}>
-          <Chip size="small" color={campaign.isActive ? 'success' : 'default'} label={campaign.isActive ? 'Active' : 'Inactive'} />
+          <Chip
+            size="small"
+            color={campaign.isActive ? 'success' : 'default'}
+            label={campaign.isActive ? 'Active' : 'Inactive'}
+          />
           <Button size="small" variant="outlined" onClick={() => onEdit(campaign)} data-testid="edit-campaign-button">
             Edit
           </Button>
@@ -470,7 +523,11 @@ const CampaignRow: React.FC<CampaignRowProps> = ({ campaign, isSelected, onSelec
         <Typography>
           {campaign.campaignName} ({campaign.campaignYear})
         </Typography>
-        <Chip size="small" color={campaign.isActive ? 'success' : 'default'} label={campaign.isActive ? 'Active' : 'Inactive'} />
+        <Chip
+          size="small"
+          color={campaign.isActive ? 'success' : 'default'}
+          label={campaign.isActive ? 'Active' : 'Inactive'}
+        />
       </Box>
     </CardActionArea>
   </Card>
@@ -486,7 +543,12 @@ const CampaignList: React.FC<{
   ) : (
     <Stack spacing={1} sx={{ mb: 3 }}>
       {campaigns.map((c) => (
-        <CampaignRow key={c.unitCampaignId} campaign={c} isSelected={c.unitCampaignId === selectedId} onSelect={onSelect} />
+        <CampaignRow
+          key={c.unitCampaignId}
+          campaign={c}
+          isSelected={c.unitCampaignId === selectedId}
+          onSelect={onSelect}
+        />
       ))}
     </Stack>
   );
@@ -514,7 +576,11 @@ const UnitCampaignsSection: React.FC<{ unitId: string }> = ({ unitId }) => {
         </Button>
       </Box>
       <CampaignList campaigns={campaigns} selectedId={selectedId} onSelect={setSelectedId} />
-      {selected && <Card><UnitCampaignDetail campaign={selected} onEdit={setEditing} /></Card>}
+      {selected && (
+        <Card>
+          <UnitCampaignDetail campaign={selected} onEdit={setEditing} />
+        </Card>
+      )}
       <CreateUnitCampaignDialog
         open={createOpen}
         unitId={unitId}

@@ -52,9 +52,7 @@ function renderForm(mocks: unknown[], onSave?: (u: unknown) => void) {
 }
 
 it('renders the unit settings from the unit', async () => {
-  renderForm([
-    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } },
-  ]);
+  renderForm([{ request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } }]);
 
   expect(await screen.findByText('Pack 3149 - Aurora, CO')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Save changes/i })).toBeInTheDocument();
@@ -86,7 +84,10 @@ it('surfaces a conflict when the save is rejected by optimistic concurrency', as
   const user = userEvent.setup();
   renderForm([
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } },
-    { request: { query: UPDATE_UNIT, variables: match }, result: { errors: [new GraphQLError('version changed', { extensions: { errorCode: 'CONFLICT' } })] } },
+    {
+      request: { query: UPDATE_UNIT, variables: match },
+      result: { errors: [new GraphQLError('version changed', { extensions: { errorCode: 'CONFLICT' } })] },
+    },
   ]);
 
   await screen.findByRole('button', { name: /Save changes/i });
@@ -101,7 +102,13 @@ it('sends trimmed city so the stored unit matches the generated-name preview', a
   renderForm([
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } },
     {
-      request: { query: UPDATE_UNIT, variables: (v: unknown) => { sentVariables.push(v as Record<string, unknown>); return true; } },
+      request: {
+        query: UPDATE_UNIT,
+        variables: (v: unknown) => {
+          sentVariables.push(v as Record<string, unknown>);
+          return true;
+        },
+      },
       result: { data: { updateUnit: unit({ version: 2 }) } },
     },
   ]);
@@ -118,12 +125,24 @@ it('reverts a cleared display name to the generated name built from the saved ci
   const user = userEvent.setup();
   const sentVariables: Array<Record<string, unknown>> = [];
   renderForm([
-    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: 'Custom Troop' }) } } },
     {
-      request: { query: UPDATE_UNIT, variables: (v: unknown) => { sentVariables.push(v as Record<string, unknown>); return true; } },
+      request: { query: GET_UNIT, variables: match },
+      result: { data: { unit: unit({ displayName: 'Custom Troop' }) } },
+    },
+    {
+      request: {
+        query: UPDATE_UNIT,
+        variables: (v: unknown) => {
+          sentVariables.push(v as Record<string, unknown>);
+          return true;
+        },
+      },
       result: { data: { updateUnit: unit({ displayName: 'Pack 3149 - Aurora, CO', version: 2 }) } },
     },
-    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: 'Pack 3149 - Aurora, CO', version: 2 }) } } },
+    {
+      request: { query: GET_UNIT, variables: match },
+      result: { data: { unit: unit({ displayName: 'Pack 3149 - Aurora, CO', version: 2 }) } },
+    },
   ]);
 
   await screen.findByDisplayValue('Custom Troop');
@@ -140,12 +159,24 @@ it('builds the cleared display name from the changed city, not the old one', asy
   const user = userEvent.setup();
   const sentVariables: Array<Record<string, unknown>> = [];
   renderForm([
-    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: 'Custom Troop' }) } } },
     {
-      request: { query: UPDATE_UNIT, variables: (v: unknown) => { sentVariables.push(v as Record<string, unknown>); return true; } },
+      request: { query: GET_UNIT, variables: match },
+      result: { data: { unit: unit({ displayName: 'Custom Troop' }) } },
+    },
+    {
+      request: {
+        query: UPDATE_UNIT,
+        variables: (v: unknown) => {
+          sentVariables.push(v as Record<string, unknown>);
+          return true;
+        },
+      },
       result: { data: { updateUnit: unit({ displayName: 'Pack 3149 - Denver, CO', version: 2 }) } },
     },
-    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: 'Pack 3149 - Denver, CO', version: 2 }) } } },
+    {
+      request: { query: GET_UNIT, variables: match },
+      result: { data: { unit: unit({ displayName: 'Pack 3149 - Denver, CO', version: 2 }) } },
+    },
   ]);
 
   await screen.findByDisplayValue('Custom Troop');
@@ -160,9 +191,7 @@ it('builds the cleared display name from the changed city, not the old one', asy
 });
 
 it('renders the shared option lists from unitTypes', async () => {
-  renderForm([
-    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } },
-  ]);
+  renderForm([{ request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } }]);
 
   await screen.findByDisplayValue('Aurora');
   fireEvent.mouseDown(screen.getByLabelText(/Default split/i));

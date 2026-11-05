@@ -4,7 +4,9 @@
  * The generated display name mirrors the backend's `generated_display_name`
  * (data model §5.1): `Type Number - City, State`. It is only a client preview;
  * the server is authoritative and fills the same value when `displayName` is
- * omitted on `createUnit`/`updateUnit`.
+ * omitted on `createUnit`. On `updateUnit` the client composes and sends this
+ * same value when the field is blank — the backend applies any non-None sent
+ * string verbatim, so only a blank sent name falls back to generation.
  */
 
 /** Build the generated display name from unit metadata when the caller omits one. */

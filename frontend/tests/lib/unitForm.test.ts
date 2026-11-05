@@ -19,8 +19,6 @@ describe('generatedUnitDisplayName', () => {
   it('matches the server-composed name for whitespace-padded input sent through the forms', () => {
     const sentCity = '  Aurora  '.trim();
     const sentState = ' CO '.trim();
-    expect(generatedUnitDisplayName('Pack', 3149, sentCity, sentState)).toBe(
-      `Pack 3149 - ${sentCity}, ${sentState}`,
-    );
+    expect(generatedUnitDisplayName('Pack', 3149, sentCity, sentState)).toBe(`Pack 3149 - ${sentCity}, ${sentState}`);
   });
 });

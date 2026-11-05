@@ -3,7 +3,14 @@ import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { GraphQLError } from 'graphql';
 import { vi } from 'vitest';
-import { GET_UNIT, UNIT_ADMINS, UNIT_INVITES, CREATE_UNIT_INVITE, REVOKE_UNIT_INVITE, REVOKE_UNIT_ACCESS_GRANT } from '../src/lib/graphql';
+import {
+  GET_UNIT,
+  UNIT_ADMINS,
+  UNIT_INVITES,
+  CREATE_UNIT_INVITE,
+  REVOKE_UNIT_INVITE,
+  REVOKE_UNIT_ACCESS_GRANT,
+} from '../src/lib/graphql';
 import UnitAccessSection from '../src/pages/UnitAccessSection';
 
 vi.mock('../src/contexts/AuthContext', () => ({
@@ -71,8 +78,27 @@ const match = () => true;
 it('renders the unit admins and pending invites', async () => {
   renderSection([
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
-    { request: { query: UNIT_ADMINS, variables: match }, result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self'), admin('other', 'other@fixtures.kernelworx.test', 'Taylor')], pageInfo: PAGE_INFO } } } },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [invite('ABC123')], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [
+              admin('self', 'self@fixtures.kernelworx.test', 'Self'),
+              admin('other', 'other@fixtures.kernelworx.test', 'Taylor'),
+            ],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: {
+        data: { unitInvites: { __typename: 'UnitInviteConnection', items: [invite('ABC123')], pageInfo: PAGE_INFO } },
+      },
+    },
   ]);
 
   expect(await screen.findByText('Admins')).toBeInTheDocument();
@@ -86,8 +112,22 @@ it('renders the unit admins and pending invites', async () => {
 it('disables removing the last admin and explains the rule', async () => {
   renderSection([
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 1 }) } } },
-    { request: { query: UNIT_ADMINS, variables: match }, result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')], pageInfo: PAGE_INFO } } } },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
   ]);
 
   expect(await screen.findByRole('button', { name: 'Remove' })).toBeDisabled();
@@ -98,10 +138,41 @@ it('confirms before removing an admin, then closes on success', async () => {
   const user = userEvent.setup();
   renderSection([
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
-    { request: { query: UNIT_ADMINS, variables: match }, result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self'), admin('other', 'other@fixtures.kernelworx.test', 'Taylor')], pageInfo: PAGE_INFO } } } },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } } },
-    { request: { query: REVOKE_UNIT_ACCESS_GRANT, variables: match }, result: { data: { revokeUnitAccessGrant: unit({ adminCount: 1, version: 2 }) } } },
-    { request: { query: UNIT_ADMINS, variables: match }, result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [
+              admin('self', 'self@fixtures.kernelworx.test', 'Self'),
+              admin('other', 'other@fixtures.kernelworx.test', 'Taylor'),
+            ],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
+    {
+      request: { query: REVOKE_UNIT_ACCESS_GRANT, variables: match },
+      result: { data: { revokeUnitAccessGrant: unit({ adminCount: 1, version: 2 }) } },
+    },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 1, version: 2 }) } } },
   ]);
 
@@ -119,9 +190,28 @@ it('creates an invite without surfacing an error on success', async () => {
   const user = userEvent.setup();
   renderSection([
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
-    { request: { query: UNIT_ADMINS, variables: match }, result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')], pageInfo: PAGE_INFO } } } },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [invite('ABC123')], pageInfo: PAGE_INFO } } } },
-    { request: { query: CREATE_UNIT_INVITE, variables: match }, result: { data: { createUnitInvite: invite('NEWINV') } } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: {
+        data: { unitInvites: { __typename: 'UnitInviteConnection', items: [invite('ABC123')], pageInfo: PAGE_INFO } },
+      },
+    },
+    {
+      request: { query: CREATE_UNIT_INVITE, variables: match },
+      result: { data: { createUnitInvite: invite('NEWINV') } },
+    },
   ]);
 
   await screen.findByRole('button', { name: /Create invite/i });
@@ -135,9 +225,26 @@ it('surfaces an error when creating an invite fails', async () => {
   const user = userEvent.setup();
   renderSection([
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
-    { request: { query: UNIT_ADMINS, variables: match }, result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')], pageInfo: PAGE_INFO } } } },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } } },
-    { request: { query: CREATE_UNIT_INVITE, variables: match }, result: { errors: [new GraphQLError('Too many invites', { extensions: { errorCode: 'RATE_LIMIT_EXCEEDED' } })] } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
+    {
+      request: { query: CREATE_UNIT_INVITE, variables: match },
+      result: { errors: [new GraphQLError('Too many invites', { extensions: { errorCode: 'RATE_LIMIT_EXCEEDED' } })] },
+    },
   ]);
 
   await screen.findByRole('button', { name: /Create invite/i });
@@ -150,10 +257,29 @@ it('revokes an invite after confirmation', async () => {
   const user = userEvent.setup();
   renderSection([
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
-    { request: { query: UNIT_ADMINS, variables: match }, result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')], pageInfo: PAGE_INFO } } } },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [invite('ABC123')], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: {
+        data: { unitInvites: { __typename: 'UnitInviteConnection', items: [invite('ABC123')], pageInfo: PAGE_INFO } },
+      },
+    },
     { request: { query: REVOKE_UNIT_INVITE, variables: match }, result: { data: { revokeUnitInvite: true } } },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
   ]);
 
   await screen.findByText('ABC123');
@@ -170,11 +296,33 @@ it('surfaces a query failure as a load error with a working Retry', async () => 
   const user = userEvent.setup();
   renderSection([
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
-    { request: { query: UNIT_ADMINS, variables: match }, result: { errors: [new GraphQLError('The admins list is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        errors: [new GraphQLError('The admins list is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })],
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
-    { request: { query: UNIT_ADMINS, variables: match }, result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')], pageInfo: PAGE_INFO } } } },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
   ]);
 
   expect(await screen.findByRole('alert')).toHaveTextContent(/admins list is unavailable/i);

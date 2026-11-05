@@ -61,9 +61,21 @@ const RedeemUnitInviteCard: React.FC<RedeemUnitInviteCardProps> = ({ onRedeemed 
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
           Have a Unit invite code? Enter it here to join as a Unit Admin.
         </Typography>
-        {error && <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>}
-        {success && <Alert severity="success" sx={{ mb: 1 }}>{success}</Alert>}
-        <Box component="form" onSubmit={(e) => void handleSubmit(e)} sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+        {error && (
+          <Alert severity="error" sx={{ mb: 1 }}>
+            {error}
+          </Alert>
+        )}
+        {success && (
+          <Alert severity="success" sx={{ mb: 1 }}>
+            {success}
+          </Alert>
+        )}
+        <Box
+          component="form"
+          onSubmit={(e) => void handleSubmit(e)}
+          sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}
+        >
           <TextField
             label="Invite code"
             value={code}

@@ -1194,4 +1194,3 @@ export const JOIN_UNIT_CAMPAIGN = gql`
     }
   }
 `;
-

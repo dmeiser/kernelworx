@@ -89,7 +89,7 @@ beforeEach(() => {
   mockNavigate.mockClear();
 });
 
-it('renders the admin\'s units from myUnits (explicit + generated display names)', async () => {
+it("renders the admin's units from myUnits (explicit + generated display names)", async () => {
   renderPage([
     {
       request: { query: MY_UNITS, variables: () => true },
@@ -113,9 +113,7 @@ it('renders the admin\'s units from myUnits (explicit + generated display names)
 });
 
 it('shows the empty state when the admin has no units', async () => {
-  renderPage([
-    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
-  ]);
+  renderPage([{ request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) }]);
   expect(await screen.findByText(/No units yet/)).toBeInTheDocument();
 });
 
@@ -125,7 +123,11 @@ it('confirms before creating a distinct unit on a duplicate (CONFLICT → duplic
     { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
     {
       request: { query: CREATE_UNIT, variables: () => true },
-      result: { errors: [new GraphQLError('A unit with the same identity already exists', { extensions: { errorCode: 'CONFLICT' } })] },
+      result: {
+        errors: [
+          new GraphQLError('A unit with the same identity already exists', { extensions: { errorCode: 'CONFLICT' } }),
+        ],
+      },
     },
     { request: { query: CREATE_UNIT, variables: () => true }, result: createUnitSuccess('unit-new') },
     { request: { query: MY_UNITS, variables: () => true }, result: myUnits([unit({ unitId: 'unit-new' })]) },
@@ -153,12 +155,24 @@ it('sends trimmed city and state so the server-composed display name matches the
   const user = userEvent.setup();
   const sentVariables: Array<Record<string, unknown>> = [];
   renderPage([
-    { request: { query: MY_UNITS, variables: () => true }, result: { data: { myUnits: { __typename: 'UnitConnection', items: [], pageInfo: PAGE_INFO } } } },
     {
-      request: { query: CREATE_UNIT, variables: (v: unknown) => { sentVariables.push(v as Record<string, unknown>); return true; } },
+      request: { query: MY_UNITS, variables: () => true },
+      result: { data: { myUnits: { __typename: 'UnitConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
+    {
+      request: {
+        query: CREATE_UNIT,
+        variables: (v: unknown) => {
+          sentVariables.push(v as Record<string, unknown>);
+          return true;
+        },
+      },
       result: createUnitSuccess('unit-new'),
     },
-    { request: { query: MY_UNITS, variables: () => true }, result: { data: { myUnits: { __typename: 'UnitConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: MY_UNITS, variables: () => true },
+      result: { data: { myUnits: { __typename: 'UnitConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
   ]);
 
   const createButtons = await screen.findAllByRole('button', { name: /^Create Unit$/i });
@@ -178,9 +192,7 @@ it('sends trimmed city and state so the server-composed display name matches the
 });
 
 it('offers a discoverable entry to the participant join flow beside the invite card', async () => {
-  renderPage([
-    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
-  ]);
+  renderPage([{ request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) }]);
 
   const joinLink = await screen.findByRole('link', { name: /Join unit campaign/i });
   expect(joinLink).toHaveAttribute('href', '/join-unit-campaign');
@@ -190,7 +202,9 @@ it('surfaces an error and a retry when loading the units fails', async () => {
   renderPage([
     {
       request: { query: MY_UNITS, variables: () => true },
-      result: { errors: [new GraphQLError('The units list is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+      result: {
+        errors: [new GraphQLError('The units list is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })],
+      },
     },
   ]);
 
@@ -232,9 +246,7 @@ it('keeps the redeem success confirmation visible while MY_UNITS refetches', asy
 
 it('normalizes the unit number in the create preview like the server (007 -> 7)', async () => {
   const user = userEvent.setup();
-  renderPage([
-    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
-  ]);
+  renderPage([{ request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) }]);
 
   const createButtons = await screen.findAllByRole('button', { name: /^Create Unit$/i });
   await user.click(createButtons[0]);

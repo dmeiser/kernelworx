@@ -10,17 +10,7 @@
 
 import React, { useRef, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  Chip,
-  Stack,
-  Typography,
-} from '@mui/material';
+import { Alert, Box, Button, Card, CardContent, CardHeader, Chip, Stack, Typography } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import {
   CREATE_UNIT_INVITE,
@@ -169,7 +159,11 @@ const InvitesCard: React.FC<InvitesCardProps> = ({ invites, inviteError, onCreat
       }
     />
     <CardContent>
-      {inviteError && <Alert severity="error" sx={{ mb: 1 }}>{inviteError}</Alert>}
+      {inviteError && (
+        <Alert severity="error" sx={{ mb: 1 }}>
+          {inviteError}
+        </Alert>
+      )}
       {invites.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
           No active invites.
@@ -277,9 +271,7 @@ const UnitAccessSection: React.FC<{ unitId: string }> = ({ unitId }) => {
   const loading = anyLoading(unitQuery.loading, adminsQuery.loading, invitesQuery.loading);
   const loadError = unitQuery.error ?? adminsQuery.error ?? invitesQuery.error;
   const refetchAll = async (): Promise<void> => {
-    await Promise.all([unitQuery.refetch(), adminsQuery.refetch(), invitesQuery.refetch()]).catch(
-      () => undefined,
-    );
+    await Promise.all([unitQuery.refetch(), adminsQuery.refetch(), invitesQuery.refetch()]).catch(() => undefined);
   };
 
   const [revokeAdmin, setRevokeAdmin] = useState<GqlUnitAccessGrant | null>(null);
@@ -289,7 +281,10 @@ const UnitAccessSection: React.FC<{ unitId: string }> = ({ unitId }) => {
   const inviteOutcome = useRef<Outcome>({ state: 'pending', error: null });
 
   const [revokeGrant] = useMutation(REVOKE_UNIT_ACCESS_GRANT, {
-    refetchQueries: [{ query: UNIT_ADMINS, variables: { unitId } }, { query: GET_UNIT, variables: { unitId } }],
+    refetchQueries: [
+      { query: UNIT_ADMINS, variables: { unitId } },
+      { query: GET_UNIT, variables: { unitId } },
+    ],
     onCompleted: () => {
       adminOutcome.current = { state: 'success', error: null };
       setRevokeAdmin(null);
@@ -370,16 +365,29 @@ const UnitAccessSection: React.FC<{ unitId: string }> = ({ unitId }) => {
   return (
     <AccessQueryGate loading={loading} loadError={loadError} onRetry={refetchAll}>
       <Stack spacing={2}>
-      <AdminsCard admins={admins} currentAccountId={currentAccountId} isLastAdmin={isLastAdmin} onRevokeAdmin={setRevokeAdmin} />
-      <InvitesCard
-        invites={invites}
-        inviteError={inviteError}
-        onCreateInvite={() => void handleCreateInvite()}
-        onRevokeInvite={setRevokeInvite}
-      />
-      <RevokeAdminDialog target={revokeAdmin} onConfirm={handleConfirmRevokeAdmin} onDismiss={() => setRevokeAdmin(null)} />
-      <RevokeInviteDialog target={revokeInvite} onConfirm={handleConfirmRevokeInvite} onDismiss={() => setRevokeInvite(null)} />
-    </Stack>
+        <AdminsCard
+          admins={admins}
+          currentAccountId={currentAccountId}
+          isLastAdmin={isLastAdmin}
+          onRevokeAdmin={setRevokeAdmin}
+        />
+        <InvitesCard
+          invites={invites}
+          inviteError={inviteError}
+          onCreateInvite={() => void handleCreateInvite()}
+          onRevokeInvite={setRevokeInvite}
+        />
+        <RevokeAdminDialog
+          target={revokeAdmin}
+          onConfirm={handleConfirmRevokeAdmin}
+          onDismiss={() => setRevokeAdmin(null)}
+        />
+        <RevokeInviteDialog
+          target={revokeInvite}
+          onConfirm={handleConfirmRevokeInvite}
+          onDismiss={() => setRevokeInvite(null)}
+        />
+      </Stack>
     </AccessQueryGate>
   );
 };

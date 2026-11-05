@@ -59,7 +59,10 @@ beforeEach(() => {
 
 it('shows an empty state when the account has no profiles', async () => {
   renderPage([
-    { request: { query: LIST_MY_PROFILES, variables: match }, result: { data: { listMyProfiles: { profiles: [], nextToken: null } } } },
+    {
+      request: { query: LIST_MY_PROFILES, variables: match },
+      result: { data: { listMyProfiles: { profiles: [], nextToken: null } } },
+    },
   ]);
 
   expect(await screen.findByText(/No profiles/i)).toBeInTheDocument();
@@ -68,9 +71,32 @@ it('shows an empty state when the account has no profiles', async () => {
 it('joins a unit campaign by code and routes to the profile campaigns', async () => {
   const user = userEvent.setup();
   renderPage([
-    { request: { query: LIST_MY_PROFILES, variables: match }, result: { data: { listMyProfiles: { profiles: [profile('prof-1', 'Aurora Pack 3149')], nextToken: null } } } },
-    { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match }, result: { data: { listCampaignsByProfile: { campaigns: [campaign('camp-1', '2026-27 Summer', 2026)], nextToken: null } } } },
-    { request: { query: JOIN_UNIT_CAMPAIGN, variables: match }, result: { data: { joinUnitCampaign: { __typename: 'UnitCampaignMembership', campaignId: 'camp-1', profileId: 'prof-1', status: 'JOINED', unitCampaignId: 'uc-1', unitId: 'unit-1', version: 1 } } } },
+    {
+      request: { query: LIST_MY_PROFILES, variables: match },
+      result: { data: { listMyProfiles: { profiles: [profile('prof-1', 'Aurora Pack 3149')], nextToken: null } } },
+    },
+    {
+      request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match },
+      result: {
+        data: { listCampaignsByProfile: { campaigns: [campaign('camp-1', '2026-27 Summer', 2026)], nextToken: null } },
+      },
+    },
+    {
+      request: { query: JOIN_UNIT_CAMPAIGN, variables: match },
+      result: {
+        data: {
+          joinUnitCampaign: {
+            __typename: 'UnitCampaignMembership',
+            campaignId: 'camp-1',
+            profileId: 'prof-1',
+            status: 'JOINED',
+            unitCampaignId: 'uc-1',
+            unitId: 'unit-1',
+            version: 1,
+          },
+        },
+      },
+    },
   ]);
 
   await screen.findByLabelText(/Your campaign to join/i);
@@ -84,8 +110,16 @@ it('joins a unit campaign by code and routes to the profile campaigns', async ()
 it('requires a campaign and join code before submitting', async () => {
   const user = userEvent.setup();
   renderPage([
-    { request: { query: LIST_MY_PROFILES, variables: match }, result: { data: { listMyProfiles: { profiles: [profile('prof-1', 'Aurora Pack 3149')], nextToken: null } } } },
-    { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match }, result: { data: { listCampaignsByProfile: { campaigns: [campaign('camp-1', '2026-27 Summer', 2026)], nextToken: null } } } },
+    {
+      request: { query: LIST_MY_PROFILES, variables: match },
+      result: { data: { listMyProfiles: { profiles: [profile('prof-1', 'Aurora Pack 3149')], nextToken: null } } },
+    },
+    {
+      request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match },
+      result: {
+        data: { listCampaignsByProfile: { campaigns: [campaign('camp-1', '2026-27 Summer', 2026)], nextToken: null } },
+      },
+    },
   ]);
 
   await screen.findByLabelText(/Your campaign to join/i);
@@ -98,9 +132,20 @@ it('requires a campaign and join code before submitting', async () => {
 it('surfaces a server error when the join code is rejected', async () => {
   const user = userEvent.setup();
   renderPage([
-    { request: { query: LIST_MY_PROFILES, variables: match }, result: { data: { listMyProfiles: { profiles: [profile('prof-1', 'Aurora Pack 3149')], nextToken: null } } } },
-    { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match }, result: { data: { listCampaignsByProfile: { campaigns: [campaign('camp-1', '2026-27 Summer', 2026)], nextToken: null } } } },
-    { request: { query: JOIN_UNIT_CAMPAIGN, variables: match }, result: { errors: [new GraphQLError('The join code is not valid', { extensions: { errorCode: 'FORBIDDEN' } })] } },
+    {
+      request: { query: LIST_MY_PROFILES, variables: match },
+      result: { data: { listMyProfiles: { profiles: [profile('prof-1', 'Aurora Pack 3149')], nextToken: null } } },
+    },
+    {
+      request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match },
+      result: {
+        data: { listCampaignsByProfile: { campaigns: [campaign('camp-1', '2026-27 Summer', 2026)], nextToken: null } },
+      },
+    },
+    {
+      request: { query: JOIN_UNIT_CAMPAIGN, variables: match },
+      result: { errors: [new GraphQLError('The join code is not valid', { extensions: { errorCode: 'FORBIDDEN' } })] },
+    },
   ]);
 
   await screen.findByLabelText(/Your campaign to join/i);
@@ -113,8 +158,16 @@ it('surfaces a server error when the join code is rejected', async () => {
 
 it('surfaces a campaign-load failure with a Retry and never shows the empty state', async () => {
   renderPage([
-    { request: { query: LIST_MY_PROFILES, variables: match }, result: { data: { listMyProfiles: { profiles: [profile('prof-1', 'Aurora Pack 3149')], nextToken: null } } } },
-    { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match }, result: { errors: [new GraphQLError('The campaigns are unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+    {
+      request: { query: LIST_MY_PROFILES, variables: match },
+      result: { data: { listMyProfiles: { profiles: [profile('prof-1', 'Aurora Pack 3149')], nextToken: null } } },
+    },
+    {
+      request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match },
+      result: {
+        errors: [new GraphQLError('The campaigns are unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })],
+      },
+    },
   ]);
 
   // The campaign load failure surfaces with a Retry, not the "no campaigns" empty state.
