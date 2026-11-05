@@ -18,6 +18,7 @@ import UnitAccessSection from './UnitAccessSection';
 import UnitCampaignsSection from './UnitCampaignsSection';
 import { GET_UNIT } from '../lib/graphql';
 import { getErrorCode } from '../lib/api-utils';
+import { generatedUnitDisplayName } from '../lib/unitForm';
 import type { GqlUnit } from '../types';
 
 const TABS = [
@@ -28,7 +29,8 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]['key'];
 
-const unitTitle = (unit: GqlUnit): string => unit.displayName || 'Unit';
+const unitTitle = (unit: GqlUnit): string =>
+  unit.displayName || generatedUnitDisplayName(unit.unitType, unit.unitNumber, unit.city, unit.state);
 
 const backToUnits = {
   onClick: () => window.history.back(),

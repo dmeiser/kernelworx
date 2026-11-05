@@ -113,3 +113,37 @@ it('sends trimmed city so the stored unit matches the generated-name preview', a
   await waitFor(() => expect(sentVariables.length).toBeGreaterThan(0));
   expect(sentVariables[0].input).toMatchObject({ city: 'Aurora', state: 'CO' });
 });
+
+it('reverts a cleared display name to the generated name', async () => {
+  const user = userEvent.setup();
+  const sentVariables: Array<Record<string, unknown>> = [];
+  renderForm([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: 'Custom Troop' }) } } },
+    {
+      request: { query: UPDATE_UNIT, variables: (v: unknown) => { sentVariables.push(v as Record<string, unknown>); return true; } },
+      result: { data: { updateUnit: unit({ displayName: '', version: 2 }) } },
+    },
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: '', version: 2 }) } } },
+  ]);
+
+  await screen.findByDisplayValue('Custom Troop');
+  fireEvent.change(screen.getByLabelText(/Display name/i), { target: { value: '' } });
+  await user.click(screen.getByRole('button', { name: /Save changes/i }));
+
+  await waitFor(() => expect(sentVariables.length).toBeGreaterThan(0));
+  expect(sentVariables[0].input).toMatchObject({ displayName: '' });
+  expect(await screen.findByText('Pack 3149 - Aurora, CO')).toBeInTheDocument();
+});
+
+it('renders the shared option lists from unitTypes', async () => {
+  renderForm([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } },
+  ]);
+
+  await screen.findByDisplayValue('Aurora');
+  fireEvent.mouseDown(screen.getByLabelText(/Default split/i));
+  expect(await screen.findByRole('option', { name: 'Split by time worked' })).toBeInTheDocument();
+  fireEvent.mouseDown(screen.getByLabelText(/Council-need basis/i));
+  expect(await screen.findByRole('option', { name: 'Physical stock' })).toBeInTheDocument();
+  expect(await screen.findByRole('option', { name: 'After assignments' })).toBeInTheDocument();
+});

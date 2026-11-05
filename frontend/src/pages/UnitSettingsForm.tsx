@@ -17,17 +17,8 @@ import { mapErrorCodeToMessage } from '../lib/errorCodes';
 import { StateAutocomplete } from '../components/StateAutocomplete';
 import { LoadingState } from '../components/LoadingState';
 import { generatedUnitDisplayName, newUnitIdempotencyKey } from '../lib/unitForm';
+import { COUNCIL_BASIS, SPLIT_DEFAULTS } from '../constants/unitTypes';
 import type { GqlCouncilNeedBasis, GqlSplitMethod, GqlUnit } from '../types';
-
-const SPLIT_DEFAULTS: Array<{ value: GqlSplitMethod; label: string }> = [
-  { value: 'EQUAL', label: 'Split equally' },
-  { value: 'TIME_WORKED', label: 'Split by time worked' },
-];
-
-const COUNCIL_BASIS: Array<{ value: GqlCouncilNeedBasis; label: string }> = [
-  { value: 'PHYSICAL_STOCK', label: 'Present on physical stock in the kernel' },
-  { value: 'AFTER_ASSIGNMENTS', label: 'Present after applying assignments' },
-];
 
 interface EditableSettings {
   displayName: string;
@@ -56,12 +47,16 @@ const SettingsLoadError: React.FC<{ error: Error }> = ({ error }) => (
   </Alert>
 );
 
+const freshestUnit = (savedUnit: GqlUnit | null, unit: GqlUnit): GqlUnit => savedUnit ?? unit;
+
 const UnitSettingsFields: React.FC<{ unit: GqlUnit; onSaved?: (unit: GqlUnit) => void }> = ({ unit, onSaved }) => {
   const [settings, setSettings] = useState<EditableSettings>(() => settingsFromUnit(unit));
+  const [savedUnit, setSavedUnit] = useState<GqlUnit | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [updateUnit, { loading: saving }] = useMutation<{ updateUnit: GqlUnit }>(UPDATE_UNIT, {
     refetchQueries: [{ query: GET_UNIT, variables: { unitId: unit.unitId } }],
     onCompleted: (result) => {
+      setSavedUnit(result.updateUnit);
       onSaved?.(result.updateUnit);
     },
     onError: (e) => setSaveError(mapErrorCodeToMessage(getErrorCode(e), getErrorMessage(e))),
@@ -70,7 +65,8 @@ const UnitSettingsFields: React.FC<{ unit: GqlUnit; onSaved?: (unit: GqlUnit) =>
   const setField = <K extends keyof EditableSettings>(key: K, value: EditableSettings[K]) =>
     setSettings((prev) => ({ ...prev, [key]: value }));
 
-  const previewName = previewDisplayName(unit, settings);
+  const viewUnit = freshestUnit(savedUnit, unit);
+  const previewName = previewDisplayName(viewUnit, settings);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,8 +76,8 @@ const UnitSettingsFields: React.FC<{ unit: GqlUnit; onSaved?: (unit: GqlUnit) =>
         variables: {
           input: {
             unitId: unit.unitId,
-            version: { expectedVersion: unit.version },
-            displayName: settings.displayName.trim() || null,
+            version: { expectedVersion: viewUnit.version },
+            displayName: settings.displayName.trim(),
             city: settings.city.trim(),
             state: settings.state.trim(),
             timezone: settings.timezone,
@@ -99,11 +95,11 @@ const UnitSettingsFields: React.FC<{ unit: GqlUnit; onSaved?: (unit: GqlUnit) =>
   return (
     <Box component="form" noValidate onSubmit={(e) => void handleSave(e)}>
       <Typography variant="h6" gutterBottom>
-        {unit.displayName ?? previewName}
+        {viewUnit.displayName || previewName}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        {unit.unitType} {unit.unitNumber} · {unit.city}, {unit.state} · {unit.adminCount} admin
-        {unit.adminCount === 1 ? '' : 's'}
+        {viewUnit.unitType} {viewUnit.unitNumber} · {viewUnit.city}, {viewUnit.state} · {viewUnit.adminCount} admin
+        {viewUnit.adminCount === 1 ? '' : 's'}
       </Typography>
       <Stack spacing={2}>
         {saveError && <Alert severity="error">{saveError}</Alert>}
