@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { GraphQLError } from 'graphql';
 import { vi } from 'vitest';
-import { GET_UNIT, UNIT_ADMINS, UNIT_INVITES, CREATE_UNIT_INVITE, REVOKE_UNIT_ACCESS_GRANT } from '../src/lib/graphql';
+import { GET_UNIT, UNIT_ADMINS, UNIT_INVITES, CREATE_UNIT_INVITE, REVOKE_UNIT_INVITE, REVOKE_UNIT_ACCESS_GRANT } from '../src/lib/graphql';
 import UnitAccessSection from '../src/pages/UnitAccessSection';
 
 vi.mock('../src/contexts/AuthContext', () => ({
@@ -144,4 +144,24 @@ it('surfaces an error when creating an invite fails', async () => {
   await user.click(screen.getByRole('button', { name: /Create invite/i }));
 
   expect(await screen.findByRole('alert')).toBeInTheDocument();
+});
+
+it('revokes an invite after confirmation', async () => {
+  const user = userEvent.setup();
+  renderSection([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
+    { request: { query: UNIT_ADMINS, variables: match }, result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')], pageInfo: PAGE_INFO } } } },
+    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [invite('ABC123')], pageInfo: PAGE_INFO } } } },
+    { request: { query: REVOKE_UNIT_INVITE, variables: match }, result: { data: { revokeUnitInvite: true } } },
+    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } } },
+  ]);
+
+  await screen.findByText('ABC123');
+  await user.click(screen.getByRole('button', { name: 'Revoke' }));
+
+  await screen.findByText('Revoke this invite?');
+  const confirm = within(screen.getByRole('dialog')).getByRole('button', { name: 'Revoke' });
+  await user.click(confirm);
+
+  await waitFor(() => expect(screen.queryByText('Revoke this invite?')).not.toBeInTheDocument());
 });

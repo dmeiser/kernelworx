@@ -133,3 +133,32 @@ it('validates the create form before submitting', async () => {
 
   expect(await screen.findByText(/Enter a campaign name, year, and choose a catalog/i)).toBeInTheDocument();
 });
+
+it('keeps removed roster memberships as history (REMOVED status)', async () => {
+  const user = userEvent.setup();
+  renderSection([
+    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
+    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [membership({ campaignId: 'camp-prev', profileId: 'prof-prev', status: 'REMOVED', removedAt: '2026-11-05T00:00:00+00:00', version: 2 })], pageInfo: PAGE_INFO } } } },
+  ]);
+
+  const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
+  await user.click(row);
+
+  expect(await screen.findByText('Removed')).toBeInTheDocument();
+});
+
+it('fixes the catalog when editing (immutable after creation)', async () => {
+  const user = userEvent.setup();
+  renderSection([
+    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
+    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO } } } },
+  ]);
+
+  const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
+  await user.click(row);
+  await user.click(await screen.findByTestId('edit-campaign-button'));
+
+  expect(await screen.findByTestId('edit-catalog-immutable-note')).toBeInTheDocument();
+});

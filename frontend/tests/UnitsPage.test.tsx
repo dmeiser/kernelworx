@@ -148,3 +148,15 @@ it('confirms before creating a distinct unit on a duplicate (CONFLICT → duplic
   await waitFor(() => expect(screen.queryByText(/Create a distinct Unit\?/i)).not.toBeInTheDocument());
   expect(screen.queryByText(/already exists/i)).not.toBeInTheDocument();
 });
+
+it('surfaces an error and a retry when loading the units fails', async () => {
+  renderPage([
+    {
+      request: { query: MY_UNITS, variables: () => true },
+      result: { errors: [new GraphQLError('The units list is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
+  ]);
+
+  expect(await screen.findByText(/The units list is unavailable\./i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Retry/i })).toBeInTheDocument();
+});
