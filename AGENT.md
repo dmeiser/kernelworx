@@ -207,7 +207,7 @@ Before claiming work is complete:
 ## Architecture Notes
 
 **GraphQL Schema**: Defined in `tofu/application/schema/schema.graphql`
-**DynamoDB Schema**: Eight separate tables (accounts, catalogs, profiles, campaigns, orders, shares, invites, shared_campaigns) with named GSIs; see `tofu/application/modules/dynamodb/main.tf`
+**DynamoDB Schema**: Separate tables (not a single-table design) with named GSIs; see `tofu/application/modules/dynamodb/main.tf` and `docs/SCHEMA.md`
 **Authorization Model**: Owner-based + Share-based (READ/WRITE permissions)
 **Auth Flow**: Cognito User Pools → AppSync → Lambda/VTL/JS resolvers
 
