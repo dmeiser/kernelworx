@@ -201,8 +201,8 @@ it('surfaces create-catalog list failures with a working Retry and never blames 
   expect(within(dialog).getByRole('button', { name: /^Create campaign$/i })).toBeDisabled();
   expect(screen.queryByText(/choose a catalog/i)).not.toBeInTheDocument();
 
-  // Retry re-runs both queries and clears the error.
+  // Retry re-runs both queries; wait for them to settle (loading -> data) so the form re-enables.
   await user.click(screen.getByRole('button', { name: /^Retry$/i }));
-  await waitFor(() => expect(screen.queryByText(/Unable to load the catalogs/i)).not.toBeInTheDocument());
-  expect(within(dialog).getByRole('button', { name: /^Create campaign$/i })).toBeEnabled();
+  await waitFor(() => expect(within(dialog).getByRole('button', { name: /^Create campaign$/i })).toBeEnabled());
+  expect(screen.queryByText(/Unable to load the catalogs/i)).not.toBeInTheDocument();
 });
