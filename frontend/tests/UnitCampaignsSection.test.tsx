@@ -181,3 +181,28 @@ it('surfaces a catalog load failure with a working Retry instead of a silent pla
   await user.click(screen.getByRole('button', { name: 'Retry' }));
   expect(await screen.findByText(/Fall 2026 Show & Sell/i)).toBeInTheDocument();
 });
+
+it('surfaces create-catalog list failures with a working Retry and never blames the user', async () => {
+  const user = userEvent.setup();
+  renderSection([
+    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    // Both catalog list queries fail on the initial load.
+    { request: { query: LIST_MY_CATALOGS, variables: match }, result: { errors: [new GraphQLError('The catalogs are unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+    { request: { query: LIST_MANAGED_CATALOGS, variables: match }, result: { errors: [new GraphQLError('The catalogs are unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+    // Retry recovers both.
+    { request: { query: LIST_MY_CATALOGS, variables: match }, result: { data: { listMyCatalogs: [] } } },
+    { request: { query: LIST_MANAGED_CATALOGS, variables: match }, result: { data: { listManagedCatalogs: [] } } },
+  ]);
+  await user.click(await screen.findByRole('button', { name: /Create campaign/i }));
+  const dialog = await screen.findByRole('dialog');
+
+  // A failed catalog read is an error + Retry, not a silent empty list and not a user-blame on submit.
+  expect(await screen.findByText(/Unable to load the catalogs/i)).toBeInTheDocument();
+  expect(within(dialog).getByRole('button', { name: /^Create campaign$/i })).toBeDisabled();
+  expect(screen.queryByText(/choose a catalog/i)).not.toBeInTheDocument();
+
+  // Retry re-runs both queries and clears the error.
+  await user.click(screen.getByRole('button', { name: /^Retry$/i }));
+  await waitFor(() => expect(screen.queryByText(/Unable to load the catalogs/i)).not.toBeInTheDocument());
+  expect(within(dialog).getByRole('button', { name: /^Create campaign$/i })).toBeEnabled();
+});

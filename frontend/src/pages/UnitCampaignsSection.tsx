@@ -97,18 +97,26 @@ const CreateUnitCampaignDialog: React.FC<{
     onError: (e) => setError(mapErrorCodeToMessage(getErrorCode(e), getErrorMessage(e))),
   });
 
-  const { data: myData, loading: myLoading } = useQuery<{ listMyCatalogs: GqlCatalog[] }>(LIST_MY_CATALOGS, {
-    skip: !open,
-  });
-  const { data: managedData, loading: managedLoading } = useQuery<{ listManagedCatalogs: GqlCatalog[] }>(
-    LIST_MANAGED_CATALOGS,
-    { skip: !open },
-  );
+  const { data: myData, loading: myLoading, error: myError, refetch: myRefetch } = useQuery<{
+    listMyCatalogs: GqlCatalog[];
+  }>(LIST_MY_CATALOGS, { skip: !open });
+  const {
+    data: managedData,
+    loading: managedLoading,
+    error: managedError,
+    refetch: managedRefetch,
+  } = useQuery<{ listManagedCatalogs: GqlCatalog[] }>(LIST_MANAGED_CATALOGS, { skip: !open });
 
   const myCatalogs = selectMyCatalogs(myData);
   const managedCatalogs = selectManagedCatalogs(managedData);
   const filteredPublic = managedCatalogs.filter((c) => !myCatalogs.some((m) => m.catalogId === c.catalogId));
-  const busy = [submitting, myLoading, managedLoading].some(Boolean);
+  const catalogError = Boolean(myError || managedError);
+  const busy = [submitting, myLoading, managedLoading].some(Boolean) || catalogError;
+
+  const retryCatalogs = () => {
+    void myRefetch().catch(() => undefined);
+    void managedRefetch().catch(() => undefined);
+  };
 
   const handleClose = () => {
     if (submitting) return;
@@ -146,6 +154,15 @@ const CreateUnitCampaignDialog: React.FC<{
       <Box component="form" noValidate onSubmit={(e) => void handleSubmit(e)}>
         <DialogContent>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {catalogError && (
+            <Alert
+              severity="error"
+              sx={{ mb: 2 }}
+              action={<Button color="inherit" size="small" onClick={retryCatalogs}>Retry</Button>}
+            >
+              Unable to load the catalogs.
+            </Alert>
+          )}
           <TextField
             fullWidth
             required

@@ -188,3 +188,22 @@ it('surfaces an error and a retry when loading the units fails', async () => {
   expect(await screen.findByText(/The units list is unavailable\./i)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /Retry/i })).toBeInTheDocument();
 });
+
+it('normalizes the unit number in the create preview like the server (007 -> 7)', async () => {
+  const user = userEvent.setup();
+  renderPage([
+    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
+  ]);
+
+  const createButtons = await screen.findAllByRole('button', { name: /^Create Unit$/i });
+  await user.click(createButtons[0]);
+  await screen.findByRole('dialog');
+  fireEvent.mouseDown(screen.getAllByRole('combobox')[0]);
+  await user.click(await screen.findByRole('option', { name: 'Pack' }));
+  fireEvent.change(screen.getByLabelText(/Unit number/i), { target: { value: '007' } });
+  fireEvent.change(screen.getByLabelText(/City/i), { target: { value: 'Aurora' } });
+  fireEvent.change(screen.getByLabelText(/State/i), { target: { value: 'CO' } });
+
+  // The preview composes the number the way the server does (007 -> 7), not the raw string.
+  expect(await screen.findByText(/Pack 7 - Aurora, CO/)).toBeInTheDocument();
+});

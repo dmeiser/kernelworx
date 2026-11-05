@@ -49,7 +49,7 @@ const CampaignPicker: React.FC<{
   selectedCampaignId: string | null;
   onSelect: (campaignId: string) => void;
 }> = ({ profileId, selectedCampaignId, onSelect }) => {
-  const { data, loading } = useQuery<{ listCampaignsByProfile: { campaigns: GqlCampaign[] } }>(
+  const { data, loading, error, refetch } = useQuery<{ listCampaignsByProfile: { campaigns: GqlCampaign[] } }>(
     LIST_CAMPAIGNS_BY_PROFILE,
     { variables: { profileId } },
   );
@@ -59,6 +59,16 @@ const CampaignPicker: React.FC<{
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
         <CircularProgress />
+      </Box>
+    );
+  }
+  if (error) {
+    return (
+      <Box>
+        <ErrorAlert message={error.message || 'Unable to load your campaigns.'} />
+        <Button variant="outlined" sx={{ mt: 1 }} onClick={() => void refetch().catch(() => undefined)}>
+          Retry
+        </Button>
       </Box>
     );
   }

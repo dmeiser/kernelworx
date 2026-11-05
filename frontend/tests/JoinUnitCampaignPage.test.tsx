@@ -110,3 +110,15 @@ it('surfaces a server error when the join code is rejected', async () => {
 
   expect(await screen.findByRole('alert')).toBeInTheDocument();
 });
+
+it('surfaces a campaign-load failure with a Retry and never shows the empty state', async () => {
+  renderPage([
+    { request: { query: LIST_MY_PROFILES, variables: match }, result: { data: { listMyProfiles: { profiles: [profile('prof-1', 'Aurora Pack 3149')], nextToken: null } } } },
+    { request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match }, result: { errors: [new GraphQLError('The campaigns are unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+  ]);
+
+  // The campaign load failure surfaces with a Retry, not the "no campaigns" empty state.
+  expect(await screen.findByRole('button', { name: /Retry/i })).toBeInTheDocument();
+  expect(await screen.findByText(/The campaigns are unavailable\./i)).toBeInTheDocument();
+  expect(screen.queryByText(/This profile has no campaigns yet/i)).not.toBeInTheDocument();
+});

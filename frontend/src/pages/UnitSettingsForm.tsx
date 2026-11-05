@@ -39,7 +39,7 @@ const settingsFromUnit = (unit: GqlUnit): EditableSettings => ({
 });
 
 const previewDisplayName = (unit: GqlUnit, settings: EditableSettings): string =>
-  settings.displayName.trim() || generatedUnitDisplayName(unit.unitType, unit.unitNumber, unit.city, unit.state);
+  settings.displayName.trim() || generatedUnitDisplayName(unit.unitType, unit.unitNumber, settings.city.trim(), settings.state.trim());
 
 const SettingsLoadError: React.FC<{ error: Error }> = ({ error }) => (
   <Alert severity="error" sx={{ my: 2 }}>
@@ -77,7 +77,9 @@ const UnitSettingsFields: React.FC<{ unit: GqlUnit; onSaved?: (unit: GqlUnit) =>
           input: {
             unitId: unit.unitId,
             version: { expectedVersion: viewUnit.version },
-            displayName: settings.displayName.trim(),
+            displayName:
+              settings.displayName.trim() ||
+              generatedUnitDisplayName(unit.unitType, unit.unitNumber, settings.city.trim(), settings.state.trim()),
             city: settings.city.trim(),
             state: settings.state.trim(),
             timezone: settings.timezone,

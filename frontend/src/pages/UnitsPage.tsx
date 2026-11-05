@@ -89,7 +89,7 @@ const validateUnitForm = (form: CreateUnitFormState): string | null => {
 const getCreateUnitPreviewName = (form: CreateUnitFormState): string => {
   const explicit = form.displayName.trim();
   if (explicit) return explicit;
-  return generatedUnitDisplayName(form.unitType, form.unitNumber, form.city, form.state);
+  return generatedUnitDisplayName(form.unitType, Number(form.unitNumber), form.city, form.state);
 };
 
 const unitDisplayName = (unit: GqlUnit): string =>

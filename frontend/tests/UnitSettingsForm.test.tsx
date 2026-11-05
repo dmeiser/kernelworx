@@ -114,16 +114,16 @@ it('sends trimmed city so the stored unit matches the generated-name preview', a
   expect(sentVariables[0].input).toMatchObject({ city: 'Aurora', state: 'CO' });
 });
 
-it('reverts a cleared display name to the generated name', async () => {
+it('reverts a cleared display name to the generated name built from the saved city/state', async () => {
   const user = userEvent.setup();
   const sentVariables: Array<Record<string, unknown>> = [];
   renderForm([
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: 'Custom Troop' }) } } },
     {
       request: { query: UPDATE_UNIT, variables: (v: unknown) => { sentVariables.push(v as Record<string, unknown>); return true; } },
-      result: { data: { updateUnit: unit({ displayName: '', version: 2 }) } },
+      result: { data: { updateUnit: unit({ displayName: 'Pack 3149 - Aurora, CO', version: 2 }) } },
     },
-    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: '', version: 2 }) } } },
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: 'Pack 3149 - Aurora, CO', version: 2 }) } } },
   ]);
 
   await screen.findByDisplayValue('Custom Troop');
@@ -131,8 +131,32 @@ it('reverts a cleared display name to the generated name', async () => {
   await user.click(screen.getByRole('button', { name: /Save changes/i }));
 
   await waitFor(() => expect(sentVariables.length).toBeGreaterThan(0));
-  expect(sentVariables[0].input).toMatchObject({ displayName: '' });
+  // A cleared display name sends the generated name from the saved city/state, not a blank.
+  expect(sentVariables[0].input).toMatchObject({ displayName: 'Pack 3149 - Aurora, CO' });
   expect(await screen.findByText('Pack 3149 - Aurora, CO')).toBeInTheDocument();
+});
+
+it('builds the cleared display name from the changed city, not the old one', async () => {
+  const user = userEvent.setup();
+  const sentVariables: Array<Record<string, unknown>> = [];
+  renderForm([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: 'Custom Troop' }) } } },
+    {
+      request: { query: UPDATE_UNIT, variables: (v: unknown) => { sentVariables.push(v as Record<string, unknown>); return true; } },
+      result: { data: { updateUnit: unit({ displayName: 'Pack 3149 - Denver, CO', version: 2 }) } },
+    },
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: 'Pack 3149 - Denver, CO', version: 2 }) } } },
+  ]);
+
+  await screen.findByDisplayValue('Custom Troop');
+  // Change the city AND clear the display name in the same save.
+  fireEvent.change(screen.getByLabelText(/City/i), { target: { value: 'Denver' } });
+  fireEvent.change(screen.getByLabelText(/Display name/i), { target: { value: '' } });
+  await user.click(screen.getByRole('button', { name: /Save changes/i }));
+
+  await waitFor(() => expect(sentVariables.length).toBeGreaterThan(0));
+  // The generated name is built from the NEW city (Denver), not the old one (Aurora).
+  expect(sentVariables[0].input).toMatchObject({ displayName: 'Pack 3149 - Denver, CO', city: 'Denver' });
 });
 
 it('renders the shared option lists from unitTypes', async () => {
