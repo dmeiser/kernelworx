@@ -1,6 +1,7 @@
 import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
+import { GraphQLError } from 'graphql';
 import { vi } from 'vitest';
 import {
   UNIT_CAMPAIGNS,
@@ -161,4 +162,22 @@ it('fixes the catalog when editing (immutable after creation)', async () => {
   await user.click(await screen.findByTestId('edit-campaign-button'));
 
   expect(await screen.findByTestId('edit-catalog-immutable-note')).toBeInTheDocument();
+});
+
+it('surfaces a catalog load failure with a working Retry instead of a silent placeholder', async () => {
+  const user = userEvent.setup();
+  renderSection([
+    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: { errors: [new GraphQLError('The catalog is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+    { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
+    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO } } } },
+  ]);
+
+  const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
+  await user.click(row);
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(/Unable to load the catalog/i);
+
+  await user.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(await screen.findByText(/Fall 2026 Show & Sell/i)).toBeInTheDocument();
 });

@@ -33,6 +33,7 @@ import {
 import { getErrorCode, getErrorMessage } from '../lib/api-utils';
 import { mapErrorCodeToMessage } from '../lib/errorCodes';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ErrorAlert } from '../components/ErrorAlert';
 import { LoadingState } from '../components/LoadingState';
 import { newUnitIdempotencyKey } from '../lib/unitForm';
 import { useAuth } from '../contexts/AuthContext';
@@ -232,27 +233,54 @@ const RevokeInviteDialog: React.FC<RevokeInviteDialogProps> = ({ target, onConfi
   </ConfirmDialog>
 );
 
+interface AccessQueryGateProps {
+  loading: boolean;
+  loadError: { message?: string } | null | undefined;
+  onRetry: () => Promise<void> | void;
+  children: React.ReactNode;
+}
+
+const AccessQueryGate: React.FC<AccessQueryGateProps> = ({ loading, loadError, onRetry, children }) => {
+  if (loading) return <LoadingState minHeight="200px" />;
+  if (loadError)
+    return (
+      <Box>
+        <ErrorAlert message={loadError.message || 'Unable to load unit access.'} />
+        <Button variant="outlined" onClick={() => void onRetry()}>
+          Retry
+        </Button>
+      </Box>
+    );
+  return <>{children}</>;
+};
+
 const UnitAccessSection: React.FC<{ unitId: string }> = ({ unitId }) => {
   const { account } = useAuth();
   const currentAccountId = account ? account.accountId : null;
 
-  const { data: unitData, loading: unitLoading } = useQuery<{ unit: GqlUnit }>(GET_UNIT, {
+  const unitQuery = useQuery<{ unit: GqlUnit }>(GET_UNIT, {
     variables: { unitId },
   });
-  const { data: adminsData, loading: adminsLoading } = useQuery<{
+  const adminsQuery = useQuery<{
     unitAdmins: { items: GqlUnitAccessGrant[] };
   }>(UNIT_ADMINS, { variables: { unitId } });
-  const { data: invitesData, loading: invitesLoading } = useQuery<{
+  const invitesQuery = useQuery<{
     unitInvites: { items: GqlUnitInvite[] };
   }>(UNIT_INVITES, { variables: { unitId } });
 
   const { unit, admins, invites, isLastAdmin } = selectUnitAccess(
-    unitData,
-    adminsData,
-    invitesData,
+    unitQuery.data,
+    adminsQuery.data,
+    invitesQuery.data,
     currentAccountId,
   );
-  const loading = anyLoading(unitLoading, adminsLoading, invitesLoading);
+  const loading = anyLoading(unitQuery.loading, adminsQuery.loading, invitesQuery.loading);
+  const loadError = unitQuery.error ?? adminsQuery.error ?? invitesQuery.error;
+  const refetchAll = async (): Promise<void> => {
+    await Promise.all([unitQuery.refetch(), adminsQuery.refetch(), invitesQuery.refetch()]).catch(
+      () => undefined,
+    );
+  };
 
   const [revokeAdmin, setRevokeAdmin] = useState<GqlUnitAccessGrant | null>(null);
   const [revokeInvite, setRevokeInvite] = useState<GqlUnitInvite | null>(null);
@@ -339,10 +367,9 @@ const UnitAccessSection: React.FC<{ unitId: string }> = ({ unitId }) => {
     throwIfError(inviteOutcome.current);
   };
 
-  if (loading) return <LoadingState minHeight="200px" />;
-
   return (
-    <Stack spacing={2}>
+    <AccessQueryGate loading={loading} loadError={loadError} onRetry={refetchAll}>
+      <Stack spacing={2}>
       <AdminsCard admins={admins} currentAccountId={currentAccountId} isLastAdmin={isLastAdmin} onRevokeAdmin={setRevokeAdmin} />
       <InvitesCard
         invites={invites}
@@ -353,6 +380,7 @@ const UnitAccessSection: React.FC<{ unitId: string }> = ({ unitId }) => {
       <RevokeAdminDialog target={revokeAdmin} onConfirm={handleConfirmRevokeAdmin} onDismiss={() => setRevokeAdmin(null)} />
       <RevokeInviteDialog target={revokeInvite} onConfirm={handleConfirmRevokeInvite} onDismiss={() => setRevokeInvite(null)} />
     </Stack>
+    </AccessQueryGate>
   );
 };
 

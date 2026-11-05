@@ -129,8 +129,8 @@ export const CreateUnitDialog: React.FC<CreateUnitDialogProps> = ({ open, onClos
   const buildInput = (duplicateConfirmed: boolean, idempotencyKey: string) => ({
     unitType: form.unitType,
     unitNumber: Number(form.unitNumber),
-    city: form.city,
-    state: form.state,
+    city: form.city.trim(),
+    state: form.state.trim(),
     displayName: form.displayName.trim() || null,
     timezone: form.timezone,
     splitDefault: form.splitDefault,

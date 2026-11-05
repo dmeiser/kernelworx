@@ -18,7 +18,7 @@ export const generatedUnitDisplayName = (
   const num = String(unitNumber).trim();
   const cityName = city.trim();
   const stateName = state.trim();
-  return `${type} ${num} - ${cityName}, ${stateName}`.replace(/\s+/g, ' ');
+  return `${type} ${num} - ${cityName}, ${stateName}`;
 };
 
 /**

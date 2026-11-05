@@ -165,3 +165,22 @@ it('revokes an invite after confirmation', async () => {
 
   await waitFor(() => expect(screen.queryByText('Revoke this invite?')).not.toBeInTheDocument());
 });
+
+it('surfaces a query failure as a load error with a working Retry', async () => {
+  const user = userEvent.setup();
+  renderSection([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
+    { request: { query: UNIT_ADMINS, variables: match }, result: { errors: [new GraphQLError('The admins list is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } } },
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
+    { request: { query: UNIT_ADMINS, variables: match }, result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')], pageInfo: PAGE_INFO } } } },
+    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } } },
+  ]);
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(/admins list is unavailable/i);
+  expect(screen.queryByText('Awaiting admin resolution.')).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole('button', { name: 'Retry' }));
+  expect(await screen.findByText('Admins')).toBeInTheDocument();
+  expect(await screen.findByText('self@fixtures.kernelworx.test')).toBeInTheDocument();
+});

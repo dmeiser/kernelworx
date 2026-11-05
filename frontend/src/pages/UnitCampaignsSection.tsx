@@ -326,7 +326,7 @@ const UnitCampaignDetail: React.FC<{
   campaign: GqlUnitCampaignAdmin;
   onEdit: (c: GqlUnitCampaignAdmin) => void;
 }> = ({ campaign, onEdit }) => {
-  const { data: catalogData } = useQuery<{ unitCampaignCatalog: GqlUnitCampaignCatalog }>(
+  const catalogQuery = useQuery<{ unitCampaignCatalog: GqlUnitCampaignCatalog }>(
     UNIT_CAMPAIGN_CATALOG,
     { variables: { unitCampaignId: campaign.unitCampaignId } },
   );
@@ -372,10 +372,27 @@ const UnitCampaignDetail: React.FC<{
     }
   };
 
-  const catalogName = catalogData ? catalogData.unitCampaignCatalog.catalogName : '—';
+  const catalogName = catalogQuery.data ? catalogQuery.data.unitCampaignCatalog.catalogName : '—';
 
   return (
     <CardContent>
+      {catalogQuery.error && (
+        <Alert
+          severity="error"
+          sx={{ mb: 1 }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => void catalogQuery.refetch().catch(() => undefined)}
+            >
+              Retry
+            </Button>
+          }
+        >
+          Unable to load the catalog.
+        </Alert>
+      )}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
         <Typography variant="h6">
           {campaign.campaignName} ({campaign.campaignYear})

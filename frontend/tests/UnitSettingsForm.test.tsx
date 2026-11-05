@@ -94,3 +94,22 @@ it('surfaces a conflict when the save is rejected by optimistic concurrency', as
 
   expect(await screen.findByRole('alert')).toBeInTheDocument();
 });
+
+it('sends trimmed city so the stored unit matches the generated-name preview', async () => {
+  const user = userEvent.setup();
+  const sentVariables: Array<Record<string, unknown>> = [];
+  renderForm([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } },
+    {
+      request: { query: UPDATE_UNIT, variables: (v: unknown) => { sentVariables.push(v as Record<string, unknown>); return true; } },
+      result: { data: { updateUnit: unit({ version: 2 }) } },
+    },
+  ]);
+
+  await screen.findByRole('button', { name: /Save changes/i });
+  fireEvent.change(screen.getByLabelText(/City/i), { target: { value: '  Aurora  ' } });
+  await user.click(screen.getByRole('button', { name: /Save changes/i }));
+
+  await waitFor(() => expect(sentVariables.length).toBeGreaterThan(0));
+  expect(sentVariables[0].input).toMatchObject({ city: 'Aurora', state: 'CO' });
+});

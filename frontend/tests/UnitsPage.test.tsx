@@ -149,6 +149,34 @@ it('confirms before creating a distinct unit on a duplicate (CONFLICT → duplic
   expect(screen.queryByText(/already exists/i)).not.toBeInTheDocument();
 });
 
+it('sends trimmed city and state so the server-composed display name matches the preview', async () => {
+  const user = userEvent.setup();
+  const sentVariables: Array<Record<string, unknown>> = [];
+  renderPage([
+    { request: { query: MY_UNITS, variables: () => true }, result: { data: { myUnits: { __typename: 'UnitConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: CREATE_UNIT, variables: (v: unknown) => { sentVariables.push(v as Record<string, unknown>); return true; } },
+      result: createUnitSuccess('unit-new'),
+    },
+    { request: { query: MY_UNITS, variables: () => true }, result: { data: { myUnits: { __typename: 'UnitConnection', items: [], pageInfo: PAGE_INFO } } } },
+  ]);
+
+  const createButtons = await screen.findAllByRole('button', { name: /^Create Unit$/i });
+  await user.click(createButtons[0]);
+  await screen.findByRole('dialog');
+  fireEvent.mouseDown(screen.getAllByRole('combobox')[0]);
+  await user.click(await screen.findByRole('option', { name: 'Pack' }));
+  fireEvent.change(screen.getByLabelText(/Unit number/i), { target: { value: '3149' } });
+  fireEvent.change(screen.getByLabelText(/City/i), { target: { value: '  Aurora  ' } });
+  fireEvent.change(screen.getByLabelText(/State/i), { target: { value: 'CO' } });
+
+  const dialog = screen.getByRole('dialog');
+  await user.click(within(dialog).getByRole('button', { name: /^Create Unit$/i }));
+
+  await waitFor(() => expect(sentVariables.length).toBeGreaterThan(0));
+  expect(sentVariables[0].input).toMatchObject({ city: 'Aurora', state: 'CO' });
+});
+
 it('surfaces an error and a retry when loading the units fails', async () => {
   renderPage([
     {
