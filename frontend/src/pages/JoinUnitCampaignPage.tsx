@@ -12,6 +12,7 @@ import { useMutation, useQuery } from '@apollo/client/react';
 import { Alert, Box, Button, CircularProgress, MenuItem, Paper, Stack, TextField, Typography } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { LIST_MY_PROFILES, LIST_CAMPAIGNS_BY_PROFILE, JOIN_UNIT_CAMPAIGN } from '../lib/graphql';
+import { toUrlId } from '../lib/ids';
 import { PageHeader } from '../components/PageHeader';
 import { LoadingState } from '../components/LoadingState';
 import { ErrorAlert } from '../components/ErrorAlert';
@@ -94,7 +95,9 @@ const JoinForm: React.FC<{ profiles: GqlSellerProfile[] }> = ({ profiles }) => {
     JOIN_UNIT_CAMPAIGN,
     {
       onCompleted: () => {
-        void navigate(`/scouts/${selectedProfileId}/campaigns`);
+        // profileId is the canonical PROFILE#<uuid>; strip the prefix for the URL path
+        // (a literal # in the path is parsed as a fragment and bounces to the catch-all).
+        void navigate(`/scouts/${toUrlId(selectedProfileId)}/campaigns`);
       },
       onError: (e) => setJoinError(mapErrorCodeToMessage(getErrorCode(e), getErrorMessage(e))),
     },

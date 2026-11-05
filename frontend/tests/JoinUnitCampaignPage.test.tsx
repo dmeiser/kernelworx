@@ -27,15 +27,17 @@ vi.mock('../src/contexts/AuthContext', () => ({
 }));
 
 const match = () => true;
+// The fixtures use the REAL canonical id shape (PROFILE#<id> / CAMPAIGN#<id>), so the
+// post-join route's prefix strip is genuinely exercised (unprefixed fixtures masked it).
 const profile = (profileId: string, sellerName: string) => ({
   __typename: 'SellerProfile',
-  profileId,
+  profileId: `PROFILE#${profileId}`,
   sellerName,
   latestCampaign: null,
 });
 const campaign = (campaignId: string, campaignName: string, campaignYear: number) => ({
   __typename: 'Campaign',
-  campaignId,
+  campaignId: `CAMPAIGN#${campaignId}`,
   campaignName,
   campaignYear,
 });
@@ -104,6 +106,9 @@ it('joins a unit campaign by code and routes to the profile campaigns', async ()
   fireEvent.change(screen.getByLabelText(/Join code/i), { target: { value: 'JOIN-ABC' } });
   await user.click(screen.getByRole('button', { name: /Join/ }));
 
+  // The profileId is the canonical PROFILE#prof-1; the post-join route strips the prefix
+  // to /scouts/prof-1/campaigns (regression: navigating with the raw PROFILE# id parsed
+  // the # as a URL fragment and bounced to the catch-all route).
   await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/scouts/prof-1/campaigns'));
 });
 
@@ -174,4 +179,54 @@ it('surfaces a campaign-load failure with a Retry and never shows the empty stat
   expect(await screen.findByRole('button', { name: /Retry/i })).toBeInTheDocument();
   expect(await screen.findByText(/The campaigns are unavailable\./i)).toBeInTheDocument();
   expect(screen.queryByText(/This profile has no campaigns yet/i)).not.toBeInTheDocument();
+});
+
+it('shows the empty state when the selected profile has no campaigns', async () => {
+  renderPage([
+    {
+      request: { query: LIST_MY_PROFILES, variables: match },
+      result: { data: { listMyProfiles: { profiles: [profile('prof-1', 'Aurora Pack 3149')], nextToken: null } } },
+    },
+    {
+      request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match },
+      result: { data: { listCampaignsByProfile: { campaigns: [], nextToken: null } } },
+    },
+  ]);
+
+  expect(await screen.findByText(/This profile has no campaigns yet/i)).toBeInTheDocument();
+});
+
+it('switches the profile and resets the selected campaign', async () => {
+  const user = userEvent.setup();
+  renderPage([
+    {
+      request: { query: LIST_MY_PROFILES, variables: match },
+      result: {
+        data: {
+          listMyProfiles: {
+            profiles: [profile('prof-1', 'Aurora Pack 3149'), profile('prof-2', 'Denver Crew 7')],
+            nextToken: null,
+          },
+        },
+      },
+    },
+    {
+      request: { query: LIST_CAMPAIGNS_BY_PROFILE, variables: match },
+      result: {
+        data: { listCampaignsByProfile: { campaigns: [campaign('camp-1', '2026-27 Summer', 2026)], nextToken: null } },
+      },
+    },
+  ]);
+
+  await screen.findByLabelText(/Your campaign to join/i);
+  await selectCampaign(user, '2026-27 Summer');
+  // Selecting a campaign enables the join-code field.
+  expect(screen.getByLabelText(/Join code/i)).toBeEnabled();
+
+  // Switch the profile — handleProfileChange resets the selected campaign.
+  fireEvent.mouseDown(screen.getByLabelText(/Your profile/i));
+  await user.click(await screen.findByRole('option', { name: /Denver Crew 7/i }));
+
+  // The selected campaign was reset, so the join-code field is disabled again.
+  await waitFor(() => expect(screen.getByLabelText(/Join code/i)).toBeDisabled());
 });

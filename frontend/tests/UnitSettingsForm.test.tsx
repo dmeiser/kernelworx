@@ -18,7 +18,7 @@ vi.mock('../src/contexts/AuthContext', () => ({
   }),
 }));
 
-const UNIT_ID = 'unit-1';
+const UNIT_ID = 'UNIT#unit-1';
 const unit = (over: Record<string, unknown> = {}) => ({
   __typename: 'Unit',
   unitId: UNIT_ID,
@@ -190,6 +190,34 @@ it('builds the cleared display name from the changed city, not the old one', asy
   expect(sentVariables[0].input).toMatchObject({ displayName: 'Pack 3149 - Denver, CO', city: 'Denver' });
 });
 
+it('blocks the save when the city is cleared (city presence validation, R4-02 regression)', async () => {
+  const user = userEvent.setup();
+  const sentVariables: Array<Record<string, unknown>> = [];
+  renderForm([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } },
+    {
+      request: {
+        query: UPDATE_UNIT,
+        variables: (v: unknown) => {
+          sentVariables.push(v as Record<string, unknown>);
+          return true;
+        },
+      },
+      result: { data: { updateUnit: unit({ version: 2 }) } },
+    },
+  ]);
+
+  await screen.findByRole('button', { name: /Save changes/i });
+  // Clearing the city would compose the display name from a blank city
+  // ('Pack 3149 - , CO'), which the backend persists verbatim — so the save must be
+  // blocked by presence validation, and no mutation must be sent.
+  fireEvent.change(screen.getByLabelText(/City/i), { target: { value: '' } });
+  await user.click(screen.getByRole('button', { name: /Save changes/i }));
+
+  expect(await screen.findByText(/Enter the city\./i)).toBeInTheDocument();
+  expect(sentVariables.length).toBe(0);
+});
+
 it('renders the shared option lists from unitTypes', async () => {
   renderForm([{ request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } }]);
 
@@ -199,4 +227,31 @@ it('renders the shared option lists from unitTypes', async () => {
   fireEvent.mouseDown(screen.getByLabelText(/Council-need basis/i));
   expect(await screen.findByRole('option', { name: 'Physical stock' })).toBeInTheDocument();
   expect(await screen.findByRole('option', { name: 'After assignments' })).toBeInTheDocument();
+});
+
+it('surfaces a load failure with the error message', async () => {
+  renderForm([
+    {
+      request: { query: GET_UNIT, variables: match },
+      result: { errors: [new GraphQLError('The unit is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
+  ]);
+  expect(await screen.findByText(/The unit is unavailable\./i)).toBeInTheDocument();
+});
+
+it('updates the timezone, default split, and council-need basis on interaction', async () => {
+  const user = userEvent.setup();
+  renderForm([{ request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } }]);
+  await screen.findByDisplayValue('Aurora');
+
+  fireEvent.change(screen.getByLabelText(/Timezone/i), { target: { value: 'America/Chicago' } });
+  expect(screen.getByDisplayValue('America/Chicago')).toBeInTheDocument();
+
+  fireEvent.mouseDown(screen.getByLabelText(/Default split/i));
+  await user.click(await screen.findByRole('option', { name: 'Split by time worked' }));
+  expect(screen.getByDisplayValue('TIME_WORKED')).toBeInTheDocument();
+
+  fireEvent.mouseDown(screen.getByLabelText(/Council-need basis/i));
+  await user.click(await screen.findByRole('option', { name: 'After assignments' }));
+  expect(screen.getByDisplayValue('AFTER_ASSIGNMENTS')).toBeInTheDocument();
 });

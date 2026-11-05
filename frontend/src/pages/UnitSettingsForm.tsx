@@ -42,6 +42,19 @@ const previewDisplayName = (unit: GqlUnit, settings: EditableSettings): string =
   settings.displayName.trim() ||
   generatedUnitDisplayName(unit.unitType, unit.unitNumber, settings.city.trim(), settings.state.trim());
 
+// Presence validation, mirroring the sibling create dialog (UnitsPage FIELD_VALIDATORS):
+// the display name is composed from city/state, so a blank city/state must not be saved
+// (the backend does not validate city/state on updateUnit and would persist a blank name).
+const FIELD_VALIDATORS: Array<{ message: string; empty: (settings: EditableSettings) => boolean }> = [
+  { message: 'Enter the city.', empty: (settings) => !settings.city.trim() },
+  { message: 'Enter the state.', empty: (settings) => !settings.state.trim() },
+];
+
+const validateSettings = (settings: EditableSettings): string | null => {
+  const missing = FIELD_VALIDATORS.find((entry) => entry.empty(settings));
+  return missing ? missing.message : null;
+};
+
 const SettingsLoadError: React.FC<{ error: Error }> = ({ error }) => (
   <Alert severity="error" sx={{ my: 2 }}>
     {error.message || 'Unable to load this unit.'}
@@ -72,6 +85,11 @@ const UnitSettingsFields: React.FC<{ unit: GqlUnit; onSaved?: (unit: GqlUnit) =>
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaveError(null);
+    const validationError = validateSettings(settings);
+    if (validationError) {
+      setSaveError(validationError);
+      return;
+    }
     try {
       await updateUnit({
         variables: {

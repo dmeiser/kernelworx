@@ -332,3 +332,80 @@ it('surfaces a query failure as a load error with a working Retry', async () => 
   expect(await screen.findByText('Admins')).toBeInTheDocument();
   expect(await screen.findByText('self@fixtures.kernelworx.test')).toBeInTheDocument();
 });
+
+it('keeps the admin dialog open and surfaces the error when the removal fails', async () => {
+  const user = userEvent.setup();
+  renderSection([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [
+              admin('self', 'self@fixtures.kernelworx.test', 'Self'),
+              admin('other', 'other@fixtures.kernelworx.test', 'Taylor'),
+            ],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
+    {
+      request: { query: REVOKE_UNIT_ACCESS_GRANT, variables: match },
+      result: { errors: [new GraphQLError('The removal failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
+  ]);
+
+  const removeButtons = await screen.findAllByRole('button', { name: 'Remove' });
+  await user.click(removeButtons[1]);
+  await screen.findByText('Remove this admin?');
+  const confirm = within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' });
+  await user.click(confirm);
+
+  expect(await screen.findByText(/An internal error occurred/i)).toBeInTheDocument();
+  expect(screen.getByText('Remove this admin?')).toBeInTheDocument();
+});
+
+it('keeps the invite dialog open and surfaces the error when the revocation fails', async () => {
+  const user = userEvent.setup();
+  renderSection([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 2 }) } } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: {
+        data: { unitInvites: { __typename: 'UnitInviteConnection', items: [invite('ABC123')], pageInfo: PAGE_INFO } },
+      },
+    },
+    {
+      request: { query: REVOKE_UNIT_INVITE, variables: match },
+      result: { errors: [new GraphQLError('The invite could not be revoked.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
+  ]);
+
+  await screen.findByText('ABC123');
+  await user.click(screen.getByRole('button', { name: 'Revoke' }));
+  await screen.findByText('Revoke this invite?');
+  const confirm = within(screen.getByRole('dialog')).getByRole('button', { name: 'Revoke' });
+  await user.click(confirm);
+
+  expect(await screen.findByText(/An internal error occurred/i)).toBeInTheDocument();
+  expect(screen.getByText('Revoke this invite?')).toBeInTheDocument();
+});
