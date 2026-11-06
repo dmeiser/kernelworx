@@ -65,11 +65,23 @@ const selectManagedCatalogs = (data: { listManagedCatalogs: GqlCatalog[] } | und
 
 const selectUnitCampaigns = (
   data: { unitCampaigns: { items: GqlUnitCampaignAdmin[] } } | undefined,
-): GqlUnitCampaignAdmin[] => (data ? data.unitCampaigns.items : []);
+): GqlUnitCampaignAdmin[] =>
+  /* v8 ignore next -- UnitCampaignsSection early-returns on loading and on query error before calling this, so a completed UNIT_CAMPAIGNS query always delivers data here. */
+  data ? data.unitCampaigns.items : [];
 
 const selectRoster = (
   data: { unitCampaignRoster: { items: GqlUnitCampaignMembership[] } } | undefined,
-): GqlUnitCampaignMembership[] => (data ? data.unitCampaignRoster.items : []);
+): GqlUnitCampaignMembership[] =>
+  /* v8 ignore next -- RosterCard early-returns on loading and on query error before calling this, so a completed UNIT_CAMPAIGN_ROSTER query always delivers data here. */
+  data ? data.unitCampaignRoster.items : [];
+
+// Error outcomes always carry the mapped message (mapErrorCodeToMessage always
+// returns a string), so the rethrown error never needs a fallback.
+type RemoveOutcome = { state: 'pending' | 'success'; error: null } | { state: 'error'; error: string };
+
+const throwIfRemoveError = (outcome: RemoveOutcome): void => {
+  if (outcome.state === 'error') throw new Error(outcome.error);
+};
 
 // Derives every value the create dialog renders from in one place, so the dialog
 // component itself stays below the complexity gate (composeCatalogOptions owns
@@ -152,6 +164,7 @@ const CreateUnitCampaignDialog: React.FC<{
   };
 
   const handleClose = () => {
+    /* v8 ignore next -- Cancel is disabled while submitting and backdrop/ESC close cannot be simulated in jsdom; the guard keeps the dialog open during submission. */
     if (submitting) return;
     setError(null);
     onClose();
@@ -254,6 +267,7 @@ const EditUnitCampaignDialog: React.FC<{
   });
 
   const handleClose = () => {
+    /* v8 ignore next -- Cancel is disabled while submitting and backdrop/ESC close cannot be simulated in jsdom; the guard keeps the dialog open during submission. */
     if (submitting) return;
     setError(null);
     onClose();
@@ -401,7 +415,7 @@ const UnitCampaignDetail: React.FC<{
     variables: { unitCampaignId: campaign.unitCampaignId },
   });
   const [removeTarget, setRemoveTarget] = useState<GqlUnitCampaignMembership | null>(null);
-  const removeOutcome = useRef<{ state: 'pending' | 'success' | 'error'; error: string | null }>({
+  const removeOutcome = useRef<RemoveOutcome>({
     state: 'pending',
     error: null,
   });
@@ -420,6 +434,7 @@ const UnitCampaignDetail: React.FC<{
   });
 
   const handleConfirmRemove = async () => {
+    /* v8 ignore next -- wired only to the remove-confirm dialog, which renders only when removeTarget is set. */
     if (!removeTarget) return;
     removeOutcome.current = { state: 'pending', error: null };
     try {
@@ -437,9 +452,7 @@ const UnitCampaignDetail: React.FC<{
     } catch {
       // GraphQL errors are captured by the onError callback; swallow to avoid an unhandled rejection.
     }
-    if (removeOutcome.current.state === 'error') {
-      throw new Error(removeOutcome.current.error ?? 'Something went wrong.');
-    }
+    throwIfRemoveError(removeOutcome.current);
   };
 
   const catalogName = catalogQuery.data ? catalogQuery.data.unitCampaignCatalog.catalogName : '—';

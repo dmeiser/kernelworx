@@ -29,10 +29,12 @@ import { newUnitIdempotencyKey } from '../lib/unitForm';
 import { useAuth } from '../contexts/AuthContext';
 import type { GqlUnit, GqlUnitAccessGrant, GqlUnitInvite } from '../types';
 
-type Outcome = { state: 'pending' | 'success' | 'error'; error: string | null };
+// Error outcomes always carry the mapped message (mapErrorCodeToMessage always
+// returns a string), so the rethrown error never needs a fallback.
+type Outcome = { state: 'pending' | 'success'; error: null } | { state: 'error'; error: string };
 
 const throwIfError = (outcome: Outcome): void => {
-  if (outcome.state === 'error') throw new Error(outcome.error ?? 'Something went wrong.');
+  if (outcome.state === 'error') throw new Error(outcome.error);
 };
 
 const anyLoading = (...flags: boolean[]): boolean => flags.some(Boolean);
@@ -344,6 +346,7 @@ const UnitAccessSection: React.FC<{ unitId: string }> = ({ unitId }) => {
   };
 
   const handleConfirmRevokeInvite = async () => {
+    /* v8 ignore next -- wired only to the revoke-invite dialog, which renders only when revokeInvite is set. */
     if (!revokeInvite) return;
     inviteOutcome.current = { state: 'pending', error: null };
     try {

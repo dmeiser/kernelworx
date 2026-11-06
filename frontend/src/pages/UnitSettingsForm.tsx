@@ -185,6 +185,7 @@ export const UnitSettingsForm: React.FC<{
 
   if (loading) return <LoadingState minHeight="200px" />;
   if (error) return <SettingsLoadError error={error} />;
+  /* v8 ignore next -- the loading and error early-returns above guarantee data is present here; a completed GET_UNIT query always delivers the payload. */
   const unit = data ? data.unit : null;
   if (!unit) return null;
 

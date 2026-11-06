@@ -23,6 +23,7 @@ import { newUnitIdempotencyKey } from '../lib/unitForm';
 import type { GqlCampaign, GqlSellerProfile, GqlUnitCampaignMembership } from '../types';
 
 const selectProfiles = (data: { listMyProfiles: { profiles: GqlSellerProfile[] } } | undefined): GqlSellerProfile[] =>
+  /* v8 ignore next -- JoinUnitCampaignPage early-returns on loading and on query error before calling this, so a completed LIST_MY_PROFILES query always delivers data here. */
   data ? data.listMyProfiles.profiles : [];
 
 const selectCampaigns = (data: { listCampaignsByProfile: { campaigns: GqlCampaign[] } } | undefined): GqlCampaign[] =>

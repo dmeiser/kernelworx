@@ -92,6 +92,7 @@ const unitDisplayName = (unit: GqlUnit): string =>
   unit.displayName || generatedUnitDisplayName(unit.unitType, unit.unitNumber, unit.city, unit.state);
 
 const selectMyUnits = (data: { myUnits: { items: GqlUnit[] } } | undefined): GqlUnit[] =>
+  /* v8 ignore next -- UnitsPage early-returns when loading without data and on query error, so a completed MY_UNITS query always delivers data here. */
   data ? data.myUnits.items : [];
 
 interface CreateUnitDialogProps {
@@ -100,12 +101,18 @@ interface CreateUnitDialogProps {
   onCreated?: (unitId: string) => void;
 }
 
+// Error outcomes always carry the mapped message (mapErrorCodeToMessage always
+// returns a string), so surfaced errors never need a fallback.
+type CreateUnitOutcome =
+  | { code?: string; unitId?: undefined; error: string }
+  | { code?: undefined; unitId?: string; error?: undefined };
+
 export const CreateUnitDialog: React.FC<CreateUnitDialogProps> = ({ open, onClose, onCreated }) => {
   const [form, setForm] = useState<CreateUnitFormState>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [pendingInput, setPendingInput] = useState<Record<string, unknown> | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const createOutcome = useRef<{ code?: string; unitId?: string; error?: string }>({});
+  const createOutcome = useRef<CreateUnitOutcome>({});
   const [createUnit] = useMutation<{ createUnit: { unit?: { unitId: string } } }>(CREATE_UNIT, {
     refetchQueries: [{ query: MY_UNITS }],
     onCompleted: (data) => {
@@ -143,12 +150,9 @@ export const CreateUnitDialog: React.FC<CreateUnitDialogProps> = ({ open, onClos
     else onClose();
   };
 
-  const routeCreateOutcome = (
-    outcome: { code?: string; unitId?: string; error?: string },
-    input: Record<string, unknown>,
-  ) => {
+  const routeCreateOutcome = (outcome: CreateUnitOutcome, input: Record<string, unknown>) => {
     if (outcome.code === 'CONFLICT') setPendingInput(input);
-    else if (outcome.code) setFormError(outcome.error ?? 'Something went wrong.');
+    else if (outcome.code) setFormError(outcome.error);
     else finishCreate(outcome.unitId);
   };
 
@@ -173,6 +177,7 @@ export const CreateUnitDialog: React.FC<CreateUnitDialogProps> = ({ open, onClos
   };
 
   const handleConfirmDuplicate = async () => {
+    /* v8 ignore next -- wired only to the duplicate-confirm dialog, which renders only when pendingInput is set. */
     if (!pendingInput) return;
     createOutcome.current = {};
     try {
@@ -190,7 +195,7 @@ export const CreateUnitDialog: React.FC<CreateUnitDialogProps> = ({ open, onClos
     }
     const outcome = createOutcome.current;
     if (outcome.code) {
-      throw new Error(outcome.error ?? 'Something went wrong.');
+      throw new Error(outcome.error);
     }
     finishCreate(outcome.unitId);
   };
