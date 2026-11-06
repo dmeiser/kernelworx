@@ -51,6 +51,14 @@ function renderForm(mocks: unknown[], onSave?: (u: unknown) => void) {
   );
 }
 
+it('renders nothing when the unit query returns no unit', async () => {
+  const { container } = renderForm([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: null } } },
+  ]);
+
+  await waitFor(() => expect(container.firstChild).toBeNull());
+});
+
 it('renders the unit settings from the unit', async () => {
   renderForm([{ request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit() } } }]);
 

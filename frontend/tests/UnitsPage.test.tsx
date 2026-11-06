@@ -5,7 +5,7 @@ import { GraphQLError } from 'graphql';
 import { BrowserRouter } from 'react-router-dom';
 import { vi, beforeEach } from 'vitest';
 import { MY_UNITS, CREATE_UNIT, REDEEM_UNIT_INVITE } from '../src/lib/graphql';
-import UnitsPage from '../src/pages/UnitsPage';
+import UnitsPage, { CreateUnitDialog } from '../src/pages/UnitsPage';
 
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -196,6 +196,27 @@ it('offers a discoverable entry to the participant join flow beside the invite c
 
   const joinLink = await screen.findByRole('link', { name: /Join unit campaign/i });
   expect(joinLink).toHaveAttribute('href', '/join-unit-campaign');
+});
+
+it('closes the standalone CreateUnitDialog via onClose when no onCreated handler is given', async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  render(
+    <MockedProvider
+      mocks={[
+        { request: { query: CREATE_UNIT, variables: () => true }, result: createUnitSuccess('unit-solo') },
+        { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
+      ] as never}
+      defaultOptions={{ watchQuery: { fetchPolicy: 'no-cache' } }}
+    >
+      <CreateUnitDialog open onClose={onClose} />
+    </MockedProvider>,
+  );
+
+  await fillCreateUnitForm(user);
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^Create Unit$/i }));
+
+  await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
 });
 
 it('surfaces an error and a retry when loading the units fails', async () => {

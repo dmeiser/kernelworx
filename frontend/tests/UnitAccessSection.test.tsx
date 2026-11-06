@@ -13,9 +13,17 @@ import {
 } from '../src/lib/graphql';
 import UnitAccessSection from '../src/pages/UnitAccessSection';
 
+const mockAuth = vi.hoisted(() => {
+  const defaultAccount = { accountId: 'self', email: 'self@fixtures.kernelworx.test', givenName: 'Self' };
+  return {
+    defaultAccount,
+    account: defaultAccount as { accountId: string; email: string; givenName: string } | null,
+  };
+});
+
 vi.mock('../src/contexts/AuthContext', () => ({
   useAuth: () => ({
-    account: { accountId: 'self', email: 'self@fixtures.kernelworx.test', givenName: 'Self' },
+    account: mockAuth.account,
     loading: false,
     isAuthenticated: true,
     isAdmin: false,
@@ -74,6 +82,54 @@ function renderSection(mocks: unknown[]) {
 }
 
 const match = () => true;
+
+it('shows the awaiting-admin-resolution state when the unit has no admins yet', async () => {
+  renderSection([
+    { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 0 }) } } },
+    {
+      request: { query: UNIT_ADMINS, variables: match },
+      result: {
+        data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [], pageInfo: PAGE_INFO } },
+      },
+    },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
+  ]);
+
+  expect(await screen.findByText('Awaiting admin resolution.')).toBeInTheDocument();
+});
+
+it('renders the section while the account record is unavailable (token-authenticated, account still loading)', async () => {
+  mockAuth.account = null;
+  try {
+    renderSection([
+      { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 1 }) } } },
+      {
+        request: { query: UNIT_ADMINS, variables: match },
+        result: {
+          data: {
+            unitAdmins: {
+              __typename: 'UnitAccessGrantConnection',
+              items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')],
+              pageInfo: PAGE_INFO,
+            },
+          },
+        },
+      },
+      {
+        request: { query: UNIT_INVITES, variables: match },
+        result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } },
+      },
+    ]);
+
+    expect(await screen.findByText('Admins')).toBeInTheDocument();
+    expect(screen.getByText('Invites')).toBeInTheDocument();
+  } finally {
+    mockAuth.account = mockAuth.defaultAccount;
+  }
+});
 
 it('renders the unit admins and pending invites', async () => {
   renderSection([
