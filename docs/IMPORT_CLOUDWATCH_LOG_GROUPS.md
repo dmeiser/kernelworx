@@ -80,6 +80,8 @@ If your OpenTofu/Terraform version supports declarative imports, a single `tofu 
 The current app function keys are:
 
 - `list-catalogs-in-use`
+- `unit-operations`
+- `unit-campaign-operations`
 - `request-report`
 - `unit-reporting`
 - `list-unit-catalogs`
@@ -110,7 +112,7 @@ prefix="kernelworx"
 region_abbrev="ue1"
 environment="prod"   # change to "dev" as needed
 
-for key in list-catalogs-in-use request-report unit-reporting \
+for key in list-catalogs-in-use unit-operations unit-campaign-operations request-report unit-reporting \
            list-unit-catalogs list-unit-campaign-catalogs \
            delete-campaign-orders delete-profile-cascade delete-account \
            transfer-ownership request-qr-upload confirm-qr-upload \
