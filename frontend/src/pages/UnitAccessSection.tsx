@@ -231,7 +231,7 @@ const RevokeInviteDialog: React.FC<RevokeInviteDialogProps> = ({ target, onConfi
 
 interface AccessQueryGateProps {
   loading: boolean;
-  loadError: { message?: string } | null | undefined;
+  loadError: { message: string } | null | undefined;
   onRetry: () => Promise<void> | void;
   children: React.ReactNode;
 }
@@ -241,7 +241,7 @@ const AccessQueryGate: React.FC<AccessQueryGateProps> = ({ loading, loadError, o
   if (loadError)
     return (
       <Box>
-        <ErrorAlert message={loadError.message || 'Unable to load unit access.'} />
+        <ErrorAlert message={loadError.message} />
         <Button variant="outlined" onClick={() => void onRetry()}>
           Retry
         </Button>

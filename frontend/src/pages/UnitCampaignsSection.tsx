@@ -516,7 +516,7 @@ const UnitCampaignDetail: React.FC<{
 
 const CampaignsLoadError: React.FC<{ error: Error; onRetry: () => void }> = ({ error, onRetry }) => (
   <Box>
-    <ErrorAlert message={error.message || 'Unable to load campaigns.'} />
+    <ErrorAlert message={error.message} />
     <Button variant="outlined" onClick={() => void onRetry()}>
       Retry
     </Button>

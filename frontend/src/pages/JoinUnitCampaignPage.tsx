@@ -38,7 +38,7 @@ const Shell: React.FC<{ children: React.ReactNode; subtitle?: string }> = ({ chi
 
 const CampaignLoadError: React.FC<{ error: Error; onRetry: () => void }> = ({ error, onRetry }) => (
   <Box>
-    <ErrorAlert message={error.message || 'Unable to load your campaigns.'} />
+    <ErrorAlert message={error.message} />
     <Button variant="outlined" sx={{ mt: 1 }} onClick={() => void onRetry()}>
       Retry
     </Button>
@@ -193,7 +193,7 @@ const JoinUnitCampaignPage: React.FC = () => {
   if (error) {
     return (
       <Shell>
-        <ErrorAlert message={error.message || 'Unable to load your profiles.'} />
+        <ErrorAlert message={error.message} />
       </Shell>
     );
   }

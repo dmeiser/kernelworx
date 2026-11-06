@@ -57,7 +57,7 @@ const validateSettings = (settings: EditableSettings): string | null => {
 
 const SettingsLoadError: React.FC<{ error: Error }> = ({ error }) => (
   <Alert severity="error" sx={{ my: 2 }}>
-    {error.message || 'Unable to load this unit.'}
+    {error.message}
   </Alert>
 );
 

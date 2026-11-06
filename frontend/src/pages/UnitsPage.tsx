@@ -316,9 +316,9 @@ export const CreateUnitDialog: React.FC<CreateUnitDialogProps> = ({ open, onClos
   );
 };
 
-const UnitsLoadError: React.FC<{ message?: string; onRetry: () => void }> = ({ message, onRetry }) => (
+const UnitsLoadError: React.FC<{ message: string; onRetry: () => void }> = ({ message, onRetry }) => (
   <Box>
-    <ErrorAlert message={message || 'Unable to load your units.'} />
+    <ErrorAlert message={message} />
     <Button variant="outlined" onClick={() => void onRetry()}>
       Retry
     </Button>
