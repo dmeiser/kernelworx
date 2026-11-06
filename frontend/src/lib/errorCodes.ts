@@ -21,9 +21,7 @@ export interface GraphQLErrorExtensions {
 /**
  * Extract an error code from GraphQL error extensions.
  */
-export const extractErrorCode = (
-  extensions: GraphQLErrorExtensions | undefined,
-): string | undefined => {
+export const extractErrorCode = (extensions: GraphQLErrorExtensions | undefined): string | undefined => {
   if (!extensions) {
     return undefined;
   }

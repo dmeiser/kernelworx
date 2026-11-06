@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - 'fm/KW-SS-S1-*'
 
 permissions:
   contents: read

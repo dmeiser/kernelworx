@@ -21,6 +21,7 @@ import {
 import MenuIcon from '@mui/icons-material/Menu';
 import HomeIcon from '@mui/icons-material/Home';
 import PersonIcon from '@mui/icons-material/Person';
+import Groups2Icon from '@mui/icons-material/Groups2';
 import SettingsIcon from '@mui/icons-material/Settings';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import InventoryIcon from '@mui/icons-material/Inventory';
@@ -122,6 +123,12 @@ const DrawerContent: React.FC<{
           <PersonIcon />
         </ListItemIcon>
         <ListItemText primary="My Scouts" />
+      </ListItemButton>
+      <ListItemButton onClick={() => onNavigate('/units')} selected={isActive('/units')} sx={navItemSx}>
+        <ListItemIcon>
+          <Groups2Icon />
+        </ListItemIcon>
+        <ListItemText primary="Units" />
       </ListItemButton>
       <ListItemButton onClick={() => onNavigate('/catalogs')} selected={isActive('/catalogs')} sx={navItemSx}>
         <ListItemIcon>

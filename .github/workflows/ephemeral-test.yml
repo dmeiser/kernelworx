@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - 'fm/KW-SS-S1-*'
   schedule:
     # Nightly sweep for leaked pr-* environments (06:17 UTC).
     - cron: "17 6 * * *"

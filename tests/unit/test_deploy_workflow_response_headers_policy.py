@@ -24,7 +24,7 @@ def _step_run_script() -> str:
 
 def test_get_response_headers_policy_aborts_safely():
     run = _step_run_script()
-    assert 'get-response-headers-policy' in run
+    assert "get-response-headers-policy" in run
     assert "2>aws_err.txt || true" in run, (
         "get-response-headers-policy command substitution must be guarded with "
         "'|| true' so a non-zero exit (NoSuchResponseHeadersPolicy) does not "

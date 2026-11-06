@@ -3,7 +3,6 @@
  */
 import { toUrlId } from './ids';
 
-
 /**
  * Root-relative receipt path: exactly `/r/<campaignId>/<orderSuffix>/<receiptToken>`.
  *

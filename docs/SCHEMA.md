@@ -14,8 +14,15 @@ graph LR
     F["🔗 SHARES<br/>PK: profileId + targetAccountId<br/>GSI: targetAccountId"]
     G["🎫 INVITES<br/>PK: inviteCode<br/>GSI: profileId<br/>TTL: expiresAt"]
     H["🔄 SHARED_CAMPAIGNS<br/>PK: sharedCampaignCode<br/>GSI: createdBy+createdAt, unitCampaignKey, catalogId-index"]
+    I["⏰ PUBLIC_ORDER_THROTTLES<br/>PK: key<br/>TTL: expiresAt"]
+    J["🏫 UNITS<br/>PK: pk + sk<br/>GSI: accountId-unitId-index, unitId-createdAt-index, metadataKey-createdAt-index<br/>TTL: expiresAtEpoch"]
+    K["📅 UNIT_CAMPAIGNS<br/>PK: pk + sk<br/>GSI: unitId-createdAt-index, campaignId-index, profileId-unitCampaignId-index, catalogId-index<br/>TTL: expiresAtEpoch (idempotency markers)"]
     
     B -->|created by| A
+    A -->|creates| J
+    J -->|hosts| K
+    H -->|share-token orders throttled by| I
+    J -->|invite redemptions throttled by| I
     C -->|in| B
     D -->|in| C
     C -->|uses| E
@@ -197,6 +204,80 @@ Global Secondary Indexes:
 | description | String | Template description |
 | unitCampaignKey | String | GSI2 - Unit lookup |
 
+### public_order_throttles
+Primary Key: `key` (String) — shape depends on the counter contract (below)
+TTL: `expiresAt` (epoch seconds)
+Global Secondary Indexes: none
+
+One abuse-guard table carrying two INDEPENDENT counter contracts with different
+key shapes and windows; they never mix (data model §6.6):
+
+- Public-order share-token write throttle: key `<shareToken>#<windowStartEpoch>`,
+  one small item per (share token, 60-second window), atomically `ADD`ed by the
+  `publicCreateOrder` throttle step. Reads are GetItem-free (a blind UpdateItem
+  keyed by construction).
+- Unit-invite redemption throttle: key
+  `UNIT_INVITE_REDEMPTION#<accountId>#WINDOW#<yyyy-MM-ddTHH>`, one item per
+  (account, UTC hour), with `windowStart` / `attempts` attributes. Only FAILED
+  redemption attempts increment the counter; attempt 11 in one UTC hour is
+  rejected with `RATE_LIMIT_EXCEEDED`. A valid redemption, or a valid retry of
+  an already-completed idempotent request, does not increment the counter.
+
+TTL is load-bearing only for storage reclamation — the window lives in the key,
+so an expired item is never read.
+
+### units
+Primary Key: `pk` + `sk` (Composite)
+Global Secondary Indexes:
+- `accountId-unitId-index` (accountId + unitId) - grants for "my Units" discovery
+- `unitId-createdAt-index` (unitId + createdAt) - invites for Unit administration; sparse on non-invite items. It is NOT invite-only: any unit-scoped item carrying both attributes projects (data model §6.1)
+- `metadataKey-createdAt-index` (metadataKey + createdAt) - possible-duplicate lookup only; `metadataKey` is never unique and never authorizes anything
+
+TTL: `expiresAtEpoch` (epoch seconds)
+
+| PK prefix / SK | Item class |
+|-----------|---------|
+| `UNIT#<unitId>` / `METADATA` | The Unit itself |
+| `UNIT#<unitId>` / `GRANT#<accountId>` | UnitAccessGrant |
+| `UNIT#<unitId>` / `PAYMENT#<normalizedName>` | UnitPaymentMethod (Stage 4 write path) |
+| `INVITE#<inviteCode>` / `UNIT#<unitId>` | UnitInvite |
+| `IDEM#<actorId>#<operationType>#<scope>` / `IDEM#<idempotencyKey>` | idempotency marker |
+
+The TTL attribute serves two item classes with DIFFERENT horizons and must not be
+confused: a UnitInvite carries its own expiry (max 14 days out), while an idempotency
+marker carries the common seven-day marker horizon. Application-side expiry checks
+remain load-bearing — DynamoDB TTL only reclaims storage and can lag. Direct grant
+authorization and invite redemption use strongly consistent base-table reads (PK/SK
+constructed from the credential or the id), never a GSI; the GSIs only serve
+list/discovery pages.
+
+### unit_campaigns
+Primary Key: `pk` + `sk` (Composite)
+Global Secondary Indexes:
+- `unitId-createdAt-index` (unitId + createdAt) - Unit Campaign list
+- `campaignId-index` (campaignId) - membership lookup by Scout Campaign
+- `profileId-unitCampaignId-index` (profileId + unitCampaignId) - membership/commitment discovery
+- `catalogId-index` (catalogId) - catalog-usage guard: a catalog referenced by any Unit Campaign is in use and cannot be soft-deleted as unused; never used for authorization
+
+| PK prefix / SK | Item class |
+|-----------|---------|
+| `UNIT_CAMPAIGN#<unitCampaignId>` / `METADATA` | The Unit Campaign itself |
+| `UNIT_CAMPAIGN#<unitCampaignId>` / `MEMBERSHIP#<profileId>` | UnitCampaignMembership |
+| `PROFILE#<profileId>` / `COMMITMENT_GUARD` and `COMMITMENT#<startAt>#<unitCampaignId>#<slotId>` | Scout commitment guard and projection (Stage 3) |
+| `JOIN_CODE#<joinCode>` / `UNIT_CAMPAIGN#<unitCampaignId>` | join-code pointer |
+| `SCOUT_CAMPAIGN#<campaignId>` / `MEMBERSHIP_GUARD` | ScoutCampaignMembershipGuard |
+| `UNIT_CAMPAIGN#<unitCampaignId>#SCOUT_CAMPAIGN#<campaignId>` / `SHOW_AND_SELL_TOTAL` | Show-and-Sell totals (Stage 5) |
+| `IDEM#<actorId>#<operationType>#<scope>` / `IDEM#<idempotencyKey>` | idempotency marker (join now, sales later; §8.9) |
+
+TTL: `expiresAtEpoch` (epoch seconds) — campaign-scoped idempotency markers (join
+now, sales later; data model §8.9) share the units table's marker TTL attribute
+and horizon convention. The join-code pointer, the membership guard, and the
+membership row are all resolved to their base-table key and then read with a
+strongly consistent base-table read; a GSI query (`campaignId-index`) is used
+only as a locator — to map a Scout campaign to the membership row when the caller
+knows the campaign but not the profile — and never carries an authorization or
+write decision on its own (#438/#545 posture).
+
 ## Query Flows
 
 ### Get User's Profiles
@@ -298,6 +379,9 @@ graph TD
         F["SHARE<br/>PK: profileId + targetAccountId"]
         G["INVITE<br/>PK: inviteCode"]
         H["SHARED_CAMPAIGN<br/>PK: sharedCampaignCode"]
+        I["PUBLIC_ORDER_THROTTLE<br/>PK: key"]
+        J["UNIT<br/>PK: pk + sk"]
+        K["UNIT_CAMPAIGN<br/>PK: pk + sk"]
     end
     
     subgraph "Global Secondary Indexes"
@@ -309,6 +393,9 @@ graph TD
         F1["SHARE<br/>GSI: targetAccountId"]
         G1["INVITE<br/>GSI: profileId"]
         H1["SHARED_CAMPAIGN<br/>GSI1: createdBy+createdAt<br/>GSI2: unitCampaignKey<br/>GSI3: catalogId-index"]
+        I1["PUBLIC_ORDER_THROTTLE<br/>GSI: none"]
+        J1["UNIT<br/>GSI: accountId+unitId<br/>GSI: unitId+createdAt<br/>GSI: metadataKey+createdAt"]
+        K1["UNIT_CAMPAIGN<br/>GSI: unitId+createdAt<br/>GSI: campaignId<br/>GSI: profileId+unitCampaignId<br/>GSI: catalogId"]
     end
     
     A --> A1
@@ -319,6 +406,9 @@ graph TD
     F --> F1
     G --> G1
     H --> H1
+    I --> I1
+    J --> J1
+    K --> K1
 ```
 
 ## Permission Model

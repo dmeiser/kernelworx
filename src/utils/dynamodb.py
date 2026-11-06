@@ -18,6 +18,7 @@ from .pagination import BASE_BACKOFF_SECONDS, MAX_RETRY_ATTEMPTS
 
 if TYPE_CHECKING:
     from mypy_boto3_dynamodb import DynamoDBServiceResource
+    from mypy_boto3_dynamodb.client import DynamoDBClient
     from mypy_boto3_dynamodb.service_resource import Table
 
 
@@ -67,6 +68,9 @@ _table_overrides: dict[str, Optional["Table"]] = {}
 # Module-level cache for the DynamoDB service resource
 _dynamodb_resource: Optional["DynamoDBServiceResource"] = None
 
+# Module-level cache for the plain client (wire-form operations)
+_dynamodb_client: Optional["DynamoDBClient"] = None
+
 
 def get_required_env(name: str, default: Optional[str] = None) -> str:
     """Get a required environment variable.
@@ -96,6 +100,22 @@ def _get_dynamodb() -> "DynamoDBServiceResource":
     if _dynamodb_resource is None:
         _dynamodb_resource = boto3.resource("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
     return _dynamodb_resource
+
+
+def get_dynamodb_client() -> "DynamoDBClient":
+    """A plain (non-resource) DynamoDB client for wire-form operations.
+
+    ``TransactWriteItems`` payloads and the idempotency-marker items are built in
+    DynamoDB wire form, so they need a client that passes AttributeValues through
+    untouched. Do NOT reuse ``_get_dynamodb().meta.client`` for that: boto3's
+    DynamoDB *service resource* attaches its type serializer to that client, so
+    a wire-form value handed to it is re-encoded and arrives as a map
+    (`ValidationException: Type mismatch for key pk expected: S actual: M`).
+    """
+    global _dynamodb_client
+    if _dynamodb_client is None:
+        _dynamodb_client = boto3.client("dynamodb", endpoint_url=os.getenv("DYNAMODB_ENDPOINT"))
+    return _dynamodb_client
 
 
 def get_dynamodb_resource() -> "DynamoDBServiceResource":
@@ -265,6 +285,26 @@ class TableAccessor:
         """Get shared campaigns table instance."""
         return self._get_table("shared_campaigns")
 
+    @property
+    def units(self) -> "Table":
+        """Get Units table instance (Show & Sell Stage 1)."""
+        return self._get_table("units")
+
+    @property
+    def unit_campaigns(self) -> "Table":
+        """Get Unit Campaigns table instance (Show & Sell Stage 1)."""
+        return self._get_table("unit_campaigns")
+
+    @property
+    def public_order_throttles(self) -> "Table":
+        """Get public order throttles table instance.
+
+        One table carries two independent counter contracts: the public-order
+        share-token window and the Unit-invite redemption window (data model
+        §6.6). Key prefixes keep them apart; access is scoped per handler.
+        """
+        return self._get_table("public_order_throttles")
+
 
 # Singleton instance for import
 tables = TableAccessor()
@@ -292,6 +332,11 @@ def reset_singleton() -> None:
 
 
 def reset_dynamodb_resource() -> None:
-    """Reset the cached DynamoDB resource (for testing isolation)."""
-    global _dynamodb_resource
+    """Reset the cached DynamoDB resource and client (for testing isolation).
+
+    Both caches reset together because every test fixture resets through this one
+    function; a stale client would outlive the moto server it was built against.
+    """
+    global _dynamodb_resource, _dynamodb_client
     _dynamodb_resource = None
+    _dynamodb_client = None

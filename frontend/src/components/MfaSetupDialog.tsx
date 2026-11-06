@@ -16,17 +16,9 @@ import {
   Paper,
   Stack,
 } from '@mui/material';
-import {
-  setUpTOTP,
-  verifyTOTPSetup,
-  updateMFAPreference,
-} from 'aws-amplify/auth';
+import { setUpTOTP, verifyTOTPSetup, updateMFAPreference } from 'aws-amplify/auth';
 import QRCode from 'qrcode';
-import {
-  checkIsFederatedSession,
-  attemptSignOut,
-  handleSignOutAndRedirect,
-} from '../lib/authUtils';
+import { checkIsFederatedSession, attemptSignOut, handleSignOutAndRedirect } from '../lib/authUtils';
 
 export interface MfaSetupDialogProps {
   open: boolean;
@@ -92,7 +84,9 @@ const FederatedNoticeView: React.FC = () => (
       <strong>Administrator Security Policy:</strong> Admin operations require Multi-Factor Authentication (MFA).
     </Alert>
     <Typography variant="body1" color="text.secondary" paragraph>
-      This account signs in through a social provider which cannot present MFA. Administrator functions require signing in with an email and password with Multi-Factor Authentication (MFA) enabled. Please sign out and sign in with your password.
+      This account signs in through a social provider which cannot present MFA. Administrator functions require signing
+      in with an email and password with Multi-Factor Authentication (MFA) enabled. Please sign out and sign in with
+      your password.
     </Typography>
   </Box>
 );
@@ -254,11 +248,7 @@ const NativeDialogActions: React.FC<{
     <Button onClick={onClose} disabled={verifying}>
       Cancel
     </Button>
-    <Button
-      onClick={onVerify}
-      variant="contained"
-      disabled={verifying || loading || codeLength !== 6}
-    >
+    <Button onClick={onVerify} variant="contained" disabled={verifying || loading || codeLength !== 6}>
       {verifying ? <CircularProgress size={24} /> : 'Verify & Enable'}
     </Button>
   </DialogActions>

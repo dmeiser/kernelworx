@@ -492,7 +492,6 @@ export const ScoutsPage: React.FC = () => {
         onClose={() => setCreateDialogOpen(false)}
         onSubmit={handleCreateProfile}
       />
-
     </Box>
   );
   /* v8 ignore stop */

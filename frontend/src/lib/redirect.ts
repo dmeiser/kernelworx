@@ -46,4 +46,3 @@ export function resolveRedirectFromState(state: unknown): string | undefined {
   if (typeof fromValue === 'string') return fromValue;
   return resolvePathFromObject(fromValue);
 }
-

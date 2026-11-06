@@ -51,14 +51,9 @@ export const AmrTripwireBanner: React.FC = () => {
   }
 
   return (
-    <Alert
-      severity="error"
-      variant="filled"
-      onClose={handleDismiss}
-      sx={{ mb: 3 }}
-      data-testid="amr-tripwire-banner"
-    >
-      Cognito token behavior changed: a native amr claim appeared in your token. Report this to operations — the MFA claim injection may be retireable.
+    <Alert severity="error" variant="filled" onClose={handleDismiss} sx={{ mb: 3 }} data-testid="amr-tripwire-banner">
+      Cognito token behavior changed: a native amr claim appeared in your token. Report this to operations — the MFA
+      claim injection may be retireable.
     </Alert>
   );
 };

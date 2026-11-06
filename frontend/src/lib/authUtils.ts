@@ -95,7 +95,6 @@ export async function handleSignOutAndRedirect(): Promise<void> {
   }
 }
 
-
 /**
  * Shared password policy regex.
  *

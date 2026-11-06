@@ -147,6 +147,10 @@ export type GqlCampaign = {
   totalOrders?: Maybe<Scalars['Int']['output']>;
   /** The sum of totalAmount across this campaign's orders. */
   totalRevenue?: Maybe<Scalars['Float']['output']>;
+  /** The Unit Campaign this campaign is joined to, or null for an independent campaign. Set atomically by joinUnitCampaign; removal does not clear it (history retention). */
+  unitCampaignId?: Maybe<Scalars['ID']['output']>;
+  /** The Unit this campaign is joined to, or null for an independent campaign. Set atomically by joinUnitCampaign; removal does not clear it (history retention). */
+  unitId?: Maybe<Scalars['ID']['output']>;
   /** The scout unit number; set together with city and state when unitType is provided. */
   unitNumber?: Maybe<Scalars['Int']['output']>;
   /** The scout unit type, if the campaign is scoped to a unit. */
@@ -221,6 +225,13 @@ export type GqlCatalogType =
   | 'ADMIN_MANAGED'
   /** A catalog created by a regular user for use in their own campaigns. */
   | 'USER_CREATED';
+
+/** Primary presentation basis for a unit's needs report. */
+export type GqlCouncilNeedBasis =
+  /** Present after applying assignments. */
+  | 'AFTER_ASSIGNMENTS'
+  /** Present on physical stock held in the kernel. */
+  | 'PHYSICAL_STOCK';
 
 /**
  * Input for createCampaign. Creates a new active campaign on a profile.
@@ -328,6 +339,77 @@ export type GqlCreateSharedCampaignInput = {
   unitType: Scalars['String']['input'];
 };
 
+/** Input for createUnitCampaign. The catalog must exist and be usable by the campaign. */
+export type GqlCreateUnitCampaignInput = {
+  /** The sales-season name. */
+  campaignName: Scalars['String']['input'];
+  /** The sales year. */
+  campaignYear: Scalars['Int']['input'];
+  /** The existing catalog used by this campaign. */
+  catalogId: Scalars['ID']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The parent Unit. */
+  unitId: Scalars['ID']['input'];
+};
+
+/** Input for createUnit. The caller becomes the initial Unit Admin; an exact metadata match requires duplicateConfirmed. */
+export type GqlCreateUnitInput = {
+  /** Geographic discriminator: the city. */
+  city: Scalars['String']['input'];
+  /** Primary presentation basis for the unit's needs report. */
+  councilNeedBasis?: InputMaybe<GqlCouncilNeedBasis>;
+  /** Optional display name; generated from the metadata when omitted. */
+  displayName?: InputMaybe<Scalars['String']['input']>;
+  /** Set true to confirm an exact unitType/unitNumber/city/state duplicate. */
+  duplicateConfirmed?: InputMaybe<Scalars['Boolean']['input']>;
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Unit-wide default split method for new events. */
+  splitDefault?: InputMaybe<GqlSplitMethod>;
+  /** Geographic discriminator: the state. */
+  state: Scalars['String']['input'];
+  /** Timezone for display and calendar generation. */
+  timezone: Scalars['String']['input'];
+  /** The scout unit number. */
+  unitNumber: Scalars['Int']['input'];
+  /** The scout unit type, for example Pack or Troop. */
+  unitType: Scalars['String']['input'];
+};
+
+/** Input for createUnitInvite. Generates a 16-character, 14-day, single-use invite. */
+export type GqlCreateUnitInviteInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The Unit to generate an invite for. */
+  unitId: Scalars['ID']['input'];
+};
+
+/** The result of createUnit: the new Unit and the creator's initial admin grant. */
+export type GqlCreateUnitPayload = {
+  __typename?: 'CreateUnitPayload';
+  /** The creator's initial Unit Admin grant. */
+  grant: GqlUnitAccessGrant;
+  /** The newly created Unit. */
+  unit: GqlUnit;
+};
+
+/** Idempotency for a mutation: a client key scoped to the caller, operation, and resource. */
+export type GqlIdempotencyInput = {
+  /** Client-supplied idempotency key (1-128 trimmed characters). */
+  idempotencyKey: Scalars['String']['input'];
+};
+
+/** Input for joinUnitCampaign. The caller must have Owner or WRITE on the campaign's Scout. */
+export type GqlJoinUnitCampaignInput = {
+  /** The caller's Scout Campaign (must match the roster identity). */
+  campaignId: Scalars['ID']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The campaign join code. */
+  joinCode: Scalars['String']['input'];
+};
+
 /** A single product line within an order. */
 export type GqlLineItem = {
   __typename?: 'LineItem';
@@ -350,6 +432,13 @@ export type GqlLineItemInput = {
   /** The quantity to order (at least 1). */
   quantity: Scalars['Int']['input'];
 };
+
+/** Membership status on a Unit Campaign roster. */
+export type GqlMembershipStatus =
+  /** Active roster member; may sign up for events. */
+  | 'ACTIVE'
+  /** Removed from the roster; blocks new signups, preserves history. */
+  | 'REMOVED';
 
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation = {
@@ -388,6 +477,12 @@ export type GqlMutation = {
   createSellerProfile: GqlSellerProfile;
   /** Create a shared campaign so other units can find and clone it. Returns the created shared campaign. */
   createSharedCampaign: GqlSharedCampaign;
+  /** Create a unit; the caller becomes its initial Unit Admin. Returns the Unit and the creator grant. */
+  createUnit: GqlCreateUnitPayload;
+  /** Create a Unit Campaign. Unit Admin for the parent Unit. */
+  createUnitCampaign: GqlUnitCampaignAdmin;
+  /** Generate a 16-character, 14-day, single-use unit admin invite. Unit Admin for that Unit. */
+  createUnitInvite: GqlUnitInvite;
   /** Delete a campaign and all of its orders, on a profile the caller has write access to. Returns true on success. */
   deleteCampaign: Scalars['Boolean']['output'];
   /** Soft-delete a catalog the caller owns (it is hidden from list queries but kept for reference). Returns true on success. */
@@ -406,14 +501,24 @@ export type GqlMutation = {
   deleteSellerProfile: Scalars['Boolean']['output'];
   /** Delete a shared campaign the caller created. Returns true on success. */
   deleteSharedCampaign: Scalars['Boolean']['output'];
+  /** Join a Unit Campaign with a join code. Any authenticated account with Owner or WRITE on the Scout. */
+  joinUnitCampaign: GqlUnitCampaignMembership;
   /** Place a public order on a campaign whose share token is in the request. Returns the buyer's receipt. A never-enabled campaign, a disabled campaign, and a bad token all return NOT_FOUND so probing cannot distinguish them; a campaign at its order cap returns PUBLIC_ORDER_LIMIT_EXCEEDED. */
   publicCreateOrder: GqlPublicOrderReceipt;
   /** Redeem an invite code to grant the caller access to a profile. Returns the created share. */
   redeemProfileInvite: GqlShare;
+  /** Redeem a single-use, unexpired invite to become a Unit Admin. Any authenticated account. */
+  redeemUnitInvite: GqlUnitAccessGrant;
+  /** Remove a Scout from a Unit Campaign roster (sets REMOVED). Unit Admin for the parent Unit. */
+  removeUnitCampaignMembership: GqlUnitCampaignMembership;
   /** Get pre-signed S3 credentials to upload a QR code for one of the caller's payment methods. */
   requestPaymentMethodQRCodeUpload: GqlS3UploadInfo;
   /** Remove a share's access to a profile the caller owns. Returns true on success. */
   revokeShare: Scalars['Boolean']['output'];
+  /** Revoke a Unit Admin grant; the last grant returns CONFLICT. Unit Admin for that Unit. */
+  revokeUnitAccessGrant: GqlUnit;
+  /** Revoke an unused unit invite. Unit Admin for that Unit. */
+  revokeUnitInvite: Scalars['Boolean']['output'];
   /** Share a profile the caller owns directly with another account by email. Returns the created share. */
   shareProfileDirect: GqlShare;
   /** Transfer a profile's ownership to an account that already has a share (the caller must be the owner or an admin). Returns the updated profile. */
@@ -436,6 +541,10 @@ export type GqlMutation = {
   updateSellerProfile: GqlSellerProfile;
   /** Update a shared campaign the caller created. Only provided fields change. Returns the updated shared campaign. */
   updateSharedCampaign: GqlSharedCampaign;
+  /** Update a unit's metadata and settings. Unit Admin for that Unit. */
+  updateUnit: GqlUnit;
+  /** Update a Unit Campaign's name, year, and active state. Unit Admin for the parent Unit. */
+  updateUnitCampaign: GqlUnitCampaignAdmin;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -528,6 +637,21 @@ export type GqlMutation_CreateSharedCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateUnitArgs = {
+  input: GqlCreateUnitInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateUnitCampaignArgs = {
+  input: GqlCreateUnitCampaignInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateUnitInviteArgs = {
+  input: GqlCreateUnitInviteInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_DeleteCampaignArgs = {
   campaignId: Scalars['ID']['input'];
 };
@@ -569,6 +693,11 @@ export type GqlMutation_DeleteSharedCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_JoinUnitCampaignArgs = {
+  input: GqlJoinUnitCampaignInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_PublicCreateOrderArgs = {
   input: GqlPublicCreateOrderInput;
 };
@@ -579,6 +708,16 @@ export type GqlMutation_RedeemProfileInviteArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RedeemUnitInviteArgs = {
+  input: GqlRedeemUnitInviteInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RemoveUnitCampaignMembershipArgs = {
+  input: GqlRemoveUnitCampaignMembershipInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_RequestPaymentMethodQrCodeUploadArgs = {
   paymentMethodName: Scalars['String']['input'];
 };
@@ -586,6 +725,16 @@ export type GqlMutation_RequestPaymentMethodQrCodeUploadArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_RevokeShareArgs = {
   input: GqlRevokeShareInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RevokeUnitAccessGrantArgs = {
+  input: GqlRevokeUnitAccessGrantInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RevokeUnitInviteArgs = {
+  input: GqlRevokeUnitInviteInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -645,6 +794,16 @@ export type GqlMutation_UpdateSharedCampaignArgs = {
   input: GqlUpdateSharedCampaignInput;
 };
 
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateUnitArgs = {
+  input: GqlUpdateUnitInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateUnitCampaignArgs = {
+  input: GqlUpdateUnitCampaignInput;
+};
+
 /** A customer order placed in a campaign. */
 export type GqlOrder = {
   __typename?: 'Order';
@@ -678,6 +837,10 @@ export type GqlOrder = {
   status?: Maybe<GqlOrderStatus>;
   /** The order's total amount (the sum of the line-item subtotals). */
   totalAmount: Scalars['Float']['output'];
+  /** The Unit Campaign the campaign was joined to when this order was created; null for an independent campaign. Captured immutably at order creation (API-FIX-05). */
+  unitCampaignId?: Maybe<Scalars['ID']['output']>;
+  /** The Unit the campaign was joined to when this order was created; null for an independent campaign. Captured immutably at order creation (API-FIX-05). */
+  unitId?: Maybe<Scalars['ID']['output']>;
   /** When the order was last updated. */
   updatedAt: Scalars['AWSDateTime']['output'];
 };
@@ -697,6 +860,23 @@ export type GqlOrderStatus =
   | 'CONFIRMED'
   /** Created, awaiting the seller's off-platform payment verification. */
   | 'NEW';
+
+/** Server-issued cursor state for one page of a Show & Sell connection. */
+export type GqlPageInfo = {
+  __typename?: 'PageInfo';
+  /** Opaque cursor to pass back as `page.cursor` to fetch the next page, or null when no results remain. */
+  endCursor?: Maybe<Scalars['String']['output']>;
+  /** True while more results remain after this page. */
+  hasNextPage: Scalars['Boolean']['output'];
+};
+
+/** Pagination parameters for a list resolver: a limit (default 50, max 100) and an opaque cursor. */
+export type GqlPageInput = {
+  /** Opaque cursor from a previous page; omit to start from the first page. */
+  cursor?: InputMaybe<Scalars['String']['input']>;
+  /** Maximum number of items to return in the page (1-100). Defaults to 50. */
+  limit?: InputMaybe<Scalars['Int']['input']>;
+};
 
 /**
  * A named payment method a seller can assign to orders.
@@ -944,12 +1124,30 @@ export type GqlQuery = {
   listSharesByProfile: Array<GqlShare>;
   /** The payment methods available to the caller: the caller's stored custom methods plus the built-in "Cash" and "Check" methods, sorted by name. */
   myPaymentMethods: Array<GqlPaymentMethod>;
+  /** The Units on which the caller holds a Unit Admin grant. No cross-Unit data. */
+  myUnits: GqlUnitConnection;
   /** The payment methods stored for a profile's owner. The caller must have access to the profile; READ-only callers see the method names but not their QR codes (qrCodeUrl is null). */
   paymentMethodsForProfile: Array<GqlPaymentMethod>;
   /** Fetch the public order page's offer: seller, campaign, catalog products, and allowed payment methods. A campaign that never enabled public orders, is disabled, or carries a token mismatch all return the same NOT_FOUND, so probing cannot distinguish them. */
   publicGetOrderOffer: GqlPublicOrderOffer;
   /** Fetch the buyer's receipt for a public order. Served to an API-key caller; the receipt token in the URL is the authorization. An unknown campaign/suffix, an absent or mismatched token, and a token that does not match the order all return the same NOT_FOUND. */
   publicGetOrderReceipt: GqlPublicOrderReceiptLookup;
+  /** The unit's settings and admin count. Unit Admin for that Unit. */
+  unit?: Maybe<GqlUnit>;
+  /** The unit's admin grants; account email/name limited to administration needs. Unit Admin. */
+  unitAdmins: GqlUnitAccessGrantConnection;
+  /** The campaign's join code and settings. Unit Admin for the parent Unit. */
+  unitCampaign?: Maybe<GqlUnitCampaignAdmin>;
+  /** The campaign's catalog and product inputs for browser sales sheets. Unit Admin for the parent Unit. */
+  unitCampaignCatalog?: Maybe<GqlUnitCampaignCatalog>;
+  /** The member-safe preview of a campaign from its join code; any authenticated account. No inventory, roster, or grant data. */
+  unitCampaignJoinInfo?: Maybe<GqlUnitCampaignJoinPreview>;
+  /** A Unit Campaign's roster, including removed history. Unit Admin for the parent Unit. */
+  unitCampaignRoster: GqlUnitCampaignMembershipConnection;
+  /** A Unit's campaigns. Unit Admin for the parent Unit. */
+  unitCampaigns: GqlUnitCampaignConnection;
+  /** The unit's active, unused invites; the code is returned only for them. Unit Admin. */
+  unitInvites: GqlUnitInviteConnection;
 };
 
 /** The root query object for the KernelWorx API. */
@@ -1070,6 +1268,11 @@ export type GqlQuery_ListSharesByProfileArgs = {
 };
 
 /** The root query object for the KernelWorx API. */
+export type GqlQuery_MyUnitsArgs = {
+  page?: InputMaybe<GqlPageInput>;
+};
+
+/** The root query object for the KernelWorx API. */
 export type GqlQuery_PaymentMethodsForProfileArgs = {
   profileId: Scalars['ID']['input'];
 };
@@ -1087,10 +1290,78 @@ export type GqlQuery_PublicGetOrderReceiptArgs = {
   receiptToken: Scalars['String']['input'];
 };
 
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitArgs = {
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitAdminsArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignArgs = {
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignCatalogArgs = {
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignJoinInfoArgs = {
+  joinCode: Scalars['String']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignRosterArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  status?: InputMaybe<GqlMembershipStatus>;
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignsArgs = {
+  isActive?: InputMaybe<Scalars['Boolean']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitInvitesArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  unitId: Scalars['ID']['input'];
+};
+
 /** Input for redeemProfileInvite. Redeems an invite code to gain access to a profile. */
 export type GqlRedeemProfileInviteInput = {
   /** The invite code to redeem. */
   inviteCode: Scalars['ID']['input'];
+};
+
+/** Input for redeemUnitInvite. Redeems a single-use, unexpired invite to grant Unit Admin. */
+export type GqlRedeemUnitInviteInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The invite code to redeem. */
+  inviteCode: Scalars['String']['input'];
+};
+
+/** Input for removeUnitCampaignMembership. Sets the roster status to REMOVED; blocks new signups only. */
+export type GqlRemoveUnitCampaignMembershipInput = {
+  /** The Scout Campaign to remove from the roster. */
+  campaignId: Scalars['ID']['input'];
+  /** The ScoutCampaignMembershipGuard version the caller last read (optimistic concurrency). */
+  expectedGuardVersion: Scalars['Int']['input'];
+  /** The membership version the caller last read (optimistic concurrency). */
+  expectedMembershipVersion: Scalars['Int']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The Unit Campaign the membership is on. */
+  unitCampaignId: Scalars['ID']['input'];
 };
 
 /** Input for revokeShare. Removes a share's access to a profile (owner only). */
@@ -1099,6 +1370,28 @@ export type GqlRevokeShareInput = {
   profileId: Scalars['ID']['input'];
   /** The ID of the account whose access should be revoked. */
   targetAccountId: Scalars['ID']['input'];
+};
+
+/** Input for revokeUnitAccessGrant. Revokes a Unit Admin grant; the last grant returns CONFLICT. */
+export type GqlRevokeUnitAccessGrantInput = {
+  /** The account whose grant is revoked. */
+  accountId: Scalars['ID']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The Unit the grant is on. */
+  unitId: Scalars['ID']['input'];
+  /** The Unit version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
+};
+
+/** Input for revokeUnitInvite. Revokes an unused invite. */
+export type GqlRevokeUnitInviteInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The invite code to revoke. */
+  inviteCode: Scalars['String']['input'];
+  /** The Unit the invite belongs to. */
+  unitId: Scalars['ID']['input'];
 };
 
 /** Credentials for uploading a file directly to S3 via a pre-signed POST request. */
@@ -1252,12 +1545,213 @@ export type GqlSharedProfile = {
   updatedAt: Scalars['AWSDateTime']['output'];
 };
 
+/** How event earnings are split between participants. */
+export type GqlSplitMethod =
+  /** Split equally among eligible participants. */
+  | 'EQUAL'
+  /** Split in proportion to confirmed work minutes. */
+  | 'TIME_WORKED';
+
 /** Input for transferProfileOwnership. Transfers a profile's ownership to an account that already has a share. */
 export type GqlTransferProfileOwnershipInput = {
   /** The ID of the account to become the new owner; it must already hold a share on the profile. */
   newOwnerAccountId: Scalars['ID']['input'];
   /** The ID of the profile to transfer (the caller must be the owner or an admin). */
   profileId: Scalars['ID']['input'];
+};
+
+/** A scout unit: a type/number/city/state identity plus its settings and authoritative admin count. */
+export type GqlUnit = {
+  __typename?: 'Unit';
+  /** Authoritative count of access grants; always at least 1. */
+  adminCount: Scalars['Int']['output'];
+  /** Geographic discriminator: the city. */
+  city: Scalars['String']['output'];
+  /** Primary presentation basis for the unit's needs report. */
+  councilNeedBasis: GqlCouncilNeedBasis;
+  /** When the unit was created. */
+  createdAt: Scalars['AWSDateTime']['output'];
+  /** The account that created the unit and is its initial Unit Admin. */
+  createdByAccountId: Scalars['ID']['output'];
+  /** Display name; generated from the metadata when the caller omits it. */
+  displayName?: Maybe<Scalars['String']['output']>;
+  /** Normalized unitType#unitNumber#city#state key used for duplicate lookup only; never grants access. */
+  metadataKey?: Maybe<Scalars['String']['output']>;
+  /** Unit-wide default split method for new events. */
+  splitDefault: GqlSplitMethod;
+  /** Geographic discriminator: the state. */
+  state: Scalars['String']['output'];
+  /** Timezone for display and calendar generation. */
+  timezone: Scalars['String']['output'];
+  /** The unit's stable ID; never derived from metadata. */
+  unitId: Scalars['ID']['output'];
+  /** The scout unit number (a display value; not globally unique). */
+  unitNumber: Scalars['Int']['output'];
+  /** The scout unit type, for example Pack or Troop. */
+  unitType: Scalars['String']['output'];
+  /** When the unit was last updated. */
+  updatedAt: Scalars['AWSDateTime']['output'];
+  /** Optimistic-concurrency version protecting grant and settings mutations. */
+  version: Scalars['Int']['output'];
+};
+
+/** A Unit administrator's access grant to a Unit, with the account's identity limited to what administration needs. */
+export type GqlUnitAccessGrant = {
+  __typename?: 'UnitAccessGrant';
+  /** The granted account's ID. */
+  accountId: Scalars['ID']['output'];
+  /** When the grant started; no automatic expiry. */
+  createdAt: Scalars['AWSDateTime']['output'];
+  /** The Unit Admin (or creator) who created the grant. */
+  createdByAccountId: Scalars['ID']['output'];
+  /** The granted account's email, limited to administration needs. */
+  email?: Maybe<Scalars['String']['output']>;
+  /** The granted account's display name, limited to administration needs. */
+  name?: Maybe<Scalars['String']['output']>;
+  /** The stored role; only UNIT_ADMIN exists. */
+  role: GqlUnitRole;
+  /** The Unit this grant is on. */
+  unitId: Scalars['ID']['output'];
+};
+
+/** A page of unit admin grants. */
+export type GqlUnitAccessGrantConnection = {
+  __typename?: 'UnitAccessGrantConnection';
+  /** The grants on this page. */
+  items: Array<GqlUnitAccessGrant>;
+  /** Cursor state for the next page. */
+  pageInfo: GqlPageInfo;
+};
+
+/** The administrative view of a Unit Campaign, including its reusable join code and settings. */
+export type GqlUnitCampaignAdmin = {
+  __typename?: 'UnitCampaignAdmin';
+  /** The sales-season name. */
+  campaignName: Scalars['String']['output'];
+  /** The sales year. */
+  campaignYear: Scalars['Int']['output'];
+  /** The existing catalog used by this campaign (immutable after creation). */
+  catalogId: Scalars['ID']['output'];
+  /** When the campaign was created. */
+  createdAt: Scalars['AWSDateTime']['output'];
+  /** The Unit Admin who created the campaign. */
+  createdByAccountId: Scalars['ID']['output'];
+  /** Deactivation has no inventory or obligation side effects. */
+  isActive: Scalars['Boolean']['output'];
+  /** The reusable campaign-join credential. */
+  joinCode: Scalars['String']['output'];
+  /** The Unit Campaign's stable ID. */
+  unitCampaignId: Scalars['ID']['output'];
+  /** The parent Unit. */
+  unitId: Scalars['ID']['output'];
+  /** When the campaign was last updated. */
+  updatedAt: Scalars['AWSDateTime']['output'];
+  /** The Unit Admin who last updated the campaign. */
+  updatedByAccountId: Scalars['ID']['output'];
+  /** Optimistic-concurrency version for metadata and deactivation updates. */
+  version: Scalars['Int']['output'];
+};
+
+/** The Unit Campaign's catalog and product inputs for browser sales sheets (including events with no sales). */
+export type GqlUnitCampaignCatalog = {
+  __typename?: 'UnitCampaignCatalog';
+  /** The catalog's ID. */
+  catalogId: Scalars['ID']['output'];
+  /** The catalog's display name. */
+  catalogName: Scalars['String']['output'];
+  /** The catalog's products, in display order. */
+  products: Array<GqlProduct>;
+};
+
+/** A page of a Unit's campaigns. */
+export type GqlUnitCampaignConnection = {
+  __typename?: 'UnitCampaignConnection';
+  /** The campaigns on this page. */
+  items: Array<GqlUnitCampaignAdmin>;
+  /** Cursor state for the next page. */
+  pageInfo: GqlPageInfo;
+};
+
+/** The member-safe preview of a Unit Campaign, exposed to any authenticated account via the join code. Carries no join code, IDs, catalog ID, or settings. */
+export type GqlUnitCampaignJoinPreview = {
+  __typename?: 'UnitCampaignJoinPreview';
+  /** The sales-season name. */
+  campaignName: Scalars['String']['output'];
+  /** The sales year. */
+  campaignYear: Scalars['Int']['output'];
+  /** The campaign catalog's display name. */
+  catalogName: Scalars['String']['output'];
+  /** Whether the campaign is currently active. */
+  isActive: Scalars['Boolean']['output'];
+  /** The parent unit's display name. */
+  unitDisplayName: Scalars['String']['output'];
+};
+
+/** A roster link between a Unit Campaign and a Scout (Campaign/Profile). */
+export type GqlUnitCampaignMembership = {
+  __typename?: 'UnitCampaignMembership';
+  /** The existing Scout Campaign (immutable). */
+  campaignId: Scalars['ID']['output'];
+  /** When the Scout joined. */
+  joinedAt: Scalars['AWSDateTime']['output'];
+  /** The account that redeemed the join code. */
+  joinedByAccountId: Scalars['ID']['output'];
+  /** The Scout's profile identity. */
+  profileId: Scalars['ID']['output'];
+  /** When the Scout was removed, or null when not removed. */
+  removedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  /** The Unit Admin who removed the Scout, or null when not removed. */
+  removedByAccountId?: Maybe<Scalars['ID']['output']>;
+  /** ACTIVE allows new signups; REMOVED blocks them. */
+  status: GqlMembershipStatus;
+  /** The joined Unit Campaign. */
+  unitCampaignId: Scalars['ID']['output'];
+  /** Denormalized tenancy check: the parent Unit. */
+  unitId: Scalars['ID']['output'];
+  /** Optimistic-concurrency version for membership mutations and rejoin. */
+  version: Scalars['Int']['output'];
+};
+
+/** A page of a Unit Campaign's roster (includes removed history). */
+export type GqlUnitCampaignMembershipConnection = {
+  __typename?: 'UnitCampaignMembershipConnection';
+  /** The memberships on this page. */
+  items: Array<GqlUnitCampaignMembership>;
+  /** Cursor state for the next page. */
+  pageInfo: GqlPageInfo;
+};
+
+/** A page of units. */
+export type GqlUnitConnection = {
+  __typename?: 'UnitConnection';
+  /** The units on this page. */
+  items: Array<GqlUnit>;
+  /** Cursor state for the next page. */
+  pageInfo: GqlPageInfo;
+};
+
+/** A single-use, 14-day credential a Unit Admin generates to add another Unit Admin. */
+export type GqlUnitInvite = {
+  __typename?: 'UnitInvite';
+  /** When the invite was created. */
+  createdAt: Scalars['AWSDateTime']['output'];
+  /** The Unit Admin who generated the invite. */
+  createdByAccountId: Scalars['ID']['output'];
+  /** When the invite expires (at most 14 days from creation). */
+  expiresAt: Scalars['AWSDateTime']['output'];
+  /** The 16-character bearer code; returned only for active, unused invites. */
+  inviteCode: Scalars['String']['output'];
+  /** The Unit this invite joins. */
+  unitId: Scalars['ID']['output'];
+};
+
+/** A page of unit invites (only active, unused invites are returned). */
+export type GqlUnitInviteConnection = {
+  __typename?: 'UnitInviteConnection';
+  /** The invites on this page. */
+  items: Array<GqlUnitInvite>;
+  /** Cursor state for the next page. */
+  pageInfo: GqlPageInfo;
 };
 
 /** An individual order within a unit report. */
@@ -1295,6 +1789,11 @@ export type GqlUnitReport = {
   /** The scout unit type the report covers. */
   unitType: Scalars['String']['output'];
 };
+
+/** The stored role on a Unit access grant. Only one role exists; 'Unit Kernel' is a display synonym, not a stored value. */
+export type GqlUnitRole =
+  /** Full Unit administrator. */
+  'UNIT_ADMIN';
 
 /** A per-seller (profile) summary within a unit report. */
 export type GqlUnitSellerSummary = {
@@ -1407,6 +1906,56 @@ export type GqlUpdateSharedCampaignInput = {
   isActive?: InputMaybe<Scalars['Boolean']['input']>;
   /** The shared campaign's code. */
   sharedCampaignCode: Scalars['String']['input'];
+};
+
+/** Input for updateUnitCampaign. Only name/year/isActive change; catalogId is immutable. */
+export type GqlUpdateUnitCampaignInput = {
+  /** The sales-season name. */
+  campaignName?: InputMaybe<Scalars['String']['input']>;
+  /** The sales year. */
+  campaignYear?: InputMaybe<Scalars['Int']['input']>;
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Activate or deactivate the campaign. */
+  isActive?: InputMaybe<Scalars['Boolean']['input']>;
+  /** The Unit Campaign to update. */
+  unitCampaignId: Scalars['ID']['input'];
+  /** The version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
+};
+
+/** Input for updateUnit. Only metadata/settings fields may change; unitId and adminCount are not editable. */
+export type GqlUpdateUnitInput = {
+  /** Geographic discriminator: the city. */
+  city?: InputMaybe<Scalars['String']['input']>;
+  /** Primary presentation basis for the unit's needs report. */
+  councilNeedBasis?: InputMaybe<GqlCouncilNeedBasis>;
+  /** Display name. */
+  displayName?: InputMaybe<Scalars['String']['input']>;
+  /** Set true to confirm an exact unitType/unitNumber/city/state duplicate. */
+  duplicateConfirmed?: InputMaybe<Scalars['Boolean']['input']>;
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Unit-wide default split method for new events. */
+  splitDefault?: InputMaybe<GqlSplitMethod>;
+  /** Geographic discriminator: the state. */
+  state?: InputMaybe<Scalars['String']['input']>;
+  /** Timezone for display and calendar generation. */
+  timezone?: InputMaybe<Scalars['String']['input']>;
+  /** The Unit to update. */
+  unitId: Scalars['ID']['input'];
+  /** The scout unit number. */
+  unitNumber?: InputMaybe<Scalars['Int']['input']>;
+  /** The scout unit type. */
+  unitType?: InputMaybe<Scalars['String']['input']>;
+  /** The version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
+};
+
+/** Optimistic-concurrency version carried by a version-changing operation. */
+export type GqlVersionedInput = {
+  /** The version the caller last read; a mismatch returns CONFLICT. */
+  expectedVersion: Scalars['Int']['input'];
 };
 
 export type GqlSellerProfileFieldsFragment = {
@@ -2864,6 +3413,414 @@ export type GqlUpdateCampaignPublicOrderSettingsMutation = {
     campaignId: string;
     campaignName: string;
     campaignState: GqlCampaignState;
+  };
+};
+
+export type GqlUnitFieldsFragment = {
+  __typename?: 'Unit';
+  unitId: string;
+  unitType: string;
+  unitNumber: number;
+  city: string;
+  state: string;
+  displayName?: string | null | undefined;
+  timezone: string;
+  splitDefault: GqlSplitMethod;
+  councilNeedBasis: GqlCouncilNeedBasis;
+  adminCount: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GqlMyUnitsQueryVariables = Exact<{
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlMyUnitsQuery = {
+  __typename?: 'Query';
+  myUnits: {
+    __typename?: 'UnitConnection';
+    items: Array<{
+      __typename?: 'Unit';
+      unitId: string;
+      unitType: string;
+      unitNumber: number;
+      city: string;
+      state: string;
+      displayName?: string | null | undefined;
+      timezone: string;
+      splitDefault: GqlSplitMethod;
+      councilNeedBasis: GqlCouncilNeedBasis;
+      adminCount: number;
+      version: number;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlGetUnitQueryVariables = Exact<{
+  unitId: Scalars['ID']['input'];
+}>;
+
+export type GqlGetUnitQuery = {
+  __typename?: 'Query';
+  unit?:
+    | {
+        __typename?: 'Unit';
+        unitId: string;
+        unitType: string;
+        unitNumber: number;
+        city: string;
+        state: string;
+        displayName?: string | null | undefined;
+        timezone: string;
+        splitDefault: GqlSplitMethod;
+        councilNeedBasis: GqlCouncilNeedBasis;
+        adminCount: number;
+        version: number;
+        createdAt: string;
+        updatedAt: string;
+      }
+    | null
+    | undefined;
+};
+
+export type GqlCreateUnitMutationVariables = Exact<{
+  input: GqlCreateUnitInput;
+}>;
+
+export type GqlCreateUnitMutation = {
+  __typename?: 'Mutation';
+  createUnit: {
+    __typename?: 'CreateUnitPayload';
+    unit: {
+      __typename?: 'Unit';
+      unitId: string;
+      unitType: string;
+      unitNumber: number;
+      city: string;
+      state: string;
+      displayName?: string | null | undefined;
+      timezone: string;
+      splitDefault: GqlSplitMethod;
+      councilNeedBasis: GqlCouncilNeedBasis;
+      adminCount: number;
+      version: number;
+      createdAt: string;
+      updatedAt: string;
+    };
+    grant: { __typename?: 'UnitAccessGrant'; accountId: string; role: GqlUnitRole; unitId: string; createdAt: string };
+  };
+};
+
+export type GqlUpdateUnitMutationVariables = Exact<{
+  input: GqlUpdateUnitInput;
+}>;
+
+export type GqlUpdateUnitMutation = {
+  __typename?: 'Mutation';
+  updateUnit: {
+    __typename?: 'Unit';
+    unitId: string;
+    unitType: string;
+    unitNumber: number;
+    city: string;
+    state: string;
+    displayName?: string | null | undefined;
+    timezone: string;
+    splitDefault: GqlSplitMethod;
+    councilNeedBasis: GqlCouncilNeedBasis;
+    adminCount: number;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+  };
+};
+
+export type GqlUnitGrantFieldsFragment = {
+  __typename?: 'UnitAccessGrant';
+  accountId: string;
+  email?: string | null | undefined;
+  name?: string | null | undefined;
+  role: GqlUnitRole;
+  unitId: string;
+  createdAt: string;
+  createdByAccountId: string;
+};
+
+export type GqlUnitAdminsQueryVariables = Exact<{
+  unitId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlUnitAdminsQuery = {
+  __typename?: 'Query';
+  unitAdmins: {
+    __typename?: 'UnitAccessGrantConnection';
+    items: Array<{
+      __typename?: 'UnitAccessGrant';
+      accountId: string;
+      email?: string | null | undefined;
+      name?: string | null | undefined;
+      role: GqlUnitRole;
+      unitId: string;
+      createdAt: string;
+      createdByAccountId: string;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlUnitInvitesQueryVariables = Exact<{
+  unitId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlUnitInvitesQuery = {
+  __typename?: 'Query';
+  unitInvites: {
+    __typename?: 'UnitInviteConnection';
+    items: Array<{
+      __typename?: 'UnitInvite';
+      inviteCode: string;
+      unitId: string;
+      createdByAccountId: string;
+      createdAt: string;
+      expiresAt: string;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlCreateUnitInviteMutationVariables = Exact<{
+  input: GqlCreateUnitInviteInput;
+}>;
+
+export type GqlCreateUnitInviteMutation = {
+  __typename?: 'Mutation';
+  createUnitInvite: {
+    __typename?: 'UnitInvite';
+    inviteCode: string;
+    unitId: string;
+    createdByAccountId: string;
+    createdAt: string;
+    expiresAt: string;
+  };
+};
+
+export type GqlRevokeUnitInviteMutationVariables = Exact<{
+  input: GqlRevokeUnitInviteInput;
+}>;
+
+export type GqlRevokeUnitInviteMutation = { __typename?: 'Mutation'; revokeUnitInvite: boolean };
+
+export type GqlRedeemUnitInviteMutationVariables = Exact<{
+  input: GqlRedeemUnitInviteInput;
+}>;
+
+export type GqlRedeemUnitInviteMutation = {
+  __typename?: 'Mutation';
+  redeemUnitInvite: {
+    __typename?: 'UnitAccessGrant';
+    accountId: string;
+    role: GqlUnitRole;
+    unitId: string;
+    createdAt: string;
+  };
+};
+
+export type GqlRevokeUnitAccessGrantMutationVariables = Exact<{
+  input: GqlRevokeUnitAccessGrantInput;
+}>;
+
+export type GqlRevokeUnitAccessGrantMutation = {
+  __typename?: 'Mutation';
+  revokeUnitAccessGrant: {
+    __typename?: 'Unit';
+    unitId: string;
+    unitType: string;
+    unitNumber: number;
+    city: string;
+    state: string;
+    displayName?: string | null | undefined;
+    timezone: string;
+    splitDefault: GqlSplitMethod;
+    councilNeedBasis: GqlCouncilNeedBasis;
+    adminCount: number;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+  };
+};
+
+export type GqlUnitCampaignAdminFieldsFragment = {
+  __typename?: 'UnitCampaignAdmin';
+  unitCampaignId: string;
+  unitId: string;
+  campaignName: string;
+  campaignYear: number;
+  catalogId: string;
+  joinCode: string;
+  isActive: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  createdByAccountId: string;
+  updatedByAccountId: string;
+};
+
+export type GqlUnitCampaignsQueryVariables = Exact<{
+  unitId: Scalars['ID']['input'];
+  isActive?: InputMaybe<Scalars['Boolean']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlUnitCampaignsQuery = {
+  __typename?: 'Query';
+  unitCampaigns: {
+    __typename?: 'UnitCampaignConnection';
+    items: Array<{
+      __typename?: 'UnitCampaignAdmin';
+      unitCampaignId: string;
+      unitId: string;
+      campaignName: string;
+      campaignYear: number;
+      catalogId: string;
+      joinCode: string;
+      isActive: boolean;
+      version: number;
+      createdAt: string;
+      updatedAt: string;
+      createdByAccountId: string;
+      updatedByAccountId: string;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlCreateUnitCampaignMutationVariables = Exact<{
+  input: GqlCreateUnitCampaignInput;
+}>;
+
+export type GqlCreateUnitCampaignMutation = {
+  __typename?: 'Mutation';
+  createUnitCampaign: {
+    __typename?: 'UnitCampaignAdmin';
+    unitCampaignId: string;
+    unitId: string;
+    campaignName: string;
+    campaignYear: number;
+    catalogId: string;
+    joinCode: string;
+    isActive: boolean;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    createdByAccountId: string;
+    updatedByAccountId: string;
+  };
+};
+
+export type GqlUpdateUnitCampaignMutationVariables = Exact<{
+  input: GqlUpdateUnitCampaignInput;
+}>;
+
+export type GqlUpdateUnitCampaignMutation = {
+  __typename?: 'Mutation';
+  updateUnitCampaign: {
+    __typename?: 'UnitCampaignAdmin';
+    unitCampaignId: string;
+    unitId: string;
+    campaignName: string;
+    campaignYear: number;
+    catalogId: string;
+    joinCode: string;
+    isActive: boolean;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    createdByAccountId: string;
+    updatedByAccountId: string;
+  };
+};
+
+export type GqlUnitCampaignCatalogQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+}>;
+
+export type GqlUnitCampaignCatalogQuery = {
+  __typename?: 'Query';
+  unitCampaignCatalog?:
+    | {
+        __typename?: 'UnitCampaignCatalog';
+        catalogId: string;
+        catalogName: string;
+        products: Array<{ __typename?: 'Product'; productId: string; productName: string; price: number }>;
+      }
+    | null
+    | undefined;
+};
+
+export type GqlUnitCampaignRosterQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+  status?: InputMaybe<GqlMembershipStatus>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlUnitCampaignRosterQuery = {
+  __typename?: 'Query';
+  unitCampaignRoster: {
+    __typename?: 'UnitCampaignMembershipConnection';
+    items: Array<{
+      __typename?: 'UnitCampaignMembership';
+      campaignId: string;
+      profileId: string;
+      unitCampaignId: string;
+      unitId: string;
+      status: GqlMembershipStatus;
+      joinedAt: string;
+      removedAt?: string | null | undefined;
+      joinedByAccountId: string;
+      removedByAccountId?: string | null | undefined;
+      version: number;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlRemoveUnitCampaignMembershipMutationVariables = Exact<{
+  input: GqlRemoveUnitCampaignMembershipInput;
+}>;
+
+export type GqlRemoveUnitCampaignMembershipMutation = {
+  __typename?: 'Mutation';
+  removeUnitCampaignMembership: {
+    __typename?: 'UnitCampaignMembership';
+    campaignId: string;
+    profileId: string;
+    status: GqlMembershipStatus;
+    removedAt?: string | null | undefined;
+    version: number;
+  };
+};
+
+export type GqlJoinUnitCampaignMutationVariables = Exact<{
+  input: GqlJoinUnitCampaignInput;
+}>;
+
+export type GqlJoinUnitCampaignMutation = {
+  __typename?: 'Mutation';
+  joinUnitCampaign: {
+    __typename?: 'UnitCampaignMembership';
+    campaignId: string;
+    profileId: string;
+    status: GqlMembershipStatus;
+    unitCampaignId: string;
+    unitId: string;
+    version: number;
   };
 };
 

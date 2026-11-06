@@ -106,40 +106,40 @@ const PaymentMethodDialogs: React.FC<PaymentMethodDialogsProps> = ({
 
   return (
     <>
-    <CreatePaymentMethodDialog
-      open={createOpen}
-      onClose={onCloseCreate}
-      onCreate={onCreate}
-      existingNames={existingNames}
-      isLoading={createIsLoading}
-    />
+      <CreatePaymentMethodDialog
+        open={createOpen}
+        onClose={onCloseCreate}
+        onCreate={onCreate}
+        existingNames={existingNames}
+        isLoading={createIsLoading}
+      />
 
-    <EditPaymentMethodDialog
-      open={editOpen}
-      onClose={onCloseEdit}
-      onUpdate={onUpdate}
-      currentName={currentName}
-      existingNames={existingNames}
-      isLoading={editIsLoading}
-    />
+      <EditPaymentMethodDialog
+        open={editOpen}
+        onClose={onCloseEdit}
+        onUpdate={onUpdate}
+        currentName={currentName}
+        existingNames={existingNames}
+        isLoading={editIsLoading}
+      />
 
-    <DeletePaymentMethodDialog
-      open={deleteOpen}
-      onClose={onCloseDelete}
-      onDelete={onDelete}
-      methodName={currentName}
-      isLoading={deleteIsLoading}
-    />
+      <DeletePaymentMethodDialog
+        open={deleteOpen}
+        onClose={onCloseDelete}
+        onDelete={onDelete}
+        methodName={currentName}
+        isLoading={deleteIsLoading}
+      />
 
-    <QRUploadDialog
-      open={qrOpen}
-      onClose={onCloseQr}
-      onUpload={onUpload}
-      methodName={currentName}
-      isLoading={qrIsLoading}
-      uploadError={qrError}
-    />
-  </>
+      <QRUploadDialog
+        open={qrOpen}
+        onClose={onCloseQr}
+        onUpload={onUpload}
+        methodName={currentName}
+        isLoading={qrIsLoading}
+        uploadError={qrError}
+      />
+    </>
   );
 };
 

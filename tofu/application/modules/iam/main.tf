@@ -62,9 +62,17 @@ variable "prevent_destroy" {
 }
 
 locals {
-  role_suffix         = "-${var.region_abbrev}-${var.environment}"
-  dynamodb_table_arns = values(var.dynamodb_table_arns)
-  dynamodb_index_arns = [for arn in values(var.dynamodb_table_arns) : "${arn}/index/*"]
+  role_suffix = "-${var.region_abbrev}-${var.environment}"
+  # Show & Sell Stage 1 (#912): `units` and `unit_campaigns` are served ONLY by
+  # the scoped unit / unit-campaign domain roles declared below - the shared
+  # mutation helper writes them through TransactWriteItems, which those roles
+  # carry scoped to the two tables and their indexes. They are excluded from
+  # the broad table lists so the admin-role and AppSync DynamoDB policies do
+  # not silently gain full item-level access plus /index/* on the new tables.
+  domain_scoped_table_keys = ["units", "unit_campaigns"]
+  broad_table_arns         = [for k, arn in var.dynamodb_table_arns : arn if !contains(local.domain_scoped_table_keys, k)]
+  dynamodb_table_arns      = local.broad_table_arns
+  dynamodb_index_arns      = [for arn in local.broad_table_arns : "${arn}/index/*"]
   # Include both the base function ARN and the qualifier variant (versions/aliases)
   lambda_invoke_arns = flatten([for arn in values(var.lambda_function_arns) : [arn, "${arn}:*"]])
 }
@@ -839,7 +847,7 @@ data "aws_iam_policy_document" "lambda_public_orders_ses" {
   count = var.ses_order_emails_enabled ? 1 : 0
 
   statement {
-    effect = "Allow"
+    effect  = "Allow"
     actions = ["ses:SendTemplatedEmail"]
     # The module's own sending identity plus its two namespaced templates.
     resources = concat([var.ses_order_identity_arn], var.ses_order_template_arns)
@@ -852,6 +860,201 @@ resource "aws_iam_role_policy" "lambda_public_orders_ses" {
   name   = "ses-order-emails"
   role   = aws_iam_role.lambda_public_orders_execution.id
   policy = data.aws_iam_policy_document.lambda_public_orders_ses[0].json
+}
+
+# =============================================================================
+# Lambda Unit Domain Execution Role (Show & Sell Stage 1, #912)
+# =============================================================================
+#
+# Scoped role for the Unit-domain handlers (unit CRUD, grants, invites) that
+# the Show & Sell stages add to the lambda module's function map. Established
+# with the tables and the shared mutation helper so no existing role ever has
+# to be widened for them: `units` was excluded from the broad admin-role and
+# AppSync table lists in locals above (gate verdict (f) on PR #912), and this
+# role is the ONLY grant on the table. Each environment wires the role into
+# lambda_domain_role_arns per function key exactly like the #351-#355 roles
+# when the first Unit handler lands; Stage 1 ships no Unit function keys yet
+# (the lambda module fails plan loudly for any key missing from the map, so
+# wiring is per-function and cannot drift).
+#
+# The shared idempotent write helper (src/utils/mutations.py) rides every Show
+# & Sell mutation: its marker insert and business writes go through
+# TransactWriteItems, so that action is the load-bearing grant here (impact map
+# §4.2: ConditionCheckItem alone is not permission to call TransactWriteItems).
+# Scope is the `units` table and its GSIs only - markers, units, grants,
+# invites, and payment methods all live in the one aggregate table (data model
+# §6.1/§8.9), and the Unit-invite redemption failure counter lives in
+# `public_order_throttles` under the §6.6 key contract. No S3, Cognito, or
+# AppSync permissions: no Unit handler touches those services.
+
+resource "aws_iam_role" "lambda_unit_execution" {
+  name = "${var.name_prefix}-lambda-unit-exec${local.role_suffix}"
+
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_unit_basic" {
+  role       = aws_iam_role.lambda_unit_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_unit_dynamodb" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:Query",
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      # The shared mutation helper's marker insert rides inside every Show &
+      # Sell mutation's TransactWriteItems (data model §8.9).
+      "dynamodb:TransactWriteItems",
+      # Condition checks staged inside TransactWriteItems map to this action.
+      "dynamodb:ConditionCheckItem",
+    ]
+    resources = [
+      var.dynamodb_table_arns["units"],
+      "${var.dynamodb_table_arns["units"]}/index/*",
+      # The Unit-invite redemption failure counter (data model §6.6).
+      var.dynamodb_table_arns["public_order_throttles"],
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_unit_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_unit_execution.id
+  policy = data.aws_iam_policy_document.lambda_unit_dynamodb.json
+}
+
+# =============================================================================
+# Lambda Unit Campaign Domain Execution Role (Show & Sell Stage 1, #912)
+# =============================================================================
+#
+# Scoped role for the Unit-campaign-domain handlers (unit campaign CRUD, roster
+# join/remove) that the Show & Sell stages add to the lambda module's function
+# map; same wiring and exclusion story as the unit role above. The join
+# transaction is deliberately single-transaction (data model §8.2): the
+# membership row, the Scout-campaign guard, and the Campaign joined-scope link
+# commit all-or-nothing, so this role's DynamoDB scope is the `unit_campaigns`
+# aggregate PLUS the exact tables the join reads/writes: campaigns (the
+# joined-scope link + base-table/GSI reads), profiles/shares (the WRITE-access
+# check), catalogs (usable-catalog check and join-preview name), and units
+# (admin grant + display-name reads + the active-membership index query the
+# join gates on). Batch B (KW-SS-S1-B-CAMPAIGNS) widened
+# the wave-1 role from `unit_campaigns`-only to this set; that is the
+# intentional, spec-mandated shape (§8.2 names campaigns in the transaction),
+# not drift toward the retired monolithic role - every action below maps to a
+# concrete call in `handlers/unit_campaign_operations.py`.
+
+resource "aws_iam_role" "lambda_unit_campaign_execution" {
+  name = "${var.name_prefix}-lambda-unit-campaign-exec${local.role_suffix}"
+
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_unit_campaign_basic" {
+  role       = aws_iam_role.lambda_unit_campaign_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_unit_campaign_dynamodb" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:Query",
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem",
+      # Campaign-scoped markers ride inside the same TransactWriteItems.
+      "dynamodb:TransactWriteItems",
+      "dynamodb:ConditionCheckItem",
+    ]
+    resources = [
+      var.dynamodb_table_arns["unit_campaigns"],
+      "${var.dynamodb_table_arns["unit_campaigns"]}/index/*",
+    ]
+  }
+
+  # The join transaction's joined-scope link on the Scout campaign, plus the
+  # consistent base read and campaignId-index locator that authorize it.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:UpdateItem",
+      # The join/remove transactions span unit_campaigns + campaigns, so IAM
+      # requires TransactWriteItems on every table named in the transaction.
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [
+      var.dynamodb_table_arns["campaigns"],
+      "${var.dynamodb_table_arns["campaigns"]}/index/*",
+    ]
+  }
+
+  # WRITE-access authorization on the Scout campaign's profile: base-table
+  # owner/share reads plus the profileId-index existence query (auth.py).
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+    ]
+    resources = [
+      var.dynamodb_table_arns["profiles"],
+      "${var.dynamodb_table_arns["profiles"]}/index/*",
+      var.dynamodb_table_arns["shares"],
+      "${var.dynamodb_table_arns["shares"]}/index/*",
+    ]
+  }
+
+  # Usable-catalog check (createUnitCampaign) and join-preview catalog name.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+    ]
+    resources = [
+      var.dynamodb_table_arns["catalogs"],
+    ]
+  }
+
+  # Unit Admin grant checks, the join-preview Unit display name, and the
+  # caller's active-unit-membership query (accountId-unitId-index) the join
+  # authorization reaches through _require_unit_membership.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+    ]
+    resources = [
+      var.dynamodb_table_arns["units"],
+      "${var.dynamodb_table_arns["units"]}/index/*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_unit_campaign_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_unit_campaign_execution.id
+  policy = data.aws_iam_policy_document.lambda_unit_campaign_dynamodb.json
 }
 
 # =============================================================================
@@ -1004,6 +1207,16 @@ output "lambda_account_reporting_execution_role_arn" {
 output "lambda_campaign_execution_role_arn" {
   description = "ARN of the scoped Lambda execution role for the campaign domain (delete-campaign-orders, unit-reporting). First entry of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
   value       = aws_iam_role.lambda_campaign_execution.arn
+}
+
+output "lambda_unit_execution_role_arn" {
+  description = "ARN of the scoped Lambda execution role for the Show & Sell Unit domain (units table + GSIs, including TransactWriteItems for the shared idempotency helper). Created in #912; each environment wires it into lambda_domain_role_arns per Unit function key as those handlers land."
+  value       = aws_iam_role.lambda_unit_execution.arn
+}
+
+output "lambda_unit_campaign_execution_role_arn" {
+  description = "ARN of the scoped Lambda execution role for the Show & Sell Unit-campaign domain (unit_campaigns table + GSIs, including TransactWriteItems for the shared idempotency helper). Created in #912; each environment wires it into lambda_domain_role_arns per Unit-campaign function key as those handlers land."
+  value       = aws_iam_role.lambda_unit_campaign_execution.arn
 }
 
 output "lambda_payment_execution_role_arn" {

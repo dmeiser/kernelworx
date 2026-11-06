@@ -91,14 +91,7 @@ export const PaymentMethodChoice: React.FC<PaymentMethodChoiceProps> = ({
   <Stack spacing={1} data-testid={`payment-method-${method.name}`}>
     <FormControlLabel
       data-testid={`payment-label-${method.name}`}
-      control={
-        <Radio
-          checked={selected}
-          name="paymentMethod"
-          onChange={() => onSelect(method.name)}
-          sx={{ p: 0 }}
-        />
-      }
+      control={<Radio checked={selected} name="paymentMethod" onChange={() => onSelect(method.name)} sx={{ p: 0 }} />}
       label={<Typography variant="body1">{method.name}</Typography>}
       onClick={() => onSelect(method.name)}
       onKeyDown={(event) => {

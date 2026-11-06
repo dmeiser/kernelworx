@@ -202,7 +202,7 @@ import_ephemeral_resources() {
 
   # DynamoDB tables
   log "   Importing DynamoDB tables..."
-  for table in accounts catalogs profiles campaigns orders shares invites shared-campaigns public-order-throttles; do
+  for table in accounts catalogs profiles campaigns orders shares invites shared-campaigns public-order-throttles units unit-campaigns; do
     table_name="kernelworx-${table}${suffix}"
     resource_name=$(echo "$table" | tr '-' '_')
     if aws dynamodb describe-table --table-name "$table_name" --region "$region" >/dev/null 2>&1; then
@@ -242,6 +242,8 @@ import_ephemeral_resources() {
   local lambda_payment_exec_role="kernelworx-lambda-payment-exec${suffix}"
   local lambda_account_reporting_exec_role="kernelworx-lambda-account-reporting-exec${suffix}"
   local lambda_public_orders_exec_role="kernelworx-lambda-public-orders-exec${suffix}"
+  local lambda_unit_exec_role="kernelworx-lambda-unit-exec${suffix}"
+  local lambda_unit_campaign_exec_role="kernelworx-lambda-unit-campaign-exec${suffix}"
   local appsync_role="kernelworx-appsync${suffix}"
   local cognito_sms_role="kernelworx${suffix}-UserPoolsmsRole"
   local appsync_logging_role="kernelworx-api${suffix}-logs"
@@ -255,6 +257,8 @@ import_ephemeral_resources() {
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_payment_execution" "$lambda_payment_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_account_reporting_execution" "$lambda_account_reporting_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_public_orders_execution" "$lambda_public_orders_exec_role"
+  import_resource "$run_id" "module.iam.aws_iam_role.lambda_unit_execution" "$lambda_unit_exec_role"
+  import_resource "$run_id" "module.iam.aws_iam_role.lambda_unit_campaign_execution" "$lambda_unit_campaign_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.appsync_service" "$appsync_role"
   import_resource "$run_id" "module.appsync.aws_iam_role.appsync_logging" "$appsync_logging_role"
   import_resource "$run_id" "module.iam.aws_iam_role.cognito_sms" "$cognito_sms_role"
@@ -289,6 +293,11 @@ import_ephemeral_resources() {
   # (dev); count is zero on ephemeral, so this import is expected to fail there
   # and import_resource tolerates that.
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_public_orders_ses[0]" "${lambda_public_orders_exec_role}:ses-order-emails"
+
+  import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_unit_basic" "${lambda_unit_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_unit_dynamodb" "${lambda_unit_exec_role}:dynamodb-access"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_unit_campaign_basic" "${lambda_unit_campaign_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_unit_campaign_dynamodb" "${lambda_unit_campaign_exec_role}:dynamodb-access"
 
   import_resource "$run_id" "module.iam.aws_iam_role_policy.cognito_sms" "${cognito_sms_role}:sns-publish"
   import_resource "$run_id" "module.appsync.aws_iam_role_policy.appsync_logging" "${appsync_logging_role}:appsync-logging"

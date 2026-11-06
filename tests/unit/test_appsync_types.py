@@ -35,7 +35,6 @@ class TestGetCallerId:
         assert get_caller_id(event) is None
 
 
-
 class TestRequireInt:
     def test_missing_raises(self) -> None:
         try:

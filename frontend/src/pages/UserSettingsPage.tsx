@@ -224,18 +224,10 @@ export const UserSettingsPage: React.FC = () => {
       <PasswordSection hook={passwordHook} />
 
       {/* Multi-Factor Authentication Section */}
-      <MfaSection
-        mfaHook={mfaHook}
-        onSetupMFA={handleSetupMFA}
-        isAdmin={isAdmin}
-      />
+      <MfaSection mfaHook={mfaHook} onSetupMFA={handleSetupMFA} isAdmin={isAdmin} />
 
       {/* Passkeys Section */}
-      <PasskeySection
-        passkeyHook={passkeyHook}
-        onRegisterPasskey={handleRegisterPasskey}
-        isAdmin={isAdmin}
-      />
+      <PasskeySection passkeyHook={passkeyHook} onRegisterPasskey={handleRegisterPasskey} isAdmin={isAdmin} />
 
       {/* Delete Account Section */}
       <DeleteAccountSection onAccountDeleted={handleAccountDeleted} userEmail={account?.email} />

@@ -262,9 +262,10 @@ import type { GqlSellerProfile, GqlCampaign, GqlOrder, GqlCatalog } from '../typ
 
 #### Helper Utilities (`tofu/application/modules/*/`)
 
-Use centralized modules for resource configuration. The application defines eight
-separate DynamoDB tables (not a single-table design); see
-`tofu/application/modules/dynamodb/main.tf` for the current schema and indexes.
+Use centralized modules for resource configuration. The application defines separate
+DynamoDB tables (not a single-table design); see
+`tofu/application/modules/dynamodb/main.tf` for the current set of tables, schema,
+and indexes.
 
 #### AppSync Resolvers (`tofu/application/modules/appsync/`)
 

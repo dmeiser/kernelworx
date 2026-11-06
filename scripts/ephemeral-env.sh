@@ -153,6 +153,9 @@ case "$ACTION" in
     echo "export CATALOGS_TABLE_NAME=kernelworx-catalogs-ue1-${RUN_ID}"
     echo "export INVITES_TABLE_NAME=kernelworx-invites-ue1-${RUN_ID}"
     echo "export SHARED_CAMPAIGNS_TABLE_NAME=kernelworx-shared-campaigns-ue1-${RUN_ID}"
+    echo "export UNITS_TABLE_NAME=kernelworx-units-ue1-${RUN_ID}"
+    echo "export UNIT_CAMPAIGNS_TABLE_NAME=kernelworx-unit-campaigns-ue1-${RUN_ID}"
+    echo "export PUBLIC_ORDER_THROTTLES_TABLE_NAME=kernelworx-public-order-throttles-ue1-${RUN_ID}"
     ;;
 
   env)
@@ -197,6 +200,9 @@ case "$ACTION" in
     echo "export CATALOGS_TABLE_NAME=kernelworx-catalogs-ue1-${RUN_ID}"
     echo "export INVITES_TABLE_NAME=kernelworx-invites-ue1-${RUN_ID}"
     echo "export SHARED_CAMPAIGNS_TABLE_NAME=kernelworx-shared-campaigns-ue1-${RUN_ID}"
+    echo "export UNITS_TABLE_NAME=kernelworx-units-ue1-${RUN_ID}"
+    echo "export UNIT_CAMPAIGNS_TABLE_NAME=kernelworx-unit-campaigns-ue1-${RUN_ID}"
+    echo "export PUBLIC_ORDER_THROTTLES_TABLE_NAME=kernelworx-public-order-throttles-ue1-${RUN_ID}"
     ;;
 
   down)
