@@ -232,3 +232,14 @@ it('switches the profile and resets the selected campaign', async () => {
   // The selected campaign was reset, so the join-code field is disabled again.
   await waitFor(() => expect(screen.getByLabelText(/Join code/i)).toBeDisabled());
 });
+
+it('surfaces a profile-load failure', async () => {
+  renderPage([
+    {
+      request: { query: LIST_MY_PROFILES, variables: match },
+      result: { errors: [new GraphQLError('Profiles are unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
+  ]);
+
+  expect(await screen.findByText(/Profiles are unavailable\./i)).toBeInTheDocument();
+});

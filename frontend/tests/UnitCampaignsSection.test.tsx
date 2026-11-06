@@ -559,3 +559,22 @@ it('retries the catalog load from the create dialog when the catalogs fail', asy
   await user.click(screen.getByRole('button', { name: /^Retry$/i }));
   expect(screen.getByRole('button', { name: /^Retry$/i })).toBeInTheDocument();
 });
+
+it('shows an inactive campaign as Inactive in the list and in the detail', async () => {
+  const user = userEvent.setup();
+  renderSection([
+    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign({ isActive: false })], pageInfo: PAGE_INFO } } } },
+    { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
+    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO } } } },
+  ]);
+
+  // The list row shows the Inactive chip (covers the list-row isActive branches).
+  const row = await screen.findByText(/Pack 3149 Fall Show & Sell/i);
+  expect(screen.getAllByText(/Inactive/).length).toBeGreaterThanOrEqual(1);
+
+  // Selecting the campaign opens the detail, which also shows the Inactive chip
+  // (covers the detail isActive branches).
+  await user.click(row);
+  expect(screen.getAllByText(/Inactive/).length).toBeGreaterThanOrEqual(2);
+});
+

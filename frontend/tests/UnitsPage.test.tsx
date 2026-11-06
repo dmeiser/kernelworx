@@ -346,3 +346,53 @@ it('surfaces a create failure without closing the dialog', async () => {
   expect(await screen.findByText(/An internal error occurred/i)).toBeInTheDocument();
   expect(screen.getByRole('dialog')).toBeInTheDocument();
 });
+
+it('shows the admin plural and the time-worked split for a unit', async () => {
+  renderPage([
+    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([unit({ adminCount: 2, splitDefault: 'TIME_WORKED' })]) },
+  ]);
+  expect(await screen.findByText(/2 admins/i)).toBeInTheDocument();
+  expect(await screen.findByText(/Split by time worked/i)).toBeInTheDocument();
+});
+
+it('keeps the create form showing the error when the create fails', async () => {
+  const user = userEvent.setup();
+  renderPage([
+    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
+    {
+      request: { query: CREATE_UNIT, variables: () => true },
+      result: { errors: [new GraphQLError('boom', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
+  ]);
+  const createButtons = await screen.findAllByRole('button', { name: /^Create Unit$/i });
+  await user.click(createButtons[0]);
+  await screen.findByRole('dialog');
+  await fillCreateUnitForm(user);
+  const dialog = screen.getByRole('dialog');
+  await user.click(within(dialog).getByRole('button', { name: /^Create Unit$/i }));
+  expect(await screen.findByText(/An internal error occurred/i)).toBeInTheDocument();
+});
+
+it('keeps the create dialog open and shows the error when the duplicate retry fails', async () => {
+  const user = userEvent.setup();
+  renderPage([
+    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
+    {
+      request: { query: CREATE_UNIT, variables: () => true },
+      result: { errors: [new GraphQLError('dup', { extensions: { errorCode: 'CONFLICT' } })] },
+    },
+    {
+      request: { query: CREATE_UNIT, variables: () => true },
+      result: { errors: [new GraphQLError('boom', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
+  ]);
+  const createButtons = await screen.findAllByRole('button', { name: /^Create Unit$/i });
+  await user.click(createButtons[0]);
+  await screen.findByRole('dialog');
+  await fillCreateUnitForm(user);
+  const dialog = screen.getByRole('dialog');
+  await user.click(within(dialog).getByRole('button', { name: /^Create Unit$/i }));
+  await screen.findByText(/Create a distinct Unit\?/i);
+  await user.click(screen.getByRole('button', { name: /Create distinct Unit/i }));
+  expect(await screen.findByText(/An internal error occurred/i)).toBeInTheDocument();
+});

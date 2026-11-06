@@ -166,6 +166,14 @@ describe('CampaignSettingsPage', () => {
     expect(screen.getByRole('switch')).toBeChecked();
   });
 
+  it('requires a city when a unit type is selected', async () => {
+    renderPage(createMocks());
+    await waitFor(() => expect(screen.getByDisplayValue('Spring Sale')).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText(/City/i), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }));
+    expect(await screen.findByText(/City is required when unit type is selected/i)).toBeInTheDocument();
+  });
+
   it('shows shared campaign warning when applicable', async () => {
     renderPage(createMocks(mockSharedCampaign));
 

@@ -258,3 +258,11 @@ it('updates the timezone, default split, and council-need basis on interaction',
   fireEvent.change(screen.getByLabelText(/State/i), { target: { value: 'Colorado' } });
   expect(screen.getByDisplayValue('Colorado')).toBeInTheDocument();
 });
+
+it('shows the admin plural and generated-name preview for a unit without a display name', async () => {
+  // displayName null → the form initializes empty and the preview falls back to the
+  // generated name; adminCount 2 → the "admins" plural (branch coverage).
+  renderForm([{ request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ displayName: null, adminCount: 2 }) } } }]);
+
+  expect(await screen.findByText(/2 admins/i)).toBeInTheDocument();
+});
