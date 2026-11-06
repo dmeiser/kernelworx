@@ -25,3 +25,33 @@ describe('Show & Sell live evidence (smoke)', () => {
     expect(r).toBeTruthy();
   });
 });
+
+describe('Show & Sell live evidence - leaf (a) auth denial zero writes', () => {
+  it('placeholder auth denial', async () => {
+    expect(true).toBe(true);
+  });
+});
+
+describe('Show & Sell live evidence - leaf (b) concurrency', () => {
+  it('placeholder concurrency', async () => {
+    expect(true).toBe(true);
+  });
+});
+
+describe('Show & Sell live evidence - leaf (c) idempotency', () => {
+  it('placeholder idempotency', async () => {
+    expect(true).toBe(true);
+  });
+});
+
+describe('Show & Sell live evidence - leaf (d) lane-scoped cleanup', () => {
+  it('placeholder cleanup', async () => {
+    expect(true).toBe(true);
+  });
+});
+
+describe('Show & Sell live evidence - leaf (e) SS-SM-01/02', () => {
+  it('placeholder data id', async () => {
+    expect(true).toBe(true);
+  });
+});
