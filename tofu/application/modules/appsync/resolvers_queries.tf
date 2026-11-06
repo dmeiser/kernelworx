@@ -692,3 +692,74 @@ resource "aws_appsync_resolver" "unit_invites" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Unit campaign operations (Lambda)
+resource "aws_appsync_resolver" "unit_campaign_join_info" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignJoinInfo"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_campaign" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaign"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_campaigns" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaigns"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_campaign_catalog" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignCatalog"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_campaign_roster" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignRoster"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

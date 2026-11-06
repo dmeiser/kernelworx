@@ -110,6 +110,17 @@ export function request(ctx) {
         orderItem.notes = input.notes;
     }
 
+    // API-FIX-05 / ORD-API-01: each new Order immutably captures the joined
+    // scope of its Campaign at creation. Independent campaigns (and pre-join
+    // rows) carry no scope attributes, which AppSync serves as null. Removal
+    // later does not rewrite orders created while joined.
+    if (campaign.unitId) {
+        orderItem.unitId = campaign.unitId;
+    }
+    if (campaign.unitCampaignId) {
+        orderItem.unitCampaignId = campaign.unitCampaignId;
+    }
+
     if (!campaignId || typeof campaignId !== 'string') {
         util.error('Invalid campaignId for PutItem: ' + campaignId, 'INVALID_INPUT');
     }

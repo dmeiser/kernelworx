@@ -50,13 +50,13 @@ Essential knowledge for GitHub Copilot when working on this volunteer-run Scouti
 - **Frontend**: React + TypeScript + Vite + MUI + Apollo Client
 - **API**: AWS AppSync (GraphQL)
 - **Functions**: AWS Lambda (Python 3.14)
-- **Data**: Amazon DynamoDB (eight separate tables)
+- **Data**: Amazon DynamoDB (separate tables, not a single-table design — see `docs/SCHEMA.md`)
 - **Auth**: Amazon Cognito User Pools (Google social login and email/password)
 - **Infrastructure**: OpenTofu (Infrastructure as Code)
 - **Package Management**: uv (Python), npm (root tooling + frontend)
 
 **Key Design Patterns**:
-- **Multi-table DynamoDB**: Eight separate tables with named GSIs (see `tofu/application/modules/dynamodb/main.tf`)
+- **Multi-table DynamoDB**: Separate tables with named GSIs (see `tofu/application/modules/dynamodb/main.tf` and `docs/SCHEMA.md`)
 - **GraphQL schema**: See `tofu/application/schema/schema.graphql`
 - **Authorization**: Owner-based + Share-based (READ/WRITE permissions)
 - **100% test coverage**: No exceptions, all tests must pass

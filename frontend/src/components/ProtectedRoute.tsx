@@ -96,13 +96,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requir
   }, [routeState, fullPath]);
 
   if (routeState === 'login') {
-    return (
-      <Navigate
-        to="/login"
-        state={{ from: { pathname: location.pathname, search: location.search } }}
-        replace
-      />
-    );
+    return <Navigate to="/login" state={{ from: { pathname: location.pathname, search: location.search } }} replace />;
   }
 
   const blockedView = renderBlockedState(routeState);

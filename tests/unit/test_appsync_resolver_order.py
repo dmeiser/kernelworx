@@ -227,8 +227,7 @@ class TestDerivedExclusions:
         for addr in excludes_of(calls[0]):
             assert "aws_appsync_function" not in addr
         assert not [arg for arg in calls[0] if arg.startswith("-target=")], (
-            "the guard must not target: a hand-maintained target list is the failure mode "
-            "this change removes"
+            "the guard must not target: a hand-maintained target list is the failure mode this change removes"
         )
 
     def test_every_planned_deletion_address_is_named_in_the_log(
@@ -270,9 +269,7 @@ class TestDerivedExclusions:
         assert len(calls) == 1, f"expected one reference-releasing apply, got: {calls}"
         assert excludes_of(calls[0]) == ["module.appsync.aws_appsync_datasource.retired"]
 
-    def test_replaced_function_is_deferred_whole(
-        self, repo_root: Path, mock_tofu: Path, tmp_path: Path
-    ) -> None:
+    def test_replaced_function_is_deferred_whole(self, repo_root: Path, mock_tofu: Path, tmp_path: Path) -> None:
         """actions ["delete","create"] is excluded so the main apply orders the replacement."""
         write_plan(mock_tofu, PLAN_FUNCTION_REPLACEMENT)
 

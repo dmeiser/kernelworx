@@ -12,7 +12,20 @@
 
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@apollo/client/react';
-import { Box, Button, Divider, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material';
+import {
+  Box,
+  Button,
+  Divider,
+  Paper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Typography,
+} from '@mui/material';
 import { LoadingState } from '../components/LoadingState';
 import { NoIndexMeta } from '../components/NoIndexMeta';
 import { PublicPageUnavailable } from '../components/public/PublicPageUnavailable';
@@ -149,15 +162,15 @@ export const PublicReceiptPage: React.FC = () => {
   const segments = receiptSegments(params);
   const complete = segmentsAreComplete(segments);
 
-  const { data, loading, error, refetch } = useQuery<GqlPublicGetOrderReceiptQuery, GqlPublicGetOrderReceiptQueryVariables>(
-    PUBLIC_GET_ORDER_RECEIPT,
-    {
-      // The two id segments are passed through as-is: the server re-prefixes
-      // them into the PK/SK and rejects legacy two-part order ids.
-      variables: segments,
-      skip: !complete,
-    },
-  );
+  const { data, loading, error, refetch } = useQuery<
+    GqlPublicGetOrderReceiptQuery,
+    GqlPublicGetOrderReceiptQueryVariables
+  >(PUBLIC_GET_ORDER_RECEIPT, {
+    // The two id segments are passed through as-is: the server re-prefixes
+    // them into the PK/SK and rejects legacy two-part order ids.
+    variables: segments,
+    skip: !complete,
+  });
 
   return (
     <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: 700, mx: 'auto' }}>

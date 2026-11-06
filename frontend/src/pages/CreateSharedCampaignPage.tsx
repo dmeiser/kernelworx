@@ -40,7 +40,6 @@ import type { GqlCatalog, GqlSharedCampaign } from '../types';
 
 /* eslint-disable complexity */
 
-
 const BASE_URL = window.location.origin;
 const MAX_CREATOR_MESSAGE_LENGTH = 300;
 const MAX_ACTIVE_SHARED_CAMPAIGNS = 50;

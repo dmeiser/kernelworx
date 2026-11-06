@@ -345,6 +345,11 @@ resource "aws_appsync_resolver" "create_order" {
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.validate_payment_method_appsync.function_id,
       aws_appsync_function.get_campaign_for_order.function_id,
+      # The locator's campaignId-index query cannot serve ConsistentRead, so
+      # the stashed projection may predate a just-committed join; the order
+      # must stamp the joined scope (ORD-API-01) from the strongly consistent
+      # base item this read replaces it with (#438/#545 posture).
+      aws_appsync_function.campaign_base_read_for_order.function_id,
       aws_appsync_function.get_catalog.function_id,
       aws_appsync_function.create_order.function_id,
       # #746: increment the denormalized campaign totals after the write.
@@ -1006,6 +1011,63 @@ resource "aws_appsync_resolver" "revoke_unit_access_grant" {
   type        = "Mutation"
   field       = "revokeUnitAccessGrant"
   data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# Unit campaign operations (Lambda)
+resource "aws_appsync_resolver" "create_unit_campaign" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "createUnitCampaign"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "update_unit_campaign" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "updateUnitCampaign"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "join_unit_campaign" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "joinUnitCampaign"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "remove_unit_campaign_membership" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "removeUnitCampaignMembership"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
 
   runtime {
     name            = "APPSYNC_JS"

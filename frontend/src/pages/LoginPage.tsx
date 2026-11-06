@@ -513,10 +513,7 @@ export const LoginPage: React.FC = () => {
   const location = useLocation();
   const { isAuthenticated, loginWithPassword } = useAuth();
 
-  const from = getSafeRedirect(
-    resolveRedirectFromState(location.state),
-    '/home',
-  );
+  const from = getSafeRedirect(resolveRedirectFromState(location.state), '/home');
 
   useEffect(() => {
     if (isAuthenticated) {

@@ -139,6 +139,21 @@ export function request(ctx) {
         updatedAt: now
     };
 
+    // API-FIX-05 / ORD-API-01 (parity with create_order_fn.js): each new
+    // Order immutably captures the joined scope of its Campaign at creation,
+    // public orders included. The stashed campaign here is the step-2
+    // strongly consistent base read (validate_public_token_step2), so a
+    // just-committed join is visible to the buyer's order. Independent
+    // campaigns (and pre-join rows) carry no scope attributes, which AppSync
+    // serves as null; removal later does not rewrite orders created while
+    // joined.
+    if (campaign.unitId) {
+        orderItem.unitId = campaign.unitId;
+    }
+    if (campaign.unitCampaignId) {
+        orderItem.unitCampaignId = campaign.unitCampaignId;
+    }
+
     if (mapped.customerEmail) {
         orderItem.customerEmail = mapped.customerEmail;
     }

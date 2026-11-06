@@ -38,14 +38,17 @@ export const PasskeySection: React.FC<PasskeySectionProps> = ({ passkeyHook, onR
       </Stack>
 
       <Typography variant="body2" color="text.secondary" paragraph>
-        Passkeys let you sign in securely without a password - using your fingerprint, face, or device PIN. Both an authenticator app and passkeys are supported together.
+        Passkeys let you sign in securely without a password - using your fingerprint, face, or device PIN. Both an
+        authenticator app and passkeys are supported together.
       </Typography>
       <Alert severity="info" sx={{ mb: 2 }}>
-        Both an authenticator app and passkeys are supported together. You can register passkeys for fast, secure sign-in alongside your authenticator app.
+        Both an authenticator app and passkeys are supported together. You can register passkeys for fast, secure
+        sign-in alongside your authenticator app.
       </Alert>
       {isAdmin && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          <strong>Administrator notice:</strong> Admin operations need an authenticator app (TOTP) enrolled; a passkey alone signs you in but does not grant admin.
+          <strong>Administrator notice:</strong> Admin operations need an authenticator app (TOTP) enrolled; a passkey
+          alone signs you in but does not grant admin.
         </Alert>
       )}
       <PasskeyStatusAlerts hook={passkeyHook} />

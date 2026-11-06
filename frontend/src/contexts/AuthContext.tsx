@@ -261,8 +261,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const domain = getCognitoDomain();
       const clientId = import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID;
       const rawLogoutUri =
-        import.meta.env.VITE_OAUTH_REDIRECT_SIGNOUT ||
-        (typeof window !== 'undefined' ? window.location.origin : '');
+        import.meta.env.VITE_OAUTH_REDIRECT_SIGNOUT || (typeof window !== 'undefined' ? window.location.origin : '');
       const logoutUri = encodeURIComponent(rawLogoutUri);
       window.location.href = `https://${domain}/logout?client_id=${clientId}&logout_uri=${logoutUri}`;
     } finally {

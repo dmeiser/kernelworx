@@ -43,7 +43,8 @@ FIRST_CLIENT_ID = "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5"
 # The mock records every aws invocation (null-separated args) and answers each
 # subcommand, so a test can assert which client-id resolution path the script
 # took and whether the S3 sync carried --delete.
-MOCK_AWS = """\
+MOCK_AWS = (
+    """\
 #!/bin/bash
 printf '%s\\0' "$@" >> "$MOCK_AWS_LOG"
 printf '\\0' >> "$MOCK_AWS_LOG"
@@ -80,9 +81,10 @@ case "$*" in
     echo "I0INVALIDATION0"
     ;;
 esac
-""".replace("__WEB_CLIENT_ID__", WEB_CLIENT_ID).replace(
-    "__FIRST_CLIENT_ID__", FIRST_CLIENT_ID
-).replace("__POOL_ID__", POOL_ID)
+""".replace("__WEB_CLIENT_ID__", WEB_CLIENT_ID)
+    .replace("__FIRST_CLIENT_ID__", FIRST_CLIENT_ID)
+    .replace("__POOL_ID__", POOL_ID)
+)
 
 # npm run build is invoked by the script; stub it so the test observes only the
 # configuration and upload decisions.
@@ -172,17 +174,11 @@ class TestAppClientResolution:
 
         for invocation in invocations(run_dir):
             joined = " ".join(invocation)
-            assert "UserPoolClients[0].ClientId" not in joined, (
-                f"the removed positional guess is back: {invocation}"
-            )
+            assert "UserPoolClients[0].ClientId" not in joined, f"the removed positional guess is back: {invocation}"
             if "list-user-pool-clients" in invocation:
-                assert "--max-results" not in invocation, (
-                    f"the removed --max-results guess is back: {invocation}"
-                )
+                assert "--max-results" not in invocation, f"the removed --max-results guess is back: {invocation}"
 
-    def test_unresolvable_web_client_fails_loudly_without_guessing(
-        self, run_dir: Path
-    ) -> None:
+    def test_unresolvable_web_client_fails_loudly_without_guessing(self, run_dir: Path) -> None:
         """No KernelWorx-Web client in the pool stops the deploy instead of
         picking an arbitrary one.
 
@@ -209,6 +205,4 @@ class TestStaticAssetUpload:
         assert result.returncode == 0, result.stdout + result.stderr
         syncs = s3_sync_calls(run_dir)
         assert len(syncs) == 1, f"expected one s3 sync, got {syncs}"
-        assert "--delete" not in syncs[0], (
-            f"the destructive --delete is back: {syncs[0]}"
-        )
+        assert "--delete" not in syncs[0], f"the destructive --delete is back: {syncs[0]}"

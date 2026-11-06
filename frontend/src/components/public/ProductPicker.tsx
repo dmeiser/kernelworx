@@ -59,36 +59,34 @@ interface ProductPickerProps {
   errorText?: string;
 }
 
-export const ProductPicker = memo<ProductPickerProps>(
-  ({ products, quantities, onQuantityChange, errorText }) => (
-    <Box>
-      <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
-        Products
+export const ProductPicker = memo<ProductPickerProps>(({ products, quantities, onQuantityChange, errorText }) => (
+  <Box>
+    <Typography variant="subtitle1" fontWeight="medium" gutterBottom>
+      Products
+    </Typography>
+    {products.length === 0 ? (
+      <Alert severity="info" sx={{ mb: 2 }}>
+        This seller has no products listed right now.
+      </Alert>
+    ) : (
+      <Stack spacing={1.5} sx={{ mb: 1 }}>
+        {products.map((product) => (
+          <ProductRow
+            key={product.productId}
+            product={product}
+            quantity={quantities[product.productId] ?? 0}
+            onQuantityChange={onQuantityChange}
+          />
+        ))}
+      </Stack>
+    )}
+    {errorText ? (
+      <Typography variant="body2" color="error">
+        {errorText}
       </Typography>
-      {products.length === 0 ? (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          This seller has no products listed right now.
-        </Alert>
-      ) : (
-        <Stack spacing={1.5} sx={{ mb: 1 }}>
-          {products.map((product) => (
-            <ProductRow
-              key={product.productId}
-              product={product}
-              quantity={quantities[product.productId] ?? 0}
-              onQuantityChange={onQuantityChange}
-            />
-          ))}
-        </Stack>
-      )}
-      {errorText ? (
-        <Typography variant="body2" color="error">
-          {errorText}
-        </Typography>
-      ) : null}
-    </Box>
-  ),
-);
+    ) : null}
+  </Box>
+));
 
 ProductPicker.displayName = 'ProductPicker';
 

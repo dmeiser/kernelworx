@@ -64,10 +64,18 @@ export const PublicSettingsActions: React.FC<PublicSettingsActionsProps> = ({
         Actions
       </Typography>
       <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
-        <Button variant="contained" onClick={onSave} disabled={actionDisabled('save', saving, enabled, canEnable, canSave)}>
+        <Button
+          variant="contained"
+          onClick={onSave}
+          disabled={actionDisabled('save', saving, enabled, canEnable, canSave)}
+        >
           {actionLabel(saving, 'Save')}
         </Button>
-        <Button variant="contained" onClick={onEnable} disabled={actionDisabled('enable', saving, enabled, canEnable, canSave)}>
+        <Button
+          variant="contained"
+          onClick={onEnable}
+          disabled={actionDisabled('enable', saving, enabled, canEnable, canSave)}
+        >
           {actionLabel(saving, 'Enable')}
         </Button>
         <Button

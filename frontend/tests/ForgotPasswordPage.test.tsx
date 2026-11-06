@@ -234,6 +234,14 @@ describe('ForgotPasswordPage', () => {
       expect(confirmResetPassword).not.toHaveBeenCalled();
     });
 
+    test('shows a validation error when the confirmation code is not six digits', async () => {
+      await fillResetForm('12345', 'Password123!xyz', 'Password123!xyz');
+      fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
+
+      expect(await screen.findByText(/Confirmation code must be 6 digits/i)).toBeInTheDocument();
+      expect(confirmResetPassword).not.toHaveBeenCalled();
+    });
+
     test('shows validation error when password does not meet complexity requirements', async () => {
       await fillResetForm('123456', 'short', 'short');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
@@ -435,6 +443,12 @@ describe('ForgotPasswordPage', () => {
     renderPage();
     fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
     expect(mockNavigate).toHaveBeenCalledWith('/login');
+  });
+
+  test('shows an email validation error when the email is missing', async () => {
+    renderPage();
+    forceSubmitForm();
+    expect(await screen.findByText(/Please enter a valid email address/i)).toBeInTheDocument();
   });
 });
 

@@ -35,12 +35,7 @@ const computeDisplayMessage = (message?: string, isFederated?: boolean): string 
 
 const FederatedButtons: React.FC<{ onBack: () => void }> = ({ onBack }) => (
   <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 3 }}>
-    <Button
-      variant="contained"
-      color="primary"
-      size="large"
-      onClick={() => void handleSignOutAndRedirect()}
-    >
+    <Button variant="contained" color="primary" size="large" onClick={() => void handleSignOutAndRedirect()}>
       Sign Out
     </Button>
     <Button variant="outlined" color="inherit" size="large" onClick={onBack}>
@@ -51,13 +46,7 @@ const FederatedButtons: React.FC<{ onBack: () => void }> = ({ onBack }) => (
 
 const NativeButtons: React.FC<{ onOpenDialog: () => void }> = ({ onOpenDialog }) => (
   <Stack direction="row" spacing={2} justifyContent="center" sx={{ mt: 3 }}>
-    <Button
-      variant="contained"
-      color="primary"
-      size="large"
-      startIcon={<QrCodeIcon />}
-      onClick={onOpenDialog}
-    >
+    <Button variant="contained" color="primary" size="large" startIcon={<QrCodeIcon />} onClick={onOpenDialog}>
       Set Up MFA
     </Button>
   </Stack>
@@ -131,18 +120,9 @@ export const MfaSetupRequiredState: React.FC<MfaSetupRequiredStateProps> = ({
         {displayMessage}
       </Typography>
 
-      {isFed ? (
-        <FederatedButtons onBack={handleBack} />
-      ) : (
-        <NativeButtons onOpenDialog={handleOpen} />
-      )}
+      {isFed ? <FederatedButtons onBack={handleBack} /> : <NativeButtons onOpenDialog={handleOpen} />}
 
-      <MfaSetupDialog
-        open={dialogOpen}
-        onClose={handleClose}
-        onSuccess={onSuccess}
-        isFederated={isFed}
-      />
+      <MfaSetupDialog open={dialogOpen} onClose={handleClose} onSuccess={onSuccess} isFederated={isFed} />
     </Paper>
   );
 };

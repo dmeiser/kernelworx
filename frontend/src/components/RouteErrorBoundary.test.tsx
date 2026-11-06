@@ -85,7 +85,6 @@ describe('RouteErrorBoundary non-chunk errors', () => {
   });
 });
 
-
 describe('isChunkLoadError', () => {
   it('returns false for non-Error values', () => {
     expect(isChunkLoadError(null)).toBe(false);
@@ -108,7 +107,6 @@ describe('isChunkLoadError', () => {
   });
 });
 
-
 describe('RouteErrorBoundary componentDidCatch', () => {
   it('skips the chunk-load log for non-chunk errors', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -116,9 +114,7 @@ describe('RouteErrorBoundary componentDidCatch', () => {
 
     instance.componentDidCatch(new Error('ordinary runtime error'), {} as React.ErrorInfo);
 
-    const loggedChunkError = consoleError.mock.calls.some(
-      (call) => call[0] === 'Route chunk load error:',
-    );
+    const loggedChunkError = consoleError.mock.calls.some((call) => call[0] === 'Route chunk load error:');
     expect(loggedChunkError).toBe(false);
 
     consoleError.mockRestore();
