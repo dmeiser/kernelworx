@@ -151,7 +151,13 @@ interface GuardedListProps {
 // their own.
 const GuardedList: React.FC<GuardedListProps> = ({ loading, error, errorPrefix, empty, emptyMessage, children }) => {
   if (loading) return <LoadingState py={4} />;
-  if (error) return <Alert severity="error">{errorPrefix}{error.message}</Alert>;
+  if (error)
+    return (
+      <Alert severity="error">
+        {errorPrefix}
+        {error.message}
+      </Alert>
+    );
   if (empty) return <Alert severity="info">{emptyMessage}</Alert>;
   return <>{children}</>;
 };
@@ -493,9 +499,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
 );
 
 // The Shared Code cell: inline editor while editing, the current code otherwise.
-const CampaignSharedCodeCell: React.FC<
-  Omit<CampaignRowProps, 'onSaveCode' | 'onCancelCode' | 'onClearCode'>
-> = ({
+const CampaignSharedCodeCell: React.FC<Omit<CampaignRowProps, 'onSaveCode' | 'onCancelCode' | 'onClearCode'>> = ({
   campaign,
   editing,
   editingSharedCode,
@@ -656,11 +660,7 @@ const SharesTabContent: React.FC<SharesTabProps> = ({
     <ProfilePicker profiles={profiles} selected={selectedProfile} onSelect={onSelectProfile} />
 
     {selectedProfile && (
-      <GuardedList
-        loading={sharesLoading}
-        empty={shares.length === 0}
-        emptyMessage="No shares found for this profile."
-      >
+      <GuardedList loading={sharesLoading} empty={shares.length === 0} emptyMessage="No shares found for this profile.">
         <SharesTable shares={shares} onRevoke={onRevoke} />
       </GuardedList>
     )}
@@ -914,8 +914,7 @@ const campaignsOf = (data: { adminGetUserCampaigns: Campaign[] } | undefined): C
   data?.adminGetUserCampaigns || [];
 const sharedCampaignsOf = (data: { adminGetUserSharedCampaigns: SharedCampaign[] } | undefined): SharedCampaign[] =>
   data?.adminGetUserSharedCampaigns || [];
-const sharesOf = (data: { adminGetProfileShares: Share[] } | undefined): Share[] =>
-  data?.adminGetProfileShares || [];
+const sharesOf = (data: { adminGetProfileShares: Share[] } | undefined): Share[] => data?.adminGetProfileShares || [];
 const searchResultsOf = (data: { adminSearchUser: GqlAdminUser[] } | undefined): GqlAdminUser[] =>
   data?.adminSearchUser || [];
 
@@ -963,7 +962,7 @@ function useUserDataData(accountId: string | undefined, isMfaRequired: boolean) 
     error: sharedCampaignsError,
   } = useQuery<{ adminGetUserSharedCampaigns: SharedCampaign[] }>(
     ADMIN_GET_USER_SHARED_CAMPAIGNS,
-    accountQueryOptions(accountId)
+    accountQueryOptions(accountId),
   );
 
   const [selectedProfileForCampaigns, setSelectedProfileForCampaigns] = useState<string | null>(null);

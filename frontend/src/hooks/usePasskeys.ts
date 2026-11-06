@@ -112,12 +112,7 @@ export const usePasskeys = (): UsePasskeysReturn => {
   };
 
   const handleRegisterPasskey = async () => {
-    await registerPasskey(
-      setPasskeyError,
-      setPasskeySuccess,
-      setPasskeyLoading,
-      loadPasskeys,
-    );
+    await registerPasskey(setPasskeyError, setPasskeySuccess, setPasskeyLoading, loadPasskeys);
   };
 
   const confirmPasskeyAction = async () => {

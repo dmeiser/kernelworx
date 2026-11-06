@@ -592,7 +592,9 @@ const UnitSummarySection: React.FC<{
           <Typography variant="body2" color="text.secondary">
             Avg per Seller
           </Typography>
-          <Typography variant="h4">{formatCurrency(report.sellers.length > 0 ? report.totalSales / report.sellers.length : 0)}</Typography>
+          <Typography variant="h4">
+            {formatCurrency(report.sellers.length > 0 ? report.totalSales / report.sellers.length : 0)}
+          </Typography>
         </Box>
       </Stack>
 
@@ -622,7 +624,9 @@ const UnitSummarySection: React.FC<{
                   <TableCell>{seller.sellerName}</TableCell>
                   <TableCell align="right">{sellerItems}</TableCell>
                   <TableCell align="right">{formatCurrency(seller.totalSales)}</TableCell>
-                  <TableCell align="right">{report.totalSales > 0 ? ((seller.totalSales / report.totalSales) * 100).toFixed(1) : '0.0'}%</TableCell>
+                  <TableCell align="right">
+                    {report.totalSales > 0 ? ((seller.totalSales / report.totalSales) * 100).toFixed(1) : '0.0'}%
+                  </TableCell>
                 </TableRow>
               );
             })}

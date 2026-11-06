@@ -274,9 +274,7 @@ const initializeFormFromCampaign = (
 };
 
 // Helper to format public order mutation error messages
-const getPublicOrderMutationErrorMessage = (
-  error: { operation: string; message: string } | null,
-): string => {
+const getPublicOrderMutationErrorMessage = (error: { operation: string; message: string } | null): string => {
   if (!error) return '';
   switch (error.operation) {
     case 'rotate':
@@ -613,11 +611,7 @@ export const CampaignSettingsPage: React.FC<CampaignSettingsPageProps> = ({ isOw
               onClose={clearPublicOrderMutationError}
               anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
             >
-              <Alert
-                severity="error"
-                onClose={clearPublicOrderMutationError}
-                sx={{ width: '100%' }}
-              >
+              <Alert severity="error" onClose={clearPublicOrderMutationError} sx={{ width: '100%' }}>
                 {getPublicOrderMutationErrorMessage(publicOrderMutationError)}
               </Alert>
             </Snackbar>

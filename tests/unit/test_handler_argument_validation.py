@@ -111,5 +111,3 @@ class TestTransferProfileOwnershipArgumentValidation:
         result = transfer_profile_ownership(event, ctx)
         assert result["__isError"] is True
         assert result["errorCode"] == ErrorCode.UNAUTHORIZED
-
-
