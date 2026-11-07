@@ -4,10 +4,9 @@ import '../setup.ts';
  * Evidence-only; no product surface changes.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
-import { ApolloClient, gql } from '@apollo/client';
-import { createAuthenticatedClient, AuthenticatedClientResult } from '../setup/apolloClient';
-import { createUnauthenticatedClient } from '../setup/apolloClient';
+import { describe, it, expect } from 'vitest';
+import { gql } from '@apollo/client';
+import { createAuthenticatedClient, createUnauthenticatedClient } from '../setup/apolloClient';
 import { TABLE_NAMES } from '../setup/testData';
 import { DynamoDBClient, ScanCommand } from '@aws-sdk/client-dynamodb';
 
