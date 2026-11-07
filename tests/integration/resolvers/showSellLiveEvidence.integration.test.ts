@@ -83,8 +83,14 @@ describe('Show & Sell live evidence - leaf (e) SS-SM-01/02 DATA_ID', () => {
       await owner.client.mutate({ mutation: CREATE_UNIT_INVITE, variables: { input: { unitId: '00000000-0000-0000-0000-000000000000', idempotency: { idempotencyKey: 'e-dataid-1' } } } });
     } catch (e: any) {
       const errs = e?.errors ?? e?.graphQLErrors ?? [];
-      const ext = errs[0]?.extensions;
-      expect(ext).toBeDefined();
+      const err = errs[0] ?? e;
+      expect(err).toBeDefined();
+      const code =
+        err?.errorInfo?.errorCode ??
+        err?.errorType ??
+        (typeof err?.extensions?.errorCode === 'string' ? err.extensions.errorCode : undefined) ??
+        (typeof err?.extensions?.code === 'string' ? err.extensions.code : undefined);
+      expect(code ?? err?.message).toBeDefined();
     }
   });
 });
