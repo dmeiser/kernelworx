@@ -202,7 +202,7 @@ import_ephemeral_resources() {
 
   # DynamoDB tables
   log "   Importing DynamoDB tables..."
-  for table in accounts catalogs profiles campaigns orders shares invites shared-campaigns public-order-throttles units unit-campaigns; do
+  for table in accounts catalogs profiles campaigns orders shares invites shared-campaigns public-order-throttles units unit-campaigns inventory order-fulfillments; do
     table_name="kernelworx-${table}${suffix}"
     resource_name=$(echo "$table" | tr '-' '_')
     if aws dynamodb describe-table --table-name "$table_name" --region "$region" >/dev/null 2>&1; then
