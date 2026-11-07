@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Any, Iterable
 
 
-def _status(a):
+def _status(a: Any) -> str:
     s = getattr(a, "status", None)
     if s is None and isinstance(a, dict):
         s = a.get("status")
     return str(s).split(".")[-1]
 
 
-def _get(a, key):
+def _get(a: Any, key: str) -> Any:
     v = getattr(a, key, None)
     if v is None and isinstance(a, dict):
         v = a.get(key)
@@ -21,7 +21,7 @@ def sellable_kernel_qty(kernel_physical_qty: int, sold_in_possession_qty: int) -
     return kernel_physical_qty - sold_in_possession_qty
 
 
-def assigned_open_qty(allocations: Iterable) -> int:
+def assigned_open_qty(allocations: Iterable[Any]) -> int:
     total = 0
     for a in allocations:
         if _status(a) == "OPEN":
@@ -37,7 +37,7 @@ def assignment_overage_qty(assigned: int, sellable: int) -> int:
     return max(0, assigned - sellable)
 
 
-def with_scout_qty(custody_rows: Iterable) -> int:
+def with_scout_qty(custody_rows: Iterable[Any]) -> int:
     total = 0
     for r in custody_rows:
         v = _get(r, "with_scout_qty")

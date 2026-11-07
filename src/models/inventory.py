@@ -44,7 +44,7 @@ class InventoryBalance:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.kernel_physical_qty < 0:
             raise ValueError("kernel_physical_qty must be non-negative")
         if self.sold_in_possession_qty < 0:
@@ -70,7 +70,7 @@ class ScoutCustodyBalance:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.with_scout_qty < 0:
             raise ValueError("with_scout_qty must be non-negative")
 
@@ -90,7 +90,7 @@ class EventInventoryAllocation:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.allocated_qty < 0 or self.sold_qty < 0 or self.released_qty < 0:
             raise ValueError("quantities must be non-negative")
         if self.allocated_qty < self.sold_qty:
