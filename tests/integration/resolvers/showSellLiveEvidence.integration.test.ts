@@ -23,6 +23,12 @@ const CREATE_UNIT = gql`
   }
 `;
 
+const CREATE_UNIT_INVITE = gql`
+  mutation CreateUnitInvite($input: CreateUnitInviteInput!) {
+    createUnitInvite(input: $input) { inviteCode }
+  }
+`;
+
 describe('Show & Sell live evidence - leaf (a) auth denial zero writes', () => {
   it('unauthenticated createUnit is denied and writes zero rows', async () => {
     const before = await countTable(TABLE_NAMES.units);
@@ -72,11 +78,12 @@ describe('Show & Sell live evidence - leaf (d) lane-scoped cleanup', () => {
 
 describe('Show & Sell live evidence - leaf (e) SS-SM-01/02 DATA_ID', () => {
   it('error extensions observed on denied mutation', async () => {
-    const client = createUnauthenticatedClient();
+    const owner = await createAuthenticatedClient('owner');
     try {
-      await client.mutate({ mutation: CREATE_UNIT, variables: { input: { unitType: 'Pack', unitNumber: 2, city: 'X', state: 'Y', timezone: 'UTC', idempotency: { idempotencyKey: 'e-dataid-1' } } } });
+      await owner.client.mutate({ mutation: CREATE_UNIT_INVITE, variables: { input: { unitId: '00000000-0000-0000-0000-000000000000', idempotency: { idempotencyKey: 'e-dataid-1' } } } });
     } catch (e: any) {
-      const ext = e?.graphQLErrors?.[0]?.extensions;
+      const errs = e?.errors ?? e?.graphQLErrors ?? [];
+      const ext = errs[0]?.extensions;
       expect(ext).toBeDefined();
     }
   });
