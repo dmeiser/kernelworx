@@ -1,6 +1,17 @@
 import React, { useState } from 'react';
 import { PageHeader } from '../components/PageHeader';
-import { Box, TextField, Button, Table, TableBody, TableCell, TableHead, TableRow, Alert, Typography } from '@mui/material';
+import {
+  Box,
+  TextField,
+  Button,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Alert,
+  Typography,
+} from '@mui/material';
 
 export const CustodyPage: React.FC = () => {
   const [scout, setScout] = useState('');
@@ -11,7 +22,10 @@ export const CustodyPage: React.FC = () => {
 
   const issue = () => {
     const n = Number(qty);
-    if (!scout || !product || !Number.isInteger(n) || n <= 0) { setError('invalid selection or quantity'); return; }
+    if (!scout || !product || !Number.isInteger(n) || n <= 0) {
+      setError('invalid selection or quantity');
+      return;
+    }
     setError('');
     const key = `${scout}:${product}`;
     setBalances((b) => ({ ...b, [key]: (b[key] || 0) + n }));
@@ -20,7 +34,10 @@ export const CustodyPage: React.FC = () => {
   const returnOne = () => {
     const key = `${scout}:${product}`;
     const cur = balances[key] || 0;
-    if (cur <= 0) { setError('nothing to return'); return; }
+    if (cur <= 0) {
+      setError('nothing to return');
+      return;
+    }
     setError('');
     setBalances((b) => ({ ...b, [key]: cur - 1 }));
   };
@@ -40,10 +57,18 @@ export const CustodyPage: React.FC = () => {
       </Box>
       <Typography>Aggregate balance: {aggregate}</Typography>
       <Table>
-        <TableHead><TableRow><TableCell>Scout:Product</TableCell><TableCell>Balance</TableCell></TableRow></TableHead>
+        <TableHead>
+          <TableRow>
+            <TableCell>Scout:Product</TableCell>
+            <TableCell>Balance</TableCell>
+          </TableRow>
+        </TableHead>
         <TableBody>
           {Object.entries(balances).map(([k, v]) => (
-            <TableRow key={k}><TableCell>{k}</TableCell><TableCell>{v}</TableCell></TableRow>
+            <TableRow key={k}>
+              <TableCell>{k}</TableCell>
+              <TableCell>{v}</TableCell>
+            </TableRow>
           ))}
         </TableBody>
       </Table>

@@ -46,7 +46,9 @@ const ScoutManagementPage = lazyRoute(() =>
 );
 const InventoryPage = lazyRoute(() => import('./pages/InventoryPage').then((m) => ({ default: m.InventoryPage })));
 const CustodyPage = lazyRoute(() => import('./pages/CustodyPage').then((m) => ({ default: m.CustodyPage })));
-const FulfillmentPage = lazyRoute(() => import('./pages/FulfillmentPage').then((m) => ({ default: m.FulfillmentPage })));
+const FulfillmentPage = lazyRoute(() =>
+  import('./pages/FulfillmentPage').then((m) => ({ default: m.FulfillmentPage })),
+);
 
 const CampaignLayout = lazyRoute(() => import('./pages/CampaignLayout').then((m) => ({ default: m.CampaignLayout })));
 const SettingsPage = lazyRoute(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
