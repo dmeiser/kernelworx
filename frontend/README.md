@@ -23,7 +23,7 @@ npm ci
 | Path | Contents |
 | --- | --- |
 | `src/App.tsx` | Router and provider wiring. Every route is lazy-loaded via `lazyRoute()` (React.lazy + a per-route `ErrorBoundary`). Public routes render bare; everything else goes through `ProtectedAppRoute`, which nests `ProtectedRoute` (auth, optional `requireAdmin`) → `AppLayout` → `ErrorBoundary`. Campaign tabs live under the `/scouts/:profileId/campaigns/:campaignId/*` wildcard rendered by `CampaignLayout`. |
-| `src/pages/` | One file per route page (27 pages, flat, plus `CampaignLayout.tsx`). |
+| `src/pages/` | One file per route page (40 pages, flat, plus `CampaignLayout.tsx`). |
 | `src/components/` | Shared UI components (flat), plus `components/settings/` for the settings feature. |
 | `src/contexts/AuthContext.tsx` | `AuthProvider`/`useAuth`: Amplify session handling, OAuth redirect restore, and the admin flag from the Cognito `cognito:groups` claim. |
 | `src/hooks/` | Form and feature hooks (campaign form state machine, order form, MFA, passkeys, snackbar, ...), with an `index.ts` barrel for the user-settings hooks. |
