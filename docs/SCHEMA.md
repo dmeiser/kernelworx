@@ -17,10 +17,14 @@ graph LR
     I["⏰ PUBLIC_ORDER_THROTTLES<br/>PK: key<br/>TTL: expiresAt"]
     J["🏫 UNITS<br/>PK: pk + sk<br/>GSI: accountId-unitId-index, unitId-createdAt-index, metadataKey-createdAt-index<br/>TTL: expiresAtEpoch"]
     K["📅 UNIT_CAMPAIGNS<br/>PK: pk + sk<br/>GSI: unitId-createdAt-index, campaignId-index, profileId-unitCampaignId-index, catalogId-index<br/>TTL: expiresAtEpoch (idempotency markers)"]
-    
+    L["📦 INVENTORY<br/>PK: unitCampaignId + productId<br/>PITR"]
+    M["🧾 ORDER_FULFILLMENTS<br/>PK: fulfillmentId<br/>GSI: unitCampaignId-index"]
+
     B -->|created by| A
     A -->|creates| J
     J -->|hosts| K
+    K -->|tracks| L
+    K -->|fulfilled by| M
     H -->|share-token orders throttled by| I
     J -->|invite redemptions throttled by| I
     C -->|in| B
@@ -278,6 +282,21 @@ only as a locator — to map a Scout campaign to the membership row when the cal
 knows the campaign but not the profile — and never carries an authorization or
 write decision on its own (#438/#545 posture).
 
+### inventory
+Primary Key: `unitCampaignId` + `productId` (Composite)
+
+No Global Secondary Indexes.
+
+PITR enabled. Append-only movement ledger is represented by `InventoryMovement` records
+keyed through this table's balance rows (Stage 2 wave 1 foundation).
+
+### order_fulfillments
+Primary Key: `fulfillmentId` (String)
+Global Secondary Indexes:
+- `unitCampaignId-index` (unitCampaignId) - fulfillments for a Unit Campaign
+
+PITR enabled.
+
 ## Query Flows
 
 ### Get User's Profiles
@@ -382,6 +401,8 @@ graph TD
         I["PUBLIC_ORDER_THROTTLE<br/>PK: key"]
         J["UNIT<br/>PK: pk + sk"]
         K["UNIT_CAMPAIGN<br/>PK: pk + sk"]
+        L["INVENTORY<br/>PK: unitCampaignId + productId"]
+        M["ORDER_FULFILLMENT<br/>PK: fulfillmentId"]
     end
     
     subgraph "Global Secondary Indexes"
@@ -396,6 +417,8 @@ graph TD
         I1["PUBLIC_ORDER_THROTTLE<br/>GSI: none"]
         J1["UNIT<br/>GSI: accountId+unitId<br/>GSI: unitId+createdAt<br/>GSI: metadataKey+createdAt"]
         K1["UNIT_CAMPAIGN<br/>GSI: unitId+createdAt<br/>GSI: campaignId<br/>GSI: profileId+unitCampaignId<br/>GSI: catalogId"]
+        L1["INVENTORY<br/>GSI: none"]
+        M1["ORDER_FULFILLMENT<br/>GSI: unitCampaignId"]
     end
     
     A --> A1
@@ -409,6 +432,8 @@ graph TD
     I --> I1
     J --> J1
     K --> K1
+    L --> L1
+    M --> M1
 ```
 
 ## Permission Model

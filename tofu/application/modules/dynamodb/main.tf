@@ -925,6 +925,89 @@ resource "aws_dynamodb_table" "unit_campaigns" {
   }
 }
 
+
+# ============================================================================
+# Inventory Table (Show & Sell Stage 2 — inventory balance + movements)
+# PK: unitCampaignId, SK: productId
+# ============================================================================
+resource "aws_dynamodb_table" "inventory" {
+  name                        = "${var.name_prefix}-inventory${local.table_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "unitCampaignId"
+  range_key                   = "productId"
+  deletion_protection_enabled = var.enable_deletion_protection
+
+  attribute {
+    name = "unitCampaignId"
+    type = "S"
+  }
+
+  attribute {
+    name = "productId"
+    type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = false
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+# ============================================================================
+# Order Fulfillments Table (Show & Sell Stage 2)
+# PK: fulfillmentId
+# GSI: unitCampaignId-index (unitCampaignId)
+# ============================================================================
+resource "aws_dynamodb_table" "order_fulfillments" {
+  name                        = "${var.name_prefix}-order-fulfillments${local.table_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "fulfillmentId"
+  deletion_protection_enabled = var.enable_deletion_protection
+
+  attribute {
+    name = "fulfillmentId"
+    type = "S"
+  }
+
+  attribute {
+    name = "unitCampaignId"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "unitCampaignId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "unitCampaignId"
+      key_type       = "HASH"
+    }
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = false
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
 # ============================================================================
 # Outputs
 # ============================================================================
@@ -942,6 +1025,8 @@ output "table_arns" {
     public_order_throttles = aws_dynamodb_table.public_order_throttles.arn
     units                  = aws_dynamodb_table.units.arn
     unit_campaigns         = aws_dynamodb_table.unit_campaigns.arn
+    inventory              = aws_dynamodb_table.inventory.arn
+    order_fulfillments     = aws_dynamodb_table.order_fulfillments.arn
   }
 }
 
@@ -959,6 +1044,8 @@ output "table_names" {
     public_order_throttles = aws_dynamodb_table.public_order_throttles.name
     units                  = aws_dynamodb_table.units.name
     unit_campaigns         = aws_dynamodb_table.unit_campaigns.name
+    inventory              = aws_dynamodb_table.inventory.name
+    order_fulfillments     = aws_dynamodb_table.order_fulfillments.name
   }
 }
 
@@ -1020,4 +1107,14 @@ output "units_table_name" {
 output "unit_campaigns_table_name" {
   description = "Name of the Unit Campaigns DynamoDB table"
   value       = aws_dynamodb_table.unit_campaigns.name
+}
+
+output "inventory_table_name" {
+  description = "Name of the inventory DynamoDB table"
+  value       = aws_dynamodb_table.inventory.name
+}
+
+output "order_fulfillments_table_name" {
+  description = "Name of the order fulfillments DynamoDB table"
+  value       = aws_dynamodb_table.order_fulfillments.name
 }
