@@ -130,6 +130,24 @@ const DrawerContent: React.FC<{
         </ListItemIcon>
         <ListItemText primary="Units" />
       </ListItemButton>
+      <ListItemButton onClick={() => onNavigate('/inventory')} selected={isActive('/inventory')} sx={navItemSx}>
+        <ListItemIcon>
+          <InventoryIcon />
+        </ListItemIcon>
+        <ListItemText primary="Inventory" />
+      </ListItemButton>
+      <ListItemButton onClick={() => onNavigate('/custody')} selected={isActive('/custody')} sx={navItemSx}>
+        <ListItemIcon>
+          <InventoryIcon />
+        </ListItemIcon>
+        <ListItemText primary="Custody" />
+      </ListItemButton>
+      <ListItemButton onClick={() => onNavigate('/fulfillment')} selected={isActive('/fulfillment')} sx={navItemSx}>
+        <ListItemIcon>
+          <InventoryIcon />
+        </ListItemIcon>
+        <ListItemText primary="Fulfillment" />
+      </ListItemButton>
       <ListItemButton onClick={() => onNavigate('/catalogs')} selected={isActive('/catalogs')} sx={navItemSx}>
         <ListItemIcon>
           <InventoryIcon />
