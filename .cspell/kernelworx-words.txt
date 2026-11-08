@@ -149,6 +149,7 @@ fontSize
 fontsource
 formData
 fromisoformat
+fromlist
 Frontend
 fullname
 fullWidth
@@ -285,8 +286,8 @@ neighbour
 networkidle
 neue
 NEWCODE
-newkey
 Newinv
+newkey
 newOwnerSearch
 nocat
 nodate
