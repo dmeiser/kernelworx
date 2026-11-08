@@ -1,23 +1,13 @@
 """Lambda resolver for Show & Sell inventory operations (Stage 2 wave 2)."""
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Any, Dict
 
 try:  # pragma: no cover
-    from utils.dynamodb import get_required_env, tables
     from utils.errors import AppError, ErrorCode
     from utils.logging import get_logger
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils.dynamodb import get_required_env, tables
     from ..utils.errors import AppError, ErrorCode
     from ..utils.logging import get_logger
-
-if TYPE_CHECKING:  # pragma: no cover
-    from ..utils.handlers import lambda_handler as with_error_handling
-else:  # pragma: no cover
-    try:
-        from utils.handlers import lambda_handler as with_error_handling
-    except ModuleNotFoundError:
-        from ..utils.handlers import lambda_handler as with_error_handling
 
 logger = get_logger(__name__)
 
