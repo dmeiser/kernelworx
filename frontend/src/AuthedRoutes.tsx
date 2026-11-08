@@ -44,6 +44,10 @@ const ScoutCampaignsPage = lazyRoute(() =>
 const ScoutManagementPage = lazyRoute(() =>
   import('./pages/ScoutManagementPage').then((m) => ({ default: m.ScoutManagementPage })),
 );
+const InventoryPage = lazyRoute(() => import('./pages/InventoryPage').then((m) => ({ default: m.InventoryPage })));
+const CustodyPage = lazyRoute(() => import('./pages/CustodyPage').then((m) => ({ default: m.CustodyPage })));
+const FulfillmentPage = lazyRoute(() => import('./pages/FulfillmentPage').then((m) => ({ default: m.FulfillmentPage })));
+
 const CampaignLayout = lazyRoute(() => import('./pages/CampaignLayout').then((m) => ({ default: m.CampaignLayout })));
 const SettingsPage = lazyRoute(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
 const UserSettingsPage = lazyRoute(() =>
@@ -279,6 +283,33 @@ function AuthedRoutes() {
             element={
               <ProtectedAppRoute>
                 <ScoutManagementPage />
+              </ProtectedAppRoute>
+            }
+          />
+
+          <Route
+            path="/inventory"
+            element={
+              <ProtectedAppRoute>
+                <InventoryPage />
+              </ProtectedAppRoute>
+            }
+          />
+
+          <Route
+            path="/custody"
+            element={
+              <ProtectedAppRoute>
+                <CustodyPage />
+              </ProtectedAppRoute>
+            }
+          />
+
+          <Route
+            path="/fulfillment"
+            element={
+              <ProtectedAppRoute>
+                <FulfillmentPage />
               </ProtectedAppRoute>
             }
           />
