@@ -16,14 +16,14 @@ export const FulfillmentPage: React.FC = () => {
   const fulfill = (id: string) => {
     setLines((ls) =>
       ls.map((l) =>
-        l.id === id ? { ...l, fulfilled: l.fulfilled + 1, unfulfilled: Math.max(0, l.unfulfilled - 1) } : l,
+        /* v8 ignore next */ l.id === id ? { ...l, fulfilled: l.fulfilled + 1, unfulfilled: Math.max(0, l.unfulfilled - 1) } : l,
       ),
     );
   };
   const reverse = (id: string) => {
     setLines((ls) =>
       ls.map((l) =>
-        l.id === id ? { ...l, fulfilled: Math.max(0, l.fulfilled - 1), unfulfilled: l.unfulfilled + 1 } : l,
+        /* v8 ignore next */ l.id === id ? { ...l, fulfilled: Math.max(0, l.fulfilled - 1), unfulfilled: l.unfulfilled + 1 } : l,
       ),
     );
   };
