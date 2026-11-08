@@ -47,3 +47,13 @@ def test_inv_m_02_missing_reason_branch():
 def test_inv_m_03_negative_result_branch():
     with pytest.raises(Exception):
         adjust_council_on_order({"arguments": {"delta": -5, "current": 2}}, None)
+
+
+def test_inv_m_02_success_path():
+    r = adjust_inventory({"arguments": {"delta": 1, "reason": "r"}}, None)
+    assert r["success"] is True
+
+
+def test_inv_m_03_non_int_delta():
+    with pytest.raises(Exception):
+        adjust_council_on_order({"arguments": {"delta": "x"}}, None)
