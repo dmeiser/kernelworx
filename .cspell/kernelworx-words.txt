@@ -490,6 +490,7 @@ unassociate
 unauthenticate
 uncompiled
 Unconfirm
+unconfirms
 unconfigured
 unfollow
 unhit
