@@ -132,6 +132,29 @@ def transaction_item_key(transact_item: Dict[str, Any]) -> tuple[str, tuple[tupl
     return table_name, tuple(sorted(item.items()))
 
 
+def _preflight_plan(transact_items: List[Dict[str, Any]]) -> None:
+    """Reject oversized or duplicate-key plans before any AWS call."""
+    if len(transact_items) > MAX_TRANSACT_ITEMS:
+        raise ValueError(f"transaction plan has {len(transact_items)} items; cap is {MAX_TRANSACT_ITEMS}")
+    seen: set[tuple[str, tuple[tuple[str, Any], ...]]] = set()
+    for entry in transact_items:
+        identity = transaction_item_key(entry)
+        if identity in seen:
+            raise TransactionDuplicateKeyError(f"duplicate key in transaction plan: {identity}")
+        seen.add(identity)
+
+
+def _cancelled_indexes(exc: ClientError, plan_length: int) -> List[int]:
+    """Map a TransactionCanceledException to the failed plan indexes."""
+    reasons = exc.response.get("CancellationReasons") or []
+    failed = [
+        index
+        for index, reason in enumerate(reasons)
+        if isinstance(reason, dict) and reason.get("Code") not in (None, "None")
+    ]
+    return failed or list(range(plan_length))
+
+
 def execute_transaction(
     transact_items: List[Dict[str, Any]],
     *,
@@ -153,15 +176,7 @@ def execute_transaction(
             are carried for domain-error mapping.
         TransactionThrottledError: Throttling persisted past ``max_retries``.
     """
-    if len(transact_items) > MAX_TRANSACT_ITEMS:
-        raise ValueError(f"transaction plan has {len(transact_items)} items; cap is {MAX_TRANSACT_ITEMS}")
-    seen: set[tuple[str, tuple[tuple[str, Any], ...]]] = set()
-    for entry in transact_items:
-        identity = transaction_item_key(entry)
-        if identity in seen:
-            raise TransactionDuplicateKeyError(f"duplicate key in transaction plan: {identity}")
-        seen.add(identity)
-
+    _preflight_plan(transact_items)
     if client is None:
         client = cast(Any, _get_dynamodb().meta.client)
 
@@ -173,20 +188,13 @@ def execute_transaction(
         except ClientError as exc:
             code = exc.response.get("Error", {}).get("Code", "")
             if code == "TransactionCanceledException":
-                reasons = exc.response.get("CancellationReasons") or []
-                failed = [
-                    index
-                    for index, reason in enumerate(reasons)
-                    if isinstance(reason, dict) and reason.get("Code") not in (None, "None")
-                ]
-                raise TransactionCancelledError(failed or list(range(len(transact_items)))) from None
-            if code in TRANSIENT_ERROR_CODES and attempt < max_retries:
-                time.sleep(BASE_BACKOFF_SECONDS * (2**attempt))
-                attempt += 1
-                continue
-            if code in TRANSIENT_ERROR_CODES:
+                raise TransactionCancelledError(_cancelled_indexes(exc, len(transact_items))) from None
+            if code not in TRANSIENT_ERROR_CODES:
+                raise
+            if attempt >= max_retries:
                 raise TransactionThrottledError(f"transaction throttled after {max_retries} retries") from exc
-            raise
+            time.sleep(BASE_BACKOFF_SECONDS * (2**attempt))
+            attempt += 1
 
 
 def idem_item_key(scope: str, marker_key: str) -> str:
