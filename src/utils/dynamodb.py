@@ -8,6 +8,7 @@ and test monkeypatch support, plus the shared chunked BatchGetItem helper.
 import json
 import os
 import time
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
 import boto3
@@ -118,6 +119,23 @@ class TransactionCancelledError(Exception):
 
 class TransactionThrottledError(Exception):
     """Transient throttling persisted past the bounded race retries."""
+
+
+def from_dynamodb_json(value: Any) -> Any:
+    """Deep-convert a value read back from DynamoDB to plain JSON types.
+
+    DynamoDB returns numbers as ``Decimal``; a committed-replay result must
+    compare equal to the live result that produced it, so marker reads (and
+    any stored-projection read) normalize through here. Integral Decimals
+    become ints; non-integral become floats.
+    """
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, dict):
+        return {key: from_dynamodb_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [from_dynamodb_json(item) for item in value]
+    return value
 
 
 def transaction_item_key(transact_item: Dict[str, Any]) -> tuple[str, str]:

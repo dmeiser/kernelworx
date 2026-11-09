@@ -30,7 +30,7 @@ product/price identity can never drift between origin and Unit records.
 import secrets
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -45,6 +45,7 @@ try:  # pragma: no cover
     from utils.dynamodb import (
         TransactionCancelledError,
         execute_transaction,
+        from_dynamodb_json,
         idem_expiry_epoch,
         tables,
     )
@@ -65,6 +66,7 @@ except ModuleNotFoundError:  # pragma: no cover
     from ..utils.dynamodb import (
         TransactionCancelledError,
         execute_transaction,
+        from_dynamodb_json,
         idem_expiry_epoch,
         tables,
     )
@@ -166,7 +168,7 @@ def _check_marker(marker: Optional[Dict[str, Any]], fingerprint: str) -> Optiona
     result = marker.get("idemResult")
     if not isinstance(result, dict):
         raise AppError(ErrorCode.INTERNAL_ERROR, "Idempotency marker is missing its committed result")
-    return result
+    return cast(Dict[str, Any], from_dynamodb_json(result))
 
 
 def _execute_or_replay(plan: List[Dict[str, Any]], marker_entry: Dict[str, Any]) -> None:
