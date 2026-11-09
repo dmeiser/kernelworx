@@ -114,6 +114,50 @@ export type GqlAdminUserConnection = {
   users: Array<GqlAdminUser>;
 };
 
+export type GqlAllocationTargetInput = {
+  productId: Scalars['ID']['input'];
+  quantity: Scalars['Int']['input'];
+};
+
+export type GqlAllocationWarning = {
+  __typename?: 'AllocationWarning';
+  assignedQty: Scalars['Int']['output'];
+  code: Scalars['String']['output'];
+  currentStockQty: Scalars['Int']['output'];
+  message: Scalars['String']['output'];
+  overageQty: Scalars['Int']['output'];
+  productId: Scalars['ID']['output'];
+};
+
+export type GqlAssignShowAndSellInventoryResult = {
+  __typename?: 'AssignShowAndSellInventoryResult';
+  allocations: Array<GqlEventInventoryAllocation>;
+  inventoryPositions: Array<GqlInventoryPosition>;
+  warnings: Array<GqlAllocationWarning>;
+};
+
+export type GqlBaseAllocation = {
+  __typename?: 'BaseAllocation';
+  baseAmountCents: Scalars['Int']['output'];
+  profileId: Scalars['ID']['output'];
+};
+
+export type GqlCalendarInviteData = {
+  __typename?: 'CalendarInviteData';
+  address?: Maybe<Scalars['String']['output']>;
+  campaignId: Scalars['ID']['output'];
+  description: Scalars['String']['output'];
+  endAtUtc: Scalars['String']['output'];
+  locationName: Scalars['String']['output'];
+  profileId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  slotId: Scalars['ID']['output'];
+  startAtUtc: Scalars['String']['output'];
+  timezone: Scalars['String']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  unitId: Scalars['ID']['output'];
+};
+
 /** A fundraising campaign owned by a seller profile, tied to a catalog for a season. */
 export type GqlCampaign = {
   __typename?: 'Campaign';
@@ -222,6 +266,21 @@ export type GqlCatalogType =
   /** A catalog created by a regular user for use in their own campaigns. */
   | 'USER_CREATED';
 
+export type GqlConfirmWorkResult = {
+  __typename?: 'ConfirmWorkResult';
+  pendingPreview: GqlWorkPendingPreview;
+  signups: Array<GqlShowAndSellSignupAdmin>;
+};
+
+export type GqlCorrectionLineInput = {
+  immediateQty: Scalars['Int']['input'];
+  lineItemId?: InputMaybe<Scalars['ID']['input']>;
+  productId: Scalars['ID']['input'];
+  weOweQty: Scalars['Int']['input'];
+};
+
+export type GqlCouncilNeedBasis = 'AFTER_ASSIGNMENTS' | 'PHYSICAL_STOCK';
+
 /**
  * Input for createCampaign. Creates a new active campaign on a profile.
  *
@@ -328,6 +387,187 @@ export type GqlCreateSharedCampaignInput = {
   unitType: Scalars['String']['input'];
 };
 
+export type GqlCreateShowAndSellInput = {
+  address?: InputMaybe<Scalars['String']['input']>;
+  endAt: Scalars['String']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  locationName: Scalars['String']['input'];
+  splitMethod?: InputMaybe<GqlSplitMethod>;
+  startAt: Scalars['String']['input'];
+  unitCampaignId: Scalars['ID']['input'];
+  weOweEnabled?: InputMaybe<Scalars['Boolean']['input']>;
+};
+
+export type GqlCreateUnitCampaignInput = {
+  campaignName: Scalars['String']['input'];
+  campaignYear: Scalars['Int']['input'];
+  catalogId: Scalars['ID']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  unitId: Scalars['ID']['input'];
+};
+
+export type GqlCreateUnitInput = {
+  city: Scalars['String']['input'];
+  councilNeedBasis?: InputMaybe<GqlCouncilNeedBasis>;
+  displayName?: InputMaybe<Scalars['String']['input']>;
+  duplicateConfirmed?: InputMaybe<Scalars['Boolean']['input']>;
+  idempotencyKey: Scalars['String']['input'];
+  splitDefault?: InputMaybe<GqlSplitMethod>;
+  state: Scalars['String']['input'];
+  timezone?: InputMaybe<Scalars['String']['input']>;
+  unitNumber: Scalars['String']['input'];
+  unitType: Scalars['String']['input'];
+};
+
+export type GqlCreateUnitResult = {
+  __typename?: 'CreateUnitResult';
+  grant: GqlUnitAccessGrant;
+  unit: GqlUnit;
+};
+
+export type GqlCreditAllocationFact = {
+  __typename?: 'CreditAllocationFact';
+  baseAmountCents: Scalars['Int']['output'];
+  campaignId: Scalars['ID']['output'];
+  createdAt: Scalars['String']['output'];
+  eventVersion: Scalars['Int']['output'];
+  finalizationId: Scalars['ID']['output'];
+  minutesConfirmed: Scalars['Int']['output'];
+  profileId: Scalars['ID']['output'];
+  roundingCents: Scalars['Int']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  status: Scalars['String']['output'];
+  totalAmountCents: Scalars['Int']['output'];
+  versionNumber: Scalars['Int']['output'];
+};
+
+export type GqlCreditAllocationFactConnection = {
+  __typename?: 'CreditAllocationFactConnection';
+  items: Array<GqlCreditAllocationFact>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlEventInventoryAllocation = {
+  __typename?: 'EventInventoryAllocation';
+  allocatedQty: Scalars['Int']['output'];
+  createdAt: Scalars['String']['output'];
+  eventEndAt: Scalars['String']['output'];
+  eventStartAt: Scalars['String']['output'];
+  productId: Scalars['ID']['output'];
+  releasedQty: Scalars['Int']['output'];
+  remainingQty: Scalars['Int']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  soldQty: Scalars['Int']['output'];
+  status: Scalars['String']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  updatedAt: Scalars['String']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlEventInventoryAllocationConnection = {
+  __typename?: 'EventInventoryAllocationConnection';
+  items: Array<GqlEventInventoryAllocation>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlFinalizationIssue = {
+  __typename?: 'FinalizationIssue';
+  code: Scalars['String']['output'];
+  message: Scalars['String']['output'];
+  unassignedCents?: Maybe<Scalars['Int']['output']>;
+};
+
+export type GqlFinalizationPreview = {
+  __typename?: 'FinalizationPreview';
+  baseAllocations: Array<GqlBaseAllocation>;
+  cashDiscrepancyCents?: Maybe<Scalars['Int']['output']>;
+  eventVersion: Scalars['Int']['output'];
+  expectedCashCents: Scalars['Int']['output'];
+  issues: Array<GqlFinalizationIssue>;
+  unassignedCents: Scalars['Int']['output'];
+  wholePoolCents: Scalars['Int']['output'];
+};
+
+export type GqlFinalizationResult = {
+  __typename?: 'FinalizationResult';
+  finalization: GqlShowAndSellFinalization;
+  laterAllocationWarnings: Array<GqlAllocationWarning>;
+  scoutAllocations: Array<GqlScoutSalesAllocation>;
+};
+
+export type GqlFulfillOrderLineResult = {
+  __typename?: 'FulfillOrderLineResult';
+  fulfillment?: Maybe<GqlOrderFulfillment>;
+  inventoryPosition?: Maybe<GqlInventoryPosition>;
+  order: GqlOrder;
+  reversal?: Maybe<GqlOrderFulfillment>;
+};
+
+export type GqlFulfillmentSource = 'EXTERNAL_COUNCIL' | 'KERNEL_STOCK' | 'SCOUT_CUSTODY';
+
+export type GqlInventoryBalance = {
+  __typename?: 'InventoryBalance';
+  councilOnOrderQty: Scalars['Int']['output'];
+  kernelPhysicalQty: Scalars['Int']['output'];
+  productId: Scalars['ID']['output'];
+  soldInPossessionQty: Scalars['Int']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlInventoryMovement = {
+  __typename?: 'InventoryMovement';
+  actorAccountId: Scalars['ID']['output'];
+  assignedDelta: Scalars['Int']['output'];
+  councilOnOrderDelta: Scalars['Int']['output'];
+  inventoryVersion: Scalars['Int']['output'];
+  kernelPhysicalDelta: Scalars['Int']['output'];
+  movementId: Scalars['ID']['output'];
+  movementType: Scalars['String']['output'];
+  occurredAt: Scalars['String']['output'];
+  orderId?: Maybe<Scalars['ID']['output']>;
+  productId: Scalars['ID']['output'];
+  profileId?: Maybe<Scalars['ID']['output']>;
+  reason?: Maybe<Scalars['String']['output']>;
+  soldPossessionDelta: Scalars['Int']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  withScoutDelta: Scalars['Int']['output'];
+};
+
+export type GqlInventoryMovementConnection = {
+  __typename?: 'InventoryMovementConnection';
+  items: Array<GqlInventoryMovement>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlInventoryPosition = {
+  __typename?: 'InventoryPosition';
+  actualCouncilDemandQty: Scalars['Int']['output'];
+  afterAssignmentsCouncilNeedQty: Scalars['Int']['output'];
+  assignedOpenQty: Scalars['Int']['output'];
+  assignmentOverageQty: Scalars['Int']['output'];
+  balance?: Maybe<GqlInventoryBalance>;
+  physicalStockCouncilNeedQty: Scalars['Int']['output'];
+  productId: Scalars['ID']['output'];
+  sellableKernelQty: Scalars['Int']['output'];
+  totalUnitOwnedUndeliveredQty: Scalars['Int']['output'];
+  unassignedKernelQty: Scalars['Int']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  withScoutQty: Scalars['Int']['output'];
+};
+
+export type GqlInventoryPositionConnection = {
+  __typename?: 'InventoryPositionConnection';
+  items: Array<GqlInventoryPosition>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlIssueStockResult = {
+  __typename?: 'IssueStockResult';
+  custodyBalance: GqlScoutCustodyBalance;
+  inventoryPosition: GqlInventoryPosition;
+};
+
 /** A single product line within an order. */
 export type GqlLineItem = {
   __typename?: 'LineItem';
@@ -350,6 +590,8 @@ export type GqlLineItemInput = {
   /** The quantity to order (at least 1). */
   quantity: Scalars['Int']['input'];
 };
+
+export type GqlMembershipStatus = 'ACTIVE' | 'REMOVED';
 
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation = {
@@ -645,6 +887,12 @@ export type GqlMutation_UpdateSharedCampaignArgs = {
   input: GqlUpdateSharedCampaignInput;
 };
 
+export type GqlOpportunityScout = {
+  __typename?: 'OpportunityScout';
+  campaignId: Scalars['ID']['output'];
+  profileId: Scalars['ID']['output'];
+};
+
 /** A customer order placed in a campaign. */
 export type GqlOrder = {
   __typename?: 'Order';
@@ -691,12 +939,116 @@ export type GqlOrderConnection = {
   orders: Array<GqlOrder>;
 };
 
+export type GqlOrderFulfillment = {
+  __typename?: 'OrderFulfillment';
+  actorAccountId: Scalars['ID']['output'];
+  campaignId: Scalars['ID']['output'];
+  createdAt: Scalars['String']['output'];
+  fulfillmentId: Scalars['ID']['output'];
+  inventoryMovementId?: Maybe<Scalars['ID']['output']>;
+  lineItemId: Scalars['ID']['output'];
+  orderId: Scalars['ID']['output'];
+  productId: Scalars['ID']['output'];
+  profileId: Scalars['ID']['output'];
+  quantity: Scalars['Int']['output'];
+  recordType: Scalars['String']['output'];
+  reversalOfFulfillmentId?: Maybe<Scalars['ID']['output']>;
+  source: GqlFulfillmentSource;
+  unitCampaignId?: Maybe<Scalars['ID']['output']>;
+  unitId?: Maybe<Scalars['ID']['output']>;
+};
+
+export type GqlOrderFulfillmentConnection = {
+  __typename?: 'OrderFulfillmentConnection';
+  items: Array<GqlOrderFulfillment>;
+  pageInfo: GqlPageInfo;
+};
+
 /** The payment-verification state of an order. Authenticated orders leave this absent; the public path always writes NEW. */
 export type GqlOrderStatus =
   /** The seller confirmed the buyer paid. */
   | 'CONFIRMED'
   /** Created, awaiting the seller's off-platform payment verification. */
   | 'NEW';
+
+export type GqlPageInfo = {
+  __typename?: 'PageInfo';
+  endCursor?: Maybe<Scalars['String']['output']>;
+  hasNextPage: Scalars['Boolean']['output'];
+};
+
+export type GqlPageInput = {
+  cursor?: InputMaybe<Scalars['String']['input']>;
+  limit?: InputMaybe<Scalars['Int']['input']>;
+};
+
+export type GqlParticipantOrderFulfillment = {
+  __typename?: 'ParticipantOrderFulfillment';
+  campaignId: Scalars['ID']['output'];
+  createdAt: Scalars['String']['output'];
+  fulfillmentId: Scalars['ID']['output'];
+  lineItemId: Scalars['ID']['output'];
+  orderId: Scalars['ID']['output'];
+  productId: Scalars['ID']['output'];
+  profileId: Scalars['ID']['output'];
+  quantity: Scalars['Int']['output'];
+  recordType: Scalars['String']['output'];
+  source: GqlFulfillmentSource;
+};
+
+export type GqlParticipantPendingAllocation = {
+  __typename?: 'ParticipantPendingAllocation';
+  campaignId: Scalars['ID']['output'];
+  computedAt: Scalars['String']['output'];
+  eventVersion: Scalars['Int']['output'];
+  pendingAmountCents: Scalars['Int']['output'];
+  profileId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+};
+
+export type GqlParticipantPendingAllocationConnection = {
+  __typename?: 'ParticipantPendingAllocationConnection';
+  items: Array<GqlParticipantPendingAllocation>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlParticipantSalesCredit = {
+  __typename?: 'ParticipantSalesCredit';
+  amountCents: Scalars['Int']['output'];
+  campaignId: Scalars['ID']['output'];
+  createdAt: Scalars['String']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  status: Scalars['String']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  versionNumber: Scalars['Int']['output'];
+};
+
+export type GqlParticipantSalesCreditConnection = {
+  __typename?: 'ParticipantSalesCreditConnection';
+  items: Array<GqlParticipantSalesCredit>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlParticipantSignup = {
+  __typename?: 'ParticipantSignup';
+  actualMinutes: Scalars['Int']['output'];
+  campaignId: Scalars['ID']['output'];
+  createdAt: Scalars['String']['output'];
+  profileId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  slotId: Scalars['ID']['output'];
+  status: GqlSignupStatus;
+  unitCampaignId: Scalars['ID']['output'];
+  updatedAt: Scalars['String']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlParticipantSignupConnection = {
+  __typename?: 'ParticipantSignupConnection';
+  items: Array<GqlParticipantSignup>;
+  pageInfo: GqlPageInfo;
+};
 
 /**
  * A named payment method a seller can assign to orders.
@@ -709,6 +1061,18 @@ export type GqlPaymentMethod = {
   name: Scalars['String']['output'];
   /** A pre-signed S3 GET URL for the method's uploaded QR code, or null when no QR code is stored or the caller may not view it. */
   qrCodeUrl?: Maybe<Scalars['String']['output']>;
+};
+
+export type GqlPaymentMethodInput = {
+  methodCode: Scalars['String']['input'];
+  otherDetails?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type GqlPaymentMethodSnapshot = {
+  __typename?: 'PaymentMethodSnapshot';
+  displayName: Scalars['String']['output'];
+  methodCode: Scalars['String']['output'];
+  otherDetails?: Maybe<Scalars['String']['output']>;
 };
 
 /** The level of access a seller profile is granted to another account through a share. WRITE implies READ: a WRITE holder can view and modify, a READ holder can only view. */
@@ -745,6 +1109,11 @@ export type GqlProductInput = {
   sortOrder: Scalars['Int']['input'];
 };
 
+export type GqlProductQuantityInput = {
+  productId: Scalars['ID']['input'];
+  quantity: Scalars['Int']['input'];
+};
+
 /** An invitation for another account to join a seller profile, redeemable by its invite code. */
 export type GqlProfileInvite = {
   __typename?: 'ProfileInvite';
@@ -759,6 +1128,12 @@ export type GqlProfileInvite = {
   /** The permissions the invite grants once redeemed. */
   permissions: Array<GqlPermissionType>;
   /** The ID of the profile the invite grants access to. */
+  profileId: Scalars['ID']['output'];
+};
+
+export type GqlProfileMinutes = {
+  __typename?: 'ProfileMinutes';
+  confirmedMinutes: Scalars['Int']['output'];
   profileId: Scalars['ID']['output'];
 };
 
@@ -1093,12 +1468,30 @@ export type GqlRedeemProfileInviteInput = {
   inviteCode: Scalars['ID']['input'];
 };
 
+export type GqlReturnLineInput = {
+  actualQty: Scalars['Int']['input'];
+  expectedQty: Scalars['Int']['input'];
+  productId: Scalars['ID']['input'];
+  reason?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type GqlReturnStockResult = {
+  __typename?: 'ReturnStockResult';
+  custodyBalances: Array<GqlScoutCustodyBalance>;
+  inventoryPositions: Array<GqlInventoryPosition>;
+};
+
 /** Input for revokeShare. Removes a share's access to a profile (owner only). */
 export type GqlRevokeShareInput = {
   /** The ID of the profile the share is on. */
   profileId: Scalars['ID']['input'];
   /** The ID of the account whose access should be revoked. */
   targetAccountId: Scalars['ID']['input'];
+};
+
+export type GqlRoundingAssignmentInput = {
+  cents: Scalars['Int']['input'];
+  profileId: Scalars['ID']['input'];
 };
 
 /** Credentials for uploading a file directly to S3 via a pre-signed POST request. */
@@ -1110,6 +1503,68 @@ export type GqlS3UploadInfo = {
   s3Key: Scalars['String']['output'];
   /** The pre-signed S3 URL to POST the file to. */
   uploadUrl: Scalars['String']['output'];
+};
+
+export type GqlScoutCampaignShowAndSellTotal = {
+  __typename?: 'ScoutCampaignShowAndSellTotal';
+  approvedTotalCents: Scalars['Int']['output'];
+  profileId: Scalars['ID']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+};
+
+export type GqlScoutCommitment = {
+  __typename?: 'ScoutCommitment';
+  commitmentId: Scalars['ID']['output'];
+  endAt: Scalars['String']['output'];
+  profileId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  slotId: Scalars['ID']['output'];
+  startAt: Scalars['String']['output'];
+  status: GqlSignupStatus;
+  unitCampaignId: Scalars['ID']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlScoutCommitmentConnection = {
+  __typename?: 'ScoutCommitmentConnection';
+  items: Array<GqlScoutCommitment>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlScoutCustodyBalance = {
+  __typename?: 'ScoutCustodyBalance';
+  campaignId: Scalars['ID']['output'];
+  productId: Scalars['ID']['output'];
+  profileId: Scalars['ID']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  version: Scalars['Int']['output'];
+  withScoutQty: Scalars['Int']['output'];
+};
+
+export type GqlScoutCustodyBalanceConnection = {
+  __typename?: 'ScoutCustodyBalanceConnection';
+  items: Array<GqlScoutCustodyBalance>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlScoutSalesAllocation = {
+  __typename?: 'ScoutSalesAllocation';
+  allocationId: Scalars['ID']['output'];
+  amountCents: Scalars['Int']['output'];
+  campaignId: Scalars['ID']['output'];
+  createdAt: Scalars['String']['output'];
+  finalizationId: Scalars['ID']['output'];
+  profileId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  status: Scalars['String']['output'];
+  suspendedAt?: Maybe<Scalars['String']['output']>;
+  unitCampaignId: Scalars['ID']['output'];
+};
+
+export type GqlScoutSalesAllocationConnection = {
+  __typename?: 'ScoutSalesAllocationConnection';
+  items: Array<GqlScoutSalesAllocation>;
+  pageInfo: GqlPageInfo;
 };
 
 /** A seller (scout unit) profile that owns campaigns. Returned for the caller's own profiles and for profiles shared to them. */
@@ -1144,6 +1599,12 @@ export type GqlSellerProfileConnection = {
   nextToken?: Maybe<Scalars['String']['output']>;
   /** The seller profiles owned by the caller on this page. */
   profiles: Array<GqlSellerProfile>;
+};
+
+export type GqlSetReservationResult = {
+  __typename?: 'SetReservationResult';
+  inventoryPosition: GqlInventoryPosition;
+  obligation: GqlWeOweObligation;
 };
 
 /** A grant of access to a seller profile, letting another account (the target) view and/or modify it. */
@@ -1252,12 +1713,330 @@ export type GqlSharedProfile = {
   updatedAt: Scalars['AWSDateTime']['output'];
 };
 
+export type GqlShowAndSell = {
+  __typename?: 'ShowAndSell';
+  address?: Maybe<Scalars['String']['output']>;
+  cancellationReason?: Maybe<Scalars['String']['output']>;
+  cancelledAt?: Maybe<Scalars['String']['output']>;
+  cancelledByAccountId?: Maybe<Scalars['ID']['output']>;
+  createdAt: Scalars['String']['output'];
+  createdByAccountId: Scalars['ID']['output'];
+  endAt: Scalars['String']['output'];
+  locationName: Scalars['String']['output'];
+  productIds: Array<Scalars['ID']['output']>;
+  showAndSellId: Scalars['ID']['output'];
+  slotCount: Scalars['Int']['output'];
+  slots: Array<GqlShowAndSellSlot>;
+  splitMethod: GqlSplitMethod;
+  startAt: Scalars['String']['output'];
+  status: GqlShowAndSellStatus;
+  unitCampaignId: Scalars['ID']['output'];
+  unitId: Scalars['ID']['output'];
+  updatedAt: Scalars['String']['output'];
+  updatedByAccountId: Scalars['ID']['output'];
+  version: Scalars['Int']['output'];
+  weOweEnabled: Scalars['Boolean']['output'];
+};
+
+export type GqlShowAndSellConnection = {
+  __typename?: 'ShowAndSellConnection';
+  items: Array<GqlShowAndSell>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlShowAndSellFinalization = {
+  __typename?: 'ShowAndSellFinalization';
+  actorAccountId: Scalars['ID']['output'];
+  actualCashCents?: Maybe<Scalars['Int']['output']>;
+  cashAdjustmentCents: Scalars['Int']['output'];
+  cashDiscrepancyCents?: Maybe<Scalars['Int']['output']>;
+  createdAt: Scalars['String']['output'];
+  discrepancyExplanation?: Maybe<Scalars['String']['output']>;
+  expectedCashCents: Scalars['Int']['output'];
+  finalizationId: Scalars['ID']['output'];
+  previousFinalizationId?: Maybe<Scalars['ID']['output']>;
+  showAndSellId: Scalars['ID']['output'];
+  status: Scalars['String']['output'];
+  versionNumber: Scalars['Int']['output'];
+  wholePoolCents: Scalars['Int']['output'];
+};
+
+export type GqlShowAndSellFinalizationConnection = {
+  __typename?: 'ShowAndSellFinalizationConnection';
+  items: Array<GqlShowAndSellFinalization>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlShowAndSellOpportunity = {
+  __typename?: 'ShowAndSellOpportunity';
+  address?: Maybe<Scalars['String']['output']>;
+  /** @deprecated use eligibleScouts (carries the roster campaign identity) */
+  eligibleProfileIds: Array<Scalars['ID']['output']>;
+  eligibleScouts: Array<GqlOpportunityScout>;
+  endAt: Scalars['String']['output'];
+  locationName: Scalars['String']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  slots: Array<GqlShowAndSellOpportunitySlot>;
+  splitMethod: GqlSplitMethod;
+  startAt: Scalars['String']['output'];
+  status: GqlShowAndSellStatus;
+  timezone: Scalars['String']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  unitId: Scalars['ID']['output'];
+};
+
+export type GqlShowAndSellOpportunityConnection = {
+  __typename?: 'ShowAndSellOpportunityConnection';
+  items: Array<GqlShowAndSellOpportunity>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlShowAndSellOpportunitySlot = {
+  __typename?: 'ShowAndSellOpportunitySlot';
+  activeSignupCount: Scalars['Int']['output'];
+  capacity: Scalars['Int']['output'];
+  endAt: Scalars['String']['output'];
+  label?: Maybe<Scalars['String']['output']>;
+  signedUpProfileIds: Array<Scalars['ID']['output']>;
+  slotId: Scalars['ID']['output'];
+  startAt: Scalars['String']['output'];
+};
+
+export type GqlShowAndSellSale = {
+  __typename?: 'ShowAndSellSale';
+  buyerEmail?: Maybe<Scalars['String']['output']>;
+  buyerName?: Maybe<Scalars['String']['output']>;
+  buyerPhone?: Maybe<Scalars['String']['output']>;
+  createdAt: Scalars['String']['output'];
+  enteredByAccountId: Scalars['ID']['output'];
+  lineItems: Array<GqlShowAndSellSaleLine>;
+  paymentMethodSnapshot: GqlPaymentMethodSnapshot;
+  priorRevisions: Array<GqlShowAndSellSaleRevision>;
+  revision: Scalars['Int']['output'];
+  saleAt: Scalars['String']['output'];
+  saleId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  status: Scalars['String']['output'];
+  totalCents: Scalars['Int']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  unitId: Scalars['ID']['output'];
+  updatedAt: Scalars['String']['output'];
+  voidReason?: Maybe<Scalars['String']['output']>;
+  voidedAt?: Maybe<Scalars['String']['output']>;
+  voidedByAccountId?: Maybe<Scalars['ID']['output']>;
+};
+
+export type GqlShowAndSellSaleConnection = {
+  __typename?: 'ShowAndSellSaleConnection';
+  items: Array<GqlShowAndSellSale>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlShowAndSellSaleLine = {
+  __typename?: 'ShowAndSellSaleLine';
+  immediateQty: Scalars['Int']['output'];
+  lineItemId: Scalars['ID']['output'];
+  productId: Scalars['ID']['output'];
+  productNameSnapshot: Scalars['String']['output'];
+  subtotalCents: Scalars['Int']['output'];
+  unitPriceCentsSnapshot: Scalars['Int']['output'];
+  weOweQty: Scalars['Int']['output'];
+};
+
+export type GqlShowAndSellSaleLineInput = {
+  immediateQty: Scalars['Int']['input'];
+  productId: Scalars['ID']['input'];
+  weOweQty: Scalars['Int']['input'];
+};
+
+export type GqlShowAndSellSaleResult = {
+  __typename?: 'ShowAndSellSaleResult';
+  allocations: Array<GqlEventInventoryAllocation>;
+  inventoryPositions: Array<GqlInventoryPosition>;
+  sale: GqlShowAndSellSale;
+  warnings: Array<GqlAllocationWarning>;
+  weOweObligations: Array<GqlWeOweObligation>;
+};
+
+export type GqlShowAndSellSaleRevision = {
+  __typename?: 'ShowAndSellSaleRevision';
+  buyerEmail?: Maybe<Scalars['String']['output']>;
+  buyerName?: Maybe<Scalars['String']['output']>;
+  buyerPhone?: Maybe<Scalars['String']['output']>;
+  correctedByAccountId: Scalars['ID']['output'];
+  createdAt: Scalars['String']['output'];
+  lineItems: Array<GqlShowAndSellSaleLine>;
+  paymentMethodSnapshot: GqlPaymentMethodSnapshot;
+  reason: Scalars['String']['output'];
+  revision: Scalars['Int']['output'];
+  saleAt: Scalars['String']['output'];
+  totalCents: Scalars['Int']['output'];
+};
+
+export type GqlShowAndSellSignupAdmin = {
+  __typename?: 'ShowAndSellSignupAdmin';
+  actualMinutes: Scalars['Int']['output'];
+  campaignId: Scalars['ID']['output'];
+  confirmedAt?: Maybe<Scalars['String']['output']>;
+  confirmedByAccountId?: Maybe<Scalars['ID']['output']>;
+  createdAt: Scalars['String']['output'];
+  profileId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  signedUpByAccountId: Scalars['ID']['output'];
+  slotId: Scalars['ID']['output'];
+  status: GqlSignupStatus;
+  unitCampaignId: Scalars['ID']['output'];
+  updatedAt: Scalars['String']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlShowAndSellSignupAdminConnection = {
+  __typename?: 'ShowAndSellSignupAdminConnection';
+  items: Array<GqlShowAndSellSignupAdmin>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlShowAndSellSlot = {
+  __typename?: 'ShowAndSellSlot';
+  activeSignupCount: Scalars['Int']['output'];
+  capacity: Scalars['Int']['output'];
+  createdAt: Scalars['String']['output'];
+  endAt: Scalars['String']['output'];
+  label?: Maybe<Scalars['String']['output']>;
+  showAndSellId: Scalars['ID']['output'];
+  slotId: Scalars['ID']['output'];
+  startAt: Scalars['String']['output'];
+  updatedAt: Scalars['String']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlShowAndSellStatus = 'ACTIVE' | 'CANCELLED' | 'ENDED' | 'FINALIZED' | 'REOPENED' | 'SCHEDULED';
+
+export type GqlSignupStatus = 'ACTIVE' | 'CANCELLED';
+
+export type GqlSplitMethod = 'EQUAL' | 'TIME_WORKED';
+
 /** Input for transferProfileOwnership. Transfers a profile's ownership to an account that already has a share. */
 export type GqlTransferProfileOwnershipInput = {
   /** The ID of the account to become the new owner; it must already hold a share on the profile. */
   newOwnerAccountId: Scalars['ID']['input'];
   /** The ID of the profile to transfer (the caller must be the owner or an admin). */
   profileId: Scalars['ID']['input'];
+};
+
+export type GqlUnit = {
+  __typename?: 'Unit';
+  adminCount: Scalars['Int']['output'];
+  city: Scalars['String']['output'];
+  councilNeedBasis: GqlCouncilNeedBasis;
+  createdAt: Scalars['String']['output'];
+  createdByAccountId: Scalars['ID']['output'];
+  displayName: Scalars['String']['output'];
+  splitDefault: GqlSplitMethod;
+  state: Scalars['String']['output'];
+  timezone: Scalars['String']['output'];
+  unitId: Scalars['ID']['output'];
+  unitNumber: Scalars['String']['output'];
+  unitType: Scalars['String']['output'];
+  updatedAt: Scalars['String']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlUnitAccessGrant = {
+  __typename?: 'UnitAccessGrant';
+  accountId: Scalars['ID']['output'];
+  createdAt: Scalars['String']['output'];
+  createdByAccountId: Scalars['ID']['output'];
+  role: GqlUnitRole;
+  unitId: Scalars['ID']['output'];
+};
+
+export type GqlUnitAccessGrantConnection = {
+  __typename?: 'UnitAccessGrantConnection';
+  items: Array<GqlUnitAccessGrant>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlUnitCampaignAdmin = {
+  __typename?: 'UnitCampaignAdmin';
+  campaignName: Scalars['String']['output'];
+  campaignYear: Scalars['Int']['output'];
+  catalogId: Scalars['ID']['output'];
+  createdAt: Scalars['String']['output'];
+  createdByAccountId: Scalars['ID']['output'];
+  isActive: Scalars['Boolean']['output'];
+  joinCode: Scalars['String']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  unitId: Scalars['ID']['output'];
+  updatedAt: Scalars['String']['output'];
+  updatedByAccountId?: Maybe<Scalars['ID']['output']>;
+  version: Scalars['Int']['output'];
+};
+
+export type GqlUnitCampaignCatalog = {
+  __typename?: 'UnitCampaignCatalog';
+  catalogId: Scalars['ID']['output'];
+  catalogName: Scalars['String']['output'];
+  products: Array<GqlProduct>;
+};
+
+export type GqlUnitCampaignConnection = {
+  __typename?: 'UnitCampaignConnection';
+  items: Array<GqlUnitCampaignAdmin>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlUnitCampaignJoinPreview = {
+  __typename?: 'UnitCampaignJoinPreview';
+  campaignName: Scalars['String']['output'];
+  campaignYear: Scalars['Int']['output'];
+  catalogName: Scalars['String']['output'];
+  isActive: Scalars['Boolean']['output'];
+  unitDisplayName: Scalars['String']['output'];
+};
+
+export type GqlUnitCampaignMembership = {
+  __typename?: 'UnitCampaignMembership';
+  campaignId: Scalars['ID']['output'];
+  campaignName?: Maybe<Scalars['String']['output']>;
+  guardVersion?: Maybe<Scalars['Int']['output']>;
+  joinedAt: Scalars['String']['output'];
+  joinedByAccountId: Scalars['ID']['output'];
+  profileDisplayName?: Maybe<Scalars['String']['output']>;
+  profileId: Scalars['ID']['output'];
+  removedAt?: Maybe<Scalars['String']['output']>;
+  removedByAccountId?: Maybe<Scalars['ID']['output']>;
+  status: GqlMembershipStatus;
+  unitCampaignId: Scalars['ID']['output'];
+  unitId: Scalars['ID']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlUnitCampaignMembershipConnection = {
+  __typename?: 'UnitCampaignMembershipConnection';
+  items: Array<GqlUnitCampaignMembership>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlUnitConnection = {
+  __typename?: 'UnitConnection';
+  items: Array<GqlUnit>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlUnitInvite = {
+  __typename?: 'UnitInvite';
+  createdAt: Scalars['String']['output'];
+  createdByAccountId: Scalars['ID']['output'];
+  expiresAt: Scalars['String']['output'];
+  inviteCode: Scalars['String']['output'];
+  unitId: Scalars['ID']['output'];
+};
+
+export type GqlUnitInviteConnection = {
+  __typename?: 'UnitInviteConnection';
+  items: Array<GqlUnitInvite>;
+  pageInfo: GqlPageInfo;
 };
 
 /** An individual order within a unit report. */
@@ -1275,6 +2054,20 @@ export type GqlUnitOrderDetail = {
   orderId: Scalars['ID']['output'];
   /** The order's total amount. */
   totalAmount: Scalars['Float']['output'];
+};
+
+export type GqlUnitPaymentMethod = {
+  __typename?: 'UnitPaymentMethod';
+  createdAt: Scalars['String']['output'];
+  displayName: Scalars['String']['output'];
+  isActive: Scalars['Boolean']['output'];
+  isBuiltin: Scalars['Boolean']['output'];
+  normalizedName: Scalars['String']['output'];
+  paymentMethodId: Scalars['ID']['output'];
+  qrCodeS3Key?: Maybe<Scalars['String']['output']>;
+  unitId: Scalars['ID']['output'];
+  updatedAt: Scalars['String']['output'];
+  version: Scalars['Int']['output'];
 };
 
 /** A unit-level sales report aggregating sellers (profiles) and their orders for a unit and season. */
@@ -1295,6 +2088,8 @@ export type GqlUnitReport = {
   /** The scout unit type the report covers. */
   unitType: Scalars['String']['output'];
 };
+
+export type GqlUnitRole = 'UNIT_ADMIN';
 
 /** A per-seller (profile) summary within a unit report. */
 export type GqlUnitSellerSummary = {
@@ -1407,6 +2202,113 @@ export type GqlUpdateSharedCampaignInput = {
   isActive?: InputMaybe<Scalars['Boolean']['input']>;
   /** The shared campaign's code. */
   sharedCampaignCode: Scalars['String']['input'];
+};
+
+export type GqlUpdateShowAndSellInput = {
+  address?: InputMaybe<Scalars['String']['input']>;
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  locationName?: InputMaybe<Scalars['String']['input']>;
+  showAndSellId: Scalars['ID']['input'];
+  splitMethod?: InputMaybe<GqlSplitMethod>;
+  weOweEnabled?: InputMaybe<Scalars['Boolean']['input']>;
+};
+
+export type GqlUpdateUnitCampaignInput = {
+  campaignName?: InputMaybe<Scalars['String']['input']>;
+  campaignYear?: InputMaybe<Scalars['Int']['input']>;
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  isActive?: InputMaybe<Scalars['Boolean']['input']>;
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+export type GqlUpdateUnitInput = {
+  city?: InputMaybe<Scalars['String']['input']>;
+  councilNeedBasis?: InputMaybe<GqlCouncilNeedBasis>;
+  displayName?: InputMaybe<Scalars['String']['input']>;
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  splitDefault?: InputMaybe<GqlSplitMethod>;
+  state?: InputMaybe<Scalars['String']['input']>;
+  timezone?: InputMaybe<Scalars['String']['input']>;
+  unitId: Scalars['ID']['input'];
+  unitNumber?: InputMaybe<Scalars['String']['input']>;
+  unitType?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type GqlUpsertShowAndSellSlotInput = {
+  capacity: Scalars['Int']['input'];
+  endAt: Scalars['String']['input'];
+  expectedEventVersion: Scalars['Int']['input'];
+  expectedSlotVersion?: InputMaybe<Scalars['Int']['input']>;
+  idempotencyKey: Scalars['String']['input'];
+  label?: InputMaybe<Scalars['String']['input']>;
+  showAndSellId: Scalars['ID']['input'];
+  slotId?: InputMaybe<Scalars['ID']['input']>;
+  startAt: Scalars['String']['input'];
+};
+
+export type GqlWeOweFulfillment = {
+  __typename?: 'WeOweFulfillment';
+  actorAccountId: Scalars['ID']['output'];
+  createdAt: Scalars['String']['output'];
+  fulfillmentId: Scalars['ID']['output'];
+  inventoryMovementId?: Maybe<Scalars['ID']['output']>;
+  quantity: Scalars['Int']['output'];
+  source: Scalars['String']['output'];
+  weOweId: Scalars['ID']['output'];
+};
+
+export type GqlWeOweObligation = {
+  __typename?: 'WeOweObligation';
+  buyerName: Scalars['String']['output'];
+  cancelledQty: Scalars['Int']['output'];
+  closeReason?: Maybe<Scalars['String']['output']>;
+  closedAt?: Maybe<Scalars['String']['output']>;
+  createdAt: Scalars['String']['output'];
+  fulfilledQty: Scalars['Int']['output'];
+  fulfillments: Array<GqlWeOweFulfillment>;
+  lineItemId: Scalars['ID']['output'];
+  originalQty: Scalars['Int']['output'];
+  productId: Scalars['ID']['output'];
+  productNameSnapshot: Scalars['String']['output'];
+  remainingQty: Scalars['Int']['output'];
+  reservedQty: Scalars['Int']['output'];
+  saleId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  status: Scalars['String']['output'];
+  uncoveredQty: Scalars['Int']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  valueCentsSnapshot: Scalars['Int']['output'];
+  version: Scalars['Int']['output'];
+  weOweId: Scalars['ID']['output'];
+};
+
+export type GqlWeOweObligationConnection = {
+  __typename?: 'WeOweObligationConnection';
+  items: Array<GqlWeOweObligation>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlWeOweResult = {
+  __typename?: 'WeOweResult';
+  fulfillment?: Maybe<GqlWeOweFulfillment>;
+  inventoryPosition?: Maybe<GqlInventoryPosition>;
+  obligation: GqlWeOweObligation;
+};
+
+export type GqlWorkConfirmationInput = {
+  actualMinutes: Scalars['Int']['input'];
+  profileId: Scalars['ID']['input'];
+  slotId: Scalars['ID']['input'];
+};
+
+export type GqlWorkPendingPreview = {
+  __typename?: 'WorkPendingPreview';
+  confirmedMinutesByProfileId: Array<GqlProfileMinutes>;
+  note: Scalars['String']['output'];
+  totalConfirmedMinutes: Scalars['Int']['output'];
 };
 
 export type GqlSellerProfileFieldsFragment = {

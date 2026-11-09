@@ -1337,6 +1337,969 @@ type Mutation {
   ): Catalog!
 }
 
+
+# ============================================================================
+# Show & Sell (spec docs/specs/show_sell, GraphQL API section 4 additions).
+# New constructs ONLY in this wave: models, inputs, enums for Units, Unit
+# Campaigns, inventory, events, sales, We Owe, finalization, participant
+# projections, and order fulfillment. Root Query/Mutation fields, legacy
+# surface changes (Order/Campaign origin+fulfillment fields), and legacy
+# report deprecation land in later waves per
+# docs/SHOW_SELL_INTEGRATION_PLAN.md. All types here are Cognito-only by
+# default (no @aws_api_key), per the impact map. New money is integer
+# cents; no Float is introduced anywhere in this section.
+# Ported from the gate-proven clean-room SDL (branch show-sell-cleanroom,
+# graphql/schema.graphql) unchanged except section banner.
+# ============================================================================
+
+enum UnitRole {
+  UNIT_ADMIN
+}
+
+enum MembershipStatus {
+  ACTIVE
+  REMOVED
+}
+
+enum SplitMethod {
+  EQUAL
+  TIME_WORKED
+}
+
+enum CouncilNeedBasis {
+  PHYSICAL_STOCK
+  AFTER_ASSIGNMENTS
+}
+
+# ---------------------------------------------------------------------------
+# Shared inputs (API §3.1)
+# ---------------------------------------------------------------------------
+
+input PageInput {
+  limit: Int = 50
+  cursor: String
+}
+
+# API §3.1 defines IdempotencyInput/VersionedInput as prose contracts; this
+# SDL inlines `idempotencyKey: String!` and `expectedVersion: Int!` on the
+# concrete mutation inputs/arguments instead of unused wrapper types
+# (review R-L1). Every mutation still requires an idempotencyKey.
+
+# ---------------------------------------------------------------------------
+# Shared outputs (API §3.2)
+# ---------------------------------------------------------------------------
+
+type PageInfo {
+  endCursor: String
+  hasNextPage: Boolean!
+}
+
+# ---------------------------------------------------------------------------
+# Stage 3: Show & Sell events, slots, signups (API §6; DATA_MODEL §5.10-5.13)
+# ---------------------------------------------------------------------------
+
+enum ShowAndSellStatus {
+  SCHEDULED
+  ACTIVE
+  ENDED
+  FINALIZED
+  REOPENED
+  CANCELLED
+}
+
+enum SignupStatus {
+  ACTIVE
+  CANCELLED
+}
+
+type ShowAndSell {
+  showAndSellId: ID!
+  unitId: ID!
+  unitCampaignId: ID!
+  locationName: String!
+  address: String
+  startAt: String!
+  endAt: String!
+  status: ShowAndSellStatus!
+  splitMethod: SplitMethod!
+  weOweEnabled: Boolean!
+  productIds: [ID!]!
+  version: Int!
+  createdByAccountId: ID!
+  createdAt: String!
+  updatedByAccountId: ID!
+  updatedAt: String!
+  cancelledByAccountId: ID
+  cancelledAt: String
+  cancellationReason: String
+  # 3.1.1 contract: the admin event shape includes its slots and status.
+  slots: [ShowAndSellSlot!]!
+  slotCount: Int!
+}
+
+type ShowAndSellSlot {
+  showAndSellId: ID!
+  slotId: ID!
+  label: String
+  startAt: String!
+  endAt: String!
+  capacity: Int!
+  activeSignupCount: Int!
+  version: Int!
+  createdAt: String!
+  updatedAt: String!
+}
+
+# Admin signup/work audit record (API 6.4; full actor/confirmation audit).
+
+type ShowAndSellSignupAdmin {
+  showAndSellId: ID!
+  slotId: ID!
+  profileId: ID!
+  unitCampaignId: ID!
+  campaignId: ID!
+  status: SignupStatus!
+  actualMinutes: Int!
+  signedUpByAccountId: ID!
+  createdAt: String!
+  updatedAt: String!
+  version: Int!
+  confirmedByAccountId: ID
+  confirmedAt: String
+}
+
+# Participant-safe signup: no actor/account audit fields (API 6.4).
+
+type ParticipantSignup {
+  showAndSellId: ID!
+  slotId: ID!
+  profileId: ID!
+  unitCampaignId: ID!
+  campaignId: ID!
+  status: SignupStatus!
+  actualMinutes: Int!
+  createdAt: String!
+  updatedAt: String!
+  version: Int!
+}
+
+type ShowAndSellConnection {
+  items: [ShowAndSell!]!
+  pageInfo: PageInfo!
+}
+
+type ShowAndSellSignupAdminConnection {
+  items: [ShowAndSellSignupAdmin!]!
+  pageInfo: PageInfo!
+}
+
+type ParticipantSignupConnection {
+  items: [ParticipantSignup!]!
+  pageInfo: PageInfo!
+}
+
+type AllocationWarning {
+  code: String!
+  productId: ID!
+  currentStockQty: Int!
+  assignedQty: Int!
+  overageQty: Int!
+  message: String!
+}
+
+# Raw allocation interval (5.11): allocated/sold/released/remaining are the
+# record's own vocabulary; no report aggregation (DATA-Q-03).
+
+type EventInventoryAllocation {
+  unitCampaignId: ID!
+  productId: ID!
+  showAndSellId: ID!
+  eventStartAt: String!
+  eventEndAt: String!
+  status: String!
+  allocatedQty: Int!
+  soldQty: Int!
+  releasedQty: Int!
+  remainingQty: Int!
+  version: Int!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type EventInventoryAllocationConnection {
+  items: [EventInventoryAllocation!]!
+  pageInfo: PageInfo!
+}
+
+input AllocationTargetInput {
+  productId: ID!
+  # Target quantity that should be assigned after save — never a delta.
+  # Zero releases the remaining allocation; omit the product to leave it
+  # unchanged (API 3.1 / design 16.2).
+  quantity: Int!
+}
+
+type AssignShowAndSellInventoryResult {
+  allocations: [EventInventoryAllocation!]!
+  inventoryPositions: [InventoryPosition!]!
+  warnings: [AllocationWarning!]!
+}
+
+# Participant-safe event/slot surface (EVT-Q-02/03): no stock, sales, buyer,
+# cash, or actor data.
+
+type ShowAndSellOpportunitySlot {
+  slotId: ID!
+  label: String
+  startAt: String!
+  endAt: String!
+  capacity: Int!
+  activeSignupCount: Int!
+  # Active signups by the caller's accessible Scouts, per slot.
+  signedUpProfileIds: [ID!]!
+}
+
+type ShowAndSellOpportunity {
+  showAndSellId: ID!
+  unitCampaignId: ID!
+  unitId: ID!
+  # IANA Unit timezone for local-time display of slot and conflict copy.
+  timezone: String!
+  locationName: String!
+  address: String
+  startAt: String!
+  endAt: String!
+  status: ShowAndSellStatus!
+  splitMethod: SplitMethod!
+  slots: [ShowAndSellOpportunitySlot!]!
+  # A flat duplicate of eligibleScouts — kept for compat, do not extend.
+  # Use eligibleScouts, which carries the roster campaign identity the
+  # signup mutation resolves silently.
+  eligibleProfileIds: [ID!]! @deprecated(reason: "use eligibleScouts (carries the roster campaign identity)")
+  # The caller's Scouts eligible to sign up at this event, with their
+  # roster campaign identity — the signup mutation resolves
+  # campaignId/profileId from this pair silently.
+  eligibleScouts: [OpportunityScout!]!
+}
+
+type OpportunityScout {
+  profileId: ID!
+  campaignId: ID!
+}
+
+type ShowAndSellOpportunityConnection {
+  items: [ShowAndSellOpportunity!]!
+  pageInfo: PageInfo!
+}
+
+type ScoutCommitment {
+  commitmentId: ID!
+  profileId: ID!
+  unitCampaignId: ID!
+  showAndSellId: ID!
+  slotId: ID!
+  startAt: String!
+  endAt: String!
+  status: SignupStatus!
+  version: Int!
+}
+
+type ScoutCommitmentConnection {
+  items: [ScoutCommitment!]!
+  pageInfo: PageInfo!
+}
+
+# CalendarInviteData (API 3.2): data only — the browser builds the file; no
+# generated artifact, no notification (DATA-Q-05, NOTIFY-01).
+
+type CalendarInviteData {
+  unitId: ID!
+  unitCampaignId: ID!
+  campaignId: ID!
+  showAndSellId: ID!
+  slotId: ID!
+  profileId: ID!
+  locationName: String!
+  address: String
+  timezone: String!
+  startAtUtc: String!
+  endAtUtc: String!
+  description: String!
+}
+
+input CreateShowAndSellInput {
+  unitCampaignId: ID!
+  locationName: String!
+  address: String
+  startAt: String!
+  endAt: String!
+  splitMethod: SplitMethod
+  weOweEnabled: Boolean
+  idempotencyKey: String!
+}
+
+input UpdateShowAndSellInput {
+  showAndSellId: ID!
+  locationName: String
+  address: String
+  splitMethod: SplitMethod
+  weOweEnabled: Boolean
+  expectedVersion: Int!
+  idempotencyKey: String!
+}
+
+input UpsertShowAndSellSlotInput {
+  showAndSellId: ID!
+  slotId: ID
+  label: String
+  startAt: String!
+  endAt: String!
+  capacity: Int!
+  expectedEventVersion: Int!
+  expectedSlotVersion: Int
+  idempotencyKey: String!
+}
+
+input WorkConfirmationInput {
+  slotId: ID!
+  profileId: ID!
+  actualMinutes: Int!
+}
+
+# Pending work preview: credit/pool computation belongs to finalization
+# (stage 5) — this wave returns confirmed work facts only (see W6 report).
+
+type ProfileMinutes {
+  profileId: ID!
+  confirmedMinutes: Int!
+}
+
+type WorkPendingPreview {
+  totalConfirmedMinutes: Int!
+  confirmedMinutesByProfileId: [ProfileMinutes!]!
+  note: String!
+}
+
+type ConfirmWorkResult {
+  signups: [ShowAndSellSignupAdmin!]!
+  pendingPreview: WorkPendingPreview!
+}
+
+# ---------------------------------------------------------------------------
+# Stage 4: payment methods, sales, We Owe (API §7; DATA_MODEL §5.4/5.14/5.15)
+# Money is integer cents everywhere. 9.4: OPEN -> OPEN -> CLOSED.
+# ---------------------------------------------------------------------------
+
+type UnitPaymentMethod {
+  paymentMethodId: ID!
+  unitId: ID!
+  displayName: String!
+  normalizedName: String!
+  # Built-in Cash/Check/Other are computed, never stored as custom methods.
+  isBuiltin: Boolean!
+  qrCodeS3Key: String
+  isActive: Boolean!
+  version: Int!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type PaymentMethodSnapshot {
+  methodCode: String!
+  displayName: String!
+  otherDetails: String
+}
+
+type ShowAndSellSaleLine {
+  lineItemId: ID!
+  productId: ID!
+  productNameSnapshot: String!
+  unitPriceCentsSnapshot: Int!
+  immediateQty: Int!
+  weOweQty: Int!
+  subtotalCents: Int!
+}
+
+type ShowAndSellSaleRevision {
+  revision: Int!
+  saleAt: String!
+  buyerName: String
+  buyerPhone: String
+  buyerEmail: String
+  lineItems: [ShowAndSellSaleLine!]!
+  totalCents: Int!
+  paymentMethodSnapshot: PaymentMethodSnapshot!
+  correctedByAccountId: ID!
+  reason: String!
+  createdAt: String!
+}
+
+type ShowAndSellSale {
+  saleId: ID!
+  showAndSellId: ID!
+  unitId: ID!
+  unitCampaignId: ID!
+  saleAt: String!
+  enteredByAccountId: ID!
+  buyerName: String
+  buyerPhone: String
+  buyerEmail: String
+  lineItems: [ShowAndSellSaleLine!]!
+  totalCents: Int!
+  paymentMethodSnapshot: PaymentMethodSnapshot!
+  revision: Int!
+  # ACTIVE | VOIDED (5.14 SaleStatus)
+  status: String!
+  voidedByAccountId: ID
+  voidedAt: String
+  voidReason: String
+  priorRevisions: [ShowAndSellSaleRevision!]!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type ShowAndSellSaleConnection {
+  items: [ShowAndSellSale!]!
+  pageInfo: PageInfo!
+}
+
+input ShowAndSellSaleLineInput {
+  productId: ID!
+  immediateQty: Int!
+  weOweQty: Int!
+}
+
+input ReturnLineInput {
+  productId: ID!
+  expectedQty: Int!
+  actualQty: Int!
+  reason: String
+}
+
+input CorrectionLineInput {
+  # Existing lines carry their stable lineItemId; new lines omit it.
+  lineItemId: ID
+  productId: ID!
+  immediateQty: Int!
+  weOweQty: Int!
+}
+
+input PaymentMethodInput {
+  methodCode: String!
+  otherDetails: String
+}
+
+type ShowAndSellSaleResult {
+  sale: ShowAndSellSale!
+  allocations: [EventInventoryAllocation!]!
+  inventoryPositions: [InventoryPosition!]!
+  weOweObligations: [WeOweObligation!]!
+  warnings: [AllocationWarning!]!
+}
+
+type WeOweFulfillment {
+  fulfillmentId: ID!
+  weOweId: ID!
+  quantity: Int!
+  source: String!
+  inventoryMovementId: ID
+  actorAccountId: ID!
+  createdAt: String!
+}
+
+type WeOweObligation {
+  weOweId: ID!
+  unitCampaignId: ID!
+  showAndSellId: ID!
+  saleId: ID!
+  lineItemId: ID!
+  buyerName: String!
+  productId: ID!
+  productNameSnapshot: String!
+  originalQty: Int!
+  fulfilledQty: Int!
+  cancelledQty: Int!
+  reservedQty: Int!
+  remainingQty: Int!
+  uncoveredQty: Int!
+  valueCentsSnapshot: Int!
+  status: String!
+  closeReason: String
+  version: Int!
+  createdAt: String!
+  closedAt: String
+  fulfillments: [WeOweFulfillment!]!
+}
+
+type WeOweObligationConnection {
+  items: [WeOweObligation!]!
+  pageInfo: PageInfo!
+}
+
+# --- Stage 5: finalization + credit (API §8; DATA_MODEL §5.16-5.18) --------
+
+type FinalizationIssue {
+  code: String!
+  message: String!
+  unassignedCents: Int
+}
+
+type BaseAllocation {
+  profileId: ID!
+  baseAmountCents: Int!
+}
+
+type FinalizationPreview {
+  wholePoolCents: Int!
+  baseAllocations: [BaseAllocation!]!
+  unassignedCents: Int!
+  expectedCashCents: Int!
+  cashDiscrepancyCents: Int
+  issues: [FinalizationIssue!]!
+  eventVersion: Int!
+}
+
+type ShowAndSellFinalization {
+  finalizationId: ID!
+  showAndSellId: ID!
+  versionNumber: Int!
+  status: String!
+  wholePoolCents: Int!
+  expectedCashCents: Int!
+  actualCashCents: Int
+  cashAdjustmentCents: Int!
+  cashDiscrepancyCents: Int
+  discrepancyExplanation: String
+  previousFinalizationId: ID
+  actorAccountId: ID!
+  createdAt: String!
+}
+
+type ShowAndSellFinalizationConnection {
+  items: [ShowAndSellFinalization!]!
+  pageInfo: PageInfo!
+}
+
+type ScoutSalesAllocation {
+  allocationId: ID!
+  finalizationId: ID!
+  showAndSellId: ID!
+  unitCampaignId: ID!
+  campaignId: ID!
+  profileId: ID!
+  amountCents: Int!
+  status: String!
+  createdAt: String!
+  suspendedAt: String
+}
+
+type ScoutSalesAllocationConnection {
+  items: [ScoutSalesAllocation!]!
+  pageInfo: PageInfo!
+}
+
+# API 8 typed rounding assignments — one entry per Scout, unique.
+
+input RoundingAssignmentInput {
+  profileId: ID!
+  cents: Int!
+}
+
+type FinalizationResult {
+  finalization: ShowAndSellFinalization!
+  scoutAllocations: [ScoutSalesAllocation!]!
+  laterAllocationWarnings: [AllocationWarning!]!
+}
+
+# Admin fact row (5.4.2): one row per finalization credit across the Unit
+# Campaign — base/rounding/total/minutes/status/version facts, no report
+# aggregation.
+
+type CreditAllocationFact {
+  finalizationId: ID!
+  showAndSellId: ID!
+  versionNumber: Int!
+  profileId: ID!
+  campaignId: ID!
+  baseAmountCents: Int!
+  roundingCents: Int!
+  totalAmountCents: Int!
+  minutesConfirmed: Int!
+  status: String!
+  eventVersion: Int!
+  createdAt: String!
+}
+
+type CreditAllocationFactConnection {
+  items: [CreditAllocationFact!]!
+  pageInfo: PageInfo!
+}
+
+# Participant projection (5.4.3): the visible Scout's own approved/suspended
+# credits. Deliberately carries NO finalizationId, actors, cash, returns, or
+# buyer details, and never another Scout's rows.
+
+type ParticipantSalesCredit {
+  showAndSellId: ID!
+  unitCampaignId: ID!
+  campaignId: ID!
+  amountCents: Int!
+  status: String!
+  versionNumber: Int!
+  createdAt: String!
+}
+
+type ParticipantSalesCreditConnection {
+  items: [ParticipantSalesCredit!]!
+  pageInfo: PageInfo!
+}
+
+# Participant-safe pending projection (5.4.4): what WOULD be approved at
+# the next finalization, minus already-approved credit. Never carries actor
+# or admin fields; pending never counts in approved totals.
+
+type ParticipantPendingAllocation {
+  showAndSellId: ID!
+  unitCampaignId: ID!
+  campaignId: ID!
+  profileId: ID!
+  pendingAmountCents: Int!
+  eventVersion: Int!
+  computedAt: String!
+}
+
+type ParticipantPendingAllocationConnection {
+  items: [ParticipantPendingAllocation!]!
+  pageInfo: PageInfo!
+}
+
+type ScoutCampaignShowAndSellTotal {
+  profileId: ID!
+  unitCampaignId: ID!
+  approvedTotalCents: Int!
+}
+
+type WeOweResult {
+  obligation: WeOweObligation!
+  fulfillment: WeOweFulfillment
+  inventoryPosition: InventoryPosition
+}
+
+type SetReservationResult {
+  obligation: WeOweObligation!
+  inventoryPosition: InventoryPosition!
+}
+
+# ---------------------------------------------------------------------------
+# Unit models (admin read shapes; DATA_MODEL §5.1-5.3)
+# ---------------------------------------------------------------------------
+
+type Unit {
+  unitId: ID!
+  unitType: String!
+  unitNumber: String!
+  city: String!
+  state: String!
+  displayName: String!
+  timezone: String!
+  splitDefault: SplitMethod!
+  councilNeedBasis: CouncilNeedBasis!
+  adminCount: Int!
+  version: Int!
+  createdAt: String!
+  updatedAt: String!
+  createdByAccountId: ID!
+}
+
+type UnitAccessGrant {
+  unitId: ID!
+  accountId: ID!
+  role: UnitRole!
+  createdByAccountId: ID!
+  createdAt: String!
+}
+
+type UnitInvite {
+  inviteCode: String!
+  unitId: ID!
+  createdByAccountId: ID!
+  createdAt: String!
+  expiresAt: String!
+}
+
+type UnitConnection {
+  items: [Unit!]!
+  pageInfo: PageInfo!
+}
+
+type UnitAccessGrantConnection {
+  items: [UnitAccessGrant!]!
+  pageInfo: PageInfo!
+}
+
+type UnitInviteConnection {
+  items: [UnitInvite!]!
+  pageInfo: PageInfo!
+}
+
+# Participant-safe campaign join preview (API §4.1): exactly these five
+# fields — no inventory, roster, grant, joinCode, or settings data.
+
+type UnitCampaignJoinPreview {
+  unitDisplayName: String!
+  campaignName: String!
+  campaignYear: Int!
+  catalogName: String!
+  isActive: Boolean!
+}
+
+# Administrative campaign shape (API §4.1); distinct from the preview above.
+
+type UnitCampaignAdmin {
+  unitCampaignId: ID!
+  unitId: ID!
+  campaignName: String!
+  campaignYear: Int!
+  catalogId: ID!
+  joinCode: String!
+  isActive: Boolean!
+  version: Int!
+  createdAt: String!
+  updatedAt: String!
+  createdByAccountId: ID!
+  updatedByAccountId: ID
+}
+
+type UnitCampaignConnection {
+  items: [UnitCampaignAdmin!]!
+  pageInfo: PageInfo!
+}
+
+type UnitCampaignMembership {
+  unitCampaignId: ID!
+  unitId: ID!
+  campaignId: ID!
+  profileId: ID!
+  status: MembershipStatus!
+  joinedByAccountId: ID!
+  joinedAt: String!
+  removedByAccountId: ID
+  removedAt: String
+  version: Int!
+  profileDisplayName: String
+  campaignName: String
+  # The Scout Campaign membership-guard version this row was read with —
+  # removeUnitCampaignMembership conditions on it, and the guard moves
+  # independently of the membership row (signups bump the membership; the
+  # guard moves on join/removal only). Without this field the client cannot
+  # satisfy expectedGuardVersion after participation (recording-wave find).
+  guardVersion: Int
+}
+
+type UnitCampaignMembershipConnection {
+  items: [UnitCampaignMembership!]!
+  pageInfo: PageInfo!
+}
+
+type UnitCampaignCatalog {
+  catalogId: ID!
+  catalogName: String!
+  products: [Product!]!
+}
+
+# ---------------------------------------------------------------------------
+# Queries (API §4.1)
+# ---------------------------------------------------------------------------
+
+input CreateUnitInput {
+  unitType: String!
+  unitNumber: String!
+  city: String!
+  state: String!
+  displayName: String
+  timezone: String
+  splitDefault: SplitMethod
+  councilNeedBasis: CouncilNeedBasis
+  duplicateConfirmed: Boolean = false
+  idempotencyKey: String!
+}
+
+input UpdateUnitInput {
+  unitId: ID!
+  unitType: String
+  unitNumber: String
+  city: String
+  state: String
+  displayName: String
+  timezone: String
+  splitDefault: SplitMethod
+  councilNeedBasis: CouncilNeedBasis
+  expectedVersion: Int!
+  idempotencyKey: String!
+}
+
+input CreateUnitCampaignInput {
+  unitId: ID!
+  campaignName: String!
+  campaignYear: Int!
+  catalogId: ID!
+  idempotencyKey: String!
+}
+
+input UpdateUnitCampaignInput {
+  unitCampaignId: ID!
+  campaignName: String
+  campaignYear: Int
+  isActive: Boolean
+  expectedVersion: Int!
+  idempotencyKey: String!
+}
+
+type CreateUnitResult {
+  unit: Unit!
+  grant: UnitAccessGrant!
+}
+
+# ---------------------------------------------------------------------------
+# Legacy base-app surface (impact doc §1): Account -> SellerProfile ->
+# Campaign -> Order, plus Catalog/Product. Cognito-only, preserved as the
+# stable base the Unit work extends.
+# ---------------------------------------------------------------------------
+
+enum FulfillmentSource {
+  KERNEL_STOCK
+  SCOUT_CUSTODY
+  EXTERNAL_COUNCIL
+}
+
+type InventoryPosition {
+  unitCampaignId: ID!
+  productId: ID!
+  balance: InventoryBalance
+  sellableKernelQty: Int!
+  assignedOpenQty: Int!
+  unassignedKernelQty: Int!
+  assignmentOverageQty: Int!
+  withScoutQty: Int!
+  totalUnitOwnedUndeliveredQty: Int!
+  actualCouncilDemandQty: Int!
+  physicalStockCouncilNeedQty: Int!
+  afterAssignmentsCouncilNeedQty: Int!
+}
+
+type InventoryBalance {
+  unitCampaignId: ID!
+  productId: ID!
+  kernelPhysicalQty: Int!
+  soldInPossessionQty: Int!
+  councilOnOrderQty: Int!
+  version: Int!
+}
+
+type InventoryMovement {
+  movementId: ID!
+  unitCampaignId: ID!
+  productId: ID!
+  movementType: String!
+  kernelPhysicalDelta: Int!
+  soldPossessionDelta: Int!
+  withScoutDelta: Int!
+  assignedDelta: Int!
+  councilOnOrderDelta: Int!
+  profileId: ID
+  orderId: ID
+  reason: String
+  actorAccountId: ID!
+  occurredAt: String!
+  inventoryVersion: Int!
+}
+
+type InventoryMovementConnection {
+  items: [InventoryMovement!]!
+  pageInfo: PageInfo!
+}
+
+type InventoryPositionConnection {
+  items: [InventoryPosition!]!
+  pageInfo: PageInfo!
+}
+
+type ScoutCustodyBalance {
+  unitCampaignId: ID!
+  productId: ID!
+  profileId: ID!
+  campaignId: ID!
+  withScoutQty: Int!
+  version: Int!
+}
+
+type ScoutCustodyBalanceConnection {
+  items: [ScoutCustodyBalance!]!
+  pageInfo: PageInfo!
+}
+
+type OrderFulfillment {
+  fulfillmentId: ID!
+  orderId: ID!
+  campaignId: ID!
+  profileId: ID!
+  unitId: ID
+  unitCampaignId: ID
+  lineItemId: ID!
+  productId: ID!
+  recordType: String!
+  quantity: Int!
+  source: FulfillmentSource!
+  inventoryMovementId: ID
+  reversalOfFulfillmentId: ID
+  actorAccountId: ID!
+  createdAt: String!
+}
+
+type OrderFulfillmentConnection {
+  items: [OrderFulfillment!]!
+  pageInfo: PageInfo!
+}
+
+# Participant-safe projection of OrderFulfillment (API 10.2 / design 14.4):
+# administrative audit fields (actor account, movement internals, reversal
+# linkage, unit scope) are deliberately absent.
+
+type ParticipantOrderFulfillment {
+  fulfillmentId: ID!
+  orderId: ID!
+  campaignId: ID!
+  profileId: ID!
+  lineItemId: ID!
+  productId: ID!
+  recordType: String!
+  quantity: Int!
+  source: FulfillmentSource!
+  createdAt: String!
+}
+
+input ProductQuantityInput {
+  productId: ID!
+  quantity: Int!
+}
+
+type IssueStockResult {
+  inventoryPosition: InventoryPosition!
+  custodyBalance: ScoutCustodyBalance!
+}
+
+type ReturnStockResult {
+  inventoryPositions: [InventoryPosition!]!
+  custodyBalances: [ScoutCustodyBalance!]!
+}
+
+type FulfillOrderLineResult {
+  order: Order!
+  fulfillment: OrderFulfillment
+  reversal: OrderFulfillment
+  inventoryPosition: InventoryPosition
+}
+
 # ============================================================================
 # Schema Root
 # ============================================================================
