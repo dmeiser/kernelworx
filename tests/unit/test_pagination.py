@@ -6,7 +6,16 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from src.utils.pagination import query_all_items, query_all_items_iter
+from src.utils.errors import AppError, ErrorCode
+from src.utils.pagination import (
+    DEFAULT_PAGE_LIMIT,
+    MAX_PAGE_LIMIT,
+    decode_cursor,
+    encode_cursor,
+    query_all_items,
+    query_all_items_iter,
+    validate_page_limit,
+)
 
 
 class TestQueryAllItems:
@@ -306,3 +315,66 @@ class TestMaxItems:
         )
 
         assert result == [{"pk": "1"}, {"pk": "2"}]
+
+
+SCOPE = "myUnits:acct-1"
+LEK: dict = {"unitId": "unit-9", "itemKey": "GRANT#acct-1"}
+
+
+class _CursorContract:
+    def assert_invalid(self, fn, *args):  # noqa: ANN001, ANN002
+        try:
+            fn(*args)
+        except AppError as exc:
+            assert exc.error_code == ErrorCode.INVALID_INPUT
+        else:
+            raise AssertionError("expected AppError")
+
+
+class TestValidatePageLimit(_CursorContract):
+    def test_none_returns_default(self):
+        assert validate_page_limit(None) == DEFAULT_PAGE_LIMIT == 50
+
+    def test_within_bounds(self):
+        assert validate_page_limit(100) == MAX_PAGE_LIMIT
+
+    def test_zero_rejected(self):
+        self.assert_invalid(validate_page_limit, 0)
+
+    def test_over_max_rejected(self):
+        self.assert_invalid(validate_page_limit, 101)
+
+    def test_bool_rejected(self):
+        self.assert_invalid(validate_page_limit, True)
+
+    def test_non_int_rejected(self):
+        self.assert_invalid(validate_page_limit, "50")
+
+
+class TestCursorRoundTrip(_CursorContract):
+    def test_round_trip(self):
+        cursor = encode_cursor(SCOPE, LEK)
+        assert decode_cursor(cursor, SCOPE) == LEK
+
+    def test_scope_mismatch_rejected(self):
+        cursor = encode_cursor(SCOPE, LEK)
+        self.assert_invalid(decode_cursor, cursor, "other-scope")
+
+    def test_tampered_cursor_rejected(self):
+        self.assert_invalid(decode_cursor, "not-base64!!", SCOPE)
+
+    def test_wrong_version_rejected(self):
+        import base64
+        import json
+
+        payload = json.dumps({"v": 2, "s": SCOPE, "lek": LEK}).encode()
+        cursor = base64.urlsafe_b64encode(payload).decode()
+        self.assert_invalid(decode_cursor, cursor, SCOPE)
+
+    def test_non_dict_key_rejected(self):
+        import base64
+        import json
+
+        payload = json.dumps({"v": 1, "s": SCOPE, "lek": "oops"}).encode()
+        cursor = base64.urlsafe_b64encode(payload).decode()
+        self.assert_invalid(decode_cursor, cursor, SCOPE)

@@ -6,6 +6,8 @@ do not silently truncate results at DynamoDB's 1 MB page limit. It retries
 generator variant is available to bound memory growth on large result sets.
 """
 
+import base64
+import json
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
 
@@ -147,3 +149,74 @@ def query_all_items_iter(
         with exponential backoff.
     """
     yield from _paginated_query(table, query_kwargs, max_items=max_items)
+
+
+# ----------------------------------------------------------------------------
+# Opaque, scope-bound cursor pagination (Show & Sell, spec API section 3.1).
+#
+# Default page size 50, maximum 100. Cursors are base64url JSON binding the
+# query scope to the last evaluated key; a cursor minted for one tenant or
+# query cannot enter another (PAGE-01 cursor isolation), and a tampered or
+# stale cursor is INVALID_INPUT, never a silent wrong page.
+# ----------------------------------------------------------------------------
+
+DEFAULT_PAGE_LIMIT: int = 50
+MAX_PAGE_LIMIT: int = 100
+
+
+def validate_page_limit(limit: Optional[int]) -> int:
+    """Resolve a caller page limit to the default when absent, else validate bounds.
+
+    Args:
+        limit: Caller-requested page size, or None for the default.
+
+    Returns:
+        The page size to request (1..MAX_PAGE_LIMIT, default DEFAULT_PAGE_LIMIT).
+
+    Raises:
+        AppError: INVALID_INPUT when the limit is not an int in 1..100. Bools
+            are rejected: JSON ``true`` must not become page size 1.
+    """
+    from .errors import AppError, ErrorCode
+
+    if limit is None:
+        return DEFAULT_PAGE_LIMIT
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_PAGE_LIMIT:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Page limit must be between 1 and {MAX_PAGE_LIMIT}")
+    return limit
+
+
+def encode_cursor(scope: str, last_evaluated_key: Dict[str, Any]) -> str:
+    """Encode a query's last evaluated key into an opaque, scope-bound cursor."""
+    payload = json.dumps({"v": 1, "s": scope, "lek": last_evaluated_key}, separators=(",", ":"))
+    return base64.urlsafe_b64encode(payload.encode()).decode()
+
+
+def decode_cursor(cursor: str, expected_scope: str) -> Dict[str, Any]:
+    """Decode and validate a cursor, returning the exclusive-start key.
+
+    Args:
+        cursor: The opaque cursor string from the previous page.
+        expected_scope: The scope of the query now running; must match the
+            scope the cursor was minted for.
+
+    Returns:
+        The DynamoDB ``LastEvaluatedKey`` dict to pass as ``ExclusiveStartKey``.
+
+    Raises:
+        AppError: INVALID_INPUT when the cursor is malformed, minted for a
+            different scope, or carries a version this code cannot read.
+    """
+    from .errors import AppError, ErrorCode
+
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+        version, scope, last_evaluated_key = payload["v"], payload["s"], payload["lek"]
+    except ValueError, KeyError, TypeError, UnicodeDecodeError:
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid page cursor") from None
+    if version != 1 or not isinstance(scope, str) or not isinstance(last_evaluated_key, dict):
+        raise AppError(ErrorCode.INVALID_INPUT, "Invalid page cursor") from None
+    if scope != expected_scope:
+        # A cursor from another tenant/query must not open that result set.
+        raise AppError(ErrorCode.INVALID_INPUT, "Page cursor does not belong to this query")
+    return last_evaluated_key

@@ -7,7 +7,7 @@ and test monkeypatch support, plus the shared chunked BatchGetItem helper.
 
 import os
 import time
-from typing import TYPE_CHECKING, Any, Callable, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
 import boto3
 from botocore.exceptions import ClientError
@@ -59,6 +59,177 @@ TRANSIENT_ERROR_CODES = frozenset(
 def is_transient_client_error(error: ClientError) -> bool:
     """Return True when ``error`` is a retryable DynamoDB condition (throttling)."""
     return error.response.get("Error", {}).get("Code", "") in TRANSIENT_ERROR_CODES
+
+
+# ----------------------------------------------------------------------------
+# Show & Sell transaction + idempotency helpers (impact map 3.4).
+#
+# Convention (decision record: docs/investigations/show-sell-idempotency-convention.md,
+# ported from the gate-proven clean-room build):
+#   1. Validate input DETERMINISTICALLY before touching the marker; every
+#      state check lives inside the transaction plan.
+#   2. The idempotency marker and its effect write in ONE TransactWriteItems
+#      call — a committed marker always means a committed effect.
+#   3. A committed marker whose stored request fingerprint matches replays
+#      the stored result (equality, never re-execution); a fingerprint
+#      mismatch is a CONDITION failure (CONFLICT), not an overwrite.
+#   4. Race retries are bounded: at most MAX_RACE_RETRIES attempts, backoff
+#      only on transient throttling, and the FULL plan re-executes (plans are
+#      rebuilt per attempt, never partially applied).
+#   5. The 90-item preflight cap leaves headroom under DynamoDB's 100-item
+#      service limit for ConditionCheck entries the planner adds.
+# ----------------------------------------------------------------------------
+
+# Preflight cap for TransactWriteItems plans (service limit is 100; the cap
+# leaves headroom for planner-added ConditionCheck entries).
+MAX_TRANSACT_ITEMS: int = 90
+
+# Bounded race-retry ceiling (F1 ruling from the clean-room build: an
+# unbounded retry turns throttling into a Lambda timeout; three attempts
+# with exponential backoff resolve genuine races without masking a hot key).
+MAX_RACE_RETRIES: int = 3
+
+# Common idempotency-marker retention: seven days, numeric epoch seconds on
+# the tables' shared expiresAtEpoch TTL attribute (impact map 4.1).
+IDEM_TTL_SECONDS: int = 7 * 24 * 3600
+
+
+class TransactionDuplicateKeyError(ValueError):
+    """A transaction plan addresses one table key twice (client-side pin).
+
+    DynamoDB would surface this only opaquely through cancellation reasons;
+    the layer rejects it outright so planner bugs fail at build time.
+    """
+
+
+class TransactionCancelledError(Exception):
+    """TransactWriteItems cancelled: carries the indexes of the failed items.
+
+    ``failed_indexes`` lists the positions in the submitted plan whose
+    ConditionCheck/Put/Update/Delete failed, so the handler can map the
+    failure to a domain error without re-reading the world.
+    """
+
+    def __init__(self, failed_indexes: List[int]):
+        self.failed_indexes = failed_indexes
+        super().__init__(f"transaction cancelled at items {failed_indexes}")
+
+
+class TransactionThrottledError(Exception):
+    """Transient throttling persisted past the bounded race retries."""
+
+
+def transaction_item_key(transact_item: Dict[str, Any]) -> tuple[str, tuple[tuple[str, Any], ...]]:
+    """Extract the (table, key) identity of a TransactWriteItems entry.
+
+    Every entry form (Put/Update/Delete/ConditionCheck) carries TableName and
+    either Item (Put) or Key (the rest); the identity is what the duplicate-key
+    pin compares.
+    """
+    body = transact_item[next(iter(transact_item))]
+    table_name = body["TableName"]
+    item = body.get("Item", body.get("Key", {}))
+    return table_name, tuple(sorted(item.items()))
+
+
+def execute_transaction(
+    transact_items: List[Dict[str, Any]],
+    *,
+    client: Optional[Any] = None,
+    max_retries: int = MAX_RACE_RETRIES,
+) -> None:
+    """Execute a TransactWriteItems plan with preflight checks and bounded retries.
+
+    Args:
+        transact_items: The plan entries (Put/Update/Delete/ConditionCheck).
+        client: Optional DynamoDB client; defaults to the shared resource's
+            client. Injectable for tests.
+        max_retries: Retry ceiling for transient throttling (F1 bound).
+
+    Raises:
+        ValueError: Plan exceeds MAX_TRANSACT_ITEMS (planner bug).
+        TransactionDuplicateKeyError: The plan addresses one key twice.
+        TransactionCancelledError: A condition failed; failed item indexes
+            are carried for domain-error mapping.
+        TransactionThrottledError: Throttling persisted past ``max_retries``.
+    """
+    if len(transact_items) > MAX_TRANSACT_ITEMS:
+        raise ValueError(f"transaction plan has {len(transact_items)} items; cap is {MAX_TRANSACT_ITEMS}")
+    seen: set[tuple[str, tuple[tuple[str, Any], ...]]] = set()
+    for entry in transact_items:
+        identity = transaction_item_key(entry)
+        if identity in seen:
+            raise TransactionDuplicateKeyError(f"duplicate key in transaction plan: {identity}")
+        seen.add(identity)
+
+    if client is None:
+        client = cast(Any, _get_dynamodb().meta.client)
+
+    attempt = 0
+    while True:
+        try:
+            client.transact_write_items(TransactItems=transact_items)
+            return
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code == "TransactionCanceledException":
+                reasons = exc.response.get("CancellationReasons") or []
+                failed = [
+                    index
+                    for index, reason in enumerate(reasons)
+                    if isinstance(reason, dict) and reason.get("Code") not in (None, "None")
+                ]
+                raise TransactionCancelledError(failed or list(range(len(transact_items)))) from None
+            if code in TRANSIENT_ERROR_CODES and attempt < max_retries:
+                time.sleep(BASE_BACKOFF_SECONDS * (2**attempt))
+                attempt += 1
+                continue
+            if code in TRANSIENT_ERROR_CODES:
+                raise TransactionThrottledError(f"transaction throttled after {max_retries} retries") from exc
+            raise
+
+
+def idem_item_key(scope: str, marker_key: str) -> str:
+    """Item-key attribute for an idempotency-marker row in an aggregate table.
+
+    Layout: IDEM#<scope>#<markerKey>, stored under the table's base hash key
+    (e.g. unitId or unitCampaignId) with the marker TTL attribute.
+    """
+    return f"IDEM#{scope}#{marker_key}"
+
+
+def idem_expiry_epoch(now_epoch: int) -> int:
+    """Expiry epoch (seconds) for a marker committed at ``now_epoch``.
+
+    Seven-day retention per the common marker convention (impact map 4.1);
+    the numeric value lands on the tables' shared expiresAtEpoch TTL.
+    """
+    return now_epoch + IDEM_TTL_SECONDS
+
+
+def new_marker_item(
+    *,
+    scope: str,
+    marker_key: str,
+    fingerprint: str,
+    now_epoch: int,
+    result: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build the idempotency-marker item written in the same transaction as its effect.
+
+    The marker records the deterministic request fingerprint (committed-replay
+    equality: a replay with the same fingerprint returns ``result`` without
+    re-executing) and expires seven days after commit.
+    """
+    marker: Dict[str, Any] = {
+        "itemKey": idem_item_key(scope, marker_key),
+        "idemFingerprint": fingerprint,
+        "idemCommittedAtEpoch": now_epoch,
+        "expiresAtEpoch": idem_expiry_epoch(now_epoch),
+    }
+    if result is not None:
+        marker["idemResult"] = result
+    return marker
 
 
 # Module-level cache for test overrides
