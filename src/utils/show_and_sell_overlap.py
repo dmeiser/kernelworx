@@ -26,7 +26,7 @@ class OverlapWarning:
 def evaluate_overlaps(intervals: List[Interval]) -> Tuple[bool, List[OverlapWarning]]:
     """Hard-block concurrent over-assignment at every instant; warn on sequential."""
     # Check instantaneous overlap per product
-    by_product: dict = {}
+    by_product: dict[str, list[Interval]] = {}
     for iv in intervals:
         by_product.setdefault(iv.product_id, []).append(iv)
 
