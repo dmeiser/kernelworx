@@ -27,7 +27,7 @@ PROFILE_A = "PROFILE#profile-1"
 CAMPAIGN_A = "CAMPAIGN#campaign-1"
 CATALOG_A = "CATALOG#catalog-1"
 
-EXPECTED_TRANSACT_TABLES = {"units", "unit_campaigns", "campaigns"}
+EXPECTED_TRANSACT_TABLES = {"units", "unit_campaigns", "campaigns", "orders"}
 
 
 def _role_transact_tables() -> Set[str]:

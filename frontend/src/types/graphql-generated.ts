@@ -604,6 +604,10 @@ export type GqlMembershipStatus = 'ACTIVE' | 'REMOVED';
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation = {
   __typename?: 'Mutation';
+  /** Adjust the council-on-order bucket; never reduces council need (Unit Admins only). */
+  adjustCouncilOnOrder: GqlInventoryPosition;
+  /** Adjust kernel physical stock with a mandatory reason (Unit Admins only). */
+  adjustInventory: GqlInventoryPosition;
   /** Delete a specific share, revoking that account's access to a profile (admin only). Returns true on success. */
   adminDeleteShare: Scalars['Boolean']['output'];
   /** Delete all campaigns across all profiles owned by the given account (admin only). Returns the number of campaigns deleted. */
@@ -662,10 +666,16 @@ export type GqlMutation = {
   deleteSellerProfile: Scalars['Boolean']['output'];
   /** Delete a shared campaign the caller created. Returns true on success. */
   deleteSharedCampaign: Scalars['Boolean']['output'];
+  /** Fulfill one order line from a named source; append-only fulfillment record. */
+  fulfillIndividualOrderLine: GqlFulfillOrderLineResult;
+  /** Issue kernel stock to a Scout's custody in ONE transaction (Unit Admins only). */
+  issueStockToScout: GqlIssueStockResult;
   /** Join a Unit Campaign with a Scout Campaign (join-time catalog identity enforced). */
   joinUnitCampaign: GqlUnitCampaignMembership;
   /** Place a public order on a campaign whose share token is in the request. Returns the buyer's receipt. A never-enabled campaign, a disabled campaign, and a bad token all return NOT_FOUND so probing cannot distinguish them; a campaign at its order cap returns PUBLIC_ORDER_LIMIT_EXCEEDED. */
   publicCreateOrder: GqlPublicOrderReceipt;
+  /** Record a council stock receipt (Unit Admins only). */
+  recordInventoryReceipt: GqlInventoryPosition;
   /** Redeem an invite code to grant the caller access to a profile. Returns the created share. */
   redeemProfileInvite: GqlShare;
   /** Redeem a Unit invite; every failure outcome is indistinguishable NOT_FOUND (spec 5.3). */
@@ -674,6 +684,10 @@ export type GqlMutation = {
   removeUnitCampaignMembership: GqlUnitCampaignMembership;
   /** Get pre-signed S3 credentials to upload a QR code for one of the caller's payment methods. */
   requestPaymentMethodQRCodeUpload: GqlS3UploadInfo;
+  /** Return with-Scout stock to the unit in ONE transaction (Unit Admins only). */
+  returnStockFromScout: GqlReturnStockResult;
+  /** Reverse a fulfillment with a deterministic REVERSAL# record (never an overwrite). */
+  reverseIndividualOrderFulfillment: GqlFulfillOrderLineResult;
   /** Remove a share's access to a profile the caller owns. Returns true on success. */
   revokeShare: Scalars['Boolean']['output'];
   /** Remove a Unit Admin grant; a Unit must keep at least one admin. */
@@ -706,6 +720,24 @@ export type GqlMutation = {
   updateUnit: GqlUnit;
   /** Update a Unit Campaign (Unit Admins only). */
   updateUnitCampaign: GqlUnitCampaignAdmin;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_AdjustCouncilOnOrderArgs = {
+  idempotencyKey: Scalars['String']['input'];
+  productId: Scalars['ID']['input'];
+  quantityDelta: Scalars['Int']['input'];
+  reason?: InputMaybe<Scalars['String']['input']>;
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_AdjustInventoryArgs = {
+  idempotencyKey: Scalars['String']['input'];
+  productId: Scalars['ID']['input'];
+  quantityDelta: Scalars['Int']['input'];
+  reason: Scalars['String']['input'];
+  unitCampaignId: Scalars['ID']['input'];
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -855,6 +887,26 @@ export type GqlMutation_DeleteSharedCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_FulfillIndividualOrderLineArgs = {
+  expectedFulfillmentVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  lineItemId: Scalars['ID']['input'];
+  orderId: Scalars['ID']['input'];
+  quantity: Scalars['Int']['input'];
+  source: GqlFulfillmentSource;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_IssueStockToScoutArgs = {
+  campaignId: Scalars['ID']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  productId: Scalars['ID']['input'];
+  profileId: Scalars['ID']['input'];
+  quantity: Scalars['Int']['input'];
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_JoinUnitCampaignArgs = {
   campaignId: Scalars['ID']['input'];
   idempotencyKey: Scalars['String']['input'];
@@ -864,6 +916,15 @@ export type GqlMutation_JoinUnitCampaignArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_PublicCreateOrderArgs = {
   input: GqlPublicCreateOrderInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RecordInventoryReceiptArgs = {
+  idempotencyKey: Scalars['String']['input'];
+  occurredAt?: InputMaybe<Scalars['String']['input']>;
+  productId: Scalars['ID']['input'];
+  quantity: Scalars['Int']['input'];
+  unitCampaignId: Scalars['ID']['input'];
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -889,6 +950,23 @@ export type GqlMutation_RemoveUnitCampaignMembershipArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_RequestPaymentMethodQrCodeUploadArgs = {
   paymentMethodName: Scalars['String']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_ReturnStockFromScoutArgs = {
+  campaignId: Scalars['ID']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  items: Array<GqlProductQuantityInput>;
+  profileId: Scalars['ID']['input'];
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_ReverseIndividualOrderFulfillmentArgs = {
+  expectedFulfillmentVersion: Scalars['Int']['input'];
+  fulfillmentId: Scalars['ID']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  orderId: Scalars['ID']['input'];
 };
 
 /** The root mutation object for the KernelWorx API. */

@@ -209,6 +209,16 @@ locals {
       timeout     = 30
       memory_size = 256
     }
+    "inventory-operations" = {
+      handler     = "handlers.inventory_operations.handler"
+      timeout     = 30
+      memory_size = 256
+    }
+    "order-operations" = {
+      handler     = "handlers.order_operations.handler"
+      timeout     = 30
+      memory_size = 256
+    }
     "participant-data" = {
       handler     = "handlers.participant_data.handler"
       timeout     = 15

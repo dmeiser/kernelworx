@@ -1411,6 +1411,65 @@ type Mutation {
     idempotencyKey: String!
   ): UnitCampaignMembership!
 
+  # --- Show & Sell wave 3: inventory + fulfillment (spec API section 6) ---
+  """Record a council stock receipt (Unit Admins only)."""
+  recordInventoryReceipt(
+    unitCampaignId: ID!
+    productId: ID!
+    quantity: Int!
+    occurredAt: String
+    idempotencyKey: String!
+  ): InventoryPosition!
+  """Adjust kernel physical stock with a mandatory reason (Unit Admins only)."""
+  adjustInventory(
+    unitCampaignId: ID!
+    productId: ID!
+    quantityDelta: Int!
+    reason: String!
+    idempotencyKey: String!
+  ): InventoryPosition!
+  """Adjust the council-on-order bucket; never reduces council need (Unit Admins only)."""
+  adjustCouncilOnOrder(
+    unitCampaignId: ID!
+    productId: ID!
+    quantityDelta: Int!
+    reason: String
+    idempotencyKey: String!
+  ): InventoryPosition!
+  """Issue kernel stock to a Scout's custody in ONE transaction (Unit Admins only)."""
+  issueStockToScout(
+    unitCampaignId: ID!
+    campaignId: ID!
+    profileId: ID!
+    productId: ID!
+    quantity: Int!
+    idempotencyKey: String!
+  ): IssueStockResult!
+  """Return with-Scout stock to the unit in ONE transaction (Unit Admins only)."""
+  returnStockFromScout(
+    unitCampaignId: ID!
+    campaignId: ID!
+    profileId: ID!
+    items: [ProductQuantityInput!]!
+    idempotencyKey: String!
+  ): ReturnStockResult!
+  """Fulfill one order line from a named source; append-only fulfillment record."""
+  fulfillIndividualOrderLine(
+    orderId: ID!
+    lineItemId: ID!
+    quantity: Int!
+    source: FulfillmentSource!
+    expectedFulfillmentVersion: Int!
+    idempotencyKey: String!
+  ): FulfillOrderLineResult!
+  """Reverse a fulfillment with a deterministic REVERSAL# record (never an overwrite)."""
+  reverseIndividualOrderFulfillment(
+    orderId: ID!
+    fulfillmentId: ID!
+    expectedFulfillmentVersion: Int!
+    idempotencyKey: String!
+  ): FulfillOrderLineResult!
+
 }
 
 

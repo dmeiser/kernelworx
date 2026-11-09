@@ -243,3 +243,21 @@ resource "aws_appsync_function" "send_public_order_emails" {
 
   code = file("${local.js_resolvers_dir}/send_public_order_emails_fn.js")
 }
+
+# Custody router (Show & Sell wave 3, r2 C-1): runs after the auth/catalog
+# steps and before the legacy create_order_fn write step. NONE answers
+# continue (legacy steps run exactly as the golden oracles pin); custody
+# early-returns the Lambda's transaction result, skipping the legacy write
+# and the totals sync (the custody transaction updated totals atomically).
+resource "aws_appsync_function" "custody_router" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.order_operations.name
+  name        = "CustodyRouterFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/custody_router_fn.js")
+}

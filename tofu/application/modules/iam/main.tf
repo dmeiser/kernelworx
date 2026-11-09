@@ -1039,6 +1039,7 @@ locals {
     "catalogs",
     "profiles",
     "public_order_throttles",
+    "orders",
   ]
   show_and_sell_table_arns = [for k in local.show_and_sell_table_keys : var.dynamodb_table_arns[k]]
   show_and_sell_index_arns = [for arn in local.show_and_sell_table_arns : "${arn}/index/*"]
@@ -1049,6 +1050,7 @@ locals {
     "show_and_sells",
     "order_fulfillments",
     "campaigns",
+    "orders",
   ]
   show_and_sell_transact_arns = [for k in local.show_and_sell_transact_keys : var.dynamodb_table_arns[k]]
 }
@@ -1098,7 +1100,9 @@ data "aws_iam_policy_document" "lambda_show_and_sell_dynamodb" {
   }
 
   # Cross-table atomic writes: the Show & Sell mutation plans execute through
-  # TransactWriteItems on the five-table family plus campaigns.
+  # TransactWriteItems on the five-table family plus campaigns and orders
+  # (the custody createOrder transaction writes the order row alongside the
+  # custody draw and totals).
   statement {
     effect    = "Allow"
     actions   = ["dynamodb:TransactWriteItems"]

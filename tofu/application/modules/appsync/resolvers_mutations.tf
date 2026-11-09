@@ -346,6 +346,10 @@ resource "aws_appsync_resolver" "create_order" {
       aws_appsync_function.validate_payment_method_appsync.function_id,
       aws_appsync_function.get_campaign_for_order.function_id,
       aws_appsync_function.get_catalog.function_id,
+      # Show & Sell wave 3 (r2 C-1): custody router step. NONE continues to
+      # the legacy write; CONSUME_SCOUT_CUSTODY early-returns from the
+      # Lambda with the atomic transaction result.
+      aws_appsync_function.custody_router.function_id,
       aws_appsync_function.create_order.function_id,
       # #746: increment the denormalized campaign totals after the write.
       aws_appsync_function.sync_campaign_totals.function_id,
@@ -1077,6 +1081,115 @@ resource "aws_appsync_resolver" "remove_unit_campaign_membership" {
   type        = "Mutation"
   field       = "removeUnitCampaignMembership"
   data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# =============================================================================
+# Show & Sell wave 3 resolvers — inventory + fulfillment (direct Lambda).
+# =============================================================================
+
+# recordInventoryReceipt (Show & Sell wave 3, Lambda)
+resource "aws_appsync_resolver" "record_inventory_receipt" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "recordInventoryReceipt"
+  data_source = aws_appsync_datasource.inventory_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# adjustInventory (Show & Sell wave 3, Lambda)
+resource "aws_appsync_resolver" "adjust_inventory" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "adjustInventory"
+  data_source = aws_appsync_datasource.inventory_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# adjustCouncilOnOrder (Show & Sell wave 3, Lambda)
+resource "aws_appsync_resolver" "adjust_council_on_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "adjustCouncilOnOrder"
+  data_source = aws_appsync_datasource.inventory_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# issueStockToScout (Show & Sell wave 3, Lambda)
+resource "aws_appsync_resolver" "issue_stock_to_scout" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "issueStockToScout"
+  data_source = aws_appsync_datasource.inventory_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# returnStockFromScout (Show & Sell wave 3, Lambda)
+resource "aws_appsync_resolver" "return_stock_from_scout" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "returnStockFromScout"
+  data_source = aws_appsync_datasource.inventory_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# fulfillIndividualOrderLine (Show & Sell wave 3, Lambda)
+resource "aws_appsync_resolver" "fulfill_individual_order_line" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "fulfillIndividualOrderLine"
+  data_source = aws_appsync_datasource.order_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# reverseIndividualOrderFulfillment (Show & Sell wave 3, Lambda)
+resource "aws_appsync_resolver" "reverse_individual_order_fulfillment" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "reverseIndividualOrderFulfillment"
+  data_source = aws_appsync_datasource.order_operations.name
 
   runtime {
     name            = "APPSYNC_JS"

@@ -275,6 +275,8 @@ module "lambda" {
     # Lambda uses its own scoped role (the anonymous-facing read path).
     "unit-operations"          = module.iam.lambda_show_and_sell_execution_role_arn
     "unit-campaign-operations" = module.iam.lambda_show_and_sell_execution_role_arn
+    "inventory-operations"     = module.iam.lambda_show_and_sell_execution_role_arn
+    "order-operations"         = module.iam.lambda_show_and_sell_execution_role_arn
     "participant-data"         = module.iam.lambda_show_and_sell_execution_role_arn
     "public-orders"            = module.iam.lambda_public_orders_execution_role_arn
   }

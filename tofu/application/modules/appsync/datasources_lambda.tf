@@ -86,6 +86,28 @@ resource "aws_appsync_datasource" "unit_campaign_operations" {
   }
 }
 
+resource "aws_appsync_datasource" "inventory_operations" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "InventoryOperationsDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["inventory-operations"]
+  }
+}
+
+resource "aws_appsync_datasource" "order_operations" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "OrderOperationsDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["order-operations"]
+  }
+}
+
 resource "aws_appsync_datasource" "participant_data" {
   api_id           = aws_appsync_graphql_api.main.id
   name             = "ParticipantDataDS"
