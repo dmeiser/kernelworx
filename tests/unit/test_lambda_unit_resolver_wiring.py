@@ -4,7 +4,7 @@ The `lambda_handler` decorator (src/utils/handlers.py) returns structured
 `__isError` payloads instead of raising, so every resolver that invokes a
 decorated handler must run JS code that detects the payload and calls
 `util.error(...)` — otherwise the error dict leaks into the field result and
-typed error codes never reach the client. The 10 direct Lambda UNIT resolvers
+typed error codes never reach the client. The direct Lambda UNIT resolvers
 on decorator-wrapped handlers run `lambda_unit_resolver.js` for this. These
 tests parse the OpenTofu configuration into a semantic model (via
 python-hcl2) and assert the meaning of the wiring contract:
