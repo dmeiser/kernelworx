@@ -212,9 +212,9 @@ class TestGetAllTableSchemas:
     """Tests for get_all_table_schemas function."""
 
     def test_returns_all_eight_schemas(self):
-        """Function returns all 8 table schemas."""
+        """Function returns all 13 table schemas."""
         schemas = get_all_table_schemas()
-        assert len(schemas) == 8
+        assert len(schemas) == 13
 
     def test_all_schemas_have_table_name(self):
         """All schemas have a TableName key."""
@@ -239,7 +239,7 @@ class TestTableNames:
     """Tests for TABLE_NAMES constant."""
 
     def test_has_all_tables(self):
-        """TABLE_NAMES includes all 8 tables."""
+        """TABLE_NAMES includes all 13 tables."""
         expected_keys = {
             "accounts",
             "catalogs",
@@ -249,6 +249,11 @@ class TestTableNames:
             "shares",
             "invites",
             "shared_campaigns",
+            "units",
+            "unit_campaigns",
+            "inventory",
+            "show_and_sells",
+            "order_fulfillments",
         }
         assert set(TABLE_NAMES.keys()) == expected_keys
 
@@ -263,9 +268,9 @@ class TestCreateAllTables:
     """Tests for create_all_tables function."""
 
     def test_creates_all_tables(self, aws_credentials, dynamodb_resource):
-        """Function creates all 8 tables."""
+        """Function creates all 13 tables."""
         tables = create_all_tables(dynamodb_resource)
-        assert len(tables) == 8
+        assert len(tables) == 13
 
     def test_returns_dict_with_correct_keys(self, aws_credentials, dynamodb_resource):
         """Function returns dict with expected table keys."""
@@ -279,6 +284,11 @@ class TestCreateAllTables:
             "shares",
             "invites",
             "shared_campaigns",
+            "units",
+            "unit_campaigns",
+            "inventory",
+            "show_and_sells",
+            "order_fulfillments",
         }
         assert set(tables.keys()) == expected_keys
 

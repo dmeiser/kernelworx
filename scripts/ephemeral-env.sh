@@ -153,6 +153,11 @@ case "$ACTION" in
     echo "export CATALOGS_TABLE_NAME=kernelworx-catalogs-ue1-${RUN_ID}"
     echo "export INVITES_TABLE_NAME=kernelworx-invites-ue1-${RUN_ID}"
     echo "export SHARED_CAMPAIGNS_TABLE_NAME=kernelworx-shared-campaigns-ue1-${RUN_ID}"
+    echo "export UNITS_TABLE_NAME=kernelworx-units-ue1-${RUN_ID}"
+    echo "export UNIT_CAMPAIGNS_TABLE_NAME=kernelworx-unit-campaigns-ue1-${RUN_ID}"
+    echo "export INVENTORY_TABLE_NAME=kernelworx-inventory-ue1-${RUN_ID}"
+    echo "export SHOW_AND_SELLS_TABLE_NAME=kernelworx-show-and-sells-ue1-${RUN_ID}"
+    echo "export ORDER_FULFILLMENTS_TABLE_NAME=kernelworx-order-fulfillments-ue1-${RUN_ID}"
     ;;
 
   env)
@@ -197,6 +202,11 @@ case "$ACTION" in
     echo "export CATALOGS_TABLE_NAME=kernelworx-catalogs-ue1-${RUN_ID}"
     echo "export INVITES_TABLE_NAME=kernelworx-invites-ue1-${RUN_ID}"
     echo "export SHARED_CAMPAIGNS_TABLE_NAME=kernelworx-shared-campaigns-ue1-${RUN_ID}"
+    echo "export UNITS_TABLE_NAME=kernelworx-units-ue1-${RUN_ID}"
+    echo "export UNIT_CAMPAIGNS_TABLE_NAME=kernelworx-unit-campaigns-ue1-${RUN_ID}"
+    echo "export INVENTORY_TABLE_NAME=kernelworx-inventory-ue1-${RUN_ID}"
+    echo "export SHOW_AND_SELLS_TABLE_NAME=kernelworx-show-and-sells-ue1-${RUN_ID}"
+    echo "export ORDER_FULFILLMENTS_TABLE_NAME=kernelworx-order-fulfillments-ue1-${RUN_ID}"
     ;;
 
   down)

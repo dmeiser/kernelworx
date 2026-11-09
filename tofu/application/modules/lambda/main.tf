@@ -111,17 +111,22 @@ locals {
   payload_dir = var.lambda_payload_dir != "" ? var.lambda_payload_dir : "${path.module}/../../../.build/lambda"
 
   common_env = {
-    EXPORTS_BUCKET              = var.exports_bucket_name
-    POWERTOOLS_SERVICE_NAME     = var.name_prefix
-    LOG_LEVEL                   = "INFO"
-    ACCOUNTS_TABLE_NAME         = var.table_names.accounts
-    CATALOGS_TABLE_NAME         = var.table_names.catalogs
-    PROFILES_TABLE_NAME         = var.table_names.profiles
-    CAMPAIGNS_TABLE_NAME        = var.table_names.campaigns
-    ORDERS_TABLE_NAME           = var.table_names.orders
-    SHARES_TABLE_NAME           = var.table_names.shares
-    INVITES_TABLE_NAME          = var.table_names.invites
-    SHARED_CAMPAIGNS_TABLE_NAME = var.table_names.shared_campaigns
+    EXPORTS_BUCKET                = var.exports_bucket_name
+    POWERTOOLS_SERVICE_NAME       = var.name_prefix
+    LOG_LEVEL                     = "INFO"
+    ACCOUNTS_TABLE_NAME           = var.table_names.accounts
+    CATALOGS_TABLE_NAME           = var.table_names.catalogs
+    PROFILES_TABLE_NAME           = var.table_names.profiles
+    CAMPAIGNS_TABLE_NAME          = var.table_names.campaigns
+    ORDERS_TABLE_NAME             = var.table_names.orders
+    SHARES_TABLE_NAME             = var.table_names.shares
+    INVITES_TABLE_NAME            = var.table_names.invites
+    SHARED_CAMPAIGNS_TABLE_NAME   = var.table_names.shared_campaigns
+    UNITS_TABLE_NAME              = var.table_names.units
+    UNIT_CAMPAIGNS_TABLE_NAME     = var.table_names.unit_campaigns
+    INVENTORY_TABLE_NAME          = var.table_names.inventory
+    SHOW_AND_SELLS_TABLE_NAME     = var.table_names.show_and_sells
+    ORDER_FULFILLMENTS_TABLE_NAME = var.table_names.order_fulfillments
   }
 
   # Lambda functions configuration

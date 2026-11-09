@@ -333,6 +333,285 @@ def create_shared_campaigns_table_schema() -> dict[str, Any]:
     }
 
 
+def create_units_table_schema() -> dict[str, Any]:
+    """
+    Schema for units table (Show & Sell).
+
+    Key structure: PK=unitId, SK=itemKey (METADATA / GRANT#<accountId> /
+    INVITE#<joinCode> / PAYMENT#<paymentMethodId> / IDEM#... rows).
+    GSIs (mirrors tofu/application/modules/dynamodb/main.tf):
+    - accountId-unitId-index: an Account's Units via GRANT/METADATA rows
+    - unitId-createdAt-index: Unit-scoped history in time order
+    - metadataKey-createdAt-index: join-code redemption lookup
+    """
+    return {
+        "TableName": "kernelworx-units-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "unitId", "KeyType": "HASH"},
+            {"AttributeName": "itemKey", "KeyType": "RANGE"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "unitId", "AttributeType": "S"},
+            {"AttributeName": "itemKey", "AttributeType": "S"},
+            {"AttributeName": "accountId", "AttributeType": "S"},
+            {"AttributeName": "createdAt", "AttributeType": "S"},
+            {"AttributeName": "metadataKey", "AttributeType": "S"},
+        ],
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "accountId-unitId-index",
+                "KeySchema": [
+                    {"AttributeName": "accountId", "KeyType": "HASH"},
+                    {"AttributeName": "unitId", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "unitId-createdAt-index",
+                "KeySchema": [
+                    {"AttributeName": "unitId", "KeyType": "HASH"},
+                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "metadataKey-createdAt-index",
+                "KeySchema": [
+                    {"AttributeName": "metadataKey", "KeyType": "HASH"},
+                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+    }
+
+
+def create_unit_campaigns_table_schema() -> dict[str, Any]:
+    """
+    Schema for unit campaigns table (Show & Sell).
+
+    Key structure: PK=unitCampaignId, SK=itemKey (METADATA / MEMBER# /
+    COMMIT# / GUARD# / TOTAL# / IDEM# rows).
+    GSIs:
+    - unitId-createdAt-index: a Unit's Unit Campaigns in time order
+    - campaignId-index: authoritative join pointer from a Scout Campaign
+    - profileId-unitCampaignId-index: a Scout's memberships
+    - catalogId-index: catalog usage guard without a Scan
+    """
+    return {
+        "TableName": "kernelworx-unit-campaigns-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "unitCampaignId", "KeyType": "HASH"},
+            {"AttributeName": "itemKey", "KeyType": "RANGE"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "unitCampaignId", "AttributeType": "S"},
+            {"AttributeName": "itemKey", "AttributeType": "S"},
+            {"AttributeName": "unitId", "AttributeType": "S"},
+            {"AttributeName": "campaignId", "AttributeType": "S"},
+            {"AttributeName": "catalogId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+            {"AttributeName": "createdAt", "AttributeType": "S"},
+        ],
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "unitId-createdAt-index",
+                "KeySchema": [
+                    {"AttributeName": "unitId", "KeyType": "HASH"},
+                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "campaignId-index",
+                "KeySchema": [
+                    {"AttributeName": "campaignId", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "profileId-unitCampaignId-index",
+                "KeySchema": [
+                    {"AttributeName": "profileId", "KeyType": "HASH"},
+                    {"AttributeName": "unitCampaignId", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "catalogId-index",
+                "KeySchema": [
+                    {"AttributeName": "catalogId", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+    }
+
+
+def create_inventory_table_schema() -> dict[str, Any]:
+    """
+    Schema for inventory table (Show & Sell).
+
+    Key structure: PK=unitCampaignId, SK=itemKey (BALANCE#<productId> /
+    ALLOC# / CUSTODY# / MOVEMENT# / IDEM# rows).
+    GSIs:
+    - showAndSellId-index: an event's allocations
+    - profileId-unitCampaignId-index: a Scout's custody
+    - movementType-occurredAt-index: movement audit by type
+    """
+    return {
+        "TableName": "kernelworx-inventory-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "unitCampaignId", "KeyType": "HASH"},
+            {"AttributeName": "itemKey", "KeyType": "RANGE"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "unitCampaignId", "AttributeType": "S"},
+            {"AttributeName": "itemKey", "AttributeType": "S"},
+            {"AttributeName": "showAndSellId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+            {"AttributeName": "movementType", "AttributeType": "S"},
+            {"AttributeName": "occurredAt", "AttributeType": "S"},
+        ],
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "showAndSellId-index",
+                "KeySchema": [
+                    {"AttributeName": "showAndSellId", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "profileId-unitCampaignId-index",
+                "KeySchema": [
+                    {"AttributeName": "profileId", "KeyType": "HASH"},
+                    {"AttributeName": "unitCampaignId", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "movementType-occurredAt-index",
+                "KeySchema": [
+                    {"AttributeName": "movementType", "KeyType": "HASH"},
+                    {"AttributeName": "occurredAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+    }
+
+
+def create_show_and_sells_table_schema() -> dict[str, Any]:
+    """
+    Schema for show and sells table (Show & Sell events aggregate).
+
+    Key structure: PK=unitCampaignId, SK=itemKey (EVENT# / SLOT# / SIGNUP# /
+    SALE# / SALEREV# / FINAL# / CREDIT# / WEOWE# / WEOWEFULF# / IDEM# rows).
+    GSIs:
+    - unitCampaignId-startAt-index: upcoming/past event listing
+    - saleId-index: sale lookup by id
+    - weOweId-index: obligation lookup by bearer id
+    - campaignId-status-index: campaign-scoped status queries
+    - unitCampaignId-status-index: event listing by lifecycle state
+    """
+    return {
+        "TableName": "kernelworx-show-and-sells-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "unitCampaignId", "KeyType": "HASH"},
+            {"AttributeName": "itemKey", "KeyType": "RANGE"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "unitCampaignId", "AttributeType": "S"},
+            {"AttributeName": "itemKey", "AttributeType": "S"},
+            {"AttributeName": "saleId", "AttributeType": "S"},
+            {"AttributeName": "weOweId", "AttributeType": "S"},
+            {"AttributeName": "campaignId", "AttributeType": "S"},
+            {"AttributeName": "startAt", "AttributeType": "S"},
+            {"AttributeName": "status", "AttributeType": "S"},
+        ],
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "unitCampaignId-startAt-index",
+                "KeySchema": [
+                    {"AttributeName": "unitCampaignId", "KeyType": "HASH"},
+                    {"AttributeName": "startAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "saleId-index",
+                "KeySchema": [
+                    {"AttributeName": "saleId", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "weOweId-index",
+                "KeySchema": [
+                    {"AttributeName": "weOweId", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "campaignId-status-index",
+                "KeySchema": [
+                    {"AttributeName": "campaignId", "KeyType": "HASH"},
+                    {"AttributeName": "status", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "unitCampaignId-status-index",
+                "KeySchema": [
+                    {"AttributeName": "unitCampaignId", "KeyType": "HASH"},
+                    {"AttributeName": "status", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+    }
+
+
+def create_order_fulfillments_table_schema() -> dict[str, Any]:
+    """
+    Schema for order fulfillments table (Show & Sell).
+
+    Key structure: PK=orderId, SK=fulfillmentId. Reversals are separate
+    rows with deterministic REVERSAL#<originalFulfillmentId> ids —
+    fulfillment history is append-only.
+    GSI:
+    - campaignId-createdAt-index: campaign-scoped fulfillment listing
+    """
+    return {
+        "TableName": "kernelworx-order-fulfillments-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "orderId", "KeyType": "HASH"},
+            {"AttributeName": "fulfillmentId", "KeyType": "RANGE"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "orderId", "AttributeType": "S"},
+            {"AttributeName": "fulfillmentId", "AttributeType": "S"},
+            {"AttributeName": "campaignId", "AttributeType": "S"},
+            {"AttributeName": "createdAt", "AttributeType": "S"},
+        ],
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "campaignId-createdAt-index",
+                "KeySchema": [
+                    {"AttributeName": "campaignId", "KeyType": "HASH"},
+                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+    }
+
+
 def get_all_table_schemas() -> list[dict[str, Any]]:
     """
     Get all table schemas as a list.
@@ -349,6 +628,11 @@ def get_all_table_schemas() -> list[dict[str, Any]]:
         create_shares_table_schema(),
         create_invites_table_schema(),
         create_shared_campaigns_table_schema(),
+        create_units_table_schema(),
+        create_unit_campaigns_table_schema(),
+        create_inventory_table_schema(),
+        create_show_and_sells_table_schema(),
+        create_order_fulfillments_table_schema(),
     ]
 
 
@@ -381,6 +665,11 @@ def create_all_tables(dynamodb_resource: Any) -> dict[str, Any]:
         ("shares", create_shares_table_schema),
         ("invites", create_invites_table_schema),
         ("shared_campaigns", create_shared_campaigns_table_schema),
+        ("units", create_units_table_schema),
+        ("unit_campaigns", create_unit_campaigns_table_schema),
+        ("inventory", create_inventory_table_schema),
+        ("show_and_sells", create_show_and_sells_table_schema),
+        ("order_fulfillments", create_order_fulfillments_table_schema),
     ]
 
     for name, schema_creator in schema_creators:
@@ -400,4 +689,9 @@ TABLE_NAMES = {
     "shares": "kernelworx-shares-ue1-dev",
     "invites": "kernelworx-invites-ue1-dev",
     "shared_campaigns": "kernelworx-shared-campaigns-ue1-dev",
+    "units": "kernelworx-units-ue1-dev",
+    "unit_campaigns": "kernelworx-unit-campaigns-ue1-dev",
+    "inventory": "kernelworx-inventory-ue1-dev",
+    "show_and_sells": "kernelworx-show-and-sells-ue1-dev",
+    "order_fulfillments": "kernelworx-order-fulfillments-ue1-dev",
 }

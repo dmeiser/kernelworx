@@ -265,6 +265,31 @@ class TableAccessor:
         """Get shared campaigns table instance."""
         return self._get_table("shared_campaigns")
 
+    @property
+    def units(self) -> "Table":
+        """Get units table instance (Show & Sell)."""
+        return self._get_table("units")
+
+    @property
+    def unit_campaigns(self) -> "Table":
+        """Get unit campaigns table instance (Show & Sell)."""
+        return self._get_table("unit_campaigns")
+
+    @property
+    def inventory(self) -> "Table":
+        """Get inventory table instance (Show & Sell)."""
+        return self._get_table("inventory")
+
+    @property
+    def show_and_sells(self) -> "Table":
+        """Get show and sells table instance (Show & Sell events aggregate)."""
+        return self._get_table("show_and_sells")
+
+    @property
+    def order_fulfillments(self) -> "Table":
+        """Get order fulfillments table instance (Show & Sell)."""
+        return self._get_table("order_fulfillments")
+
 
 # Singleton instance for import
 tables = TableAccessor()

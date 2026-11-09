@@ -32,6 +32,11 @@ def reset_between_tests(aws_credentials: None) -> Generator[None, None, None]:
         "CATALOGS_TABLE_NAME",
         "INVITES_TABLE_NAME",
         "SHARED_CAMPAIGNS_TABLE_NAME",
+        "UNITS_TABLE_NAME",
+        "UNIT_CAMPAIGNS_TABLE_NAME",
+        "INVENTORY_TABLE_NAME",
+        "SHOW_AND_SELLS_TABLE_NAME",
+        "ORDER_FULFILLMENTS_TABLE_NAME",
     ]
     original_values = {k: os.environ.get(k) for k in table_env_vars}
 
@@ -296,6 +301,57 @@ class TestTableProperties:
                 reset_singleton()
                 table = tables.shared_campaigns
                 assert table.name == "custom-shared-campaigns"
+
+
+class TestShowAndSellTables:
+    """Accessor tests for the five Show & Sell tables (wave 1)."""
+
+    # (accessor, env var, table name, hash key, range key or None)
+    SHOW_AND_SELL_TABLES = [
+        ("units", "UNITS_TABLE_NAME", "custom-units", "unitId", "itemKey"),
+        ("unit_campaigns", "UNIT_CAMPAIGNS_TABLE_NAME", "custom-unit-campaigns", "unitCampaignId", "itemKey"),
+        ("inventory", "INVENTORY_TABLE_NAME", "custom-inventory", "unitCampaignId", "itemKey"),
+        ("show_and_sells", "SHOW_AND_SELLS_TABLE_NAME", "custom-show-and-sells", "unitCampaignId", "itemKey"),
+        (
+            "order_fulfillments",
+            "ORDER_FULFILLMENTS_TABLE_NAME",
+            "custom-order-fulfillments",
+            "orderId",
+            "fulfillmentId",
+        ),
+    ]
+
+    @pytest.mark.parametrize("accessor,env_var,table_name,hash_key,range_key", SHOW_AND_SELL_TABLES)
+    def test_missing_env_raises(
+        self, aws_credentials: None, accessor: str, env_var: str, table_name: str, hash_key: str, range_key: str
+    ) -> None:
+        """Each Show & Sell table raises ValueError when its env var is missing."""
+        with mock_aws():
+            with pytest.raises(ValueError, match=f"Required environment variable '{env_var}' is not set"):
+                _ = getattr(tables, accessor)
+
+    @pytest.mark.parametrize("accessor,env_var,table_name,hash_key,range_key", SHOW_AND_SELL_TABLES)
+    def test_custom_name(
+        self, aws_credentials: None, accessor: str, env_var: str, table_name: str, hash_key: str, range_key: str
+    ) -> None:
+        """Each Show & Sell table uses its custom name from env."""
+        with mock_aws():
+            dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+            key_schema = [{"AttributeName": hash_key, "KeyType": "HASH"}]
+            attribute_definitions = [{"AttributeName": hash_key, "AttributeType": "S"}]
+            if range_key is not None:
+                key_schema.append({"AttributeName": range_key, "KeyType": "RANGE"})
+                attribute_definitions.append({"AttributeName": range_key, "AttributeType": "S"})
+            dynamodb.create_table(
+                TableName=table_name,
+                KeySchema=key_schema,
+                AttributeDefinitions=attribute_definitions,
+                BillingMode="PAY_PER_REQUEST",
+            )
+            with patch.dict(os.environ, {env_var: table_name}):
+                reset_singleton()
+                table = getattr(tables, accessor)
+                assert table.name == table_name
 
 
 class TestTableOverrides:

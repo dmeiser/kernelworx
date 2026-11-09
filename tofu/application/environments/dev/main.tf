@@ -274,7 +274,7 @@ module "lambda" {
     # #354 (chunk 4 of #326): account/reporting-domain handlers use the scoped
     # account-reporting execution role. delete-account stays on the admin role
     # (#121, which takes precedence in the lambda module's role resolution).
-    "list-catalogs-in-use"        = module.iam.lambda_account_reporting_execution_role_arn
+    "list-catalogs-in-use" = module.iam.lambda_account_reporting_execution_role_arn
     # #355 (chunk 5 of #326, final): the Cognito post-auth account-bootstrap
     # trigger uses its own scoped role (accounts table only). The monolithic
     # shared role is retired.
@@ -286,14 +286,19 @@ module "lambda" {
   exports_bucket_name = module.s3.exports_bucket_name
 
   table_names = {
-    accounts         = module.dynamodb.accounts_table_name
-    catalogs         = module.dynamodb.catalogs_table_name
-    profiles         = module.dynamodb.profiles_table_name
-    campaigns        = module.dynamodb.campaigns_table_name
-    orders           = module.dynamodb.orders_table_name
-    shares           = module.dynamodb.shares_table_name
-    invites          = module.dynamodb.invites_table_name
-    shared_campaigns = module.dynamodb.shared_campaigns_table_name
+    accounts           = module.dynamodb.accounts_table_name
+    catalogs           = module.dynamodb.catalogs_table_name
+    profiles           = module.dynamodb.profiles_table_name
+    campaigns          = module.dynamodb.campaigns_table_name
+    orders             = module.dynamodb.orders_table_name
+    shares             = module.dynamodb.shares_table_name
+    invites            = module.dynamodb.invites_table_name
+    shared_campaigns   = module.dynamodb.shared_campaigns_table_name
+    units              = module.dynamodb.units_table_name
+    unit_campaigns     = module.dynamodb.unit_campaigns_table_name
+    inventory          = module.dynamodb.inventory_table_name
+    show_and_sells     = module.dynamodb.show_and_sells_table_name
+    order_fulfillments = module.dynamodb.order_fulfillments_table_name
   }
 
   user_pool_id = module.cognito.user_pool_id
@@ -370,9 +375,9 @@ module "cloudfront" {
 module "waf" {
   source = "../../modules/waf"
 
-  name_prefix        = local.name_prefix
-  environment        = var.environment
-  github_token       = var.github_token
+  name_prefix  = local.name_prefix
+  environment  = var.environment
+  github_token = var.github_token
 }
 
 module "route53" {

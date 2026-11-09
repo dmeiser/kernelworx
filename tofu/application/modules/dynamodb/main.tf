@@ -648,6 +648,595 @@ resource "aws_dynamodb_table" "public_order_throttles" {
 }
 
 # ============================================================================
+# Show & Sell tables (wave 1, integration plan section 5 step 2; impact map
+# section 4.1). Base-key convention follows THIS module (natural compound
+# keys), not the clean-room PK/SK design — handlers are re-expressed against
+# these keys in later waves. Aggregate tables hold multiple entity kinds,
+# discriminated by the range-key attribute `itemKey` (e.g. METADATA,
+# GRANT#<accountId>, INVITE#<joinCode>, PAYMENT#<paymentMethodId>,
+# BALANCE#<productId>, MOVEMENT#<occurredAt>#<movementId>, EVENT#<showAndSellId>,
+# SALE#<saleId>, WEOWE#<weOweId>, IDEM#<markerKey>).
+#
+# TTL: a single numeric epoch-seconds attribute `expiresAtEpoch` per table.
+# UnitInvite rows expire at invite expiry; idempotency-marker rows expire at
+# commit time + 7 days (the map's common marker convention). Numeric epoch,
+# distinct from the legacy string/throttle TTLs elsewhere in this module.
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Units Table
+# PK: unitId, SK: itemKey
+# Rows: METADATA (one per Unit; carries accountId of the creating owner,
+#       createdAt, metadataKey), GRANT#<accountId> (one per granted Account),
+#       INVITE#<joinCode> (one per outstanding invite; metadataKey=joinCode
+#       enables code redemption through the metadataKey-createdAt-index),
+#       PAYMENT#<paymentMethodId> (Unit payment methods),
+#       IDEM#<scope>#<markerKey> (idempotency markers).
+# GSI: accountId-unitId-index (accountId HASH, unitId RANGE) — an Account's
+#      Units via its GRANT rows plus owning METADATA row.
+# GSI: unitId-createdAt-index (unitId HASH, createdAt RANGE) — Unit-scoped
+#      history ordered by time (metadata/grant/invite audit).
+# GSI: metadataKey-createdAt-index (metadataKey HASH, createdAt RANGE) —
+#      join-code redemption lookup (INVITE rows) and metadata registry.
+# TTL: expiresAtEpoch (UnitInvite rows reap after expiry).
+# ----------------------------------------------------------------------------
+resource "aws_dynamodb_table" "units" {
+  name                        = "${var.name_prefix}-units${local.table_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "unitId"
+  range_key                   = "itemKey"
+  deletion_protection_enabled = var.enable_deletion_protection
+
+  attribute {
+    name = "unitId"
+    type = "S"
+  }
+
+  attribute {
+    name = "itemKey"
+    type = "S"
+  }
+
+  attribute {
+    name = "accountId"
+    type = "S"
+  }
+
+  attribute {
+    name = "createdAt"
+    type = "S"
+  }
+
+  attribute {
+    name = "metadataKey"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "accountId-unitId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "accountId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "unitId"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "unitId-createdAt-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "unitId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "metadataKey-createdAt-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "metadataKey"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
+  }
+
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = false
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+# ----------------------------------------------------------------------------
+# Unit Campaigns Table
+# PK: unitCampaignId, SK: itemKey
+# Rows: METADATA (one per Unit Campaign; carries unitId, campaignId, catalogId,
+#       createdAt), MEMBER#<profileId> (roster; carries profileId, createdAt),
+#       COMMIT#<showAndSellId>#<profileId> (slot commitments),
+#       GUARD#<guardKey> (ACTIVE roster/guard rows), TOTAL#<profileId> (Scout
+#       sales totals), IDEM#<scope>#<markerKey> (idempotency markers).
+# GSI: unitId-createdAt-index (unitId HASH, createdAt RANGE) — a Unit's Unit
+#      Campaigns in time order.
+# GSI: campaignId-index (campaignId HASH) — the joined Scout Campaign's Unit
+#      Campaign (authoritative join pointer; impact map 3.3 soft-delete guard).
+# GSI: profileId-unitCampaignId-index (profileId HASH, unitCampaignId RANGE) —
+#      a Scout's memberships across Units.
+# GSI: catalogId-index (catalogId HASH) — catalog usage guard without a Scan.
+# ----------------------------------------------------------------------------
+resource "aws_dynamodb_table" "unit_campaigns" {
+  name                        = "${var.name_prefix}-unit-campaigns${local.table_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "unitCampaignId"
+  range_key                   = "itemKey"
+  deletion_protection_enabled = var.enable_deletion_protection
+
+  attribute {
+    name = "unitCampaignId"
+    type = "S"
+  }
+
+  attribute {
+    name = "itemKey"
+    type = "S"
+  }
+
+  attribute {
+    name = "unitId"
+    type = "S"
+  }
+
+  attribute {
+    name = "campaignId"
+    type = "S"
+  }
+
+  attribute {
+    name = "catalogId"
+    type = "S"
+  }
+
+  attribute {
+    name = "profileId"
+    type = "S"
+  }
+
+  attribute {
+    name = "createdAt"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "unitId-createdAt-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "unitId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "campaignId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "campaignId"
+      key_type       = "HASH"
+    }
+  }
+
+  global_secondary_index {
+    name            = "profileId-unitCampaignId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "profileId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "unitCampaignId"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "catalogId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "catalogId"
+      key_type       = "HASH"
+    }
+  }
+
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = false
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+# ----------------------------------------------------------------------------
+# Inventory Table
+# PK: unitCampaignId, SK: itemKey
+# Rows: BALANCE#<productId> (on-hand balance; conditional updates are the
+#       stock authority), ALLOC#<showAndSellId>#<productId> (event
+#       allocations), CUSTODY#<profileId>#<productId> (with-Scout custody),
+#       MOVEMENT#<occurredAt>#<movementId> (append-style movement audit),
+#       IDEM#<scope>#<markerKey> (idempotency markers).
+# GSI: showAndSellId-index (showAndSellId HASH) — an event's allocations.
+# GSI: profileId-unitCampaignId-index (profileId HASH, unitCampaignId RANGE) —
+#      a Scout's custody across Unit Campaigns.
+# GSI: movementType-occurredAt-index (movementType HASH, occurredAt RANGE) —
+#      movement audit by type (optional in the map; included — our handlers
+#      use it for the audit surfaces).
+# ----------------------------------------------------------------------------
+resource "aws_dynamodb_table" "inventory" {
+  name                        = "${var.name_prefix}-inventory${local.table_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "unitCampaignId"
+  range_key                   = "itemKey"
+  deletion_protection_enabled = var.enable_deletion_protection
+
+  attribute {
+    name = "unitCampaignId"
+    type = "S"
+  }
+
+  attribute {
+    name = "itemKey"
+    type = "S"
+  }
+
+  attribute {
+    name = "showAndSellId"
+    type = "S"
+  }
+
+  attribute {
+    name = "profileId"
+    type = "S"
+  }
+
+  attribute {
+    name = "movementType"
+    type = "S"
+  }
+
+  attribute {
+    name = "occurredAt"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "showAndSellId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "showAndSellId"
+      key_type       = "HASH"
+    }
+  }
+
+  global_secondary_index {
+    name            = "profileId-unitCampaignId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "profileId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "unitCampaignId"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "movementType-occurredAt-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "movementType"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "occurredAt"
+      key_type       = "RANGE"
+    }
+  }
+
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = false
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+# ----------------------------------------------------------------------------
+# Show & Sells Table (the events aggregate)
+# PK: unitCampaignId, SK: itemKey
+# Rows: EVENT#<showAndSellId> (event metadata; carries startAt, status,
+#       campaignId), SLOT#<showAndSellId>#<slotId> (time slots),
+#       SIGNUP#<slotId>#<profileId> (signups/commitments),
+#       SALE#<saleId> (sales; carries saleId, status),
+#       SALEREV#<saleId>#<revisionId> (sale revisions),
+#       FINAL#<finalizationId> (finalization versions),
+#       CREDIT#<profileId>#<factId> (credit allocation facts),
+#       WEOWE#<weOweId> (We Owe obligations),
+#       WEOWEFULF#<weOweId>#<fulfillmentId>,
+#       IDEM#<scope>#<markerKey> (idempotency markers).
+# GSI: unitCampaignId-startAt-index (unitCampaignId HASH, startAt RANGE) —
+#      upcoming/past event listing.
+# GSI: saleId-index (saleId HASH) — sale lookup by id.
+# GSI: weOweId-index (weOweId HASH) — obligation lookup by bearer id.
+# GSI: campaignId-status-index (campaignId HASH, status RANGE).
+# GSI: unitCampaignId-status-index (unitCampaignId HASH, status RANGE) —
+#      event listing by lifecycle state.
+# ----------------------------------------------------------------------------
+resource "aws_dynamodb_table" "show_and_sells" {
+  name                        = "${var.name_prefix}-show-and-sells${local.table_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "unitCampaignId"
+  range_key                   = "itemKey"
+  deletion_protection_enabled = var.enable_deletion_protection
+
+  attribute {
+    name = "unitCampaignId"
+    type = "S"
+  }
+
+  attribute {
+    name = "itemKey"
+    type = "S"
+  }
+
+  attribute {
+    name = "saleId"
+    type = "S"
+  }
+
+  attribute {
+    name = "weOweId"
+    type = "S"
+  }
+
+  attribute {
+    name = "campaignId"
+    type = "S"
+  }
+
+  attribute {
+    name = "startAt"
+    type = "S"
+  }
+
+  attribute {
+    name = "status"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "unitCampaignId-startAt-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "unitCampaignId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "startAt"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "saleId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "saleId"
+      key_type       = "HASH"
+    }
+  }
+
+  global_secondary_index {
+    name            = "weOweId-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "weOweId"
+      key_type       = "HASH"
+    }
+  }
+
+  global_secondary_index {
+    name            = "campaignId-status-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "campaignId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "status"
+      key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name            = "unitCampaignId-status-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "unitCampaignId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "status"
+      key_type       = "RANGE"
+    }
+  }
+
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = false
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+# ----------------------------------------------------------------------------
+# Order Fulfillments Table
+# PK: orderId, SK: fulfillmentId
+# Rows: one per fulfillment; reversals are separate rows whose fulfillmentId
+# is the deterministic REVERSAL#<originalFulfillmentId> (impact map 4.1),
+# never an overwrite — fulfillment history is append-only.
+# GSI: campaignId-createdAt-index (campaignId HASH, createdAt RANGE) —
+#      campaign-scoped fulfillment listing (spec 10.2 orderFulfillments).
+# ----------------------------------------------------------------------------
+resource "aws_dynamodb_table" "order_fulfillments" {
+  name                        = "${var.name_prefix}-order-fulfillments${local.table_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "orderId"
+  range_key                   = "fulfillmentId"
+  deletion_protection_enabled = var.enable_deletion_protection
+
+  attribute {
+    name = "orderId"
+    type = "S"
+  }
+
+  attribute {
+    name = "fulfillmentId"
+    type = "S"
+  }
+
+  attribute {
+    name = "campaignId"
+    type = "S"
+  }
+
+  attribute {
+    name = "createdAt"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "campaignId-createdAt-index"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "campaignId"
+      key_type       = "HASH"
+    }
+
+    key_schema {
+      attribute_name = "createdAt"
+      key_type       = "RANGE"
+    }
+  }
+
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = false
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+# ============================================================================
 # Outputs
 # ============================================================================
 output "table_arns" {
@@ -662,6 +1251,11 @@ output "table_arns" {
     invites                = aws_dynamodb_table.invites.arn
     shared_campaigns       = aws_dynamodb_table.shared_campaigns.arn
     public_order_throttles = aws_dynamodb_table.public_order_throttles.arn
+    units                  = aws_dynamodb_table.units.arn
+    unit_campaigns         = aws_dynamodb_table.unit_campaigns.arn
+    inventory              = aws_dynamodb_table.inventory.arn
+    show_and_sells         = aws_dynamodb_table.show_and_sells.arn
+    order_fulfillments     = aws_dynamodb_table.order_fulfillments.arn
   }
 }
 
@@ -677,6 +1271,11 @@ output "table_names" {
     invites                = aws_dynamodb_table.invites.name
     shared_campaigns       = aws_dynamodb_table.shared_campaigns.name
     public_order_throttles = aws_dynamodb_table.public_order_throttles.name
+    units                  = aws_dynamodb_table.units.name
+    unit_campaigns         = aws_dynamodb_table.unit_campaigns.name
+    inventory              = aws_dynamodb_table.inventory.name
+    show_and_sells         = aws_dynamodb_table.show_and_sells.name
+    order_fulfillments     = aws_dynamodb_table.order_fulfillments.name
   }
 }
 
@@ -719,4 +1318,29 @@ output "invites_table_name" {
 output "shared_campaigns_table_name" {
   description = "Name of the shared campaigns DynamoDB table"
   value       = aws_dynamodb_table.shared_campaigns.name
+}
+
+output "units_table_name" {
+  description = "Name of the units DynamoDB table"
+  value       = aws_dynamodb_table.units.name
+}
+
+output "unit_campaigns_table_name" {
+  description = "Name of the unit campaigns DynamoDB table"
+  value       = aws_dynamodb_table.unit_campaigns.name
+}
+
+output "inventory_table_name" {
+  description = "Name of the inventory DynamoDB table"
+  value       = aws_dynamodb_table.inventory.name
+}
+
+output "show_and_sells_table_name" {
+  description = "Name of the show and sells DynamoDB table"
+  value       = aws_dynamodb_table.show_and_sells.name
+}
+
+output "order_fulfillments_table_name" {
+  description = "Name of the order fulfillments DynamoDB table"
+  value       = aws_dynamodb_table.order_fulfillments.name
 }
