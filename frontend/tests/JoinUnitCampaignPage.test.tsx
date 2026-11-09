@@ -237,7 +237,9 @@ it('surfaces a profile-load failure', async () => {
   renderPage([
     {
       request: { query: LIST_MY_PROFILES, variables: match },
-      result: { errors: [new GraphQLError('Profiles are unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+      result: {
+        errors: [new GraphQLError('Profiles are unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })],
+      },
     },
   ]);
 

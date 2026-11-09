@@ -452,7 +452,9 @@ it('keeps the invite dialog open and surfaces the error when the revocation fail
     },
     {
       request: { query: REVOKE_UNIT_INVITE, variables: match },
-      result: { errors: [new GraphQLError('The invite could not be revoked.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+      result: {
+        errors: [new GraphQLError('The invite could not be revoked.', { extensions: { errorCode: 'INTERNAL_ERROR' } })],
+      },
     },
   ]);
 
@@ -475,13 +477,19 @@ it('shows a generic label for an admin without a name', async () => {
         data: {
           unitAdmins: {
             __typename: 'UnitAccessGrantConnection',
-            items: [admin('self', 'self@fixtures.kernelworx.test', 'Self'), admin('other', 'other@fixtures.kernelworx.test', '')],
+            items: [
+              admin('self', 'self@fixtures.kernelworx.test', 'Self'),
+              admin('other', 'other@fixtures.kernelworx.test', ''),
+            ],
             pageInfo: PAGE_INFO,
           },
         },
       },
     },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [], pageInfo: PAGE_INFO } } },
+    },
   ]);
   expect(await screen.findByText('You')).toBeInTheDocument();
   expect(screen.getByText('Admin')).toBeInTheDocument();
@@ -500,9 +508,22 @@ it('omits the expiry line for an invite that has none', async () => {
     { request: { query: GET_UNIT, variables: match }, result: { data: { unit: unit({ adminCount: 1 }) } } },
     {
       request: { query: UNIT_ADMINS, variables: match },
-      result: { data: { unitAdmins: { __typename: 'UnitAccessGrantConnection', items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')], pageInfo: PAGE_INFO } } },
+      result: {
+        data: {
+          unitAdmins: {
+            __typename: 'UnitAccessGrantConnection',
+            items: [admin('self', 'self@fixtures.kernelworx.test', 'Self')],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
     },
-    { request: { query: UNIT_INVITES, variables: match }, result: { data: { unitInvites: { __typename: 'UnitInviteConnection', items: [noExpiryInvite], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_INVITES, variables: match },
+      result: {
+        data: { unitInvites: { __typename: 'UnitInviteConnection', items: [noExpiryInvite], pageInfo: PAGE_INFO } },
+      },
+    },
   ]);
   expect(await screen.findByText(/ABC123/i)).toBeInTheDocument();
   expect(screen.queryByText(/expires/i)).not.toBeInTheDocument();

@@ -359,9 +359,21 @@ it('surfaces create-catalog list failures with a working Retry and never blames 
 it('shows the empty roster state when no one has joined', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
     { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
-    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGN_ROSTER, variables: match },
+      result: {
+        data: {
+          unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO },
+        },
+      },
+    },
   ]);
 
   const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
@@ -372,9 +384,19 @@ it('shows the empty roster state when no one has joined', async () => {
 it('surfaces a roster load failure', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
     { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
-    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { errors: [new GraphQLError('The roster is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+    {
+      request: { query: UNIT_CAMPAIGN_ROSTER, variables: match },
+      result: {
+        errors: [new GraphQLError('The roster is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })],
+      },
+    },
   ]);
 
   const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
@@ -385,10 +407,25 @@ it('surfaces a roster load failure', async () => {
 it('saves campaign edits and closes the dialog on success', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
     { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
-    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO } } } },
-    { request: { query: UPDATE_UNIT_CAMPAIGN, variables: match }, result: { data: { updateUnitCampaign: campaign({ campaignName: 'Renamed Campaign' }) } } },
+    {
+      request: { query: UNIT_CAMPAIGN_ROSTER, variables: match },
+      result: {
+        data: {
+          unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO },
+        },
+      },
+    },
+    {
+      request: { query: UPDATE_UNIT_CAMPAIGN, variables: match },
+      result: { data: { updateUnitCampaign: campaign({ campaignName: 'Renamed Campaign' }) } },
+    },
   ]);
 
   const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
@@ -402,10 +439,25 @@ it('saves campaign edits and closes the dialog on success', async () => {
 it('surfaces an error when saving campaign edits fails', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
     { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
-    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO } } } },
-    { request: { query: UPDATE_UNIT_CAMPAIGN, variables: match }, result: { errors: [new GraphQLError('The update failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+    {
+      request: { query: UNIT_CAMPAIGN_ROSTER, variables: match },
+      result: {
+        data: {
+          unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO },
+        },
+      },
+    },
+    {
+      request: { query: UPDATE_UNIT_CAMPAIGN, variables: match },
+      result: { errors: [new GraphQLError('The update failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
   ]);
 
   const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
@@ -420,10 +472,27 @@ it('surfaces an error when saving campaign edits fails', async () => {
 it('creates a campaign and closes the dialog on success', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
-    { request: { query: LIST_MY_CATALOGS, variables: match }, result: { data: { listMyCatalogs: [{ __typename: 'Catalog', catalogId: 'cat-1', catalogName: 'Fall 2026', catalogType: 'USER' }] } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
+    {
+      request: { query: LIST_MY_CATALOGS, variables: match },
+      result: {
+        data: {
+          listMyCatalogs: [
+            { __typename: 'Catalog', catalogId: 'cat-1', catalogName: 'Fall 2026', catalogType: 'USER' },
+          ],
+        },
+      },
+    },
     { request: { query: LIST_MANAGED_CATALOGS, variables: match }, result: { data: { listManagedCatalogs: [] } } },
-    { request: { query: CREATE_UNIT_CAMPAIGN, variables: match }, result: { data: { createUnitCampaign: campaign({ unitCampaignId: 'uc-new' }) } } },
+    {
+      request: { query: CREATE_UNIT_CAMPAIGN, variables: match },
+      result: { data: { createUnitCampaign: campaign({ unitCampaignId: 'uc-new' }) } },
+    },
   ]);
 
   await user.click(await screen.findByRole('button', { name: /Create campaign/i }));
@@ -438,8 +507,18 @@ it('creates a campaign and closes the dialog on success', async () => {
 it('surfaces a campaign-list load failure with a working Retry', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { errors: [new GraphQLError('The campaigns are unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        errors: [new GraphQLError('The campaigns are unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })],
+      },
+    },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
   ]);
 
   expect(await screen.findByRole('button', { name: /Retry/i })).toBeInTheDocument();
@@ -450,10 +529,27 @@ it('surfaces a campaign-list load failure with a working Retry', async () => {
 it('surfaces an error when creating a campaign fails', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
-    { request: { query: LIST_MY_CATALOGS, variables: match }, result: { data: { listMyCatalogs: [{ __typename: 'Catalog', catalogId: 'cat-1', catalogName: 'Fall 2026', catalogType: 'USER' }] } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
+    {
+      request: { query: LIST_MY_CATALOGS, variables: match },
+      result: {
+        data: {
+          listMyCatalogs: [
+            { __typename: 'Catalog', catalogId: 'cat-1', catalogName: 'Fall 2026', catalogType: 'USER' },
+          ],
+        },
+      },
+    },
     { request: { query: LIST_MANAGED_CATALOGS, variables: match }, result: { data: { listManagedCatalogs: [] } } },
-    { request: { query: CREATE_UNIT_CAMPAIGN, variables: match }, result: { errors: [new GraphQLError('The create failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+    {
+      request: { query: CREATE_UNIT_CAMPAIGN, variables: match },
+      result: { errors: [new GraphQLError('The create failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
   ]);
 
   await user.click(await screen.findByRole('button', { name: /Create campaign/i }));
@@ -468,9 +564,21 @@ it('surfaces an error when creating a campaign fails', async () => {
 it('edits the campaign name and active toggle, then closes via Cancel', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
     { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
-    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGN_ROSTER, variables: match },
+      result: {
+        data: {
+          unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO },
+        },
+      },
+    },
   ]);
 
   const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
@@ -486,9 +594,21 @@ it('edits the campaign name and active toggle, then closes via Cancel', async ()
 it('blocks saving an empty campaign name in the edit dialog', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
     { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
-    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGN_ROSTER, variables: match },
+      result: {
+        data: {
+          unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO },
+        },
+      },
+    },
   ]);
 
   const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
@@ -503,9 +623,27 @@ it('blocks saving an empty campaign name in the edit dialog', async () => {
 it('deduplicates public catalogs against owned catalogs and closes the create dialog via Cancel', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
-    { request: { query: LIST_MY_CATALOGS, variables: match }, result: { data: { listMyCatalogs: [catalogItem({ catalogId: 'cat-own-1', catalogName: 'My Catalog' })] } } },
-    { request: { query: LIST_MANAGED_CATALOGS, variables: match }, result: { data: { listManagedCatalogs: [catalogItem({ catalogId: 'cat-own-1', catalogName: 'My Catalog' }), catalogItem({ catalogId: 'cat-pub-1', catalogName: 'Public Catalog' })] } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
+    {
+      request: { query: LIST_MY_CATALOGS, variables: match },
+      result: { data: { listMyCatalogs: [catalogItem({ catalogId: 'cat-own-1', catalogName: 'My Catalog' })] } },
+    },
+    {
+      request: { query: LIST_MANAGED_CATALOGS, variables: match },
+      result: {
+        data: {
+          listManagedCatalogs: [
+            catalogItem({ catalogId: 'cat-own-1', catalogName: 'My Catalog' }),
+            catalogItem({ catalogId: 'cat-pub-1', catalogName: 'Public Catalog' }),
+          ],
+        },
+      },
+    },
   ]);
 
   await user.click(await screen.findByRole('button', { name: /Create campaign/i }));
@@ -517,10 +655,29 @@ it('deduplicates public catalogs against owned catalogs and closes the create di
 it('keeps the roster-removal dialog open and shows the error when the removal fails', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
     { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
-    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [membership()], pageInfo: PAGE_INFO } } } },
-    { request: { query: REMOVE_UNIT_CAMPAIGN_MEMBERSHIP, variables: match }, result: { errors: [new GraphQLError('The removal failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+    {
+      request: { query: UNIT_CAMPAIGN_ROSTER, variables: match },
+      result: {
+        data: {
+          unitCampaignRoster: {
+            __typename: 'UnitCampaignMembershipConnection',
+            items: [membership()],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
+    {
+      request: { query: REMOVE_UNIT_CAMPAIGN_MEMBERSHIP, variables: match },
+      result: { errors: [new GraphQLError('The removal failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
   ]);
 
   const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
@@ -535,9 +692,24 @@ it('keeps the roster-removal dialog open and shows the error when the removal fa
 it('surfaces a detail-catalog load failure with a working Retry', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
-    { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: { errors: [new GraphQLError('The catalog failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
-    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
+    {
+      request: { query: UNIT_CAMPAIGN_CATALOG, variables: match },
+      result: { errors: [new GraphQLError('The catalog failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
+    {
+      request: { query: UNIT_CAMPAIGN_ROSTER, variables: match },
+      result: {
+        data: {
+          unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO },
+        },
+      },
+    },
   ]);
 
   const row = await screen.findByText(/Pack 3149 Fall Show & Sell \(2026\)/i);
@@ -549,8 +721,16 @@ it('surfaces a detail-catalog load failure with a working Retry', async () => {
 it('retries the catalog load from the create dialog when the catalogs fail', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } } } },
-    { request: { query: LIST_MY_CATALOGS, variables: match }, result: { errors: [new GraphQLError('The catalogs failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign()], pageInfo: PAGE_INFO } },
+      },
+    },
+    {
+      request: { query: LIST_MY_CATALOGS, variables: match },
+      result: { errors: [new GraphQLError('The catalogs failed.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+    },
     { request: { query: LIST_MANAGED_CATALOGS, variables: match }, result: { data: { listManagedCatalogs: [] } } },
   ]);
 
@@ -563,9 +743,27 @@ it('retries the catalog load from the create dialog when the catalogs fail', asy
 it('shows an inactive campaign as Inactive in the list and in the detail', async () => {
   const user = userEvent.setup();
   renderSection([
-    { request: { query: UNIT_CAMPAIGNS, variables: match }, result: { data: { unitCampaigns: { __typename: 'UnitCampaignConnection', items: [campaign({ isActive: false })], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGNS, variables: match },
+      result: {
+        data: {
+          unitCampaigns: {
+            __typename: 'UnitCampaignConnection',
+            items: [campaign({ isActive: false })],
+            pageInfo: PAGE_INFO,
+          },
+        },
+      },
+    },
     { request: { query: UNIT_CAMPAIGN_CATALOG, variables: match }, result: catalogResult },
-    { request: { query: UNIT_CAMPAIGN_ROSTER, variables: match }, result: { data: { unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO } } } },
+    {
+      request: { query: UNIT_CAMPAIGN_ROSTER, variables: match },
+      result: {
+        data: {
+          unitCampaignRoster: { __typename: 'UnitCampaignMembershipConnection', items: [], pageInfo: PAGE_INFO },
+        },
+      },
+    },
   ]);
 
   // The list row shows the Inactive chip (covers the list-row isActive branches).
@@ -577,4 +775,3 @@ it('shows an inactive campaign as Inactive in the list and in the detail', async
   await user.click(row);
   expect(screen.getAllByText(/Inactive/).length).toBeGreaterThanOrEqual(2);
 });
-

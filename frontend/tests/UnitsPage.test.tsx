@@ -203,10 +203,12 @@ it('closes the standalone CreateUnitDialog via onClose when no onCreated handler
   const onClose = vi.fn();
   render(
     <MockedProvider
-      mocks={[
-        { request: { query: CREATE_UNIT, variables: () => true }, result: createUnitSuccess('unit-solo') },
-        { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
-      ] as never}
+      mocks={
+        [
+          { request: { query: CREATE_UNIT, variables: () => true }, result: createUnitSuccess('unit-solo') },
+          { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
+        ] as never
+      }
       defaultOptions={{ watchQuery: { fetchPolicy: 'no-cache' } }}
     >
       <CreateUnitDialog open onClose={onClose} />
@@ -313,7 +315,7 @@ it('blocks submit and names the first missing required field', async () => {
   expect(await screen.findByText(/Choose the unit type\./i)).toBeInTheDocument();
 });
 
-it('opens a unit\'s detail when its card is clicked', async () => {
+it("opens a unit's detail when its card is clicked", async () => {
   const user = userEvent.setup();
   renderPage([{ request: { query: MY_UNITS, variables: () => true }, result: myUnits([unit()]) }]);
 
@@ -337,7 +339,9 @@ it('recovers from a units load failure when Retry is clicked', async () => {
   renderPage([
     {
       request: { query: MY_UNITS, variables: () => true },
-      result: { errors: [new GraphQLError('The units list is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+      result: {
+        errors: [new GraphQLError('The units list is unavailable.', { extensions: { errorCode: 'INTERNAL_ERROR' } })],
+      },
     },
     { request: { query: MY_UNITS, variables: () => true }, result: myUnits([unit()]) },
   ]);
@@ -353,7 +357,9 @@ it('surfaces a create failure without closing the dialog', async () => {
     { request: { query: MY_UNITS, variables: () => true }, result: myUnits([]) },
     {
       request: { query: CREATE_UNIT, variables: () => true },
-      result: { errors: [new GraphQLError('The unit could not be created.', { extensions: { errorCode: 'INTERNAL_ERROR' } })] },
+      result: {
+        errors: [new GraphQLError('The unit could not be created.', { extensions: { errorCode: 'INTERNAL_ERROR' } })],
+      },
     },
   ]);
 
@@ -370,7 +376,10 @@ it('surfaces a create failure without closing the dialog', async () => {
 
 it('shows the admin plural and the time-worked split for a unit', async () => {
   renderPage([
-    { request: { query: MY_UNITS, variables: () => true }, result: myUnits([unit({ adminCount: 2, splitDefault: 'TIME_WORKED' })]) },
+    {
+      request: { query: MY_UNITS, variables: () => true },
+      result: myUnits([unit({ adminCount: 2, splitDefault: 'TIME_WORKED' })]),
+    },
   ]);
   expect(await screen.findByText(/2 admins/i)).toBeInTheDocument();
   expect(await screen.findByText(/Split by time worked/i)).toBeInTheDocument();

@@ -22,7 +22,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('../src/contexts/AuthContext', () => ({
-  useAuth: vi.fn(() => ({ isAuthenticated: false, loading: false } as AuthContextValue)),
+  useAuth: vi.fn(() => ({ isAuthenticated: false, loading: false }) as AuthContextValue),
 }));
 
 vi.mock('aws-amplify/auth', () => ({
@@ -270,9 +270,7 @@ describe('ForgotPasswordPage', () => {
         });
       });
 
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        'Your password has been reset successfully.',
-      );
+      expect(await screen.findByRole('alert')).toHaveTextContent('Your password has been reset successfully.');
 
       await waitFor(
         () => {
@@ -287,9 +285,7 @@ describe('ForgotPasswordPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toHaveTextContent(
-          'Your password has been reset successfully.',
-        );
+        expect(screen.getByRole('alert')).toHaveTextContent('Your password has been reset successfully.');
       });
 
       fireEvent.click(screen.getByRole('button', { name: 'Back to Email' }));
@@ -352,9 +348,7 @@ describe('ForgotPasswordPage', () => {
       await fillResetForm('000000', 'Password123!xyz', 'Password123!xyz');
       fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
 
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        'This code has expired. Please request a new one.',
-      );
+      expect(await screen.findByRole('alert')).toHaveTextContent('This code has expired. Please request a new one.');
     });
 
     test('displays mapped error for invalid password', async () => {
@@ -436,7 +430,6 @@ describe('ForgotPasswordPage', () => {
       });
       expect(screen.getByRole('button', { name: /Resend code in/i })).toBeDisabled();
     });
-
   });
 
   test('navigates to login when Back to Login is clicked', () => {

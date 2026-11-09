@@ -104,8 +104,7 @@ interface CreateUnitDialogProps {
 // Error outcomes always carry the mapped message (mapErrorCodeToMessage always
 // returns a string), so surfaced errors never need a fallback.
 type CreateUnitOutcome =
-  | { code?: string; unitId?: undefined; error: string }
-  | { code?: undefined; unitId?: string; error?: undefined };
+  { code?: string; unitId?: undefined; error: string } | { code?: undefined; unitId?: string; error?: undefined };
 
 export const CreateUnitDialog: React.FC<CreateUnitDialogProps> = ({ open, onClose, onCreated }) => {
   const [form, setForm] = useState<CreateUnitFormState>(EMPTY_FORM);
