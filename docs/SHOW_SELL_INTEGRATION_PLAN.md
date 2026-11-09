@@ -65,10 +65,10 @@ file-by-file, section 10 order, section 11 decisions).
 | `handlers/unit_operations.py` | NEW `src/handlers/unit_operations.py` (impact map 3.5) | Re-express on their `tables` accessors, `with_error_handling` decorator, their `AppError` codes (`RATE_LIMITED`→`RATE_LIMIT_EXCEEDED` rename), structured logging; drop our in-memory layer imports; add unit-invite throttle via `public_order_throttles` key contract (impact map 4.4) instead of our throttle approach |
 | `handlers/unit_campaign_operations.py` | NEW `src/handlers/unit_campaign_operations.py` | Same; join-time catalog identity enforcement maps to their `update_campaign_fn.js` guard coordination |
 | `handlers/inventory_operations.py` | NEW `src/handlers/inventory_operations.py` | Custody/issue/return semantics port directly; GSI names come from their table module (see risk 4) |
-| `handlers/event_operations.py` + `sale_operations.py` | NEW `src/handlers/show_and_sell_operations.py` (~2700 lines) | Consider splitting events vs sales if review objects; impact map names one module |
+| `handlers/event_operations.py` + `sale_operations.py` | NEW `src/handlers/event_operations.py` + NEW `src/handlers/sale_operations.py` (module split DECIDED per r1 item 3 — recorded org decision; one ~2700-line module rejected) | Impact map names show_and_sell_operations.py; we land two modules with the map's full responsibility set split events vs sales |
 | `handlers/finalization_operations.py` | NEW `src/handlers/finalization_operations.py` | Impact map groups this under show_and_sell_operations; recommend separate module (finalization is its own transaction family) — org decision, not product |
 | participant-safe projections (inside our handlers) | NEW `src/handlers/participant_data.py` (impact map 3.5) | Extract our participant filters into the dedicated module the map requires |
-| `handlers/order_operations.py` (custody design) | NOT landed as a file — reference for their `create_order_fn.js` custody redesign (impact map 3.2) | Their createOrder is a JS pipeline; our Python custody/transaction plan becomes golden-test oracles + spec for the JS rewrite (risk 3) |
+| `handlers/order_operations.py` (custody design) | NOT landed as a file — spec + golden oracles for a NEW Lambda custody path (r2 C-1) | **Architecture correction (r2 C-1):** AppSync JS pipeline resolvers on DynamoDB data sources support single-item ops only — NO `TransactWriteItems`. Custody mode (five-table atomic write under the 90-action preflight, bounded race retry, committed-replay semantics) MUST execute in Lambda: either a direct Lambda resolver extending their `src/handlers/order_operations.py`, or a Lambda function step in the AppSync pipeline (JS keeps NONE-mode, delegates CONSUME_SCOUT_CUSTODY). Wave 3 assumes a new function + domain-role entry + wiring tests. Golden oracles FIRST (53-case committed-replay pin — count corrected from 43), then implement |
 | `handlers/legacy_reporting.py` | NOT landed — parity oracle for stage 5/7 | Drives golden-parity tests until browser parity, then retires with `campaign_reporting.py` |
 
 ### 2.2 Backend utils — extend THEIR files
@@ -78,7 +78,7 @@ file-by-file, section 10 order, section 11 decisions).
 | `dynamodb_boto3.py` transaction lessons (90-action plans, bounded self-retry MAX_RACE_RETRIES, condition-error classification, client-side dup-key rejection) | `src/utils/dynamodb.py` additions per impact map 3.4 | Their utils are boto3-resource based already; our production-proven transaction helpers are the design source |
 | `idempotency.py` (deterministic-input validation, committed-retry pin, 366-day cap as CONDITION) | `src/utils/dynamodb.py` transaction/idempotency helpers | Align TTL to the impact map 7-day numeric-epoch convention (decision already recommended in map §11) |
 | `pagination.py` opaque cursors | `src/utils/pagination.py` | Ours is scope/filter-bound; theirs needs DynamoDB-Limit-before-filter care per map |
-| `errors.py` codes | `src/utils/errors.py` | Vocabulary mapping table needed (we have `RATE_LIMITED`, they want `RATE_LIMIT_EXCEEDED`; our `OPERATION_TOO_LARGE` handling must forward only authorized details per map 3.1) |
+| `errors.py` codes | `src/utils/errors.py` | **Rewritten per r1 item 1:** our vocabulary IS the spec vocabulary — no rename. Their `errors.py` has no RATE_LIMIT code at all; their `PUBLIC_ORDER_LIMIT_EXCEEDED` is a lifetime cap, NOT a throttle, so spec 5.3 throttle semantics (attempt-11 fixed window on `public_order_throttles`) need a DESIGN DECISION record in wave 1. **Bidirectional narrowing:** their `INVITE_EXPIRED`/`INVITE_ALREADY_USED` are distinct codes the spec 5.3 forbids — the ported redemption path must SUPPRESS them into NOT_FOUND indistinguishability (no existence oracle through their vocabulary). CONFLICT detail reasons carry an authorized-details table (forward only contracted reasons, never internals) |
 | `unit_auth.py` | NEW `src/utils/unit_auth.py` (map 3.4) | Ports nearly verbatim conceptually: grant checks, resource-derived tenancy, cross-tenant NOT_FOUND vs FORBIDDEN tombstone semantics |
 | `gsi.py` registry + drift pin | Their `tofu/application/modules/dynamodb/main.tf` + `tests/unit/table_schemas.py` | Registry-as-source pattern is worth proposing; at minimum our 20-index set lands in their table module with their test conventions |
 | `appsync_types.py` strict validators | Their `src/utils/appsync_types.py` | We learned the same lesson (loose coercion causes bugs); our validator set is the checklist |
@@ -103,8 +103,18 @@ file-by-file, section 10 order, section 11 decisions).
   specified GSIs + TTLs; `table_arns`/outputs/environment maps across
   dev/prod/ephemeral; our `terraform/` is NOT landed (step-4 destroy target).
 - Lambda: new handler entries + env vars, domain-role mapping, no fallback
-  role. IAM: scoped Unit/inventory/Show&Sell roles with `TransactWriteItems`;
-  no Scan anywhere; actual-TransactItems-table capture tests.
+  role. IAM: **role granularity DECIDED in wave 1 (r2 C-2, recorded org
+  decision):** ONE `show-and-sell` domain role owning the five-table family
+  plus explicit statements for the legacy tables its transactions touch
+  (`campaigns`, `orders`, `profiles`, `public_order_throttles`, `shares` as
+  needed) — one `TransactWriteItems` executes under ONE role and our
+  transactions span 3-5 tables, so four scoped roles would duplicate every
+  shared grant. `TransactWriteItems` appears in NO current policy: it is a
+  new grant everywhere, including AppSync-direct paths. No Scan anywhere;
+  actual-TransactItems-table capture tests are the acceptance pin. Wave 1
+  also reconciles the AppSync service-role write surface (it can
+  Put/Update/Delete ALL tables via field resolvers; complex writes go
+  through Lambda under the domain role — r2 N-5).
 - AppSync wiring: queries/mutations/fields/data sources per map §3.1; direct
   Lambda unit resolvers for complex transactions; JS resolvers keep
   `__isError`/`errorCode` forwarding with authorized-detail-only additions.
@@ -138,6 +148,24 @@ file-by-file, section 10 order, section 11 decisions).
 - Recorder evidence kit: re-run against the integrated app's ephemeral
   environment for the final evidence sweep (recordings target the deployed
   app, steps exist in both variants).
+- **Ruling semantics must land as records, not habits (r1 item 2):** ADR
+  0002 fulfilledQuantity, ADR 0003 per-campaign auto-reduce, W10
+  return-baseline/union-key, W13 omission-zero, and the tombstone
+  authorization semantics each get a wave-1 record plus a per-wave
+  acceptance probe — otherwise re-expression silently reverts them.
+- **Replay-pin convention gets a wave-1 test-infra home (r1 item 2):**
+  schema-derived committed-retry pin (53 mutations), not custody-only.
+- **Two-backend real-DynamoDB suite gets a §2.6 home (r1 item 2):** the
+  contract suite that ran our layer against REAL DynamoDB (zero skips,
+  leak-check) is ported as the integration's live-table contract suite.
+- **Tick traceability owner row (r1 item 2):** checklist ticks map onto
+  their PR conventions; the owner column is recorded in wave 1.
+- **Time arrangement is named (r2 C-3, RULED):** short-lived real events
+  with clock-independent assertions are the CI default; a guarded
+  test-only clock behind an env flag is built ONLY if a scenario truly
+  needs it, under the same D4 purity doctrine (dev/ephemeral surface
+  only, structural purity test, bounded offset). Without this, wave 4's
+  replay/idempotency bar cannot run in CI.
 
 ---
 
@@ -179,12 +207,14 @@ file-by-file, section 10 order, section 11 decisions).
 2. **Dual money semantics.** Legacy Orders stay Float; new money is integer
    cents. Any shared line-item helper (`lib/line_items.js`) must carry both
    without coercion leaks — our strict-validator experience says this bites.
-3. **Custody createOrder is a JS rewrite of proven Python.** Our custody +
-   idempotency + race-retry logic is battle-tested in Python against real
-   DynamoDB; the map puts custody in the JS pipeline. Mitigation: port our
-   43-case committed-retry pin and corruption-direction probes as golden
-   tests FIRST, then implement. This is the single largest correctness risk
-   of the integration.
+3. **Custody createOrder must move to Lambda (r2 C-1 — architecture, not
+   preference).** AppSync JS/VTL resolvers on DynamoDB data sources have no
+   `TransactWriteItems`; a JS "port" would be sequential single-writes on
+   the top money/stock path — the exact partial-write class the factory
+   hardened against. Custody executes in Python Lambda (direct resolver or
+   pipeline step); oracles-first stays (53-case committed-replay pin,
+   corruption-direction probes). Corrected from the survey's JS-rewrite
+   framing; wave 3 budget = new function + role + wiring, not resolver-only.
 4. **GSI/table-shape differences.** Their five-table spec differs from our
    11-table build (e.g. no separate `events` table — events live in
    `show_and_sells`; `saleId-index`/`campaignId-status-index` indexes we
@@ -203,7 +233,21 @@ file-by-file, section 10 order, section 11 decisions).
    thresholds + Playwright add CI weight.
 8. **Ephemeral/CI surface.** Schema surface checks, resolver wiring, IAM
    policy tests, codegen drift, shellcheck gates all need updating in wave 1;
-   missing one fails CI late.
+   missing one fails CI late. r2 C-4 names the three specifics: per-table
+   NAME env maps in each environment main.tf (their hand-maintained 9-entry
+   pattern), `scripts/ephemeral-env.sh` up/env branches, and
+   `scripts/ephemeral-recover-common.sh` importing every new table slug +
+   IAM role/policy pinned by
+   `test_ephemeral_reliability.py::test_dynamic_resource_import_coverage`.
+9. **Additive-schema nullability/default audit (r1 item 3).** Legacy rows
+   keep existing defaults; every new field on extended types needs an
+   explicit nullability/default audit so old rows read coherently.
+10. **Cognito MFA posture (r1 item 3).** Lane personas stay unenrolled;
+   admin automation handles MFA codes. Recorded so ephemeral automation
+   does not fight the pool's MFA settings.
+11. **mypy friction (r2 N-1, folded into this list).** ~5-6k lines of new
+    typed Python under their `mypy src/` gate is a real review loop beyond
+    the coverage cost; budget for it in every backend wave.
 9. **Section-11 decisions are pre-answered by the map's recommended defaults
    and all six MATCH our implemented behavior** (final-admin delete block,
    joined-campaign delete block, custody-return before profile deletion,
@@ -211,13 +255,51 @@ file-by-file, section 10 order, section 11 decisions).
    TTL — we used a 366-day invite cap; markers align to the map). No product
    decisions are open from my side; anything beyond these six = STOP-AND-ASK.
 
-## 5. Immediate next steps (wave 1 proposal, awaiting dispatch)
+## 5. Immediate next steps (wave 1 — DISPATCHED 02:17Z; this list is the
+## definition of done)
 
-1. Schema merge PR skeleton (new types only) + codegen regen + drift guard.
-2. Five tables + env maps in all three environments + accessor tests.
-3. `unit_auth.py` + error-vocabulary mapping table + strict validators.
+1. Schema merge (new types only) + codegen regen + drift guard. IN FLIGHT.
+2. Five tables + env maps in all three environments + accessor tests,
+   including the r2 C-4 specifics: (a) the hand-maintained per-table NAME
+   maps in each environment `main.tf` (their 9-entry pattern — handlers
+   read names, not arns); (b) `scripts/ephemeral-env.sh` exports the five
+   names in `up` and `env` branches; (c)
+   `scripts/ephemeral-recover-common.sh` imports all five table slugs +
+   every new IAM role/attachment/inline policy, pinned by
+   `test_ephemeral_reliability.py::test_dynamic_resource_import_coverage`.
+3. `unit_auth.py` + error-vocabulary DECISION RECORDS (r1 item 1:
+   RATE_LIMIT_EXCEEDED throttle-vs-cap design decision; suppression of
+   INVITE_EXPIRED/INVITE_ALREADY_USED into NOT_FOUND indistinguishability;
+   CONFLICT authorized-details table) + strict validators.
 4. Transaction/idempotency/cursor helpers in `src/utils/dynamodb.py` with
-   our golden probes translated.
-5. CI guard updates (surface, depth, wiring, IAM) so later waves fail fast.
+   our golden probes translated (53-case replay pin home; two-backend
+   real-DynamoDB contract suite home; ADR/ruling records + acceptance
+   probes; tick-traceability owner row).
+5. CI guard updates (surface, depth, wiring, IAM) so later waves fail fast,
+   including the AppSync service-role write-surface reconciliation (r2
+   N-5): field resolvers limited to reads and legacy; new writes go through
+   Lambda under the show-and-sell domain role.
+6. Recorded org decisions in the commit trail: one `show-and-sell` domain
+   role (r2 C-2), separate event_operations/sale_operations modules
+   (r1 item 3), short-lived-events time arrangement (r2 C-3).
+7. Sanction line for reviewers (r2 N-3): extending their
+   `dynamodb.py`/`errors.py`/`pagination.py` with minimal diffs is
+   sanctioned by this plan; everything else is new files.
+8. Recorded note (r1 item 4): their js-resolver `util.error` 4-arg form
+   already carries `errorCode` — this is the recorded fix for the
+   clean-room adapter-wave MEDIUM; no js-resolver error-shape work needed.
 
-Estimate: wave 1 is a multi-day gated effort; subsequent waves per §3.
+Estimate: wave 1 is a multi-day gated effort; waves 2-8 per §3 with the
+risk-5/11 cost multipliers (coverage + mypy) applied.
+
+## 6. Plan reviews
+
+- r1 (`docs/review/integration-plan/01-review-r1.md`): CHANGES — four
+  items, all folded above (error-vocabulary rewrite; ADR/ruling +
+  replay-pin + two-backend + tick-traceability homes; three new risks +
+  module-split decision; js-resolver errorCode note).
+- r2 (`docs/review/integration-plan/01-review-r2.md`): CHANGES — C-1
+  custody-in-Lambda architecture fix; C-2 one-domain-role decision RULED;
+  C-3 time arrangement RULED; C-4 three CI-fails-late items named in §5;
+  N-1/N-3/N-5 folded; N-4 pin count corrected; N-2 sizing accepted.
+- Disposition: this revision (delta only) returns to r1+r2.
