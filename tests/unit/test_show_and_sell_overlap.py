@@ -1,4 +1,4 @@
-from src.utils.show_and_sell_overlap import evaluate_overlaps, Interval
+from src.utils.show_and_sell_overlap import Interval, evaluate_overlaps
 
 
 def test_four_box():
