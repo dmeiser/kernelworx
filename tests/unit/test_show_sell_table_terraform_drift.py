@@ -47,6 +47,7 @@ ENV_VAR_BY_SLUG = {
     "inventory": "INVENTORY_TABLE_NAME",
     "show_and_sells": "SHOW_AND_SELLS_TABLE_NAME",
     "order_fulfillments": "ORDER_FULFILLMENTS_TABLE_NAME",
+    "public_order_throttles": "PUBLIC_ORDER_THROTTLES_TABLE_NAME",
 }
 
 

@@ -44,15 +44,21 @@ def _client_error(code: str, *, cancellation_reasons: Any = None) -> ClientError
 
 class TestTransactionItemKey:
     def test_put_uses_item(self) -> None:
-        assert transaction_item_key(_put()) == (TABLE, tuple(sorted(KEY.items())))
+        assert transaction_item_key(_put()) == (TABLE, '{"itemKey":"METADATA","unitId":"unit-1"}')
 
     def test_update_uses_key(self) -> None:
         entry = {"Update": {"TableName": TABLE, "Key": dict(KEY)}}
-        assert transaction_item_key(entry) == (TABLE, tuple(sorted(KEY.items())))
+        assert transaction_item_key(entry) == (TABLE, '{"itemKey":"METADATA","unitId":"unit-1"}')
 
     def test_condition_check_uses_key(self) -> None:
         entry = {"ConditionCheck": {"TableName": TABLE, "Key": dict(KEY)}}
-        assert transaction_item_key(entry) == (TABLE, tuple(sorted(KEY.items())))
+        assert transaction_item_key(entry) == (TABLE, '{"itemKey":"METADATA","unitId":"unit-1"}')
+
+    def test_nested_dict_values_are_hashable(self) -> None:
+        entry = {"Put": {"TableName": TABLE, "Item": {**KEY, "nested": {"a": [1, 2]}}}}
+        identity = transaction_item_key(entry)
+        assert identity[0] == TABLE
+        assert isinstance(hash(identity), int)
 
 
 class TestExecuteTransaction:

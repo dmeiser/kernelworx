@@ -5,6 +5,7 @@ Provides singleton-pattern table accessors with lazy initialization
 and test monkeypatch support, plus the shared chunked BatchGetItem helper.
 """
 
+import json
 import os
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
@@ -119,24 +120,26 @@ class TransactionThrottledError(Exception):
     """Transient throttling persisted past the bounded race retries."""
 
 
-def transaction_item_key(transact_item: Dict[str, Any]) -> tuple[str, tuple[tuple[str, Any], ...]]:
+def transaction_item_key(transact_item: Dict[str, Any]) -> tuple[str, str]:
     """Extract the (table, key) identity of a TransactWriteItems entry.
 
     Every entry form (Put/Update/Delete/ConditionCheck) carries TableName and
-    either Item (Put) or Key (the rest); the identity is what the duplicate-key
-    pin compares.
+    either Item (Put) or Key (the rest); the identity is what the
+    duplicate-key pin compares. The key is canonical JSON because item values
+    may themselves be dicts (e.g. an embedded idempotency result), which are
+    unhashable in a raw tuple.
     """
     body = transact_item[next(iter(transact_item))]
     table_name = body["TableName"]
     item = body.get("Item", body.get("Key", {}))
-    return table_name, tuple(sorted(item.items()))
+    return table_name, json.dumps(item, sort_keys=True, separators=(",", ":"))
 
 
 def _preflight_plan(transact_items: List[Dict[str, Any]]) -> None:
     """Reject oversized or duplicate-key plans before any AWS call."""
     if len(transact_items) > MAX_TRANSACT_ITEMS:
         raise ValueError(f"transaction plan has {len(transact_items)} items; cap is {MAX_TRANSACT_ITEMS}")
-    seen: set[tuple[str, tuple[tuple[str, Any], ...]]] = set()
+    seen: set[tuple[str, str]] = set()
     for entry in transact_items:
         identity = transaction_item_key(entry)
         if identity in seen:
@@ -468,6 +471,16 @@ class TableAccessor:
     def order_fulfillments(self) -> "Table":
         """Get order fulfillments table instance (Show & Sell)."""
         return self._get_table("order_fulfillments")
+
+    @property
+    def public_order_throttles(self) -> "Table":
+        """Get public order throttles table instance (abuse-guard counters).
+
+        Show & Sell Unit-invite redemption reuses this table under its own
+        key contract (impact map 4.4); the legacy public-order throttle keys
+        are unchanged.
+        """
+        return self._get_table("public_order_throttles")
 
 
 # Singleton instance for import

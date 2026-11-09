@@ -1090,6 +1090,30 @@ type Query {
     """The profile's ID."""
     profileId: ID!
   ): [Share!]!
+  # --- Show & Sell: Units and Unit Campaigns (spec API sections 4-5) ---
+  """The Units the caller administers (via grants or creation), paginated."""
+  myUnits(page: PageInput): UnitConnection!
+  """A Unit the caller administers."""
+  unit(unitId: ID!): Unit!
+  """The Unit's active admin grants (Unit Admins only)."""
+  unitAdmins(unitId: ID!, page: PageInput): UnitAccessGrantConnection!
+  """The Unit's active invites (Unit Admins only)."""
+  unitInvites(unitId: ID!, page: PageInput): UnitInviteConnection!
+  """Participant-safe preview of the Unit Campaign behind a join code."""
+  unitCampaignJoinInfo(joinCode: String!): UnitCampaignJoinPreview!
+  """A Unit Campaign the caller administers."""
+  unitCampaign(unitCampaignId: ID!): UnitCampaignAdmin!
+  """The Unit's Unit Campaigns (Unit Admins only)."""
+  unitCampaigns(unitId: ID!, isActive: Boolean, page: PageInput): UnitCampaignConnection!
+  """The Unit Campaign roster (Unit Admins only)."""
+  unitCampaignRoster(
+    unitCampaignId: ID!
+    status: MembershipStatus
+    page: PageInput
+  ): UnitCampaignMembershipConnection!
+  """The Unit Campaign's catalog with products (Unit Admins only)."""
+  unitCampaignCatalog(unitCampaignId: ID!): UnitCampaignCatalog!
+
 }
 
 # ============================================================================
@@ -1335,6 +1359,39 @@ type Mutation {
     """The new catalog's details and products."""
     input: CreateCatalogInput!
   ): Catalog!
+  # --- Show & Sell: Units and Unit Campaigns (spec API sections 4-5) ---
+  """Create a Unit; the creator becomes its first Unit Admin."""
+  createUnit(input: CreateUnitInput!): CreateUnitResult!
+  """Update a Unit (Unit Admins only; optimistic concurrency via expectedVersion)."""
+  updateUnit(input: UpdateUnitInput!): Unit!
+  """Create a Unit invite (Unit Admins only; at most 20 active)."""
+  createUnitInvite(unitId: ID!, idempotencyKey: String!): UnitInvite!
+  """Revoke a Unit invite (Unit Admins only)."""
+  revokeUnitInvite(unitId: ID!, inviteCode: String!, idempotencyKey: String!): Boolean!
+  """Redeem a Unit invite; every failure outcome is indistinguishable NOT_FOUND (spec 5.3)."""
+  redeemUnitInvite(inviteCode: String!, idempotencyKey: String!): UnitAccessGrant!
+  """Remove a Unit Admin grant; a Unit must keep at least one admin."""
+  revokeUnitAccessGrant(
+    unitId: ID!
+    accountId: ID!
+    expectedVersion: Int!
+    idempotencyKey: String!
+  ): Unit!
+  """Create a Unit Campaign (Unit Admins only)."""
+  createUnitCampaign(input: CreateUnitCampaignInput!): UnitCampaignAdmin!
+  """Update a Unit Campaign (Unit Admins only)."""
+  updateUnitCampaign(input: UpdateUnitCampaignInput!): UnitCampaignAdmin!
+  """Join a Unit Campaign with a Scout Campaign (join-time catalog identity enforced)."""
+  joinUnitCampaign(joinCode: String!, campaignId: ID!, idempotencyKey: String!): UnitCampaignMembership!
+  """Remove a Scout Campaign from the roster (Unit Admins only)."""
+  removeUnitCampaignMembership(
+    unitCampaignId: ID!
+    campaignId: ID!
+    expectedMembershipVersion: Int!
+    expectedGuardVersion: Int!
+    idempotencyKey: String!
+  ): UnitCampaignMembership!
+
 }
 
 

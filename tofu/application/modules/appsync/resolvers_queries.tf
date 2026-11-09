@@ -635,3 +635,144 @@ resource "aws_appsync_resolver" "public_order_receipt" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# =============================================================================
+# Show & Sell resolvers (integration wave 2) — direct Lambda unit resolvers.
+# Every mutation with a cross-table transaction executes in Lambda (r2 C-1);
+# the JS pipeline shape has no TransactWriteItems.
+# =============================================================================
+
+# myUnits (Show & Sell, Lambda)
+resource "aws_appsync_resolver" "my_units" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "myUnits"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# unit (Show & Sell, Lambda)
+resource "aws_appsync_resolver" "unit" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unit"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# unitAdmins (Show & Sell, Lambda)
+resource "aws_appsync_resolver" "unit_admins" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitAdmins"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# unitInvites (Show & Sell, Lambda)
+resource "aws_appsync_resolver" "unit_invites" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitInvites"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# unitCampaignJoinInfo (Show & Sell, Lambda)
+resource "aws_appsync_resolver" "unit_campaign_join_info" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignJoinInfo"
+  data_source = aws_appsync_datasource.participant_data.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# unitCampaign (Show & Sell, Lambda)
+resource "aws_appsync_resolver" "unit_campaign" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaign"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# unitCampaigns (Show & Sell, Lambda)
+resource "aws_appsync_resolver" "unit_campaigns" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaigns"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# unitCampaignRoster (Show & Sell, Lambda)
+resource "aws_appsync_resolver" "unit_campaign_roster" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignRoster"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# unitCampaignCatalog (Show & Sell, Lambda)
+resource "aws_appsync_resolver" "unit_campaign_catalog" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignCatalog"
+  data_source = aws_appsync_datasource.unit_campaign_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

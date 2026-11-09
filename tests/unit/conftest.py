@@ -36,6 +36,7 @@ os.environ["UNIT_CAMPAIGNS_TABLE_NAME"] = "kernelworx-unit-campaigns-ue1-dev"
 os.environ["INVENTORY_TABLE_NAME"] = "kernelworx-inventory-ue1-dev"
 os.environ["SHOW_AND_SELLS_TABLE_NAME"] = "kernelworx-show-and-sells-ue1-dev"
 os.environ["ORDER_FULFILLMENTS_TABLE_NAME"] = "kernelworx-order-fulfillments-ue1-dev"
+os.environ["PUBLIC_ORDER_THROTTLES_TABLE_NAME"] = "kernelworx-public-order-throttles-ue1-dev"
 # S3 bucket names
 os.environ["EXPORTS_BUCKET"] = "kernelworx-exports-ue1-dev"
 

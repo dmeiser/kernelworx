@@ -630,6 +630,12 @@ export type GqlMutation = {
   createSellerProfile: GqlSellerProfile;
   /** Create a shared campaign so other units can find and clone it. Returns the created shared campaign. */
   createSharedCampaign: GqlSharedCampaign;
+  /** Create a Unit; the creator becomes its first Unit Admin. */
+  createUnit: GqlCreateUnitResult;
+  /** Create a Unit Campaign (Unit Admins only). */
+  createUnitCampaign: GqlUnitCampaignAdmin;
+  /** Create a Unit invite (Unit Admins only; at most 20 active). */
+  createUnitInvite: GqlUnitInvite;
   /** Delete a campaign and all of its orders, on a profile the caller has write access to. Returns true on success. */
   deleteCampaign: Scalars['Boolean']['output'];
   /** Soft-delete a catalog the caller owns (it is hidden from list queries but kept for reference). Returns true on success. */
@@ -648,14 +654,24 @@ export type GqlMutation = {
   deleteSellerProfile: Scalars['Boolean']['output'];
   /** Delete a shared campaign the caller created. Returns true on success. */
   deleteSharedCampaign: Scalars['Boolean']['output'];
+  /** Join a Unit Campaign with a Scout Campaign (join-time catalog identity enforced). */
+  joinUnitCampaign: GqlUnitCampaignMembership;
   /** Place a public order on a campaign whose share token is in the request. Returns the buyer's receipt. A never-enabled campaign, a disabled campaign, and a bad token all return NOT_FOUND so probing cannot distinguish them; a campaign at its order cap returns PUBLIC_ORDER_LIMIT_EXCEEDED. */
   publicCreateOrder: GqlPublicOrderReceipt;
   /** Redeem an invite code to grant the caller access to a profile. Returns the created share. */
   redeemProfileInvite: GqlShare;
+  /** Redeem a Unit invite; every failure outcome is indistinguishable NOT_FOUND (spec 5.3). */
+  redeemUnitInvite: GqlUnitAccessGrant;
+  /** Remove a Scout Campaign from the roster (Unit Admins only). */
+  removeUnitCampaignMembership: GqlUnitCampaignMembership;
   /** Get pre-signed S3 credentials to upload a QR code for one of the caller's payment methods. */
   requestPaymentMethodQRCodeUpload: GqlS3UploadInfo;
   /** Remove a share's access to a profile the caller owns. Returns true on success. */
   revokeShare: Scalars['Boolean']['output'];
+  /** Remove a Unit Admin grant; a Unit must keep at least one admin. */
+  revokeUnitAccessGrant: GqlUnit;
+  /** Revoke a Unit invite (Unit Admins only). */
+  revokeUnitInvite: Scalars['Boolean']['output'];
   /** Share a profile the caller owns directly with another account by email. Returns the created share. */
   shareProfileDirect: GqlShare;
   /** Transfer a profile's ownership to an account that already has a share (the caller must be the owner or an admin). Returns the updated profile. */
@@ -678,6 +694,10 @@ export type GqlMutation = {
   updateSellerProfile: GqlSellerProfile;
   /** Update a shared campaign the caller created. Only provided fields change. Returns the updated shared campaign. */
   updateSharedCampaign: GqlSharedCampaign;
+  /** Update a Unit (Unit Admins only; optimistic concurrency via expectedVersion). */
+  updateUnit: GqlUnit;
+  /** Update a Unit Campaign (Unit Admins only). */
+  updateUnitCampaign: GqlUnitCampaignAdmin;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -770,6 +790,22 @@ export type GqlMutation_CreateSharedCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateUnitArgs = {
+  input: GqlCreateUnitInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateUnitCampaignArgs = {
+  input: GqlCreateUnitCampaignInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateUnitInviteArgs = {
+  idempotencyKey: Scalars['String']['input'];
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_DeleteCampaignArgs = {
   campaignId: Scalars['ID']['input'];
 };
@@ -811,6 +847,13 @@ export type GqlMutation_DeleteSharedCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_JoinUnitCampaignArgs = {
+  campaignId: Scalars['ID']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  joinCode: Scalars['String']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_PublicCreateOrderArgs = {
   input: GqlPublicCreateOrderInput;
 };
@@ -821,6 +864,21 @@ export type GqlMutation_RedeemProfileInviteArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RedeemUnitInviteArgs = {
+  idempotencyKey: Scalars['String']['input'];
+  inviteCode: Scalars['String']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RemoveUnitCampaignMembershipArgs = {
+  campaignId: Scalars['ID']['input'];
+  expectedGuardVersion: Scalars['Int']['input'];
+  expectedMembershipVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_RequestPaymentMethodQrCodeUploadArgs = {
   paymentMethodName: Scalars['String']['input'];
 };
@@ -828,6 +886,21 @@ export type GqlMutation_RequestPaymentMethodQrCodeUploadArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_RevokeShareArgs = {
   input: GqlRevokeShareInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RevokeUnitAccessGrantArgs = {
+  accountId: Scalars['ID']['input'];
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RevokeUnitInviteArgs = {
+  idempotencyKey: Scalars['String']['input'];
+  inviteCode: Scalars['String']['input'];
+  unitId: Scalars['ID']['input'];
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -885,6 +958,16 @@ export type GqlMutation_UpdateSellerProfileArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpdateSharedCampaignArgs = {
   input: GqlUpdateSharedCampaignInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateUnitArgs = {
+  input: GqlUpdateUnitInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateUnitCampaignArgs = {
+  input: GqlUpdateUnitCampaignInput;
 };
 
 export type GqlOpportunityScout = {
@@ -1319,12 +1402,30 @@ export type GqlQuery = {
   listSharesByProfile: Array<GqlShare>;
   /** The payment methods available to the caller: the caller's stored custom methods plus the built-in "Cash" and "Check" methods, sorted by name. */
   myPaymentMethods: Array<GqlPaymentMethod>;
+  /** The Units the caller administers (via grants or creation), paginated. */
+  myUnits: GqlUnitConnection;
   /** The payment methods stored for a profile's owner. The caller must have access to the profile; READ-only callers see the method names but not their QR codes (qrCodeUrl is null). */
   paymentMethodsForProfile: Array<GqlPaymentMethod>;
   /** Fetch the public order page's offer: seller, campaign, catalog products, and allowed payment methods. A campaign that never enabled public orders, is disabled, or carries a token mismatch all return the same NOT_FOUND, so probing cannot distinguish them. */
   publicGetOrderOffer: GqlPublicOrderOffer;
   /** Fetch the buyer's receipt for a public order. Served to an API-key caller; the receipt token in the URL is the authorization. An unknown campaign/suffix, an absent or mismatched token, and a token that does not match the order all return the same NOT_FOUND. */
   publicGetOrderReceipt: GqlPublicOrderReceiptLookup;
+  /** A Unit the caller administers. */
+  unit: GqlUnit;
+  /** The Unit's active admin grants (Unit Admins only). */
+  unitAdmins: GqlUnitAccessGrantConnection;
+  /** A Unit Campaign the caller administers. */
+  unitCampaign: GqlUnitCampaignAdmin;
+  /** The Unit Campaign's catalog with products (Unit Admins only). */
+  unitCampaignCatalog: GqlUnitCampaignCatalog;
+  /** Participant-safe preview of the Unit Campaign behind a join code. */
+  unitCampaignJoinInfo: GqlUnitCampaignJoinPreview;
+  /** The Unit Campaign roster (Unit Admins only). */
+  unitCampaignRoster: GqlUnitCampaignMembershipConnection;
+  /** The Unit's Unit Campaigns (Unit Admins only). */
+  unitCampaigns: GqlUnitCampaignConnection;
+  /** The Unit's active invites (Unit Admins only). */
+  unitInvites: GqlUnitInviteConnection;
 };
 
 /** The root query object for the KernelWorx API. */
@@ -1445,6 +1546,11 @@ export type GqlQuery_ListSharesByProfileArgs = {
 };
 
 /** The root query object for the KernelWorx API. */
+export type GqlQuery_MyUnitsArgs = {
+  page?: InputMaybe<GqlPageInput>;
+};
+
+/** The root query object for the KernelWorx API. */
 export type GqlQuery_PaymentMethodsForProfileArgs = {
   profileId: Scalars['ID']['input'];
 };
@@ -1460,6 +1566,52 @@ export type GqlQuery_PublicGetOrderReceiptArgs = {
   campaignId: Scalars['ID']['input'];
   orderSuffix: Scalars['String']['input'];
   receiptToken: Scalars['String']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitArgs = {
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitAdminsArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignArgs = {
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignCatalogArgs = {
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignJoinInfoArgs = {
+  joinCode: Scalars['String']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignRosterArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  status?: InputMaybe<GqlMembershipStatus>;
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignsArgs = {
+  isActive?: InputMaybe<Scalars['Boolean']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitInvitesArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  unitId: Scalars['ID']['input'];
 };
 
 /** Input for redeemProfileInvite. Redeems an invite code to gain access to a profile. */

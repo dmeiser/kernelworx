@@ -111,22 +111,23 @@ locals {
   payload_dir = var.lambda_payload_dir != "" ? var.lambda_payload_dir : "${path.module}/../../../.build/lambda"
 
   common_env = {
-    EXPORTS_BUCKET                = var.exports_bucket_name
-    POWERTOOLS_SERVICE_NAME       = var.name_prefix
-    LOG_LEVEL                     = "INFO"
-    ACCOUNTS_TABLE_NAME           = var.table_names.accounts
-    CATALOGS_TABLE_NAME           = var.table_names.catalogs
-    PROFILES_TABLE_NAME           = var.table_names.profiles
-    CAMPAIGNS_TABLE_NAME          = var.table_names.campaigns
-    ORDERS_TABLE_NAME             = var.table_names.orders
-    SHARES_TABLE_NAME             = var.table_names.shares
-    INVITES_TABLE_NAME            = var.table_names.invites
-    SHARED_CAMPAIGNS_TABLE_NAME   = var.table_names.shared_campaigns
-    UNITS_TABLE_NAME              = var.table_names.units
-    UNIT_CAMPAIGNS_TABLE_NAME     = var.table_names.unit_campaigns
-    INVENTORY_TABLE_NAME          = var.table_names.inventory
-    SHOW_AND_SELLS_TABLE_NAME     = var.table_names.show_and_sells
-    ORDER_FULFILLMENTS_TABLE_NAME = var.table_names.order_fulfillments
+    EXPORTS_BUCKET                    = var.exports_bucket_name
+    POWERTOOLS_SERVICE_NAME           = var.name_prefix
+    LOG_LEVEL                         = "INFO"
+    ACCOUNTS_TABLE_NAME               = var.table_names.accounts
+    CATALOGS_TABLE_NAME               = var.table_names.catalogs
+    PROFILES_TABLE_NAME               = var.table_names.profiles
+    CAMPAIGNS_TABLE_NAME              = var.table_names.campaigns
+    ORDERS_TABLE_NAME                 = var.table_names.orders
+    SHARES_TABLE_NAME                 = var.table_names.shares
+    INVITES_TABLE_NAME                = var.table_names.invites
+    SHARED_CAMPAIGNS_TABLE_NAME       = var.table_names.shared_campaigns
+    UNITS_TABLE_NAME                  = var.table_names.units
+    UNIT_CAMPAIGNS_TABLE_NAME         = var.table_names.unit_campaigns
+    INVENTORY_TABLE_NAME              = var.table_names.inventory
+    SHOW_AND_SELLS_TABLE_NAME         = var.table_names.show_and_sells
+    ORDER_FULFILLMENTS_TABLE_NAME     = var.table_names.order_fulfillments
+    PUBLIC_ORDER_THROTTLES_TABLE_NAME = var.table_names.public_order_throttles
   }
 
   # Lambda functions configuration
@@ -198,6 +199,21 @@ locals {
     # info.fieldName for the reads and on the explicit operation
     # discriminator for the pipeline's email invoke. The SES env arrives via
     # local.ses_env and is absent entirely where no SES module exists.
+    "unit-operations" = {
+      handler     = "handlers.unit_operations.handler"
+      timeout     = 30
+      memory_size = 256
+    }
+    "unit-campaign-operations" = {
+      handler     = "handlers.unit_campaign_operations.handler"
+      timeout     = 30
+      memory_size = 256
+    }
+    "participant-data" = {
+      handler     = "handlers.participant_data.handler"
+      timeout     = 15
+      memory_size = 128
+    }
     "public-orders" = {
       handler     = "handlers.public_orders_offer.handler"
       timeout     = 15

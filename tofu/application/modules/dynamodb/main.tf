@@ -1340,6 +1340,11 @@ output "show_and_sells_table_name" {
   value       = aws_dynamodb_table.show_and_sells.name
 }
 
+output "public_order_throttles_table_name" {
+  description = "Name of the public order throttles DynamoDB table"
+  value       = aws_dynamodb_table.public_order_throttles.name
+}
+
 output "order_fulfillments_table_name" {
   description = "Name of the order fulfillments DynamoDB table"
   value       = aws_dynamodb_table.order_fulfillments.name

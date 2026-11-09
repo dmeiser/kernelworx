@@ -612,6 +612,25 @@ def create_order_fulfillments_table_schema() -> dict[str, Any]:
     }
 
 
+def create_public_order_throttles_table_schema() -> dict[str, Any]:
+    """
+    Schema for public order throttles table.
+
+    Key structure: PK=key ("<shareToken>#<windowStartEpoch>" or the
+    Show & Sell UNIT_INVITE_REDEMPTION contract). No GSIs.
+    """
+    return {
+        "TableName": "kernelworx-public-order-throttles-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "key", "KeyType": "HASH"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "key", "AttributeType": "S"},
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+    }
+
+
 def get_all_table_schemas() -> list[dict[str, Any]]:
     """
     Get all table schemas as a list.
@@ -633,6 +652,7 @@ def get_all_table_schemas() -> list[dict[str, Any]]:
         create_inventory_table_schema(),
         create_show_and_sells_table_schema(),
         create_order_fulfillments_table_schema(),
+        create_public_order_throttles_table_schema(),
     ]
 
 
@@ -670,6 +690,7 @@ def create_all_tables(dynamodb_resource: Any) -> dict[str, Any]:
         ("inventory", create_inventory_table_schema),
         ("show_and_sells", create_show_and_sells_table_schema),
         ("order_fulfillments", create_order_fulfillments_table_schema),
+        ("public_order_throttles", create_public_order_throttles_table_schema),
     ]
 
     for name, schema_creator in schema_creators:
@@ -694,4 +715,5 @@ TABLE_NAMES = {
     "inventory": "kernelworx-inventory-ue1-dev",
     "show_and_sells": "kernelworx-show-and-sells-ue1-dev",
     "order_fulfillments": "kernelworx-order-fulfillments-ue1-dev",
+    "public_order_throttles": "kernelworx-public-order-throttles-ue1-dev",
 }

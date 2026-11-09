@@ -60,6 +60,43 @@ resource "aws_appsync_datasource" "delete_account" {
   }
 }
 
+# Show & Sell (integration wave 2): one direct Lambda data source per domain
+# dispatcher. Mutations with cross-table transactions MUST stay on these
+# Lambda resolvers — AppSync JS pipeline resolvers on DynamoDB data sources
+# have no TransactWriteItems (r2 C-1).
+resource "aws_appsync_datasource" "unit_operations" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "UnitOperationsDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["unit-operations"]
+  }
+}
+
+resource "aws_appsync_datasource" "unit_campaign_operations" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "UnitCampaignOperationsDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["unit-campaign-operations"]
+  }
+}
+
+resource "aws_appsync_datasource" "participant_data" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "ParticipantDataDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["participant-data"]
+  }
+}
+
 resource "aws_appsync_datasource" "transfer_ownership" {
   api_id           = aws_appsync_graphql_api.main.id
   name             = "TransferOwnershipDS"

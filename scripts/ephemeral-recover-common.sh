@@ -242,6 +242,7 @@ import_ephemeral_resources() {
   local lambda_payment_exec_role="kernelworx-lambda-payment-exec${suffix}"
   local lambda_account_reporting_exec_role="kernelworx-lambda-account-reporting-exec${suffix}"
   local lambda_public_orders_exec_role="kernelworx-lambda-public-orders-exec${suffix}"
+  local lambda_show_and_sell_exec_role="kernelworx-lambda-show-and-sell-exec${suffix}"
   local appsync_role="kernelworx-appsync${suffix}"
   local cognito_sms_role="kernelworx${suffix}-UserPoolsmsRole"
   local appsync_logging_role="kernelworx-api${suffix}-logs"
@@ -255,6 +256,7 @@ import_ephemeral_resources() {
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_payment_execution" "$lambda_payment_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_account_reporting_execution" "$lambda_account_reporting_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.lambda_public_orders_execution" "$lambda_public_orders_exec_role"
+  import_resource "$run_id" "module.iam.aws_iam_role.lambda_show_and_sell_execution" "$lambda_show_and_sell_exec_role"
   import_resource "$run_id" "module.iam.aws_iam_role.appsync_service" "$appsync_role"
   import_resource "$run_id" "module.appsync.aws_iam_role.appsync_logging" "$appsync_logging_role"
   import_resource "$run_id" "module.iam.aws_iam_role.cognito_sms" "$cognito_sms_role"
@@ -289,6 +291,9 @@ import_ephemeral_resources() {
   # (dev); count is zero on ephemeral, so this import is expected to fail there
   # and import_resource tolerates that.
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_public_orders_ses[0]" "${lambda_public_orders_exec_role}:ses-order-emails"
+
+  import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_show_and_sell_basic" "${lambda_show_and_sell_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_show_and_sell_dynamodb" "${lambda_show_and_sell_exec_role}:dynamodb-access"
 
   import_resource "$run_id" "module.iam.aws_iam_role_policy.cognito_sms" "${cognito_sms_role}:sns-publish"
   import_resource "$run_id" "module.appsync.aws_iam_role_policy.appsync_logging" "${appsync_logging_role}:appsync-logging"

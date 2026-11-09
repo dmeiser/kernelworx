@@ -839,7 +839,7 @@ data "aws_iam_policy_document" "lambda_public_orders_ses" {
   count = var.ses_order_emails_enabled ? 1 : 0
 
   statement {
-    effect = "Allow"
+    effect  = "Allow"
     actions = ["ses:SendTemplatedEmail"]
     # The module's own sending identity plus its two namespaced templates.
     resources = concat([var.ses_order_identity_arn], var.ses_order_template_arns)
@@ -1004,6 +1004,117 @@ output "lambda_account_reporting_execution_role_arn" {
 output "lambda_campaign_execution_role_arn" {
   description = "ARN of the scoped Lambda execution role for the campaign domain (delete-campaign-orders, unit-reporting). First entry of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
   value       = aws_iam_role.lambda_campaign_execution.arn
+}
+
+# =============================================================================
+# Lambda Show & Sell Domain Execution Role (Show & Sell integration wave 2)
+# =============================================================================
+#
+# ONE domain role for the whole Show & Sell feature family (review ruling r2
+# C-2, recorded in docs/SHOW_SELL_INTEGRATION_PLAN.md): a single
+# TransactWriteItems executes under ONE role, and the feature's transactions
+# routinely span 3-5 tables (join writes unit_campaigns + campaigns; custody
+# orders write orders + inventory + order_fulfillments; signup/finalization
+# spans show_and_sells + unit_campaigns + inventory), so per-stage scoped
+# roles would duplicate every shared grant four ways.
+#
+# Table scope: the five-table Show & Sell family plus the legacy tables the
+# feature's transactions touch (campaigns for the join pointer, catalogs and
+# profiles for reads, public_order_throttles for the invite-redemption
+# throttle). The acceptance pin is the actual-TransactItems table capture
+# test (tests/unit/test_iam_show_and_sell_role.py) — every table named in a
+# submitted plan must appear here.
+#
+# TransactWriteItems appears in NO other policy in this module (verified r2
+# C-2); it is granted here for the five family tables + campaigns only.
+
+locals {
+  show_and_sell_table_keys = [
+    "units",
+    "unit_campaigns",
+    "inventory",
+    "show_and_sells",
+    "order_fulfillments",
+    "campaigns",
+    "catalogs",
+    "profiles",
+    "public_order_throttles",
+  ]
+  show_and_sell_table_arns = [for k in local.show_and_sell_table_keys : var.dynamodb_table_arns[k]]
+  show_and_sell_index_arns = [for arn in local.show_and_sell_table_arns : "${arn}/index/*"]
+  show_and_sell_transact_keys = [
+    "units",
+    "unit_campaigns",
+    "inventory",
+    "show_and_sells",
+    "order_fulfillments",
+    "campaigns",
+  ]
+  show_and_sell_transact_arns = [for k in local.show_and_sell_transact_keys : var.dynamodb_table_arns[k]]
+}
+
+resource "aws_iam_role" "lambda_show_and_sell_execution" {
+  name = "${var.name_prefix}-lambda-show-and-sell-exec${local.role_suffix}"
+
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_show_and_sell_basic" {
+  role       = aws_iam_role.lambda_show_and_sell_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_show_and_sell_dynamodb" {
+  # Reads (auth checks, listings, participant projections) on every table the
+  # feature touches, plus their GSIs.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:BatchGetItem",
+    ]
+    resources = concat(local.show_and_sell_table_arns, local.show_and_sell_index_arns)
+  }
+
+  # Item-level writes outside transactions (the invite-redemption throttle
+  # UpdateItem on public_order_throttles) and legacy-table single writes
+  # (campaigns.unitCampaignKey attach/detach on join/removal).
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+    ]
+    resources = [
+      var.dynamodb_table_arns["public_order_throttles"],
+      var.dynamodb_table_arns["campaigns"],
+    ]
+  }
+
+  # Cross-table atomic writes: the Show & Sell mutation plans execute through
+  # TransactWriteItems on the five-table family plus campaigns.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:TransactWriteItems"]
+    resources = local.show_and_sell_transact_arns
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_show_and_sell_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_show_and_sell_execution.id
+  policy = data.aws_iam_policy_document.lambda_show_and_sell_dynamodb.json
+}
+
+output "lambda_show_and_sell_execution_role_arn" {
+  description = "ARN of the scoped Lambda execution role for the Show & Sell domain (one-domain ruling r2 C-2)."
+  value       = aws_iam_role.lambda_show_and_sell_execution.arn
 }
 
 output "lambda_payment_execution_role_arn" {
