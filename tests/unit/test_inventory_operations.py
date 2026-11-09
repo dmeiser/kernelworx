@@ -10,9 +10,8 @@ derived-quantity formulas.
 
 from typing import Any, Dict
 
-import pytest
-
 import boto3
+import pytest
 
 from src.handlers.inventory_operations import handler
 from src.utils.errors import ErrorCode
@@ -79,22 +78,40 @@ def _ev(field: str, args: Dict[str, Any], sub: str = "user-123-456") -> Dict[str
 
 def _receipt(t: Dict[str, Any], product: str = "P1", qty: int = 10, key: str = "rc-000001") -> Dict[str, Any]:
     return handler(
-        _ev("recordInventoryReceipt", {"unitCampaignId": "uc-1", "productId": product, "quantity": qty, "idempotencyKey": key}),
+        _ev(
+            "recordInventoryReceipt",
+            {"unitCampaignId": "uc-1", "productId": product, "quantity": qty, "idempotencyKey": key},
+        ),
         None,
     )
 
 
 class TestInventoryDerived:
     def test_sellable_excludes_sold_in_possession(self) -> None:
-        assert derive_position(
-            unit_campaign_id="uc", product_id="P", kernel_physical_qty=10, sold_in_possession_qty=3,
-            council_on_order_qty=0, balance_version=1, allocations=[], custody_rows=[],
-        )["sellableKernelQty"] == 7
+        assert (
+            derive_position(
+                unit_campaign_id="uc",
+                product_id="P",
+                kernel_physical_qty=10,
+                sold_in_possession_qty=3,
+                council_on_order_qty=0,
+                balance_version=1,
+                allocations=[],
+                custody_rows=[],
+            )["sellableKernelQty"]
+            == 7
+        )
 
     def test_council_need_excludes_with_scout_and_on_order(self) -> None:
         position = derive_position(
-            unit_campaign_id="uc", product_id="P", kernel_physical_qty=5, sold_in_possession_qty=0,
-            council_on_order_qty=4, balance_version=1, allocations=[], custody_rows=[{"withScoutQty": 6}],
+            unit_campaign_id="uc",
+            product_id="P",
+            kernel_physical_qty=5,
+            sold_in_possession_qty=0,
+            council_on_order_qty=4,
+            balance_version=1,
+            allocations=[],
+            custody_rows=[{"withScoutQty": 6}],
             unfulfilled_individual_qty=8,
         )
         # Demand 8, sellable 5 -> physical need 3; withScout 6 is NOT demand.
@@ -104,9 +121,14 @@ class TestInventoryDerived:
 
     def test_assignment_overage(self) -> None:
         position = derive_position(
-            unit_campaign_id="uc", product_id="P", kernel_physical_qty=2, sold_in_possession_qty=0,
-            council_on_order_qty=0, balance_version=1,
-            allocations=[{"remainingQty": 5, "status": "OPEN"}], custody_rows=[],
+            unit_campaign_id="uc",
+            product_id="P",
+            kernel_physical_qty=2,
+            sold_in_possession_qty=0,
+            council_on_order_qty=0,
+            balance_version=1,
+            allocations=[{"remainingQty": 5, "status": "OPEN"}],
+            custody_rows=[],
         )
         assert position["assignedOpenQty"] == 5
         assert position["assignmentOverageQty"] == 3
@@ -120,9 +142,7 @@ class TestRecordReceipt:
         assert result["balance"]["kernelPhysicalQty"] == 10
         assert result["sellableKernelQty"] == 10
         movements = [
-            i
-            for i in t["inventory"].scan()["Items"]
-            if i["itemKey"].startswith("MOVEMENT#") and i["productId"] == "P1"
+            i for i in t["inventory"].scan()["Items"] if i["itemKey"].startswith("MOVEMENT#") and i["productId"] == "P1"
         ]
         assert len(movements) == 1
         assert movements[0]["kernelPhysicalDelta"] == 10
@@ -251,7 +271,9 @@ class TestCustody:
         assert result["inventoryPosition"]["balance"]["kernelPhysicalQty"] == 6
         assert result["custodyBalance"]["withScoutQty"] == 4
         movement = next(
-            i for i in t["inventory"].scan()["Items"] if i["itemKey"].startswith("MOVEMENT#") and i["movementType"] == "ISSUE"
+            i
+            for i in t["inventory"].scan()["Items"]
+            if i["itemKey"].startswith("MOVEMENT#") and i["movementType"] == "ISSUE"
         )
         assert movement["withScoutDelta"] == 4
         assert movement["kernelPhysicalDelta"] == -4
@@ -393,14 +415,20 @@ class TestInventorySweep:
 
     def test_unauthenticated(self, t: Dict[str, Any]) -> None:
         _seed(t)
-        event = _ev("recordInventoryReceipt", {"unitCampaignId": "uc-1", "productId": "P1", "quantity": 1, "idempotencyKey": "sw-un-001"})
+        event = _ev(
+            "recordInventoryReceipt",
+            {"unitCampaignId": "uc-1", "productId": "P1", "quantity": 1, "idempotencyKey": "sw-un-001"},
+        )
         del event["identity"]
         assert handler(event, None)["errorCode"] == ErrorCode.UNAUTHORIZED
 
     def test_unknown_unit_campaign(self, t: Dict[str, Any]) -> None:
         _seed(t)
         result = handler(
-            _ev("recordInventoryReceipt", {"unitCampaignId": "UC#ghost", "productId": "P1", "quantity": 1, "idempotencyKey": "sw-uc-001"}),
+            _ev(
+                "recordInventoryReceipt",
+                {"unitCampaignId": "UC#ghost", "productId": "P1", "quantity": 1, "idempotencyKey": "sw-uc-001"},
+            ),
             None,
         )
         assert result["errorCode"] == ErrorCode.NOT_FOUND
@@ -489,7 +517,10 @@ class TestInventorySweep:
     def test_receipt_nonpositive_quantity(self, t: Dict[str, Any]) -> None:
         _seed(t)
         result = handler(
-            _ev("recordInventoryReceipt", {"unitCampaignId": "uc-1", "productId": "P1", "quantity": 0, "idempotencyKey": "sw-q-0001"}),
+            _ev(
+                "recordInventoryReceipt",
+                {"unitCampaignId": "uc-1", "productId": "P1", "quantity": 0, "idempotencyKey": "sw-q-0001"},
+            ),
             None,
         )
         assert result["errorCode"] == ErrorCode.INVALID_INPUT
@@ -576,7 +607,13 @@ class TestInventorySweep:
         empty = handler(
             _ev(
                 "returnStockFromScout",
-                {"unitCampaignId": "uc-1", "campaignId": "CAMP#1", "profileId": "PROF#1", "items": [], "idempotencyKey": "sw-rem-001"},
+                {
+                    "unitCampaignId": "uc-1",
+                    "campaignId": "CAMP#1",
+                    "profileId": "PROF#1",
+                    "items": [],
+                    "idempotencyKey": "sw-rem-001",
+                },
             ),
             None,
         )
@@ -584,7 +621,13 @@ class TestInventorySweep:
         not_dict = handler(
             _ev(
                 "returnStockFromScout",
-                {"unitCampaignId": "uc-1", "campaignId": "CAMP#1", "profileId": "PROF#1", "items": ["nope"], "idempotencyKey": "sw-rnd-001"},
+                {
+                    "unitCampaignId": "uc-1",
+                    "campaignId": "CAMP#1",
+                    "profileId": "PROF#1",
+                    "items": ["nope"],
+                    "idempotencyKey": "sw-rnd-001",
+                },
             ),
             None,
         )

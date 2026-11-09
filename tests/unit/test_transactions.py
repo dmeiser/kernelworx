@@ -62,11 +62,16 @@ class TestTransactionItemKey:
 
 
 class TestExecuteTransaction:
-    def test_success_passes_plan(self) -> None:
+    def test_success_sends_typed_wire_form(self) -> None:
+        """Non-moto clients receive the typed client form (real DynamoDB's
+        wire contract); moto's lenient plain form is selected by detection."""
         client = MagicMock()
-        plan = [_put()]
-        execute_transaction(plan, client=client)
-        client.transact_write_items.assert_called_once_with(TransactItems=plan)
+        execute_transaction([_put()], client=client)
+        client.transact_write_items.assert_called_once_with(
+            TransactItems=[
+                {"Put": {"TableName": TABLE, "Item": {"unitId": {"S": "unit-1"}, "itemKey": {"S": "METADATA"}}}}
+            ]
+        )
 
     def test_plan_over_cap_rejected_before_call(self) -> None:
         client = MagicMock()
@@ -172,3 +177,65 @@ class TestIdempotencyHelpers:
 
     def test_default_retry_ceiling_matches_convention(self) -> None:
         assert MAX_RACE_RETRIES == 3
+
+
+class TestTypedWireConversion:
+    def test_moto_detection_with_mock_client(self) -> None:
+        from unittest.mock import MagicMock
+
+        from src.utils.dynamodb import _client_runs_moto
+
+        assert _client_runs_moto(MagicMock()) is False
+
+    def test_moto_detection_attribute_error(self) -> None:
+        class _NoEvents:
+            class meta:
+                class events:
+                    pass
+
+        from src.utils.dynamodb import _client_runs_moto
+
+        assert _client_runs_moto(_NoEvents()) is False
+
+    def test_typed_entry_converts_key_and_values(self) -> None:
+        from decimal import Decimal
+
+        from src.utils.dynamodb import _typed_entry
+
+        entry = {
+            "Update": {
+                "TableName": "t",
+                "Key": {"pk": "a", "sk": "b"},
+                "UpdateExpression": "SET x = :v",
+                "ExpressionAttributeValues": {":v": Decimal("3.98"), ":n": 2},
+            }
+        }
+        typed = _typed_entry(entry)
+        body = typed["Update"]
+        assert body["Key"] == {"pk": {"S": "a"}, "sk": {"S": "b"}}
+        assert body["ExpressionAttributeValues"][":v"] == {"N": "3.98"}
+        assert body["ExpressionAttributeValues"][":n"] == {"N": "2"}
+
+    def test_moto_detection_non_moto_handler(self) -> None:
+        class _FakeHandler:
+            pass
+
+        class _FakeTrie:
+            def prefix_search(self, prefix: str):  # noqa: ARG002
+                return [_FakeHandler()]
+
+        class _FakeEmitter:
+            _handlers = _FakeTrie()
+
+        class _FakeEvents:
+            _emitter = _FakeEmitter()
+
+        class _FakeMeta:
+            events = _FakeEvents()
+
+        class _FakeClient:
+            meta = _FakeMeta()
+
+        from src.utils.dynamodb import _client_runs_moto
+
+        assert _client_runs_moto(_FakeClient()) is False

@@ -8,6 +8,7 @@ and test monkeypatch support, plus the shared chunked BatchGetItem helper.
 import json
 import os
 import time
+from collections import deque
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
 
@@ -150,7 +151,63 @@ def transaction_item_key(transact_item: Dict[str, Any]) -> tuple[str, str]:
     body = transact_item[next(iter(transact_item))]
     table_name = body["TableName"]
     item = body.get("Item", body.get("Key", {}))
-    return table_name, json.dumps(item, sort_keys=True, separators=(",", ":"))
+    # default=str: identity only needs determinism, and order items carry
+    # Decimal money at this layer.
+    return table_name, json.dumps(item, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _client_runs_moto(client: Any) -> bool:
+    """True when a moto before-send hook is registered on the client.
+
+    moto's DynamoDB test double only accepts the nonstandard plain-value
+    transaction form (its typed-form parsing raises TypeError in the pinned
+    version), while real DynamoDB requires the typed client form. The plans
+    handlers build are resource-style for ergonomics; execute_transaction
+    serializes them per-attribute for real DynamoDB and passes them plain to
+    moto. The real-form path is exercised against live DynamoDB by the
+    ephemeral deploy (and the planned two-backend contract suite).
+    """
+    try:
+        handlers = client.meta.events._emitter._handlers.prefix_search("before-send.dynamodb")
+    except AttributeError:
+        return False
+    if not isinstance(handlers, (list, tuple, deque)):
+        return False  # test doubles / unexpected emitters: assume real AWS
+    for handler in handlers:
+        if type(handler).__module__.startswith("moto"):
+            return True
+    return False
+
+
+_TYPE_SERIALIZER: Any = None
+
+
+def _serializer() -> Any:
+    global _TYPE_SERIALIZER
+    if _TYPE_SERIALIZER is None:
+        from boto3.dynamodb.types import TypeSerializer
+
+        _TYPE_SERIALIZER = TypeSerializer()
+    return _TYPE_SERIALIZER
+
+
+def _typed_map(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialize a resource-style attribute map to the typed client form
+    (per-attribute; Decimal is the sanctioned number type)."""
+    ser = _serializer()
+    return {key: ser.serialize(value) for key, value in item.items()}
+
+
+def _typed_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    body = entry[next(iter(entry))]
+    converted: Dict[str, Any] = dict(body)
+    if isinstance(body.get("Item"), dict):
+        converted["Item"] = _typed_map(body["Item"])
+    if isinstance(body.get("Key"), dict):
+        converted["Key"] = _typed_map(body["Key"])
+    if isinstance(body.get("ExpressionAttributeValues"), dict):
+        converted["ExpressionAttributeValues"] = _typed_map(body["ExpressionAttributeValues"])
+    return {next(iter(entry)): converted}
 
 
 def _preflight_plan(transact_items: List[Dict[str, Any]]) -> None:
@@ -201,10 +258,11 @@ def execute_transaction(
     if client is None:
         client = cast(Any, _get_dynamodb().meta.client)
 
+    wire_items = transact_items if _client_runs_moto(client) else [_typed_entry(e) for e in transact_items]
     attempt = 0
     while True:
         try:
-            client.transact_write_items(TransactItems=transact_items)
+            client.transact_write_items(TransactItems=wire_items)
             return
         except ClientError as exc:
             code = exc.response.get("Error", {}).get("Code", "")

@@ -242,4 +242,3 @@ def test_user_pool_input_hash_covers_all_pool_variables():
     # Also assert specific attributes explicitly mentioned in #701:
     assert "var.pre_token_generation_lambda_arn" in hash_expr
     assert "deletion_protection" in hash_expr
-

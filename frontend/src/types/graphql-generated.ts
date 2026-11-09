@@ -333,6 +333,10 @@ export type GqlCreateOrderInput = {
   customerName: Scalars['String']['input'];
   /** The customer's phone number. */
   customerPhone?: InputMaybe<Scalars['String']['input']>;
+  /** NONE (default) writes the order only. CONSUME_SCOUT_CUSTODY additionally draws with-Scout stock in ONE transaction (custody Lambda, r2 C-1). */
+  fulfillmentMode?: InputMaybe<Scalars['String']['input']>;
+  /** Client idempotency key; committed replays return the stored order without re-executing. */
+  idempotencyKey?: InputMaybe<Scalars['String']['input']>;
   /** The products and quantities to order; prices are looked up from the campaign's catalog. */
   lineItems: Array<GqlLineItemInput>;
   /** Free-text notes about the order. */
@@ -571,6 +575,10 @@ export type GqlIssueStockResult = {
 /** A single product line within an order. */
 export type GqlLineItem = {
   __typename?: 'LineItem';
+  /** Units fulfilled so far (absent on pre-feature rows = 0). */
+  fulfilledQuantity?: Maybe<Scalars['Int']['output']>;
+  /** The stable line id (absent on pre-feature rows; update paths must preserve existing ids). */
+  lineItemId?: Maybe<Scalars['ID']['output']>;
   /** The product's unit price captured from the catalog at order time. */
   pricePerUnit: Scalars['Float']['output'];
   /** The ID of the product. */
@@ -993,6 +1001,10 @@ export type GqlOrder = {
   customerName: Scalars['String']['output'];
   /** The customer's phone number, if provided. */
   customerPhone?: Maybe<Scalars['String']['output']>;
+  /** Optimistic-concurrency version for fulfillment changes; absent on pre-feature rows = 0. */
+  fulfillmentVersion?: Maybe<Scalars['Int']['output']>;
+  /** Participant-safe fulfillment projection for this order (empty until fulfillment lands). */
+  fulfillments: Array<GqlParticipantOrderFulfillment>;
   /** The ordered products and quantities, with prices captured from the catalog at order time. */
   lineItems: Array<GqlLineItem>;
   /** Free-text notes about the order. */
@@ -1001,6 +1013,8 @@ export type GqlOrder = {
   orderDate: Scalars['AWSDateTime']['output'];
   /** The order's unique ID (with the ORDER# prefix). */
   orderId: Scalars['ID']['output'];
+  /** Where this order's demand originates (absent on pre-feature rows = COUNCIL). */
+  origin?: Maybe<GqlOrderOrigin>;
   /** The name of the payment method used for this order. */
   paymentMethod: Scalars['String']['output'];
   /** The ID of the profile the order belongs to. */
@@ -1045,6 +1059,16 @@ export type GqlOrderFulfillmentConnection = {
   __typename?: 'OrderFulfillmentConnection';
   items: Array<GqlOrderFulfillment>;
   pageInfo: GqlPageInfo;
+};
+
+export type GqlOrderOrigin = {
+  __typename?: 'OrderOrigin';
+  /** Where the order's demand originates. COUNCIL = a legacy/independent Scout Campaign; UNIT_CAMPAIGN = a joined Show & Sell Unit Campaign. */
+  kind: Scalars['String']['output'];
+  /** The originating Scout Campaign id (the order's own campaignId for COUNCIL; the joined campaign for UNIT_CAMPAIGN), else null. */
+  sourceCampaignId?: Maybe<Scalars['ID']['output']>;
+  /** The originating Unit Campaign id (kind = UNIT_CAMPAIGN), else null. */
+  unitCampaignId?: Maybe<Scalars['ID']['output']>;
 };
 
 /** The payment-verification state of an order. Authenticated orders leave this absent; the public path always writes NEW. */

@@ -302,6 +302,15 @@ type Order {
   notes: String
   """The order's payment-verification state. Absent on pre-feature rows; the public path always writes NEW."""
   status: OrderStatus
+  # --- Show & Sell wave 3 (impact map 3.2): origin + fulfillment. Legacy
+  # rows predate these fields; readers treat absent origin as COUNCIL and
+  # absent fulfillmentVersion as 0.
+  """Where this order's demand originates (absent on pre-feature rows = COUNCIL)."""
+  origin: OrderOrigin
+  """Optimistic-concurrency version for fulfillment changes; absent on pre-feature rows = 0."""
+  fulfillmentVersion: Int
+  """Participant-safe fulfillment projection for this order (empty until fulfillment lands)."""
+  fulfillments: [ParticipantOrderFulfillment!]!
   """The account ID of the user who confirmed the order (for CONFIRMED orders)."""
   confirmedBy: ID
   """When the order was confirmed by the seller (for CONFIRMED orders)."""
@@ -330,6 +339,8 @@ type CampaignConnection {
 
 """A single product line within an order."""
 type LineItem {
+  """The stable line id (absent on pre-feature rows; update paths must preserve existing ids)."""
+  lineItemId: ID
   """The ID of the product."""
   productId: ID!
   """The product's display name."""
@@ -340,6 +351,8 @@ type LineItem {
   pricePerUnit: Float!
   """quantity times pricePerUnit."""
   subtotal: Float!
+  """Units fulfilled so far (absent on pre-feature rows = 0)."""
+  fulfilledQuantity: Int
 }
 
 """A physical mailing address."""
@@ -726,6 +739,12 @@ input CreateOrderInput {
   lineItems: [LineItemInput!]!
   """Free-text notes about the order."""
   notes: String
+  # --- Show & Sell wave 3: custody mode + idempotency. Absent/NONE keeps the
+  # legacy single-write path exactly (the golden oracles pin it).
+  """NONE (default) writes the order only. CONSUME_SCOUT_CUSTODY additionally draws with-Scout stock in ONE transaction (custody Lambda, r2 C-1)."""
+  fulfillmentMode: String
+  """Client idempotency key; committed replays return the stored order without re-executing."""
+  idempotencyKey: String
 }
 
 """Input for updateOrder. Only the provided fields are changed; providing lineItems replaces all existing line items."""
@@ -1396,6 +1415,15 @@ type Mutation {
 
 
 # ============================================================================
+type OrderOrigin {
+  """Where the order's demand originates. COUNCIL = a legacy/independent Scout Campaign; UNIT_CAMPAIGN = a joined Show & Sell Unit Campaign."""
+  kind: String!
+  """The originating Unit Campaign id (kind = UNIT_CAMPAIGN), else null."""
+  unitCampaignId: ID
+  """The originating Scout Campaign id (the order's own campaignId for COUNCIL; the joined campaign for UNIT_CAMPAIGN), else null."""
+  sourceCampaignId: ID
+}
+
 # Show & Sell (spec docs/specs/show_sell, GraphQL API section 4 additions).
 # New constructs ONLY in this wave: models, inputs, enums for Units, Unit
 # Campaigns, inventory, events, sales, We Owe, finalization, participant
