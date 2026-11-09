@@ -69,6 +69,41 @@ function applyStatusUpdate(input, order, updates, exprValues, exprNames, ctx) {
     return true;
 }
 
+// Show & Sell wave 3 (impact map 3.2): the wholesale lineItems replacement
+// must preserve stable line identity. Lines matched to an existing line by
+// productId keep their lineItemId and fulfilledQuantity; an edit that would
+// drop a line below its fulfilled quantity is rejected (the fulfillment
+// record is append-only history, never rewritten). Genuinely new lines mint
+// an id and start at zero fulfilled. Legacy lines without ids gain one here —
+// the enabling step for individual fulfillment on updated orders.
+function preserveLineIdentity(enrichedLineItems, existingLines) {
+    const existingByProduct = {};
+    if (Array.isArray(existingLines)) {
+        for (const old of existingLines) {
+            if (old && typeof old.productId === 'string' && existingByProduct[old.productId] === undefined) {
+                existingByProduct[old.productId] = old;
+            }
+        }
+    }
+    for (const line of enrichedLineItems) {
+        const old = existingByProduct[line.productId];
+        if (old) {
+            const fulfilled = typeof old.fulfilledQuantity === 'number' ? old.fulfilledQuantity : 0;
+            if (line.quantity < fulfilled) {
+                util.error(
+                    'Edit would reduce a line below its fulfilled quantity',
+                    'CONFLICT'
+                );
+            }
+            line.lineItemId = typeof old.lineItemId === 'string' ? old.lineItemId : util.autoId();
+            line.fulfilledQuantity = fulfilled;
+        } else {
+            line.lineItemId = util.autoId();
+            line.fulfilledQuantity = 0;
+        }
+    }
+}
+
 function validateOrderDate(orderDate) {
     if (!orderDate || typeof orderDate !== 'string' || !orderDate.trim()) {
         util.error('Order date is required', 'INVALID_INPUT');
@@ -155,6 +190,7 @@ export function request(ctx) {
         }
 
         const { enrichedLineItems, totalAmountCents } = enrichLineItems(input.lineItems, catalog);
+        preserveLineIdentity(enrichedLineItems, order ? order.lineItems : null);
 
         updates.push('lineItems = :lineItems');
         exprValues[':lineItems'] = enrichedLineItems;

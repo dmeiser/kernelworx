@@ -344,3 +344,85 @@ describe('update_order_fn response', () => {
     );
   });
 });
+
+describe('update_order_fn line identity preservation (Show & Sell wave 3)', () => {
+  const catalog = {
+    products: [
+      { productId: 'PROD#1', productName: 'Popcorn', price: 1.99 },
+      { productId: 'PROD#2', productName: 'Caramel', price: 0.1 },
+    ],
+  };
+
+  function ctxWith(order, lineItems) {
+    return {
+      args: { input: { lineItems } },
+      stash: { order, catalog },
+    };
+  }
+
+  it('preserves lineItemId and fulfilledQuantity for matched product lines', () => {
+    const order = {
+      campaignId: 'CAMPAIGN#c1',
+      orderId: 'ORDER#c1#x',
+      profileId: 'PROFILE#p1',
+      totalAmount: 3.98,
+      lineItems: [
+        { lineItemId: 'LINE#keep', productId: 'PROD#1', quantity: 2, fulfilledQuantity: 1 },
+      ],
+    };
+    const result = request(ctxWith(order, [{ productId: 'PROD#1', quantity: 3 }]));
+    const lines = result.update.expressionValues[':lineItems'];
+    assert.strictEqual(lines[0].lineItemId, 'LINE#keep');
+    assert.strictEqual(lines[0].fulfilledQuantity, 1);
+    assert.strictEqual(lines[0].quantity, 3);
+  });
+
+  it('assigns fresh ids and zero fulfilled counts to genuinely new lines', () => {
+    const order = {
+      campaignId: 'CAMPAIGN#c1',
+      orderId: 'ORDER#c1#x',
+      profileId: 'PROFILE#p1',
+      totalAmount: 3.98,
+      lineItems: [
+        { lineItemId: 'LINE#keep', productId: 'PROD#1', quantity: 2, fulfilledQuantity: 0 },
+      ],
+    };
+    const result = request(
+      ctxWith(order, [{ productId: 'PROD#1', quantity: 2 }, { productId: 'PROD#2', quantity: 1 }])
+    );
+    const lines = result.update.expressionValues[':lineItems'];
+    assert.strictEqual(lines[0].lineItemId, 'LINE#keep');
+    assert.strictEqual(lines[1].lineItemId, 'auto-generated-id');
+    assert.strictEqual(lines[1].fulfilledQuantity, 0);
+  });
+
+  it('assigns ids to legacy id-less lines while carrying fulfilled counts', () => {
+    const order = {
+      campaignId: 'CAMPAIGN#c1',
+      orderId: 'ORDER#c1#x',
+      profileId: 'PROFILE#p1',
+      totalAmount: 3.98,
+      lineItems: [{ productId: 'PROD#1', quantity: 2, fulfilledQuantity: 1 }],
+    };
+    const result = request(ctxWith(order, [{ productId: 'PROD#1', quantity: 2 }]));
+    const lines = result.update.expressionValues[':lineItems'];
+    assert.strictEqual(lines[0].lineItemId, 'auto-generated-id');
+    assert.strictEqual(lines[0].fulfilledQuantity, 1);
+  });
+
+  it('rejects an edit that would drop a line below its fulfilled quantity', () => {
+    const order = {
+      campaignId: 'CAMPAIGN#c1',
+      orderId: 'ORDER#c1#x',
+      profileId: 'PROFILE#p1',
+      totalAmount: 3.98,
+      lineItems: [
+        { lineItemId: 'LINE#keep', productId: 'PROD#1', quantity: 2, fulfilledQuantity: 2 },
+      ],
+    };
+    assert.throws(
+      () => request(ctxWith(order, [{ productId: 'PROD#1', quantity: 1 }])),
+      /CONFLICT: Edit would reduce a line below its fulfilled quantity/
+    );
+  });
+});

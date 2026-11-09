@@ -113,13 +113,18 @@ describe('update_order_fn line-item enrichment', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].lineItems).toBe(LINE_ITEMS);
     expect(calls[0].catalog).toBe(CATALOG);
+    // Show & Sell wave 3 (impact map 3.2): the update path stamps stable
+    // line ids + zero fulfilled counts on top of the shared helper's output
+    // (the stub order here has no existing lines, so both fields are minted).
     expect(req.update.expressionValues[':lineItems']).toEqual([
       {
         productId: 'FROM_SHARED_HELPER',
         productName: 'Stub product',
         quantity: 7,
         pricePerUnit: 1.11,
-        subtotal: 7.77
+        subtotal: 7.77,
+        lineItemId: 'TESTID',
+        fulfilledQuantity: 0
       }
     ]);
     expect(req.update.expressionValues[':totalAmount']).toBe(7.77);
