@@ -54,8 +54,17 @@ class ErrorCode:
     # Business logic errors
     # A campaign's lifetime public-order cap is spent; the buyer must not retry.
     PUBLIC_ORDER_LIMIT_EXCEEDED = "PUBLIC_ORDER_LIMIT_EXCEEDED"
+    # Legacy PROFILE-invite redemption states (Show & Sell decision record:
+    # docs/investigations/show-sell-error-vocabulary.md). The Unit-invite
+    # redemption path must NOT surface these — expired/consumed/revoked Unit
+    # invites answer NOT_FOUND so no existence oracle leaks (spec 5.3).
     INVITE_EXPIRED = "INVITE_EXPIRED"
     INVITE_ALREADY_USED = "INVITE_ALREADY_USED"
+    # Show & Sell (spec 5.3): fixed-window redemption/write throttle spent
+    # (attempt 11 in the same UTC hour). DISTINCT from
+    # PUBLIC_ORDER_LIMIT_EXCEEDED, which is a per-campaign lifetime cap, not
+    # a throttle; clients may retry after the window rolls.
+    RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
     CAMPAIGN_READ_ONLY = "CAMPAIGN_READ_ONLY"
     INSUFFICIENT_PERMISSIONS = "INSUFFICIENT_PERMISSIONS"
     # The resource is in a state the operation does not accept (e.g. a purge

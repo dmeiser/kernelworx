@@ -8,8 +8,10 @@ indexes into the raw event.
 
 import math
 from collections.abc import Mapping
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, Optional, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .errors import AppError, ErrorCode
 from .validation import validate_unit_number
@@ -112,6 +114,142 @@ def require_unit_number(arguments: Mapping[str, Any], name: str) -> int:
         AppError: INVALID_INPUT if the value is missing, empty, non-numeric, or < 1
     """
     return cast(int, validate_unit_number(arguments.get(name), required=True))
+
+
+def _is_int(value: Any) -> bool:
+    """True only for genuine integers: bools and floats are rejected.
+
+    ``isinstance(True, int)`` is True in Python, so the bool check is not
+    redundant: a JSON ``true`` must never satisfy an integer contract.
+    """
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def require_strict_int(arguments: Mapping[str, Any], name: str) -> int:
+    """Require a present argument that IS an integer, not merely converts to one.
+
+    Unlike ``require_int`` (which coerces numeric strings and floats), this
+    validator enforces the wire contract for Show & Sell fields: AppSync
+    delivers integers as JSON ints, so a float or numeric string means the
+    caller sent the wrong type and the value is rejected rather than
+    silently narrowed (impact map 3.4).
+    """
+    value = arguments.get(name)
+    if value is None:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' is required")
+    if not _is_int(value):
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must be an integer")
+    return cast(int, value)
+
+
+def require_bounded_str(arguments: Mapping[str, Any], name: str, max_length: int, *, allow_empty: bool = False) -> str:
+    """Require a present string within an explicit length bound.
+
+    Show & Sell free-text fields carry spec bounds (impact map 3.4); the
+    bound is a parameter so each resolver states its contract at the call
+    site instead of a module-global table drifting from the spec.
+    """
+    value = arguments.get(name)
+    if value is None:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' is required")
+    if not isinstance(value, str):
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must be a string")
+    if not allow_empty and not value:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must be a non-empty string")
+    if len(value) > max_length:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' exceeds the maximum length of {max_length}")
+    return value
+
+
+def require_cents(arguments: Mapping[str, Any], name: str, *, maximum: Optional[int] = None) -> int:
+    """Require a present integer-cents money value (non-negative).
+
+    Show & Sell money is integer cents, never Float (impact map 3.1). This
+    is the type/range floor: strictly an int, not a bool, >= 0, and bounded
+    by ``maximum`` when the caller passes one. Per-field caps (sale totals,
+    line limits) stay in the owning handler so the generic validator never
+    invents product policy.
+    """
+    value = require_strict_int(arguments, name)
+    if value < 0:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must not be negative")
+    if maximum is not None and value > maximum:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' exceeds the maximum of {maximum}")
+    return value
+
+
+def require_version(arguments: Mapping[str, Any], name: str = "expectedVersion") -> int:
+    """Require a present optimistic-concurrency version: a strict int >= 1.
+
+    Versions are assigned by the server starting at 1; a caller-supplied 0
+    or negative version cannot match any row and indicates a contract
+    violation rather than a conflict.
+    """
+    value = require_strict_int(arguments, name)
+    if value < 1:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must be a positive integer")
+    return value
+
+
+def require_timestamp(arguments: Mapping[str, Any], name: str) -> str:
+    """Require a present RFC 3339 timestamp string with an explicit offset.
+
+    Returns the validated string unchanged. Naive timestamps (no offset)
+    are rejected: Show & Sell event math spans zones, and a naive value
+    silently means "someone's local wall clock".
+    """
+    value = require_str(arguments, name)
+    candidate = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must be an RFC 3339 timestamp") from None
+    if parsed.tzinfo is None:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must include a UTC offset")
+    return value
+
+
+def require_timezone(arguments: Mapping[str, Any], name: str) -> str:
+    """Require a present IANA timezone name (e.g. ``America/Denver``).
+
+    Event scheduling math (spec 9.1) keys off named zones; fixed-offset
+    abbreviations like ``MST`` are ambiguous and rejected by zoneinfo.
+    """
+    value = require_str(arguments, name)
+    try:
+        ZoneInfo(value)
+    except ZoneInfoNotFoundError, ValueError, TypeError:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must be an IANA timezone name") from None
+    return value
+
+
+def require_idempotency_key(arguments: Mapping[str, Any], name: str = "idempotencyKey") -> str:
+    """Require a present client idempotency key: 8-128 visible-ASCII characters.
+
+    The key is an opaque marker identity (spec: invite alphabet is A-Z0-9;
+    general keys stay printable ASCII so they are safe in item keys, logs,
+    and caches). Uniqueness semantics live in the idempotency layer; this
+    validator only enforces the shape contract.
+    """
+    value = require_str(arguments, name)
+    if not 8 <= len(value) <= 128:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must be between 8 and 128 characters")
+    if not value.isprintable() or any(ord(ch) < 33 or ord(ch) > 126 for ch in value):
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must contain only printable ASCII characters")
+    return value
+
+
+def require_str_enum(arguments: Mapping[str, Any], name: str, allowed: tuple[str, ...]) -> str:
+    """Require a present string belonging to an explicit enumeration.
+
+    ``allowed`` is stated at the call site (schema enum values) so the
+    validator cannot drift from the SDL; the check is exact and
+    case-sensitive — wire enums are uppercase by contract.
+    """
+    value = require_str(arguments, name)
+    if value not in allowed:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Argument '{name}' must be one of: {', '.join(allowed)}")
+    return value
 
 
 def as_float(value: Any) -> Optional[float]:
