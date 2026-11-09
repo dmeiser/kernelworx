@@ -1,8 +1,11 @@
 """Show & Sell Stage 3 wave 1 - ShowAndSell model (leaf 3.1.1)."""
+
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
+
 
 @dataclass
 class ShowAndSell:
@@ -19,4 +22,4 @@ class ShowAndSell:
     product_ids: List[str] = field(default_factory=list)
     finalization_pointers: List[str] = field(default_factory=list)
     version: int = 1
-    cancellation_audit: Optional[dict] = None
+    cancellation_audit: Optional[dict[str, Any]] = None
