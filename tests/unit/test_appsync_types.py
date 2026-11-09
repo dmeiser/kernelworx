@@ -112,6 +112,9 @@ class TestRequireBoundedStr(_StrictValidatorContract):
     def test_rejects_over_bound(self) -> None:
         self.assert_invalid({"x": "x" * 11}, "x")
 
+    def test_missing(self) -> None:
+        self.assert_invalid({}, "x")
+
     def test_rejects_empty_by_default(self) -> None:
         self.assert_invalid({"x": ""}, "x")
 

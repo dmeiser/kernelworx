@@ -114,6 +114,17 @@ class TestExecuteTransaction:
         assert client.transact_write_items.call_count == 2
         sleep_mock.assert_called_once_with(0.05)
 
+    def test_default_client_uses_shared_resource(self) -> None:
+        """Without an injected client, the shared DynamoDB resource's client is used."""
+        from src.utils import dynamodb as dynamodb_module
+
+        client = MagicMock()
+        resource = MagicMock()
+        resource.meta.client = client
+        with patch.object(dynamodb_module, "_get_dynamodb", return_value=resource):
+            execute_transaction([_put()])
+        client.transact_write_items.assert_called_once()
+
     def test_throttle_exhaustion_raises_throttled(self) -> None:
         client = MagicMock()
         client.transact_write_items.side_effect = _client_error("ThrottlingException")
