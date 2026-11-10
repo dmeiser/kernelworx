@@ -1869,6 +1869,131 @@ type Mutation {
   ): Catalog!
 }
 
+
+# ============================================================================
+# Show & Sell Stage 3 SDL
+# ============================================================================
+
+enum ShowAndSellStatus { SCHEDULED ACTIVE ENDED FINALIZED CANCELLED REOPENED }
+enum AllocationStatus { ACTIVE RELEASED }
+enum CommitmentStatus { ACTIVE CANCELLED }
+
+type ShowAndSellAdmin {
+  showAndSellId: ID!
+  unitCampaignId: ID!
+  locationName: String!
+  address: String
+  startAt: String!
+  endAt: String!
+  splitMethod: String!
+  weOweEnabled: Boolean!
+  status: ShowAndSellStatus!
+  version: Int!
+  productIds: [ID!]
+  createdAt: String!
+  updatedAt: String!
+}
+
+type ShowAndSellSlot {
+  slotId: ID!
+  showAndSellId: ID!
+  label: String
+  startAt: String!
+  endAt: String!
+  capacity: Int!
+  activeSignupCount: Int!
+  version: Int!
+}
+
+type ShowAndSellSignup {
+  showAndSellId: ID!
+  slotId: ID!
+  profileId: ID!
+  status: String!
+  version: Int!
+}
+
+type ScoutCommitment {
+  commitmentId: ID!
+  profileId: ID!
+  showAndSellId: ID!
+  status: CommitmentStatus!
+  version: Int!
+}
+
+type ScoutCommitmentGuard {
+  guardId: ID!
+  profileId: ID!
+  showAndSellId: ID!
+  version: Int!
+}
+
+type EventInventoryAllocation {
+  allocationId: ID!
+  unitCampaignId: ID!
+  showAndSellId: ID!
+  productId: ID!
+  allocatedQty: Int!
+  soldQty: Int!
+  releasedQty: Int!
+  remainingQty: Int!
+  status: AllocationStatus!
+  version: Int!
+  intervalStart: String
+  intervalEnd: String
+}
+
+type ShowAndSellOpportunity {
+  showAndSellId: ID!
+  locationName: String!
+  startAt: String!
+  endAt: String!
+  slots: [ShowAndSellSlot!]
+  mySignups: [ShowAndSellSignup!]
+}
+
+type ShowAndSellOpportunityConnection {
+  items: [ShowAndSellOpportunity!]!
+  pageInfo: PageInfo!
+}
+
+type ShowAndSellAdminConnection {
+  items: [ShowAndSellAdmin!]!
+  pageInfo: PageInfo!
+}
+
+type ShowAndSellSlotConnection {
+  items: [ShowAndSellSlot!]!
+  pageInfo: PageInfo!
+}
+
+type EventInventoryAllocationConnection {
+  items: [EventInventoryAllocation!]!
+  pageInfo: PageInfo!
+}
+
+input AllocationTargetInput {
+  productId: ID!
+  quantity: Int!
+}
+
+extend type Query {
+  showAndSell(showAndSellId: ID!): ShowAndSellAdmin
+  showAndSells(unitCampaignId: ID!, status: ShowAndSellStatus, page: PageInput): ShowAndSellAdminConnection!
+  unitCampaignOpportunities(unitCampaignId: ID!, includePast: Boolean, page: PageInput): ShowAndSellOpportunityConnection!
+  showAndSellOpportunity(showAndSellId: ID!, profileId: ID!): ShowAndSellOpportunity
+  eventInventoryAllocations(unitCampaignId: ID!, productId: ID, showAndSellId: ID, status: AllocationStatus, page: PageInput): EventInventoryAllocationConnection!
+}
+
+extend type Mutation {
+  createShowAndSell(unitCampaignId: ID!, locationName: String!, address: String, startAt: String!, endAt: String!, splitMethod: String, weOweEnabled: Boolean, idempotencyKey: String!): ShowAndSellAdmin!
+  updateShowAndSell(showAndSellId: ID!, locationName: String, address: String, splitMethod: String, weOweEnabled: Boolean, expectedVersion: Int!, idempotencyKey: String!): ShowAndSellAdmin!
+  cancelShowAndSell(showAndSellId: ID!, expectedVersion: Int!, reason: String!, idempotencyKey: String!): ShowAndSellAdmin!
+  assignShowAndSellInventory(showAndSellId: ID!, items: [AllocationTargetInput!], expectedVersion: Int!, idempotencyKey: String!): [EventInventoryAllocation!]!
+  upsertShowAndSellSlot(showAndSellId: ID!, slotId: ID, label: String, startAt: String!, endAt: String!, capacity: Int!, expectedEventVersion: Int!, expectedSlotVersion: Int, idempotencyKey: String!): ShowAndSellSlot!
+  deleteShowAndSellSlot(showAndSellId: ID!, slotId: ID!, expectedVersion: Int!, idempotencyKey: String!): Boolean!
+}
+
 # ============================================================================
 # Schema Root
 # ============================================================================
