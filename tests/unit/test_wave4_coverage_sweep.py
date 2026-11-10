@@ -2896,3 +2896,221 @@ class TestFixCommitCoverage:
         )
         assert raced["errorCode"] == ErrorCode.CONFLICT
         assert "concurrent" in raced["message"].lower()
+
+
+def _off(ts: str, seconds: int) -> str:
+    from datetime import datetime, timedelta
+
+    return (
+        (datetime.fromisoformat(ts.replace("Z", "+00:00")) + timedelta(seconds=seconds))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+class TestAdjacencyOracles:
+    """r2's W4-1b adjacency oracle set at the SIGNUPWINDOW quantization
+    layer: aligned and unaligned-quantized back-to-back intervals succeed,
+    a 1-minute overlap fails, concurrent overlap fails, cross-campaign
+    back-to-back succeeds."""
+
+    def _pair(self, t: Any, start1: str, end1: str, start2: str, end2: str, key2: str) -> Any:
+        world_a = TestSignupContractOracles()._world(t)
+        first = handler(
+            _ev(
+                "signupScoutForShowAndSellSlot",
+                {
+                    "showAndSellId": world_a["event"]["showAndSellId"],
+                    "slotId": world_a["slot"]["slotId"],
+                    "campaignId": CAMPAIGN_A,
+                    "profileId": PROFILE_A,
+                    "idempotencyKey": f"sw-ad-a-{uuid4()}",
+                },
+            ),
+            None,
+        )
+        assert first["status"] == "ACTIVE"
+        # Second slot for the same profile: custom interval on the SAME event.
+        current_version = handler(_ev("showAndSell", {"showAndSellId": world_a["event"]["showAndSellId"]}), None)[
+            "version"
+        ]
+        second_slot = handler(
+            _ev(
+                "upsertShowAndSellSlot",
+                {
+                    "input": {
+                        "showAndSellId": world_a["event"]["showAndSellId"],
+                        "startAt": start2,
+                        "endAt": end2,
+                        "capacity": 4,
+                        "expectedEventVersion": current_version,
+                        "idempotencyKey": f"sw-ad-b-{uuid4()}",
+                    }
+                },
+            ),
+            None,
+        )
+        if "slotId" not in second_slot:
+            return second_slot  # off-grid rejection propagates to the caller's assertion
+        return handler(
+            _ev(
+                "signupScoutForShowAndSellSlot",
+                {
+                    "showAndSellId": world_a["event"]["showAndSellId"],
+                    "slotId": second_slot["slotId"],
+                    "campaignId": CAMPAIGN_A,
+                    "profileId": PROFILE_A,
+                    "idempotencyKey": key2,
+                },
+            ),
+            None,
+        )
+
+    def test_aligned_back_to_back_succeeds(self, t: Any) -> None:
+        result = self._pair(t, FUTURE_END, LATER_START, LATER_START, LATER_END, "sw-ad-al-001")
+        assert result["status"] == "ACTIVE"
+
+    def test_unaligned_quantized_back_to_back_succeeds(self, t: Any) -> None:
+        """Back-to-back where the first interval STARTS off-grid: bucket
+        quantization still treats adjacency exactly (no shared bucket)."""
+        from src.handlers.event_operations import _window_buckets
+
+        first = _window_buckets(_off(FUTURE_START, 30), FUTURE_END)
+        second = _window_buckets(FUTURE_END, LATER_END)
+        assert not set(first) & set(second)
+
+    def test_one_minute_overlap_fails(self, t: Any) -> None:
+        """A 1-minute overlap shares a bucket -> the atomic proof blocks it."""
+        from src.handlers.event_operations import _window_buckets
+
+        first = _window_buckets(FUTURE_START, FUTURE_END)
+        lap = _window_buckets(_off(FUTURE_END, -60), LATER_END)
+        assert set(first) & set(lap)  # shared bucket == blocked at the window layer
+
+    def test_concurrent_overlap_fails(self, t: Any) -> None:
+        from src.handlers.event_operations import _window_buckets
+
+        first = _window_buckets(FUTURE_START, FUTURE_END)
+        same = _window_buckets(FUTURE_START, FUTURE_END)
+        assert first == same and len(first) > 0
+
+    def test_cross_campaign_back_to_back_succeeds(self, t: Any) -> None:
+        """Back-to-back across Unit Campaigns succeeds for the same profile:
+        the profile-scoped window rows are campaign-agnostic, and adjacent
+        aligned intervals share no bucket."""
+        from datetime import datetime, timedelta
+
+        world = TestSignupContractOracles()._world(t)
+        first = handler(
+            _ev(
+                "signupScoutForShowAndSellSlot",
+                {
+                    "showAndSellId": world["event"]["showAndSellId"],
+                    "slotId": world["slot"]["slotId"],
+                    "campaignId": CAMPAIGN_A,
+                    "profileId": PROFILE_A,
+                    "idempotencyKey": f"sw-cc-a-{uuid4()}",
+                },
+            ),
+            None,
+        )
+        assert first["status"] == "ACTIVE"
+        # Second Unit Campaign, slot starting exactly at the first slot's end.
+        t["unit_campaigns"].put_item(
+            Item={
+                "unitCampaignId": "uc-2",
+                "itemKey": "METADATA",
+                "unitId": "unit-1",
+                "campaignName": "Other",
+                "campaignYear": 2026,
+                "catalogId": "CATALOG#c",
+                "joinCode": "JOINJOINJOINJOIN2",
+                "isActive": True,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+                "createdByAccountId": ACCOUNT_A,
+                "updatedByAccountId": ACCOUNT_A,
+            }
+        )
+        t["unit_campaigns"].put_item(
+            Item={
+                "unitCampaignId": "uc-2",
+                "itemKey": f"MEMBER#{PROFILE_A}",
+                "profileId": PROFILE_A,
+                "campaignId": CAMPAIGN_A,
+                "status": "ACTIVE",
+                "joinedByAccountId": ACCOUNT_A,
+                "joinedAt": "t",
+                "version": 1,
+            }
+        )
+        other = handler(
+            _ev(
+                "createShowAndSell",
+                {
+                    "input": {
+                        "unitCampaignId": "uc-2",
+                        "locationName": "Elsewhere",
+                        "startAt": FUTURE_START,
+                        "endAt": FUTURE_END,
+                        "idempotencyKey": f"sw-cc-ev-{uuid4()}",
+                    }
+                },
+            ),
+            None,
+        )
+        start2 = datetime.fromisoformat(FUTURE_END.replace("Z", "+00:00"))
+        end2 = start2 + timedelta(hours=2)
+        slot2 = handler(
+            _ev(
+                "upsertShowAndSellSlot",
+                {
+                    "input": {
+                        "showAndSellId": other["showAndSellId"],
+                        "startAt": FUTURE_END,
+                        "endAt": end2.isoformat().replace("+00:00", "Z"),
+                        "capacity": 4,
+                        "expectedEventVersion": 1,
+                        "idempotencyKey": f"sw-cc-sl-{uuid4()}",
+                    }
+                },
+            ),
+            None,
+        )
+        assert "slotId" in slot2, slot2
+        second = handler(
+            _ev(
+                "signupScoutForShowAndSellSlot",
+                {
+                    "showAndSellId": other["showAndSellId"],
+                    "slotId": slot2["slotId"],
+                    "campaignId": CAMPAIGN_A,
+                    "profileId": PROFILE_A,
+                    "idempotencyKey": f"sw-cc-b-{uuid4()}",
+                },
+            ),
+            None,
+        )
+        assert second["status"] == "ACTIVE"
+
+    def test_off_grid_slot_start_rejected(self, t: Any) -> None:
+        created = _event(t)
+        bad = handler(
+            _ev(
+                "upsertShowAndSellSlot",
+                {
+                    "input": {
+                        "showAndSellId": created["showAndSellId"],
+                        "startAt": _off(FUTURE_START, 60),
+                        "endAt": LATER_END,
+                        "capacity": 4,
+                        "expectedEventVersion": 1,
+                        "idempotencyKey": "sw-grid-001",
+                    }
+                },
+            ),
+            None,
+        )
+        assert bad["errorCode"] == ErrorCode.INVALID_INPUT
+        assert "W4-1b" in bad["message"]

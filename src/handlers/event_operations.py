@@ -1059,6 +1059,12 @@ def _resolve_slot_input(args: Dict[str, Any]) -> Dict[str, Any]:
     resolved["label"] = label
     start_at = require_timestamp(args, "startAt")
     end_at = require_timestamp(args, "endAt")
+    if not _is_grid_aligned(start_at):
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "Slot startAt must be aligned to the 30-minute grid (input constraint per the "
+            "W4-1b ruling: durations stay arbitrary, starts are quantized)",
+        )
     if _parse_ts(end_at) <= _parse_ts(start_at):
         raise AppError(ErrorCode.INVALID_INPUT, "endAt must be after startAt")
     resolved["startAt"] = start_at
@@ -1343,6 +1349,13 @@ def _signup_to_graphql(item: Dict[str, Any], admin_view: bool = False) -> Dict[s
 
 WINDOW_PREFIX = "PROFILEWINDOW#"
 WINDOW_BUCKET_SECONDS = 30 * 60  # 30-minute fixed grid; overlapping slots always share a bucket
+
+
+def _is_grid_aligned(timestamp: str) -> bool:
+    """Slot starts must sit on the 30-minute grid (UTC). Named input
+    constraint per the r2 W4-1b ruling — durations stay arbitrary
+    (90/120/180 minutes all preserved); only the START is quantized."""
+    return int(_parse_ts(timestamp).timestamp()) % WINDOW_BUCKET_SECONDS == 0
 
 
 def _window_buckets(start_at: str, end_at: str) -> List[str]:

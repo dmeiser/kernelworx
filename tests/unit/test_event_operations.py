@@ -27,10 +27,16 @@ CAMPAIGN_A = "CAMPAIGN#campaign-1"
 CAMPAIGN_B = "CAMPAIGN#campaign-2"
 
 NOW = datetime.now(timezone.utc)
-FUTURE_START = (NOW + timedelta(days=2)).isoformat().replace("+00:00", "Z")
-FUTURE_END = (NOW + timedelta(days=2, hours=3)).isoformat().replace("+00:00", "Z")
-LATER_START = (NOW + timedelta(days=3)).isoformat().replace("+00:00", "Z")
-LATER_END = (NOW + timedelta(days=3, hours=3)).isoformat().replace("+00:00", "Z")
+
+
+def _grid(moment: Any) -> Any:
+    return moment.replace(minute=(moment.minute // 30) * 30, second=0, microsecond=0) + timedelta(days=1)
+
+
+FUTURE_START = _grid(NOW).isoformat().replace("+00:00", "Z")
+FUTURE_END = (_grid(NOW) + timedelta(hours=3)).isoformat().replace("+00:00", "Z")
+LATER_START = (_grid(NOW) + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+LATER_END = (_grid(NOW) + timedelta(days=1, hours=3)).isoformat().replace("+00:00", "Z")
 PAST_START = (NOW - timedelta(days=2)).isoformat().replace("+00:00", "Z")
 PAST_END = (NOW - timedelta(days=1)).isoformat().replace("+00:00", "Z")
 
@@ -330,12 +336,13 @@ class TestAllocationPlanner:
         assert first["warnings"] == []
         # Second event overlapping the first: 4 + 4 = 8 > 5 concurrent -> hard block.
         second = _create_event(t, key="ev-second1", startAt=LATER_START, endAt=LATER_END)
+        overlap_start = _grid(NOW) + timedelta(hours=1)
         t["show_and_sells"].update_item(
             Key={"unitCampaignId": "uc-1", "itemKey": f"EVENT#{second['showAndSellId']}"},
             UpdateExpression="SET startAt = :s, endAt = :e",
             ExpressionAttributeValues={
-                ":s": (NOW + timedelta(days=2, hours=1)).isoformat().replace("+00:00", "Z"),
-                ":e": (NOW + timedelta(days=2, hours=2)).isoformat().replace("+00:00", "Z"),
+                ":s": overlap_start.isoformat().replace("+00:00", "Z"),
+                ":e": (overlap_start + timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
             },
         )
         blocked = handler(
