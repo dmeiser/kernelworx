@@ -1322,6 +1322,11 @@ input RemoveUnitCampaignMembershipInput {
 
 """The root query object for the KernelWorx API."""
 type Query {
+  showAndSell(showAndSellId: ID!): ShowAndSellAdmin
+  showAndSells(unitCampaignId: ID!, status: ShowAndSellStatus, page: PageInput): ShowAndSellAdminConnection!
+  unitCampaignOpportunities(unitCampaignId: ID!, includePast: Boolean, page: PageInput): ShowAndSellOpportunityConnection!
+  showAndSellOpportunity(showAndSellId: ID!, profileId: ID!): ShowAndSellOpportunity
+  eventInventoryAllocations(unitCampaignId: ID!, productId: ID, showAndSellId: ID, status: AllocationStatus, page: PageInput): EventInventoryAllocationConnection!
   # Show & Sell — Units and Unit Campaigns (Stage 1)
   """The Units on which the caller holds a Unit Admin grant. No cross-Unit data."""
   myUnits(
@@ -1578,6 +1583,12 @@ type Query {
 
 """The root mutation object for the KernelWorx API."""
 type Mutation {
+  createShowAndSell(unitCampaignId: ID!, locationName: String!, address: String, startAt: String!, endAt: String!, splitMethod: String, weOweEnabled: Boolean, idempotencyKey: String!): ShowAndSellAdmin!
+  updateShowAndSell(showAndSellId: ID!, locationName: String, address: String, splitMethod: String, weOweEnabled: Boolean, expectedVersion: Int!, idempotencyKey: String!): ShowAndSellAdmin!
+  cancelShowAndSell(showAndSellId: ID!, expectedVersion: Int!, reason: String!, idempotencyKey: String!): ShowAndSellAdmin!
+  assignShowAndSellInventory(showAndSellId: ID!, items: [AllocationTargetInput!], expectedVersion: Int!, idempotencyKey: String!): [EventInventoryAllocation!]!
+  upsertShowAndSellSlot(showAndSellId: ID!, slotId: ID, label: String, startAt: String!, endAt: String!, capacity: Int!, expectedEventVersion: Int!, expectedSlotVersion: Int, idempotencyKey: String!): ShowAndSellSlot!
+  deleteShowAndSellSlot(showAndSellId: ID!, slotId: ID!, expectedVersion: Int!, idempotencyKey: String!): Boolean!
   # Show & Sell — Units and Unit Campaigns (Stage 1)
   """Create a unit; the caller becomes its initial Unit Admin. Returns the Unit and the creator grant."""
   createUnit(
@@ -1977,22 +1988,9 @@ input AllocationTargetInput {
   quantity: Int!
 }
 
-extend type Query {
-  showAndSell(showAndSellId: ID!): ShowAndSellAdmin
-  showAndSells(unitCampaignId: ID!, status: ShowAndSellStatus, page: PageInput): ShowAndSellAdminConnection!
-  unitCampaignOpportunities(unitCampaignId: ID!, includePast: Boolean, page: PageInput): ShowAndSellOpportunityConnection!
-  showAndSellOpportunity(showAndSellId: ID!, profileId: ID!): ShowAndSellOpportunity
-  eventInventoryAllocations(unitCampaignId: ID!, productId: ID, showAndSellId: ID, status: AllocationStatus, page: PageInput): EventInventoryAllocationConnection!
-}
 
-extend type Mutation {
-  createShowAndSell(unitCampaignId: ID!, locationName: String!, address: String, startAt: String!, endAt: String!, splitMethod: String, weOweEnabled: Boolean, idempotencyKey: String!): ShowAndSellAdmin!
-  updateShowAndSell(showAndSellId: ID!, locationName: String, address: String, splitMethod: String, weOweEnabled: Boolean, expectedVersion: Int!, idempotencyKey: String!): ShowAndSellAdmin!
-  cancelShowAndSell(showAndSellId: ID!, expectedVersion: Int!, reason: String!, idempotencyKey: String!): ShowAndSellAdmin!
-  assignShowAndSellInventory(showAndSellId: ID!, items: [AllocationTargetInput!], expectedVersion: Int!, idempotencyKey: String!): [EventInventoryAllocation!]!
-  upsertShowAndSellSlot(showAndSellId: ID!, slotId: ID, label: String, startAt: String!, endAt: String!, capacity: Int!, expectedEventVersion: Int!, expectedSlotVersion: Int, idempotencyKey: String!): ShowAndSellSlot!
-  deleteShowAndSellSlot(showAndSellId: ID!, slotId: ID!, expectedVersion: Int!, idempotencyKey: String!): Boolean!
-}
+
+
 
 # ============================================================================
 # Schema Root
