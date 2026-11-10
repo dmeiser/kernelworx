@@ -425,3 +425,65 @@ class TestSweep:
         first = handler(_ev("updateUnitPaymentMethod", args), None)
         second = handler(_ev("updateUnitPaymentMethod", args), None)
         assert second == first
+
+    def test_input_wrapped_marker_key_and_replays(self, t: Dict[str, Any]) -> None:
+        from src.handlers.payment_method_operations import _idempotency_begin
+
+        _seed(t)
+        event = _ev("mystery", {})
+        _, _, _ = _idempotency_begin(event, {"input": {"idempotencyKey": "pm-ik-0001"}}, "scope")
+        # confirm + delete replay paths
+        with mock_aws():
+            boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="kernelworx-exports-ue1-dev")
+            os.environ["EXPORTS_BUCKET"] = "kernelworx-exports-ue1-dev"
+            created = _create(t, key="pm-ik-0002")
+            requested = handler(
+                _ev("requestUnitPaymentMethodQrUpload", {"unitId": "unit-1", "paymentMethodId": created["paymentMethodId"], "contentType": "image/png", "idempotencyKey": "pm-ik-0003"}),
+                None,
+            )
+            confirm_args = {
+                "unitId": "unit-1",
+                "paymentMethodId": created["paymentMethodId"],
+                "expectedVersion": 1,
+                "s3Key": requested["s3Key"],
+                "idempotencyKey": "pm-ik-0004",
+            }
+            first = handler(_ev("confirmUnitPaymentMethodQrUpload", confirm_args), None)
+            second = handler(_ev("confirmUnitPaymentMethodQrUpload", confirm_args), None)
+            assert second == first
+            delete_args = {
+                "unitId": "unit-1",
+                "paymentMethodId": created["paymentMethodId"],
+                "expectedVersion": 2,
+                "idempotencyKey": "pm-ik-0005",
+            }
+            first_d = handler(_ev("deleteUnitPaymentMethodQrCode", delete_args), None)
+            second_d = handler(_ev("deleteUnitPaymentMethodQrCode", delete_args), None)
+            assert second_d == first_d
+            os.environ.pop("EXPORTS_BUCKET", None)
+
+    def test_missing_bucket_branch(self, t: Dict[str, Any], monkeypatch: Any) -> None:
+        _seed(t)
+        created = _create(t, key="pm-mb-0001")
+        os.environ.pop("EXPORTS_BUCKET", None)
+        result = handler(
+            _ev("requestUnitPaymentMethodQrUpload", {"unitId": "unit-1", "paymentMethodId": created["paymentMethodId"], "contentType": "image/png", "idempotencyKey": "pm-mb-0002"}),
+            None,
+        )
+        assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
+
+    def test_delete_without_bucket_skips_s3(self, t: Dict[str, Any]) -> None:
+        """A delete with no configured bucket still clears the stored key."""
+        _seed(t)
+        created = _create(t, key="pm-db-0001")
+        t["units"].update_item(
+            Key={"unitId": "unit-1", "itemKey": f"PAYMENT#{created['paymentMethodId']}"},
+            UpdateExpression="SET qrCodeS3Key = :k",
+            ExpressionAttributeValues={":k": "payment-qr-codes/units/unit-1/x/y.png"},
+        )
+        os.environ.pop("EXPORTS_BUCKET", None)
+        result = handler(
+            _ev("deleteUnitPaymentMethodQrCode", {"unitId": "unit-1", "paymentMethodId": created["paymentMethodId"], "expectedVersion": 1, "idempotencyKey": "pm-db-0002"}),
+            None,
+        )
+        assert result["qrCodeS3Key"] is None
