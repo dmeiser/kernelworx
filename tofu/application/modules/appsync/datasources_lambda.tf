@@ -86,6 +86,17 @@ resource "aws_appsync_datasource" "unit_campaign_operations" {
   }
 }
 
+resource "aws_appsync_datasource" "finalization_operations" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "FinalizationOperationsDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["finalization-operations"]
+  }
+}
+
 resource "aws_appsync_datasource" "sale_operations" {
   api_id           = aws_appsync_graphql_api.main.id
   name             = "SaleOperationsDS"

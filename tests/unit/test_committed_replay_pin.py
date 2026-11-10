@@ -24,6 +24,7 @@ import pytest
 
 from src.handlers import (
     event_operations,
+    finalization_operations,
     inventory_operations,
     order_operations,
     participant_data,
@@ -86,6 +87,10 @@ PIN_CASES: Dict[str, str] = {
     "voidShowAndSellSale": "test_sale_operations.py::TestCorrectionAndVoid::test_void_returns_stock_and_cancels",
     "setWeOweReservation": "test_sale_operations.py::TestWeOwe::test_reservation_target_not_delta",
     "fulfillWeOwe": "test_sale_operations.py::TestWeOwe::test_fulfill_from_kernel_stock",
+    # finalization_operations (wave 6)
+    "finalizeShowAndSell": "test_finalization_operations.py::TestRoundingGarage::test_blocked_on_unassigned_cent_then_exact",
+    "reopenShowAndSell": "test_finalization_operations.py::TestReopenExactSubtraction::test_suspend_subtracts_totals_and_moves_no_stock",
+    "updateShowAndSellRoundingDraft": "test_finalization_operations.py::TestRoundingGarage::test_unassigned_cent_blocks_naming_the_cent",
 }
 
 
@@ -109,6 +114,7 @@ def _dispatched_operations() -> Set[str]:
         inventory_operations,
         order_operations,
         event_operations,
+        finalization_operations,
         payment_method_operations,
         sale_operations,
     ):

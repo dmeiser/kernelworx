@@ -959,3 +959,78 @@ resource "aws_appsync_resolver" "we_owe_obligations" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# showAndSellFinalizationPreview (Show & Sell wave 6, Lambda)
+resource "aws_appsync_resolver" "show_and_sell_finalization_preview" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellFinalizationPreview"
+  data_source = aws_appsync_datasource.finalization_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# showAndSellFinalizations (Show & Sell wave 6, Lambda)
+resource "aws_appsync_resolver" "show_and_sell_finalizations" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellFinalizations"
+  data_source = aws_appsync_datasource.finalization_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# showAndSellFinalizationCredits (Show & Sell wave 6, Lambda)
+resource "aws_appsync_resolver" "show_and_sell_finalization_credits" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellFinalizationCredits"
+  data_source = aws_appsync_datasource.finalization_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# scoutCampaignShowAndSellTotal (Show & Sell wave 6, Lambda)
+resource "aws_appsync_resolver" "scout_campaign_show_and_sell_total" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "scoutCampaignShowAndSellTotal"
+  data_source = aws_appsync_datasource.finalization_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# unitCampaignCreditAllocations (Show & Sell wave 6, Lambda)
+resource "aws_appsync_resolver" "unit_campaign_credit_allocations" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignCreditAllocations"
+  data_source = aws_appsync_datasource.finalization_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

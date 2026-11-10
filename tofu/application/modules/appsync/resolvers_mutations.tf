@@ -1504,3 +1504,48 @@ resource "aws_appsync_resolver" "fulfill_we_owe" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# updateShowAndSellRoundingDraft (Show & Sell wave 6, Lambda)
+resource "aws_appsync_resolver" "update_show_and_sell_rounding_draft" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "updateShowAndSellRoundingDraft"
+  data_source = aws_appsync_datasource.finalization_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# finalizeShowAndSell (Show & Sell wave 6, Lambda)
+resource "aws_appsync_resolver" "finalize_show_and_sell" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "finalizeShowAndSell"
+  data_source = aws_appsync_datasource.finalization_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# reopenShowAndSell (Show & Sell wave 6, Lambda)
+resource "aws_appsync_resolver" "reopen_show_and_sell" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "reopenShowAndSell"
+  data_source = aws_appsync_datasource.finalization_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

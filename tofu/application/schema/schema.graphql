@@ -1186,6 +1186,32 @@ type Query {
     page: PageInput
   ): WeOweObligationConnection!
 
+  # --- Show & Sell wave 6: finalization + credit (API §8) ---
+  """Finalization workspace preview: pool, base shares, unassigned cents, expected cash, blockers (Unit Admins only)."""
+  showAndSellFinalizationPreview(
+    showAndSellId: ID!
+    cashAdjustmentCents: Int
+    actualCashCents: Int
+    discrepancyExplanation: String
+  ): FinalizationPreview!
+  """Versioned finalization history for an event (Unit Admins only)."""
+  showAndSellFinalizations(showAndSellId: ID!, page: PageInput): ShowAndSellFinalizationConnection!
+  """Per-Scout credit records for an event's finalizations (Unit Admins only)."""
+  showAndSellFinalizationCredits(
+    showAndSellId: ID!
+    finalizationId: ID
+    status: String
+    page: PageInput
+  ): ScoutSalesAllocationConnection!
+  """Approved Show & Sell total for one Scout in one Unit Campaign (Unit Admins only)."""
+  scoutCampaignShowAndSellTotal(profileId: ID!, unitCampaignId: ID!): ScoutCampaignShowAndSellTotal!
+  """Raw credit facts across a Unit Campaign for browser seller/event reports (Unit Admins only)."""
+  unitCampaignCreditAllocations(
+    unitCampaignId: ID!
+    status: String
+    page: PageInput
+  ): CreditAllocationFactConnection!
+
 }
 
 # ============================================================================
@@ -1639,6 +1665,29 @@ type Mutation {
     expectedVersion: Int!
     idempotencyKey: String!
   ): WeOweResult!
+
+  # --- Show & Sell wave 6: finalization + reopening (API §8) ---
+  """Persist a Kernel rounding draft (Unit Admins; ENDED/REOPENED events)."""
+  updateShowAndSellRoundingDraft(
+    showAndSellId: ID!
+    expectedVersion: Int!
+    draft: [RoundingAssignmentInput!]!
+    idempotencyKey: String!
+  ): ShowAndSell!
+  """Publish one approved finalization version (Unit Admins; ENDED/REOPENED only)."""
+  finalizeShowAndSell(
+    showAndSellId: ID!
+    expectedVersion: Int!
+    cashAdjustmentCents: Int
+    cashAdjustmentReason: String
+    actualCashCents: Int
+    discrepancyExplanation: String
+    returnLines: [ReturnLineInput!]
+    roundingAssignments: [RoundingAssignmentInput!]
+    idempotencyKey: String!
+  ): FinalizationResult!
+  """Suspend an approved finalization for corrections (Unit Admins; no stock movement)."""
+  reopenShowAndSell(showAndSellId: ID!, expectedVersion: Int!, reason: String!, idempotencyKey: String!): ShowAndSell!
 
 }
 
