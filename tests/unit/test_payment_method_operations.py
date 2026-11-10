@@ -306,26 +306,57 @@ class TestSweep:
     def test_missing_method_and_version_mismatch(self, t: Dict[str, Any]) -> None:
         _seed(t)
         missing = handler(
-            _ev("updateUnitPaymentMethod", {"unitId": "unit-1", "paymentMethodId": "PM#ghost", "displayName": "X", "expectedVersion": 1, "idempotencyKey": "pm-sw-0002"}),
+            _ev(
+                "updateUnitPaymentMethod",
+                {
+                    "unitId": "unit-1",
+                    "paymentMethodId": "PM#ghost",
+                    "displayName": "X",
+                    "expectedVersion": 1,
+                    "idempotencyKey": "pm-sw-0002",
+                },
+            ),
             None,
         )
         assert missing["errorCode"] == ErrorCode.NOT_FOUND
         created = _create(t, key="pm-sw-0003")
         stale = handler(
-            _ev("deactivateUnitPaymentMethod", {"unitId": "unit-1", "paymentMethodId": created["paymentMethodId"], "expectedVersion": 9, "idempotencyKey": "pm-sw-0004"}),
+            _ev(
+                "deactivateUnitPaymentMethod",
+                {
+                    "unitId": "unit-1",
+                    "paymentMethodId": created["paymentMethodId"],
+                    "expectedVersion": 9,
+                    "idempotencyKey": "pm-sw-0004",
+                },
+            ),
             None,
         )
         assert stale["errorCode"] == ErrorCode.CONFLICT
         confirm_stale = handler(
             _ev(
                 "confirmUnitPaymentMethodQrUpload",
-                {"unitId": "unit-1", "paymentMethodId": created["paymentMethodId"], "expectedVersion": 9, "s3Key": f"payment-qr-codes/units/unit-1/{created['paymentMethodId']}/x.png", "idempotencyKey": "pm-sw-0005"},
+                {
+                    "unitId": "unit-1",
+                    "paymentMethodId": created["paymentMethodId"],
+                    "expectedVersion": 9,
+                    "s3Key": f"payment-qr-codes/units/unit-1/{created['paymentMethodId']}/x.png",
+                    "idempotencyKey": "pm-sw-0005",
+                },
             ),
             None,
         )
         assert confirm_stale["errorCode"] == ErrorCode.CONFLICT
         delete_stale = handler(
-            _ev("deleteUnitPaymentMethodQrCode", {"unitId": "unit-1", "paymentMethodId": created["paymentMethodId"], "expectedVersion": 9, "idempotencyKey": "pm-sw-0006"}),
+            _ev(
+                "deleteUnitPaymentMethodQrCode",
+                {
+                    "unitId": "unit-1",
+                    "paymentMethodId": created["paymentMethodId"],
+                    "expectedVersion": 9,
+                    "idempotencyKey": "pm-sw-0006",
+                },
+            ),
             None,
         )
         assert delete_stale["errorCode"] == ErrorCode.CONFLICT
@@ -363,7 +394,16 @@ class TestSweep:
             ("deleteUnitPaymentMethodQrCode", {}),
         ]:
             result = handler(
-                _ev(field, {"unitId": "unit-1", "paymentMethodId": "BUILTIN#CASH", "expectedVersion": 1, "idempotencyKey": f"pm-bg-{field[:8]}", **args}),
+                _ev(
+                    field,
+                    {
+                        "unitId": "unit-1",
+                        "paymentMethodId": "BUILTIN#CASH",
+                        "expectedVersion": 1,
+                        "idempotencyKey": f"pm-bg-{field[:8]}",
+                        **args,
+                    },
+                ),
                 None,
             )
             assert result["errorCode"] == ErrorCode.INVALID_INPUT, result
@@ -389,7 +429,9 @@ class TestSweep:
         monkeypatch.setattr(payment_method_operations, "execute_transaction", _cancel_on_first)
         with pytest.raises(TransactionCancelledError):
             payment_method_operations._create_payment_method(
-                _ev("createUnitPaymentMethod", {"unitId": "unit-1", "displayName": "Y", "idempotencyKey": "pm-race-02"}),
+                _ev(
+                    "createUnitPaymentMethod", {"unitId": "unit-1", "displayName": "Y", "idempotencyKey": "pm-race-02"}
+                ),
                 None,
             )
 
@@ -438,7 +480,15 @@ class TestSweep:
             os.environ["EXPORTS_BUCKET"] = "kernelworx-exports-ue1-dev"
             created = _create(t, key="pm-ik-0002")
             requested = handler(
-                _ev("requestUnitPaymentMethodQrUpload", {"unitId": "unit-1", "paymentMethodId": created["paymentMethodId"], "contentType": "image/png", "idempotencyKey": "pm-ik-0003"}),
+                _ev(
+                    "requestUnitPaymentMethodQrUpload",
+                    {
+                        "unitId": "unit-1",
+                        "paymentMethodId": created["paymentMethodId"],
+                        "contentType": "image/png",
+                        "idempotencyKey": "pm-ik-0003",
+                    },
+                ),
                 None,
             )
             confirm_args = {
@@ -467,7 +517,15 @@ class TestSweep:
         created = _create(t, key="pm-mb-0001")
         os.environ.pop("EXPORTS_BUCKET", None)
         result = handler(
-            _ev("requestUnitPaymentMethodQrUpload", {"unitId": "unit-1", "paymentMethodId": created["paymentMethodId"], "contentType": "image/png", "idempotencyKey": "pm-mb-0002"}),
+            _ev(
+                "requestUnitPaymentMethodQrUpload",
+                {
+                    "unitId": "unit-1",
+                    "paymentMethodId": created["paymentMethodId"],
+                    "contentType": "image/png",
+                    "idempotencyKey": "pm-mb-0002",
+                },
+            ),
             None,
         )
         assert result["errorCode"] == ErrorCode.INTERNAL_ERROR
@@ -483,7 +541,15 @@ class TestSweep:
         )
         os.environ.pop("EXPORTS_BUCKET", None)
         result = handler(
-            _ev("deleteUnitPaymentMethodQrCode", {"unitId": "unit-1", "paymentMethodId": created["paymentMethodId"], "expectedVersion": 1, "idempotencyKey": "pm-db-0002"}),
+            _ev(
+                "deleteUnitPaymentMethodQrCode",
+                {
+                    "unitId": "unit-1",
+                    "paymentMethodId": created["paymentMethodId"],
+                    "expectedVersion": 1,
+                    "idempotencyKey": "pm-db-0002",
+                },
+            ),
             None,
         )
         assert result["qrCodeS3Key"] is None

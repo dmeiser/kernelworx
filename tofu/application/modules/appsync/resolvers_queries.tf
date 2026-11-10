@@ -914,3 +914,48 @@ resource "aws_appsync_resolver" "unit_payment_methods" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# showAndSellSales (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "show_and_sell_sales" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellSales"
+  data_source = aws_appsync_datasource.sale_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# weOweObligation (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "we_owe_obligation" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "weOweObligation"
+  data_source = aws_appsync_datasource.sale_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# weOweObligations (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "we_owe_obligations" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "weOweObligations"
+  data_source = aws_appsync_datasource.sale_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

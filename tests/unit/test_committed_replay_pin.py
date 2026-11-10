@@ -28,6 +28,7 @@ from src.handlers import (
     order_operations,
     participant_data,
     payment_method_operations,
+    sale_operations,
     unit_campaign_operations,
     unit_operations,
 )
@@ -79,6 +80,12 @@ PIN_CASES: Dict[str, str] = {
     "requestUnitPaymentMethodQrUpload": "test_payment_method_operations.py::TestQrFlow::test_request_confirm_delete_round_trip",
     "confirmUnitPaymentMethodQrUpload": "test_payment_method_operations.py::TestQrFlow::test_request_confirm_delete_round_trip",
     "deleteUnitPaymentMethodQrCode": "test_payment_method_operations.py::TestQrFlow::test_request_confirm_delete_round_trip",
+    # sale_operations (wave 5)
+    "createShowAndSellSale": "test_sale_operations.py::TestCreateSale::test_replay",
+    "correctShowAndSellSale": "test_sale_operations.py::TestCorrectionAndVoid::test_absolute_target_correction",
+    "voidShowAndSellSale": "test_sale_operations.py::TestCorrectionAndVoid::test_void_returns_stock_and_cancels",
+    "setWeOweReservation": "test_sale_operations.py::TestWeOwe::test_reservation_target_not_delta",
+    "fulfillWeOwe": "test_sale_operations.py::TestWeOwe::test_fulfill_from_kernel_stock",
 }
 
 
@@ -103,6 +110,7 @@ def _dispatched_operations() -> Set[str]:
         order_operations,
         event_operations,
         payment_method_operations,
+        sale_operations,
     ):
         dispatched |= set(module._DISPATCH.keys())  # type: ignore[attr-defined]
     return dispatched

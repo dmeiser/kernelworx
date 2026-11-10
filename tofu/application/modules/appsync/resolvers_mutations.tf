@@ -1427,3 +1427,80 @@ resource "aws_appsync_resolver" "delete_unit_payment_method_qr_code" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Show & Sell wave 5 mutation resolvers — sales + We-Owe.
+
+# createShowAndSellSale (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "create_show_and_sell_sale" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "createShowAndSellSale"
+  data_source = aws_appsync_datasource.sale_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# correctShowAndSellSale (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "correct_show_and_sell_sale" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "correctShowAndSellSale"
+  data_source = aws_appsync_datasource.sale_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# voidShowAndSellSale (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "void_show_and_sell_sale" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "voidShowAndSellSale"
+  data_source = aws_appsync_datasource.sale_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# setWeOweReservation (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "set_we_owe_reservation" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "setWeOweReservation"
+  data_source = aws_appsync_datasource.sale_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# fulfillWeOwe (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "fulfill_we_owe" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "fulfillWeOwe"
+  data_source = aws_appsync_datasource.sale_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
