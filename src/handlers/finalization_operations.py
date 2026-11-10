@@ -28,6 +28,7 @@ doctrine (clean-room review docs wave-10-stage-5-backend), including:
 """
 
 import uuid
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -417,10 +418,9 @@ def _validate_draft_entry(entry: Any, eligible: set[str], seen: set[str]) -> Tup
         raise AppError(ErrorCode.INVALID_INPUT, "Rounding draft entries must name confirmed participants")
     if profile_id in seen:
         raise AppError(ErrorCode.INVALID_INPUT, "Rounding draft entries must be unique per Scout")
-    if not isinstance(cents, int) or isinstance(cents, bool) or cents < 0:
-        raise AppError(ErrorCode.INVALID_INPUT, "Rounding cents must be a non-negative integer")
+    cents_int = _integral_cents(cents)
     seen.add(profile_id)
-    return profile_id, cents
+    return profile_id, cents_int
 
 
 def _normalize_draft(raw_draft: Any, preview: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -614,6 +614,16 @@ def _split_alloc_product(alloc: Dict[str, Any]) -> str:
     return str(alloc.get("productId") or alloc["itemKey"].rsplit("#", 1)[-1])
 
 
+def _integral_cents(value: Any) -> int:
+    """Integer cents on the wire OR reloaded from DynamoDB (Decimal)."""
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        raise AppError(ErrorCode.INVALID_INPUT, "Rounding cents must be a non-negative integer")
+    cents = int(value)
+    if cents != value or cents < 0:
+        raise AppError(ErrorCode.INVALID_INPUT, "Rounding cents must be a non-negative integer")
+    return cents
+
+
 def _normalize_rounding_entries(source: Any, base_by_profile: Dict[str, int]) -> List[Dict[str, Any]]:
     if not isinstance(source, list):
         raise AppError(ErrorCode.INVALID_INPUT, "roundingAssignments must be a list")
@@ -629,10 +639,9 @@ def _normalize_rounding_entries(source: Any, base_by_profile: Dict[str, int]) ->
             raise AppError(ErrorCode.INVALID_INPUT, "Rounding assignments must name confirmed participants")
         if profile_id in seen:
             raise AppError(ErrorCode.INVALID_INPUT, "Rounding assignments must be unique per Scout")
-        if not isinstance(cents, int) or isinstance(cents, bool) or cents < 0:
-            raise AppError(ErrorCode.INVALID_INPUT, "Rounding cents must be a non-negative integer")
+        cents_int = _integral_cents(cents)
         seen.add(profile_id)
-        normalized.append({"profileId": profile_id, "cents": cents})
+        normalized.append({"profileId": profile_id, "cents": cents_int})
     return normalized
 
 
@@ -1672,7 +1681,12 @@ def _scout_total(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     args = event.get("arguments", {})
     profile_id = args.get("profileId")
     unit_campaign_id = args.get("unitCampaignId")
-    if not isinstance(profile_id, str) or not isinstance(unit_campaign_id, str):
+    if (
+        not isinstance(profile_id, str)
+        or not profile_id
+        or not isinstance(unit_campaign_id, str)
+        or not unit_campaign_id
+    ):
         raise AppError(ErrorCode.INVALID_INPUT, "profileId and unitCampaignId are required")
     caller = _require_caller(event)
     uc = tables.unit_campaigns.get_item(
