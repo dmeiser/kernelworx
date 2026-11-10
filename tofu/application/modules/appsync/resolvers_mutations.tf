@@ -1335,3 +1335,95 @@ resource "aws_appsync_resolver" "confirm_show_and_sell_work" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Show & Sell wave 5 mutation resolvers — payment methods + QR.
+
+# createUnitPaymentMethod (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "create_unit_payment_method" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "createUnitPaymentMethod"
+  data_source = aws_appsync_datasource.payment_method_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# updateUnitPaymentMethod (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "update_unit_payment_method" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "updateUnitPaymentMethod"
+  data_source = aws_appsync_datasource.payment_method_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# deactivateUnitPaymentMethod (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "deactivate_unit_payment_method" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "deactivateUnitPaymentMethod"
+  data_source = aws_appsync_datasource.payment_method_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# requestUnitPaymentMethodQrUpload (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "request_unit_payment_method_qr_upload" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "requestUnitPaymentMethodQrUpload"
+  data_source = aws_appsync_datasource.payment_method_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# confirmUnitPaymentMethodQrUpload (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "confirm_unit_payment_method_qr_upload" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "confirmUnitPaymentMethodQrUpload"
+  data_source = aws_appsync_datasource.payment_method_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# deleteUnitPaymentMethodQrCode (Show & Sell wave 5, Lambda)
+resource "aws_appsync_resolver" "delete_unit_payment_method_qr_code" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "deleteUnitPaymentMethodQrCode"
+  data_source = aws_appsync_datasource.payment_method_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

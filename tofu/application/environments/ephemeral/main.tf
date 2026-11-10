@@ -180,13 +180,14 @@ module "lambda" {
     "post-auth" = module.iam.lambda_post_auth_execution_role_arn
     # #679 (public-orders offer slice): the public buyer order offer + receipt
     # Lambda uses its own scoped role (the anonymous-facing read path).
-    "unit-operations"          = module.iam.lambda_show_and_sell_execution_role_arn
-    "unit-campaign-operations" = module.iam.lambda_show_and_sell_execution_role_arn
-    "event-operations"         = module.iam.lambda_show_and_sell_execution_role_arn
-    "inventory-operations"     = module.iam.lambda_show_and_sell_execution_role_arn
-    "order-operations"         = module.iam.lambda_show_and_sell_execution_role_arn
-    "participant-data"         = module.iam.lambda_show_and_sell_execution_role_arn
-    "public-orders"            = module.iam.lambda_public_orders_execution_role_arn
+    "unit-operations"           = module.iam.lambda_show_and_sell_execution_role_arn
+    "unit-campaign-operations"  = module.iam.lambda_show_and_sell_execution_role_arn
+    "payment-method-operations" = module.iam.lambda_show_and_sell_execution_role_arn
+    "event-operations"          = module.iam.lambda_show_and_sell_execution_role_arn
+    "inventory-operations"      = module.iam.lambda_show_and_sell_execution_role_arn
+    "order-operations"          = module.iam.lambda_show_and_sell_execution_role_arn
+    "participant-data"          = module.iam.lambda_show_and_sell_execution_role_arn
+    "public-orders"             = module.iam.lambda_public_orders_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name
 

@@ -27,6 +27,7 @@ from src.handlers import (
     inventory_operations,
     order_operations,
     participant_data,
+    payment_method_operations,
     unit_campaign_operations,
     unit_operations,
 )
@@ -71,6 +72,13 @@ PIN_CASES: Dict[str, str] = {
     "signupScoutForShowAndSellSlot": "test_wave4_coverage_sweep.py::TestEventSweep::test_signup_replay_and_race",
     "cancelShowAndSellSignup": "test_wave4_coverage_sweep.py::TestWave4TrulyFinal::test_cancel_signup_missing_slot_row_and_race",
     "confirmShowAndSellWork": "test_wave4_coverage_sweep.py::TestWave4LastBranches::test_confirm_work_replay_and_version",
+    # payment_method_operations (wave 5 fast-follow)
+    "createUnitPaymentMethod": "test_payment_method_operations.py::TestCreateAndList::test_replay",
+    "updateUnitPaymentMethod": "test_payment_method_operations.py::TestUpdateAndDeactivate::test_update_name",
+    "deactivateUnitPaymentMethod": "test_payment_method_operations.py::TestUpdateAndDeactivate::test_deactivate_and_builtin_guard",
+    "requestUnitPaymentMethodQrUpload": "test_payment_method_operations.py::TestQrFlow::test_request_confirm_delete_round_trip",
+    "confirmUnitPaymentMethodQrUpload": "test_payment_method_operations.py::TestQrFlow::test_request_confirm_delete_round_trip",
+    "deleteUnitPaymentMethodQrCode": "test_payment_method_operations.py::TestQrFlow::test_request_confirm_delete_round_trip",
 }
 
 
@@ -94,6 +102,7 @@ def _dispatched_operations() -> Set[str]:
         inventory_operations,
         order_operations,
         event_operations,
+        payment_method_operations,
     ):
         dispatched |= set(module._DISPATCH.keys())  # type: ignore[attr-defined]
     return dispatched

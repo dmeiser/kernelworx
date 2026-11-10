@@ -634,6 +634,10 @@ export type GqlMutation = {
   confirmPaymentMethodQRCodeUpload: GqlPaymentMethod;
   /** Confirm worked time (Unit Admins only). */
   confirmShowAndSellWork: GqlConfirmWorkResult;
+  /** Confirm a QR upload landed (Unit Admins only). */
+  confirmUnitPaymentMethodQrUpload: GqlUnitPaymentMethod;
+  /** Correct a sale as a NEW revision (absolute targets; prior revisions preserved). */
+  correctShowAndSellSale: GqlShowAndSellSaleResult;
   /** Create a new active campaign on a profile the caller has write access to. Returns the created campaign. */
   createCampaign: GqlCampaign;
   /** Create a catalog owned by the caller. Returns the created catalog. */
@@ -652,12 +656,18 @@ export type GqlMutation = {
   createSharedCampaign: GqlSharedCampaign;
   /** Create a Show & Sell event (Unit Admins only; immutable times per spec 9.1). */
   createShowAndSell: GqlShowAndSell;
+  /** Record a sale at an event: immediate-handoff arithmetic, allocation-drawn stock. */
+  createShowAndSellSale: GqlShowAndSellSaleResult;
   /** Create a Unit; the creator becomes its first Unit Admin. */
   createUnit: GqlCreateUnitResult;
   /** Create a Unit Campaign (Unit Admins only). */
   createUnitCampaign: GqlUnitCampaignAdmin;
   /** Create a Unit invite (Unit Admins only; at most 20 active). */
   createUnitInvite: GqlUnitInvite;
+  /** The Unit's payment methods (Unit Admins only). */
+  createUnitPaymentMethod: GqlUnitPaymentMethod;
+  /** Deactivate a Unit payment method (Unit Admins only). */
+  deactivateUnitPaymentMethod: GqlUnitPaymentMethod;
   /** Delete a campaign and all of its orders, on a profile the caller has write access to. Returns true on success. */
   deleteCampaign: Scalars['Boolean']['output'];
   /** Soft-delete a catalog the caller owns (it is hidden from list queries but kept for reference). Returns true on success. */
@@ -678,8 +688,12 @@ export type GqlMutation = {
   deleteSharedCampaign: Scalars['Boolean']['output'];
   /** Delete a slot (Unit Admins only). */
   deleteShowAndSellSlot: Scalars['Boolean']['output'];
+  /** Delete a Unit payment method's QR code (Unit Admins only). */
+  deleteUnitPaymentMethodQrCode: GqlUnitPaymentMethod;
   /** Fulfill one order line from a named source; append-only fulfillment record. */
   fulfillIndividualOrderLine: GqlFulfillOrderLineResult;
+  /** Fulfill (or partially fulfill) a We-Owe obligation from a named source. */
+  fulfillWeOwe: GqlWeOweResult;
   /** Issue kernel stock to a Scout's custody in ONE transaction (Unit Admins only). */
   issueStockToScout: GqlIssueStockResult;
   /** Join a Unit Campaign with a Scout Campaign (join-time catalog identity enforced). */
@@ -696,6 +710,8 @@ export type GqlMutation = {
   removeUnitCampaignMembership: GqlUnitCampaignMembership;
   /** Get pre-signed S3 credentials to upload a QR code for one of the caller's payment methods. */
   requestPaymentMethodQRCodeUpload: GqlS3UploadInfo;
+  /** Request a presigned QR upload for a Unit payment method (Unit Admins only). */
+  requestUnitPaymentMethodQrUpload: GqlS3UploadInfo;
   /** Return with-Scout stock to the unit in ONE transaction (Unit Admins only). */
   returnStockFromScout: GqlReturnStockResult;
   /** Reverse a fulfillment with a deterministic REVERSAL# record (never an overwrite). */
@@ -706,6 +722,8 @@ export type GqlMutation = {
   revokeUnitAccessGrant: GqlUnit;
   /** Revoke a Unit invite (Unit Admins only). */
   revokeUnitInvite: Scalars['Boolean']['output'];
+  /** Reserve We-Owe stock with an absolute target (Unit Admins only). */
+  setWeOweReservation: GqlSetReservationResult;
   /** Share a profile the caller owns directly with another account by email. Returns the created share. */
   shareProfileDirect: GqlShare;
   /** Sign a Scout Campaign up for a slot (sequence contract; finalization feasibility enforced). */
@@ -736,8 +754,12 @@ export type GqlMutation = {
   updateUnit: GqlUnit;
   /** Update a Unit Campaign (Unit Admins only). */
   updateUnitCampaign: GqlUnitCampaignAdmin;
+  /** Rename a Unit payment method (Unit Admins only). */
+  updateUnitPaymentMethod: GqlUnitPaymentMethod;
   /** Create or update a work slot of arbitrary duration (Unit Admins only; at most 20 active slots). */
   upsertShowAndSellSlot: GqlShowAndSellSlot;
+  /** Void a sale as a new revision (append-only history). */
+  voidShowAndSellSale: GqlShowAndSellSaleResult;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -841,6 +863,31 @@ export type GqlMutation_ConfirmShowAndSellWorkArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_ConfirmUnitPaymentMethodQrUploadArgs = {
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  paymentMethodId: Scalars['ID']['input'];
+  s3Key: Scalars['String']['input'];
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CorrectShowAndSellSaleArgs = {
+  buyerEmail?: InputMaybe<Scalars['String']['input']>;
+  buyerName?: InputMaybe<Scalars['String']['input']>;
+  buyerPhone?: InputMaybe<Scalars['String']['input']>;
+  expectedEventVersion: Scalars['Int']['input'];
+  expectedRevision: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  lineItems: Array<GqlCorrectionLineInput>;
+  paymentMethod: GqlPaymentMethodInput;
+  reason: Scalars['String']['input'];
+  saleAt: Scalars['String']['input'];
+  saleId: Scalars['ID']['input'];
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_CreateCampaignArgs = {
   input: GqlCreateCampaignInput;
 };
@@ -886,6 +933,19 @@ export type GqlMutation_CreateShowAndSellArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateShowAndSellSaleArgs = {
+  buyerEmail?: InputMaybe<Scalars['String']['input']>;
+  buyerName?: InputMaybe<Scalars['String']['input']>;
+  buyerPhone?: InputMaybe<Scalars['String']['input']>;
+  expectedEventVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  lineItems: Array<GqlShowAndSellSaleLineInput>;
+  paymentMethod: GqlPaymentMethodInput;
+  saleAt: Scalars['String']['input'];
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_CreateUnitArgs = {
   input: GqlCreateUnitInput;
 };
@@ -898,6 +958,21 @@ export type GqlMutation_CreateUnitCampaignArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_CreateUnitInviteArgs = {
   idempotencyKey: Scalars['String']['input'];
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateUnitPaymentMethodArgs = {
+  displayName: Scalars['String']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_DeactivateUnitPaymentMethodArgs = {
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  paymentMethodId: Scalars['ID']['input'];
   unitId: Scalars['ID']['input'];
 };
 
@@ -951,6 +1026,14 @@ export type GqlMutation_DeleteShowAndSellSlotArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_DeleteUnitPaymentMethodQrCodeArgs = {
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  paymentMethodId: Scalars['ID']['input'];
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_FulfillIndividualOrderLineArgs = {
   expectedFulfillmentVersion: Scalars['Int']['input'];
   idempotencyKey: Scalars['String']['input'];
@@ -958,6 +1041,15 @@ export type GqlMutation_FulfillIndividualOrderLineArgs = {
   orderId: Scalars['ID']['input'];
   quantity: Scalars['Int']['input'];
   source: GqlFulfillmentSource;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_FulfillWeOweArgs = {
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  quantity: Scalars['Int']['input'];
+  source: Scalars['String']['input'];
+  weOweId: Scalars['ID']['input'];
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1017,6 +1109,14 @@ export type GqlMutation_RequestPaymentMethodQrCodeUploadArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RequestUnitPaymentMethodQrUploadArgs = {
+  contentType: Scalars['String']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  paymentMethodId: Scalars['ID']['input'];
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_ReturnStockFromScoutArgs = {
   campaignId: Scalars['ID']['input'];
   idempotencyKey: Scalars['String']['input'];
@@ -1051,6 +1151,14 @@ export type GqlMutation_RevokeUnitInviteArgs = {
   idempotencyKey: Scalars['String']['input'];
   inviteCode: Scalars['String']['input'];
   unitId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_SetWeOweReservationArgs = {
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  targetReservedQty: Scalars['Int']['input'];
+  weOweId: Scalars['ID']['input'];
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1135,8 +1243,27 @@ export type GqlMutation_UpdateUnitCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateUnitPaymentMethodArgs = {
+  displayName: Scalars['String']['input'];
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  paymentMethodId: Scalars['ID']['input'];
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpsertShowAndSellSlotArgs = {
   input: GqlUpsertShowAndSellSlotInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_VoidShowAndSellSaleArgs = {
+  expectedEventVersion: Scalars['Int']['input'];
+  expectedRevision: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  reason: Scalars['String']['input'];
+  saleId: Scalars['ID']['input'];
+  showAndSellId: Scalars['ID']['input'];
 };
 
 export type GqlOpportunityScout = {
@@ -1603,6 +1730,8 @@ export type GqlQuery = {
   showAndSell: GqlShowAndSell;
   /** Participant-safe opportunity detail for one Scout. */
   showAndSellOpportunity: GqlShowAndSellOpportunity;
+  /** An event's sales by status (Unit Admins only). */
+  showAndSellSales: GqlShowAndSellSaleConnection;
   /** Participant-safe calendar payload for a signup. */
   showAndSellSignupCalendarData: GqlCalendarInviteData;
   /** Event signups (Unit Admins only). */
@@ -1627,6 +1756,12 @@ export type GqlQuery = {
   unitCampaigns: GqlUnitCampaignConnection;
   /** The Unit's active invites (Unit Admins only). */
   unitInvites: GqlUnitInviteConnection;
+  /** A Unit's payment methods (Unit Admins or roster participants for display names). */
+  unitPaymentMethods: Array<GqlUnitPaymentMethod>;
+  /** One We-Owe obligation by id (Unit Admins or the bearer). */
+  weOweObligation: GqlWeOweObligation;
+  /** We-Owe obligations with filters (Unit Admins only). */
+  weOweObligations: GqlWeOweObligationConnection;
 };
 
 /** The root query object for the KernelWorx API. */
@@ -1796,6 +1931,13 @@ export type GqlQuery_ShowAndSellOpportunityArgs = {
 };
 
 /** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellSalesArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  showAndSellId: Scalars['ID']['input'];
+  status?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** The root query object for the KernelWorx API. */
 export type GqlQuery_ShowAndSellSignupCalendarDataArgs = {
   profileId: Scalars['ID']['input'];
   showAndSellId: Scalars['ID']['input'];
@@ -1867,6 +2009,26 @@ export type GqlQuery_UnitCampaignsArgs = {
 export type GqlQuery_UnitInvitesArgs = {
   page?: InputMaybe<GqlPageInput>;
   unitId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitPaymentMethodsArgs = {
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_WeOweObligationArgs = {
+  weOweId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_WeOweObligationsArgs = {
+  buyerName?: InputMaybe<Scalars['String']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  showAndSellId?: InputMaybe<Scalars['ID']['input']>;
+  status?: InputMaybe<Scalars['String']['input']>;
+  unitCampaignId: Scalars['ID']['input'];
 };
 
 /** Input for redeemProfileInvite. Redeems an invite code to gain access to a profile. */

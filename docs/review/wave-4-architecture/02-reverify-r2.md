@@ -87,6 +87,30 @@ bounded). The interim exposure is named, not hidden.
 101/101 across the wave-4 files (event operations, coverage sweep,
 terraform drift guard).
 
+## W4-1b closed — re-verification at 079244ad (r2 third pass)
+
+**CONFIRMED.** Option (a) landed exactly as ruled:
+- Named input constraint: off-grid `startAt` → INVALID_INPUT naming the
+  W4-1b ruling (event_operations.py:1066-1070), deterministic input
+  validation before any marker (convention rule 1); durations stay
+  arbitrary (endAt only validated after startAt); single grid constant
+  (`WINDOW_BUCKET_SECONDS`) shared by `_is_grid_aligned` and
+  `_window_buckets`.
+- My exhaustive sweep (8 quantized starts × 5 durations × 8 starts × 4
+  durations): **0 false blocks on adjacency, 0 missed real overlaps** —
+  with quantized starts the bucket guard is exact in both directions.
+- The adjacency oracle set is pinned exactly as specified
+  (test_wave4_coverage_sweep.py:2912-2990): aligned and
+  unaligned-quantized back-to-back succeed, 1-minute overlap fails at the
+  window layer (shared bucket), concurrent overlap fails.
+- Decision record cites the ruling (docs/investigations/
+  show-sell-slot-start-quantization.md).
+- Suites: 110/110 across the wave-4 files including the planner/slot
+  tests with grid-aligned fixtures.
+
+**Wave 4 complete: W4-1 (six-write signup + window proofs + quantization)
+and W4-2 (8.10 decision record, wave-6 precondition) both closed.**
+
 ## Disposition
 
 One ruling needed (W4-1b resolution a/b) + the adjacency oracle; then the

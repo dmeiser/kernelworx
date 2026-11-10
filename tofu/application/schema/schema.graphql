@@ -1169,6 +1169,23 @@ type Query {
     profileId: ID!
   ): CalendarInviteData!
 
+  # --- Show & Sell wave 5 queries ---
+  """A Unit's payment methods (Unit Admins or roster participants for display names)."""
+  unitPaymentMethods(unitId: ID!): [UnitPaymentMethod!]!
+  """An event's sales by status (Unit Admins only)."""
+  showAndSellSales(showAndSellId: ID!, status: String, page: PageInput): ShowAndSellSaleConnection!
+  """One We-Owe obligation by id (Unit Admins or the bearer)."""
+  weOweObligation(weOweId: ID!): WeOweObligation!
+  """We-Owe obligations with filters (Unit Admins only)."""
+  weOweObligations(
+    unitCampaignId: ID!
+    status: String
+    showAndSellId: ID
+    productId: ID
+    buyerName: String
+    page: PageInput
+  ): WeOweObligationConnection!
+
 }
 
 # ============================================================================
@@ -1557,6 +1574,71 @@ type Mutation {
     expectedVersion: Int!
     idempotencyKey: String!
   ): ConfirmWorkResult!
+
+  # --- Show & Sell wave 5: payment methods, sales, We Owe (spec API section 7) ---
+  """The Unit's payment methods (Unit Admins only)."""
+  createUnitPaymentMethod(unitId: ID!, displayName: String!, idempotencyKey: String!): UnitPaymentMethod!
+  """Rename a Unit payment method (Unit Admins only)."""
+  updateUnitPaymentMethod(unitId: ID!, paymentMethodId: ID!, displayName: String!, expectedVersion: Int!, idempotencyKey: String!): UnitPaymentMethod!
+  """Deactivate a Unit payment method (Unit Admins only)."""
+  deactivateUnitPaymentMethod(unitId: ID!, paymentMethodId: ID!, expectedVersion: Int!, idempotencyKey: String!): UnitPaymentMethod!
+  """Request a presigned QR upload for a Unit payment method (Unit Admins only)."""
+  requestUnitPaymentMethodQrUpload(unitId: ID!, paymentMethodId: ID!, contentType: String!, idempotencyKey: String!): S3UploadInfo!
+  """Confirm a QR upload landed (Unit Admins only)."""
+  confirmUnitPaymentMethodQrUpload(unitId: ID!, paymentMethodId: ID!, expectedVersion: Int!, s3Key: String!, idempotencyKey: String!): UnitPaymentMethod!
+  """Delete a Unit payment method's QR code (Unit Admins only)."""
+  deleteUnitPaymentMethodQrCode(unitId: ID!, paymentMethodId: ID!, expectedVersion: Int!, idempotencyKey: String!): UnitPaymentMethod!
+  """Record a sale at an event: immediate-handoff arithmetic, allocation-drawn stock."""
+  createShowAndSellSale(
+    showAndSellId: ID!
+    expectedEventVersion: Int!
+    saleAt: String!
+    buyerName: String
+    buyerPhone: String
+    buyerEmail: String
+    lineItems: [ShowAndSellSaleLineInput!]!
+    paymentMethod: PaymentMethodInput!
+    idempotencyKey: String!
+  ): ShowAndSellSaleResult!
+  """Correct a sale as a NEW revision (absolute targets; prior revisions preserved)."""
+  correctShowAndSellSale(
+    showAndSellId: ID!
+    saleId: ID!
+    expectedRevision: Int!
+    expectedEventVersion: Int!
+    saleAt: String!
+    buyerName: String
+    buyerPhone: String
+    buyerEmail: String
+    lineItems: [CorrectionLineInput!]!
+    paymentMethod: PaymentMethodInput!
+    reason: String!
+    idempotencyKey: String!
+  ): ShowAndSellSaleResult!
+  """Void a sale as a new revision (append-only history)."""
+  voidShowAndSellSale(
+    showAndSellId: ID!
+    saleId: ID!
+    expectedRevision: Int!
+    expectedEventVersion: Int!
+    reason: String!
+    idempotencyKey: String!
+  ): ShowAndSellSaleResult!
+  """Reserve We-Owe stock with an absolute target (Unit Admins only)."""
+  setWeOweReservation(
+    weOweId: ID!
+    targetReservedQty: Int!
+    expectedVersion: Int!
+    idempotencyKey: String!
+  ): SetReservationResult!
+  """Fulfill (or partially fulfill) a We-Owe obligation from a named source."""
+  fulfillWeOwe(
+    weOweId: ID!
+    quantity: Int!
+    source: String!
+    expectedVersion: Int!
+    idempotencyKey: String!
+  ): WeOweResult!
 
 }
 

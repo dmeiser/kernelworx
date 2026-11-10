@@ -209,6 +209,11 @@ locals {
       timeout     = 30
       memory_size = 256
     }
+    "payment-method-operations" = {
+      handler     = "handlers.payment_method_operations.handler"
+      timeout     = 15
+      memory_size = 256
+    }
     "event-operations" = {
       handler     = "handlers.event_operations.handler"
       timeout     = 30
