@@ -776,3 +776,126 @@ resource "aws_appsync_resolver" "unit_campaign_catalog" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Show & Sell wave 4 query resolvers (direct Lambda; participant-safe
+# reads route to the participant-data Lambda).
+
+# showAndSell (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "show_and_sell" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSell"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# showAndSells (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "show_and_sells" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSells"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# eventInventoryAllocations (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "event_inventory_allocations" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "eventInventoryAllocations"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# showAndSellSignups (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "show_and_sell_signups" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellSignups"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# unitCampaignOpportunities (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "unit_campaign_opportunities" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignOpportunities"
+  data_source = aws_appsync_datasource.participant_data.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# showAndSellOpportunity (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "show_and_sell_opportunity" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellOpportunity"
+  data_source = aws_appsync_datasource.participant_data.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# myScoutCommitments (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "my_scout_commitments" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "myScoutCommitments"
+  data_source = aws_appsync_datasource.participant_data.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# showAndSellSignupCalendarData (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "show_and_sell_signup_calendar_data" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellSignupCalendarData"
+  data_source = aws_appsync_datasource.participant_data.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

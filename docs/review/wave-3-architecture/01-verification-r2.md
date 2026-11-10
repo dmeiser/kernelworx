@@ -108,14 +108,53 @@ Fix (both cheap, both conventional): a terraform test asserting
 `pipeline.index(custody_router) < pipeline.index(create_order)` and
 `create_order_fn` raising on any `fulfillmentMode` other than absent/NONE.
 
-### Close-out
+## Re-verification — fix landed 902728e8 (+c8b4fb9e) (r2 second pass)
 
-The architecture I ruled for in C-1 is the architecture that shipped —
-custody mode is one atomic transaction in Lambda under a single scoped
-role, the NONE path is provably untouched, and the serializer/IAM story
-holds against real DynamoDB semantics. What is on the floor is the
-doctrine layer: the wave implemented the transaction but quietly dropped
-the fulfillment record that makes custody consumption visible, reversible,
-and conserved — and shipped its own red acceptance probe saying so. Fix
-C-1v (satisfy the probe), land C-3v's two guards, and the mission's
-largest single risk is closed.
+**Verdict: ARCHITECTURE CONFIRMED — all three CHANGES closed by effect.**
+Suites: 82/82 across the six wave-3-relevant files (order operations 42/42,
+transactions, IAM role, pipeline functions, resolver wiring, and the NEW
+`test_create_order_pipeline_order.py`).
+
+### C-1v closed — ADR-0002 restored on the custody path
+- `_create_time_fulfillments` writes one SCOUT_CUSTODY fulfillment PER
+  CONSUMED LINE, in the SAME transaction: the plan is built as order Put +
+  custody Update + movement Put + totals Update, then
+  `plan.extend(_fulfillment_puts(...))`, then the marker — one
+  `execute_transaction` call site (order_operations.py:620).
+- Line `fulfilledQuantity` equals the consumed amount via
+  `_allocate_consumption`: deterministic spec-8.5 min-consumption, lines
+  consume in order against per-product remaining availability, shortfall
+  NEVER blocks, custody NEVER negative.
+- The response carries the participant-safe `Order.fulfillments`
+  projection, and the marker stores the FULL response (idemResultJson
+  includes fulfillments) — committed-replay equality by construction.
+- My independent plan-capture probe (monkeypatched executor, swallowed
+  write): exactly ONE transaction; 4 Puts (order, movement, fulfillment,
+  marker) + 2 Updates (custody with `withScoutQty >=` condition, campaign
+  totals); fulfillment Put in-plan with quantity = consumed,
+  source SCOUT_CUSTODY. My independent effect probe: ordered 4 with custody
+  2 → fulfilledQuantity 2, response fulfillments [2], custody row 0,
+  order_fulfillments row persisted.
+
+### C-2v closed — the red probe is green
+`TestQACorruptionDirectionProbe` (all of it, including
+`test_qa_custody_reversal_restores_only_custody_source`) passes: custody
+reversal restores only the custody source; custody drawn exactly once,
+never negative; kernel untouched.
+
+### C-3v closed — the continue-ban guard now exists
+- `tests/unit/test_create_order_pipeline_order.py`: custody_router present,
+  strictly BEFORE the legacy `create_order` write step, AND the
+  auth/load steps strictly before the router (both directions).
+- `create_order_fn.js` refuses `CONSUME_SCOUT_CUSTODY` loudly — even a
+  router removal degrades to a loud error, never a silent NONE write.
+
+### Residual note (non-blocking)
+The custody plan-size guard is the wave-1 `MAX_TRANSACT_ITEMS` (100, the
+DynamoDB hard limit) via `execute_transaction` preflight. The clean-room
+§8.10 business cap (90, finalization headroom) is a wave-4 concern when
+finalization lands on this stack; noted for that wave's acceptance bar.
+
+**Close-out: the mission's largest single risk is closed.** The C-1
+architecture shipped as ruled and now carries the doctrine layer (ADR
+0002, spec-8.5, committed-replay) with guards against its own regression.

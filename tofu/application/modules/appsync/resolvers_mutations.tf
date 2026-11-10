@@ -1198,3 +1198,140 @@ resource "aws_appsync_resolver" "reverse_individual_order_fulfillment" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Show & Sell wave 4 mutation resolvers (direct Lambda).
+
+# createShowAndSell (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "create_show_and_sell" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "createShowAndSell"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# updateShowAndSell (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "update_show_and_sell" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "updateShowAndSell"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# cancelShowAndSell (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "cancel_show_and_sell" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "cancelShowAndSell"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# assignShowAndSellInventory (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "assign_show_and_sell_inventory" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "assignShowAndSellInventory"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# upsertShowAndSellSlot (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "upsert_show_and_sell_slot" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "upsertShowAndSellSlot"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# deleteShowAndSellSlot (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "delete_show_and_sell_slot" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "deleteShowAndSellSlot"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# signupScoutForShowAndSellSlot (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "signup_scout_for_show_and_sell_slot" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "signupScoutForShowAndSellSlot"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# cancelShowAndSellSignup (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "cancel_show_and_sell_signup" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "cancelShowAndSellSignup"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# confirmShowAndSellWork (Show & Sell wave 4, Lambda)
+resource "aws_appsync_resolver" "confirm_show_and_sell_work" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "confirmShowAndSellWork"
+  data_source = aws_appsync_datasource.event_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

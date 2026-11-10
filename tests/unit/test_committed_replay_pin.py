@@ -23,6 +23,7 @@ from typing import Dict, Set
 import pytest
 
 from src.handlers import (
+    event_operations,
     inventory_operations,
     order_operations,
     participant_data,
@@ -60,6 +61,16 @@ PIN_CASES: Dict[str, str] = {
     "createOrder": "test_order_operations.py::TestCustodyCreate::test_replay_returns_same_order",
     "fulfillIndividualOrderLine": "test_order_operations.py::TestFulfillReverse::test_replays",
     "reverseIndividualOrderFulfillment": "test_order_operations.py::TestOrderSweep::test_reverse_validation_and_kernel_restore",
+    # event_operations (wave 4)
+    "createShowAndSell": "test_event_operations.py::TestCreateEvent::test_replay",
+    "updateShowAndSell": "test_wave4_coverage_sweep.py::TestEventSweep::test_update_replay_and_address",
+    "cancelShowAndSell": "test_wave4_coverage_sweep.py::TestEventSweep::test_cancel_replay_race_and_non_admin",
+    "assignShowAndSellInventory": "test_wave4_coverage_sweep.py::TestFinalWave4Branches::test_assign_replay_and_marker_race",
+    "upsertShowAndSellSlot": "test_wave4_coverage_sweep.py::TestEventSweep::test_upsert_guards_and_replay",
+    "deleteShowAndSellSlot": "test_wave4_coverage_sweep.py::TestEventSweep::test_delete_slot_guards_and_race",
+    "signupScoutForShowAndSellSlot": "test_wave4_coverage_sweep.py::TestEventSweep::test_signup_replay_and_race",
+    "cancelShowAndSellSignup": "test_wave4_coverage_sweep.py::TestWave4TrulyFinal::test_cancel_signup_missing_slot_row_and_race",
+    "confirmShowAndSellWork": "test_wave4_coverage_sweep.py::TestWave4LastBranches::test_confirm_work_replay_and_version",
 }
 
 
@@ -82,6 +93,7 @@ def _dispatched_operations() -> Set[str]:
         unit_campaign_operations,
         inventory_operations,
         order_operations,
+        event_operations,
     ):
         dispatched |= set(module._DISPATCH.keys())  # type: ignore[attr-defined]
     return dispatched

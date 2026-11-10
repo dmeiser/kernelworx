@@ -1133,6 +1133,42 @@ type Query {
   """The Unit Campaign's catalog with products (Unit Admins only)."""
   unitCampaignCatalog(unitCampaignId: ID!): UnitCampaignCatalog!
 
+  # --- Show & Sell wave 4 queries ---
+  """A Show & Sell event (Unit Admins or roster participants)."""
+  showAndSell(showAndSellId: ID!): ShowAndSell!
+  """A Unit Campaign's events by lifecycle state (Unit Admins only)."""
+  showAndSells(unitCampaignId: ID!, status: ShowAndSellStatus, page: PageInput): ShowAndSellConnection!
+  """Participant-safe opportunity listing for a Unit Campaign."""
+  unitCampaignOpportunities(
+    unitCampaignId: ID!
+    includePast: Boolean
+    page: PageInput
+  ): ShowAndSellOpportunityConnection!
+  """Participant-safe opportunity detail for one Scout."""
+  showAndSellOpportunity(showAndSellId: ID!, profileId: ID!): ShowAndSellOpportunity!
+  """Event inventory allocations (Unit Admins only)."""
+  eventInventoryAllocations(
+    unitCampaignId: ID!
+    showAndSellId: ID
+    productId: ID
+    status: String
+    page: PageInput
+  ): EventInventoryAllocationConnection!
+  """Event signups (Unit Admins only)."""
+  showAndSellSignups(
+    showAndSellId: ID!
+    status: SignupStatus
+    page: PageInput
+  ): ShowAndSellSignupAdminConnection!
+  """Participant-safe commitment listing for a Scout."""
+  myScoutCommitments(profileId: ID!, page: PageInput): ScoutCommitmentConnection!
+  """Participant-safe calendar payload for a signup."""
+  showAndSellSignupCalendarData(
+    showAndSellId: ID!
+    slotId: ID!
+    profileId: ID!
+  ): CalendarInviteData!
+
 }
 
 # ============================================================================
@@ -1469,6 +1505,58 @@ type Mutation {
     expectedFulfillmentVersion: Int!
     idempotencyKey: String!
   ): FulfillOrderLineResult!
+
+  # --- Show & Sell wave 4: events, slots, signups (spec API section 6) ---
+  """Create a Show & Sell event (Unit Admins only; immutable times per spec 9.1)."""
+  createShowAndSell(input: CreateShowAndSellInput!): ShowAndSell!
+  """Update an event (Unit Admins only; times stay immutable once set)."""
+  updateShowAndSell(input: UpdateShowAndSellInput!): ShowAndSell!
+  """Cancel an event (Unit Admins only; optimistic concurrency)."""
+  cancelShowAndSell(
+    showAndSellId: ID!
+    expectedVersion: Int!
+    reason: String!
+    idempotencyKey: String!
+  ): ShowAndSell!
+  """Assign inventory to an event: TARGET quantities, evaluated against sale intervals (Unit Admins only)."""
+  assignShowAndSellInventory(
+    showAndSellId: ID!
+    items: [AllocationTargetInput!]!
+    expectedVersion: Int!
+    idempotencyKey: String!
+  ): AssignShowAndSellInventoryResult!
+  """Create or update a work slot of arbitrary duration (Unit Admins only; at most 20 active slots)."""
+  upsertShowAndSellSlot(input: UpsertShowAndSellSlotInput!): ShowAndSellSlot!
+  """Delete a slot (Unit Admins only)."""
+  deleteShowAndSellSlot(
+    showAndSellId: ID!
+    slotId: ID!
+    expectedVersion: Int!
+    idempotencyKey: String!
+  ): Boolean!
+  """Sign a Scout Campaign up for a slot (sequence contract; finalization feasibility enforced)."""
+  signupScoutForShowAndSellSlot(
+    showAndSellId: ID!
+    slotId: ID!
+    campaignId: ID!
+    profileId: ID!
+    idempotencyKey: String!
+  ): ParticipantSignup!
+  """Cancel a signup (sequence contract)."""
+  cancelShowAndSellSignup(
+    showAndSellId: ID!
+    slotId: ID!
+    profileId: ID!
+    expectedVersion: Int!
+    idempotencyKey: String!
+  ): ParticipantSignup!
+  """Confirm worked time (Unit Admins only)."""
+  confirmShowAndSellWork(
+    showAndSellId: ID!
+    work: [WorkConfirmationInput!]!
+    expectedVersion: Int!
+    idempotencyKey: String!
+  ): ConfirmWorkResult!
 
 }
 

@@ -86,6 +86,17 @@ resource "aws_appsync_datasource" "unit_campaign_operations" {
   }
 }
 
+resource "aws_appsync_datasource" "event_operations" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "EventOperationsDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["event-operations"]
+  }
+}
+
 resource "aws_appsync_datasource" "inventory_operations" {
   api_id           = aws_appsync_graphql_api.main.id
   name             = "InventoryOperationsDS"

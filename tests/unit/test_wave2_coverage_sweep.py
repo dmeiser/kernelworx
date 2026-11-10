@@ -242,8 +242,6 @@ class TestUnitOperationsSweep:
         _seed_unit(t)
         marker_entry_holder: Dict[str, Any] = {}
 
-        real_execute = unit_operations.execute_transaction
-
         def fake_execute(plan: Any, **kwargs: Any) -> None:
             marker_entry_holder["entry"] = plan[-1]["Put"]
             raise TransactionCancelledError([len(plan) - 1])
