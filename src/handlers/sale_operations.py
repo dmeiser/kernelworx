@@ -200,10 +200,9 @@ def _find_event(show_and_sell_id: str) -> Optional[Dict[str, Any]]:
         ExpressionAttributeValues={":sid": show_and_sell_id},
         Limit=1,
     )
-    for item in response.get("Items", []):
-        if item.get("itemKey", "").startswith(EVENT_PREFIX):
-            return dict(item)
-    return None
+    items = response.get("Items", [])
+    event = next((item for item in items if item.get("itemKey", "").startswith(EVENT_PREFIX)), None)
+    return dict(event) if event is not None else None
 
 
 def _load_event(show_and_sell_id: str) -> Dict[str, Any]:
@@ -333,10 +332,11 @@ def _load_obligation(we_owe_id: str) -> Dict[str, Any]:
         ExpressionAttributeValues={":wid": we_owe_id},
         Limit=1,
     )
-    for item in response.get("Items", []):
-        if item.get("itemKey", "").startswith(WEOWE_PREFIX):
-            return dict(item)
-    raise AppError(ErrorCode.NOT_FOUND, "We-Owe obligation not found")
+    items = response.get("Items", [])
+    obligation = next((item for item in items if item.get("itemKey", "").startswith(WEOWE_PREFIX)), None)
+    if obligation is None:
+        raise AppError(ErrorCode.NOT_FOUND, "We-Owe obligation not found")
+    return dict(obligation)
 
 
 def _obligation_to_graphql(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -874,6 +874,18 @@ def _plan_weowe_target(
     return _obligation_to_graphql(_find_obligation(unit_campaign_id, sale["saleId"], enriched["lineItemId"]))
 
 
+def _cancel_obligation_remainder(
+    unit_campaign_id: str, sale_id: str, line_item_id: str, stamp: str, plan: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Internal cancellation (dropped line / void): cancels the UNFULFILLED
+    remainder while preserving fulfilled rows — the corrected target is the
+    fulfilled floor, never below it (spec 8.6.1)."""
+    obligation = _find_obligation(unit_campaign_id, sale_id, line_item_id)
+    return _adjust_obligation(
+        unit_campaign_id, sale_id, line_item_id, int(obligation.get("fulfilledQty", 0)), stamp, plan
+    )
+
+
 def _new_obligation_item(
     enriched: Dict[str, Any], sale: Dict[str, Any], unit_campaign_id: str, show_and_sell_id: str, stamp: str
 ) -> Dict[str, Any]:
@@ -936,7 +948,7 @@ def _release_dropped_line(
                 sale_id,
             )
         )
-    obligations_out.append(_adjust_obligation(unit_campaign_id, sale_id, old["lineItemId"], 0, stamp, plan))
+    obligations_out.append(_cancel_obligation_remainder(unit_campaign_id, sale_id, old["lineItemId"], stamp, plan))
 
 
 def _plan_corrected_lines(
@@ -1067,11 +1079,31 @@ def _adjust_obligation(
     original = int(obligation.get("originalQty", 0))
     fulfilled = int(obligation.get("fulfilledQty", 0))
     cancelled = int(obligation.get("cancelledQty", 0))
-    outstanding_target = max(target_we_owe - fulfilled, 0)
-    new_original = fulfilled + outstanding_target if outstanding_target > (original - cancelled) else original
-    new_cancelled = cancelled
-    if outstanding_target < (original - cancelled):
-        new_cancelled = original - outstanding_target
+    if target_we_owe < fulfilled:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "A correction below the fulfilled quantity is rejected (spec 8.6.1): "
+            "only the unfulfilled portion may be reduced.",
+            details={"fulfilledQty": fulfilled, "correctedQty": target_we_owe},
+        )
+    # Spec 8.6.1 absolute-target doctrine (review reconciliation, r1+QA):
+    #   outstanding_target = corrected - fulfilled
+    #   cancelled          = original - corrected        (decreases)
+    #   remaining          = corrected - fulfilled
+    # The corrected obligation totals net to the corrected quantity.
+    outstanding_target = target_we_owe - fulfilled
+    outstanding_current = original - fulfilled - cancelled
+    if outstanding_target > outstanding_current:
+        # Increase: extend original so totals net to the corrected demand.
+        new_original = cancelled + fulfilled + outstanding_target
+        new_cancelled = cancelled
+    elif outstanding_target < outstanding_current:
+        # Decrease: original is unchanged; cancelled absorbs the reduction.
+        new_original = original
+        new_cancelled = cancelled + (outstanding_current - outstanding_target)
+    else:
+        new_original = original
+        new_cancelled = cancelled
     remaining = max(new_original - fulfilled - new_cancelled, 0)
     reserved = min(int(obligation.get("reservedQty", 0)), remaining)
     status = WEOWE_OPEN if remaining > 0 else (WEOWE_FULFILLED if fulfilled > 0 else WEOWE_CLOSED)
@@ -1239,7 +1271,7 @@ def _void_sale(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     sale_id,
                 )
             )
-        obligations_out.append(_adjust_obligation(unit_campaign_id, sale_id, old["lineItemId"], 0, stamp, plan))
+        obligations_out.append(_cancel_obligation_remainder(unit_campaign_id, sale_id, old["lineItemId"], stamp, plan))
     merged = {
         **sale,
         "status": "VOIDED",

@@ -488,32 +488,84 @@ class TestQAWave5Probe:
         sale = created["sale"]
         line = sale["lineItems"][0]
         wid = created["weOweObligations"][0]["weOweId"]
-        f1 = handler(_ev("fulfillWeOwe", {"weOweId": wid, "quantity": 1, "source": "KERNEL_STOCK",
-                                          "expectedVersion": 1, "idempotencyKey": "qa-chain-f1"}), None)
+        f1 = handler(
+            _ev(
+                "fulfillWeOwe",
+                {
+                    "weOweId": wid,
+                    "quantity": 1,
+                    "source": "KERNEL_STOCK",
+                    "expectedVersion": 1,
+                    "idempotencyKey": "qa-chain-f1",
+                },
+            ),
+            None,
+        )
         assert f1["obligation"]["fulfilledQty"] == 1
-        c5 = handler(_ev("correctShowAndSellSale", {"showAndSellId": "ev-1", "saleId": sale["saleId"], "expectedRevision": 1,
-                                                    "expectedEventVersion": 2, "saleAt": SALE_AT,
-                                                    "paymentMethod": {"methodCode": "CASH"},
-                                                    "lineItems": [{"lineItemId": line["lineItemId"], "productId": "PROD#1",
-                                                                   "immediateQty": 0, "weOweQty": 5}],
-                                                    "idempotencyKey": "qa-chain-c5"}), None)
+        c5 = handler(
+            _ev(
+                "correctShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 1,
+                    "expectedEventVersion": 2,
+                    "saleAt": SALE_AT,
+                    "paymentMethod": {"methodCode": "CASH"},
+                    "reason": "extend",
+                    "lineItems": [
+                        {"lineItemId": line["lineItemId"], "productId": "PROD#1", "immediateQty": 0, "weOweQty": 5}
+                    ],
+                    "idempotencyKey": "qa-chain-c5",
+                },
+            ),
+            None,
+        )
         if "weOweObligations" not in c5:
             raise AssertionError(f"c5 failed: {c5}")
         ob5 = c5["weOweObligations"][0]
         assert ob5["originalQty"] == 5 and ob5["remainingQty"] == 4 and ob5["fulfilledQty"] == 1, ob5
-        c4 = handler(_ev("correctShowAndSellSale", {"showAndSellId": "ev-1", "saleId": sale["saleId"], "expectedRevision": 2,
-                                                    "expectedEventVersion": c5["sale"]["version"], "saleAt": SALE_AT,
-                                                    "paymentMethod": {"methodCode": "CASH"},
-                                                    "lineItems": [{"lineItemId": line["lineItemId"], "productId": "PROD#1",
-                                                                   "immediateQty": 0, "weOweQty": 4}],
-                                                    "idempotencyKey": "qa-chain-c4"}), None)
+        c4 = handler(
+            _ev(
+                "correctShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 2,
+                    "expectedEventVersion": 3,
+                    "saleAt": SALE_AT,
+                    "paymentMethod": {"methodCode": "CASH"},
+                    "reason": "shrink",
+                    "lineItems": [
+                        {"lineItemId": line["lineItemId"], "productId": "PROD#1", "immediateQty": 0, "weOweQty": 4}
+                    ],
+                    "idempotencyKey": "qa-chain-c4",
+                },
+            ),
+            None,
+        )
         ob4 = c4["weOweObligations"][0]
-        assert ob4["originalQty"] == 4 and ob4["remainingQty"] == 3 and ob4["fulfilledQty"] == 1, ob4
-        assert ob4["cancelledQty"] == 0, ob4
-        low = handler(_ev("correctShowAndSellSale", {"showAndSellId": "ev-1", "saleId": sale["saleId"], "expectedRevision": 3,
-                                                     "expectedEventVersion": c4["sale"]["version"], "saleAt": SALE_AT,
-                                                     "paymentMethod": {"methodCode": "CASH"},
-                                                     "lineItems": [{"lineItemId": line["lineItemId"], "productId": "PROD#1",
-                                                                    "immediateQty": 0, "weOweQty": 0}],
-                                                     "idempotencyKey": "qa-chain-low"}), None)
+        # Doctrine (original 5 extended, corrected to 4, fulfilled 1):
+        # cancelled = 5 - 4 = 1; remaining = 4 - 1 = 3; original unchanged.
+        assert ob4["originalQty"] == 5 and ob4["remainingQty"] == 3 and ob4["fulfilledQty"] == 1, ob4
+        assert ob4["cancelledQty"] == 1, ob4
+        low = handler(
+            _ev(
+                "correctShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 3,
+                    "expectedEventVersion": 4,
+                    "saleAt": SALE_AT,
+                    "paymentMethod": {"methodCode": "CASH"},
+                    "reason": "too-low",
+                    "lineItems": [
+                        {"lineItemId": line["lineItemId"], "productId": "PROD#1", "immediateQty": 0, "weOweQty": 0}
+                    ],
+                    "idempotencyKey": "qa-chain-low",
+                },
+            ),
+            None,
+        )
         assert low.get("__isError"), low

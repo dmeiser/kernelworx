@@ -99,7 +99,7 @@ class TestSaleSweep:
             _ev(
                 "createShowAndSellSale",
                 _sale_args(
-                    "sw-eg-004", [{"productId": "PROD#1", "immediateQty": 1, "weOweQty": 0}], expectedEventVersion=3
+                    "sw-eg-004", [{"productId": "PROD#1", "immediateQty": 1, "weOweQty": 0}], expectedEventVersion=2
                 ),
             ),
             None,
@@ -419,12 +419,13 @@ class TestSaleSweep:
             _ev(
                 "createShowAndSellSale",
                 _sale_args(
-                    "sw-cm-002", [{"productId": "PROD#1", "immediateQty": 1, "weOweQty": 0}], expectedEventVersion=3
+                    "sw-cm-002", [{"productId": "PROD#1", "immediateQty": 1, "weOweQty": 0}], expectedEventVersion=2
                 ),
             ),
             None,
         )
-        assert raced["errorCode"] == ErrorCode.CONFLICT
+        assert raced["errorCode"] == ErrorCode.CONFLICT, raced
+        assert "processed concurrently" in raced["message"], raced
 
         def _cancel_on_first(plan: Any, **kwargs: Any) -> None:
             raise TransactionCancelledError([0])
@@ -434,12 +435,13 @@ class TestSaleSweep:
             _ev(
                 "createShowAndSellSale",
                 _sale_args(
-                    "sw-cm-003", [{"productId": "PROD#1", "immediateQty": 1, "weOweQty": 0}], expectedEventVersion=3
+                    "sw-cm-003", [{"productId": "PROD#1", "immediateQty": 1, "weOweQty": 0}], expectedEventVersion=2
                 ),
             ),
             None,
         )
-        assert raw["errorCode"] == ErrorCode.CONFLICT
+        assert raw["errorCode"] == ErrorCode.CONFLICT, raw
+        assert "Stock or event state changed concurrently" in raw["message"], raw
 
 
 class TestSaleFinalSweep:
@@ -454,6 +456,8 @@ class TestSaleFinalSweep:
 
         with pytest.raises(ValueError):
             _parse_ts("2026-11-01T12:00:00")
+        assert _parse_ts("2026-11-01T12:00:00Z").tzinfo is not None
+        assert _parse_ts("2026-11-01T12:00:00+00:00").tzinfo is not None
         # input-wrapped marker key resolution (inline in _idempotency_begin)
         caller, _, _ = _idempotency_begin(_ev("mystery", {}), {"input": {"idempotencyKey": "sw-ik-01"}}, "scope")
         assert caller == ACCOUNT_A
@@ -528,7 +532,7 @@ class TestSaleFinalSweep:
             _ev(
                 "createShowAndSellSale",
                 _sale_args(
-                    "sw-fs-006", [{"productId": "PROD#1", "immediateQty": 1, "weOweQty": 0}], expectedEventVersion=3
+                    "sw-fs-006", [{"productId": "PROD#1", "immediateQty": 1, "weOweQty": 0}], expectedEventVersion=2
                 ),
             ),
             None,
@@ -910,3 +914,394 @@ class TestSaleTrulyFinal:
             None,
         )
         assert bad_price["errorCode"] == ErrorCode.INVALID_INPUT
+
+
+class TestObligationDecreaseDoctrine:
+    """Spec 8.6.1 absolute-target doctrine oracles (r1 WAVE-5 CHANGES-3).
+
+    Doctrine (review reconciliation): the corrected obligation totals net
+    to the corrected quantity; cancelled = original - corrected; remaining
+    = corrected - fulfilled; below-fulfilled corrections REJECT.
+    """
+
+    def _sale_with_obligation(self, t: Any, key: str, we_owe: int) -> Any:
+        return _create_sale(t, key=key, lines=[{"productId": "PROD#1", "immediateQty": 0, "weOweQty": we_owe}])
+
+    def test_r1_worked_example_original5_fulfilled2_correct_to3(self, t: Any) -> None:
+        created = self._sale_with_obligation(t, "doc-r1-001", 5)
+        sale = created["sale"]
+        line = sale["lineItems"][0]
+        wid = created["weOweObligations"][0]["weOweId"]
+        for index in range(2):
+            handler(
+                _ev(
+                    "fulfillWeOwe",
+                    {
+                        "weOweId": wid,
+                        "quantity": 1,
+                        "source": "OTHER",
+                        "expectedVersion": 1 + index,
+                        "idempotencyKey": f"doc-r1-f{index}",
+                    },
+                ),
+                None,
+            )
+        corrected = handler(
+            _ev(
+                "correctShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 1,
+                    "expectedEventVersion": 2,
+                    "saleAt": SALE_AT,
+                    "lineItems": [
+                        {"lineItemId": line["lineItemId"], "productId": "PROD#1", "immediateQty": 0, "weOweQty": 3}
+                    ],
+                    "paymentMethod": {"methodCode": "CASH"},
+                    "reason": "shrink-with-fulfilled",
+                    "idempotencyKey": "doc-r1-c1",
+                },
+            ),
+            None,
+        )
+        ob = corrected["weOweObligations"][0]
+        # cancelled = original(5) - corrected(3) = 2; remaining = 3 - 2 = 1.
+        assert ob["originalQty"] == 5, ob
+        assert ob["cancelledQty"] == 2, ob
+        assert ob["fulfilledQty"] == 2, ob
+        assert ob["remainingQty"] == 1, ob
+        # The §5.15 invariant holds on the persisted row: original >= fulfilled + cancelled.
+        assert ob["originalQty"] >= ob["fulfilledQty"] + ob["cancelledQty"], ob
+        # The buyer's one remaining owed unit still exists: the row stays
+        # OPEN (SDL status vocabulary OPEN/FULFILLED/CLOSED), not FULFILLED.
+        assert ob["status"] == "OPEN", ob
+
+    def test_qa_worked_example_original5_fulfilled1_correct_to4(self, t: Any) -> None:
+        created = self._sale_with_obligation(t, "doc-qa-001", 5)
+        sale = created["sale"]
+        line = sale["lineItems"][0]
+        wid = created["weOweObligations"][0]["weOweId"]
+        handler(
+            _ev(
+                "fulfillWeOwe",
+                {"weOweId": wid, "quantity": 1, "source": "OTHER", "expectedVersion": 1, "idempotencyKey": "doc-qa-f1"},
+            ),
+            None,
+        )
+        corrected = handler(
+            _ev(
+                "correctShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 1,
+                    "expectedEventVersion": 2,
+                    "saleAt": SALE_AT,
+                    "lineItems": [
+                        {"lineItemId": line["lineItemId"], "productId": "PROD#1", "immediateQty": 0, "weOweQty": 4}
+                    ],
+                    "paymentMethod": {"methodCode": "CASH"},
+                    "reason": "shrink",
+                    "idempotencyKey": "doc-qa-c1",
+                },
+            ),
+            None,
+        )
+        ob = corrected["weOweObligations"][0]
+        # cancelled = 5 - 4 = 1; remaining = 4 - 1 = 3.
+        assert ob["originalQty"] == 5 and ob["cancelledQty"] == 1, ob
+        assert ob["fulfilledQty"] == 1 and ob["remainingQty"] == 3, ob
+
+    def test_below_fulfilled_correction_rejects_per_861(self, t: Any) -> None:
+        created = self._sale_with_obligation(t, "doc-bf-001", 5)
+        sale = created["sale"]
+        line = sale["lineItems"][0]
+        wid = created["weOweObligations"][0]["weOweId"]
+        handler(
+            _ev(
+                "fulfillWeOwe",
+                {"weOweId": wid, "quantity": 2, "source": "OTHER", "expectedVersion": 1, "idempotencyKey": "doc-bf-f1"},
+            ),
+            None,
+        )
+        rejected = handler(
+            _ev(
+                "correctShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 1,
+                    "expectedEventVersion": 2,
+                    "saleAt": SALE_AT,
+                    "lineItems": [
+                        {"lineItemId": line["lineItemId"], "productId": "PROD#1", "immediateQty": 0, "weOweQty": 1}
+                    ],
+                    "paymentMethod": {"methodCode": "CASH"},
+                    "reason": "below-fulfilled",
+                    "idempotencyKey": "doc-bf-c1",
+                },
+            ),
+            None,
+        )
+        assert rejected["errorCode"] == ErrorCode.CONFLICT, rejected
+        assert "8.6.1" in rejected["message"], rejected
+        # Nothing was written: the obligation still nets to original 5.
+        intact = handler(_ev("weOweObligation", {"weOweId": wid}), None)
+        assert intact["originalQty"] == 5 and intact["fulfilledQty"] == 2, intact
+        assert intact["cancelledQty"] == 0 and intact["remainingQty"] == 3, intact
+
+    def test_void_preserves_fulfilled_rows_cancels_remainder(self, t: Any) -> None:
+        created = self._sale_with_obligation(t, "doc-vp-001", 5)
+        sale = created["sale"]
+        wid = created["weOweObligations"][0]["weOweId"]
+        handler(
+            _ev(
+                "fulfillWeOwe",
+                {"weOweId": wid, "quantity": 2, "source": "OTHER", "expectedVersion": 1, "idempotencyKey": "doc-vp-f1"},
+            ),
+            None,
+        )
+        voided = handler(
+            _ev(
+                "voidShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 1,
+                    "expectedEventVersion": 2,
+                    "reason": "void",
+                    "idempotencyKey": "doc-vp-v1",
+                },
+            ),
+            None,
+        )
+        assert voided["sale"]["status"] == "VOIDED"
+        ob = voided["weOweObligations"][0]
+        # Fulfilled rows are preserved; only the unfulfilled remainder is cancelled.
+        assert ob["fulfilledQty"] == 2 and ob["cancelledQty"] == 3 and ob["remainingQty"] == 0, ob
+        assert ob["status"] == "FULFILLED", ob
+
+    def test_drop_fulfilled_line_preserves_fulfilled_rows(self, t: Any) -> None:
+        created = self._sale_with_obligation(t, "doc-dp-001", 5)
+        sale = created["sale"]
+        line = sale["lineItems"][0]
+        wid = created["weOweObligations"][0]["weOweId"]
+        handler(
+            _ev(
+                "fulfillWeOwe",
+                {"weOweId": wid, "quantity": 2, "source": "OTHER", "expectedVersion": 1, "idempotencyKey": "doc-dp-f1"},
+            ),
+            None,
+        )
+        # Replace the line with a different product: the dropped line's
+        # obligation cancels only the unfulfilled remainder.
+        corrected = handler(
+            _ev(
+                "correctShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 1,
+                    "expectedEventVersion": 2,
+                    "saleAt": SALE_AT,
+                    "lineItems": [{"productId": "PROD#2", "immediateQty": 1, "weOweQty": 0}],
+                    "paymentMethod": {"methodCode": "CASH"},
+                    "reason": "swap-line",
+                    "idempotencyKey": "doc-dp-c1",
+                },
+            ),
+            None,
+        )
+        cancelled = [o for o in corrected["weOweObligations"] if o["cancelledQty"] == 3]
+        assert cancelled and cancelled[0]["fulfilledQty"] == 2 and cancelled[0]["remainingQty"] == 0, corrected[
+            "weOweObligations"
+        ]
+
+
+class TestRemainingCoverageOracles:
+    """Pin the branches r1 named: missing-allocation, kernel-insufficiency,
+    void guards, and the correction/void stock fallback."""
+
+    def test_missing_allocation_conflict(self, t: Any) -> None:
+        from src.handlers.sale_operations import _read_alloc
+
+        with pytest.raises(AppError) as exc_info:
+            _read_alloc("uc-1", "ev-ghost", "PROD#1")
+        assert exc_info.value.error_code == ErrorCode.CONFLICT
+
+    def test_kernel_stock_insufficiency_conflict(self, t: Any) -> None:
+        from src.handlers.sale_operations import _kernel_fulfill_entries
+
+        t["inventory"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "BALANCE#PROD#1",
+                "productId": "PROD#1",
+                "kernelPhysicalQty": 1,
+                "version": 1,
+            }
+        )
+        obligation = {"productId": "PROD#1"}
+        with pytest.raises(AppError) as exc_info:
+            _kernel_fulfill_entries("uc-1", obligation, "WEOWE#x", 5, "KERNEL_STOCK", ACCOUNT_A, "stamp")
+        assert exc_info.value.error_code == ErrorCode.CONFLICT
+        assert "kernel stock" in exc_info.value.message.lower()
+
+    def test_void_guards_stale_event_version_and_cross_event_sale(self, t: Any) -> None:
+        created = _create_sale(t, key="sw-vc-001")
+        sale = created["sale"]
+        stale = handler(
+            _ev(
+                "voidShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 1,
+                    "expectedEventVersion": 9,
+                    "reason": "v",
+                    "idempotencyKey": "sw-vc-002",
+                },
+            ),
+            None,
+        )
+        assert stale["errorCode"] == ErrorCode.CONFLICT, stale
+        # Seed a real event under ev-2 so the cross-event SALE guard (not
+        # the event lookup) produces the NOT_FOUND.
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "EVENT#ev-2",
+                "showAndSellId": "ev-2",
+                "saleId": "ev-2",
+                "unitId": "unit-1",
+                "locationName": "Two",
+                "startAt": "2026-12-01T00:00:00Z",
+                "endAt": "2026-12-02T00:00:00Z",
+                "status": "SCHEDULED",
+                "splitMethod": "EQUAL",
+                "weOweEnabled": False,
+                "version": 1,
+                "createdByAccountId": ACCOUNT_A,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
+        )
+        cross = handler(
+            _ev(
+                "voidShowAndSellSale",
+                {
+                    "showAndSellId": "ev-2",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 1,
+                    "expectedEventVersion": 1,
+                    "reason": "v",
+                    "idempotencyKey": "sw-vc-003",
+                },
+            ),
+            None,
+        )
+        assert cross["errorCode"] == ErrorCode.NOT_FOUND, cross
+
+    def test_correction_and_void_stock_fallback_mapping(self, t: Any, monkeypatch: Any) -> None:
+        created = _create_sale(t, key="sw-sf-001")
+        sale = created["sale"]
+        line = sale["lineItems"][0]
+
+        def _cancel_on_first(plan: Any, **kwargs: Any) -> None:
+            raise TransactionCancelledError([0])
+
+        monkeypatch.setattr(sale_operations, "execute_transaction", _cancel_on_first)
+        corr = handler(
+            _ev(
+                "correctShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 1,
+                    "expectedEventVersion": 2,
+                    "saleAt": SALE_AT,
+                    "lineItems": [
+                        {"lineItemId": line["lineItemId"], "productId": "PROD#1", "immediateQty": 1, "weOweQty": 0}
+                    ],
+                    "paymentMethod": {"methodCode": "CASH"},
+                    "reason": "r",
+                    "idempotencyKey": "sw-sf-002",
+                },
+            ),
+            None,
+        )
+        assert corr["errorCode"] == ErrorCode.CONFLICT, corr
+        assert "re-read and retry" in corr["message"], corr
+        voided = handler(
+            _ev(
+                "voidShowAndSellSale",
+                {
+                    "showAndSellId": "ev-1",
+                    "saleId": sale["saleId"],
+                    "expectedRevision": 1,
+                    "expectedEventVersion": 2,
+                    "reason": "v",
+                    "idempotencyKey": "sw-sf-003",
+                },
+            ),
+            None,
+        )
+        assert voided["errorCode"] == ErrorCode.CONFLICT, voided
+        assert "re-read and retry" in voided["message"], voided
+
+
+class TestDefensiveScanArcs:
+    """Cover the mixed-item scan else-branches (non-matching itemKeys skip)."""
+
+    def test_find_event_skips_non_event_items(self, t: Any) -> None:
+        from src.handlers.sale_operations import _find_event
+
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "SLOT#zzz",
+                "showAndSellId": "ev-mixed",
+                "slotId": "zzz",
+                "startAt": "x",
+                "endAt": "y",
+                "capacity": 1,
+                "version": 1,
+            }
+        )
+        # Only a SLOT row carries this showAndSellId: the scan skips it.
+        assert _find_event("ev-mixed") is None
+
+    def test_catalog_products_skips_non_product_rows(self, t: Any) -> None:
+        from src.handlers.sale_operations import _catalog_products
+
+        _create_sale(t, key="sw-mix-002")  # seeds UC metadata + catalog rows
+        t["catalogs"].put_item(
+            Item={
+                "catalogId": "CATALOG#c",
+                "products": [
+                    {"productId": "PROD#9", "productName": "Valid", "price": 100},
+                    "not-a-product",
+                    {"productName": "No id"},
+                ],
+            }
+        )
+        products = _catalog_products("uc-1")
+        assert list(products.keys()) == ["PROD#9"]
+
+    def test_load_obligation_skips_non_obligation_rows(self, t: Any) -> None:
+        from src.handlers.sale_operations import _load_obligation
+
+        created = _create_sale(t, key="sw-mix-001")
+        obligation = created["weOweObligations"][0]
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "WEOWE#decoy",
+                "weOweId": "WEOWE#decoy",
+                "status": "OPEN",
+                "version": 1,
+            }
+        )
+        loaded = _load_obligation(obligation["weOweId"])
+        assert loaded["weOweId"] == obligation["weOweId"]
