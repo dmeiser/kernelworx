@@ -890,3 +890,225 @@ class TestParticipantReads:
         assert ghost["errorCode"] == ErrorCode.NOT_FOUND
         unknown = p(_ev("mysteryParticipantField", {}), None)
         assert unknown["errorCode"] == ErrorCode.INTERNAL_ERROR
+
+
+class TestFeasibilityPreflight:
+    """Spec 8.10 plan-time feasibility (wave-6 START precondition; record:
+    docs/investigations/show-sell-8.10-feasibility-preflight.md). Formulas:
+    assign 4+3xproducts <= 90; signup 4+3xproducts+2x(confirmed+active+1)
+    +SIGNUPWINDOW bucket Puts <= 90 (buckets counted per the quantized
+    duration, matching the write plan's actual Puts)."""
+
+    def _with_stock(self, t: Dict[str, Any], products: int) -> Dict[str, Any]:
+        created = _create_event(t)
+        for index in range(1, products + 1):
+            t["inventory"].put_item(
+                Item={
+                    "unitCampaignId": "uc-1",
+                    "itemKey": f"BALANCE#PROD#{index}",
+                    "productId": f"PROD#{index}",
+                    "kernelPhysicalQty": 1,
+                    "soldInPossessionQty": 0,
+                    "councilOnOrderQty": 0,
+                    "version": 1,
+                }
+            )
+        return created
+
+    def _assign_products(self, created: Dict[str, Any], count: int, key: str) -> Dict[str, Any]:
+        return handler(
+            _ev(
+                "assignShowAndSellInventory",
+                {
+                    "showAndSellId": created["showAndSellId"],
+                    "items": [{"productId": f"PROD#{i}", "quantity": 1} for i in range(1, count + 1)],
+                    "expectedVersion": created["version"],
+                    "idempotencyKey": key,
+                },
+            ),
+            None,
+        )
+
+    def test_assign_28_products_ok_29th_rejected_no_writes(self, t: Dict[str, Any]) -> None:
+        created = self._with_stock(t, 29)
+        ok = self._assign_products(created, 28, "pf-assign-28")
+        assert "allocations" in ok, ok  # 4 + 3x28 = 88 <= 90
+        event_id = created["showAndSellId"]
+        version_after = _event_version(t, event_id)
+        blocked = handler(
+            _ev(
+                "assignShowAndSellInventory",
+                {
+                    "showAndSellId": event_id,
+                    "items": [{"productId": "PROD#29", "quantity": 1}],
+                    "expectedVersion": version_after,
+                    "idempotencyKey": "pf-assign-29",
+                },
+            ),
+            None,
+        )
+        assert blocked["errorCode"] == ErrorCode.CONFLICT, blocked
+        assert "OPERATION_TOO_LARGE" in blocked["message"], blocked
+        assert "91 transaction actions" in blocked["message"], blocked
+        assert "split the event" in blocked["message"], blocked
+        # No writes on rejection: no PROD#29 allocation, event version unchanged.
+        assert _event_version(t, event_id) == version_after
+        alloc = t["inventory"].get_item(Key={"unitCampaignId": "uc-1", "itemKey": f"ALLOC#{event_id}#PROD#29"})
+        assert "Item" not in alloc
+
+    def test_signup_formula_counts_window_buckets(self, t: Dict[str, Any]) -> None:
+        created = self._with_stock(t, 25)
+        assigned = self._assign_products(created, 25, "pf-signup-25")
+        assert "allocations" in assigned, assigned  # 4 + 3x25 = 79
+        event_id = created["showAndSellId"]
+
+        def _slot(key: str, start: Any, end: Any) -> Dict[str, Any]:
+            return handler(
+                _ev(
+                    "upsertShowAndSellSlot",
+                    {
+                        "input": {
+                            "showAndSellId": event_id,
+                            "startAt": start,
+                            "endAt": end,
+                            "capacity": 10,
+                            "expectedEventVersion": _event_version(t, event_id),
+                            "idempotencyKey": key,
+                        }
+                    },
+                ),
+                None,
+            )
+
+        grid = datetime.fromisoformat(FUTURE_START.replace("Z", "+00:00"))
+        slot_short = _slot(
+            "pf-slot-short-01",
+            FUTURE_START,
+            (grid + timedelta(minutes=30)).isoformat().replace("+00:00", "Z"),
+        )
+        slot_long = _slot("pf-slot-long-01", FUTURE_START, FUTURE_END)  # 3h = 6 buckets
+        slot_mid = _slot(
+            "pf-slot-mid-001",
+            (grid + timedelta(hours=2)).isoformat().replace("+00:00", "Z"),
+            (grid + timedelta(hours=2, minutes=30)).isoformat().replace("+00:00", "Z"),
+        )
+        version_after_slots = _event_version(t, event_id)
+        # confirmed counts actualMinutes > 0 even when the signup is no
+        # longer ACTIVE; active counts ACTIVE rows. PROFILE_B's ACTIVE row
+        # sits on slot_mid so neither target overlaps it.
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": f"SIGNUP#{slot_short['slotId']}#{PROFILE_A}",
+                "showAndSellId": event_id,
+                "slotId": slot_short["slotId"],
+                "profileId": PROFILE_A,
+                "campaignId": CAMPAIGN_A,
+                "status": "CANCELLED",
+                "actualMinutes": 30,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
+        )
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": f"SIGNUP#{slot_mid['slotId']}#{PROFILE_B}",
+                "showAndSellId": event_id,
+                "slotId": slot_mid["slotId"],
+                "profileId": PROFILE_B,
+                "campaignId": CAMPAIGN_B,
+                "status": "ACTIVE",
+                "actualMinutes": 0,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
+        )
+        # confirmed=1, active=1 (the attempt is +1): base 79 + 2x(1+1+1)=85.
+        # The ONLY difference between the two attempts is the SIGNUPWINDOW
+        # bucket count: 6 buckets -> 91 > 90 rejects; 1 bucket -> 86 passes.
+        blocked = handler(
+            _ev(
+                "signupScoutForShowAndSellSlot",
+                {
+                    "showAndSellId": event_id,
+                    "slotId": slot_long["slotId"],
+                    "campaignId": CAMPAIGN_A,
+                    "profileId": PROFILE_A,
+                    "idempotencyKey": "pf-signup-block1",
+                },
+            ),
+            None,
+        )
+        assert blocked["errorCode"] == ErrorCode.CONFLICT, blocked
+        assert "OPERATION_TOO_LARGE" in blocked["message"], blocked
+        assert "91 transaction actions" in blocked["message"], blocked
+        assert "actualMinutes = 0" in blocked["message"], blocked
+        assert _event_version(t, event_id) == version_after_slots  # no writes
+        ok = handler(
+            _ev(
+                "signupScoutForShowAndSellSlot",
+                {
+                    "showAndSellId": event_id,
+                    "slotId": slot_short["slotId"],
+                    "campaignId": CAMPAIGN_A,
+                    "profileId": PROFILE_A,
+                    "idempotencyKey": "pf-signup-ok-01",
+                },
+            ),
+            None,
+        )
+        assert ok["status"] == "ACTIVE", ok  # 79 + 6 + 1 bucket = 86 <= 90
+
+    def test_signup_stats_counts_per_event(self, t: Dict[str, Any]) -> None:
+        from src.handlers.event_operations import _event_signup_stats
+
+        _seed(t)
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "SIGNUP#s1#PROFILE#profile-1",
+                "showAndSellId": "ev-1",
+                "slotId": "s1",
+                "profileId": PROFILE_A,
+                "campaignId": CAMPAIGN_A,
+                "status": "ACTIVE",
+                "actualMinutes": 60,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
+        )
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "SIGNUP#s1#PROFILE#profile-2",
+                "showAndSellId": "ev-1",
+                "slotId": "s1",
+                "profileId": PROFILE_B,
+                "campaignId": CAMPAIGN_B,
+                "status": "ACTIVE",
+                "actualMinutes": 0,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
+        )
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "SIGNUP#s1#PROFILE#profile-x",
+                "showAndSellId": "ev-OTHER",
+                "slotId": "s1",
+                "profileId": PROFILE_B,
+                "campaignId": CAMPAIGN_B,
+                "status": "ACTIVE",
+                "actualMinutes": 45,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
+        )
+        assert _event_signup_stats("uc-1", "ev-1") == (1, 2)

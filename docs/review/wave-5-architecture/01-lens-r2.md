@@ -91,6 +91,31 @@ non-empty result; plus one CI assertion that any PR touching the
 retirement block (`getUnitReport` removal) includes a passing gate run.
 Then the manifest is not just executable but load-bearing.
 
+## W5-1 closed — re-verification at 0d13e317 (r2 second pass)
+
+**CONFIRMED.** The gate landed exactly as prescribed and verified by my own
+runs:
+- `scripts/reporting-parity-gate.mjs` runs `parity-gate.test.ts`
+  (production-shaped fixtures through `reconcileAgainstLegacy`); any
+  violation → non-zero exit with the retirement-blocking message. My run:
+  `REPORTING PARITY GATE: PASS`.
+- Non-vacuity: three named negative controls in the suite — drifted legacy
+  total, engine seller missing against a non-zero legacy seller, per-seller
+  count drift — each asserts detection; a detection regression flips a
+  control to failing and the gate exits non-zero. The controls PASS,
+  proving detection is live for every claimed class.
+- CI: the gate is a required step on every PR (ci.yml:118-120, no
+  continue-on-error) with the explicit retirement-block coupling
+  (ci.yml:122-133): a diff removing getUnitReport surface names the gate as
+  the MUST-pass precondition in the job summary.
+- r1's wave-5 CHANGES-3 (§8.6.1 obligation-decrease doctrine) also landed
+  (e4b76805). Suites: 67/67 Python (sale + sweep + payment methods),
+  59/59 TS (reporting incl. the gate suite).
+
+**Wave 5 complete: sale/obligation shapes, browser-only reporting
+integrity, and the executable (now load-bearing) parity gate all closed
+from review.r2.**
+
 ## Notes (non-blocking)
 
 - The sale response's `priorRevisions` enumerates stored snapshots — the

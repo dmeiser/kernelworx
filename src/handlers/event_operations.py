@@ -935,6 +935,72 @@ def _resolve_assign_input(args: Dict[str, Any]) -> Dict[str, Any]:
     return resolved
 
 
+# ---------------------------------------------------------------------------
+# 8.10 finalization-feasibility preflight (wave-6 START hard precondition;
+# record: docs/investigations/show-sell-8.10-feasibility-preflight.md)
+# ---------------------------------------------------------------------------
+
+TRANSACTION_ACTION_LIMIT = 90
+
+
+def _event_signup_stats(unit_campaign_id: str, show_and_sell_id: str) -> tuple[int, int]:
+    """(confirmed, active) signup counts for one event: confirmed counts
+    signups with actualMinutes > 0; active counts ACTIVE signups."""
+    confirmed = 0
+    active = 0
+    signups = tables.show_and_sells.query(
+        KeyConditionExpression="unitCampaignId = :uc AND begins_with(itemKey, :prefix)",
+        ExpressionAttributeValues={":uc": unit_campaign_id, ":prefix": SIGNUP_PREFIX},
+    ).get("Items", [])
+    for signup in signups:
+        if signup.get("showAndSellId") != show_and_sell_id:
+            continue
+        if signup.get("status") == SIGNUP_ACTIVE:
+            active += 1
+        if int(signup.get("actualMinutes", 0)) > 0:
+            confirmed += 1
+    return confirmed, active
+
+
+def _preflight_feasibility(action_count: int, source: str) -> None:
+    """Spec 8.10: a source mutation may not create an event that is no
+    longer legally finalizable inside the 90-action transaction limit.
+    Fails BEFORE any write with a named CONFLICT whose detail names the
+    remediation (never a bare transaction-limit error)."""
+    if action_count <= TRANSACTION_ACTION_LIMIT:
+        return
+    # The wire error shape (#329) carries code + message only, so the named
+    # reason and the remediation are named IN the message — never a bare
+    # transaction-limit error.
+    remediation = (
+        "remove signups, zero-unconfirm work (set actualMinutes = 0), correct or void sales, "
+        "reduce allocations, or split the event into smaller events"
+    )
+    raise AppError(
+        ErrorCode.CONFLICT,
+        f"OPERATION_TOO_LARGE: {source} would grow the finalization plan to {action_count} "
+        f"transaction actions (limit {TRANSACTION_ACTION_LIMIT}); the event could no longer "
+        f"be finalized. Remediation: {remediation}.",
+        details={
+            "reason": "OPERATION_TOO_LARGE",
+            "actionCount": action_count,
+            "limit": TRANSACTION_ACTION_LIMIT,
+            "remediation": remediation,
+        },
+    )
+
+
+def _assign_preflight(lines: Any, existing: Any) -> None:
+    """The assign half of the 8.10 binding: 4 + 3xdistinct products <= 90,
+    where products are the event's distinct allocated products AFTER the
+    assign (new targets union non-cancelled existing allocations)."""
+    distinct_products = {line.product_id for line in lines}
+    distinct_products.update(
+        _split_alloc_key(row["itemKey"])[1] for row in existing if row.get("status") != "CANCELLED"
+    )
+    _preflight_feasibility(4 + 3 * len(distinct_products), "assignShowAndSellInventory")
+
+
 def _assign_show_and_sell_inventory(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     args = event.get("arguments", {})
     resolved = _resolve_assign_input(args)
@@ -970,6 +1036,11 @@ def _assign_show_and_sell_inventory(event: Dict[str, Any], context: Any) -> Dict
                 f"Target for {line.product_id} is below its sold quantity ({violation})",
                 details={"reason": "SOLD_STOCK_PROTECTION", "productId": line.product_id},
             )
+
+    # 8.10 preflight: adding products grows the finalization write set by
+    # three actions per product (return line + balance + allocation). The
+    # event must remain legally finalizable.
+    _assign_preflight(lines, existing)
 
     # Sellable per product + open allocations across the Unit Campaign.
     balances = tables.inventory.query(
@@ -1550,6 +1621,27 @@ def _require_active_membership(unit_campaign_id: str, profile_id: str) -> None:
         )
 
 
+def _signup_preflight(current: Dict[str, Any], slot: Dict[str, Any], show_and_sell_id: str) -> None:
+    """The signup half of the 8.10 binding: 4 + 3xproducts + 2x(confirmed +
+    active + 1) + SIGNUPWINDOW bucket Puts <= 90. Bucket Puts are counted
+    per the quantized duration — exactly the entries the write plan
+    appends — so long slots consume the budget truthfully."""
+    unit_campaign_id = current["unitCampaignId"]
+    allocated = tables.inventory.query(
+        KeyConditionExpression="unitCampaignId = :uc AND begins_with(itemKey, :prefix)",
+        ExpressionAttributeValues={":uc": unit_campaign_id, ":prefix": f"{ALLOC_PREFIX}{show_and_sell_id}#"},
+    ).get("Items", [])
+    distinct_products = {
+        _split_alloc_key(item["itemKey"])[1] for item in allocated if item.get("status") != "CANCELLED"
+    }
+    confirmed, active = _event_signup_stats(unit_campaign_id, show_and_sell_id)
+    bucket_puts = len(_window_buckets(slot["startAt"], slot["endAt"]))
+    _preflight_feasibility(
+        4 + 3 * len(distinct_products) + 2 * (confirmed + active + 1) + bucket_puts,
+        "signupScoutForShowAndSellSlot",
+    )
+
+
 def _signup_scout_for_slot(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     args = event.get("arguments", {})
     show_and_sell_id = require_bounded_str(args, "showAndSellId", 100)
@@ -1583,6 +1675,11 @@ def _signup_scout_for_slot(event: Dict[str, Any], context: Any) -> Dict[str, Any
     # Friendly overlap pre-read (the message); the atomic guard is the
     # SIGNUPWINDOW bucket proofs in the transaction (DM-AC-14).
     _check_overlap(profile_id, slot)
+
+    # 8.10 preflight (the wave-4 record's wave-6 note): the signup formula
+    # counts the SIGNUPWINDOW bucket Puts — the same entries the write plan
+    # appends below — so the 90-action bound stays truthful for long slots.
+    _signup_preflight(current, slot, show_and_sell_id)
 
     now = _utcnow()
     stamp = _iso(now)
