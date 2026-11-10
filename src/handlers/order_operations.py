@@ -524,9 +524,9 @@ def _route_mode(args: Dict[str, Any]) -> Optional[str]:
     mode = args.get("fulfillmentMode")
     if mode is None or mode == "NONE":
         return None
-    if mode != FULFILLMENT_MODE_CUSTODY:
+    if not isinstance(mode, str) or mode != FULFILLMENT_MODE_CUSTODY:
         raise AppError(ErrorCode.INVALID_INPUT, f"Unknown fulfillmentMode: {mode}")
-    return mode
+    return str(mode)
 
 
 def _fulfillment_puts(create_time_fulfillments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
