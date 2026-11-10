@@ -46,6 +46,18 @@ export function request(ctx) {
     const campaign = ctx.stash.campaign;
     const catalog = ctx.stash.catalog;
 
+    // Show & Sell wave 3 (r2 C-3v): custody-mode orders must NEVER be written
+    // by the legacy NONE writer. The custody router step (which runs before
+    // this function and early-returns custody orders) is the only custody
+    // path; this refusal makes a future pipeline reordering fail loudly
+    // instead of silently writing a custody order as a plain NONE order.
+    if (input.fulfillmentMode === 'CONSUME_SCOUT_CUSTODY') {
+        util.error(
+            'CONSUME_SCOUT_CUSTODY orders must go through the custody router',
+            'INTERNAL_ERROR'
+        );
+    }
+
     const { customerPhone } = validateCustomer(input);
     validateOrderDate(input.orderDate);
 
@@ -96,6 +108,10 @@ export function request(ctx) {
         paymentMethod: input.paymentMethod,
         lineItems: enrichedLineItems,
         totalAmount: totalAmount,
+        // Parent-supplied Order.fulfillments (wave 3): NONE orders carry an
+        // empty projection so the non-null schema field resolves without a
+        // field resolver; custody orders supply their create-time records.
+        fulfillments: [],
         createdAt: now,
         updatedAt: now
     };

@@ -273,6 +273,22 @@ def _enrich_line_items(
 # ---------------------------------------------------------------------------
 
 
+def _allocate_consumption(enriched: List[Dict[str, Any]], available: Dict[str, int]) -> Dict[str, int]:
+    """Deterministic spec-8.5 allocation: lines consume in order against the
+    product's remaining availability; per-line take is min(quantity, left).
+    Mutates each line's fulfilledQuantity to its consumed amount and returns
+    per-product consumption totals."""
+    remaining = dict(available)
+    consumed_totals: Dict[str, int] = {}
+    for line in enriched:
+        product_id = line["productId"]
+        take = min(line["quantity"], remaining.get(product_id, 0))
+        remaining[product_id] = remaining.get(product_id, 0) - take
+        consumed_totals[product_id] = consumed_totals.get(product_id, 0) + take
+        line["fulfilledQuantity"] = take
+    return consumed_totals
+
+
 def _unit_campaign_for_custody(campaign: Dict[str, Any]) -> str:
     unit_campaign_id = campaign.get("unitCampaignKey")
     if not isinstance(unit_campaign_id, str) or not unit_campaign_id:
@@ -415,15 +431,38 @@ def _draw_totals(enriched: List[Dict[str, Any]]) -> Dict[str, int]:
     return totals
 
 
-def _guard_custody_holds(unit_campaign_id: str, profile_id: str, draw_totals: Dict[str, int]) -> None:
-    holds = _read_custody_holds(unit_campaign_id, profile_id, list(draw_totals))
-    for product_id, draw in draw_totals.items():
-        if holds[product_id] < draw:
-            raise AppError(
-                ErrorCode.CONFLICT,
-                "Not enough with-Scout stock for this order",
-                details={"reason": "INSUFFICIENT_CUSTODY", "productId": product_id},
-            )
+def _create_time_fulfillments(
+    enriched: List[Dict[str, Any]],
+    resolved: Dict[str, Any],
+    order_id: str,
+    unit_campaign_id: str,
+    caller: str,
+    stamp: str,
+) -> List[Dict[str, Any]]:
+    """ADR 0002 on the custody path: consumed Scout custody IS a fulfillment.
+    Each line that consumed stock gets a SCOUT_CUSTODY record with quantity
+    equal to the CONSUMED amount (spec 8.5 min-consumption), written IN THE
+    SAME TRANSACTION. Unconsumed lines get no record and stay unfulfilled."""
+    return [
+        {
+            "fulfillmentId": str(uuid.uuid4()),
+            "orderId": order_id,
+            "campaignId": resolved["campaignId"],
+            "profileId": resolved["profileId"],
+            "unitId": None,
+            "unitCampaignId": unit_campaign_id,
+            "lineItemId": line["lineItemId"],
+            "productId": line["productId"],
+            "recordType": "FULFILLMENT",
+            "quantity": int(line["fulfilledQuantity"]),
+            "source": "SCOUT_CUSTODY",
+            "reversalOfFulfillmentId": None,
+            "actorAccountId": caller,
+            "createdAt": stamp,
+        }
+        for line in enriched
+        if int(line["fulfilledQuantity"]) > 0
+    ]
 
 
 def _stamp_order_extras(order_item: Dict[str, Any], args: Dict[str, Any]) -> None:
@@ -452,17 +491,65 @@ def _raise_custody_cancel(
     ) from None
 
 
+def _custody_response_item(
+    order_item: Dict[str, Any], create_time_fulfillments: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """The committed-replay result is the FULL response: the normalized order
+    plus the parent-supplied Order.fulfillments participant-safe projection
+    (impact map 3.2: the field resolves from the parent when supplied, so the
+    mutation response carries no admin-only fields)."""
+    response_item = cast(Dict[str, Any], from_dynamodb_json(order_item))
+    response_item["fulfillments"] = [
+        {
+            "fulfillmentId": f["fulfillmentId"],
+            "orderId": f["orderId"],
+            "campaignId": f["campaignId"],
+            "profileId": f["profileId"],
+            "lineItemId": f["lineItemId"],
+            "productId": f["productId"],
+            "recordType": f["recordType"],
+            "quantity": f["quantity"],
+            "source": f["source"],
+            "createdAt": f["createdAt"],
+        }
+        for f in create_time_fulfillments
+    ]
+    return response_item
+
+
+def _route_mode(args: Dict[str, Any]) -> Optional[str]:
+    """Resolve the custody router's mode decision: None means the pipeline
+    should CONTINUE to the legacy NONE writer; a returned string is the mode
+    this Lambda must execute (unknown modes are refused loudly)."""
+    mode = args.get("fulfillmentMode")
+    if mode is None or mode == "NONE":
+        return None
+    if mode != FULFILLMENT_MODE_CUSTODY:
+        raise AppError(ErrorCode.INVALID_INPUT, f"Unknown fulfillmentMode: {mode}")
+    return mode
+
+
+def _fulfillment_puts(create_time_fulfillments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "Put": {
+                "TableName": tables.order_fulfillments.table_name,
+                "Item": fulfillment,
+                "ConditionExpression": "attribute_not_exists(fulfillmentId)",
+            }
+        }
+        for fulfillment in create_time_fulfillments
+    ]
+
+
 def custody_create_order(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Router entry: answer CONTINUE for the NONE path; run the custody
     transaction for CONSUME_SCOUT_CUSTODY. Invoked as a pipeline step, so
     the earlier pipeline steps (profile WRITE auth, campaign + catalog
     loads) have already run; their results arrive in stash."""
     args = (event.get("arguments") or {}).get("input") or {}
-    mode = args.get("fulfillmentMode")
-    if mode is None or mode == "NONE":
+    if _route_mode(args) is None:
         return dict(CONTINUE)
-    if mode != FULFILLMENT_MODE_CUSTODY:
-        raise AppError(ErrorCode.INVALID_INPUT, f"Unknown fulfillmentMode: {mode}")
 
     resolved = _validate_custody_input(args)
     caller = _require_caller(event)
@@ -479,12 +566,18 @@ def custody_create_order(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     unit_campaign_id = _unit_campaign_for_custody(campaign)
     enriched, total_amount = _enrich_line_items(resolved["lineItems"], catalog)
 
-    draws = _draw_totals(enriched)
-    _guard_custody_holds(unit_campaign_id, resolved["profileId"], draws)
+    # Spec 8.5 min-consumption (QA divergence + SS-SM-04 partial-sale oracle):
+    # custody consumption per product is min(ordered, available). A shortfall
+    # NEVER blocks the order: the consumed portion fulfills, the remainder
+    # stays unfulfilled, custody never goes negative.
+    available = _read_custody_holds(unit_campaign_id, resolved["profileId"], list(_draw_totals(enriched)))
+    consumed_totals = _allocate_consumption(enriched, available)
 
     now = _utcnow()
     stamp = _iso(now)
     order_id = build_order_key(resolved["campaignId"], str(uuid.uuid4()))
+    create_time_fulfillments = _create_time_fulfillments(enriched, resolved, order_id, unit_campaign_id, caller, stamp)
+
     order_item: Dict[str, Any] = {
         "orderId": order_id,
         "profileId": resolved["profileId"],
@@ -509,20 +602,25 @@ def custody_create_order(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         order_item=order_item,
         unit_campaign_id=unit_campaign_id,
         profile_id=resolved["profileId"],
-        draw_totals=draws,
+        draw_totals=consumed_totals,
         caller=caller,
         stamp=stamp,
     )
+    plan.extend(_fulfillment_puts(create_time_fulfillments))
+    # The committed-replay result is the FULL response (parent-supplied
+    # Order.fulfillments included), computed before the commit — every value
+    # is deterministic at plan time, and the marker/effect write atomically.
+    response_item = _custody_response_item(order_item, create_time_fulfillments)
     marker: Optional[Dict[str, Any]] = None
     if idem_key is not None:
-        marker = _marker_put(caller, marker_scope, idem_key, fingerprint, order_item, _epoch(now))
+        marker = _marker_put(caller, marker_scope, idem_key, fingerprint, response_item, _epoch(now))
         plan.append(marker)
 
     try:
         execute_transaction(plan)
     except TransactionCancelledError as exc:
         _raise_custody_cancel(exc, plan, marker)
-    return cast(Dict[str, Any], from_dynamodb_json(order_item))
+    return response_item
 
 
 # ---------------------------------------------------------------------------
@@ -776,6 +874,66 @@ def fulfill_individual_order_line(event: Dict[str, Any], context: Any) -> Dict[s
     return result
 
 
+def _reversal_inventory_entries(
+    original: Dict[str, Any], order: Dict[str, Any], quantity: int, order_id: str, caller: str, stamp: str
+) -> List[Dict[str, Any]]:
+    """Inventory legs of a reversal: KERNEL_STOCK returns to the unit balance;
+    SCOUT_CUSTODY returns to the Scout's custody (the draw ran at
+    create/fulfill time; conservation runs both directions). EXTERNAL_COUNCIL
+    and unit-less fulfillments have no inventory leg."""
+    unit_campaign_id = original.get("unitCampaignId")
+    if not isinstance(unit_campaign_id, str) or not unit_campaign_id:
+        return []
+    if original.get("source") == "KERNEL_STOCK":
+        return [
+            {
+                "Update": {
+                    "TableName": tables.inventory.table_name,
+                    "Key": {
+                        "unitCampaignId": unit_campaign_id,
+                        "itemKey": f"{BALANCE_PREFIX}{original['productId']}",
+                    },
+                    "UpdateExpression": "ADD kernelPhysicalQty :q SET version = version + :one, updatedAt = :ua",
+                    "ConditionExpression": "attribute_exists(itemKey)",
+                    "ExpressionAttributeValues": {":q": quantity, ":one": 1, ":ua": stamp},
+                }
+            }
+        ]
+    if original.get("source") == "SCOUT_CUSTODY":
+        profile_id_for_custody = str(order["profileId"])
+        return [
+            {
+                "Update": {
+                    "TableName": tables.inventory.table_name,
+                    "Key": {
+                        "unitCampaignId": unit_campaign_id,
+                        "itemKey": f"{CUSTODY_PREFIX}{profile_id_for_custody}#{original['productId']}",
+                    },
+                    "UpdateExpression": "ADD withScoutQty :q SET version = version + :one, updatedAt = :ua",
+                    "ConditionExpression": "attribute_exists(itemKey)",
+                    "ExpressionAttributeValues": {":q": quantity, ":one": 1, ":ua": stamp},
+                }
+            },
+            {
+                "Put": {
+                    "TableName": tables.inventory.table_name,
+                    "Item": {
+                        "unitCampaignId": unit_campaign_id,
+                        "itemKey": f"{MOVEMENT_PREFIX}{stamp}#{uuid.uuid4()}",
+                        "productId": original["productId"],
+                        "movementType": "REVERSAL_RETURN",
+                        "withScoutDelta": quantity,
+                        "orderId": order_id,
+                        "actorAccountId": caller,
+                        "occurredAt": stamp,
+                    },
+                    "ConditionExpression": "attribute_not_exists(itemKey)",
+                }
+            },
+        ]
+    return []
+
+
 def reverse_individual_order_fulfillment(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     args = event.get("arguments", {})
     order_id = require_bounded_str(args, "orderId", 100)
@@ -862,19 +1020,7 @@ def reverse_individual_order_fulfillment(event: Dict[str, Any], context: Any) ->
             }
         },
     ]
-    if original.get("source") == "KERNEL_STOCK" and isinstance(original.get("unitCampaignId"), str):
-        unit_campaign_id = original["unitCampaignId"]
-        plan.append(
-            {
-                "Update": {
-                    "TableName": tables.inventory.table_name,
-                    "Key": {"unitCampaignId": unit_campaign_id, "itemKey": f"{BALANCE_PREFIX}{original['productId']}"},
-                    "UpdateExpression": "ADD kernelPhysicalQty :q SET version = version + :one, updatedAt = :ua",
-                    "ConditionExpression": "attribute_exists(itemKey)",
-                    "ExpressionAttributeValues": {":q": quantity, ":one": 1, ":ua": stamp},
-                }
-            }
-        )
+    plan.extend(_reversal_inventory_entries(original, order, quantity, order_id, caller, stamp))
 
     updated_order = dict(order)
     updated_lines = [dict(line) for line in lines]

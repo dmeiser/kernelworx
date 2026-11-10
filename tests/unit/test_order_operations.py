@@ -179,9 +179,16 @@ class TestCustodyCreate:
         assert result["fulfillmentVersion"] == 0
         line = result["lineItems"][0]
         assert line["lineItemId"]
-        assert line["fulfilledQuantity"] == 0
+        # ADR-0002 custody path: consumed custody is fulfilled at creation
+        # (full coverage here), with the participant-safe record exposed.
+        assert line["fulfilledQuantity"] == line["quantity"]
+        assert len(result["fulfillments"]) == 1
+        assert result["fulfillments"][0]["quantity"] == line["quantity"]
+        assert "actorAccountId" not in result["fulfillments"][0]
         assert line["subtotal"] == 3.98
         assert result["totalAmount"] == 3.98
+        rows = t["order_fulfillments"].scan()["Items"]
+        assert len(rows) == 1 and rows[0]["source"] == "SCOUT_CUSTODY"
         # Custody drawn, order written, totals bumped — all landed.
         custody = t["inventory"].get_item(Key={"unitCampaignId": "uc-1", "itemKey": f"CUSTODY#{PROFILE_A}#PROD#1"})[
             "Item"
@@ -203,19 +210,26 @@ class TestCustodyCreate:
         ]
         assert custody["withScoutQty"] == 8  # no double draw
 
-    def test_insufficient_custody_cancels_everything(self, t: Dict[str, Any]) -> None:
-        _seed(t, custody_qty=1)
-        result = handler(_ev("createOrder", _create_args()), None)
-        assert result["__isError"] is True
-        assert result["errorCode"] == ErrorCode.CONFLICT
-        # No partial write: no order row, custody untouched, totals unmoved.
-        assert t["orders"].scan()["Count"] == 0
+    def test_partial_sale_oracle_min_consumption(self, t: Dict[str, Any]) -> None:
+        """SS-SM-04 partial-sale oracle (spec 8.5, lead ruling): custody 2 of
+        ordered 4 consumes 2, fulfills 2, leaves 2 unfulfilled, ZERO
+        conflict, custody never negative. A shortfall never blocks."""
+        _seed(t, custody_qty=2)
+        args = _create_args(lineItems=[{"productId": "PROD#1", "quantity": 4}], idempotencyKey="ord-partial")
+        result = handler(_ev("createOrder", args), None)
+        line = result["lineItems"][0]
+        assert line["quantity"] == 4
+        assert line["fulfilledQuantity"] == 2
+        assert [f["quantity"] for f in result["fulfillments"]] == [2]
+        assert result["fulfillments"][0]["source"] == "SCOUT_CUSTODY"
         custody = t["inventory"].get_item(Key={"unitCampaignId": "uc-1", "itemKey": f"CUSTODY#{PROFILE_A}#PROD#1"})[
             "Item"
         ]
-        assert custody["withScoutQty"] == 1
+        assert custody["withScoutQty"] == 0  # never negative
+        stored = t["orders"].get_item(Key={"campaignId": CAMPAIGN_A, "orderId": result["orderId"]})["Item"]
+        assert stored["lineItems"][0]["fulfilledQuantity"] == 2
         campaign = t["campaigns"].get_item(Key={"profileId": PROFILE_A, "campaignId": CAMPAIGN_A})["Item"]
-        assert campaign["totalOrders"] == 0
+        assert campaign["totalOrders"] == 1
 
     def test_unjoined_campaign_rejected(self, t: Dict[str, Any]) -> None:
         _seed(t)
@@ -255,7 +269,9 @@ class TestCustodyCreate:
 
 class TestFulfillReverse:
     def _order(self, t: Dict[str, Any]) -> Dict[str, Any]:
-        _seed(t)
+        """A custody order with an unfulfilled remainder (custody 1 of
+        ordered 2) so individual fulfillment has something to fulfill."""
+        _seed(t, custody_qty=1)
         return handler(_ev("createOrder", _create_args()), None)
 
     def test_fulfill_and_reverse_round_trip(self, t: Dict[str, Any]) -> None:
@@ -277,7 +293,7 @@ class TestFulfillReverse:
         )
         assert fulfilled["fulfillment"]["recordType"] == "FULFILLMENT"
         assert fulfilled["order"]["fulfillmentVersion"] == 1
-        assert fulfilled["order"]["lineItems"][0]["fulfilledQuantity"] == 1
+        assert fulfilled["order"]["lineItems"][0]["fulfilledQuantity"] == 2  # 1 at create + 1 now
 
         reversed_result = handler(
             _ev(
@@ -293,13 +309,19 @@ class TestFulfillReverse:
         )
         assert reversed_result["reversal"]["recordType"] == "REVERSAL"
         assert reversed_result["reversal"]["fulfillmentId"].startswith("REVERSAL#")
-        assert reversed_result["order"]["lineItems"][0]["fulfilledQuantity"] == 0
+        # Only the post-create fulfillment was reversed: 1 create-time stays.
+        assert reversed_result["order"]["lineItems"][0]["fulfilledQuantity"] == 1
         assert reversed_result["order"]["fulfillmentVersion"] == 2
-        # Append-only: the original row survives, marked reversed.
+        # SCOUT_CUSTODY reversal returns stock to custody (conservation).
+        custody = t["inventory"].get_item(Key={"unitCampaignId": "uc-1", "itemKey": f"CUSTODY#{PROFILE_A}#PROD#1"})[
+            "Item"
+        ]
+        assert custody["withScoutQty"] == 1  # 0 after create (drew 1), +1 restored
+        # Append-only: create-time fulfill + post-create fulfill + reversal.
         rows = t["order_fulfillments"].query(
             KeyConditionExpression="orderId = :o", ExpressionAttributeValues={":o": order["orderId"]}
         )["Items"]
-        assert len(rows) == 2
+        assert len(rows) == 3
 
     def test_over_fulfill_rejected(self, t: Dict[str, Any]) -> None:
         order = self._order(t)
@@ -319,7 +341,9 @@ class TestFulfillReverse:
             None,
         )
         assert result["errorCode"] == ErrorCode.CONFLICT
-        assert t["order_fulfillments"].scan()["Count"] == 0
+        # Only the create-time fulfillment exists; the rejected one left no row.
+        rows = t["order_fulfillments"].scan()["Items"]
+        assert len(rows) == 1 and rows[0]["source"] == "SCOUT_CUSTODY"
 
     def test_version_mismatch_rejected(self, t: Dict[str, Any]) -> None:
         order = self._order(t)
@@ -404,7 +428,7 @@ class TestFulfillReverse:
                 {
                     "orderId": order["orderId"],
                     "lineItemId": line_id,
-                    "quantity": 2,
+                    "quantity": 1,  # the unfulfilled remainder
                     "source": "KERNEL_STOCK",
                     "expectedFulfillmentVersion": 0,
                     "idempotencyKey": "ful-k-001",
@@ -412,9 +436,9 @@ class TestFulfillReverse:
             ),
             None,
         )
-        assert result["inventoryPosition"]["balance"]["kernelPhysicalQty"] == 5
+        assert result["inventoryPosition"]["balance"]["kernelPhysicalQty"] == 6
         balance = t["inventory"].get_item(Key={"unitCampaignId": "uc-1", "itemKey": "BALANCE#PROD#1"})["Item"]
-        assert balance["kernelPhysicalQty"] == 5
+        assert balance["kernelPhysicalQty"] == 6
 
     def test_replays(self, t: Dict[str, Any]) -> None:
         order = self._order(t)
@@ -608,7 +632,7 @@ class TestOrderSweep:
                 {
                     "orderId": order["orderId"],
                     "lineItemId": line_id,
-                    "quantity": 2,
+                    "quantity": 1,  # the unfulfilled remainder
                     "source": "KERNEL_STOCK",
                     "expectedFulfillmentVersion": 0,
                     "idempotencyKey": "sw-kf-001",
@@ -673,7 +697,9 @@ class TestOrderSweep:
         assert handler(_ev("mysteryField", {}), None)["errorCode"] == ErrorCode.INTERNAL_ERROR
 
     def _custody_order(self, t: Dict[str, Any]) -> Dict[str, Any]:
-        _seed(t)
+        """A custody order with an unfulfilled remainder (custody 1 of
+        ordered 2) so individual fulfillment has something to fulfill."""
+        _seed(t, custody_qty=1)
         return handler(_ev("createOrder", _create_args(idempotencyKey=f"ord-sw-{uuid4()}")), None)
 
     def test_marker_encoder_fallback_and_json_variants(self, t: Dict[str, Any]) -> None:
@@ -1055,7 +1081,7 @@ class TestOrderSweep:
     def test_kernel_source_without_unit_origin_skips_inventory(self, t: Dict[str, Any]) -> None:
         """A legacy-shaped order (no origin) fulfilled from KERNEL_STOCK has
         no inventory leg — the kernel context returns None at the handler."""
-        _seed(t)
+        _seed(t, custody_qty=1)  # remainder 1 unfulfilled
         order = handler(_ev("createOrder", _create_args()), None)
         stored = t["orders"].get_item(Key={"campaignId": CAMPAIGN_A, "orderId": order["orderId"]})["Item"]
         del stored["origin"]
@@ -1080,7 +1106,7 @@ class TestOrderSweep:
     def test_unit_admin_fulfills_without_profile_ownership(self, t: Dict[str, Any]) -> None:
         """A Unit Admin (no profile access) fulfills a unit-originated order
         through the unit-grant authorization path."""
-        _seed(t)
+        _seed(t, custody_qty=1)  # remainder 1 unfulfilled
         t["profiles"].delete_item(Key={"ownerAccountId": ACCOUNT_A, "profileId": PROFILE_A})
         t["profiles"].put_item(
             Item={
@@ -1121,3 +1147,137 @@ class TestOrderSweep:
         with pytest.raises(AppError) as race_info:
             _raise_custody_cancel(TransactionCancelledError([1]), plan, marker)
         assert "being processed concurrently" in str(race_info.value)
+
+
+class TestQACorruptionDirectionProbe:
+    """QA wave-3 probes (temporary)."""
+
+    def test_qa_custody_full_cycle_reversal_restores_only_custody(self, t):
+        """UPDATED BY THE C-1v FIX COMMIT (QA re-verifies): mechanics adapted
+        to the shipped contract — the create-time SCOUT_CUSTODY fulfillment is
+        resolved from order_fulfillments (its real home; ADR-0002 custody
+        path), the SDL argument name is expectedFulfillmentVersion, and the
+        actor is the profile owner. Intent unchanged: reversal restores
+        custody only; kernel never moves."""
+        _seed(t, with_custody=True, custody_qty=2)
+        t["inventory"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "BALANCE#PROD#1",
+                "kernelPhysicalQty": 10,
+                "soldInPossessionQty": 0,
+                "councilOnOrderQty": 0,
+                "version": 1,
+            }
+        )
+        order = handler(_ev("createOrder", _create_args()), None)  # default quantity 2 == custody 2
+        custody_key = {"unitCampaignId": "uc-1", "itemKey": f"CUSTODY#{PROFILE_A}#PROD#1"}
+        balance_key = {"unitCampaignId": "uc-1", "itemKey": "BALANCE#PROD#1"}
+        cust0 = t["inventory"].get_item(Key=custody_key)["Item"]["withScoutQty"]
+        kern0 = t["inventory"].get_item(Key=balance_key)["Item"]["kernelPhysicalQty"]
+        assert cust0 == 0 and kern0 == 10, (cust0, kern0)  # drawn once, never negative, kernel untouched
+        rows = t["order_fulfillments"].query(
+            KeyConditionExpression="orderId = :o", ExpressionAttributeValues={":o": order["orderId"]}
+        )["Items"]
+        assert len(rows) == 1 and rows[0]["source"] == "SCOUT_CUSTODY", rows
+        result = handler(
+            _ev(
+                "reverseIndividualOrderFulfillment",
+                {
+                    "orderId": order["orderId"],
+                    "fulfillmentId": rows[0]["fulfillmentId"],
+                    "expectedFulfillmentVersion": 0,
+                    "idempotencyKey": "qa-cdp-3",
+                },
+                sub="user-123-456",
+            ),
+            None,
+        )
+        assert "reversal" in result, result
+        cust1 = t["inventory"].get_item(Key=custody_key)["Item"]["withScoutQty"]
+        kern1 = t["inventory"].get_item(Key=balance_key)["Item"]["kernelPhysicalQty"]
+        assert cust1 == 2 and kern1 == 10, (cust1, kern1)  # custody restored; kernel never moved
+
+    def test_qa_partial_custody_divergence_documented(self, t):
+        """UPDATED BY THE C-1v FIX COMMIT: this probe originally pinned the
+        DIVERGENT behavior (CONFLICT on shortfall). The lead ruled spec 8.5
+        unambiguous — min(ordered, available), never blocking — so the probe
+        now pins the CORRECTED contract: ordered 3, custody 2 consumes 2,
+        fulfills 2, leaves 1 unfulfilled, zero error, custody never
+        negative, kernel untouched. (SS-SM-04 partial-sale oracle.)"""
+        _seed(t, with_custody=True, custody_qty=2)
+        t["inventory"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "BALANCE#PROD#1",
+                "kernelPhysicalQty": 10,
+                "soldInPossessionQty": 0,
+                "councilOnOrderQty": 0,
+                "version": 1,
+            }
+        )
+        result = handler(
+            _ev(
+                "createOrder",
+                {
+                    "input": {
+                        "profileId": PROFILE_A,
+                        "campaignId": CAMPAIGN_A,
+                        "customerName": "QA Buyer",
+                        "orderDate": "2026-11-09T12:00:00Z",
+                        "paymentMethod": "CASH",
+                        "lineItems": [{"productId": "PROD#1", "quantity": 3}],
+                        "fulfillmentMode": "CONSUME_SCOUT_CUSTODY",
+                        "idempotencyKey": "qa-cdp-9",
+                    }
+                },
+            ),
+            None,
+        )
+        assert "orderId" in result, result  # a shortfall NEVER blocks (spec 8.5)
+        line = result["lineItems"][0]
+        assert line["quantity"] == 3 and line["fulfilledQuantity"] == 2, line
+        assert [f["quantity"] for f in result["fulfillments"]] == [2]
+        custody = t["inventory"].get_item(Key={"unitCampaignId": "uc-1", "itemKey": f"CUSTODY#{PROFILE_A}#PROD#1"})[
+            "Item"
+        ]
+        balance = t["inventory"].get_item(Key={"unitCampaignId": "uc-1", "itemKey": "BALANCE#PROD#1"})["Item"]
+        assert custody["withScoutQty"] == 0 and balance["kernelPhysicalQty"] == 10, (custody, balance)
+        print("PARTIAL-SALE PINNED: consumed 2 of 3, remainder 1 unfulfilled, no conflict")
+
+    def test_reversal_inventory_entry_variants(self, t: Dict[str, Any]) -> None:
+        from src.handlers.order_operations import _reversal_inventory_entries
+
+        order = {"profileId": PROFILE_A}
+        # unit-less fulfillment -> no inventory leg
+        assert _reversal_inventory_entries({"source": "KERNEL_STOCK"}, order, 1, "o", "a", "s") == []
+        # EXTERNAL_COUNCIL -> no inventory leg
+        ext = _reversal_inventory_entries(
+            {"source": "EXTERNAL_COUNCIL", "unitCampaignId": "uc-1", "productId": "P1"}, order, 1, "o", "a", "s"
+        )
+        assert ext == []
+        # SCOUT_CUSTODY -> custody restore + movement
+        entries = _reversal_inventory_entries(
+            {"source": "SCOUT_CUSTODY", "unitCampaignId": "uc-1", "productId": "P1"}, order, 2, "o", "a", "s"
+        )
+        assert len(entries) == 2
+        assert "withScoutQty" in entries[0]["Update"]["UpdateExpression"]
+
+    def test_kernel_fulfill_insufficient_stock_raise(self, t: Dict[str, Any]) -> None:
+        from src.handlers.order_operations import _kernel_fulfill_context
+        from src.utils.errors import AppError
+
+        t["inventory"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "BALANCE#P1",
+                "productId": "P1",
+                "kernelPhysicalQty": 1,
+                "soldInPossessionQty": 0,
+                "councilOnOrderQty": 0,
+                "version": 3,
+            }
+        )
+        with pytest.raises(AppError) as exc_info:
+            _kernel_fulfill_context({"unitCampaignId": "uc-1"}, "P1", 5, "ORDER#x", ACCOUNT_A, "s", "m")
+        assert exc_info.value.error_code == "CONFLICT"

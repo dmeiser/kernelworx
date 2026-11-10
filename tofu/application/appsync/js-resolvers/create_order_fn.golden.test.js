@@ -162,3 +162,45 @@ describe('golden oracle O6: spec-input tolerance on the NONE path', () => {
     assert.strictEqual(result.operation, 'PutItem');
   });
 });
+
+describe('golden oracle O7: custody-mode refusal and the fulfillments field', () => {
+  const o7Ctx = {
+    args: {
+      input: {
+        profileId: 'PROFILE#p1',
+        campaignId: 'CAMPAIGN#c1',
+        customerName: 'Alice',
+        orderDate: '2024-01-01T00:00:00Z',
+        paymentMethod: 'CASH',
+        lineItems: [{ productId: 'PROD#1', quantity: 3 }],
+      },
+    },
+    stash: {
+      campaign: { profileId: 'PROFILE#p1' },
+      catalog: {
+        products: [{ productId: 'PROD#1', productName: 'Popcorn', price: 1.99 }],
+      },
+    },
+  };
+
+  it('refuses CONSUME_SCOUT_CUSTODY at the NONE writer (r2 C-3v)', () => {
+    const ctx = {
+      args: {
+        input: {
+          ...o7Ctx.args.input,
+          fulfillmentMode: 'CONSUME_SCOUT_CUSTODY',
+        },
+      },
+      stash: o7Ctx.stash,
+    };
+    assert.throws(
+      () => request(ctx),
+      /INTERNAL_ERROR: CONSUME_SCOUT_CUSTODY orders must go through the custody router/
+    );
+  });
+
+  it('parent-supplies an empty fulfillments projection on the NONE path', () => {
+    const result = request(o7Ctx);
+    assert.deepStrictEqual(result.attributeValues.fulfillments, []);
+  });
+});
