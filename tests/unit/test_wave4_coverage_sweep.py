@@ -2130,3 +2130,396 @@ class TestWave4TrulyFinal:
         assert all(i["showAndSellId"] != "old-one" for i in listing["items"])
         with_past = p(_ev("unitCampaignOpportunities", {"unitCampaignId": "uc-1", "includePast": True}), None)
         assert any(i["showAndSellId"] == "old-one" for i in with_past["items"])
+
+
+class TestSignupContractOracles:
+    """Ported pins: SIGN-M-01 (sequence contract), DM-AC-14 (atomic overlap
+    prevention, cross-campaign), DM-AC-19 (membership-removal race barrier)."""
+
+    def _world(self, t: Any, sub: str = "user-123-456") -> Any:
+        created = _create_event(t, key=f"sw-or-{uuid4()}")
+        slot = handler(
+            _ev(
+                "upsertShowAndSellSlot",
+                {
+                    "input": {
+                        "showAndSellId": created["showAndSellId"],
+                        "startAt": FUTURE_START,
+                        "endAt": FUTURE_END,
+                        "capacity": 4,
+                        "expectedEventVersion": 1,
+                        "idempotencyKey": f"sw-or-slot-{uuid4()}",
+                    }
+                },
+            ),
+            None,
+        )
+        return {"event": created, "slot": slot}
+
+    def _signup(
+        self, world: Any, key: str, profile: str = PROFILE_A, campaign: str = CAMPAIGN_A, sub: str = "user-123-456"
+    ) -> Any:
+        return handler(
+            _ev(
+                "signupScoutForShowAndSellSlot",
+                {
+                    "showAndSellId": world["event"]["showAndSellId"],
+                    "slotId": world["slot"]["slotId"],
+                    "campaignId": campaign,
+                    "profileId": profile,
+                    "idempotencyKey": key,
+                },
+                sub=sub,
+            ),
+            None,
+        )
+
+    def test_sign_m_01_happy_path_replay_and_duplicate(self, t: Any) -> None:
+        world = self._world(t)
+        first = self._signup(world, "sw-sign-m1-01")
+        assert first["status"] == "ACTIVE"
+        replayed = self._signup(world, "sw-sign-m1-01")
+        assert replayed == first
+        # Cancel, then re-signup the same slot (tombstone overwrite allowed).
+        cancelled = handler(
+            _ev(
+                "cancelShowAndSellSignup",
+                {
+                    "showAndSellId": world["event"]["showAndSellId"],
+                    "slotId": world["slot"]["slotId"],
+                    "profileId": PROFILE_A,
+                    "expectedVersion": first["version"],
+                    "idempotencyKey": "sw-sign-m1-02",
+                },
+            ),
+            None,
+        )
+        assert cancelled["status"] == "CANCELLED"
+        resigned = self._signup(world, "sw-sign-m1-03")
+        assert resigned["status"] == "ACTIVE"
+
+    def test_dm_ac_14_cross_unit_campaign_overlap_blocked_atomically(self, t: Any) -> None:
+        """DM-AC-14: a Scout cannot hold overlapping commitments across Unit
+        Campaigns. Sign up in UC-1, then attempt an overlapping slot in a
+        second Unit Campaign -> CONFLICT via the SIGNUPWINDOW proof."""
+        world = self._world(t)
+        self._signup(world, "sw-ac14-0001")
+        # Second Unit Campaign in the same unit, same profile a member.
+        t["unit_campaigns"].put_item(
+            Item={
+                "unitCampaignId": "uc-2",
+                "itemKey": "METADATA",
+                "unitId": "unit-1",
+                "campaignName": "Other",
+                "campaignYear": 2026,
+                "catalogId": "CATALOG#c",
+                "joinCode": "JOINJOINJOINJOIN2",
+                "isActive": True,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+                "createdByAccountId": ACCOUNT_A,
+                "updatedByAccountId": ACCOUNT_A,
+            }
+        )
+        t["unit_campaigns"].put_item(
+            Item={
+                "unitCampaignId": "uc-2",
+                "itemKey": f"MEMBER#{PROFILE_A}",
+                "profileId": PROFILE_A,
+                "campaignId": CAMPAIGN_A,
+                "status": "ACTIVE",
+                "joinedByAccountId": ACCOUNT_A,
+                "joinedAt": "t",
+                "version": 1,
+            }
+        )
+        other = handler(
+            _ev(
+                "createShowAndSell",
+                {
+                    "input": {
+                        "unitCampaignId": "uc-2",
+                        "locationName": "Elsewhere",
+                        "startAt": FUTURE_START,
+                        "endAt": FUTURE_END,
+                        "idempotencyKey": "sw-ac14-ev-01",
+                    }
+                },
+            ),
+            None,
+        )
+        other_slot = handler(
+            _ev(
+                "upsertShowAndSellSlot",
+                {
+                    "input": {
+                        "showAndSellId": other["showAndSellId"],
+                        "startAt": FUTURE_START,
+                        "endAt": FUTURE_END,
+                        "capacity": 4,
+                        "expectedEventVersion": 1,
+                        "idempotencyKey": "sw-ac14-slot",
+                    }
+                },
+            ),
+            None,
+        )
+        # The friendly pre-read catches it (the buckets would too).
+        blocked = handler(
+            _ev(
+                "signupScoutForShowAndSellSlot",
+                {
+                    "showAndSellId": other["showAndSellId"],
+                    "slotId": other_slot["slotId"],
+                    "campaignId": CAMPAIGN_A,
+                    "profileId": PROFILE_A,
+                    "idempotencyKey": "sw-ac14-su-01",
+                },
+            ),
+            None,
+        )
+        assert blocked["errorCode"] == ErrorCode.CONFLICT
+        assert blocked["message"]  # friendly message names the conflicting commitment
+        # Non-overlapping slot in UC-2 succeeds (no shared bucket).
+        far_slot = handler(
+            _ev(
+                "upsertShowAndSellSlot",
+                {
+                    "input": {
+                        "showAndSellId": other["showAndSellId"],
+                        "startAt": LATER_START,
+                        "endAt": LATER_END,
+                        "capacity": 4,
+                        "expectedEventVersion": 2,
+                        "idempotencyKey": "sw-ac14-slot2",
+                    }
+                },
+            ),
+            None,
+        )
+        ok = handler(
+            _ev(
+                "signupScoutForShowAndSellSlot",
+                {
+                    "showAndSellId": other["showAndSellId"],
+                    "slotId": far_slot["slotId"],
+                    "campaignId": CAMPAIGN_A,
+                    "profileId": PROFILE_A,
+                    "idempotencyKey": "sw-ac14-su-02",
+                },
+            ),
+            None,
+        )
+        assert ok["status"] == "ACTIVE"
+
+    def test_dm_ac_19_removal_race_cancels_the_transaction(self, t: Any, monkeypatch: Any) -> None:
+        """DM-AC-19: a membership removal racing a new signup invalidates the
+        membership-version condition; nothing commits."""
+        world = self._world(t)
+        real_execute = event_operations.execute_transaction
+
+        def racing_execute(plan: Any, **kwargs: Any) -> None:
+            # The removal lands between the pre-read and the commit.
+            t["unit_campaigns"].update_item(
+                Key={"unitCampaignId": "uc-1", "itemKey": f"MEMBER#{PROFILE_A}"},
+                UpdateExpression="SET #status = :s",
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={":s": "REMOVED"},
+            )
+            real_execute(plan, **kwargs)
+
+        monkeypatch.setattr(event_operations, "execute_transaction", racing_execute)
+        result = self._signup(world, "sw-ac19-0001")
+        assert result["errorCode"] == ErrorCode.CONFLICT
+        assert result["details"]["reason"] == "NOT_ROSTERED" if "details" in result else result["message"]
+        # No signup row, no commitment residue.
+        rows = t["show_and_sells"].scan()["Items"]
+        assert not [r for r in rows if r["itemKey"].startswith("SIGNUP#")]
+
+    def test_signup_window_race_maps_to_overlap(self, t: Any, monkeypatch: Any) -> None:
+        """A window-bucket condition failure (concurrent overlapping signup)
+        maps to the OVERLAPPING_COMMITMENT conflict."""
+        world = self._world(t)
+
+        def _cancel_on_window(plan: Any, **kwargs: Any) -> None:
+            raise TransactionCancelledError([4])
+
+        monkeypatch.setattr(event_operations, "execute_transaction", _cancel_on_window)
+        raced = self._signup(world, "sw-win-0001")
+        assert raced["errorCode"] == ErrorCode.CONFLICT
+        assert raced["message"]  # names the conflicting commitment
+
+
+class TestCancelCascade:
+    """r1 CHANGES-1 (spec 8.8): cancelling an event releases everything in
+    ONE transaction — allocations cancelled with releasedQty, release
+    movements, signups cancelled, slot counters zeroed, window buckets freed."""
+
+    def _world(self, t: Any) -> Any:
+        created = _create_event(t, key=f"sw-cc-{uuid4()}")
+        t["inventory"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "BALANCE#PROD#1",
+                "productId": "PROD#1",
+                "kernelPhysicalQty": 10,
+                "soldInPossessionQty": 0,
+                "councilOnOrderQty": 0,
+                "version": 1,
+            }
+        )
+        handler(
+            _ev(
+                "assignShowAndSellInventory",
+                {
+                    "showAndSellId": created["showAndSellId"],
+                    "items": [{"productId": "PROD#1", "quantity": 6}],
+                    "expectedVersion": created["version"],
+                    "idempotencyKey": f"sw-cc-as-{uuid4()}",
+                },
+            ),
+            None,
+        )
+        slot = handler(
+            _ev(
+                "upsertShowAndSellSlot",
+                {
+                    "input": {
+                        "showAndSellId": created["showAndSellId"],
+                        "startAt": FUTURE_START,
+                        "endAt": FUTURE_END,
+                        "capacity": 4,
+                        "expectedEventVersion": 2,
+                        "idempotencyKey": f"sw-cc-sl-{uuid4()}",
+                    }
+                },
+            ),
+            None,
+        )
+        handler(
+            _ev(
+                "signupScoutForShowAndSellSlot",
+                {
+                    "showAndSellId": created["showAndSellId"],
+                    "slotId": slot["slotId"],
+                    "campaignId": CAMPAIGN_A,
+                    "profileId": PROFILE_A,
+                    "idempotencyKey": f"sw-cc-su-{uuid4()}",
+                },
+            ),
+            None,
+        )
+        return {"event": created, "slot": slot}
+
+    def test_cancel_releases_allocations_signups_slots_and_windows(self, t: Any) -> None:
+        world = self._world(t)
+        result = handler(
+            _ev(
+                "cancelShowAndSell",
+                {
+                    "showAndSellId": world["event"]["showAndSellId"],
+                    "expectedVersion": 4,
+                    "reason": "storm",
+                    "idempotencyKey": f"sw-cc-cancel-{uuid4()}",
+                },
+            ),
+            None,
+        )
+        assert result["status"] == "CANCELLED"
+        # Allocation CANCELLED with releasedQty += remaining, remaining 0.
+        alloc = t["inventory"].get_item(
+            Key={"unitCampaignId": "uc-1", "itemKey": f"ALLOC#{world['event']['showAndSellId']}#PROD#1"}
+        )["Item"]
+        assert alloc["status"] == "CANCELLED"
+        assert int(alloc["remainingQty"]) == 0
+        assert int(alloc["releasedQty"]) == 6
+        # Release movement recorded.
+        movements = [
+            m
+            for m in t["inventory"].scan()["Items"]
+            if m["itemKey"].startswith("MOVEMENT#") and m.get("movementType") == "RELEASE"
+        ]
+        assert len(movements) == 1 and int(movements[0]["assignedDelta"]) == -6
+        # Signup cancelled; slot counter zeroed; window buckets freed.
+        signup = t["show_and_sells"].get_item(
+            Key={"unitCampaignId": "uc-1", "itemKey": f"SIGNUP#{world['slot']['slotId']}#{PROFILE_A}"}
+        )["Item"]
+        assert signup["status"] == "CANCELLED"
+        slot = t["show_and_sells"].get_item(
+            Key={
+                "unitCampaignId": "uc-1",
+                "itemKey": f"SLOT#{world['event']['showAndSellId']}#{world['slot']['slotId']}",
+            }
+        )["Item"]
+        assert int(slot["activeSignupCount"]) == 0
+        windows = [w for w in t["show_and_sells"].scan()["Items"] if w["unitCampaignId"].startswith("PROFILEWINDOW#")]
+        assert windows == []
+
+    def test_cancel_retains_buckets_shared_with_other_active_signup(self, t: Any) -> None:
+        world = self._world(t)
+        # A second overlapping ACTIVE signup of the same profile elsewhere
+        # keeps the shared buckets alive.
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": f"EVENT#shadow-{uuid4()}",
+                "showAndSellId": "shadow",
+                "saleId": "shadow",
+                "unitId": "unit-1",
+                "locationName": "Shadow",
+                "startAt": FUTURE_START,
+                "endAt": FUTURE_END,
+                "status": "SCHEDULED",
+                "splitMethod": "EQUAL",
+                "weOweEnabled": False,
+                "version": 1,
+                "createdByAccountId": ACCOUNT_A,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
+        )
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "SLOT#shadow#s2",
+                "showAndSellId": "shadow",
+                "slotId": "s2",
+                "startAt": FUTURE_START,
+                "endAt": FUTURE_END,
+                "capacity": 4,
+                "activeSignupCount": 1,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
+        )
+        t["show_and_sells"].put_item(
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": f"SIGNUP#s2#{PROFILE_A}",
+                "showAndSellId": "shadow",
+                "slotId": "s2",
+                "profileId": PROFILE_A,
+                "campaignId": CAMPAIGN_A,
+                "status": "ACTIVE",
+                "actualMinutes": 0,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
+        )
+        handler(
+            _ev(
+                "cancelShowAndSell",
+                {
+                    "showAndSellId": world["event"]["showAndSellId"],
+                    "expectedVersion": 4,
+                    "reason": "storm",
+                    "idempotencyKey": f"sw-cc-sh-{uuid4()}",
+                },
+            ),
+            None,
+        )
+        windows = [w for w in t["show_and_sells"].scan()["Items"] if w["unitCampaignId"].startswith("PROFILEWINDOW#")]
+        assert len(windows) > 0  # the shadow signup still claims the shared buckets

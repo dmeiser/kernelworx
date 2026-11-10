@@ -102,6 +102,7 @@ IDEM_HASH = "__IDEM__"
 EVENT_PREFIX = "EVENT#"
 SLOT_PREFIX = "SLOT#"
 SIGNUP_PREFIX = "SIGNUP#"
+MOVEMENT_PREFIX = "MOVEMENT#"
 ALLOC_PREFIX = "ALLOC#"
 MAX_ACTIVE_SLOTS = 20  # spec 3.3
 SIGNUP_ACTIVE = "ACTIVE"
@@ -548,6 +549,133 @@ def _update_show_and_sell(event: Dict[str, Any], context: Any) -> Dict[str, Any]
     return result
 
 
+def _allocation_release_entries(event_item: Dict[str, Any], stamp: str) -> List[Dict[str, Any]]:
+    """Every allocation CANCELLED with releasedQty += remainingQty (so the
+    section 7 formulas and the auto-reduce evaluator stop reserving stock),
+    plus a release movement per non-empty remainder."""
+    unit_campaign_id = event_item["unitCampaignId"]
+    show_and_sell_id = event_item["showAndSellId"]
+    entries: List[Dict[str, Any]] = []
+    # Allocations -> CANCELLED with releasedQty += remainingQty.
+    allocations = tables.inventory.query(
+        KeyConditionExpression="unitCampaignId = :uc AND begins_with(itemKey, :prefix)",
+        ExpressionAttributeValues={":uc": unit_campaign_id, ":prefix": f"{ALLOC_PREFIX}{show_and_sell_id}#"},
+    ).get("Items", [])
+    for row in allocations:
+        product_id = _split_alloc_key(row["itemKey"])[1]
+        remaining = int(row.get("remainingQty", 0))
+        entries.append(
+            {
+                "Update": {
+                    "TableName": tables.inventory.table_name,
+                    "Key": {"unitCampaignId": unit_campaign_id, "itemKey": row["itemKey"]},
+                    "UpdateExpression": "SET #status = :cancelled, #releasedQty = releasedQty + :rel, #remainingQty = :zero, #updatedAt = :ua",
+                    "ConditionExpression": "#status = :open",
+                    "ExpressionAttributeNames": {
+                        "#status": "status",
+                        "#releasedQty": "releasedQty",
+                        "#remainingQty": "remainingQty",
+                        "#updatedAt": "updatedAt",
+                    },
+                    "ExpressionAttributeValues": {
+                        ":cancelled": "CANCELLED",
+                        ":open": "OPEN",
+                        ":rel": remaining,
+                        ":zero": 0,
+                        ":ua": stamp,
+                    },
+                }
+            }
+        )
+        if remaining > 0:
+            entries.append(
+                {
+                    "Put": {
+                        "TableName": tables.inventory.table_name,
+                        "Item": {
+                            "unitCampaignId": unit_campaign_id,
+                            "itemKey": f"{MOVEMENT_PREFIX}{stamp}#{uuid.uuid4()}",
+                            "productId": product_id,
+                            "movementType": "RELEASE",
+                            "assignedDelta": -remaining,
+                            "showAndSellId": show_and_sell_id,
+                            "occurredAt": stamp,
+                        },
+                        "ConditionExpression": "attribute_not_exists(itemKey)",
+                    }
+                }
+            )
+
+    return entries
+
+
+def _slot_zero_entries(slots: List[Dict[str, Any]], unit_campaign_id: str, stamp: str) -> List[Dict[str, Any]]:
+    return [
+        {
+            "Update": {
+                "TableName": tables.show_and_sells.table_name,
+                "Key": {"unitCampaignId": unit_campaign_id, "itemKey": slot["itemKey"]},
+                "UpdateExpression": "SET activeSignupCount = :zero, updatedAt = :ua",
+                "ConditionExpression": "attribute_exists(itemKey)",
+                "ExpressionAttributeValues": {":zero": 0, ":ua": stamp},
+            }
+        }
+        for slot in slots
+        if int(slot.get("activeSignupCount", 0)) != 0
+    ]
+
+
+def _window_release_buckets(signup: Dict[str, Any], slot: Dict[str, Any]) -> List[str]:
+    """The signup's window buckets MINUS any bucket another ACTIVE signup of
+    the same profile still claims (those stay)."""
+    buckets = _window_buckets(slot["startAt"], slot["endAt"])
+    other_buckets: set[str] = set()
+    for interval in _profile_active_intervals(signup["profileId"], exclude_signup_key=signup["itemKey"]):
+        other_buckets.update(_window_buckets(interval["startAt"], interval["endAt"]))
+    return [b for b in buckets if b not in other_buckets]
+
+
+def _signup_cancellation_entries(
+    event_item: Dict[str, Any], slots: List[Dict[str, Any]], stamp: str
+) -> List[Dict[str, Any]]:
+    """Signups cancelled, slot counters zeroed, window buckets released
+    (buckets still claimed by another ACTIVE signup of the same profile are
+    retained)."""
+    from boto3.dynamodb.conditions import Key
+
+    unit_campaign_id = event_item["unitCampaignId"]
+    show_and_sell_id = event_item["showAndSellId"]
+    entries = _slot_zero_entries(slots, unit_campaign_id, stamp)
+    signups = tables.show_and_sells.query(
+        KeyConditionExpression=Key("unitCampaignId").eq(unit_campaign_id) & Key("itemKey").begins_with(SIGNUP_PREFIX),
+    ).get("Items", [])
+    for signup in signups:
+        if signup.get("showAndSellId") != show_and_sell_id or signup.get("status") != SIGNUP_ACTIVE:
+            continue
+        profile_id = signup["profileId"]
+        entries.append(
+            {
+                "Update": {
+                    "TableName": tables.show_and_sells.table_name,
+                    "Key": {"unitCampaignId": unit_campaign_id, "itemKey": signup["itemKey"]},
+                    "UpdateExpression": "SET #status = :cancelled, #updatedAt = :ua",
+                    "ConditionExpression": "#status = :active",
+                    "ExpressionAttributeNames": {"#status": "status", "#updatedAt": "updatedAt"},
+                    "ExpressionAttributeValues": {
+                        ":cancelled": SIGNUP_CANCELLED,
+                        ":active": SIGNUP_ACTIVE,
+                        ":ua": stamp,
+                    },
+                }
+            }
+        )
+        slot = next((sl for sl in slots if sl["slotId"] == signup["slotId"]), None)
+        if slot is None:
+            continue
+        entries.extend(_window_delete_entries(profile_id, _window_release_buckets(signup, slot)))
+    return entries
+
+
 def _cancel_show_and_sell(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     args = event.get("arguments", {})
     show_and_sell_id = require_bounded_str(args, "showAndSellId", 100)
@@ -607,7 +735,18 @@ def _cancel_show_and_sell(event: Dict[str, Any], context: Any) -> Dict[str, Any]
     }
     result = _event_to_graphql(merged, now)
     marker = _marker_put(caller, "cancelShowAndSell", key, fingerprint, result, _epoch(now))
-    plan = [update, marker]
+    from boto3.dynamodb.conditions import Key
+
+    cascade_slots = tables.show_and_sells.query(
+        KeyConditionExpression=Key("unitCampaignId").eq(current["unitCampaignId"])
+        & Key("itemKey").begins_with(f"{SLOT_PREFIX}{show_and_sell_id}#"),
+    ).get("Items", [])
+    plan = (
+        [update]
+        + _allocation_release_entries(current, stamp)
+        + _signup_cancellation_entries(current, cascade_slots, stamp)
+        + [marker]
+    )
     try:
         execute_transaction(plan)
     except TransactionCancelledError as exc:
@@ -1202,15 +1341,121 @@ def _signup_to_graphql(item: Dict[str, Any], admin_view: bool = False) -> Dict[s
     return result
 
 
+WINDOW_PREFIX = "PROFILEWINDOW#"
+WINDOW_BUCKET_SECONDS = 30 * 60  # 30-minute fixed grid; overlapping slots always share a bucket
+
+
+def _window_buckets(start_at: str, end_at: str) -> List[str]:
+    """The fixed-grid bucket starts an interval touches. Two overlapping
+    intervals always share at least one bucket, so one attribute_not_exists
+    Put per bucket is EXACT atomic overlap prevention (SIGN-M-01 / DM-AC-14);
+    the friendly pre-read only improves the error message."""
+    start = _parse_ts(start_at)
+    end = _parse_ts(end_at)
+    buckets = []
+    current = int(start.timestamp() // WINDOW_BUCKET_SECONDS) * WINDOW_BUCKET_SECONDS
+    last = int((end.timestamp() - 1) // WINDOW_BUCKET_SECONDS) * WINDOW_BUCKET_SECONDS
+    while current <= last:
+        buckets.append(str(current))
+        current += WINDOW_BUCKET_SECONDS
+    return buckets
+
+
+def _window_put_entries(profile_id: str, buckets: List[str]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "Put": {
+                "TableName": tables.show_and_sells.table_name,
+                "Item": {
+                    "unitCampaignId": f"{WINDOW_PREFIX}{profile_id}",
+                    "itemKey": bucket,
+                    "profileId": profile_id,
+                    "bucketStartEpoch": int(bucket),
+                },
+                "ConditionExpression": "attribute_not_exists(itemKey)",
+            }
+        }
+        for bucket in buckets
+    ]
+
+
+def _window_delete_entries(profile_id: str, buckets: List[str]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "Delete": {
+                "TableName": tables.show_and_sells.table_name,
+                "Key": {"unitCampaignId": f"{WINDOW_PREFIX}{profile_id}", "itemKey": bucket},
+                "ConditionExpression": "attribute_exists(itemKey)",
+            }
+        }
+        for bucket in buckets
+    ]
+
+
+def _profile_active_intervals(profile_id: str, exclude_signup_key: Optional[str] = None) -> List[Dict[str, str]]:
+    """The profile's ACTIVE signup intervals across Unit Campaigns (the
+    friendly overlap pre-read; the atomic guard is the window buckets)."""
+    intervals = []
+    memberships = tables.unit_campaigns.query(
+        IndexName="profileId-unitCampaignId-index",
+        KeyConditionExpression="profileId = :pid",
+        ExpressionAttributeValues={":pid": profile_id},
+    ).get("Items", [])
+    for membership in memberships:
+        unit_campaign_id = membership["unitCampaignId"]
+        signups = tables.show_and_sells.query(
+            KeyConditionExpression="unitCampaignId = :uc AND begins_with(itemKey, :prefix)",
+            ExpressionAttributeValues={":uc": unit_campaign_id, ":prefix": SIGNUP_PREFIX},
+        ).get("Items", [])
+        for signup in signups:
+            if signup.get("profileId") != profile_id or signup.get("status") != SIGNUP_ACTIVE:
+                continue
+            if exclude_signup_key is not None and signup["itemKey"] == exclude_signup_key:
+                continue
+            slot = tables.show_and_sells.get_item(
+                Key={
+                    "unitCampaignId": unit_campaign_id,
+                    "itemKey": f"{SLOT_PREFIX}{signup['showAndSellId']}#{signup['slotId']}",
+                },
+                ConsistentRead=True,
+            ).get("Item")
+            if isinstance(slot, dict):
+                intervals.append({"startAt": slot["startAt"], "endAt": slot["endAt"], "itemKey": signup["itemKey"]})
+    return intervals
+
+
+def _check_overlap(profile_id: str, slot: Dict[str, Any], exclude_signup_key: Optional[str] = None) -> None:
+    start = _parse_ts(slot["startAt"])
+    end = _parse_ts(slot["endAt"])
+    for interval in _profile_active_intervals(profile_id, exclude_signup_key):
+        other_start = _parse_ts(interval["startAt"])
+        other_end = _parse_ts(interval["endAt"])
+        if other_start < end and other_end > start:
+            raise AppError(
+                ErrorCode.CONFLICT,
+                "The Scout has a conflicting commitment in another campaign or slot",
+                details={"reason": "OVERLAPPING_COMMITMENT"},
+            )
+
+
 def _signup_write_plan(
     *,
     signup_item: Dict[str, Any],
     slot: Dict[str, Any],
     unit_campaign_id: str,
+    membership: Dict[str, Any],
+    event_item: Dict[str, Any],
+    caller: str,
     stamp: str,
 ) -> List[Dict[str, Any]]:
+    """The six-write signup contract (r1 CHANGES-2 + r2 W4-1, ported from the
+    clean room's SIGN-M-01): signup row, conditioned slot counter, CONDITIONED
+    MEMBERSHIP update (version + ACTIVE — a removal racing the signup cancels
+    the transaction, DM-AC-19), event version bump, and the SIGNUPWINDOW
+    bucket proofs (attribute_not_exists — exact atomic overlap prevention,
+    DM-AC-14). The marker rides last."""
     capacity = int(slot.get("capacity", 0))
-    return [
+    plan = [
         {
             "Put": {
                 "TableName": tables.show_and_sells.table_name,
@@ -1234,7 +1479,25 @@ def _signup_write_plan(
                 },
             }
         },
+        {
+            "Update": {
+                "TableName": tables.unit_campaigns.table_name,
+                "Key": {"unitCampaignId": unit_campaign_id, "itemKey": f"MEMBER#{signup_item['profileId']}"},
+                "UpdateExpression": "ADD version :one SET updatedAt = :ua",
+                "ConditionExpression": "#status = :active AND version = :mv",
+                "ExpressionAttributeNames": {"#status": "status"},
+                "ExpressionAttributeValues": {
+                    ":one": 1,
+                    ":ua": stamp,
+                    ":active": "ACTIVE",
+                    ":mv": int(membership.get("version", 0)),
+                },
+            }
+        },
+        _event_bump_entry(event_item, int(event_item.get("version", 0)), caller, stamp),
     ]
+    plan.extend(_window_put_entries(str(signup_item["profileId"]), _window_buckets(slot["startAt"], slot["endAt"])))
+    return plan
 
 
 def _authorize_signup_campaign(campaign_id: str, profile_id: str, caller: str) -> None:
@@ -1297,6 +1560,16 @@ def _signup_scout_for_slot(event: Dict[str, Any], context: Any) -> Dict[str, Any
 
     _authorize_signup_campaign(campaign_id, profile_id, caller)
     _require_active_membership(current["unitCampaignId"], profile_id)
+    membership = (
+        tables.unit_campaigns.get_item(
+            Key={"unitCampaignId": current["unitCampaignId"], "itemKey": f"MEMBER#{profile_id}"},
+            ConsistentRead=True,
+        ).get("Item")
+        or {}
+    )
+    # Friendly overlap pre-read (the message); the atomic guard is the
+    # SIGNUPWINDOW bucket proofs in the transaction (DM-AC-14).
+    _check_overlap(profile_id, slot)
 
     now = _utcnow()
     stamp = _iso(now)
@@ -1315,17 +1588,39 @@ def _signup_scout_for_slot(event: Dict[str, Any], context: Any) -> Dict[str, Any
         "updatedAt": stamp,
     }
     plan = _signup_write_plan(
-        signup_item=signup_item, slot=slot, unit_campaign_id=current["unitCampaignId"], stamp=stamp
+        signup_item=signup_item,
+        slot=slot,
+        unit_campaign_id=current["unitCampaignId"],
+        membership=membership,
+        event_item=current,
+        caller=caller,
+        stamp=stamp,
     )
     result = _signup_to_graphql(signup_item)
     marker = _marker_put(caller, "signupScoutForShowAndSellSlot", key, fingerprint, result, _epoch(now))
     plan.append(marker)
+    window_start = 4  # after signup, slot, membership, event bump
     try:
         execute_transaction(plan)
     except TransactionCancelledError as exc:
-        if plan.index(marker) in exc.failed_indexes:
+        marker_index = plan.index(marker)
+        if marker_index in exc.failed_indexes:
             raise AppError(
                 ErrorCode.CONFLICT, "Request is being processed concurrently; retry to read the result"
+            ) from None
+        if 2 in exc.failed_indexes:
+            # The membership version+ACTIVE condition fired: a removal raced
+            # the signup (DM-AC-19) or the roster changed under it.
+            raise AppError(
+                ErrorCode.CONFLICT,
+                "The Scout's membership changed concurrently; re-check the roster",
+                details={"reason": "NOT_ROSTERED"},
+            ) from None
+        if any(window_start <= idx < marker_index for idx in exc.failed_indexes):
+            raise AppError(
+                ErrorCode.CONFLICT,
+                "The Scout has a conflicting commitment in another campaign or slot",
+                details={"reason": "OVERLAPPING_COMMITMENT"},
             ) from None
         raise AppError(
             ErrorCode.CONFLICT,
@@ -1365,7 +1660,13 @@ def _cancel_show_and_sell_signup(event: Dict[str, Any], context: Any) -> Dict[st
     now = _utcnow()
     stamp = _iso(now)
     merged = {**signup, "status": SIGNUP_CANCELLED, "version": expected_version + 1, "updatedAt": stamp}
-    plan = [
+    # Release the signup's window buckets (retaining buckets another ACTIVE
+    # signup of the same profile still claims), then the slot decrement.
+    buckets = _window_buckets(slot["startAt"], slot["endAt"])
+    other_buckets: set[str] = set()
+    for interval in _profile_active_intervals(profile_id, exclude_signup_key=signup["itemKey"]):
+        other_buckets.update(_window_buckets(interval["startAt"], interval["endAt"]))
+    plan = _window_delete_entries(profile_id, [b for b in buckets if b not in other_buckets]) + [
         {
             "Update": {
                 "TableName": tables.show_and_sells.table_name,

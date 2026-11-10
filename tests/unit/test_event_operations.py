@@ -664,7 +664,7 @@ class TestWorkConfirmation:
                 {
                     "showAndSellId": created["showAndSellId"],
                     "work": [{"slotId": slot["slotId"], "profileId": PROFILE_A, "actualMinutes": 90}],
-                    "expectedVersion": 2,
+                    "expectedVersion": 3,
                     "idempotencyKey": "ev-wc-0001",
                 },
             ),
@@ -678,7 +678,7 @@ class TestWorkConfirmation:
                 {
                     "showAndSellId": created["showAndSellId"],
                     "work": [{"slotId": slot["slotId"], "profileId": PROFILE_B, "actualMinutes": 30}],
-                    "expectedVersion": 3,
+                    "expectedVersion": 4,
                     "idempotencyKey": "ev-wc-0002",
                 },
             ),
