@@ -12,4 +12,5 @@ from src.utils.handlers import lambda_handler
 
 @lambda_handler
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    _ = event
     return {"ok": True}
