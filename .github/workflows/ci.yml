@@ -115,6 +115,26 @@ jobs:
       - name: Vitest (coverage)
         run: npm run test -- --coverage
 
+      - name: Reporting parity gate (legacy report retirement precondition)
+        working-directory: .
+        run: node scripts/reporting-parity-gate.mjs
+
+      - name: Retirement-block PRs carry a passing parity gate
+        working-directory: .
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          git fetch --depth=1 origin ${{ github.base_ref }}
+          if git diff --name-only "$BASE_REF"...HEAD \
+             | grep -qE '(^|/)(campaign_reporting\.py|resolvers_queries\.tf|test_lambda_unit_resolver_wiring\.py)$' \
+             || git diff "$BASE_REF"...HEAD | grep -q '^-.*getUnitReport'; then
+            echo "::notice::Retirement block touched (getUnitReport surface). The reporting parity gate is the"
+            echo "::notice::precondition for retirement and MUST pass — it ran as a required step above."
+            echo "- Reporting parity gate (required for getUnitReport retirement)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Retirement block untouched; the parity gate remains a standing required check."
+          fi
+
       - name: Generate job summary
         if: success()
         run: |
