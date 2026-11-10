@@ -763,3 +763,18 @@ resource "aws_appsync_resolver" "unit_campaign_roster" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Show & Sell operations (Lambda)
+resource "aws_appsync_resolver" "show_and_sell" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSell"
+  data_source = aws_appsync_datasource.show_and_sell_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
