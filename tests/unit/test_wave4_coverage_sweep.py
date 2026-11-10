@@ -949,8 +949,12 @@ class TestFinalWave4Branches:
         raw = handler(
             _ev(
                 "assignShowAndSellInventory",
-                {"showAndSellId": created["showAndSellId"], "items": [{"productId": "PROD#1", "quantity": 1}],
-                 "expectedVersion": 2, "idempotencyKey": "sw-ar-0003"},
+                {
+                    "showAndSellId": created["showAndSellId"],
+                    "items": [{"productId": "PROD#1", "quantity": 1}],
+                    "expectedVersion": 2,
+                    "idempotencyKey": "sw-ar-0003",
+                },
             ),
             None,
         )
@@ -1983,8 +1987,15 @@ class TestWave4TrulyFinal:
     def test_assign_marker_race_branch(self, t: Any, monkeypatch: Any) -> None:
         created = _event(t)
         t["inventory"].put_item(
-            Item={"unitCampaignId": "uc-1", "itemKey": "BALANCE#PROD#9", "productId": "PROD#9", "kernelPhysicalQty": 5,
-                  "soldInPossessionQty": 0, "councilOnOrderQty": 0, "version": 1}
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "BALANCE#PROD#9",
+                "productId": "PROD#9",
+                "kernelPhysicalQty": 5,
+                "soldInPossessionQty": 0,
+                "councilOnOrderQty": 0,
+                "version": 1,
+            }
         )
 
         def _cancel_on_marker(plan: Any, **kwargs: Any) -> None:
@@ -1994,8 +2005,12 @@ class TestWave4TrulyFinal:
         raced = handler(
             _ev(
                 "assignShowAndSellInventory",
-                {"showAndSellId": created["showAndSellId"], "items": [{"productId": "PROD#9", "quantity": 1}],
-                 "expectedVersion": 1, "idempotencyKey": "sw-am-0001"},
+                {
+                    "showAndSellId": created["showAndSellId"],
+                    "items": [{"productId": "PROD#9", "quantity": 1}],
+                    "expectedVersion": 1,
+                    "idempotencyKey": "sw-am-0001",
+                },
             ),
             None,
         )
@@ -2006,14 +2021,29 @@ class TestWave4TrulyFinal:
         slot = handler(
             _ev(
                 "upsertShowAndSellSlot",
-                {"input": {"showAndSellId": created["showAndSellId"], "startAt": FUTURE_START, "endAt": FUTURE_END, "capacity": 4, "expectedEventVersion": 1, "idempotencyKey": "sw-cm-slot"}},
+                {
+                    "input": {
+                        "showAndSellId": created["showAndSellId"],
+                        "startAt": FUTURE_START,
+                        "endAt": FUTURE_END,
+                        "capacity": 4,
+                        "expectedEventVersion": 1,
+                        "idempotencyKey": "sw-cm-slot",
+                    }
+                },
             ),
             None,
         )
         handler(
             _ev(
                 "signupScoutForShowAndSellSlot",
-                {"showAndSellId": created["showAndSellId"], "slotId": slot["slotId"], "campaignId": CAMPAIGN_A, "profileId": PROFILE_A, "idempotencyKey": "sw-cm-su-01"},
+                {
+                    "showAndSellId": created["showAndSellId"],
+                    "slotId": slot["slotId"],
+                    "campaignId": CAMPAIGN_A,
+                    "profileId": PROFILE_A,
+                    "idempotencyKey": "sw-cm-su-01",
+                },
             ),
             None,
         )
@@ -2025,7 +2055,12 @@ class TestWave4TrulyFinal:
         raced = handler(
             _ev(
                 "confirmShowAndSellWork",
-                {"showAndSellId": created["showAndSellId"], "work": [{"slotId": slot["slotId"], "profileId": PROFILE_A, "actualMinutes": 5}], "expectedVersion": 2, "idempotencyKey": "sw-cm-0001"},
+                {
+                    "showAndSellId": created["showAndSellId"],
+                    "work": [{"slotId": slot["slotId"], "profileId": PROFILE_A, "actualMinutes": 5}],
+                    "expectedVersion": 2,
+                    "idempotencyKey": "sw-cm-0001",
+                },
             ),
             None,
         )
@@ -2035,14 +2070,36 @@ class TestWave4TrulyFinal:
         from src.handlers.participant_data import _find_event_by_id
 
         t["show_and_sells"].put_item(
-            Item={"unitCampaignId": "uc-1", "itemKey": "SLOT#x#y", "saleId": "two-row",
-                  "showAndSellId": "two-row", "slotId": "y", "startAt": "t", "endAt": "t",
-                  "capacity": 1, "activeSignupCount": 0, "version": 1, "createdAt": "t", "updatedAt": "t"}
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "SLOT#x#y",
+                "saleId": "two-row",
+                "showAndSellId": "two-row",
+                "slotId": "y",
+                "startAt": "t",
+                "endAt": "t",
+                "capacity": 1,
+                "activeSignupCount": 0,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
         )
         t["show_and_sells"].put_item(
-            Item={"unitCampaignId": "uc-1", "itemKey": "SIGNUP#x#p", "saleId": "two-row",
-                  "showAndSellId": "two-row", "slotId": "x", "profileId": "p", "campaignId": "c",
-                  "status": "ACTIVE", "actualMinutes": 0, "version": 1, "createdAt": "t", "updatedAt": "t"}
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "SIGNUP#x#p",
+                "saleId": "two-row",
+                "showAndSellId": "two-row",
+                "slotId": "x",
+                "profileId": "p",
+                "campaignId": "c",
+                "status": "ACTIVE",
+                "actualMinutes": 0,
+                "version": 1,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
         )
         assert _find_event_by_id("two-row") is None
 
@@ -2051,10 +2108,23 @@ class TestWave4TrulyFinal:
 
         _seed(t)
         t["show_and_sells"].put_item(
-            Item={"unitCampaignId": "uc-1", "itemKey": "EVENT#old-one", "showAndSellId": "old-one", "saleId": "old-one",
-                  "unitId": "unit-1", "locationName": "Old", "startAt": "2026-09-01T00:00:00Z",
-                  "endAt": "2026-09-02T00:00:00Z", "status": "SCHEDULED", "splitMethod": "EQUAL",
-                  "weOweEnabled": False, "version": 1, "createdByAccountId": ACCOUNT_A, "createdAt": "t", "updatedAt": "t"}
+            Item={
+                "unitCampaignId": "uc-1",
+                "itemKey": "EVENT#old-one",
+                "showAndSellId": "old-one",
+                "saleId": "old-one",
+                "unitId": "unit-1",
+                "locationName": "Old",
+                "startAt": "2026-09-01T00:00:00Z",
+                "endAt": "2026-09-02T00:00:00Z",
+                "status": "SCHEDULED",
+                "splitMethod": "EQUAL",
+                "weOweEnabled": False,
+                "version": 1,
+                "createdByAccountId": ACCOUNT_A,
+                "createdAt": "t",
+                "updatedAt": "t",
+            }
         )
         listing = p(_ev("unitCampaignOpportunities", {"unitCampaignId": "uc-1"}), None)
         assert all(i["showAndSellId"] != "old-one" for i in listing["items"])
