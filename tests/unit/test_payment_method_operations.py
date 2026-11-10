@@ -409,7 +409,6 @@ class TestSweep:
             assert result["errorCode"] == ErrorCode.INVALID_INPUT, result
 
     def test_marker_race_mapping(self, t: Dict[str, Any], monkeypatch: Any) -> None:
-        from unittest.mock import MagicMock
 
         from src.handlers import payment_method_operations
         from src.utils.dynamodb import TransactionCancelledError

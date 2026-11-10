@@ -5,7 +5,6 @@ absolute-target corrections, voids, We-Owe reservation/fulfillment."""
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict
-from uuid import uuid4
 
 import boto3
 import pytest
@@ -275,7 +274,6 @@ class TestCorrectionAndVoid:
     def test_correction_can_drop_a_line(self, t: Dict[str, Any]) -> None:
         created = _create_sale(t)
         sale = created["sale"]
-        line = sale["lineItems"][0]
         # Correct to a DIFFERENT product: the old line fully releases.
         corrected = handler(
             _ev(
