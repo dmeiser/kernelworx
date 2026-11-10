@@ -1021,3 +1021,40 @@ output "unit_campaigns_table_name" {
   description = "Name of the Unit Campaigns DynamoDB table"
   value       = aws_dynamodb_table.unit_campaigns.name
 }
+
+resource "aws_dynamodb_table" "show_and_sells" {
+  name                        = "${var.name_prefix}-show-and-sells${local.table_suffix}"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "pk"
+  range_key                   = "sk"
+  deletion_protection_enabled = var.enable_deletion_protection
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = var.enable_point_in_time_recovery
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+output "show_and_sells_table_name" {
+  description = "Name of the Show and Sells DynamoDB table"
+  value       = aws_dynamodb_table.show_and_sells.name
+}
