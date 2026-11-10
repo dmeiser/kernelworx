@@ -114,6 +114,13 @@ export type GqlAdminUserConnection = {
   users: Array<GqlAdminUser>;
 };
 
+export type GqlAllocationStatus = 'ACTIVE' | 'RELEASED';
+
+export type GqlAllocationTargetInput = {
+  productId: Scalars['ID']['input'];
+  quantity: Scalars['Int']['input'];
+};
+
 /** A fundraising campaign owned by a seller profile, tied to a catalog for a season. */
 export type GqlCampaign = {
   __typename?: 'Campaign';
@@ -225,6 +232,8 @@ export type GqlCatalogType =
   | 'ADMIN_MANAGED'
   /** A catalog created by a regular user for use in their own campaigns. */
   | 'USER_CREATED';
+
+export type GqlCommitmentStatus = 'ACTIVE' | 'CANCELLED';
 
 /** Primary presentation basis for a unit's needs report. */
 export type GqlCouncilNeedBasis =
@@ -394,6 +403,28 @@ export type GqlCreateUnitPayload = {
   unit: GqlUnit;
 };
 
+export type GqlEventInventoryAllocation = {
+  __typename?: 'EventInventoryAllocation';
+  allocatedQty: Scalars['Int']['output'];
+  allocationId: Scalars['ID']['output'];
+  intervalEnd?: Maybe<Scalars['String']['output']>;
+  intervalStart?: Maybe<Scalars['String']['output']>;
+  productId: Scalars['ID']['output'];
+  releasedQty: Scalars['Int']['output'];
+  remainingQty: Scalars['Int']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  soldQty: Scalars['Int']['output'];
+  status: GqlAllocationStatus;
+  unitCampaignId: Scalars['ID']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlEventInventoryAllocationConnection = {
+  __typename?: 'EventInventoryAllocationConnection';
+  items: Array<GqlEventInventoryAllocation>;
+  pageInfo: GqlPageInfo;
+};
+
 /** Idempotency for a mutation: a client key scoped to the caller, operation, and resource. */
 export type GqlIdempotencyInput = {
   /** Client-supplied idempotency key (1-128 trimmed characters). */
@@ -459,6 +490,8 @@ export type GqlMutation = {
   adminResetUserPassword: Scalars['Boolean']['output'];
   /** Set or clear a campaign's sharedCampaignCode, associating it with a shared campaign (admin only). Returns the updated campaign. */
   adminUpdateCampaignSharedCode: GqlCampaign;
+  assignShowAndSellInventory: Array<GqlEventInventoryAllocation>;
+  cancelShowAndSell: GqlShowAndSellAdmin;
   /** Confirm a QR code upload for a payment method after the S3 upload completes. Returns the updated payment method. */
   confirmPaymentMethodQRCodeUpload: GqlPaymentMethod;
   /** Create a new active campaign on a profile the caller has write access to. Returns the created campaign. */
@@ -477,6 +510,7 @@ export type GqlMutation = {
   createSellerProfile: GqlSellerProfile;
   /** Create a shared campaign so other units can find and clone it. Returns the created shared campaign. */
   createSharedCampaign: GqlSharedCampaign;
+  createShowAndSell: GqlShowAndSellAdmin;
   /** Create a unit; the caller becomes its initial Unit Admin. Returns the Unit and the creator grant. */
   createUnit: GqlCreateUnitPayload;
   /** Create a Unit Campaign. Unit Admin for the parent Unit. */
@@ -501,6 +535,7 @@ export type GqlMutation = {
   deleteSellerProfile: Scalars['Boolean']['output'];
   /** Delete a shared campaign the caller created. Returns true on success. */
   deleteSharedCampaign: Scalars['Boolean']['output'];
+  deleteShowAndSellSlot: Scalars['Boolean']['output'];
   /** Join a Unit Campaign with a join code. Any authenticated account with Owner or WRITE on the Scout. */
   joinUnitCampaign: GqlUnitCampaignMembership;
   /** Place a public order on a campaign whose share token is in the request. Returns the buyer's receipt. A never-enabled campaign, a disabled campaign, and a bad token all return NOT_FOUND so probing cannot distinguish them; a campaign at its order cap returns PUBLIC_ORDER_LIMIT_EXCEEDED. */
@@ -541,10 +576,12 @@ export type GqlMutation = {
   updateSellerProfile: GqlSellerProfile;
   /** Update a shared campaign the caller created. Only provided fields change. Returns the updated shared campaign. */
   updateSharedCampaign: GqlSharedCampaign;
+  updateShowAndSell: GqlShowAndSellAdmin;
   /** Update a unit's metadata and settings. Unit Admin for that Unit. */
   updateUnit: GqlUnit;
   /** Update a Unit Campaign's name, year, and active state. Unit Admin for the parent Unit. */
   updateUnitCampaign: GqlUnitCampaignAdmin;
+  upsertShowAndSellSlot: GqlShowAndSellSlot;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -591,6 +628,22 @@ export type GqlMutation_AdminUpdateCampaignSharedCodeArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_AssignShowAndSellInventoryArgs = {
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  items?: InputMaybe<Array<GqlAllocationTargetInput>>;
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CancelShowAndSellArgs = {
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  reason: Scalars['String']['input'];
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_ConfirmPaymentMethodQrCodeUploadArgs = {
   paymentMethodName: Scalars['String']['input'];
   s3Key: Scalars['String']['input'];
@@ -634,6 +687,18 @@ export type GqlMutation_CreateSellerProfileArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_CreateSharedCampaignArgs = {
   input: GqlCreateSharedCampaignInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateShowAndSellArgs = {
+  address?: InputMaybe<Scalars['String']['input']>;
+  endAt: Scalars['String']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  locationName: Scalars['String']['input'];
+  splitMethod?: InputMaybe<Scalars['String']['input']>;
+  startAt: Scalars['String']['input'];
+  unitCampaignId: Scalars['ID']['input'];
+  weOweEnabled?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -690,6 +755,14 @@ export type GqlMutation_DeleteSellerProfileArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_DeleteSharedCampaignArgs = {
   sharedCampaignCode: Scalars['String']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_DeleteShowAndSellSlotArgs = {
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  showAndSellId: Scalars['ID']['input'];
+  slotId: Scalars['ID']['input'];
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -795,6 +868,17 @@ export type GqlMutation_UpdateSharedCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateShowAndSellArgs = {
+  address?: InputMaybe<Scalars['String']['input']>;
+  expectedVersion: Scalars['Int']['input'];
+  idempotencyKey: Scalars['String']['input'];
+  locationName?: InputMaybe<Scalars['String']['input']>;
+  showAndSellId: Scalars['ID']['input'];
+  splitMethod?: InputMaybe<Scalars['String']['input']>;
+  weOweEnabled?: InputMaybe<Scalars['Boolean']['input']>;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpdateUnitArgs = {
   input: GqlUpdateUnitInput;
 };
@@ -802,6 +886,19 @@ export type GqlMutation_UpdateUnitArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpdateUnitCampaignArgs = {
   input: GqlUpdateUnitCampaignInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpsertShowAndSellSlotArgs = {
+  capacity: Scalars['Int']['input'];
+  endAt: Scalars['String']['input'];
+  expectedEventVersion: Scalars['Int']['input'];
+  expectedSlotVersion?: InputMaybe<Scalars['Int']['input']>;
+  idempotencyKey: Scalars['String']['input'];
+  label?: InputMaybe<Scalars['String']['input']>;
+  showAndSellId: Scalars['ID']['input'];
+  slotId?: InputMaybe<Scalars['ID']['input']>;
+  startAt: Scalars['String']['input'];
 };
 
 /** A customer order placed in a campaign. */
@@ -1084,6 +1181,7 @@ export type GqlQuery = {
   adminListUsers: GqlAdminUserConnection;
   /** Search users by email, name, or accountId (admin only). */
   adminSearchUser: Array<GqlAdminUser>;
+  eventInventoryAllocations: GqlEventInventoryAllocationConnection;
   /** Find active shared campaigns that exactly match the given unit and season (unitType, unitNumber, city, state, campaignName, and campaignYear). Inactive shared campaigns are excluded. */
   findSharedCampaigns: Array<GqlSharedCampaign>;
   /** Fetch a single campaign by ID. Returns the campaign if the caller has read access to its profile, otherwise null. */
@@ -1132,6 +1230,9 @@ export type GqlQuery = {
   publicGetOrderOffer: GqlPublicOrderOffer;
   /** Fetch the buyer's receipt for a public order. Served to an API-key caller; the receipt token in the URL is the authorization. An unknown campaign/suffix, an absent or mismatched token, and a token that does not match the order all return the same NOT_FOUND. */
   publicGetOrderReceipt: GqlPublicOrderReceiptLookup;
+  showAndSell?: Maybe<GqlShowAndSellAdmin>;
+  showAndSellOpportunity?: Maybe<GqlShowAndSellOpportunity>;
+  showAndSells: GqlShowAndSellAdminConnection;
   /** The unit's settings and admin count. Unit Admin for that Unit. */
   unit?: Maybe<GqlUnit>;
   /** The unit's admin grants; account email/name limited to administration needs. Unit Admin. */
@@ -1142,6 +1243,7 @@ export type GqlQuery = {
   unitCampaignCatalog?: Maybe<GqlUnitCampaignCatalog>;
   /** The member-safe preview of a campaign from its join code; any authenticated account. No inventory, roster, or grant data. */
   unitCampaignJoinInfo?: Maybe<GqlUnitCampaignJoinPreview>;
+  unitCampaignOpportunities: GqlShowAndSellOpportunityConnection;
   /** A Unit Campaign's roster, including removed history. Unit Admin for the parent Unit. */
   unitCampaignRoster: GqlUnitCampaignMembershipConnection;
   /** A Unit's campaigns. Unit Admin for the parent Unit. */
@@ -1184,6 +1286,15 @@ export type GqlQuery_AdminListUsersArgs = {
 /** The root query object for the KernelWorx API. */
 export type GqlQuery_AdminSearchUserArgs = {
   query: Scalars['String']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_EventInventoryAllocationsArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  showAndSellId?: InputMaybe<Scalars['ID']['input']>;
+  status?: InputMaybe<GqlAllocationStatus>;
+  unitCampaignId: Scalars['ID']['input'];
 };
 
 /** The root query object for the KernelWorx API. */
@@ -1291,6 +1402,24 @@ export type GqlQuery_PublicGetOrderReceiptArgs = {
 };
 
 /** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellArgs = {
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellOpportunityArgs = {
+  profileId: Scalars['ID']['input'];
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellsArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  status?: InputMaybe<GqlShowAndSellStatus>;
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
 export type GqlQuery_UnitArgs = {
   unitId: Scalars['ID']['input'];
 };
@@ -1314,6 +1443,13 @@ export type GqlQuery_UnitCampaignCatalogArgs = {
 /** The root query object for the KernelWorx API. */
 export type GqlQuery_UnitCampaignJoinInfoArgs = {
   joinCode: Scalars['String']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitCampaignOpportunitiesArgs = {
+  includePast?: InputMaybe<Scalars['Boolean']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+  unitCampaignId: Scalars['ID']['input'];
 };
 
 /** The root query object for the KernelWorx API. */
@@ -1403,6 +1539,23 @@ export type GqlS3UploadInfo = {
   s3Key: Scalars['String']['output'];
   /** The pre-signed S3 URL to POST the file to. */
   uploadUrl: Scalars['String']['output'];
+};
+
+export type GqlScoutCommitment = {
+  __typename?: 'ScoutCommitment';
+  commitmentId: Scalars['ID']['output'];
+  profileId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  status: GqlCommitmentStatus;
+  version: Scalars['Int']['output'];
+};
+
+export type GqlScoutCommitmentGuard = {
+  __typename?: 'ScoutCommitmentGuard';
+  guardId: Scalars['ID']['output'];
+  profileId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  version: Scalars['Int']['output'];
 };
 
 /** A seller (scout unit) profile that owns campaigns. Returned for the caller's own profiles and for profiles shared to them. */
@@ -1544,6 +1697,74 @@ export type GqlSharedProfile = {
   /** When the profile was last updated. */
   updatedAt: Scalars['AWSDateTime']['output'];
 };
+
+export type GqlShowAndSellAdmin = {
+  __typename?: 'ShowAndSellAdmin';
+  address?: Maybe<Scalars['String']['output']>;
+  createdAt: Scalars['String']['output'];
+  endAt: Scalars['String']['output'];
+  locationName: Scalars['String']['output'];
+  productIds?: Maybe<Array<Scalars['ID']['output']>>;
+  showAndSellId: Scalars['ID']['output'];
+  splitMethod: Scalars['String']['output'];
+  startAt: Scalars['String']['output'];
+  status: GqlShowAndSellStatus;
+  unitCampaignId: Scalars['ID']['output'];
+  updatedAt: Scalars['String']['output'];
+  version: Scalars['Int']['output'];
+  weOweEnabled: Scalars['Boolean']['output'];
+};
+
+export type GqlShowAndSellAdminConnection = {
+  __typename?: 'ShowAndSellAdminConnection';
+  items: Array<GqlShowAndSellAdmin>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlShowAndSellOpportunity = {
+  __typename?: 'ShowAndSellOpportunity';
+  endAt: Scalars['String']['output'];
+  locationName: Scalars['String']['output'];
+  mySignups?: Maybe<Array<GqlShowAndSellSignup>>;
+  showAndSellId: Scalars['ID']['output'];
+  slots?: Maybe<Array<GqlShowAndSellSlot>>;
+  startAt: Scalars['String']['output'];
+};
+
+export type GqlShowAndSellOpportunityConnection = {
+  __typename?: 'ShowAndSellOpportunityConnection';
+  items: Array<GqlShowAndSellOpportunity>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlShowAndSellSignup = {
+  __typename?: 'ShowAndSellSignup';
+  profileId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  slotId: Scalars['ID']['output'];
+  status: Scalars['String']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlShowAndSellSlot = {
+  __typename?: 'ShowAndSellSlot';
+  activeSignupCount: Scalars['Int']['output'];
+  capacity: Scalars['Int']['output'];
+  endAt: Scalars['String']['output'];
+  label?: Maybe<Scalars['String']['output']>;
+  showAndSellId: Scalars['ID']['output'];
+  slotId: Scalars['ID']['output'];
+  startAt: Scalars['String']['output'];
+  version: Scalars['Int']['output'];
+};
+
+export type GqlShowAndSellSlotConnection = {
+  __typename?: 'ShowAndSellSlotConnection';
+  items: Array<GqlShowAndSellSlot>;
+  pageInfo: GqlPageInfo;
+};
+
+export type GqlShowAndSellStatus = 'ACTIVE' | 'CANCELLED' | 'ENDED' | 'FINALIZED' | 'REOPENED' | 'SCHEDULED';
 
 /** How event earnings are split between participants. */
 export type GqlSplitMethod =
