@@ -387,6 +387,9 @@ jobs:
       # The image's default user cannot write /opt/hostedtoolcache, which
       # setup-python and setup-uv need.
       options: --user root
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 90
     needs: deploy
     if: ${{ needs.deploy.result == 'success' && inputs.e2e-base-url != '' }}
