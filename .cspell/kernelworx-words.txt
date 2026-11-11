@@ -170,6 +170,7 @@ getters
 getvalue
 GEZDGNBVGY
 giftcard
+gitflow
 GitHub
 GraphQL
 GraphQLAPIId
