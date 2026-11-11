@@ -1,9 +1,12 @@
 name: Ephemeral Test Environment
 
 on:
-  pull_request:
-    branches:
-      - main
+  # 2026-11-11: per-PR ephemeral provisioning disabled for the gitflow conversion. Wave PRs target
+  # `dev`, which is itself a deployed environment. The nightly `sweep` job below stays active and
+  # still cleans leaked `pr-*` stacks. Re-enable by restoring the pull_request block.
+  # pull_request:
+  #   branches:
+  #     - main
   schedule:
     # Nightly sweep for leaked pr-* environments (06:17 UTC).
     - cron: "17 6 * * *"
