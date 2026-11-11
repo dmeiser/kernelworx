@@ -180,6 +180,7 @@ hashable
 hashlib
 HMAC
 Home
+hostedtoolcache
 hostedzone
 HOTP
 href

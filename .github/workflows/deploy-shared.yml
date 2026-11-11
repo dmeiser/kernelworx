@@ -379,6 +379,14 @@ jobs:
   smoke-tests:
     name: Post-deploy smoke tests (${{ inputs.environment }})
     runs-on: ubuntu-latest
+    # Browsers ship in the image, pinned to the version uv.lock resolves.
+    # Keep this tag in lockstep with `playwright` in uv.lock: a mismatch is
+    # "Executable doesn't exist", which is the failure this job is fixing.
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.63.0-noble
+      # The image's default user cannot write /opt/hostedtoolcache, which
+      # setup-python and setup-uv need.
+      options: --user root
     timeout-minutes: 90
     needs: deploy
     if: ${{ needs.deploy.result == 'success' && inputs.e2e-base-url != '' }}
@@ -401,8 +409,16 @@ jobs:
       - name: Install Python dependencies (including dev/test)
         run: uv sync --locked --dev
 
-      - name: Install Playwright browser dependencies
-        run: uv run playwright install --with-deps chromium
+      - name: Assert Playwright matches the browser image
+        run: |
+          uv run playwright --version
+          uv run python - <<'PY'
+          import importlib.metadata as m, sys
+          v = m.version("playwright")
+          want = "1.63.0"
+          print(f"playwright {v} (image carries {want})")
+          sys.exit(0 if v == want else 1)
+          PY
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
