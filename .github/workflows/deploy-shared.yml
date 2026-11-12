@@ -420,6 +420,7 @@ jobs:
           for tool in uv node npm aws; do
             command -v "$tool" >/dev/null || { echo "::error::$tool is missing from the smoke image"; exit 1; }
           done
+          aws --version
           uv run playwright --version
           uv run python - <<'PY'
           import importlib.metadata as m, sys
