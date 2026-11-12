@@ -414,9 +414,10 @@ jobs:
 
       - name: Install AWS CLI (pinned, offline-clean)
         run: |
-          uv pip install 'awscli==1.42.0'
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-          export PATH="$PWD/.venv/bin:$PATH"
+          uv venv .awscli-venv
+          uv pip install --python .awscli-venv/bin/python 'awscli==1.42.0' 'urllib3==1.26.20'
+          echo "$PWD/.awscli-venv/bin" >> "$GITHUB_PATH"
+          export PATH="$PWD/.awscli-venv/bin:$PATH"
           aws --version
 
       - name: Assert Playwright matches the browser image
