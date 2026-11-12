@@ -412,6 +412,13 @@ jobs:
       - name: Install Python dependencies (including dev/test)
         run: uv sync --locked --dev
 
+      - name: Install AWS CLI (pinned, offline-clean)
+        run: |
+          uv pip install 'awscli==1.42.0'
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          export PATH="$PWD/.venv/bin:$PATH"
+          aws --version
+
       - name: Assert Playwright matches the browser image
         run: |
           uv run playwright --version
