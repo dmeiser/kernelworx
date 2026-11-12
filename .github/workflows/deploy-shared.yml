@@ -409,11 +409,17 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install AWS CLI (the browser image does not ship it)
+        run: uv tool install awscli
+
       - name: Install Python dependencies (including dev/test)
         run: uv sync --locked --dev
 
-      - name: Assert Playwright matches the browser image
+      - name: Assert the job's tools exist in this image
         run: |
+          for tool in uv node npm aws; do
+            command -v "$tool" >/dev/null || { echo "::error::$tool is missing from the smoke image"; exit 1; }
+          done
           uv run playwright --version
           uv run python - <<'PY'
           import importlib.metadata as m, sys
