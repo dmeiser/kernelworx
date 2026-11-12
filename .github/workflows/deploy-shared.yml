@@ -399,15 +399,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-
+      # setup-python is incompatible with this container: it installs a CPython
+      # built for the ubuntu-26.04 runner whose _ssl requires OPENSSL_3.3.0,
+      # while the Playwright image (noble) ships libcrypto 3.0.13.
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: "3.14"
+
+      - name: Install managed Python
+        run: uv python install 3.14
 
       - name: Install Python dependencies (including dev/test)
         run: uv sync --locked --dev
@@ -415,9 +417,11 @@ jobs:
       - name: Install AWS CLI (pinned, offline-clean)
         run: |
           uv venv .awscli-venv
-          uv pip install --python .awscli-venv/bin/python 'awscli==1.42.0'
+          uv pip install --python .awscli-venv/bin/python 'awscli==1.42.0' 'urllib3==1.26.20'
           echo "$PWD/.awscli-venv/bin" >> "$GITHUB_PATH"
           export PATH="$PWD/.awscli-venv/bin:$PATH"
+          uv run python -V
+          uv run python -c "import ssl; print(ssl.OPENSSL_VERSION)"
           aws --version
 
       - name: Assert Playwright matches the browser image
