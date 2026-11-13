@@ -746,9 +746,17 @@ resource "aws_dynamodb_table" "units" {
     }
   }
 
-  # UnitInvite rows carry a numeric expiresAtEpoch (epoch seconds); DynamoDB
-  # TTL physically deletes expired invites (data model §5.3). Application-side
-  # expiry validation remains load-bearing — TTL deletion is eventual.
+  # Shared numeric epoch-seconds TTL attribute (DynamoDB allows exactly one TTL
+  # attribute per table, so expiry-carrying item families share it and set it to
+  # their own horizon:
+  #   - UnitInvite rows: created_at + up to 14 days (data model §5.3).
+  #   - Idempotency-marker rows: created_at + 7 days — the common marker
+  #     convention every aggregate table carries
+  #     (SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md §4.1/§4.4 decision "one
+  #     numeric epoch-seconds attribute representing seven days across all
+  #     aggregate tables", §8.9 markers). Markers and invites are distinguished
+  #     by the value written, never by separate attributes.
+  # Application-side expiry validation remains load-bearing — TTL deletion is eventual.
   ttl {
     attribute_name = "expiresAtEpoch"
     enabled        = true
@@ -884,6 +892,14 @@ resource "aws_dynamodb_table" "unit_campaigns" {
     }
   }
 
+  # Common seven-day idempotency-marker TTL (marker-bearing aggregate table,
+  # §8.9; same expiresAtEpoch convention as the units table — see the units
+  # ttl block comment for the full marker/invite contract).
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
+  }
+
   point_in_time_recovery {
     enabled = var.enable_point_in_time_recovery
   }
@@ -1000,6 +1016,14 @@ resource "aws_dynamodb_table" "inventory" {
     }
   }
 
+  # Common seven-day idempotency-marker TTL (marker-bearing aggregate table,
+  # §8.9; same expiresAtEpoch convention as the units table). Balance,
+  # allocation, custody, and append-only movement rows never carry expiry.
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
+  }
+
   point_in_time_recovery {
     enabled = var.enable_point_in_time_recovery
   }
@@ -1068,6 +1092,14 @@ resource "aws_dynamodb_table" "order_fulfillments" {
       attribute_name = "createdAt"
       key_type       = "RANGE"
     }
+  }
+
+  # Common seven-day idempotency-marker TTL (marker-bearing aggregate table,
+  # §8.9; same expiresAtEpoch convention as the units table). Fulfillment and
+  # reversal records never carry expiry — only marker rows set the attribute.
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
   }
 
   point_in_time_recovery {
@@ -1222,6 +1254,14 @@ resource "aws_dynamodb_table" "show_and_sells" {
     }
   }
 
+  # Common seven-day idempotency-marker TTL (marker-bearing aggregate table,
+  # §8.9; same expiresAtEpoch convention as the units table). Business rows
+  # (events, sales, finalizations, credits, We Owe) never carry expiry.
+  ttl {
+    attribute_name = "expiresAtEpoch"
+    enabled        = true
+  }
+
   point_in_time_recovery {
     enabled = var.enable_point_in_time_recovery
   }
@@ -1319,4 +1359,33 @@ output "invites_table_name" {
 output "shared_campaigns_table_name" {
   description = "Name of the shared campaigns DynamoDB table"
   value       = aws_dynamodb_table.shared_campaigns.name
+}
+
+# Show & Sell wave 1 — the five individual table-name outputs are the
+# documented downstream wiring interface (SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md
+# §4.1): later waves' Lambda environment variables and resolver wiring resolve
+# names through these outputs, not through the aggregate maps.
+output "units_table_name" {
+  description = "Name of the units DynamoDB table"
+  value       = aws_dynamodb_table.units.name
+}
+
+output "unit_campaigns_table_name" {
+  description = "Name of the unit campaigns DynamoDB table"
+  value       = aws_dynamodb_table.unit_campaigns.name
+}
+
+output "inventory_table_name" {
+  description = "Name of the inventory DynamoDB table"
+  value       = aws_dynamodb_table.inventory.name
+}
+
+output "show_and_sells_table_name" {
+  description = "Name of the show and sells DynamoDB table"
+  value       = aws_dynamodb_table.show_and_sells.name
+}
+
+output "order_fulfillments_table_name" {
+  description = "Name of the order fulfillments DynamoDB table"
+  value       = aws_dynamodb_table.order_fulfillments.name
 }

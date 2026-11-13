@@ -2,22 +2,25 @@
 
 Pins the five new DynamoDB tables (units, unit_campaigns, inventory,
 order_fulfillments, show_and_sells) and the show-sell-preview Cognito group to
-the key/index contracts in docs/specs/show_sell/SHOW_AND_SELL_DATA_MODEL.md §6,
-the IAM wiring that grants least-privilege access to them in every
-environment, and the recovery-import coverage for both the tables and the
-group.
+the key/index/TTL contracts in docs/specs/show_sell/SHOW_AND_SELL_DATA_MODEL.md §6,
+the IAM grants that make transactional AppSync access least-privilege in every
+environment, the individual table-name outputs that are the documented
+downstream wiring interface, and the recovery-import coverage for the tables
+and the group.
 
-These parse the OpenTofu configuration directly: the tables are provisioned by
-`tofu apply` during deploys, and the CI infra job runs tflint/KICS without
-AWS credentials, so the schema contract is enforced here rather than by a live
-describe-table.
+Structural assertions parse the OpenTofu configuration semantically
+(python-hcl2, the pattern established by test_iam_appsync_dynamodb_policy.py);
+raw-source string checks are used only for the human-readable key-namespace
+documentation, which lives in comments.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
+import hcl2
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -27,67 +30,7 @@ IAM_TF = REPO_ROOT / "tofu" / "application" / "modules" / "iam" / "main.tf"
 RECOVERY_SH = REPO_ROOT / "scripts" / "ephemeral-recover-common.sh"
 ENVIRONMENTS = ("dev", "ephemeral", "prod")
 
-
-def _resource_block(content: str, rtype: str, name: str) -> str:
-    """Return the body of resource/data "<rtype>" "<name>" { ... } (brace-matched)."""
-    match = re.search(r'(?:resource|data)\s+"' + rtype + r'"\s+"' + re.escape(name) + r'"\s*\{', content)
-    assert match, f'resource "{rtype}" "{name}" not found'
-    start = match.end() - 1
-    depth = 0
-    for i in range(start, len(content)):
-        if content[i] == "{":
-            depth += 1
-        elif content[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return content[start : i + 1]
-    raise AssertionError(f"unbalanced braces for {rtype}.{name}")
-
-
-def _sub_block(block: str, header: str) -> str:
-    """Return the body of a nested block introduced by `header` (brace-matched)."""
-    match = re.search(r"(?m)^\s*" + re.escape(header) + r"\s*\{", block)
-    assert match, f"block '{header}' not found"
-    start = match.end() - 1
-    depth = 0
-    for i in range(start, len(block)):
-        if block[i] == "{":
-            depth += 1
-        elif block[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return block[start : i + 1]
-    raise AssertionError(f"unbalanced braces for '{header}'")
-
-
-def _key_schemas(gsi_block: str) -> dict[str, str]:
-    keys = {}
-    for m in re.finditer(
-        r"key_schema\s*\{[^}]*attribute_name\s*=\s*\"([^\"]+)\"[^}]*key_type\s*=\s*\"([^\"]+)\"",
-        gsi_block,
-        re.DOTALL,
-    ):
-        keys[m.group(1)] = m.group(2)
-    return keys
-
-
-def _table_section(content: str, table_name: str) -> str:
-    """Return the table's full section: its preceding banner comment plus body.
-
-    The key-layout documentation lives in the comment block above the resource,
-    where the data model's PK/SK item families are recorded for reviewers.
-    """
-    m = re.search(r'resource\s+"aws_dynamodb_table"\s+"' + re.escape(table_name) + r'"', content)
-    assert m, f'aws_dynamodb_table "{table_name}" not declared'
-    banners = [b.start() for b in re.finditer(r"# =+\n", content[: m.start()])]
-    assert banners, f"no banner comment above {table_name}"
-    # The banner comment is fenced by two # ==== rules; the section starts at
-    # the opening fence (the one before the one immediately above the resource).
-    start = banners[-2] if len(banners) >= 2 else banners[-1]
-    end = re.search(r'resource\s+"aws_dynamodb_table"', content[m.end() :])
-    stop = m.end() + end.start() if end else len(content)
-    return content[start:stop]
-
+SHOW_SELL_TABLES = ("units", "unit_campaigns", "inventory", "order_fulfillments", "show_and_sells")
 
 # Expected layout per SHOW_AND_SELL_DATA_MODEL.md §6.
 TABLE_SPECS: dict[str, dict] = {
@@ -140,75 +83,158 @@ TABLE_SPECS: dict[str, dict] = {
 }
 
 
+def _norm(value):
+    """Strip the quote wrapper python-hcl2 adds around keys and strings."""
+    if isinstance(value, dict):
+        return {_norm(k): _norm(v) for k, v in value.items() if k not in ("__is_block__", "__comments__")}
+    if isinstance(value, list):
+        return [_norm(v) for v in value]
+    if isinstance(value, str) and value.startswith('"') and value.endswith('"'):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _load(path: Path) -> dict:
+    with path.open() as f:
+        return _norm(hcl2.load(f))
+
+
+def _resources(doc: dict, rtype: str) -> dict[str, dict]:
+    """Merge every `resource "<rtype>" "<name>"` block into name -> body."""
+    merged: dict[str, dict] = {}
+    for block in doc.get("resource", []):
+        if rtype in block:
+            merged.update(block[rtype])
+    return merged
+
+
+def _outputs(doc: dict) -> dict[str, dict]:
+    merged: dict[str, dict] = {}
+    for block in doc.get("output", []):
+        merged.update(block)
+    return merged
+
+
+def _table_sections(content: str) -> dict[str, str]:
+    """Raw text section per table: the banner comment immediately preceding the
+    resource up to (but excluding) the next table's banner — so one table's
+    documentation can never satisfy another table's assertion."""
+    starts = [m for m in re.finditer(r'resource\s+"aws_dynamodb_table"\s+"([^"]+)"', content)]
+    banners = [m.start() for m in re.finditer(r"# =+\n", content)]
+    sections: dict[str, str] = {}
+    for i, m in enumerate(starts):
+        preceding = [b for b in banners if b < m.start()]
+        open_fence = preceding[-2] if len(preceding) >= 2 else preceding[-1]
+        # The section runs from this table's opening comment fence to the next
+        # table's opening fence, so one table's documentation can never satisfy
+        # another table's assertion.
+        following = [b for b in banners if b > m.start()]
+        stop = following[0] if following else len(content)
+        sections[m.group(1)] = content[open_fence:stop]
+    return sections
+
+
 @pytest.fixture(scope="module")
-def dynamodb_tf() -> str:
-    return DYNAMODB_TF.read_text()
+def dynamodb_doc() -> dict:
+    return _load(DYNAMODB_TF)
+
+
+@pytest.fixture(scope="module")
+def dynamodb_tables(dynamodb_doc: dict) -> dict[str, dict]:
+    return _resources(dynamodb_doc, "aws_dynamodb_table")
 
 
 class TestShowSellTables:
-    """Table-for-table key/index contract from SHOW_AND_SELL_DATA_MODEL.md §6."""
+    """Table-for-table key/index/TTL contract from SHOW_AND_SELL_DATA_MODEL.md §6."""
 
-    @pytest.mark.parametrize("table_name", sorted(TABLE_SPECS))
-    def test_table_declared_with_prefixed_composite_key(self, dynamodb_tf: str, table_name: str) -> None:
+    @pytest.mark.parametrize("table_name", SHOW_SELL_TABLES)
+    def test_table_declared_with_prefixed_composite_key(self, dynamodb_tables: dict, table_name: str) -> None:
         spec = TABLE_SPECS[table_name]
-        block = _resource_block(dynamodb_tf, "aws_dynamodb_table", table_name)
-        assert (
-            f'name                        = "${{var.name_prefix}}-{spec["aws_suffix"]}${{local.table_suffix}}"' in block
-        )
-        assert 'hash_key                    = "pk"' in block
-        assert 'range_key                   = "sk"' in block
-        assert 'billing_mode                = "PAY_PER_REQUEST"' in block
-        assert "deletion_protection_enabled = var.enable_deletion_protection" in block
+        table = dynamodb_tables[table_name]
+        assert table["name"] == f"${{var.name_prefix}}-{spec['aws_suffix']}${{local.table_suffix}}"
+        assert table["hash_key"] == "pk"
+        assert table["range_key"] == "sk"
+        assert table["billing_mode"] == "PAY_PER_REQUEST"
+        assert table["deletion_protection_enabled"] == "${var.enable_deletion_protection}"
+        assert table["lifecycle"][0]["prevent_destroy"] == "${var.prevent_destroy}"
 
-    @pytest.mark.parametrize("table_name", sorted(TABLE_SPECS))
-    def test_gsi_layout_matches_the_data_model(self, dynamodb_tf: str, table_name: str) -> None:
+    @pytest.mark.parametrize("table_name", SHOW_SELL_TABLES)
+    def test_gsi_layout_matches_the_data_model(self, dynamodb_tables: dict, table_name: str) -> None:
         spec = TABLE_SPECS[table_name]
-        block = _resource_block(dynamodb_tf, "aws_dynamodb_table", table_name)
-        gsi_names = re.findall(r'global_secondary_index\s*\{\s*name\s*=\s*"([^"]+)"', block)
-        assert sorted(gsi_names) == sorted(spec["indexes"]), (
-            f"{table_name}: GSI set {sorted(gsi_names)} != data model {sorted(spec['indexes'])}"
-        )
-        for gsi_name, expected_keys in spec["indexes"].items():
-            m = re.search(r'global_secondary_index\s*\{\s*name\s*=\s*"' + re.escape(gsi_name) + '"', block)
-            assert m, f"{table_name}.{gsi_name} missing"
-            gsi = _sub_block(block[m.start() :], "global_secondary_index")
-            assert 'projection_type = "ALL"' in gsi, f"{table_name}.{gsi_name} must project ALL"
-            assert _key_schemas(gsi) == expected_keys, f"{table_name}.{gsi_name} key schema drift"
+        table = dynamodb_tables[table_name]
+        gsi_list = table.get("global_secondary_index", [])
+        assert sorted(g["name"] for g in gsi_list) == sorted(spec["indexes"])
+        for gsi in gsi_list:
+            assert gsi["projection_type"] == "ALL", f"{table_name}.{gsi['name']} must project ALL"
+            keys = {k["attribute_name"]: k["key_type"] for k in gsi["key_schema"]}
+            assert keys == spec["indexes"][gsi["name"]], f"{table_name}.{gsi['name']} key schema drift"
 
-    @pytest.mark.parametrize("table_name", sorted(TABLE_SPECS))
-    def test_attribute_definitions_match_index_keys(self, dynamodb_tf: str, table_name: str) -> None:
+    @pytest.mark.parametrize("table_name", SHOW_SELL_TABLES)
+    def test_attribute_definitions_match_index_keys(self, dynamodb_tables: dict, table_name: str) -> None:
         spec = TABLE_SPECS[table_name]
-        block = _resource_block(dynamodb_tf, "aws_dynamodb_table", table_name)
-        attrs = set(re.findall(r'attribute\s*\{\s*name\s*=\s*"([^"]+)"\s*type\s*=\s"S"\s*\}', block))
+        table = dynamodb_tables[table_name]
+        attrs = {a["name"] for a in table.get("attribute", [])}
         # All Show & Sell key attributes are String type; the set must be exactly
         # the key attributes the data model names (no unused definitions).
         assert attrs == spec["attributes"], f"{table_name}: attribute set drift: {sorted(attrs)}"
+        assert all(a["type"] == "S" for a in table.get("attribute", []))
 
-    @pytest.mark.parametrize("table_name", sorted(TABLE_SPECS))
-    def test_pitr_and_no_kms(self, dynamodb_tf: str, table_name: str) -> None:
-        block = _resource_block(dynamodb_tf, "aws_dynamodb_table", table_name)
-        pitr = _sub_block(block, "point_in_time_recovery")
-        assert "enabled = var.enable_point_in_time_recovery" in pitr
-        assert "enabled = true" not in _sub_block(block, "server_side_encryption")
+    @pytest.mark.parametrize("table_name", SHOW_SELL_TABLES)
+    def test_pitr_and_no_kms(self, dynamodb_tables: dict, table_name: str) -> None:
+        table = dynamodb_tables[table_name]
+        assert table["point_in_time_recovery"][0]["enabled"] == "${var.enable_point_in_time_recovery}"
+        assert table["server_side_encryption"][0]["enabled"] is False
 
-    def test_units_invite_ttl_on_expires_at_epoch(self, dynamodb_tf: str) -> None:
-        block = _resource_block(dynamodb_tf, "aws_dynamodb_table", "units")
-        ttl = _sub_block(block, "ttl")
-        assert 'attribute_name = "expiresAtEpoch"' in ttl
-        assert "enabled        = true" in ttl
+    @pytest.mark.parametrize("table_name", SHOW_SELL_TABLES)
+    def test_marker_ttl_on_expires_at_epoch(self, dynamodb_tables: dict, table_name: str) -> None:
+        # One shared numeric epoch-seconds TTL attribute across every aggregate
+        # table (SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md §4.1/§4.4: seven
+        # days for idempotency markers; the units table also carries UnitInvite
+        # rows on the same attribute with a longer, application-set horizon).
+        table = dynamodb_tables[table_name]
+        (ttl,) = table["ttl"]
+        assert ttl["attribute_name"] == "expiresAtEpoch"
+        assert ttl["enabled"] is True
 
-    def test_order_fulfillments_documents_at_most_once_reversal_key(self, dynamodb_tf: str) -> None:
-        # §5.19: a reversal uses the deterministic SK REVERSAL#<reversalOfFulfillmentId>
-        # so at most one reversal per fulfillment can exist. The table cannot
-        # express the prefix in its schema, so the contract lives in the table's
-        # documented key layout and is pinned here.
-        assert "REVERSAL#<reversalOfFulfillmentId>" in _table_section(dynamodb_tf, "order_fulfillments")
 
-    def test_show_and_sells_documents_future_namespaces(self, dynamodb_tf: str) -> None:
+class TestKeyNamespaceDocumentation:
+    """The prefixed-SK item families are a code-visible contract: each table's
+    banner comment records them, and these raw-source checks pin that record
+    (comments are not representable in the HCL parse)."""
+
+    @pytest.fixture(scope="module")
+    def sections(self) -> dict[str, str]:
+        return _table_sections(DYNAMODB_TF.read_text())
+
+    def test_units_documents_invite_and_marker_layout(self, sections: dict[str, str]) -> None:
+        s = sections["units"]
+        for contract in ("UNIT#<unitId>", "METADATA", "GRANT#<accountId>", "INVITE#<inviteCode>"):
+            assert contract in s, f"units key contract {contract} undocumented"
+        assert "14 days" in s and "7 days" in s, "invite vs marker TTL horizons undocumented"
+
+    def test_unit_campaigns_documents_guard_and_pointer_layout(self, sections: dict[str, str]) -> None:
+        s = sections["unit_campaigns"]
+        for contract in ("JOIN_CODE#<joinCode>", "MEMBERSHIP#<profileId>", "MEMBERSHIP_GUARD", "COMMITMENT_GUARD"):
+            assert contract in s, f"unit_campaigns key contract {contract} undocumented"
+
+    def test_inventory_documents_product_prefix_layout(self, sections: dict[str, str]) -> None:
+        s = sections["inventory"]
+        for contract in ("BALANCE", "EVENT#<showAndSellId>", "CUSTODY#<profileId>", "MOVEMENT#<occurredAt>"):
+            assert contract in s, f"inventory SK contract {contract} undocumented"
+
+    def test_order_fulfillments_documents_at_most_once_reversal_key(self, sections: dict[str, str]) -> None:
+        # §5.19: deterministic SK REVERSAL#<reversalOfFulfillmentId> bounds any
+        # fulfillment to one reversal; the schema cannot express the prefix.
+        assert "REVERSAL#<reversalOfFulfillmentId>" in sections["order_fulfillments"]
+
+    def test_show_and_sells_documents_future_namespaces(self, sections: dict[str, str]) -> None:
         # §3.6.1: metadata/slot/signup keys plus the future sale/finalization/
         # We Owe namespaces are declared now so later waves never migrate keys.
-        section = _table_section(dynamodb_tf, "show_and_sells")
-        for sk_contract in (
+        s = sections["show_and_sells"]
+        for contract in (
             "METADATA",
             "SLOT#<slotId>",
             "SIGNUP#<slotId>#<profileId>",
@@ -219,40 +245,64 @@ class TestShowSellTables:
             "WE_OWE#<weOweId>",
             "WE_OWE#<weOweId>#FULFILLMENT#<fulfillmentId>",
         ):
-            assert sk_contract in section, f"show_and_sells SK namespace {sk_contract} undocumented"
+            assert contract in s, f"show_and_sells SK namespace {contract} undocumented"
 
-    def test_units_documents_invite_item_layout(self, dynamodb_tf: str) -> None:
-        section = _table_section(dynamodb_tf, "units")
-        for key_contract in ("UNIT#<unitId>", "METADATA", "GRANT#<accountId>", "INVITE#<inviteCode>"):
-            assert key_contract in section, f"units key contract {key_contract} undocumented"
+    def test_sections_do_not_bleed_into_the_next_table(self, sections: dict[str, str]) -> None:
+        # A table's section must stop at its own resource declaration boundary,
+        # so a contract string can only be satisfied by that table's own banner.
+        for table_name, section in sections.items():
+            for other in SHOW_SELL_TABLES:
+                if other == table_name:
+                    continue
+                assert f'resource "aws_dynamodb_table" "{other}"' not in section, (
+                    f"{table_name} section bleeds into the {other} declaration"
+                )
 
-    def test_unit_campaigns_documents_guard_and_pointer_layout(self, dynamodb_tf: str) -> None:
-        section = _table_section(dynamodb_tf, "unit_campaigns")
-        for key_contract in ("JOIN_CODE#<joinCode>", "MEMBERSHIP#<profileId>", "MEMBERSHIP_GUARD", "COMMITMENT_GUARD"):
-            assert key_contract in section, f"unit_campaigns key contract {key_contract} undocumented"
 
-    def test_inventory_documents_product_prefix_layout(self, dynamodb_tf: str) -> None:
-        section = _table_section(dynamodb_tf, "inventory")
-        for key_contract in ("BALANCE", "EVENT#<showAndSellId>", "CUSTODY#<profileId>", "MOVEMENT#<occurredAt>"):
-            assert key_contract in section, f"inventory SK contract {key_contract} undocumented"
+class TestTableOutputs:
+    """Individual table-name outputs are the documented downstream interface
+    (SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md §4.1) alongside the maps."""
 
-    def test_public_order_throttles_reused_for_unit_invite_throttle(self, dynamodb_tf: str) -> None:
-        # §6.6: the wave reuses the existing throttle table with a separate key
-        # contract (UNIT_INVITE_REDEMPTION#...); no new throttle table.
-        tables = re.findall(r'resource\s+"aws_dynamodb_table"\s+"([^"]+)"', dynamodb_tf)
-        throttle_tables = [t for t in tables if "throttle" in t]
-        assert throttle_tables == ["public_order_throttles"], "wave 1 must reuse the existing throttle table"
+    def test_maps_include_every_show_sell_table(self, dynamodb_doc: dict) -> None:
+        outs = _outputs(dynamodb_doc)
+        for table_name in SHOW_SELL_TABLES:
+            assert outs["table_arns"]["value"][table_name] == f"${{aws_dynamodb_table.{table_name}.arn}}"
+            assert outs["table_names"]["value"][table_name] == f"${{aws_dynamodb_table.{table_name}.name}}"
+
+    @pytest.mark.parametrize("table_name", SHOW_SELL_TABLES)
+    def test_individual_table_name_output(self, dynamodb_doc: dict, table_name: str) -> None:
+        outs = _outputs(dynamodb_doc)
+        out = outs[f"{table_name}_table_name"]
+        assert out["value"] == f"${{aws_dynamodb_table.{table_name}.name}}"
 
 
 class TestIAMWiring:
     """Least-privilege grants: the new tables flow through the per-environment
     table_arns map into the AppSync service role and admin-role documents —
-    table/index ARNs only, never account wildcards."""
+    table/index ARNs only, never account wildcards — and the AppSync direct
+    path is actually authorized for TransactWriteItems (§8 transaction
+    boundaries; SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md §4.2 IAM notes:
+    ConditionCheckItem is not permission to invoke TransactWriteItems)."""
 
-    @pytest.mark.parametrize("table_name", sorted(TABLE_SPECS))
-    def test_tables_exposed_through_arn_and_name_maps(self, dynamodb_tf: str, table_name: str) -> None:
-        assert re.search(rf"{table_name}\s*=\s*aws_dynamodb_table\.{table_name}\.arn", dynamodb_tf)
-        assert re.search(rf"{table_name}\s*=\s*aws_dynamodb_table\.{table_name}\.name", dynamodb_tf)
+    def test_appsync_dynamodb_policy_exact_actions_include_transact_write(self) -> None:
+        doc = _load(IAM_TF)
+        actions = _appsync_actions(doc)
+        assert sorted(actions) == sorted(EXPECTED_APPSYNC_ACTIONS)
+        assert "dynamodb:TransactWriteItems" in actions
+        assert "dynamodb:ConditionCheckItem" in actions
+        assert "dynamodb:Scan" not in actions
+        assert not any(a.endswith(":*") for a in actions)
+
+    def test_appsync_dynamodb_policy_scoped_to_tables_and_indexes(self) -> None:
+        doc = _load(IAM_TF)
+        (statement,) = _appsync_statement(doc)
+        raw = statement["resources"]
+        raw = raw if isinstance(raw, list) else [raw]
+        resources = [r[2:-1] if isinstance(r, str) and r.startswith("${") and r.endswith("}") else r for r in raw]
+        assert resources == ["concat(local.dynamodb_table_arns, local.dynamodb_index_arns)"]
+
+    def test_no_wildcard_dynamodb_grants_anywhere(self) -> None:
+        assert "dynamodb:*" not in IAM_TF.read_text()
 
     @pytest.mark.parametrize("env", ENVIRONMENTS)
     def test_environment_wires_table_arns_into_iam(self, env: str) -> None:
@@ -260,22 +310,6 @@ class TestIAMWiring:
         assert re.search(r"dynamodb_table_arns\s*=\s*module\.dynamodb\.table_arns", content), (
             f"{env}: IAM module must receive module.dynamodb.table_arns so the new tables are granted"
         )
-
-    def test_iam_grants_are_table_scoped_not_wildcards(self) -> None:
-        iam = IAM_TF.read_text()
-        assert "dynamodb:*" not in iam
-        # The two documents that cover the new tables enumerate table + index ARNs
-        # built from the map.
-        appsync_block = _sub_block(_block_text(iam, "aws_iam_policy_document", "appsync_dynamodb"), "statement")
-        assert "concat(local.dynamodb_table_arns, local.dynamodb_index_arns)" in appsync_block
-
-    def test_appsync_transaction_condition_access_granted(self) -> None:
-        # §8 transaction boundaries: conditional checks inside TransactWriteItems
-        # authorize on dynamodb:ConditionCheckItem. The AppSync service role is
-        # the principal that will run the Show & Sell transactional writes.
-        doc = _block_text(IAM_TF.read_text(), "aws_iam_policy_document", "appsync_dynamodb")
-        assert "dynamodb:ConditionCheckItem" in doc
-        assert "dynamodb:PutItem" in doc and "dynamodb:UpdateItem" in doc and "dynamodb:DeleteItem" in doc
 
     def test_no_new_lambda_execution_role_before_handlers_exist(self) -> None:
         # Wave 1 ships no resolvers/handlers, so no new per-domain Lambda role
@@ -287,20 +321,55 @@ class TestIAMWiring:
             assert forbidden not in iam
 
 
-def _block_text(content: str, rtype: str, name: str) -> str:
-    return _resource_block(content, rtype, name)
+EXPECTED_APPSYNC_ACTIONS = [
+    "dynamodb:GetItem",
+    "dynamodb:PutItem",
+    "dynamodb:UpdateItem",
+    "dynamodb:DeleteItem",
+    "dynamodb:ConditionCheckItem",
+    "dynamodb:TransactWriteItems",
+    "dynamodb:Query",
+    "dynamodb:BatchGetItem",
+    "dynamodb:BatchWriteItem",
+]
+
+
+def _appsync_data_documents(doc: dict) -> dict:
+    merged: dict[str, dict] = {}
+    for block in doc.get("data", []):
+        if "aws_iam_policy_document" in block:
+            merged.update(block["aws_iam_policy_document"])
+    return merged["appsync_dynamodb"]
+
+
+def _appsync_statement(doc: dict) -> list[dict]:
+    return _appsync_data_documents(doc)["statement"]
+
+
+def _appsync_actions(doc: dict) -> list[str]:
+    (statement,) = _appsync_statement(doc)
+    return statement["actions"]
 
 
 class TestCognitoPreviewGroup:
-    def test_group_declared_in_module(self) -> None:
-        block = _resource_block(COGNITO_TF.read_text(), "aws_cognito_user_group", "show_sell_preview")
-        assert 'name         = "show-sell-preview"' in block
-        assert "aws_cognito_user_pool.main.id" in block
+    def test_group_declared_with_exact_name_on_the_main_pool(self) -> None:
+        doc = _load(COGNITO_TF)
+        group = _resources(doc, "aws_cognito_user_group")["show_sell_preview"]
+        assert group["name"] == "show-sell-preview"
+        assert group["user_pool_id"] == "${aws_cognito_user_pool.main.id}"
+        assert group["lifecycle"][0]["prevent_destroy"] == "${var.prevent_destroy}"
+
+    def test_group_name_output(self) -> None:
+        doc = _load(COGNITO_TF)
+        out = _outputs(doc)["show_sell_preview_group_name"]
+        assert out["value"] == "${aws_cognito_user_group.show_sell_preview.name}"
 
     def test_group_name_constant_across_environments(self) -> None:
-        content = COGNITO_TF.read_text()
-        assert content.count('"show-sell-preview"') >= 1
-        assert re.search(r'output\s+"show_sell_preview_group_name"', content)
+        # The literal group name carries no environment interpolation: every
+        # environment's pool gets the same group name.
+        doc = _load(COGNITO_TF)
+        group = _resources(doc, "aws_cognito_user_group")["show_sell_preview"]
+        assert "${" not in group["name"]
 
 
 class TestRecoveryImports:
@@ -318,11 +387,3 @@ class TestRecoveryImports:
             'import_resource "$run_id" "module.cognito.aws_cognito_user_group.show_sell_preview" '
             '"${user_pool_id}/show-sell-preview"' in recovery
         )
-
-    def test_recovery_resource_names_are_valid_tofu_addresses(self) -> None:
-        # tr '-' '_' maps the hyphenated AWS table names onto the snake_case
-        # resource names declared in the dynamodb module.
-        dynamodb_tf = DYNAMODB_TF.read_text()
-        declared = set(re.findall(r'resource\s+"aws_dynamodb_table"\s+"([^"]+)"', dynamodb_tf))
-        for table_name in TABLE_SPECS:
-            assert table_name in declared

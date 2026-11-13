@@ -891,6 +891,13 @@ data "aws_iam_policy_document" "appsync_dynamodb" {
       "dynamodb:DeleteItem",
       # ConditionCheckItem is the IAM action for condition checks inside TransactWriteItems.
       "dynamodb:ConditionCheckItem",
+      # ConditionCheckItem is NOT permission to invoke TransactWriteItems
+      # (docs/specs/show_sell/SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md §4.2 IAM
+      # notes). Show & Sell wave 1+ executes versioned conditional transactions
+      # through direct AppSync data sources (§8 transaction boundaries), so the
+      # role must hold TransactWriteItems itself; it is table/index-scoped by the
+      # same resources list, and the no-Scan posture (#459) is unchanged.
+      "dynamodb:TransactWriteItems",
       "dynamodb:Query",
       "dynamodb:BatchGetItem",
       "dynamodb:BatchWriteItem",
