@@ -153,6 +153,12 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
     (e.g., AWS IAM Identity Center / SSO plugins) are picked up through the
     standard CLI provider chain.
 
+    No ``--no-cli-pager``: that is a v2-only global option and the smoke job
+    pins awscli v1, which rejects it with "Unknown options: --no-cli-pager".
+    v1 has no output pager for service commands at all (only ``aws history``
+    pages), so nothing replaces the flag; ``AWS_PAGER=""`` is set in the child
+    environment so a future move to v2 stays quiet too (v1 ignores it).
+
     Individual delete failures are collected and reported at the end so one
     throttled or already-deleted user does not abort the entire cleanup pass.
     """
@@ -172,13 +178,19 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
             "60",
             "--output",
             "json",
-            "--no-cli-pager",
         ]
         if region:
             cmd.extend(["--region", region])
         if next_token:
             cmd.extend(["--starting-token", next_token])
-        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env={**os.environ, "AWS_PAGER": ""},
+        )
         if result.returncode != 0:
             raise RuntimeError(f"aws list-users failed: {result.stderr}")
 
@@ -194,11 +206,17 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
                 user["Username"],
                 "--output",
                 "json",
-                "--no-cli-pager",
             ]
             if region:
                 delete_cmd.extend(["--region", region])
-            del_result = subprocess.run(delete_cmd, check=False, capture_output=True, text=True, timeout=120)
+            del_result = subprocess.run(
+                delete_cmd,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={**os.environ, "AWS_PAGER": ""},
+            )
             if del_result.returncode != 0:
                 stderr = del_result.stderr
                 # An already-deleted user between list and delete is benign in
