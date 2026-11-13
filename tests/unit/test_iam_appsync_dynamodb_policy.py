@@ -22,15 +22,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 IAM_MODULE = REPO_ROOT / "tofu" / "application" / "modules" / "iam" / "main.tf"
 
 # The complete set of DynamoDB operations the AppSync resolvers use: point
-# reads/writes, GSI/key-condition queries, and batch variants. Scan is
-# deliberately absent — nothing in js-resolvers/ or mapping-templates/
-# issues it (#459).
+# reads/writes, GSI/key-condition queries, batch variants, and
+# TransactWriteItems — the versioned conditional transactions the Show & Sell
+# storage contract requires on the direct AppSync path (see
+# SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md §4.2 IAM notes: ConditionCheckItem
+# is not permission to invoke TransactWriteItems; the list was revalidated when
+# the Show & Sell tables landed). Scan is deliberately absent — nothing in
+# js-resolvers/ or mapping-templates/ issues it (#459).
 EXPECTED_ACTIONS = [
     "dynamodb:GetItem",
     "dynamodb:PutItem",
     "dynamodb:UpdateItem",
     "dynamodb:DeleteItem",
     "dynamodb:ConditionCheckItem",
+    "dynamodb:TransactWriteItems",
     "dynamodb:Query",
     "dynamodb:BatchGetItem",
     "dynamodb:BatchWriteItem",

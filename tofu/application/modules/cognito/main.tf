@@ -553,6 +553,23 @@ resource "aws_cognito_user_pool_domain" "prefix" {
   }
 }
 
+# Show & Sell preview gate (WORK-78 wave 1). This group is the reveal switch:
+# the Show & Sell UI stays hidden until wave 7, and membership in this Cognito
+# group is what unlocks it in the meantime. The group is declared here (not
+# created out-of-band in the console like the ADMIN group) so the name is a
+# versioned contract and it exists in every environment's user pool from wave 1
+# on. Nothing reads the group claim yet — no resolvers or UI consume it until
+# its own wave.
+resource "aws_cognito_user_group" "show_sell_preview" {
+  name         = "show-sell-preview"
+  user_pool_id = aws_cognito_user_pool.main.id
+  description  = "Show & Sell preview access gate (revealed in wave 7)"
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
 # Outputs
 output "user_pool_id" {
   description = "ID of the Cognito User Pool"
@@ -567,6 +584,11 @@ output "user_pool_arn" {
 output "user_pool_endpoint" {
   description = "Endpoint of the Cognito User Pool"
   value       = aws_cognito_user_pool.main.endpoint
+}
+
+output "show_sell_preview_group_name" {
+  description = "Name of the Show & Sell preview Cognito group (reveal gate for the Show & Sell UI)"
+  value       = aws_cognito_user_group.show_sell_preview.name
 }
 
 output "client_id" {
