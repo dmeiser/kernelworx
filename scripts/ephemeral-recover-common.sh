@@ -202,7 +202,11 @@ import_ephemeral_resources() {
 
   # DynamoDB tables
   log "   Importing DynamoDB tables..."
-  for table in accounts catalogs profiles campaigns orders shares invites shared-campaigns public-order-throttles; do
+  # Show & Sell wave 1 added units, unit-campaigns, inventory, order-fulfillments,
+  # and show-and-sells; the coverage guard in
+  # tests/unit/test_ephemeral_reliability.py fails if a table declared in the
+  # dynamodb module is missing here.
+  for table in accounts catalogs profiles campaigns orders shares invites shared-campaigns public-order-throttles units unit-campaigns inventory order-fulfillments show-and-sells; do
     table_name="kernelworx-${table}${suffix}"
     resource_name=$(echo "$table" | tr '-' '_')
     if aws dynamodb describe-table --table-name "$table_name" --region "$region" >/dev/null 2>&1; then
@@ -330,6 +334,10 @@ import_ephemeral_resources() {
     fi
 
     import_resource "$run_id" "module.cognito.aws_cognito_user_pool_domain.prefix[0]" "kernelworx${suffix}"
+
+    # Show & Sell preview gate group (WORK-78 wave 1). The group name is
+    # constant across environments; the import id is <pool_id>/<group_name>.
+    import_resource "$run_id" "module.cognito.aws_cognito_user_group.show_sell_preview" "${user_pool_id}/show-sell-preview"
 
     # Cognito Lambda trigger permissions. These are state-tracked and must be
     # imported so the following apply does not try to recreate them.
