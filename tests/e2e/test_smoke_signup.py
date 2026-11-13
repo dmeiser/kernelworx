@@ -94,12 +94,24 @@ def _submit_signup_and_wait_for_verification(page: Page, email: str, password: s
 
 
 def _cognito_cli(*args: str) -> None:
-    """Run an ``aws cognito-idp`` admin command via the AWS CLI subprocess."""
-    cmd = ["aws", "cognito-idp", *args, "--output", "json", "--no-cli-pager"]
+    """Run an ``aws cognito-idp`` admin command via the AWS CLI subprocess.
+
+    No ``--no-cli-pager``: the smoke job pins awscli v1, which rejects that
+    v2-only global option, and v1 never pages service output. ``AWS_PAGER=""``
+    keeps a future v2 quiet instead (v1 ignores it).
+    """
+    cmd = ["aws", "cognito-idp", *args, "--output", "json"]
     region = os.environ.get("TEST_REGION")
     if region:
         cmd.extend(["--region", region])
-    result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**os.environ, "AWS_PAGER": ""},
+    )
     if result.returncode != 0:
         raise RuntimeError(f"aws cognito-idp {' '.join(args)} failed: {result.stderr}")
 
