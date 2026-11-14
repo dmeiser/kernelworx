@@ -60,13 +60,16 @@ AVERY = "11111111-1111-4111-8111-111111111111"
 
 CREATED_AT = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
 
-# Codes drawn from INVITE_CODE_ALPHABET (no I/O/0/1), as production issues them.
-CODE_ACTIVE = "ABCDEFGHJKLMNMNP"
-CODE_UNKNOWN = "QRSTVWXYZ2345678"
-CODE_FRESH = "MMMMNNNNPPPPQRST"
-CODE_STALE = "ZZZZYYYYXXXXWWWW"
-CODE_NEWEST = "VVVVWWWWXXXXYYYY"
-CODE_OTHER_UNIT = "2222333344445555"
+# Codes drawn from the production alphabet, as production issues them (no I/O/0/1).
+CODE_ACTIVE = INVITE_CODE_ALPHABET[:16]
+CODE_UNKNOWN = INVITE_CODE_ALPHABET[16:]
+CODE_FRESH = INVITE_CODE_ALPHABET[1:17]
+CODE_STALE = INVITE_CODE_ALPHABET[2:18]
+CODE_NEWEST = INVITE_CODE_ALPHABET[3:19]
+CODE_OTHER_UNIT = INVITE_CODE_ALPHABET[4:20]
+# Right length, digits from outside the alphabet, and one character too long.
+CODE_WITH_DIGITS = f"{CODE_ACTIVE[:9]}01234567"
+CODE_TOO_LONG = f"{CODE_ACTIVE}A"
 
 
 def _unit_item(unit_id: str = PACK_ID, **overrides: Any) -> Dict[str, Any]:
@@ -292,7 +295,7 @@ def test_unit_builder_normalizes_text_and_number() -> None:
         ("unit_type", "   "),
         ("city", None),
         ("state", ""),
-        ("timezone_name", "Amerika/Denver"),
+        ("timezone_name", "Mars/Olympus"),
         ("created_by_account_id", ""),
         ("now_iso", ""),
     ],
@@ -348,7 +351,7 @@ def test_invite_code_shape_and_alphabet() -> None:
         assert ambiguous not in INVITE_CODE_ALPHABET
 
 
-@pytest.mark.parametrize("value", ["SHORT", "ABCDEFGHJKLMNMNPO", "abcdefghijklmnop", "ABCDEFGHIK01234567", None, 16])
+@pytest.mark.parametrize("value", ["SHORT", CODE_TOO_LONG, CODE_ACTIVE.lower(), CODE_WITH_DIGITS, None, 16])
 def test_invite_code_shape_predicate(value: Any) -> None:
     assert is_valid_invite_code(value) is False
     assert read_invite(value) is None

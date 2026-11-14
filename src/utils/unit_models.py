@@ -33,6 +33,7 @@ from __future__ import annotations
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from string import ascii_uppercase, digits
 from typing import Any, Dict, List, Optional, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -66,7 +67,7 @@ DEFAULT_COUNCIL_NEED_BASIS = "PHYSICAL_STOCK"
 INVITE_CODE_LENGTH = 16
 # Unambiguous upper-case base32 alphabet: no I/O/0/1, so a code read aloud or
 # transcribed from a screen cannot be silently corrupted into a different code.
-INVITE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+INVITE_CODE_ALPHABET = "".join(c for c in ascii_uppercase + digits if c not in "IO01")
 INVITE_TTL_DAYS = 14
 
 # --- Text limits (API contract §3.4: Unit/display names 1-100 trimmed) -----------
@@ -77,7 +78,7 @@ MAX_TIMEZONE_LENGTH = 64
 
 # IANA timezone names drive display and browser-side ICS generation. Validation
 # resolves the name against the tz database rather than pattern-matching it, so a
-# typo like "Amerika/Denver" is rejected at write time instead of surfacing as a
+# typo like "Mars/Olympus" is rejected at write time instead of surfacing as a
 # broken calendar months later. The database is shipped explicitly (the `tzdata`
 # dependency, exported into the Lambda layer by scripts/build-lambda-layer.sh),
 # so validation cannot silently reject every zone because a base image happens to
@@ -178,6 +179,16 @@ def normalize_enum(value: Any, field: str, allowed: frozenset[str], default: str
     return value
 
 
+def normalize_split_default(value: Any) -> str:
+    """Validate the Unit-wide split default, applying EQUAL when omitted."""
+    return normalize_enum(value, "splitDefault", SPLIT_METHODS, DEFAULT_SPLIT_METHOD)
+
+
+def normalize_council_need_basis(value: Any) -> str:
+    """Validate the Council-needs report basis, applying PHYSICAL_STOCK when omitted."""
+    return normalize_enum(value, "councilNeedBasis", COUNCIL_NEED_BASES, DEFAULT_COUNCIL_NEED_BASIS)
+
+
 def normalized_metadata_key(unit_type: str, unit_number: int, city: str, state: str) -> str:
     """The normalized duplicate-lookup fingerprint (data model §5.1).
 
@@ -270,10 +281,8 @@ def build_unit_item(
         or generated_display_name(unit_type_text, number, city_text, state_text),
         "metadataKey": normalized_metadata_key(unit_type_text, number, city_text, state_text),
         "timezone": normalize_timezone(timezone_name),
-        "splitDefault": normalize_enum(split_default, "splitDefault", SPLIT_METHODS, DEFAULT_SPLIT_METHOD),
-        "councilNeedBasis": normalize_enum(
-            council_need_basis, "councilNeedBasis", COUNCIL_NEED_BASES, DEFAULT_COUNCIL_NEED_BASIS
-        ),
+        "splitDefault": normalize_split_default(split_default),
+        "councilNeedBasis": normalize_council_need_basis(council_need_basis),
         "adminCount": admin_count,
         "version": version,
         "createdAt": normalize_required_text(now_iso, "nowIso", 40),
