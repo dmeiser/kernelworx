@@ -142,10 +142,11 @@ export function request(ctx) {
 
     // §1.4.3 (API-FIX-05): a public order belongs to the Unit the campaign was
     // joined to at the moment of sale. Unfulfilled public orders count toward
-    // that Unit's Council demand, and the campaign's own link is a latest-link
-    // removal retains, so the only correct time to read it is now. The fields are
-    // storage-only: no public read selects them (public API-key surface guard).
-    const origin = orderOrigin(campaign);
+    // that Unit's Council demand, so the answer comes from the membership guard
+    // the pipeline read strongly, not from the campaign's latest-link pair that
+    // removal retains. The fields are storage-only: no public read selects them
+    // (public API-key surface guard).
+    const origin = orderOrigin(stash.membershipGuard, stash.activeUnitCampaign);
     orderItem.unitId = origin.unitId;
     orderItem.unitCampaignId = origin.unitCampaignId;
 

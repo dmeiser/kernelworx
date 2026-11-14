@@ -102,10 +102,12 @@ export function request(ctx) {
     };
 
     // §1.4.3 (API-FIX-05): the joined scope is captured here and never derived
-    // again. The Campaign's own unitId/unitCampaignId pair is the *latest* link
-    // and removal keeps it, so an Order that read it back later would follow a
-    // Scout into another Unit and move old demand with them.
-    const origin = orderOrigin(campaign);
+    // again -- which is only sound if it is captured from something that answers
+    // the question *now*. The Campaign's own unitId/unitCampaignId pair is the
+    // latest link and removal keeps it, so an Order written after the Scout left
+    // would follow them into another Unit. The membership guard is the current
+    // answer; the Unit comes from that Unit Campaign's own metadata row.
+    const origin = orderOrigin(ctx.stash.membershipGuard, ctx.stash.activeUnitCampaign);
     orderItem.unitId = origin.unitId;
     orderItem.unitCampaignId = origin.unitCampaignId;
 

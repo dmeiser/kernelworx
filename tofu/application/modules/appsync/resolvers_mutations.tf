@@ -345,6 +345,13 @@ resource "aws_appsync_resolver" "create_order" {
       aws_appsync_function.check_share_permissions.function_id,
       aws_appsync_function.validate_payment_method_appsync.function_id,
       aws_appsync_function.get_campaign_for_order.function_id,
+      # The step above is a GSI locator only: it can name the campaign's key, not
+      # the campaign. Everything downstream trusts this strong read instead.
+      aws_appsync_function.get_campaign_strong_for_order.function_id,
+      # §1.4.3: the Order's joined scope is captured at creation from the join
+      # guard, which is current; the campaign's retained link is not.
+      aws_appsync_function.get_membership_guard_for_order.function_id,
+      aws_appsync_function.get_active_unit_campaign_for_order.function_id,
       aws_appsync_function.get_catalog.function_id,
       aws_appsync_function.create_order.function_id,
       # #746: increment the denormalized campaign totals after the write.
@@ -886,8 +893,13 @@ resource "aws_appsync_resolver" "admin_update_campaign_shared_code" {
 #   6 get_catalog                     (CatalogsDS, reused as-is)
 #   7 validate_payment_method_public  (AccountsDS, no-oracle clone)
 #   8 increment_public_order_count    (CampaignsDS, the cap CONDITION)
-#   9 create_public_order             (OrdersDS, the PutItem + receipt mint)
-#  10 send_public_order_emails        (PublicOrdersDS, best-effort; failures
+#   9 get_membership_guard_for_order  (UnitCampaignsDS, §5.6 join guard: the
+#                                       current join, read strongly)
+#  10 get_active_unit_campaign_for_order (UnitCampaignsDS, names the Unit behind
+#                                       the guard's pointer; skipped when there is
+#                                       no current join)
+#  11 create_public_order             (OrdersDS, the PutItem + receipt mint)
+#  12 send_public_order_emails        (PublicOrdersDS, best-effort; failures
 #                                       are swallowed so email never fails the
 #                                     committed order)
 resource "aws_appsync_resolver" "public_create_order" {
@@ -915,6 +927,11 @@ resource "aws_appsync_resolver" "public_create_order" {
       # CampaignsDS: the cap gate, BEFORE the write (condition failure aborts
       # the pipeline with PUBLIC_ORDER_LIMIT_EXCEEDED and no row).
       aws_appsync_function.increment_public_order_count.function_id,
+      # §1.4.3: an unfulfilled public order counts toward the Unit the campaign was
+      # joined to at the moment of sale, so the scope is read from the guard --
+      # never from the campaign's latest-link pair, which removal keeps.
+      aws_appsync_function.get_membership_guard_for_order.function_id,
+      aws_appsync_function.get_active_unit_campaign_for_order.function_id,
       aws_appsync_function.create_public_order.function_id,
       # Best-effort email, AFTER the write: the function and the handler both
       # swallow failures and only update confirmationEmailSent.

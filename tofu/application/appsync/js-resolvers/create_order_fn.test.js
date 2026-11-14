@@ -126,7 +126,25 @@ describe('create_order_fn request', () => {
     });
   });
 
-  it('captures the campaign joined scope on the order row (API-FIX-05)', () => {
+  // The joined scope is captured at creation from the membership guard, which is
+  // the only read that answers "joined to what, right now". The Campaign row's own
+  // pair is a latest-link that removal retains, so it is never the source.
+  const JOINED_STASH = {
+    membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-pack-3149-fall-2026' },
+    activeUnitCampaign: { pk: 'UNIT_CAMPAIGN#uc-pack-3149-fall-2026', sk: 'METADATA', unitId: 'UNIT#pack-3149' },
+  };
+
+  it('captures the joined scope on the order row from the join guard (API-FIX-05)', () => {
+    const ctx = { ...baseCtx, stash: { ...baseCtx.stash, ...JOINED_STASH } };
+    const order = request(ctx).attributeValues;
+    assert.strictEqual(order.unitId, 'UNIT#pack-3149');
+    assert.strictEqual(order.unitCampaignId, 'uc-pack-3149-fall-2026');
+  });
+
+  it('leaves an order written after removal attributed to no Unit', () => {
+    // Removal clears the guard pointer but deliberately keeps the campaign's link
+    // so joined history survives. Copying that link would put this sale in a Unit
+    // the Scout had already left.
     const ctx = {
       ...baseCtx,
       stash: {
@@ -135,8 +153,37 @@ describe('create_order_fn request', () => {
       },
     };
     const order = request(ctx).attributeValues;
-    assert.strictEqual(order.unitId, 'UNIT#pack-3149');
+    assert.strictEqual(order.unitId, null);
+    assert.strictEqual(order.unitCampaignId, null);
+  });
+
+  it('attributes an order to the Unit the Scout moved to, not the one the campaign row still shows', () => {
+    const ctx = {
+      ...baseCtx,
+      stash: {
+        ...baseCtx.stash,
+        campaign: { profileId: 'PROFILE#p1', unitId: 'UNIT#pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' },
+        membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-crew-529-spring-2027' },
+        activeUnitCampaign: { pk: 'UNIT_CAMPAIGN#uc-crew-529-spring-2027', sk: 'METADATA', unitId: 'UNIT#crew-529' },
+      },
+    };
+    const order = request(ctx).attributeValues;
+    assert.strictEqual(order.unitId, 'UNIT#crew-529');
+    assert.strictEqual(order.unitCampaignId, 'uc-crew-529-spring-2027');
+  });
+
+  it('names the Unit Campaign a guard points at even when its metadata row is gone', () => {
+    const ctx = {
+      ...baseCtx,
+      stash: {
+        ...baseCtx.stash,
+        membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-pack-3149-fall-2026' },
+        activeUnitCampaign: null,
+      },
+    };
+    const order = request(ctx).attributeValues;
     assert.strictEqual(order.unitCampaignId, 'uc-pack-3149-fall-2026');
+    assert.strictEqual(order.unitId, null);
   });
 
   it('records an independent campaign as a null origin, not an absent field (ORD-API-01-02)', () => {

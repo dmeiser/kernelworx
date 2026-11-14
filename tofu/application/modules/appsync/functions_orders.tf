@@ -104,6 +104,53 @@ resource "aws_appsync_function" "get_campaign_for_order" {
   code = file("${local.js_resolvers_dir}/get_campaign_for_order_fn.js")
 }
 
+# Strongly consistent re-read of the campaign the GSI locator above found. The
+# base table is keyed by (profileId, campaignId), so the GSI query is needed only
+# to learn the key; every check and the Order's origin come from this item.
+resource "aws_appsync_function" "get_campaign_strong_for_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "GetCampaignStrongForOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_campaign_strong_for_order_fn.js")
+}
+
+# The join guard read (data model §5.6): which Unit Campaign this Scout Campaign
+# is joined to at this moment. §1.4.3 requires an Order to record that, and the
+# Campaign row cannot answer it -- removal keeps the link there.
+resource "aws_appsync_function" "get_membership_guard_for_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.unit_campaigns.name
+  name        = "GetMembershipGuardForOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_membership_guard_for_order_fn.js")
+}
+
+# Names the Unit behind the guard's pointer, and is skipped (request returns null)
+# when there is no current join.
+resource "aws_appsync_function" "get_active_unit_campaign_for_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.unit_campaigns.name
+  name        = "GetActiveUnitCampaignForOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_active_unit_campaign_for_order_fn.js")
+}
+
 resource "aws_appsync_function" "get_catalog" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.catalogs.name

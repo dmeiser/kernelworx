@@ -146,24 +146,49 @@ describe('create_public_order response', () => {
         assert.throws(() => response({ result: { keys: [] }, stash: {} }), /INTERNAL_ERROR: Order could not be written/);
     });
 
+    const written = (req) => req.transactItems.find((item) => item.operation === 'PutItem').attributeValues;
+
     it('captures the joined scope at creation, and null for an independent campaign (§1.4.3)', () => {
         // Unfulfilled public orders count toward the Unit they were sold in, so
-        // the scope is stamped at sale time; the campaign's own link is a
-        // latest-link that removal retains and cannot be read back later.
+        // the scope is stamped at sale time -- from the membership guard, which is
+        // the current answer, and not from the campaign's latest-link pair that
+        // removal retains.
         const joined = request({
             stash: makeStash({
-                campaign: {
-                    campaignId: 'CAMPAIGN#c1',
-                    unitId: 'UNIT#crew-529',
-                    unitCampaignId: 'uc-crew-529-spring-2027',
-                },
+                membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-crew-529-spring-2027' },
+                activeUnitCampaign: { pk: 'UNIT_CAMPAIGN#uc-crew-529-spring-2027', sk: 'METADATA', unitId: 'UNIT#crew-529' },
             }),
         });
         const order = request({ stash: makeStash() });
-        const written = (req) => req.transactItems.find((item) => item.operation === 'PutItem').attributeValues;
         assert.strictEqual(written(joined).unitId, 'UNIT#crew-529');
         assert.strictEqual(written(joined).unitCampaignId, 'uc-crew-529-spring-2027');
         assert.strictEqual(written(order).unitId, null);
         assert.strictEqual(written(order).unitCampaignId, null);
+    });
+
+    it('does not credit an old Unit after the Scout left the campaign', () => {
+        // A stale campaign row -- retained link, or a campaignId-index projection
+        // that has not caught up -- must not attribute this sale to a Unit the
+        // Scout no longer belongs to. The guard says "no join", and that is what
+        // the order records.
+        const stale = request({
+            stash: makeStash({
+                campaign: { campaignId: 'CAMPAIGN#c1', unitId: 'UNIT#crew-529', unitCampaignId: 'uc-crew-529-spring-2027' },
+            }),
+        });
+        assert.strictEqual(written(stale).unitId, null);
+        assert.strictEqual(written(stale).unitCampaignId, null);
+    });
+
+    it('follows a move to the Unit named by the guard, not the campaign row it left', () => {
+        const moved = request({
+            stash: makeStash({
+                campaign: { campaignId: 'CAMPAIGN#c1', unitId: 'UNIT#pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' },
+                membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-crew-529-spring-2027' },
+                activeUnitCampaign: { pk: 'UNIT_CAMPAIGN#uc-crew-529-spring-2027', sk: 'METADATA', unitId: 'UNIT#crew-529' },
+            }),
+        });
+        assert.strictEqual(written(moved).unitId, 'UNIT#crew-529');
+        assert.strictEqual(written(moved).unitCampaignId, 'uc-crew-529-spring-2027');
     });
 });

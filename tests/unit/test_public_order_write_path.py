@@ -41,6 +41,10 @@ PROFILE_STEP2 = "aws_appsync_function.get_profile_for_public_order_step2"
 CATALOG = "aws_appsync_function.get_catalog"
 PAYMENT = "aws_appsync_function.validate_payment_method_public"
 INCREMENT = "aws_appsync_function.increment_public_order_count"
+# §1.4.3: the join guard read (data model §5.6) sits between the cap gate and
+# the write, so the Order records the join that was live at the moment of sale.
+GUARD = "aws_appsync_function.get_membership_guard_for_order"
+ACTIVE_UNIT_CAMPAIGN = "aws_appsync_function.get_active_unit_campaign_for_order"
 WRITE = "aws_appsync_function.create_public_order"
 EMAIL = "aws_appsync_function.send_public_order_emails"
 
@@ -59,6 +63,8 @@ def test_public_create_order_pipeline_order() -> None:
         CATALOG,
         PAYMENT,
         INCREMENT,
+        GUARD,
+        ACTIVE_UNIT_CAMPAIGN,
         WRITE,
         # The best-effort email step runs AFTER the order write: it must never
         # abort the committed order, and its own failure is swallowed by design.
