@@ -35,8 +35,11 @@ across the Lambda boundary, and forwarding an allowlisted subcode into GraphQL
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, cast
+
+from botocore.exceptions import ClientError
 
 try:  # pragma: no cover
     from utils import unit_auth, unit_models
@@ -49,6 +52,10 @@ except ModuleNotFoundError:  # pragma: no cover
 AppError, ErrorCode = import_from_utils("errors", "AppError", "ErrorCode")
 get_caller_id = import_from_utils("appsync_types", "get_caller_id")
 tables = import_from_utils("dynamodb", "tables")
+batch_get_chunked = import_from_utils("dynamodb", "batch_get_chunked")
+get_dynamodb_client = import_from_utils("dynamodb", "get_dynamodb_client")
+ensure_account_id = import_from_utils("ids", "ensure_account_id")
+paginate_page = import_from_utils("pagination", "paginate_page")
 get_logger = import_from_utils("logging", "get_logger")
 (
     BOOTSTRAP_SCOPE,
@@ -70,6 +77,7 @@ get_logger = import_from_utils("logging", "get_logger")
 # into locals: the name list they expose is long, and a name-by-name unpack is
 # ordering-sensitive wiring that fails silently when either side gains a symbol.
 if TYPE_CHECKING:  # pragma: no cover
+    from ..utils.errors import AppError as AppErrorType
     from ..utils.handlers import lambda_handler as with_error_handling
 else:  # pragma: no cover
     with_error_handling = import_from_utils("handlers", "lambda_handler")
@@ -77,6 +85,20 @@ else:  # pragma: no cover
 CREATE_UNIT_FIELD = "createUnit"
 UPDATE_UNIT_FIELD = "updateUnit"
 REVOKE_GRANT_FIELD = "revokeUnitAccessGrant"
+CREATE_INVITE_FIELD = "createUnitInvite"
+REDEEM_INVITE_FIELD = "redeemUnitInvite"
+REVOKE_INVITE_FIELD = "revokeUnitInvite"
+UNIT_INVITES_FIELD = "unitInvites"
+MY_UNITS_FIELD = "myUnits"
+UNIT_FIELD = "unit"
+UNIT_ADMINS_FIELD = "unitAdmins"
+
+MAX_ACTIVE_UNIT_INVITES = 20
+INVITE_FAILURES_PER_HOUR = 10
+# The §6.6 counter contract on the existing throttle table: its own key prefix
+# and window bucket keep it apart from public-order share-token throttling.
+_THROTTLE_KEY_PREFIX = "UNIT_INVITE_REDEMPTION"
+_THROTTLE_TTL_SECONDS = 2 * 60 * 60
 
 # The fields ``UpdateUnitInput`` may carry. Anything else in the payload is
 # ignored: ``unitId`` and ``adminCount`` are not writable through this surface,
@@ -565,26 +587,457 @@ def _revoke_grant(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     return unit_payload(refreshed)
 
 
+# --- Unit invites (§1.3.1, §1.3.2, §1.3.3) --------------------------------------
+
+
+def invite_payload(invite: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project an invite item onto the ``UnitInvite`` type.
+
+    ``expiresAtEpoch`` is storage/TTL detail and is never returned: the caller
+    sees the expiry it acts on, not the moment DynamoDB may delete the row.
+    """
+    return {
+        "inviteCode": invite["inviteCode"],
+        "unitId": invite["unitId"],
+        "createdByAccountId": invite["createdByAccountId"],
+        "createdAt": invite["createdAt"],
+        "expiresAt": invite["expiresAt"],
+    }
+
+
+def _require_active_admin(caller_id: str, unit_id: str) -> Dict[str, Any]:
+    """Read the caller's grant and return the Unit, denying everything else."""
+    unit_auth.require_unit_admin(caller_id, unit_id)
+    return dict(unit_models.load_unit_or_not_found(unit_id))
+
+
+def _page_argument(event: Dict[str, Any]) -> Optional[Mapping[str, Any]]:
+    """Read the optional ``page: PageInput`` of a list resolver."""
+    arguments = event.get("arguments")
+    page = arguments.get("page") if isinstance(arguments, Mapping) else None
+    if page is None:
+        return None
+    if not isinstance(page, Mapping):
+        raise AppError(ErrorCode.INVALID_INPUT, "page must be an object")
+    return page
+
+
+def _query_argument(event: Dict[str, Any], name: str) -> str:
+    """Read a required top-level query argument (``unitId``)."""
+    arguments = event.get("arguments")
+    value = arguments.get(name) if isinstance(arguments, Mapping) else None
+    if not isinstance(value, str) or not value.strip():
+        raise AppError(ErrorCode.INVALID_INPUT, f"{name} is required")
+    return value.strip()
+
+
+def _create_invite(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Issue a 16-character, 14-day, single-use admin invite (§1.3.1).
+
+    The 20-active-invite ceiling is counted over invites that are still
+    redeemable: an expired row the TTL has not collected yet, and a redeemed or
+    revoked row (deleted), do not consume a slot. The ceiling is checked before
+    the marker is staged, so a rejected request leaves no idempotency marker
+    behind and the caller's next attempt is a real attempt.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    unit_id = _resource_id(payload, "unitId")
+    runner = IdempotentMutationRunner()
+
+    keys = _marker(caller_id=caller_id, operation=CREATE_INVITE_FIELD, scope=unit_id, idempotency_key=key)
+    replayed = _replay(runner, keys, fingerprint, CREATE_INVITE_FIELD, lambda stored: _loaded_invite(str(stored)))
+    if replayed is not None:
+        return replayed
+
+    _require_active_admin(caller_id, unit_id)
+    active = unit_models.list_active_invites(unit_id)
+    if len(active) >= MAX_ACTIVE_UNIT_INVITES:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            f"This Unit already has {MAX_ACTIVE_UNIT_INVITES} active invites. Revoke one before creating another.",
+            details={"subcode": "INVITE_LIMIT_REACHED", "activeInvites": len(active)},
+        )
+
+    invite_code = unit_models.new_invite_code()
+    item = unit_models.build_invite_item(
+        invite_code=invite_code,
+        unit_id=unit_id,
+        created_by_account_id=caller_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=invite_code)
+    plan.add("Put", _put_action(item))
+    runner.execute(
+        keys,
+        plan,
+        operation=CREATE_INVITE_FIELD,
+        fingerprint=fingerprint,
+        result_id=invite_code,
+        load_result=lambda stored: _loaded_invite(str(stored)),
+    )
+    log.info("Unit invite created", unit_id=unit_id, caller_id=caller_id, invite_expires_at=item["expiresAt"])
+    return _loaded_invite(invite_code)
+
+
+def _loaded_invite(invite_code: str) -> Dict[str, Any]:
+    """Load the invite a request just created or must replay."""
+    invite = unit_models.read_invite(invite_code)
+    if invite is None:
+        raise AppError(ErrorCode.INTERNAL_ERROR, "unit invite could not be loaded")
+    return invite_payload(invite)
+
+
+def _current_redemption_window() -> tuple[str, int]:
+    """The UTC hour bucket the §6.6 counter is keyed on, and its start instant."""
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    return now.strftime("%Y-%m-%dT%H"), int(now.timestamp())
+
+
+def _record_failed_redemption(account_id: str) -> None:
+    """Count one failed redemption and reject attempt 11 in the current UTC hour.
+
+    Increment-then-read is the atomic check the data model asks for: two racing
+    failures cannot both believe they were the tenth. A successful redemption and
+    a replay never call this, and the window expires on its own TTL rather than
+    needing a cleanup path.
+    """
+    window_start, window_epoch = _current_redemption_window()
+    throttle_key = f"{_THROTTLE_KEY_PREFIX}#{account_id}#WINDOW#{window_start}"
+    now_iso = utc_now_iso()
+    try:
+        updated = get_dynamodb_client().update_item(
+            TableName=tables.public_order_throttles.table_name,
+            Key={"key": {"S": throttle_key}},
+            UpdateExpression=(
+                "SET #attempts = if_not_exists(#attempts, :zero) + :one, "
+                "#accountId = :accountId, #windowStart = :windowStart, "
+                "#createdAt = if_not_exists(#createdAt, :now), #updatedAt = :now, #expiresAt = :expiresAt"
+            ),
+            ExpressionAttributeNames={
+                "#attempts": "attempts",
+                "#accountId": "accountId",
+                "#windowStart": "windowStart",
+                "#createdAt": "createdAt",
+                "#updatedAt": "updatedAt",
+                "#expiresAt": "expiresAt",
+            },
+            ExpressionAttributeValues={
+                ":zero": {"N": "0"},
+                ":one": {"N": "1"},
+                ":accountId": {"S": account_id},
+                ":windowStart": {"S": window_start},
+                ":now": {"S": now_iso},
+                ":expiresAt": {"N": str(window_epoch + _THROTTLE_TTL_SECONDS)},
+            },
+            ReturnValues="UPDATED_NEW",
+        )
+    except ClientError as exc:
+        raise _attempt_counter_failure(exc) from exc
+    if _counter_attempts(updated) > INVITE_FAILURES_PER_HOUR:
+        raise AppError(
+            ErrorCode.RATE_LIMIT_EXCEEDED,
+            "Too many failed invite redemptions. Try again later.",
+            details={"subcode": "INVITE_REDEMPTION_THROTTLE", "window": window_start},
+        )
+
+
+_RETRYABLE_COUNTER_ERRORS: frozenset[str] = frozenset(
+    {"ProvisionedThroughputExceededException", "ThrottlingException", "TooManyRequestsException"}
+)
+
+
+def _counter_attempts(updated: Mapping[str, Any]) -> int:
+    """Read this attempt's count out of the wire-form UPDATED_NEW attributes."""
+    value = updated.get("Attributes", {}).get("attempts", {})
+    raw = value.get("N") if isinstance(value, Mapping) else None
+    try:
+        return int(raw) if raw is not None else 0
+    except TypeError, ValueError:
+        # A counter that cannot be read is a counter that did not count: fail the
+        # request rather than silently allowing unlimited attempts.
+        raise AppError(ErrorCode.DATABASE_ERROR, "failed to read the invite attempt counter") from None
+
+
+def _attempt_counter_failure(exc: ClientError) -> "AppErrorType":
+    """A busy counter is retryable; anything else is a storage fault.
+
+    The distinction matters to the caller: ``RESOURCE_BUSY`` means the same
+    redemption may be retried, while a failed counter write must not be reported
+    as a bad invite code.
+    """
+    code = str(exc.response.get("Error", {}).get("Code", ""))
+    if code in _RETRYABLE_COUNTER_ERRORS:
+        return cast(
+            "AppErrorType", AppError(ErrorCode.RESOURCE_BUSY, "The invite attempt counter is busy. Try again shortly.")
+        )
+    return cast("AppErrorType", AppError(ErrorCode.DATABASE_ERROR, "failed to record the invite attempt"))
+
+
+def _redeemed_payload(unit_id: str, account_id: str) -> Dict[str, Any]:
+    """Load the grant a redemption produced (or must replay)."""
+    grant = unit_auth.read_grant(unit_id, account_id)
+    if grant is None:
+        raise AppError(ErrorCode.INTERNAL_ERROR, "redeemed Unit access grant could not be loaded")
+    return grant_payload(grant)
+
+
+def _redeem_invite(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Redeem a single-use invite into a Unit Admin grant (§1.3.2).
+
+    Ordering carries the contract:
+
+    1. the idempotency replay is answered first, so a retry of a completed
+       redemption is never throttled or re-validated (UNIT-M-05-04);
+    2. the marker is scoped to the ``inviteCode`` because redemption deletes the
+       invite and the marker has to outlive it (§3.1);
+    3. an unusable code — unknown, malformed, expired, already consumed — is
+       counted and answered ``NOT_FOUND`` identically, so the caller learns
+       nothing about which case it hit;
+    4. an already-held grant returns that grant without touching ``adminCount``
+       (§5.2) and still consumes the code, so a code cannot be banked;
+    5. otherwise the grant, the ``adminCount`` increment, the invite deletion and
+       the marker commit as one transaction. Two redeemers of one code: the
+       loser's delete condition fails and the whole transaction is cancelled.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    invite_code = str(payload.get("inviteCode") or "")
+    runner = IdempotentMutationRunner()
+
+    # A malformed code cannot have a completed attempt behind it, so it is
+    # answered before the marker work — and counted, because code guessing is
+    # exactly what the §6.6 window exists to bound.
+    if not unit_models.is_valid_invite_code(invite_code):
+        _record_failed_redemption(caller_id)
+        raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
+
+    keys = _marker(caller_id=caller_id, operation=REDEEM_INVITE_FIELD, scope=invite_code, idempotency_key=key)
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        REDEEM_INVITE_FIELD,
+        lambda stored: _redeemed_payload(str(stored), caller_id),
+    )
+    if replayed is not None:
+        return replayed
+
+    invite = unit_models.read_invite(invite_code)
+    if invite is None:
+        _record_failed_redemption(caller_id)
+        raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
+    unit_id = str(invite["unitId"])
+    if unit_models.read_unit(unit_id) is None:
+        _record_failed_redemption(caller_id)
+        raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=unit_id)
+    plan.add("Delete", _delete_invite_action(invite))
+    existing = unit_auth.read_grant(unit_id, caller_id)
+    if existing is None:
+        grant = unit_models.build_grant_item(
+            unit_id=unit_id,
+            account_id=caller_id,
+            created_by_account_id=str(invite["createdByAccountId"]),
+            now_iso=utc_now_iso(),
+        )
+        plan.add("Put", _put_action(grant))
+        plan.add("Update", _grant_count_increment(unit_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=REDEEM_INVITE_FIELD,
+        fingerprint=fingerprint,
+        result_id=unit_id,
+        load_result=lambda stored: _redeemed_payload(str(stored), caller_id),
+    )
+    log.info("Unit invite redeemed", unit_id=unit_id, caller_id=caller_id, already_admin=existing is not None)
+    return _redeemed_payload(unit_id, caller_id)
+
+
+def _delete_invite_action(invite: Mapping[str, Any]) -> Dict[str, Any]:
+    """Delete the invite only if it is still there — the single-use guard."""
+    return {
+        "TableName": tables.units.table_name,
+        "Key": _wire_key({"pk": str(invite["pk"]), "sk": str(invite["sk"])}),
+        "ConditionExpression": "attribute_exists(#pk) AND attribute_exists(#sk)",
+        "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+        "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+    }
+
+
+def _grant_count_increment(unit_id: str) -> Dict[str, Any]:
+    """The conditional ``adminCount`` increment that rides beside the grant Put."""
+    return {
+        "TableName": tables.units.table_name,
+        "Key": _wire_key(unit_models.unit_metadata_key(unit_id)),
+        "UpdateExpression": "SET #adminCount = if_not_exists(#adminCount, :zero) + :one, #version = if_not_exists(#version, :zero) + :one, #updatedAt = :updatedAt",
+        "ExpressionAttributeNames": {
+            "#pk": "pk",
+            "#adminCount": "adminCount",
+            "#version": "version",
+            "#updatedAt": "updatedAt",
+        },
+        "ExpressionAttributeValues": {
+            ":zero": {"N": "0"},
+            ":one": {"N": "1"},
+            ":updatedAt": {"S": utc_now_iso()},
+        },
+        "ConditionExpression": "attribute_exists(#pk)",
+        "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+    }
+
+
+def _revoke_invite(event: Dict[str, Any], caller_id: str) -> bool:
+    """Revoke an unused invite (§1.3.3).
+
+    A redeemed, revoked, or expired code is already gone and answers
+    ``NOT_FOUND``; only an identical retry of the caller's own completed
+    revocation replays to ``true``, because the marker is consulted before the
+    code is looked up.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    unit_id = _resource_id(payload, "unitId")
+    invite_code = str(payload.get("inviteCode") or "")
+    runner = IdempotentMutationRunner()
+
+    keys = _marker(caller_id=caller_id, operation=REVOKE_INVITE_FIELD, scope=unit_id, idempotency_key=key)
+    replayed = _replay(runner, keys, fingerprint, REVOKE_INVITE_FIELD, lambda stored: True)
+    if replayed is not None:
+        return True
+
+    _require_active_admin(caller_id, unit_id)
+    invite = unit_models.read_invite(invite_code) if unit_models.is_valid_invite_code(invite_code) else None
+    if invite is None or str(invite["unitId"]) != unit_id:
+        raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=invite_code)
+    plan.add("Delete", _delete_invite_action(invite))
+    runner.execute(
+        keys,
+        plan,
+        operation=REVOKE_INVITE_FIELD,
+        fingerprint=fingerprint,
+        result_id=invite_code,
+        load_result=lambda stored: True,
+    )
+    log.info("Unit invite revoked", unit_id=unit_id, caller_id=caller_id)
+    return True
+
+
+# --- Unit and roster queries (§1.3.3 listing, §1.3.4) ---------------------------
+
+
+def _list_invites(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The Unit's active, unused invites — codes included for admins only."""
+    unit_id = _query_argument(event, "unitId")
+    _require_active_admin(caller_id, unit_id)
+    items = [invite_payload(invite) for invite in unit_models.list_active_invites(unit_id)]
+    return dict(paginate_page(items, f"{UNIT_INVITES_FIELD}#{unit_id}", _page_argument(event)))
+
+
+def _my_units(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The Units the caller holds a grant on — never a Unit they were not granted."""
+    unit_ids = unit_auth.list_unit_ids_for_account(caller_id)
+    items = [unit_payload(unit) for unit_id in unit_ids if (unit := unit_models.read_unit(unit_id)) is not None]
+    return dict(paginate_page(items, f"{MY_UNITS_FIELD}#{caller_id}", _page_argument(event)))
+
+
+def _get_unit(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One Unit's settings and authoritative admin count, for its admins."""
+    unit_id = _query_argument(event, "unitId")
+    unit = _require_active_admin(caller_id, unit_id)
+    return unit_payload(unit)
+
+
+def _account_directory(account_ids: list[str]) -> Dict[str, Dict[str, Any]]:
+    """Batch-read the Account rows behind a roster, keyed by bare sub.
+
+    Read only for the fields administration needs (email and name); a missing
+    Account still appears in the roster with those fields null, because the grant
+    — not the Account row — is what makes someone an admin.
+    """
+    directory: Dict[str, Dict[str, Any]] = {}
+    # ``batch_get_chunked`` makes no call for an empty key list, so no special case.
+    keys = [{"accountId": ensure_account_id(account_id)} for account_id in account_ids]
+    batch_get_chunked(tables.accounts.table_name, keys, on_item=lambda item: _remember_account(directory, item))
+    return directory
+
+
+def _remember_account(directory: Dict[str, Dict[str, Any]], item: Dict[str, Any]) -> None:
+    """Index one Account row by its bare sub for the roster join."""
+    directory[str(item.get("accountId", "")).split("#", 1)[-1]] = item
+
+
+def _account_name(account: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """The display name a roster shows, from the Account's Cognito name parts."""
+    if account is None:
+        return None
+    parts = [str(part) for part in (account.get("givenName"), account.get("familyName")) if part]
+    return " ".join(parts) if parts else None
+
+
+def _list_admins(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The Unit's current grants; a revoked admin is gone from the next read."""
+    unit_id = _query_argument(event, "unitId")
+    _require_active_admin(caller_id, unit_id)
+    grants = unit_auth.list_unit_grants(unit_id)
+    directory = _account_directory([str(grant["accountId"]) for grant in grants])
+    items = []
+    for grant in grants:
+        account = directory.get(str(grant["accountId"]))
+        admin = grant_payload(grant)
+        admin["email"] = account.get("email") if account is not None else None
+        admin["name"] = _account_name(account)
+        items.append(admin)
+    return dict(paginate_page(items, f"{UNIT_ADMINS_FIELD}#{unit_id}", _page_argument(event)))
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
-@with_error_handling(error_message="Failed to update the Unit")
-def handle_unit_operation(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """Route one Unit mutation event to the resolver that owns it.
+_RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
+    CREATE_UNIT_FIELD: _create_unit,
+    UPDATE_UNIT_FIELD: _update_unit,
+    REVOKE_GRANT_FIELD: _revoke_grant,
+    CREATE_INVITE_FIELD: _create_invite,
+    REDEEM_INVITE_FIELD: _redeem_invite,
+    REVOKE_INVITE_FIELD: _revoke_invite,
+    UNIT_INVITES_FIELD: _list_invites,
+    MY_UNITS_FIELD: _my_units,
+    UNIT_FIELD: _get_unit,
+    UNIT_ADMINS_FIELD: _list_admins,
+}
 
-    ``context`` is the Lambda invocation context, unused by the routing itself.
+
+@with_error_handling(error_message="Failed to process the Unit request")
+def handle_unit_operation(event: Dict[str, Any], context: Any) -> Any:
+    """Route one Unit request to the resolver that owns it.
+
+    Stage 1 puts the Unit's reads and writes behind one Lambda: the queries need
+    the same grant lookup as the mutations, and splitting them would put tenant
+    isolation in two places. ``context`` is the Lambda invocation context,
+    unused by the routing itself.
     """
     field_name = str((event.get("info") or {}).get("fieldName", ""))
-    if field_name not in {CREATE_UNIT_FIELD, UPDATE_UNIT_FIELD, REVOKE_GRANT_FIELD}:
+    resolver = _RESOLVERS.get(field_name)
+    if resolver is None:
         raise AppError(ErrorCode.INTERNAL_ERROR, f"Unsupported operation: {field_name}")
 
     caller_id = get_caller_id(event)
     if not caller_id:
         raise AppError(ErrorCode.UNAUTHORIZED, "A signed-in account is required")
 
-    get_logger(__name__).debug("Unit mutation received", field_name=field_name, caller_id=caller_id)
-    if field_name == CREATE_UNIT_FIELD:
-        return _create_unit(event, caller_id)
-    if field_name == UPDATE_UNIT_FIELD:
-        return _update_unit(event, caller_id)
-    return _revoke_grant(event, caller_id)
+    get_logger(__name__).debug("Unit request received", field_name=field_name, caller_id=caller_id)
+    return resolver(event, caller_id)
