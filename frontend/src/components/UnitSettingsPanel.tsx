@@ -11,7 +11,7 @@
  * uses, so a duplicate is always a choice and never a surprise.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@apollo/client/react';
 import { Alert, Box, Button, Stack, Typography } from '@mui/material';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -19,7 +19,7 @@ import { ErrorNote } from './ErrorAlert';
 import { UPDATE_UNIT } from '../lib/graphql';
 import { UnitFormFields } from './UnitFormFields';
 import { changedUnitFields, unitFormErrors, unitFormFromUnit, type UnitFormValues } from '../lib/unitForm';
-import { isDuplicateUnitError, isStaleVersionError, newIdempotencyKey, refreshQuery } from '../lib/units';
+import { createWriteIntent, isDuplicateUnitError, isStaleVersionError, refreshQuery } from '../lib/units';
 import type { GqlUnit } from '../types/graphql-generated';
 
 interface UnitSettingsPanelProps {
@@ -28,7 +28,6 @@ interface UnitSettingsPanelProps {
 }
 
 interface SaveIntent {
-  idempotencyKey: string;
   duplicateConfirmed: boolean;
 }
 
@@ -40,7 +39,7 @@ export const UnitSettingsPanel: React.FC<UnitSettingsPanelProps> = ({ unit, onSa
   const [pendingSave, setPendingSave] = useState<SaveIntent | null>(null);
   // One key per edit intent: a retry of the same body replays the original write,
   // and a saved edit's key is retired so the next edit is genuinely a new intent.
-  const [intentKey, setIntentKey] = useState(newIdempotencyKey);
+  const writeIntent = useRef(createWriteIntent());
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
   // Another admin's save (or a reload) replaces `unit`, and the form follows it
@@ -57,24 +56,21 @@ export const UnitSettingsPanel: React.FC<UnitSettingsPanelProps> = ({ unit, onSa
     setError(null);
     setSavedMessage(null);
     try {
+      const body = {
+        unitId: unit.unitId,
+        ...changes,
+        duplicateConfirmed: intent.duplicateConfirmed,
+        version: { expectedVersion: unit.version },
+      };
       await updateUnit({
-        variables: {
-          input: {
-            unitId: unit.unitId,
-            ...changes,
-            duplicateConfirmed: intent.duplicateConfirmed,
-            version: { expectedVersion: unit.version },
-            idempotency: { idempotencyKey: intent.idempotencyKey },
-          },
-        },
+        variables: { input: { ...body, idempotency: { idempotencyKey: writeIntent.current.keyFor(body) } } },
       });
       setPendingSave(null);
       setSavedMessage('Settings saved.');
-      setIntentKey(newIdempotencyKey());
       await refreshQuery(onSaved);
     } catch (mutationError) {
       const failure = classifySaveFailure(mutationError);
-      if (failure.kind === 'duplicate') setPendingSave({ idempotencyKey: newIdempotencyKey(), duplicateConfirmed: true });
+      if (failure.kind === 'duplicate') setPendingSave({ duplicateConfirmed: true });
       if (failure.kind === 'stale') {
         setStale(true);
         await refreshQuery(onSaved);
@@ -91,7 +87,7 @@ export const UnitSettingsPanel: React.FC<UnitSettingsPanelProps> = ({ unit, onSa
       setError('Nothing to save — no field has changed.');
       return;
     }
-    await submit({ idempotencyKey: intentKey, duplicateConfirmed: false });
+    await submit({ duplicateConfirmed: false });
   };
 
   return (

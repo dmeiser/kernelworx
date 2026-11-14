@@ -5,7 +5,7 @@ Stage 1 lays the Unit Campaign down at the physical key shapes of data model
 
     UNIT_CAMPAIGN#<unitCampaignId>            / METADATA          (§5.5)
     UNIT_CAMPAIGN#<unitCampaignId>            / MEMBERSHIP#<profileId>   (§5.6)
-    JOIN_CODE#<joinCode>                      / UNIT_CAMPAIGN#<id>       (§5.5)
+    JOIN_CODE#<joinCode>                      / POINTER               (§5.5, one row per code)
     SCOUT_CAMPAIGN#<campaignId>               / MEMBERSHIP_GUARD  (§5.6)
 
 This module owns the persistence rules §1.4 names — identity, join-code
@@ -54,6 +54,7 @@ from .unit_models import MAX_ID_LENGTH, METADATA_SK, normalize_required_text
 UNIT_CAMPAIGN_PK_PREFIX = "UNIT_CAMPAIGN"
 MEMBERSHIP_SK_PREFIX = "MEMBERSHIP"
 JOIN_CODE_PK_PREFIX = "JOIN_CODE"
+JOIN_CODE_POINTER_SK = "POINTER"  # one reservation row per code (§5.5)
 SCOUT_CAMPAIGN_PK_PREFIX = "SCOUT_CAMPAIGN"
 MEMBERSHIP_GUARD_SK = "MEMBERSHIP_GUARD"
 
@@ -129,9 +130,17 @@ def join_code_pk(join_code: str) -> str:
     return f"{JOIN_CODE_PK_PREFIX}#{join_code}"
 
 
-def join_code_pointer_key(join_code: str, unit_campaign_id: str) -> Dict[str, str]:
-    """The pointer item's key pair."""
-    return {"pk": join_code_pk(join_code), "sk": unit_campaign_pk(unit_campaign_id)}
+def join_code_pointer_key(join_code: str) -> Dict[str, str]:
+    """The pointer item's key pair: exactly one row per join code.
+
+    The code alone, never the campaign as well. Uniqueness has to be a property of
+    the write, not of the read that came before it: with the campaign id in the sort
+    key, two campaigns that happened to draw the same code wrote two different items,
+    both conditional inserts passed, and the only thing standing between them was a
+    pre-read that an interleaving create walks straight past. One row per code makes
+    the second create fail its own condition.
+    """
+    return {"pk": join_code_pk(join_code), "sk": JOIN_CODE_POINTER_SK}
 
 
 def guard_key(campaign_id: str) -> Dict[str, str]:
@@ -257,8 +266,7 @@ def build_join_code_pointer_item(*, join_code: Any, unit_campaign_id: Any, now_i
     code = normalize_join_code(join_code)
     campaign_id = normalize_campaign_id(unit_campaign_id, "unitCampaignId")
     return {
-        "pk": join_code_pk(code),
-        "sk": unit_campaign_pk(campaign_id),
+        **join_code_pointer_key(code),
         "unitCampaignId": campaign_id,
         "createdAt": normalize_required_text(now_iso, "nowIso", 40),
     }
@@ -501,6 +509,25 @@ def read_catalog(catalog_id: str) -> Optional[Dict[str, Any]]:
     return dict(item) if isinstance(item, dict) else None
 
 
+def catalog_visible_to(catalog: Optional[Dict[str, Any]], account_id: str) -> bool:
+    """Whether this account may read this catalog at all.
+
+    The same three ways the existing catalog read grants it — public, admin-managed,
+    or owned by the caller (get_catalog_response.vtl, get_catalog_for_shared_campaign_fn.js,
+    verify_shared_campaign_catalog_fn.js). A Unit admin naming a catalog id must not
+    get a second, unguarded path to another account's private catalog: the id is not
+    an authorization. A catalog that is not answerable looks exactly like one that is
+    missing, so this never confirms that someone else's catalog exists.
+    """
+    if catalog is None:
+        return False
+    return bool(
+        catalog.get("isPublic") is True
+        or catalog.get("catalogType") == "ADMIN_MANAGED"
+        or catalog.get("ownerAccountId") == account_id
+    )
+
+
 def catalog_is_usable(catalog: Optional[Dict[str, Any]]) -> bool:
     """Whether a new campaign may point at this catalog: it exists, undeleted.
 
@@ -606,9 +633,11 @@ def create_campaign_actions(campaign: Dict[str, Any], pointer: Dict[str, Any]) -
     """Write the campaign row and its join-code pointer as one atomic pair (§5.5).
 
     Both inserts are conditional, so a retry of the same create cannot double the
-    campaign or its pointer. Cross-campaign code collisions are caught by
-    :func:`join_code_taken`, which is the read that :func:`create_campaign_actions`
-    callers run before staging this pair (§5.5).
+    campaign or its pointer, and because the pointer is keyed by the code alone, a
+    second create that drew the same code fails this pair's own condition rather than
+    quietly reserving the code twice. The :func:`join_code_taken` read that callers
+    run first is only an optimisation that avoids a wasted transaction; it is not what
+    makes the code unique (§5.5).
     """
     return [
         _put(campaign, condition=_ABSENT),
@@ -624,10 +653,7 @@ def delete_campaign_actions(campaign: Dict[str, Any]) -> List[Action]:
     """
     return [
         _delete(unit_campaign_metadata_key(str(campaign["unitCampaignId"])), condition=_PRESENT),
-        _delete(
-            join_code_pointer_key(str(campaign["joinCode"]), str(campaign["unitCampaignId"])),
-            condition=_PRESENT,
-        ),
+        _delete(join_code_pointer_key(str(campaign["joinCode"])), condition=_PRESENT),
     ]
 
 

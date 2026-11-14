@@ -280,4 +280,93 @@ describe('UnitCampaignWorkspacePage', () => {
 
     expect(await screen.findByText('Could not save the campaign settings.')).toBeInTheDocument();
   });
+
+
+  it('saves two edits made in one mounted screen as two separate writes', async () => {
+    const renamed = campaignFixture({ campaignName: 'Winter Popcorn', version: 2 });
+    const reyearred = campaignFixture({ campaignName: 'Winter Popcorn', campaignYear: 2027, version: 3 });
+    const saveName = {
+      request: {
+        query: UPDATE_UNIT_CAMPAIGN,
+        variables: {
+          input: {
+            unitCampaignId: CAMPAIGN_ID,
+            campaignName: 'Winter Popcorn',
+            campaignYear: 2026,
+            version: { expectedVersion: 1 },
+            idempotency: { idempotencyKey: 'test-idem-1' },
+          },
+        },
+      },
+      result: { data: { updateUnitCampaign: renamed } },
+    };
+    const saveYear = {
+      request: {
+        query: UPDATE_UNIT_CAMPAIGN,
+        variables: {
+          input: {
+            unitCampaignId: CAMPAIGN_ID,
+            campaignName: 'Winter Popcorn',
+            campaignYear: 2027,
+            version: { expectedVersion: 2 },
+            idempotency: { idempotencyKey: 'test-idem-2' },
+          },
+        },
+      },
+      result: { data: { updateUnitCampaign: reyearred } },
+    };
+    renderWorkspace([campaignMock(), rosterMock([]), saveName, campaignMock(renamed), saveYear, campaignMock(reyearred)]);
+    const user = userEvent.setup();
+
+    const name = (await screen.findByTestId('campaign-name')).querySelector('input') as HTMLInputElement;
+    await user.clear(name);
+    await user.type(name, 'Winter Popcorn');
+    await user.click(screen.getByTestId('save-campaign'));
+    expect(await screen.findByText('Winter Popcorn')).toBeInTheDocument();
+
+    const year = (screen.getByTestId('campaign-year')).querySelector('input') as HTMLInputElement;
+    await user.clear(year);
+    await user.type(year, '2027');
+    await user.click(screen.getByTestId('save-campaign'));
+
+    // The refreshed campaign alone does not prove the second write happened: the
+    // card refreshes after a failed save too. An unanswered request surfaces as an
+    // alert, so a clean screen is what says both writes were the ones described.
+    await waitFor(() => expect(screen.getByText('2027 · Active')).toBeInTheDocument());
+        // The settings card always carries its fixed-catalog note as an alert; any other
+    // alert on this screen is a write that did not land.
+    const failedWrites = screen.getAllByRole('alert').filter((node) => !node.textContent?.includes('cannot change'));
+    expect(failedWrites).toEqual([]);
+  });
+
+  it('retries a save whose answer never arrived as the same write', async () => {
+    const renamed = campaignFixture({ campaignName: 'Winter Popcorn', version: 2 });
+    const input = {
+      unitCampaignId: CAMPAIGN_ID,
+      campaignName: 'Winter Popcorn',
+      campaignYear: 2026,
+      version: { expectedVersion: 1 },
+    };
+    const dropped = {
+      request: { query: UPDATE_UNIT_CAMPAIGN, variables: { input: { ...input, idempotency: { idempotencyKey: 'test-idem-1' } } } },
+      error: new Error(''),
+    };
+    const replay = {
+      request: { query: UPDATE_UNIT_CAMPAIGN, variables: { input: { ...input, idempotency: { idempotencyKey: 'test-idem-1' } } } },
+      result: { data: { updateUnitCampaign: renamed } },
+    };
+    renderWorkspace([campaignMock(), rosterMock([]), dropped, campaignMock(), replay, campaignMock(renamed)]);
+    const user = userEvent.setup();
+
+    const name = (await screen.findByTestId('campaign-name')).querySelector('input') as HTMLInputElement;
+    await user.clear(name);
+    await user.type(name, 'Winter Popcorn');
+    await user.click(screen.getByTestId('save-campaign'));
+    expect(await screen.findByText('Could not save the campaign settings.')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('save-campaign'));
+
+    await waitFor(() => expect(screen.getByText('Winter Popcorn')).toBeInTheDocument());
+    expect(screen.queryByText('Could not save the campaign settings.')).not.toBeInTheDocument();
+  });
 });

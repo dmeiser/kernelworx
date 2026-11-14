@@ -238,6 +238,9 @@ CATALOGS: Dict[str, Dict[str, Any]] = {
     "CATALOG#fixture-deleted": {
         "catalogId": "CATALOG#fixture-deleted",
         "catalogName": "Fixture Deleted Catalog",
+        # Deleted by the admin who owns it, so its owner can still see that it is
+        # deleted rather than being told it never existed.
+        "owner": "Avery",
         "isDeleted": True,
     },
 }
@@ -652,12 +655,16 @@ def unit_campaign_item(
 def join_code_pointer_item(
     join_code: str, unit_campaign_id: str, *, created_at: Optional[str] = None
 ) -> Dict[str, Any]:
-    """The join-code pointer at ``JOIN_CODE#<code>`` / ``UNIT_CAMPAIGN#<id>`` (§6.2)."""
+    """The join-code pointer at ``JOIN_CODE#<code>`` / ``POINTER`` (§6.2).
+
+    One row per code, whichever campaign claims it: that is what makes a code
+    collision a failed write instead of two rows that both read as free.
+    """
     if len(join_code) != 16:
         raise ValueError(f"joinCode must be exactly 16 characters, got {len(join_code)}")
     return {
         "pk": f"JOIN_CODE#{join_code}",
-        "sk": f"UNIT_CAMPAIGN#{unit_campaign_id}",
+        "sk": "POINTER",
         "unitCampaignId": unit_campaign_id,
         "createdAt": created_at or T0.isoformat(),
     }

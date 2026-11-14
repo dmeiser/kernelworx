@@ -1117,10 +1117,16 @@ def _fresh_join_code() -> str:
     raise AppError(ErrorCode.CONFLICT, "Could not allocate a unique join code. Retry the create.")
 
 
-def _require_usable_catalog(catalog_id: str) -> None:
-    """Require the referenced catalog to exist and be selectable by a new campaign."""
+def _require_usable_catalog(catalog_id: str, caller_id: str) -> None:
+    """Require the referenced catalog to exist, be selectable, and be this caller's to use.
+
+    The catalog arrives as an id the caller typed, so the read path's authorization
+    rule has to be applied here too: without it, a Unit admin could point a campaign
+    at another account's private catalog and read its products through the campaign.
+    A catalog the caller cannot see answers as not found.
+    """
     catalog = unit_campaign_models.read_catalog(catalog_id)
-    if catalog is None:
+    if catalog is None or not unit_campaign_models.catalog_visible_to(catalog, caller_id):
         raise AppError(ErrorCode.NOT_FOUND, "Catalog not found")
     if not unit_campaign_models.catalog_is_usable(catalog):
         raise AppError(ErrorCode.INVALID_INPUT, "That catalog is deleted and cannot be used by a new Unit Campaign.")
@@ -1164,7 +1170,7 @@ def _create_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         return replayed
 
     unit_auth.require_unit_admin(caller_id, unit_id)
-    _require_usable_catalog(catalog_id)
+    _require_usable_catalog(catalog_id, caller_id)
 
     unit_campaign_id = str(unit_campaign_models.new_unit_campaign_id())
     now_iso = utc_now_iso()
@@ -1763,7 +1769,15 @@ def _campaign_catalog(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     """
     campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
     catalog = unit_campaign_models.read_catalog(str(campaign["catalogId"]))
-    if catalog is None:
+    # The id comes from the campaign row rather than from the caller, so this is not
+    # a lookup-by-id hole. It is still a disclosure path: the catalog had to be
+    # answerable to the admin who attached it, so that is the identity the rule is
+    # checked against — a campaign written around someone else's private catalog by
+    # any path that skipped the create check answers as missing, while a co-admin of
+    # a campaign legitimately built on another admin's catalog still reads it.
+    if catalog is None or not unit_campaign_models.catalog_visible_to(
+        catalog, str(campaign.get("createdByAccountId") or "")
+    ):
         raise AppError(ErrorCode.NOT_FOUND, "catalog could not be loaded")
     return {
         "catalogId": str(catalog["catalogId"]),

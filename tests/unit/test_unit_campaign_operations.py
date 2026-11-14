@@ -60,6 +60,7 @@ from tests.unit.show_sell_fixtures import (
     account_id,
     assert_is_error,
     catalog_item,
+    grant_item,
     seed_show_sell_fixtures,
     unit_campaign_membership_item,
     unit_operation_event,
@@ -71,6 +72,7 @@ TAYLOR = account_id("Taylor")
 
 DEFAULT_CATALOG = "CATALOG#fixture-default"
 DELETED_CATALOG = "CATALOG#fixture-deleted"
+BLAKE_PRIVATE_CATALOG = "CATALOG#fixture-blake-private"
 FALL_CODE = "JOINPK3149FALL01"
 SPRING_CODE = "JOINCRW529SPRNG1"
 OLD_CODE = "JOINPK3149OLD001"
@@ -240,6 +242,95 @@ def test_create_requires_a_catalog_that_exists_and_is_selectable(seeded: Dict[st
             _call(CREATE_UNIT_CAMPAIGN_FIELD, "Avery", input=_create_input(catalog_id=catalog_id)),
             expected,
         )
+
+
+def test_create_refuses_a_catalog_another_account_keeps_private(
+    seeded: Dict[str, Any], unit_campaigns_table: Any, catalogs_table: Any
+) -> None:
+    """A catalog id is not an authorization, so the create applies the read rule.
+
+    Avery administers the Unit and Blake owns a private catalog. Taking the id at
+    face value would let a Unit campaign be built on Blake's products, which the
+    Unit admin could then read through the campaign — the same disclosure the
+    catalog read refuses by id. It answers as a catalog that is not there.
+    """
+    catalogs_table.put_item(Item=catalog_item(BLAKE_PRIVATE_CATALOG, "Blake Private Catalog", owner="Blake"))
+    campaigns_before = len(_scan(unit_campaigns_table, "UNIT_CAMPAIGN#"))
+    pointers_before = len(_scan(unit_campaigns_table, "JOIN_CODE#"))
+
+    assert_is_error(
+        _call(CREATE_UNIT_CAMPAIGN_FIELD, "Avery", input=_create_input(catalog_id=BLAKE_PRIVATE_CATALOG)),
+        ErrorCode.NOT_FOUND,
+    )
+
+    assert len(_scan(unit_campaigns_table, "UNIT_CAMPAIGN#")) == campaigns_before
+    assert len(_scan(unit_campaigns_table, "JOIN_CODE#")) == pointers_before
+
+
+def test_campaign_catalog_refuses_a_catalog_its_creator_could_not_see(
+    seeded: Dict[str, Any], unit_campaigns_table: Any, catalogs_table: Any
+) -> None:
+    """Reading through a campaign is not a second way to open a private catalog.
+
+    The catalog id on the row comes from the campaign rather than from the caller,
+    so the row has to have been built on a catalog its own creator was allowed to
+    use. A campaign written around someone else's private catalog — by an older
+    path, or by hand — answers as having no catalog.
+    """
+    catalogs_table.put_item(Item=catalog_item(BLAKE_PRIVATE_CATALOG, "Blake Private Catalog", owner="Blake"))
+    created = _call(CREATE_UNIT_CAMPAIGN_FIELD, "Avery", input=_create_input())
+    unit_campaigns_table.update_item(
+        Key=ucm.unit_campaign_metadata_key(created["unitCampaignId"]),
+        UpdateExpression="SET catalogId = :catalog_id",
+        ExpressionAttributeValues={":catalog_id": BLAKE_PRIVATE_CATALOG},
+    )
+
+    assert_is_error(
+        _call(UNIT_CAMPAIGN_CATALOG_FIELD, "Avery", arguments={"unitCampaignId": created["unitCampaignId"]}),
+        ErrorCode.NOT_FOUND,
+    )
+
+
+def test_campaign_catalog_reads_the_catalog_a_fellow_admin_built_the_campaign_on(
+    seeded: Dict[str, Any], units_table: Any
+) -> None:
+    """Equal admins read the catalog their Unit campaign already sells from.
+
+    Avery created the campaign on Avery's own private catalog; Taylor is the
+    Unit's other admin. Denying Taylor here would strand the campaign's own sales
+    sheet, because the catalog was chosen through the authorized path.
+    """
+    units_table.put_item(Item=grant_item(PACK_3149, "Taylor", created_by="Avery"))
+    created = _call(CREATE_UNIT_CAMPAIGN_FIELD, "Avery", input=_create_input())
+
+    result = _call(UNIT_CAMPAIGN_CATALOG_FIELD, "Taylor", arguments={"unitCampaignId": created["unitCampaignId"]})
+
+    assert result["catalogId"] == DEFAULT_CATALOG
+
+
+def test_two_creates_drawing_one_join_code_leave_one_reservation(
+    seeded: Dict[str, Any], unit_campaigns_table: Any, monkeypatch: Any
+) -> None:
+    """A join-code collision is decided by the write, not by the read before it.
+
+    The pre-read that avoids re-drawing a taken code is an optimisation. Two creates
+    can interleave past it and both believe the code is free — so the pointer row,
+    keyed by the code alone, has to be what refuses the second one. The loser is told
+    to retry, and a retry draws a code that is now visibly taken.
+    """
+    contested = "JOINAA11BB22CC33"
+    monkeypatch.setattr(ucm, "new_join_code", lambda: contested)
+    monkeypatch.setattr(ucm, "join_code_taken", lambda *_args, **_kwargs: False)
+
+    first = _call(CREATE_UNIT_CAMPAIGN_FIELD, "Avery", input=_create_input(key="race-1"))
+    second = _call(CREATE_UNIT_CAMPAIGN_FIELD, "Avery", input=_create_input(key="race-2"))
+
+    assert_is_error(second, ErrorCode.CONFLICT)
+    assert first["joinCode"] == contested
+    assert len(_scan(unit_campaigns_table, f"JOIN_CODE#{contested}")) == 1
+    resolved = ucm.resolve_join_code(contested)
+    assert resolved is not None
+    assert resolved["unitCampaignId"] == first["unitCampaignId"]
 
 
 def test_create_validates_name_and_year(seeded: Dict[str, Any]) -> None:

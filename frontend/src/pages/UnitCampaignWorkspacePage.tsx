@@ -10,7 +10,7 @@
  * rejection).
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -37,7 +37,7 @@ import { LoadingState } from '../components/LoadingState';
 import { PageHeader } from '../components/PageHeader';
 import { QueryGate } from '../components/QueryGate';
 import { UnitRosterPanel } from '../components/UnitRosterPanel';
-import { SHOW_SELL_BASE, newIdempotencyKey, refreshQuery, unitCampaignStatusLabel } from '../lib/units';
+import { SHOW_SELL_BASE, createWriteIntent, newIdempotencyKey, refreshQuery, unitCampaignStatusLabel } from '../lib/units';
 import type {
   GqlGetUnitCampaignCatalogQuery,
   GqlGetUnitCampaignQuery,
@@ -176,23 +176,23 @@ const CampaignSettingsCard: React.FC<{ campaign: Campaign; onSaved: () => Promis
   const [year, setYear] = useState(campaign.campaignYear);
   const [error, setError] = useState<string | null>(null);
   const [pendingToggle, setPendingToggle] = useState<PendingToggle | null>(null);
-  // One key per edit intent: a retry of the same body replays the original write.
-  const [intentKey] = useState(newIdempotencyKey);
+  // One key per edit intent: the same body sent again replays the original write,
+  // and a different body is a different write. The card outlives its saves, so the
+  // key cannot be one per mount.
+  const intent = useRef(createWriteIntent());
   const [updateCampaign, { loading }] = useMutation(UPDATE_UNIT_CAMPAIGN);
 
   const save = async () => {
     setError(null);
     try {
+      const body = {
+        unitCampaignId: campaign.unitCampaignId,
+        campaignName: name.trim(),
+        campaignYear: year,
+        version: { expectedVersion: campaign.version },
+      };
       await updateCampaign({
-        variables: {
-          input: {
-            unitCampaignId: campaign.unitCampaignId,
-            campaignName: name.trim(),
-            campaignYear: year,
-            version: { expectedVersion: campaign.version },
-            idempotency: { idempotencyKey: intentKey },
-          },
-        },
+        variables: { input: { ...body, idempotency: { idempotencyKey: intent.current.keyFor(body) } } },
       });
     } catch (mutationError) {
       setError(describeUpdateFailure(mutationError, 'Could not save the campaign settings.'));

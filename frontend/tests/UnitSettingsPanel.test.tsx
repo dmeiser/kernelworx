@@ -269,4 +269,53 @@ describe('UnitSettingsPanel', () => {
     expect(await screen.findByText('Could not save the Unit settings.')).toBeInTheDocument();
     expect(screen.getByTestId('unit-version')).toHaveTextContent('Version 3 · 1 admin');
   });
+
+
+  it('makes a second edit after a stale refusal a new write, not a replay of the refused one', async () => {
+    const unit = unitFixture();
+    const onSaved = vi.fn();
+    const mocks = [
+      {
+        request: {
+          query: UPDATE_UNIT,
+          variables: {
+            input: {
+              unitId: unit.unitId,
+              city: 'Shelbyville',
+              duplicateConfirmed: false,
+              version: { expectedVersion: unit.version },
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        error: new GraphQLError('The Unit changed underneath this edit', { extensions: { code: 'CONFLICT' } }),
+      },
+      {
+        request: {
+          query: UPDATE_UNIT,
+          variables: {
+            input: {
+              unitId: unit.unitId,
+              city: 'Fairfield',
+              duplicateConfirmed: false,
+              version: { expectedVersion: unit.version },
+              idempotency: { idempotencyKey: 'test-idem-2' },
+            },
+          },
+        },
+        result: { data: { updateUnit: { ...unit, city: 'Fairfield', version: unit.version + 1 } } },
+      },
+    ];
+    renderPanel(unit, onSaved, mocks);
+    const user = userEvent.setup();
+
+    await clearAndType('unit-city', 'Shelbyville', user);
+    await user.click(screen.getByTestId('save-unit'));
+    expect(await screen.findByText('This Unit changed while you were editing. Reload it and apply your change again.')).toBeInTheDocument();
+
+    await clearAndType('unit-city', 'Fairfield', user);
+    await user.click(screen.getByTestId('save-unit'));
+
+    expect(await screen.findByText('Settings saved.')).toBeInTheDocument();
+  });
 });

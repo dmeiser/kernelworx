@@ -1138,6 +1138,7 @@ export const GET_UNIT_CAMPAIGN_JOIN_INFO = gql`
 
 export const CREATE_UNIT = gql`
   ${UNIT_FRAGMENT}
+  ${UNIT_ACCESS_GRANT_FRAGMENT}
   mutation CreateUnit($input: CreateUnitInput!) {
     createUnit(input: $input) {
       unit {

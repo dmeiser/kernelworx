@@ -130,6 +130,13 @@ def _cancellation_codes(error: BaseException) -> List[str]:
 # --- Key layout (data model §6.2) ------------------------------------------------
 
 
+def test_catalog_visibility_follows_the_way_the_catalog_read_grants_it() -> None:
+    """Public, admin-managed, or owned — the same three ways, no fourth."""
+    assert ucm.catalog_visible_to({"catalogId": "CATALOG#a", "isPublic": True}, "ACCOUNT#anyone")
+    assert ucm.catalog_visible_to({"catalogId": "CATALOG#a", "catalogType": "ADMIN_MANAGED"}, "ACCOUNT#anyone")
+    assert ucm.catalog_visible_to({"catalogId": "CATALOG#a", "ownerAccountId": "ACCOUNT#avery"}, "ACCOUNT#avery")
+    assert not ucm.catalog_visible_to({"catalogId": "CATALOG#a", "isPublic": False, "ownerAccountId": "ACCOUNT#blake"}, "ACCOUNT#avery")
+    assert not ucm.catalog_visible_to(None, "ACCOUNT#avery")
 def test_key_layout_matches_the_data_model() -> None:
     """Every row type lands on the §6.2 partition/sort pair — no drift allowed."""
     assert ucm.unit_campaign_metadata_key(PACK_ID) == {"pk": f"UNIT_CAMPAIGN#{PACK_ID}", "sk": "METADATA"}
@@ -137,9 +144,9 @@ def test_key_layout_matches_the_data_model() -> None:
         "pk": f"UNIT_CAMPAIGN#{PACK_ID}",
         "sk": f"MEMBERSHIP#{PACK_PROFILE}",
     }
-    assert ucm.join_code_pointer_key(PACK_JOIN_CODE, PACK_ID) == {
+    assert ucm.join_code_pointer_key(PACK_JOIN_CODE) == {
         "pk": f"JOIN_CODE#{PACK_JOIN_CODE}",
-        "sk": f"UNIT_CAMPAIGN#{PACK_ID}",
+        "sk": "POINTER",
     }
     assert ucm.guard_key(PACK_CAMPAIGN) == {"pk": f"SCOUT_CAMPAIGN#{PACK_CAMPAIGN}", "sk": "MEMBERSHIP_GUARD"}
 
@@ -212,6 +219,21 @@ def test_generated_join_codes_are_issued_shape_and_unique() -> None:
     assert not ucm.is_valid_join_code("joinpk3149fall01")
     assert not ucm.is_valid_join_code(None)
     assert not ucm.is_valid_join_code("JOINPK3149FALL0")
+
+
+def test_a_join_code_reserves_one_row_whatever_campaign_claims_it() -> None:
+    """The reservation is keyed by the code, so a collision is a failed write.
+
+    With the campaign in the pointer's sort key, two creates drawing the same code
+    each got their own row and both conditions passed — uniqueness lived only in the
+    read that ran before them.
+    """
+    first = ucm.build_join_code_pointer_item(join_code=PACK_JOIN_CODE, unit_campaign_id=PACK_ID, now_iso=NOW)
+    second = ucm.build_join_code_pointer_item(join_code=PACK_JOIN_CODE, unit_campaign_id=CREW_ID, now_iso=NOW)
+
+    assert first["pk"] == second["pk"]
+    assert first["sk"] == second["sk"]
+    assert first["unitCampaignId"] != second["unitCampaignId"]
 
 
 def test_join_code_pointer_holds_only_the_address() -> None:

@@ -156,3 +156,29 @@ export async function refreshQuery(refresh: () => unknown): Promise<void> {
     // Swallowed by design: see above.
   }
 }
+
+/**
+ * An idempotency key identifies one write intent, not one mounted screen: the same
+ * payload sent again is the same write and must replay it, while a changed payload
+ * is a different write. A screen that holds one key for its whole lifetime sends a
+ * second edit under the first edit's key, and the server refuses it as a changed
+ * fingerprint on a write that was never attempted.
+ *
+ * The key is therefore derived from the payload body: identical body, identical key.
+ */
+export interface WriteIntent {
+  keyFor: (body: unknown) => string;
+}
+
+export const createWriteIntent = (): WriteIntent => {
+  let last: { fingerprint: string; key: string } | null = null;
+  return {
+    keyFor: (body) => {
+      const fingerprint = JSON.stringify(body);
+      if (last === null || last.fingerprint !== fingerprint) {
+        last = { fingerprint, key: newIdempotencyKey() };
+      }
+      return last.key;
+    },
+  };
+};

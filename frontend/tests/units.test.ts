@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GraphQLError } from 'graphql';
 import {
   bareAccountId,
+  createWriteIntent,
   isDuplicateUnitError,
   isStaleVersionError,
   newIdempotencyKey,
@@ -99,5 +100,14 @@ describe('naming', () => {
       refreshed = true;
     });
     expect(refreshed).toBe(true);
+  });
+
+
+  it('keys a write by its payload, so a retry replays and a new edit does not', () => {
+    const intent = createWriteIntent();
+    const first = { city: 'Fairfield', version: { expectedVersion: 3 } };
+
+    expect(intent.keyFor(first)).toBe(intent.keyFor({ city: 'Fairfield', version: { expectedVersion: 3 } }));
+    expect(intent.keyFor({ city: 'Fairfield', version: { expectedVersion: 4 } })).not.toBe(intent.keyFor(first));
   });
 });
