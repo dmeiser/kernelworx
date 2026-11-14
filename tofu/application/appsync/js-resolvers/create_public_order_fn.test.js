@@ -145,4 +145,25 @@ describe('create_public_order response', () => {
     it('returns INTERNAL_ERROR when the stash carries no written order row', () => {
         assert.throws(() => response({ result: { keys: [] }, stash: {} }), /INTERNAL_ERROR: Order could not be written/);
     });
+
+    it('captures the joined scope at creation, and null for an independent campaign (§1.4.3)', () => {
+        // Unfulfilled public orders count toward the Unit they were sold in, so
+        // the scope is stamped at sale time; the campaign's own link is a
+        // latest-link that removal retains and cannot be read back later.
+        const joined = request({
+            stash: makeStash({
+                campaign: {
+                    campaignId: 'CAMPAIGN#c1',
+                    unitId: 'UNIT#crew-529',
+                    unitCampaignId: 'uc-crew-529-spring-2027',
+                },
+            }),
+        });
+        const order = request({ stash: makeStash() });
+        const written = (req) => req.transactItems.find((item) => item.operation === 'PutItem').attributeValues;
+        assert.strictEqual(written(joined).unitId, 'UNIT#crew-529');
+        assert.strictEqual(written(joined).unitCampaignId, 'uc-crew-529-spring-2027');
+        assert.strictEqual(written(order).unitId, null);
+        assert.strictEqual(written(order).unitCampaignId, null);
+    });
 });

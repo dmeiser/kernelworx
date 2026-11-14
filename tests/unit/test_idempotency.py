@@ -16,6 +16,7 @@ stub client because moto cannot throttle on demand.
 from __future__ import annotations
 
 import time
+from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -42,6 +43,8 @@ from src.utils.mutations import (
     marker_sort_key,
     marker_ttl_epoch,
     normalized_fingerprint,
+    wire_key,
+    wire_value,
 )
 
 UNITS_TABLE = "kernelworx-units-ue1-dev"
@@ -1167,3 +1170,20 @@ class TestErrorClassification:
         with pytest.raises(AppError) as exc:
             runner.load_marker(_keys())
         assert exc.value.error_code == ErrorCode.RESOURCE_BUSY
+
+
+def test_the_shared_wire_encoder_is_the_only_wire_translation() -> None:
+    """Every staged value goes through one encoder, because a local one drifts.
+
+    §1.4 added the Unit Campaign's ``isActive``, which is a real DynamoDB
+    boolean: a handler-local encoder that stringifies it would write "True" and
+    every later ``isActive = :true`` condition would simply never match. Same for
+    the ``Decimal`` a read hands back — encoded as a string it stops being
+    comparable to a numeric condition.
+    """
+    assert wire_value("unit-1") == {"S": "unit-1"}
+    assert wire_value(7) == {"N": "7"}
+    assert wire_value(Decimal("7")) == {"N": "7"}
+    assert wire_value(True) == {"BOOL": True}
+    assert wire_value(None) == {"NULL": True}
+    assert wire_key({"pk": "UNIT#u", "sk": "METADATA"}) == {"pk": {"S": "UNIT#u"}, "sk": {"S": "METADATA"}}

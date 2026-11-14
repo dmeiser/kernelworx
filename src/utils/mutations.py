@@ -52,6 +52,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, cast
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -340,6 +341,29 @@ def marker_ttl_epoch(now_epoch: Optional[int] = None) -> int:
     """The numeric epoch-seconds TTL value for a marker written ``now``."""
     base = now_epoch if now_epoch is not None else int(time.time())
     return base + MARKER_TTL_SECONDS
+
+
+def wire_value(value: Any) -> dict[str, Any]:
+    """Encode one Python value as a DynamoDB AttributeValue (wire form).
+
+    The mutation runner submits its plan to the plain client, which passes
+    AttributeValues through untouched, so every staged item is encoded here — one
+    owner rather than one encoder per handler. ``bool`` is tested before ``int``
+    because a Python bool IS an int, and DynamoDB stores it as ``BOOL`` (the Unit
+    Campaign's ``isActive`` is a real boolean, unlike the Unit rows).
+    """
+    if isinstance(value, bool):
+        return {"BOOL": value}
+    if isinstance(value, (int, Decimal)):
+        return {"N": str(value)}
+    if value is None:
+        return {"NULL": True}
+    return {"S": str(value)}
+
+
+def wire_key(key: Mapping[str, Any]) -> dict[str, Any]:
+    """Encode a key pair in wire form."""
+    return {name: wire_value(value) for name, value in key.items()}
 
 
 def build_marker_item(

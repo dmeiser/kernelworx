@@ -2,6 +2,7 @@ import { util } from '@aws-appsync/utils';
 import { enrichLineItems } from './lib/line_items.js';
 import { buildOrderKey } from './lib/order_keys.js';
 import { composePublicOrderReceipt } from './lib/public_order.js';
+import { orderOrigin } from './lib/order_origin.js';
 
 // Loaded via Terraform templatefile() (functions_orders.tf): a dollar-brace
 // sequence here is Terraform-interpolated, not JS. In a template/string literal
@@ -138,6 +139,15 @@ export function request(ctx) {
         createdAt: now,
         updatedAt: now
     };
+
+    // §1.4.3 (API-FIX-05): a public order belongs to the Unit the campaign was
+    // joined to at the moment of sale. Unfulfilled public orders count toward
+    // that Unit's Council demand, and the campaign's own link is a latest-link
+    // removal retains, so the only correct time to read it is now. The fields are
+    // storage-only: no public read selects them (public API-key surface guard).
+    const origin = orderOrigin(campaign);
+    orderItem.unitId = origin.unitId;
+    orderItem.unitCampaignId = origin.unitCampaignId;
 
     if (mapped.customerEmail) {
         orderItem.customerEmail = mapped.customerEmail;

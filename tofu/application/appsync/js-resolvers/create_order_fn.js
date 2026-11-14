@@ -3,6 +3,7 @@ import { validatePhone, validateAddress } from './lib/validation.js';
 import { normalizeId } from './lib/ids.js';
 import { enrichLineItems } from './lib/line_items.js';
 import { buildOrderKey } from './lib/order_keys.js';
+import { orderOrigin } from './lib/order_origin.js';
 
 function validateCustomer(input) {
     if (!input.customerName || (typeof input.customerName === 'string' && !input.customerName.trim())) {
@@ -99,6 +100,14 @@ export function request(ctx) {
         createdAt: now,
         updatedAt: now
     };
+
+    // §1.4.3 (API-FIX-05): the joined scope is captured here and never derived
+    // again. The Campaign's own unitId/unitCampaignId pair is the *latest* link
+    // and removal keeps it, so an Order that read it back later would follow a
+    // Scout into another Unit and move old demand with them.
+    const origin = orderOrigin(campaign);
+    orderItem.unitId = origin.unitId;
+    orderItem.unitCampaignId = origin.unitCampaignId;
 
     if (customerPhone) {
         orderItem.customerPhone = customerPhone;

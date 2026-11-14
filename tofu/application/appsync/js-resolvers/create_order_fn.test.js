@@ -125,6 +125,27 @@ describe('create_order_fn request', () => {
       revenue: 5.97,
     });
   });
+
+  it('captures the campaign joined scope on the order row (API-FIX-05)', () => {
+    const ctx = {
+      ...baseCtx,
+      stash: {
+        ...baseCtx.stash,
+        campaign: { profileId: 'PROFILE#p1', unitId: 'UNIT#pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' },
+      },
+    };
+    const order = request(ctx).attributeValues;
+    assert.strictEqual(order.unitId, 'UNIT#pack-3149');
+    assert.strictEqual(order.unitCampaignId, 'uc-pack-3149-fall-2026');
+  });
+
+  it('records an independent campaign as a null origin, not an absent field (ORD-API-01-02)', () => {
+    // Absent would let a later join look like the order's origin; a recorded null
+    // is the fact that this campaign was independent at the moment of sale.
+    const order = request(baseCtx).attributeValues;
+    assert.strictEqual(order.unitId, null);
+    assert.strictEqual(order.unitCampaignId, null);
+  });
 });
 
 describe('create_order_fn response', () => {

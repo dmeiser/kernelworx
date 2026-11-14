@@ -64,6 +64,8 @@ get_logger = import_from_utils("logging", "get_logger")
     marker_keys,
     normalized_fingerprint,
     utc_now_iso,
+    wire_key,
+    wire_value,
 ) = import_from_utils(
     "mutations",
     "BOOTSTRAP_SCOPE",
@@ -72,6 +74,8 @@ get_logger = import_from_utils("logging", "get_logger")
     "marker_keys",
     "normalized_fingerprint",
     "utc_now_iso",
+    "wire_key",
+    "wire_value",
 )
 # ``unit_auth`` and ``unit_models`` are imported as modules rather than unpacked
 # into locals: the name list they expose is long, and a name-by-name unpack is
@@ -216,23 +220,6 @@ def grant_payload(grant: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _wire_key(key: Mapping[str, str]) -> Dict[str, Dict[str, str]]:
-    """Encode a key pair as DynamoDB AttributeValues (wire form)."""
-    return {name: {"S": value} for name, value in key.items()}
-
-
-def _wire(value: Any) -> Dict[str, Any]:
-    """Encode a Python value as a DynamoDB AttributeValue (wire form).
-
-    Only strings and integers occur in the Stage 1 Unit payloads; a boolean
-    would arrive as a string here, which is why no Stage 1 Unit field is stored
-    as a DynamoDB boolean.
-    """
-    if isinstance(value, int):
-        return {"N": str(value)}
-    return {"S": str(value)}
-
-
 # --- Duplicate gate --------------------------------------------------------------
 
 
@@ -318,7 +305,7 @@ def _put_action(item: Mapping[str, Any]) -> Dict[str, Any]:
     """
     return {
         "TableName": tables.units.table_name,
-        "Item": {name: _wire(value) for name, value in item.items()},
+        "Item": {name: wire_value(value) for name, value in item.items()},
         "ConditionExpression": "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
         "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
         "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
@@ -438,11 +425,11 @@ def _versioned_unit_update(unit_id: str, changes: Mapping[str, Any], *, expected
     sets: List[str] = ["#version = #version + :one", "#updatedAt = :updatedAt"]
     for field, value in changes.items():
         names[f"#{field}"] = field
-        values[f":{field}"] = _wire(value)
+        values[f":{field}"] = wire_value(value)
         sets.append(f"#{field} = :{field}")
     return {
         "TableName": tables.units.table_name,
-        "Key": _wire_key(unit_models.unit_metadata_key(unit_id)),
+        "Key": wire_key(unit_models.unit_metadata_key(unit_id)),
         "UpdateExpression": "SET " + ", ".join(sets),
         "ExpressionAttributeNames": names,
         "ExpressionAttributeValues": values,
@@ -509,7 +496,7 @@ def _grant_count_update(unit_id: str, *, expected_version: int) -> Dict[str, Any
     """
     return {
         "TableName": tables.units.table_name,
-        "Key": _wire_key(unit_models.unit_metadata_key(unit_id)),
+        "Key": wire_key(unit_models.unit_metadata_key(unit_id)),
         "UpdateExpression": "SET #adminCount = #adminCount - :one, #version = #version + :one, #updatedAt = :updatedAt",
         "ExpressionAttributeNames": {"#adminCount": "adminCount", "#version": "version", "#updatedAt": "updatedAt"},
         "ExpressionAttributeValues": {
@@ -561,7 +548,7 @@ def _revoke_grant(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         "Delete",
         {
             "TableName": tables.units.table_name,
-            "Key": _wire_key(unit_models.grant_key(unit_id, target_account_id)),
+            "Key": wire_key(unit_models.grant_key(unit_id, target_account_id)),
             "ConditionExpression": "attribute_exists(#pk) AND attribute_exists(#sk)",
             "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
             "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
@@ -866,7 +853,7 @@ def _delete_invite_action(invite: Mapping[str, Any]) -> Dict[str, Any]:
     """Delete the invite only if it is still there — the single-use guard."""
     return {
         "TableName": tables.units.table_name,
-        "Key": _wire_key({"pk": str(invite["pk"]), "sk": str(invite["sk"])}),
+        "Key": wire_key({"pk": str(invite["pk"]), "sk": str(invite["sk"])}),
         "ConditionExpression": "attribute_exists(#pk) AND attribute_exists(#sk)",
         "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
         "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
@@ -877,7 +864,7 @@ def _grant_count_increment(unit_id: str) -> Dict[str, Any]:
     """The conditional ``adminCount`` increment that rides beside the grant Put."""
     return {
         "TableName": tables.units.table_name,
-        "Key": _wire_key(unit_models.unit_metadata_key(unit_id)),
+        "Key": wire_key(unit_models.unit_metadata_key(unit_id)),
         "UpdateExpression": "SET #adminCount = if_not_exists(#adminCount, :zero) + :one, #version = if_not_exists(#version, :zero) + :one, #updatedAt = :updatedAt",
         "ExpressionAttributeNames": {
             "#pk": "pk",
