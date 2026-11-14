@@ -75,7 +75,7 @@ FALL_CODE = "JOINPK3149FALL01"
 SPRING_CODE = "JOINCRW529SPRNG1"
 OLD_CODE = "JOINPK3149OLD001"
 TAKEN_CODE = FALL_CODE
-FREE_CODE = "JOINBLAKE0000001"
+FREE_CODE = "JOINPK3149FREE01"
 
 _PROFILE_OF = {persona: PROFILES[persona]["profileId"] for persona in PROFILES}
 _CAMPAIGN_OF = {persona: PROFILES[persona]["campaignId"] for persona in PROFILES}
@@ -974,6 +974,31 @@ def test_roster_keeps_removed_history_and_filters_by_status(seeded: Dict[str, An
         UNIT_CAMPAIGN_ROSTER_FIELD, "Avery", arguments={"unitCampaignId": CREW_529_SPRING, "status": "ACTIVE"}
     )
     assert [item["campaignId"] for item in scouts["items"]] == [_CAMPAIGN_OF["Riley"]]
+
+
+def test_the_roster_answers_the_version_pair_removal_requires(seeded: Dict[str, Any]) -> None:
+    """A roster row an admin can act on carries both versions removal demands.
+
+    Removal moves two rows and takes both versions from the caller (§1.5.5), so the
+    guard half has to be readable somewhere — otherwise the write cannot be issued
+    from the screen that offers the button. The removed row answers null: its slot
+    is already free, and inventing a version for a row no mutation accepts would
+    invite a stale write.
+    """
+    _join("Blake", FALL_CODE, _CAMPAIGN_OF["Blake"])
+    roster = _call(
+        UNIT_CAMPAIGN_ROSTER_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL, "status": "ACTIVE"}
+    )
+    row = next(item for item in roster["items"] if item["campaignId"] == _CAMPAIGN_OF["Blake"])
+    guard = ucm.read_membership_guard(_CAMPAIGN_OF["Blake"])
+    assert row["guardVersion"] == guard["membershipVersion"]
+
+    removed = _remove("Avery", PACK_3149_FALL, _CAMPAIGN_OF["Blake"], row["version"], row["guardVersion"])
+    assert removed["status"] == "REMOVED"
+    after = _call(
+        UNIT_CAMPAIGN_ROSTER_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL, "status": "REMOVED"}
+    )
+    assert next(item for item in after["items"] if item["campaignId"] == _CAMPAIGN_OF["Blake"])["guardVersion"] is None
 
 
 def test_roster_is_admin_only_and_refuses_an_unknown_status(seeded: Dict[str, Any]) -> None:

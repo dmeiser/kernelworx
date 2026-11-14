@@ -118,9 +118,12 @@ const TYPE_FIELDS: Record<string, string[]> = {
   ],
   UnitCampaignJoinPreview: ["unitDisplayName", "campaignName", "campaignYear", "catalogName", "isActive"],
   UnitCampaignCatalog: ["catalogId", "catalogName", "products"],
+  // `guardVersion` is part of the contract because the removal write conditions on
+  // two rows (the roster row and the Scout Campaign's join guard) and takes both
+  // versions from the caller: a roster that answers only one cannot offer the write.
   UnitCampaignMembership: [
     "unitCampaignId", "unitId", "campaignId", "profileId", "status", "joinedByAccountId",
-    "joinedAt", "removedByAccountId", "removedAt", "version",
+    "joinedAt", "removedByAccountId", "removedAt", "version", "guardVersion",
   ],
   CreateUnitPayload: ["unit", "grant"],
 };

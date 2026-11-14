@@ -1154,6 +1154,14 @@ type UnitCampaignMembership {
   removedAt: AWSDateTime
   """Optimistic-concurrency version for membership mutations and rejoin."""
   version: Int!
+  """
+  The Scout Campaign's membership-guard version that `removeUnitCampaignMembership`
+  must match. Returned here because removal moves two rows and both versions come
+  from the caller: a roster row the admin can act on answers its guard version, so
+  the client is never asked to supply a number no query gave it. Null on a REMOVED
+  row — its slot is already free and no removal starts from that row.
+  """
+  guardVersion: Int
 }
 
 """A page of a Unit Campaign's roster (includes removed history)."""

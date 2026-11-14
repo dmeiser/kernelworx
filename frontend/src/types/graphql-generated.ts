@@ -1692,6 +1692,14 @@ export type GqlUnitCampaignMembership = {
   __typename?: 'UnitCampaignMembership';
   /** The existing Scout Campaign (immutable). */
   campaignId: Scalars['ID']['output'];
+  /**
+   * The Scout Campaign's membership-guard version that `removeUnitCampaignMembership`
+   * must match. Returned here because removal moves two rows and both versions come
+   * from the caller: a roster row the admin can act on answers its guard version, so
+   * the client is never asked to supply a number no query gave it. Null on a REMOVED
+   * row — its slot is already free and no removal starts from that row.
+   */
+  guardVersion?: Maybe<Scalars['Int']['output']>;
   /** When the Scout joined. */
   joinedAt: Scalars['AWSDateTime']['output'];
   /** The account that redeemed the join code. */
@@ -3413,6 +3421,520 @@ export type GqlUpdateCampaignPublicOrderSettingsMutation = {
     campaignId: string;
     campaignName: string;
     campaignState: GqlCampaignState;
+  };
+};
+
+export type GqlUnitFieldsFragment = {
+  __typename?: 'Unit';
+  unitId: string;
+  unitType: string;
+  unitNumber: number;
+  city: string;
+  state: string;
+  displayName?: string | null | undefined;
+  timezone: string;
+  splitDefault: GqlSplitMethod;
+  councilNeedBasis: GqlCouncilNeedBasis;
+  adminCount: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  createdByAccountId: string;
+};
+
+export type GqlUnitAccessGrantFieldsFragment = {
+  __typename?: 'UnitAccessGrant';
+  unitId: string;
+  accountId: string;
+  role: GqlUnitRole;
+  email?: string | null | undefined;
+  name?: string | null | undefined;
+  createdByAccountId: string;
+  createdAt: string;
+};
+
+export type GqlUnitInviteFieldsFragment = {
+  __typename?: 'UnitInvite';
+  inviteCode: string;
+  unitId: string;
+  createdByAccountId: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export type GqlUnitCampaignFieldsFragment = {
+  __typename?: 'UnitCampaignAdmin';
+  unitCampaignId: string;
+  unitId: string;
+  campaignName: string;
+  campaignYear: number;
+  catalogId: string;
+  joinCode: string;
+  isActive: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  createdByAccountId: string;
+  updatedByAccountId: string;
+};
+
+export type GqlUnitCampaignMembershipFieldsFragment = {
+  __typename?: 'UnitCampaignMembership';
+  unitCampaignId: string;
+  unitId: string;
+  campaignId: string;
+  profileId: string;
+  status: GqlMembershipStatus;
+  joinedByAccountId: string;
+  joinedAt: string;
+  removedByAccountId?: string | null | undefined;
+  removedAt?: string | null | undefined;
+  version: number;
+  guardVersion?: number | null | undefined;
+};
+
+export type GqlMyUnitsQueryVariables = Exact<{
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlMyUnitsQuery = {
+  __typename?: 'Query';
+  myUnits: {
+    __typename?: 'UnitConnection';
+    items: Array<{
+      __typename?: 'Unit';
+      unitId: string;
+      unitType: string;
+      unitNumber: number;
+      city: string;
+      state: string;
+      displayName?: string | null | undefined;
+      timezone: string;
+      splitDefault: GqlSplitMethod;
+      councilNeedBasis: GqlCouncilNeedBasis;
+      adminCount: number;
+      version: number;
+      createdAt: string;
+      updatedAt: string;
+      createdByAccountId: string;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlGetUnitQueryVariables = Exact<{
+  unitId: Scalars['ID']['input'];
+}>;
+
+export type GqlGetUnitQuery = {
+  __typename?: 'Query';
+  unit?:
+    | {
+        __typename?: 'Unit';
+        unitId: string;
+        unitType: string;
+        unitNumber: number;
+        city: string;
+        state: string;
+        displayName?: string | null | undefined;
+        timezone: string;
+        splitDefault: GqlSplitMethod;
+        councilNeedBasis: GqlCouncilNeedBasis;
+        adminCount: number;
+        version: number;
+        createdAt: string;
+        updatedAt: string;
+        createdByAccountId: string;
+      }
+    | null
+    | undefined;
+};
+
+export type GqlListUnitAdminsQueryVariables = Exact<{
+  unitId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListUnitAdminsQuery = {
+  __typename?: 'Query';
+  unitAdmins: {
+    __typename?: 'UnitAccessGrantConnection';
+    items: Array<{
+      __typename?: 'UnitAccessGrant';
+      unitId: string;
+      accountId: string;
+      role: GqlUnitRole;
+      email?: string | null | undefined;
+      name?: string | null | undefined;
+      createdByAccountId: string;
+      createdAt: string;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlListUnitInvitesQueryVariables = Exact<{
+  unitId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListUnitInvitesQuery = {
+  __typename?: 'Query';
+  unitInvites: {
+    __typename?: 'UnitInviteConnection';
+    items: Array<{
+      __typename?: 'UnitInvite';
+      inviteCode: string;
+      unitId: string;
+      createdByAccountId: string;
+      createdAt: string;
+      expiresAt: string;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlListUnitCampaignsQueryVariables = Exact<{
+  unitId: Scalars['ID']['input'];
+  isActive?: InputMaybe<Scalars['Boolean']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListUnitCampaignsQuery = {
+  __typename?: 'Query';
+  unitCampaigns: {
+    __typename?: 'UnitCampaignConnection';
+    items: Array<{
+      __typename?: 'UnitCampaignAdmin';
+      unitCampaignId: string;
+      unitId: string;
+      campaignName: string;
+      campaignYear: number;
+      catalogId: string;
+      joinCode: string;
+      isActive: boolean;
+      version: number;
+      createdAt: string;
+      updatedAt: string;
+      createdByAccountId: string;
+      updatedByAccountId: string;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlGetUnitCampaignQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+}>;
+
+export type GqlGetUnitCampaignQuery = {
+  __typename?: 'Query';
+  unitCampaign?:
+    | {
+        __typename?: 'UnitCampaignAdmin';
+        unitCampaignId: string;
+        unitId: string;
+        campaignName: string;
+        campaignYear: number;
+        catalogId: string;
+        joinCode: string;
+        isActive: boolean;
+        version: number;
+        createdAt: string;
+        updatedAt: string;
+        createdByAccountId: string;
+        updatedByAccountId: string;
+      }
+    | null
+    | undefined;
+};
+
+export type GqlGetUnitCampaignCatalogQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+}>;
+
+export type GqlGetUnitCampaignCatalogQuery = {
+  __typename?: 'Query';
+  unitCampaignCatalog?:
+    | {
+        __typename?: 'UnitCampaignCatalog';
+        catalogId: string;
+        catalogName: string;
+        products: Array<{
+          __typename?: 'Product';
+          productId: string;
+          productName: string;
+          description?: string | null | undefined;
+          price: number;
+          sortOrder: number;
+        }>;
+      }
+    | null
+    | undefined;
+};
+
+export type GqlListUnitCampaignRosterQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+  status?: InputMaybe<GqlMembershipStatus>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListUnitCampaignRosterQuery = {
+  __typename?: 'Query';
+  unitCampaignRoster: {
+    __typename?: 'UnitCampaignMembershipConnection';
+    items: Array<{
+      __typename?: 'UnitCampaignMembership';
+      unitCampaignId: string;
+      unitId: string;
+      campaignId: string;
+      profileId: string;
+      status: GqlMembershipStatus;
+      joinedByAccountId: string;
+      joinedAt: string;
+      removedByAccountId?: string | null | undefined;
+      removedAt?: string | null | undefined;
+      version: number;
+      guardVersion?: number | null | undefined;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlGetUnitCampaignJoinInfoQueryVariables = Exact<{
+  joinCode: Scalars['String']['input'];
+}>;
+
+export type GqlGetUnitCampaignJoinInfoQuery = {
+  __typename?: 'Query';
+  unitCampaignJoinInfo?:
+    | {
+        __typename?: 'UnitCampaignJoinPreview';
+        unitDisplayName: string;
+        campaignName: string;
+        campaignYear: number;
+        catalogName: string;
+        isActive: boolean;
+      }
+    | null
+    | undefined;
+};
+
+export type GqlCreateUnitMutationVariables = Exact<{
+  input: GqlCreateUnitInput;
+}>;
+
+export type GqlCreateUnitMutation = {
+  __typename?: 'Mutation';
+  createUnit: {
+    __typename?: 'CreateUnitPayload';
+    unit: {
+      __typename?: 'Unit';
+      unitId: string;
+      unitType: string;
+      unitNumber: number;
+      city: string;
+      state: string;
+      displayName?: string | null | undefined;
+      timezone: string;
+      splitDefault: GqlSplitMethod;
+      councilNeedBasis: GqlCouncilNeedBasis;
+      adminCount: number;
+      version: number;
+      createdAt: string;
+      updatedAt: string;
+      createdByAccountId: string;
+    };
+    grant: {
+      __typename?: 'UnitAccessGrant';
+      unitId: string;
+      accountId: string;
+      role: GqlUnitRole;
+      email?: string | null | undefined;
+      name?: string | null | undefined;
+      createdByAccountId: string;
+      createdAt: string;
+    };
+  };
+};
+
+export type GqlUpdateUnitMutationVariables = Exact<{
+  input: GqlUpdateUnitInput;
+}>;
+
+export type GqlUpdateUnitMutation = {
+  __typename?: 'Mutation';
+  updateUnit: {
+    __typename?: 'Unit';
+    unitId: string;
+    unitType: string;
+    unitNumber: number;
+    city: string;
+    state: string;
+    displayName?: string | null | undefined;
+    timezone: string;
+    splitDefault: GqlSplitMethod;
+    councilNeedBasis: GqlCouncilNeedBasis;
+    adminCount: number;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    createdByAccountId: string;
+  };
+};
+
+export type GqlRevokeUnitAccessGrantMutationVariables = Exact<{
+  input: GqlRevokeUnitAccessGrantInput;
+}>;
+
+export type GqlRevokeUnitAccessGrantMutation = {
+  __typename?: 'Mutation';
+  revokeUnitAccessGrant: {
+    __typename?: 'Unit';
+    unitId: string;
+    unitType: string;
+    unitNumber: number;
+    city: string;
+    state: string;
+    displayName?: string | null | undefined;
+    timezone: string;
+    splitDefault: GqlSplitMethod;
+    councilNeedBasis: GqlCouncilNeedBasis;
+    adminCount: number;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    createdByAccountId: string;
+  };
+};
+
+export type GqlCreateUnitInviteMutationVariables = Exact<{
+  input: GqlCreateUnitInviteInput;
+}>;
+
+export type GqlCreateUnitInviteMutation = {
+  __typename?: 'Mutation';
+  createUnitInvite: {
+    __typename?: 'UnitInvite';
+    inviteCode: string;
+    unitId: string;
+    createdByAccountId: string;
+    createdAt: string;
+    expiresAt: string;
+  };
+};
+
+export type GqlRedeemUnitInviteMutationVariables = Exact<{
+  input: GqlRedeemUnitInviteInput;
+}>;
+
+export type GqlRedeemUnitInviteMutation = {
+  __typename?: 'Mutation';
+  redeemUnitInvite: {
+    __typename?: 'UnitAccessGrant';
+    unitId: string;
+    accountId: string;
+    role: GqlUnitRole;
+    email?: string | null | undefined;
+    name?: string | null | undefined;
+    createdByAccountId: string;
+    createdAt: string;
+  };
+};
+
+export type GqlRevokeUnitInviteMutationVariables = Exact<{
+  input: GqlRevokeUnitInviteInput;
+}>;
+
+export type GqlRevokeUnitInviteMutation = { __typename?: 'Mutation'; revokeUnitInvite: boolean };
+
+export type GqlCreateUnitCampaignMutationVariables = Exact<{
+  input: GqlCreateUnitCampaignInput;
+}>;
+
+export type GqlCreateUnitCampaignMutation = {
+  __typename?: 'Mutation';
+  createUnitCampaign: {
+    __typename?: 'UnitCampaignAdmin';
+    unitCampaignId: string;
+    unitId: string;
+    campaignName: string;
+    campaignYear: number;
+    catalogId: string;
+    joinCode: string;
+    isActive: boolean;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    createdByAccountId: string;
+    updatedByAccountId: string;
+  };
+};
+
+export type GqlUpdateUnitCampaignMutationVariables = Exact<{
+  input: GqlUpdateUnitCampaignInput;
+}>;
+
+export type GqlUpdateUnitCampaignMutation = {
+  __typename?: 'Mutation';
+  updateUnitCampaign: {
+    __typename?: 'UnitCampaignAdmin';
+    unitCampaignId: string;
+    unitId: string;
+    campaignName: string;
+    campaignYear: number;
+    catalogId: string;
+    joinCode: string;
+    isActive: boolean;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    createdByAccountId: string;
+    updatedByAccountId: string;
+  };
+};
+
+export type GqlJoinUnitCampaignMutationVariables = Exact<{
+  input: GqlJoinUnitCampaignInput;
+}>;
+
+export type GqlJoinUnitCampaignMutation = {
+  __typename?: 'Mutation';
+  joinUnitCampaign: {
+    __typename?: 'UnitCampaignMembership';
+    unitCampaignId: string;
+    unitId: string;
+    campaignId: string;
+    profileId: string;
+    status: GqlMembershipStatus;
+    joinedByAccountId: string;
+    joinedAt: string;
+    removedByAccountId?: string | null | undefined;
+    removedAt?: string | null | undefined;
+    version: number;
+    guardVersion?: number | null | undefined;
+  };
+};
+
+export type GqlRemoveUnitCampaignMembershipMutationVariables = Exact<{
+  input: GqlRemoveUnitCampaignMembershipInput;
+}>;
+
+export type GqlRemoveUnitCampaignMembershipMutation = {
+  __typename?: 'Mutation';
+  removeUnitCampaignMembership: {
+    __typename?: 'UnitCampaignMembership';
+    unitCampaignId: string;
+    unitId: string;
+    campaignId: string;
+    profileId: string;
+    status: GqlMembershipStatus;
+    joinedByAccountId: string;
+    joinedAt: string;
+    removedByAccountId?: string | null | undefined;
+    removedAt?: string | null | undefined;
+    version: number;
+    guardVersion?: number | null | undefined;
   };
 };
 

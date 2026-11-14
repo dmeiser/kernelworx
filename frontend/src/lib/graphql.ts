@@ -928,3 +928,302 @@ export const UPDATE_CAMPAIGN_PUBLIC_ORDER_SETTINGS = gql`
   }
 `;
 
+
+// ============================================================================
+// Units and Unit Campaigns (Show & Sell Stage 1)
+//
+// One section for the whole Stage 1 surface, so the SDL contract (§ Unit,
+// UnitCampaign, UnitCampaignMembership, PageInput, VersionedInput,
+// IdempotencyInput) is readable in one place. Reads select only the fields a
+// screen renders — a projection written out field by field is what keeps a
+// later SDL addition from silently widening what the browser holds.
+// ============================================================================
+
+export const UNIT_FRAGMENT = gql`
+  fragment UnitFields on Unit {
+    unitId
+    unitType
+    unitNumber
+    city
+    state
+    displayName
+    timezone
+    splitDefault
+    councilNeedBasis
+    adminCount
+    version
+    createdAt
+    updatedAt
+    createdByAccountId
+  }
+`;
+
+export const UNIT_ACCESS_GRANT_FRAGMENT = gql`
+  fragment UnitAccessGrantFields on UnitAccessGrant {
+    unitId
+    accountId
+    role
+    email
+    name
+    createdByAccountId
+    createdAt
+  }
+`;
+
+export const UNIT_INVITE_FRAGMENT = gql`
+  fragment UnitInviteFields on UnitInvite {
+    inviteCode
+    unitId
+    createdByAccountId
+    createdAt
+    expiresAt
+  }
+`;
+
+export const UNIT_CAMPAIGN_FRAGMENT = gql`
+  fragment UnitCampaignFields on UnitCampaignAdmin {
+    unitCampaignId
+    unitId
+    campaignName
+    campaignYear
+    catalogId
+    joinCode
+    isActive
+    version
+    createdAt
+    updatedAt
+    createdByAccountId
+    updatedByAccountId
+  }
+`;
+
+export const UNIT_CAMPAIGN_MEMBERSHIP_FRAGMENT = gql`
+  fragment UnitCampaignMembershipFields on UnitCampaignMembership {
+    unitCampaignId
+    unitId
+    campaignId
+    profileId
+    status
+    joinedByAccountId
+    joinedAt
+    removedByAccountId
+    removedAt
+    version
+    guardVersion
+  }
+`;
+
+export const MY_UNITS = gql`
+  ${UNIT_FRAGMENT}
+  query MyUnits($page: PageInput) {
+    myUnits(page: $page) {
+      items {
+        ...UnitFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const GET_UNIT = gql`
+  ${UNIT_FRAGMENT}
+  query GetUnit($unitId: ID!) {
+    unit(unitId: $unitId) {
+      ...UnitFields
+    }
+  }
+`;
+
+export const LIST_UNIT_ADMINS = gql`
+  ${UNIT_ACCESS_GRANT_FRAGMENT}
+  query ListUnitAdmins($unitId: ID!, $page: PageInput) {
+    unitAdmins(unitId: $unitId, page: $page) {
+      items {
+        ...UnitAccessGrantFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const LIST_UNIT_INVITES = gql`
+  ${UNIT_INVITE_FRAGMENT}
+  query ListUnitInvites($unitId: ID!, $page: PageInput) {
+    unitInvites(unitId: $unitId, page: $page) {
+      items {
+        ...UnitInviteFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const LIST_UNIT_CAMPAIGNS = gql`
+  ${UNIT_CAMPAIGN_FRAGMENT}
+  query ListUnitCampaigns($unitId: ID!, $isActive: Boolean, $page: PageInput) {
+    unitCampaigns(unitId: $unitId, isActive: $isActive, page: $page) {
+      items {
+        ...UnitCampaignFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const GET_UNIT_CAMPAIGN = gql`
+  ${UNIT_CAMPAIGN_FRAGMENT}
+  query GetUnitCampaign($unitCampaignId: ID!) {
+    unitCampaign(unitCampaignId: $unitCampaignId) {
+      ...UnitCampaignFields
+    }
+  }
+`;
+
+export const GET_UNIT_CAMPAIGN_CATALOG = gql`
+  query GetUnitCampaignCatalog($unitCampaignId: ID!) {
+    unitCampaignCatalog(unitCampaignId: $unitCampaignId) {
+      catalogId
+      catalogName
+      products {
+        productId
+        productName
+        description
+        price
+        sortOrder
+      }
+    }
+  }
+`;
+
+export const LIST_UNIT_CAMPAIGN_ROSTER = gql`
+  ${UNIT_CAMPAIGN_MEMBERSHIP_FRAGMENT}
+  query ListUnitCampaignRoster($unitCampaignId: ID!, $status: MembershipStatus, $page: PageInput) {
+    unitCampaignRoster(unitCampaignId: $unitCampaignId, status: $status, page: $page) {
+      items {
+        ...UnitCampaignMembershipFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+// The participant-safe projection: this is all a bare join code buys, and the
+// 1.7.5 guard suite fails a build that widens it.
+export const GET_UNIT_CAMPAIGN_JOIN_INFO = gql`
+  query GetUnitCampaignJoinInfo($joinCode: String!) {
+    unitCampaignJoinInfo(joinCode: $joinCode) {
+      unitDisplayName
+      campaignName
+      campaignYear
+      catalogName
+      isActive
+    }
+  }
+`;
+
+export const CREATE_UNIT = gql`
+  ${UNIT_FRAGMENT}
+  mutation CreateUnit($input: CreateUnitInput!) {
+    createUnit(input: $input) {
+      unit {
+        ...UnitFields
+      }
+      grant {
+        ...UnitAccessGrantFields
+      }
+    }
+  }
+`;
+
+export const UPDATE_UNIT = gql`
+  ${UNIT_FRAGMENT}
+  mutation UpdateUnit($input: UpdateUnitInput!) {
+    updateUnit(input: $input) {
+      ...UnitFields
+    }
+  }
+`;
+
+export const REVOKE_UNIT_ACCESS_GRANT = gql`
+  ${UNIT_FRAGMENT}
+  mutation RevokeUnitAccessGrant($input: RevokeUnitAccessGrantInput!) {
+    revokeUnitAccessGrant(input: $input) {
+      ...UnitFields
+    }
+  }
+`;
+
+export const CREATE_UNIT_INVITE = gql`
+  ${UNIT_INVITE_FRAGMENT}
+  mutation CreateUnitInvite($input: CreateUnitInviteInput!) {
+    createUnitInvite(input: $input) {
+      ...UnitInviteFields
+    }
+  }
+`;
+
+export const REDEEM_UNIT_INVITE = gql`
+  ${UNIT_ACCESS_GRANT_FRAGMENT}
+  mutation RedeemUnitInvite($input: RedeemUnitInviteInput!) {
+    redeemUnitInvite(input: $input) {
+      ...UnitAccessGrantFields
+    }
+  }
+`;
+
+export const REVOKE_UNIT_INVITE = gql`
+  mutation RevokeUnitInvite($input: RevokeUnitInviteInput!) {
+    revokeUnitInvite(input: $input)
+  }
+`;
+
+export const CREATE_UNIT_CAMPAIGN = gql`
+  ${UNIT_CAMPAIGN_FRAGMENT}
+  mutation CreateUnitCampaign($input: CreateUnitCampaignInput!) {
+    createUnitCampaign(input: $input) {
+      ...UnitCampaignFields
+    }
+  }
+`;
+
+export const UPDATE_UNIT_CAMPAIGN = gql`
+  ${UNIT_CAMPAIGN_FRAGMENT}
+  mutation UpdateUnitCampaign($input: UpdateUnitCampaignInput!) {
+    updateUnitCampaign(input: $input) {
+      ...UnitCampaignFields
+    }
+  }
+`;
+
+export const JOIN_UNIT_CAMPAIGN = gql`
+  ${UNIT_CAMPAIGN_MEMBERSHIP_FRAGMENT}
+  mutation JoinUnitCampaign($input: JoinUnitCampaignInput!) {
+    joinUnitCampaign(input: $input) {
+      ...UnitCampaignMembershipFields
+    }
+  }
+`;
+
+export const REMOVE_UNIT_CAMPAIGN_MEMBERSHIP = gql`
+  ${UNIT_CAMPAIGN_MEMBERSHIP_FRAGMENT}
+  mutation RemoveUnitCampaignMembership($input: RemoveUnitCampaignMembershipInput!) {
+    removeUnitCampaignMembership(input: $input) {
+      ...UnitCampaignMembershipFields
+    }
+  }
+`;

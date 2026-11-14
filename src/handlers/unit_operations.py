@@ -1027,12 +1027,17 @@ def campaign_payload(campaign: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-def membership_payload(membership: Mapping[str, Any]) -> Dict[str, Any]:
+def membership_payload(membership: Mapping[str, Any], *, guard_version: Optional[int] = None) -> Dict[str, Any]:
     """Project a membership item onto ``UnitCampaignMembership``.
 
     Removal audit is returned as null rather than omitted: a REMOVED roster entry
     is history the admin is entitled to see, and who removed it and when is why
     the record was never deleted (§5.6).
+
+    ``guardVersion`` rides along only where a guard row was read — the roster, for
+    the sake of a removal the admin can actually perform from it. Removal requires
+    both row versions, so a roster that answered only the membership version would
+    leave the second half of the pair unknowable.
     """
     return {
         "unitCampaignId": membership["unitCampaignId"],
@@ -1045,6 +1050,7 @@ def membership_payload(membership: Mapping[str, Any]) -> Dict[str, Any]:
         "removedByAccountId": membership.get("removedByAccountId"),
         "removedAt": membership.get("removedAt"),
         "version": _number(membership["version"]),
+        "guardVersion": None if guard_version is None else _number(guard_version),
     }
 
 
@@ -1408,15 +1414,125 @@ def _joined_membership_payload(unit_campaign_id: str, campaign_id: str) -> Dict[
     return membership_payload(membership)
 
 
+def _join_scout_profile(caller_id: str, campaign_id: str) -> str:
+    """The Profile the joining Campaign belongs to, after the Owner/WRITE check.
+
+    Authorization is the existing Profile Owner/WRITE rule: the join is an act of
+    the Scout, not an appointment by a Unit Admin, which is why a READ-only share
+    and a substituted ``campaignId`` both fail here (CAMP-M-03-02). A Campaign the
+    caller cannot see is absent rather than forbidden.
+    """
+    scout = unit_campaign_models.read_scout_campaign(campaign_id)
+    if scout is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Campaign not found")
+    profile_id = str(scout["profileId"])
+    require_profile_access(caller_id, profile_id, "WRITE")
+    return profile_id
+
+
+def _join_target_campaign(join_code: str) -> Dict[str, Any]:
+    """The Unit Campaign a code names.
+
+    An unknown code, a redeemed code, and a code on a campaign the Unit closed
+    answer identically — the same refusal a code that never existed earns, so the
+    endpoint cannot be walked to enumerate Units.
+    """
+    unit_campaign: Dict[str, Any] | None = unit_campaign_models.resolve_join_code(join_code)
+    if unit_campaign is None:
+        raise AppError(ErrorCode.NOT_FOUND, _JOIN_CODE_UNUSABLE)
+    return unit_campaign
+
+
+def _join_guard(campaign_id: str, unit_campaign_id: str) -> Dict[str, Any] | None:
+    """The Campaign's join guard, unless it is already held by another campaign.
+
+    One Scout Campaign belongs to one Unit Campaign at a time; the guard row is
+    where that is written, so leaving a roster is a precondition to joining this
+    one rather than a silent hand-off between Units.
+    """
+    guard: Dict[str, Any] | None = unit_campaign_models.read_membership_guard(campaign_id)
+    target = unit_campaign_models.guard_active_unit_campaign_id(guard)
+    if target is not None and target != unit_campaign_id:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "This Scout Campaign is already joined to another Unit Campaign; leave that roster before joining this one.",
+        )
+    return guard
+
+
+def _joinable_membership(unit_campaign_id: str, profile_id: str, campaign_id: str) -> Dict[str, Any] | None:
+    """The roster row this join would write, if a joinable one exists.
+
+    A row that belongs to a different Scout Campaign, or one already ACTIVE, is a
+    conflict rather than a re-write: the roster identifies one Campaign per Scout,
+    and a second active membership in the same campaign would double-count the
+    Scout's participation.
+    """
+    membership: Dict[str, Any] | None = unit_campaign_models.read_membership(unit_campaign_id, profile_id)
+    if membership is not None and str(membership["campaignId"]) != campaign_id:
+        raise AppError(ErrorCode.CONFLICT, "This Scout's roster entry belongs to a different Scout Campaign.")
+    if membership is not None and str(membership["status"]) == unit_campaign_models.MEMBERSHIP_STATUS_ACTIVE:
+        raise AppError(ErrorCode.CONFLICT, "This Scout Campaign already has an active membership here.")
+    return membership
+
+
+def _stage_join_plan(
+    runner: Any,
+    keys: Any,
+    fingerprint: str,
+    membership: Dict[str, Any] | None,
+    member: Dict[str, Any],
+    campaign_id: str,
+    profile_id: str,
+    unit_campaign: Dict[str, Any],
+    unit_campaign_id: str,
+    guard: Dict[str, Any] | None,
+    now_iso: str,
+) -> Any:
+    # `WritePlan` arrives through `import_from_utils`, which is untyped, so the
+    # plan is returned as Any rather than a name mypy cannot see through.
+    """The four rows a join moves, in one plan: marker, roster, guard, Campaign link.
+
+    A row that already exists is reactivated against its own version rather than
+    overwritten, so a second join after a removal is a transition the roster
+    history can show — not a rewrite of the row that records the removal.
+    """
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=unit_campaign_id)
+    if membership is None:
+        plan.add(*unit_campaign_models.put_membership_action(member))
+    else:
+        plan.add(
+            *unit_campaign_models.reactivate_membership_action(member, expected_version=_number(membership["version"]))
+        )
+    plan.add(
+        *unit_campaign_models.guard_claim_action(
+            campaign_id=campaign_id,
+            profile_id=profile_id,
+            active_unit_campaign_id=unit_campaign_id,
+            expected_membership_version=_number(guard["membershipVersion"]) if guard is not None else None,
+            now_iso=now_iso,
+        )
+    )
+    plan.add(
+        *unit_campaign_models.campaign_latest_link_action(
+            profile_id=profile_id,
+            campaign_id=campaign_id,
+            unit_id=str(unit_campaign["unitId"]),
+            unit_campaign_id=unit_campaign_id,
+        )
+    )
+    return plan
+
+
 def _join_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     """Join a Scout Campaign to a Unit Campaign with its code (§1.5.4).
 
     Four rows commit together — membership, guard, the Campaign's joined-scope
     link, and the marker — so a Scout is never a member in one row and unjoined
-    in another. Authorization is the existing Profile Owner/WRITE rule: the join
-    is an act of the Scout, not an appointment by a Unit Admin, which is why a
-    READ-only share and a substituted ``campaignId`` both fail here
-    (CAMP-M-03-02).
+    in another. Every refusal (unknown code, guard held elsewhere, a roster row
+    that is not this Campaign's, an already-active membership) is decided before
+    any row is written, so a join that is refused leaves nothing behind.
 
     The idempotency marker is scoped to the join code: the same code plus the
     same key is one join, however many campaigns the caller names in between.
@@ -1442,29 +1558,11 @@ def _join_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     if replayed is not None:
         return replayed
 
-    scout = unit_campaign_models.read_scout_campaign(campaign_id)
-    if scout is None:
-        raise AppError(ErrorCode.NOT_FOUND, "Campaign not found")
-    profile_id = str(scout["profileId"])
-    require_profile_access(caller_id, profile_id, "WRITE")
-
-    unit_campaign = unit_campaign_models.resolve_join_code(join_code)
-    if unit_campaign is None:
-        raise AppError(ErrorCode.NOT_FOUND, _JOIN_CODE_UNUSABLE)
+    profile_id = _join_scout_profile(caller_id, campaign_id)
+    unit_campaign = _join_target_campaign(join_code)
     unit_campaign_id = str(unit_campaign["unitCampaignId"])
-
-    guard = unit_campaign_models.read_membership_guard(campaign_id)
-    target = unit_campaign_models.guard_active_unit_campaign_id(guard)
-    if target is not None and target != unit_campaign_id:
-        raise AppError(
-            ErrorCode.CONFLICT,
-            "This Scout Campaign is already joined to another Unit Campaign; leave that roster before joining this one.",
-        )
-    membership = unit_campaign_models.read_membership(unit_campaign_id, profile_id)
-    if membership is not None and str(membership["campaignId"]) != campaign_id:
-        raise AppError(ErrorCode.CONFLICT, "This Scout's roster entry belongs to a different Scout Campaign.")
-    if membership is not None and str(membership["status"]) == unit_campaign_models.MEMBERSHIP_STATUS_ACTIVE:
-        raise AppError(ErrorCode.CONFLICT, "This Scout Campaign already has an active membership here.")
+    guard = _join_guard(campaign_id, unit_campaign_id)
+    membership = _joinable_membership(unit_campaign_id, profile_id, campaign_id)
 
     now_iso = utc_now_iso()
     member = unit_campaign_models.build_membership_item(
@@ -1475,30 +1573,18 @@ def _join_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         joined_by_account_id=caller_id,
         now_iso=now_iso,
     )
-    plan = WritePlan()
-    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=unit_campaign_id)
-    if membership is None:
-        plan.add(*unit_campaign_models.put_membership_action(member))
-    else:
-        plan.add(
-            *unit_campaign_models.reactivate_membership_action(member, expected_version=_number(membership["version"]))
-        )
-    plan.add(
-        *unit_campaign_models.guard_claim_action(
-            campaign_id=campaign_id,
-            profile_id=profile_id,
-            active_unit_campaign_id=unit_campaign_id,
-            expected_membership_version=_number(guard["membershipVersion"]) if guard is not None else None,
-            now_iso=now_iso,
-        )
-    )
-    plan.add(
-        *unit_campaign_models.campaign_latest_link_action(
-            profile_id=profile_id,
-            campaign_id=campaign_id,
-            unit_id=str(unit_campaign["unitId"]),
-            unit_campaign_id=unit_campaign_id,
-        )
+    plan = _stage_join_plan(
+        runner,
+        keys,
+        fingerprint,
+        membership,
+        member,
+        campaign_id,
+        profile_id,
+        unit_campaign,
+        unit_campaign_id,
+        guard,
+        now_iso,
     )
     runner.execute(
         keys,
@@ -1698,10 +1784,17 @@ def _list_roster(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     raw_status = arguments.get("status") if isinstance(arguments, Mapping) else None
     status = None if raw_status is None else unit_campaign_models.normalize_membership_status(raw_status)
     unit_campaign_id = str(campaign["unitCampaignId"])
-    items = [
-        membership_payload(membership)
-        for membership in unit_campaign_models.list_memberships(unit_campaign_id, status=status)
-    ]
+    items = []
+    for membership in unit_campaign_models.list_memberships(unit_campaign_id, status=status):
+        # Only an ACTIVE row can be removed, so only an ACTIVE row needs its guard
+        # version read back. A REMOVED row's slot is already free, and answering
+        # null says so without inventing a version for a row no mutation accepts.
+        guard_version = None
+        if str(membership["status"]) == unit_campaign_models.MEMBERSHIP_STATUS_ACTIVE:
+            guard = unit_campaign_models.read_membership_guard(str(membership["campaignId"]))
+            if guard is not None:
+                guard_version = _number(guard["membershipVersion"])
+        items.append(membership_payload(membership, guard_version=guard_version))
     return dict(
         paginate_page(
             items, f"{UNIT_CAMPAIGN_ROSTER_FIELD}#{unit_campaign_id}#{status or 'ALL'}", _page_argument(event)
