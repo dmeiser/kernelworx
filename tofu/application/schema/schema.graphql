@@ -198,6 +198,10 @@ type Campaign {
   totalOrders: Int
   """The sum of totalAmount across this campaign's orders."""
   totalRevenue: Float
+  """The Unit this campaign is joined to, or null for an independent campaign. Set atomically by joinUnitCampaign; removal does not clear it (history retention)."""
+  unitId: ID
+  """The Unit Campaign this campaign is joined to, or null for an independent campaign. Set atomically by joinUnitCampaign; removal does not clear it (history retention)."""
+  unitCampaignId: ID
 }
 
 """A catalog of products that campaigns sell from.
@@ -310,6 +314,10 @@ type Order {
   createdAt: AWSDateTime!
   """When the order was last updated."""
   updatedAt: AWSDateTime!
+  """The Unit the campaign was joined to when this order was created; null for an independent campaign. Captured immutably at order creation (API-FIX-05)."""
+  unitId: ID
+  """The Unit Campaign the campaign was joined to when this order was created; null for an independent campaign. Captured immutably at order creation (API-FIX-05)."""
+  unitCampaignId: ID
 }
 
 """A page of Order results from listOrdersByCampaign, with a token for fetching the next page."""
@@ -896,11 +904,483 @@ input PublicCreateOrderInput {
 }
 
 # ============================================================================
+# Show & Sell and inventory — Stage 1: Units and Unit Campaigns
+#
+# Foundation SDL for the Show & Sell and inventory program. These types and
+# root fields define the binding surface for the Unit and Unit Campaign domain.
+# Every field here is Cognito-only: the API's Cognito user-pool auth mode
+# defaults to ALLOW and the API-key mode defaults to DENY, so a field with no
+# @aws_ directive is reachable only by an authenticated Cognito caller and never
+# by the public orders API key. No Show & Sell field carries @aws_api_key.
+# Authorization (Unit Admin / Profile access) is enforced in the resolvers, the
+# same resolver-only posture the rest of the schema relies on.
+#
+# Pagination, idempotency, and versioning use the shared contracts in section 3
+# of the Show & Sell GraphQL API spec: every new mutation embeds IdempotencyInput,
+# version-changing operations embed VersionedInput, and every list resolver takes
+# a PageInput and returns a connection of `items` plus `pageInfo`.
+# ============================================================================
+
+"""Pagination parameters for a list resolver: a limit (default 50, max 100) and an opaque cursor."""
+input PageInput {
+  """Maximum number of items to return in the page (1-100). Defaults to 50."""
+  limit: Int = 50
+  """Opaque cursor from a previous page; omit to start from the first page."""
+  cursor: String
+}
+
+"""Server-issued cursor state for one page of a Show & Sell connection."""
+type PageInfo {
+  """Opaque cursor to pass back as `page.cursor` to fetch the next page, or null when no results remain."""
+  endCursor: String
+  """True while more results remain after this page."""
+  hasNextPage: Boolean!
+}
+
+"""Idempotency for a mutation: a client key scoped to the caller, operation, and resource."""
+input IdempotencyInput {
+  """Client-supplied idempotency key (1-128 trimmed characters)."""
+  idempotencyKey: String!
+}
+
+"""Optimistic-concurrency version carried by a version-changing operation."""
+input VersionedInput {
+  """The version the caller last read; a mismatch returns CONFLICT."""
+  expectedVersion: Int!
+}
+
+"""The stored role on a Unit access grant. Only one role exists; 'Unit Kernel' is a display synonym, not a stored value."""
+enum UnitRole {
+  """Full Unit administrator."""
+  UNIT_ADMIN
+}
+
+"""Membership status on a Unit Campaign roster."""
+enum MembershipStatus {
+  """Active roster member; may sign up for events."""
+  ACTIVE
+  """Removed from the roster; blocks new signups, preserves history."""
+  REMOVED
+}
+
+"""How event earnings are split between participants."""
+enum SplitMethod {
+  """Split equally among eligible participants."""
+  EQUAL
+  """Split in proportion to confirmed work minutes."""
+  TIME_WORKED
+}
+
+"""Primary presentation basis for a unit's needs report."""
+enum CouncilNeedBasis {
+  """Present on physical stock held in the kernel."""
+  PHYSICAL_STOCK
+  """Present after applying assignments."""
+  AFTER_ASSIGNMENTS
+}
+
+"""A scout unit: a type/number/city/state identity plus its settings and authoritative admin count."""
+type Unit {
+  """The unit's stable ID; never derived from metadata."""
+  unitId: ID!
+  """The scout unit type, for example Pack or Troop."""
+  unitType: String!
+  """The scout unit number (a display value; not globally unique)."""
+  unitNumber: Int!
+  """Geographic discriminator: the city."""
+  city: String!
+  """Geographic discriminator: the state."""
+  state: String!
+  """Display name; generated from the metadata when the caller omits it."""
+  displayName: String
+  """Normalized unitType#unitNumber#city#state key used for duplicate lookup only; never grants access."""
+  metadataKey: String
+  """Timezone for display and calendar generation."""
+  timezone: String!
+  """Unit-wide default split method for new events."""
+  splitDefault: SplitMethod!
+  """Primary presentation basis for the unit's needs report."""
+  councilNeedBasis: CouncilNeedBasis!
+  """Authoritative count of access grants; always at least 1."""
+  adminCount: Int!
+  """Optimistic-concurrency version protecting grant and settings mutations."""
+  version: Int!
+  """When the unit was created."""
+  createdAt: AWSDateTime!
+  """When the unit was last updated."""
+  updatedAt: AWSDateTime!
+  """The account that created the unit and is its initial Unit Admin."""
+  createdByAccountId: ID!
+}
+
+"""A page of units."""
+type UnitConnection {
+  """The units on this page."""
+  items: [Unit!]!
+  """Cursor state for the next page."""
+  pageInfo: PageInfo!
+}
+
+"""A Unit administrator's access grant to a Unit, with the account's identity limited to what administration needs."""
+type UnitAccessGrant {
+  """The Unit this grant is on."""
+  unitId: ID!
+  """The granted account's ID."""
+  accountId: ID!
+  """The granted account's email, limited to administration needs."""
+  email: String
+  """The granted account's display name, limited to administration needs."""
+  name: String
+  """The stored role; only UNIT_ADMIN exists."""
+  role: UnitRole!
+  """The Unit Admin (or creator) who created the grant."""
+  createdByAccountId: ID!
+  """When the grant started; no automatic expiry."""
+  createdAt: AWSDateTime!
+}
+
+"""A page of unit admin grants."""
+type UnitAccessGrantConnection {
+  """The grants on this page."""
+  items: [UnitAccessGrant!]!
+  """Cursor state for the next page."""
+  pageInfo: PageInfo!
+}
+
+"""A single-use, 14-day credential a Unit Admin generates to add another Unit Admin."""
+type UnitInvite {
+  """The 16-character bearer code; returned only for active, unused invites."""
+  inviteCode: String!
+  """The Unit this invite joins."""
+  unitId: ID!
+  """The Unit Admin who generated the invite."""
+  createdByAccountId: ID!
+  """When the invite was created."""
+  createdAt: AWSDateTime!
+  """When the invite expires (at most 14 days from creation)."""
+  expiresAt: AWSDateTime!
+}
+
+"""A page of unit invites (only active, unused invites are returned)."""
+type UnitInviteConnection {
+  """The invites on this page."""
+  items: [UnitInvite!]!
+  """Cursor state for the next page."""
+  pageInfo: PageInfo!
+}
+
+"""The administrative view of a Unit Campaign, including its reusable join code and settings."""
+type UnitCampaignAdmin {
+  """The Unit Campaign's stable ID."""
+  unitCampaignId: ID!
+  """The parent Unit."""
+  unitId: ID!
+  """The sales-season name."""
+  campaignName: String!
+  """The sales year."""
+  campaignYear: Int!
+  """The existing catalog used by this campaign (immutable after creation)."""
+  catalogId: ID!
+  """The reusable campaign-join credential."""
+  joinCode: String!
+  """Deactivation has no inventory or obligation side effects."""
+  isActive: Boolean!
+  """Optimistic-concurrency version for metadata and deactivation updates."""
+  version: Int!
+  """When the campaign was created."""
+  createdAt: AWSDateTime!
+  """When the campaign was last updated."""
+  updatedAt: AWSDateTime!
+  """The Unit Admin who created the campaign."""
+  createdByAccountId: ID!
+  """The Unit Admin who last updated the campaign."""
+  updatedByAccountId: ID!
+}
+
+"""A page of a Unit's campaigns."""
+type UnitCampaignConnection {
+  """The campaigns on this page."""
+  items: [UnitCampaignAdmin!]!
+  """Cursor state for the next page."""
+  pageInfo: PageInfo!
+}
+
+# participant-safe: the 1.7.5 guard suite derives its participant-type set from
+# this marker; any type a bare join code or READ grant can see must carry it
+# and is then rejected if it exposes an administrative field.
+"""The member-safe preview of a Unit Campaign, exposed to any authenticated account via the join code. Carries no join code, IDs, catalog ID, or settings."""
+type UnitCampaignJoinPreview {
+  """The parent unit's display name."""
+  unitDisplayName: String!
+  """The sales-season name."""
+  campaignName: String!
+  """The sales year."""
+  campaignYear: Int!
+  """The campaign catalog's display name."""
+  catalogName: String!
+  """Whether the campaign is currently active."""
+  isActive: Boolean!
+}
+
+"""The Unit Campaign's catalog and product inputs for browser sales sheets (including events with no sales)."""
+type UnitCampaignCatalog {
+  """The catalog's ID."""
+  catalogId: ID!
+  """The catalog's display name."""
+  catalogName: String!
+  """The catalog's products, in display order."""
+  products: [Product!]!
+}
+
+"""A roster link between a Unit Campaign and a Scout (Campaign/Profile)."""
+type UnitCampaignMembership {
+  """The joined Unit Campaign."""
+  unitCampaignId: ID!
+  """Denormalized tenancy check: the parent Unit."""
+  unitId: ID!
+  """The existing Scout Campaign (immutable)."""
+  campaignId: ID!
+  """The Scout's profile identity."""
+  profileId: ID!
+  """ACTIVE allows new signups; REMOVED blocks them."""
+  status: MembershipStatus!
+  """The account that redeemed the join code."""
+  joinedByAccountId: ID!
+  """When the Scout joined."""
+  joinedAt: AWSDateTime!
+  """The Unit Admin who removed the Scout, or null when not removed."""
+  removedByAccountId: ID
+  """When the Scout was removed, or null when not removed."""
+  removedAt: AWSDateTime
+  """Optimistic-concurrency version for membership mutations and rejoin."""
+  version: Int!
+}
+
+"""A page of a Unit Campaign's roster (includes removed history)."""
+type UnitCampaignMembershipConnection {
+  """The memberships on this page."""
+  items: [UnitCampaignMembership!]!
+  """Cursor state for the next page."""
+  pageInfo: PageInfo!
+}
+
+"""The result of createUnit: the new Unit and the creator's initial admin grant."""
+type CreateUnitPayload {
+  """The newly created Unit."""
+  unit: Unit!
+  """The creator's initial Unit Admin grant."""
+  grant: UnitAccessGrant!
+}
+
+"""Input for createUnit. The caller becomes the initial Unit Admin; an exact metadata match requires duplicateConfirmed."""
+input CreateUnitInput {
+  """The scout unit type, for example Pack or Troop."""
+  unitType: String!
+  """The scout unit number."""
+  unitNumber: Int!
+  """Geographic discriminator: the city."""
+  city: String!
+  """Geographic discriminator: the state."""
+  state: String!
+  """Optional display name; generated from the metadata when omitted."""
+  displayName: String
+  """Timezone for display and calendar generation."""
+  timezone: String!
+  """Unit-wide default split method for new events."""
+  splitDefault: SplitMethod
+  """Primary presentation basis for the unit's needs report."""
+  councilNeedBasis: CouncilNeedBasis
+  """Set true to confirm an exact unitType/unitNumber/city/state duplicate."""
+  duplicateConfirmed: Boolean = false
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for updateUnit. Only metadata/settings fields may change; unitId and adminCount are not editable."""
+input UpdateUnitInput {
+  """The Unit to update."""
+  unitId: ID!
+  """The scout unit type."""
+  unitType: String
+  """The scout unit number."""
+  unitNumber: Int
+  """Geographic discriminator: the city."""
+  city: String
+  """Geographic discriminator: the state."""
+  state: String
+  """Display name."""
+  displayName: String
+  """Timezone for display and calendar generation."""
+  timezone: String
+  """Unit-wide default split method for new events."""
+  splitDefault: SplitMethod
+  """Primary presentation basis for the unit's needs report."""
+  councilNeedBasis: CouncilNeedBasis
+  """Set true to confirm an exact unitType/unitNumber/city/state duplicate."""
+  duplicateConfirmed: Boolean = false
+  """The version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for createUnitInvite. Generates a 16-character, 14-day, single-use invite."""
+input CreateUnitInviteInput {
+  """The Unit to generate an invite for."""
+  unitId: ID!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for revokeUnitInvite. Revokes an unused invite."""
+input RevokeUnitInviteInput {
+  """The Unit the invite belongs to."""
+  unitId: ID!
+  """The invite code to revoke."""
+  inviteCode: String!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for redeemUnitInvite. Redeems a single-use, unexpired invite to grant Unit Admin."""
+input RedeemUnitInviteInput {
+  """The invite code to redeem."""
+  inviteCode: String!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for revokeUnitAccessGrant. Revokes a Unit Admin grant; the last grant returns CONFLICT."""
+input RevokeUnitAccessGrantInput {
+  """The Unit the grant is on."""
+  unitId: ID!
+  """The account whose grant is revoked."""
+  accountId: ID!
+  """The Unit version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for createUnitCampaign. The catalog must exist and be usable by the campaign."""
+input CreateUnitCampaignInput {
+  """The parent Unit."""
+  unitId: ID!
+  """The sales-season name."""
+  campaignName: String!
+  """The sales year."""
+  campaignYear: Int!
+  """The existing catalog used by this campaign."""
+  catalogId: ID!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for updateUnitCampaign. Only name/year/isActive change; catalogId is immutable."""
+input UpdateUnitCampaignInput {
+  """The Unit Campaign to update."""
+  unitCampaignId: ID!
+  """The sales-season name."""
+  campaignName: String
+  """The sales year."""
+  campaignYear: Int
+  """Activate or deactivate the campaign."""
+  isActive: Boolean
+  """The version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for joinUnitCampaign. The caller must have Owner or WRITE on the campaign's Scout."""
+input JoinUnitCampaignInput {
+  """The campaign join code."""
+  joinCode: String!
+  """The caller's Scout Campaign (must match the roster identity)."""
+  campaignId: ID!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for removeUnitCampaignMembership. Sets the roster status to REMOVED; blocks new signups only."""
+input RemoveUnitCampaignMembershipInput {
+  """The Unit Campaign the membership is on."""
+  unitCampaignId: ID!
+  """The Scout Campaign to remove from the roster."""
+  campaignId: ID!
+  """The membership version the caller last read (optimistic concurrency)."""
+  expectedMembershipVersion: Int!
+  """The ScoutCampaignMembershipGuard version the caller last read (optimistic concurrency)."""
+  expectedGuardVersion: Int!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+# ============================================================================
 # Query Root
 # ============================================================================
 
 """The root query object for the KernelWorx API."""
 type Query {
+  # Show & Sell — Units and Unit Campaigns (Stage 1)
+  """The Units on which the caller holds a Unit Admin grant. No cross-Unit data."""
+  myUnits(
+    """Pagination parameters."""
+    page: PageInput
+  ): UnitConnection!
+  """The unit's settings and admin count. Unit Admin for that Unit."""
+  unit(
+    """The Unit ID."""
+    unitId: ID!
+  ): Unit
+  """The unit's admin grants; account email/name limited to administration needs. Unit Admin."""
+  unitAdmins(
+    """The Unit ID."""
+    unitId: ID!
+    """Pagination parameters."""
+    page: PageInput
+  ): UnitAccessGrantConnection!
+  """The unit's active, unused invites; the code is returned only for them. Unit Admin."""
+  unitInvites(
+    """The Unit ID."""
+    unitId: ID!
+    """Pagination parameters."""
+    page: PageInput
+  ): UnitInviteConnection!
+  """The member-safe preview of a campaign from its join code; any authenticated account. No inventory, roster, or grant data."""
+  unitCampaignJoinInfo(
+    """The campaign join code."""
+    joinCode: String!
+  ): UnitCampaignJoinPreview
+  """The campaign's join code and settings. Unit Admin for the parent Unit."""
+  unitCampaign(
+    """The Unit Campaign ID."""
+    unitCampaignId: ID!
+  ): UnitCampaignAdmin
+  """The campaign's catalog and product inputs for browser sales sheets. Unit Admin for the parent Unit."""
+  unitCampaignCatalog(
+    """The Unit Campaign ID."""
+    unitCampaignId: ID!
+  ): UnitCampaignCatalog
+  """A Unit's campaigns. Unit Admin for the parent Unit."""
+  unitCampaigns(
+    """The parent Unit ID."""
+    unitId: ID!
+    """Filter by active state."""
+    isActive: Boolean
+    """Pagination parameters."""
+    page: PageInput
+  ): UnitCampaignConnection!
+  """A Unit Campaign's roster, including removed history. Unit Admin for the parent Unit."""
+  unitCampaignRoster(
+    """The Unit Campaign ID."""
+    unitCampaignId: ID!
+    """Filter by roster status."""
+    status: MembershipStatus
+    """Pagination parameters."""
+    page: PageInput
+  ): UnitCampaignMembershipConnection!
+
   # Account queries
   """The authenticated caller's account. The row is created automatically on first read if it does not yet exist."""
   getMyAccount: Account!
@@ -1098,6 +1578,58 @@ type Query {
 
 """The root mutation object for the KernelWorx API."""
 type Mutation {
+  # Show & Sell — Units and Unit Campaigns (Stage 1)
+  """Create a unit; the caller becomes its initial Unit Admin. Returns the Unit and the creator grant."""
+  createUnit(
+    """The unit to create."""
+    input: CreateUnitInput!
+  ): CreateUnitPayload!
+  """Update a unit's metadata and settings. Unit Admin for that Unit."""
+  updateUnit(
+    """The unit update."""
+    input: UpdateUnitInput!
+  ): Unit!
+  """Generate a 16-character, 14-day, single-use unit admin invite. Unit Admin for that Unit."""
+  createUnitInvite(
+    """The invite to create."""
+    input: CreateUnitInviteInput!
+  ): UnitInvite!
+  """Revoke an unused unit invite. Unit Admin for that Unit."""
+  revokeUnitInvite(
+    """The invite to revoke."""
+    input: RevokeUnitInviteInput!
+  ): Boolean!
+  """Redeem a single-use, unexpired invite to become a Unit Admin. Any authenticated account."""
+  redeemUnitInvite(
+    """The invite to redeem."""
+    input: RedeemUnitInviteInput!
+  ): UnitAccessGrant!
+  """Revoke a Unit Admin grant; the last grant returns CONFLICT. Unit Admin for that Unit."""
+  revokeUnitAccessGrant(
+    """The grant to revoke."""
+    input: RevokeUnitAccessGrantInput!
+  ): Unit!
+  """Create a Unit Campaign. Unit Admin for the parent Unit."""
+  createUnitCampaign(
+    """The campaign to create."""
+    input: CreateUnitCampaignInput!
+  ): UnitCampaignAdmin!
+  """Update a Unit Campaign's name, year, and active state. Unit Admin for the parent Unit."""
+  updateUnitCampaign(
+    """The campaign update."""
+    input: UpdateUnitCampaignInput!
+  ): UnitCampaignAdmin!
+  """Join a Unit Campaign with a join code. Any authenticated account with Owner or WRITE on the Scout."""
+  joinUnitCampaign(
+    """The join request."""
+    input: JoinUnitCampaignInput!
+  ): UnitCampaignMembership!
+  """Remove a Scout from a Unit Campaign roster (sets REMOVED). Unit Admin for the parent Unit."""
+  removeUnitCampaignMembership(
+    """The removal request."""
+    input: RemoveUnitCampaignMembershipInput!
+  ): UnitCampaignMembership!
+
   # Account mutations
   """Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account."""
   updateMyAccount(
