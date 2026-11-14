@@ -12,6 +12,9 @@ dependencies = [
     "aioboto3>=14.3.0",
     "boto3>=1.35.0",
     "openpyxl>=3.1.0",
+    # IANA timezone validation (src/utils/unit_models.normalize_timezone) must not depend on
+    # the base image carrying a tz database: the Lambda layer ships the data explicitly.
+    "tzdata>=2024.1",
 ]
 
 [dependency-groups]

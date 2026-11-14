@@ -192,6 +192,7 @@ htmlcov
 htmlFor
 httpOnly
 hyperlegible
+IANA
 iconButton
 iconify
 idempotently
@@ -463,6 +464,7 @@ tolower
 totp
 TQOJQ
 TQOJQGEZDGNBVGY
+tzdata
 transferOwnership
 transpiled
 treeshake
@@ -571,3 +573,4 @@ VCALENDAR
 VEVENT
 waitlist
 xdist
+zoneinfo
