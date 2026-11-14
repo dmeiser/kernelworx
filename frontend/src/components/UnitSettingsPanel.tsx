@@ -19,7 +19,7 @@ import { ErrorNote } from './ErrorAlert';
 import { UPDATE_UNIT } from '../lib/graphql';
 import { UnitFormFields } from './UnitFormFields';
 import { changedUnitFields, unitFormErrors, unitFormFromUnit, type UnitFormValues } from '../lib/unitForm';
-import { isDuplicateUnitError, isStaleVersionError, newIdempotencyKey } from '../lib/units';
+import { isDuplicateUnitError, isStaleVersionError, newIdempotencyKey, refreshQuery } from '../lib/units';
 import type { GqlUnit } from '../types/graphql-generated';
 
 interface UnitSettingsPanelProps {
@@ -71,13 +71,13 @@ export const UnitSettingsPanel: React.FC<UnitSettingsPanelProps> = ({ unit, onSa
       setPendingSave(null);
       setSavedMessage('Settings saved.');
       setIntentKey(newIdempotencyKey());
-      await onSaved();
+      await refreshQuery(onSaved);
     } catch (mutationError) {
       const failure = classifySaveFailure(mutationError);
       if (failure.kind === 'duplicate') setPendingSave({ idempotencyKey: newIdempotencyKey(), duplicateConfirmed: true });
       if (failure.kind === 'stale') {
         setStale(true);
-        await onSaved();
+        await refreshQuery(onSaved);
       }
       if (failure.message) setError(failure.message);
     }

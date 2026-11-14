@@ -30,13 +30,7 @@ import { LoadingState } from '../components/LoadingState';
 import { PageHeader } from '../components/PageHeader';
 import { UnitFormFields } from '../components/UnitFormFields';
 import { createUnitInput, emptyUnitForm, unitFormErrors, type UnitFormValues } from '../lib/unitForm';
-import {
-  isDuplicateUnitError,
-  newIdempotencyKey,
-  SHOW_SELL_BASE,
-  UNIT_PAGE_SIZE,
-  unitDisplayName,
-} from '../lib/units';
+import { SHOW_SELL_BASE, UNIT_PAGE_SIZE, isDuplicateUnitError, newIdempotencyKey, refreshQuery, unitDisplayName } from '../lib/units';
 import type { GqlMyUnitsQuery, GqlUnit } from '../types/graphql-generated';
 
 export const UnitsPage: React.FC = () => {
@@ -149,7 +143,7 @@ const RedeemInviteCard: React.FC<{ onRedeemed: () => Promise<unknown> }> = ({ on
       });
       setCode('');
       setMessage('Invite redeemed. The Unit now appears in your list.');
-      await onRedeemed();
+      await refreshQuery(onRedeemed);
     } catch (redeemFailure) {
       setError((redeemFailure as Error).message || 'That invite code could not be redeemed.');
     }
@@ -214,7 +208,7 @@ const CreateUnitDialog: React.FC<{ onClose: () => void; onCreated: () => Promise
     try {
       await createUnit({ variables: { input: createUnitInput(formValues, idempotencyKey, duplicateConfirmed) } });
       setPendingConfirm(null);
-      await onCreated();
+      await refreshQuery(onCreated);
       onClose();
     } catch (mutationError) {
       if (isDuplicateUnitError(mutationError)) {

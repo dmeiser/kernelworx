@@ -188,7 +188,9 @@ describe('UnitAccessPanel', () => {
         },
         error: new GraphQLError('This Unit already has 20 invites waiting.', { extensions: { code: 'CONFLICT' } }),
       },
-      invitesQuery([]),
+      // Delayed on purpose: the panel refreshes the invite list after a refused
+      // write, and that refresh is still in flight when the panel is torn down.
+      { ...invitesQuery([]), delay: 250 },
     ];
     renderPanel(mocks);
     const user = userEvent.setup();

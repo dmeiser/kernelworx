@@ -45,7 +45,7 @@ import { LoadingState } from './LoadingState';
 import { QueryGate } from './QueryGate';
 import { useCatalogsData } from '../hooks/useCatalogsData';
 import { CREATE_UNIT_CAMPAIGN, LIST_UNIT_CAMPAIGNS, UPDATE_UNIT_CAMPAIGN } from '../lib/graphql';
-import { newIdempotencyKey, SHOW_SELL_BASE, UNIT_PAGE_SIZE, unitCampaignStatusLabel } from '../lib/units';
+import { SHOW_SELL_BASE, UNIT_PAGE_SIZE, newIdempotencyKey, refreshQuery, unitCampaignStatusLabel } from '../lib/units';
 import type { GqlListUnitCampaignsQuery, GqlUnit, GqlUnitCampaignAdmin } from '../types/graphql-generated';
 
 type ActiveFilter = 'all' | 'active' | 'closed';
@@ -93,7 +93,7 @@ export const UnitCampaignsPanel: React.FC<UnitCampaignsPanelProps> = ({ unit }) 
   const handleCreated = useCallback(
     (campaign: GqlUnitCampaignAdmin) => {
       setCreatedCampaign(campaign);
-      void refetchCampaigns();
+      void refreshQuery(refetchCampaigns);
     },
     [refetchCampaigns],
   );
@@ -134,7 +134,7 @@ export const UnitCampaignsPanel: React.FC<UnitCampaignsPanelProps> = ({ unit }) 
           onConfirm={async (pending) => {
             setPendingToggle(null);
             setActionError(await applyToggle(pending));
-            await campaigns.refetch();
+            await refreshQuery(campaigns.refetch);
           }}
         />
       </Box>

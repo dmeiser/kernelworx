@@ -142,3 +142,17 @@ export const UNIT_TIMEZONES: readonly string[] = [
   'UTC',
 ];
 
+/**
+ * A write is followed by a read refresh so the screen shows what changed. Apollo
+ * rejects that refresh when the screen tears down mid-flight, and the caller after
+ * a write has nothing left to do with the rejection; a failed read surfaces through
+ * the query's own error state instead. A refresh callback may also be a plain
+ * notification, so its return is not assumed to be a promise.
+ */
+export async function refreshQuery(refresh: () => unknown): Promise<void> {
+  try {
+    await refresh();
+  } catch {
+    // Swallowed by design: see above.
+  }
+}

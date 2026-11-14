@@ -43,7 +43,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { ErrorAlert } from './ErrorAlert';
 import { LoadingState } from './LoadingState';
 import { QueryGate } from './QueryGate';
-import { bareAccountId, isStaleVersionError, newIdempotencyKey, UNIT_PAGE_SIZE } from '../lib/units';
+import { UNIT_PAGE_SIZE, bareAccountId, isStaleVersionError, newIdempotencyKey, refreshQuery } from '../lib/units';
 import type {
   GqlListUnitAdminsQuery,
   GqlListUnitInvitesQuery,
@@ -188,7 +188,7 @@ function useAccessMutations(args: AccessMutationArgs) {
     } catch (mutationError) {
       args.setInviteError((mutationError as Error).message || 'Could not create an invite.');
     }
-    await args.invites.refetch();
+    await refreshQuery(args.invites.refetch);
   }, [args, createInvite]);
 
   const handleRevokeInvite = useCallback(async () => {
@@ -202,7 +202,7 @@ function useAccessMutations(args: AccessMutationArgs) {
     } catch (mutationError) {
       args.setActionError((mutationError as Error).message || 'That invite could not be revoked.');
     }
-    await args.invites.refetch();
+    await refreshQuery(args.invites.refetch);
   }, [args, revokeInvite]);
 
   const handleRevokeGrant = useCallback(async () => {
@@ -223,7 +223,7 @@ function useAccessMutations(args: AccessMutationArgs) {
     } catch (mutationError) {
       args.setActionError(describeGrantFailure(mutationError));
     }
-    await Promise.all([args.admins.refetch(), args.invites.refetch(), args.onUnitChanged()]);
+    await Promise.all([refreshQuery(args.admins.refetch), refreshQuery(args.invites.refetch), refreshQuery(args.onUnitChanged)]);
   }, [args, revokeGrant]);
 
   return { handleCreateInvite, handleRevokeInvite, handleRevokeGrant, creatingInvite };

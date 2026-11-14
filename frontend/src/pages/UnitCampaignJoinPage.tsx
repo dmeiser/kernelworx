@@ -20,7 +20,7 @@ import { GET_UNIT_CAMPAIGN_JOIN_INFO, JOIN_UNIT_CAMPAIGN, LIST_MY_PROFILES } fro
 import { JoinProfilePicker } from '../components/JoinProfilePicker';
 import { ErrorAlert, ErrorNote } from '../components/ErrorAlert';
 import { PageHeader } from '../components/PageHeader';
-import { newIdempotencyKey } from '../lib/units';
+import { newIdempotencyKey, refreshQuery } from '../lib/units';
 import type { GqlGetUnitCampaignJoinInfoQuery, GqlListMyProfilesQuery } from '../types/graphql-generated';
 
 interface JoinedNotice {
@@ -196,7 +196,7 @@ const JoinProfileCard: React.FC<{
         variables: { input: { joinCode, campaignId, idempotency: { idempotencyKey } } },
       });
       onJoined({ campaignName: preview.campaignName, status: readMembershipStatus(result) });
-      await onProfileUsed();
+      await refreshQuery(onProfileUsed);
     } catch (mutationError) {
       setError((mutationError as Error).message || 'You could not join this campaign.');
     }

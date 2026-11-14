@@ -12,6 +12,7 @@ import {
   isDuplicateUnitError,
   isStaleVersionError,
   newIdempotencyKey,
+  refreshQuery,
   unitCampaignStatusLabel,
   unitDisplayName,
 } from '../src/lib/units';
@@ -87,5 +88,16 @@ describe('naming', () => {
     expect(isDuplicateUnitError(undefined)).toBe(false);
     expect(isStaleVersionError(null)).toBe(false);
     expect(isDuplicateUnitError({})).toBe(false);
+  });
+
+
+  it('settles a background refresh so a torn-down screen cannot reject unhandled', async () => {
+    await expect(refreshQuery(() => Promise.reject(new Error('The operation was aborted.')))).resolves.toBeUndefined();
+
+    let refreshed = false;
+    await refreshQuery(async () => {
+      refreshed = true;
+    });
+    expect(refreshed).toBe(true);
   });
 });

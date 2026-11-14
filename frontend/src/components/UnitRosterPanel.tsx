@@ -34,7 +34,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { ErrorAlert, ErrorNote } from './ErrorAlert';
 import { LoadingState } from './LoadingState';
 import { QueryGate } from './QueryGate';
-import { newIdempotencyKey, UNIT_PAGE_SIZE } from '../lib/units';
+import { UNIT_PAGE_SIZE, newIdempotencyKey, refreshQuery } from '../lib/units';
 import type {
   GqlListUnitCampaignRosterQuery,
   GqlMembershipStatus,
@@ -100,7 +100,7 @@ export const UnitRosterPanel: React.FC<UnitRosterPanelProps> = ({ unitCampaignId
     } catch (mutationError) {
       setActionError((mutationError as Error).message || 'That Scout could not be removed.');
     }
-    await roster.refetch();
+    await refreshQuery(roster.refetch);
   };
 
   return (

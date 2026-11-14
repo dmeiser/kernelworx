@@ -37,7 +37,7 @@ import { LoadingState } from '../components/LoadingState';
 import { PageHeader } from '../components/PageHeader';
 import { QueryGate } from '../components/QueryGate';
 import { UnitRosterPanel } from '../components/UnitRosterPanel';
-import { newIdempotencyKey, SHOW_SELL_BASE, unitCampaignStatusLabel } from '../lib/units';
+import { SHOW_SELL_BASE, newIdempotencyKey, refreshQuery, unitCampaignStatusLabel } from '../lib/units';
 import type {
   GqlGetUnitCampaignCatalogQuery,
   GqlGetUnitCampaignQuery,
@@ -197,7 +197,7 @@ const CampaignSettingsCard: React.FC<{ campaign: Campaign; onSaved: () => Promis
     } catch (mutationError) {
       setError(describeUpdateFailure(mutationError, 'Could not save the campaign settings.'));
     }
-    await onSaved();
+    await refreshQuery(onSaved);
   };
 
   const applyToggle = async (toggle: PendingToggle) => {
@@ -216,7 +216,7 @@ const CampaignSettingsCard: React.FC<{ campaign: Campaign; onSaved: () => Promis
     } catch (mutationError) {
       setError(describeUpdateFailure(mutationError, 'Could not change this campaign.'));
     }
-    await onSaved();
+    await refreshQuery(onSaved);
   };
 
   return (

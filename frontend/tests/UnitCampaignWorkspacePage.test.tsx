@@ -266,7 +266,9 @@ describe('UnitCampaignWorkspacePage', () => {
         },
         error: new Error(''),
       },
-      campaignMock(),
+      // Delayed on purpose: a refused save still refreshes the campaign, and that
+      // refresh is in flight when the screen tears down.
+      { ...campaignMock(), delay: 250 },
     ];
     renderWorkspace(mocks);
     const user = userEvent.setup();
