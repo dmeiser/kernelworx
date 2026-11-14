@@ -4,7 +4,7 @@
 **Last updated:** 2026-10-30  
 **Rule:** Do not mark a stage complete until its implementation, tests, cleanup, and validation evidence are complete.
 
-**Evidence-source rule:** Evidence must come from an environment this repository can actually produce; a requirement on a retired path (such as the former per-PR ephemeral stack, retired by WORK-76) is a defect in the checklist, not a blocker on the wave.
+**Evidence-source rule:** Evidence must come from an environment this repository can actually produce; a requirement on a retired path (such as the former per-PR ephemeral stack, retired by WORK-76) is a defect in the checklist, not a blocker on the wave. The retired path was found as a blocker on WORK-78.
 
 **Leaf-item standard:** Every leaf is one bounded subagent work order: a named deliverable, its contract, and its acceptance evidence. Parent items are coordination structure, not work orders. Leaves in one stage may run in parallel only when they do not edit the same GraphQL SDL block, infrastructure block, frontend route, fixture module, or aggregate write path. Unit grants, inventory balances, event aggregates, and finalization writes each require a single named write owner. Existing-file integration work is mapped in `docs/SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md`.
 
