@@ -42,10 +42,10 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, 
 from botocore.exceptions import ClientError
 
 try:  # pragma: no cover
-    from utils import unit_auth, unit_models
+    from utils import unit_auth, unit_campaign_models, unit_models
     from utils.import_fallback import import_from_utils
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils import unit_auth, unit_models
+    from ..utils import unit_auth, unit_campaign_models, unit_models
     from ..utils.import_fallback import import_from_utils
 
 
@@ -55,6 +55,7 @@ tables = import_from_utils("dynamodb", "tables")
 batch_get_chunked = import_from_utils("dynamodb", "batch_get_chunked")
 get_dynamodb_client = import_from_utils("dynamodb", "get_dynamodb_client")
 ensure_account_id = import_from_utils("ids", "ensure_account_id")
+require_profile_access = import_from_utils("auth", "require_profile_access")
 paginate_page = import_from_utils("pagination", "paginate_page")
 get_logger = import_from_utils("logging", "get_logger")
 (
@@ -96,6 +97,15 @@ UNIT_INVITES_FIELD = "unitInvites"
 MY_UNITS_FIELD = "myUnits"
 UNIT_FIELD = "unit"
 UNIT_ADMINS_FIELD = "unitAdmins"
+CREATE_UNIT_CAMPAIGN_FIELD = "createUnitCampaign"
+UPDATE_UNIT_CAMPAIGN_FIELD = "updateUnitCampaign"
+JOIN_PREVIEW_FIELD = "unitCampaignJoinInfo"
+JOIN_UNIT_CAMPAIGN_FIELD = "joinUnitCampaign"
+REMOVE_MEMBERSHIP_FIELD = "removeUnitCampaignMembership"
+UNIT_CAMPAIGN_FIELD = "unitCampaign"
+UNIT_CAMPAIGNS_FIELD = "unitCampaigns"
+UNIT_CAMPAIGN_CATALOG_FIELD = "unitCampaignCatalog"
+UNIT_CAMPAIGN_ROSTER_FIELD = "unitCampaignRoster"
 
 MAX_ACTIVE_UNIT_INVITES = 20
 INVITE_FAILURES_PER_HOUR = 10
@@ -991,6 +1001,714 @@ def _list_admins(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     return dict(paginate_page(items, f"{UNIT_ADMINS_FIELD}#{unit_id}", _page_argument(event)))
 
 
+# --- Unit Campaign mutations and roster queries (§1.5) ---------------------------
+
+
+def campaign_payload(campaign: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project a Unit Campaign item onto ``UnitCampaignAdmin``.
+
+    The join code is included because this is the admin projection: the
+    member-safe path is ``unitCampaignJoinInfo``, which carries no code, no IDs,
+    and no settings (API contract §3.2 participant allowlist).
+    """
+    return {
+        "unitCampaignId": campaign["unitCampaignId"],
+        "unitId": campaign["unitId"],
+        "campaignName": campaign["campaignName"],
+        "campaignYear": _number(campaign["campaignYear"]),
+        "catalogId": campaign["catalogId"],
+        "joinCode": campaign["joinCode"],
+        "isActive": bool(campaign["isActive"]),
+        "version": _number(campaign["version"]),
+        "createdAt": campaign["createdAt"],
+        "updatedAt": campaign["updatedAt"],
+        "createdByAccountId": campaign["createdByAccountId"],
+        "updatedByAccountId": campaign["updatedByAccountId"],
+    }
+
+
+def membership_payload(membership: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project a membership item onto ``UnitCampaignMembership``.
+
+    Removal audit is returned as null rather than omitted: a REMOVED roster entry
+    is history the admin is entitled to see, and who removed it and when is why
+    the record was never deleted (§5.6).
+    """
+    return {
+        "unitCampaignId": membership["unitCampaignId"],
+        "unitId": membership["unitId"],
+        "campaignId": membership["campaignId"],
+        "profileId": membership["profileId"],
+        "status": membership["status"],
+        "joinedByAccountId": membership["joinedByAccountId"],
+        "joinedAt": membership["joinedAt"],
+        "removedByAccountId": membership.get("removedByAccountId"),
+        "removedAt": membership.get("removedAt"),
+        "version": _number(membership["version"]),
+    }
+
+
+def _campaign_marker(*, caller_id: str, operation: str, scope: str, idempotency_key: str) -> Any:
+    """Resolve this request's marker address on the unit_campaigns table.
+
+    Campaign-domain markers live on the campaign aggregate table rather than the
+    Units table so a Unit-scoped audit or cleanup sweep sees them (§8.9).
+    """
+    return marker_keys(
+        table_key="unit_campaigns",
+        table_name=tables.unit_campaigns.table_name,
+        actor_id=caller_id,
+        operation=operation,
+        scope=scope,
+        idempotency_key=idempotency_key,
+    )
+
+
+def _positive_int(payload: Mapping[str, Any], field: str) -> int:
+    """Read a required version field at the top level of the input."""
+    value = payload.get(field)
+    if value is None:
+        raise AppError(ErrorCode.INVALID_INPUT, f"{field} is required")
+    if isinstance(value, bool) or not isinstance(value, (int, str, Decimal)):
+        raise AppError(ErrorCode.INVALID_INPUT, f"{field} must be an integer")
+    try:
+        number = int(value)
+    except ValueError, ArithmeticError:
+        raise AppError(ErrorCode.INVALID_INPUT, f"{field} must be an integer") from None
+    if number < 1:
+        raise AppError(ErrorCode.INVALID_INPUT, f"{field} must be a positive integer")
+    return number
+
+
+def _campaign_admin_guard(event: Dict[str, Any], caller_id: str, name: str) -> Dict[str, Any]:
+    """Load the addressed Unit Campaign and require admin of its Unit.
+
+    Tenancy comes from the campaign's own ``unitId``, never from a unit id the
+    caller supplies: a campaign id is not an access path, and this is the single
+    place the four campaign-scoped reads derive tenancy from (§1.5.6, AUTH-U).
+    """
+    unit_campaign_id = _query_argument(event, name)
+    campaign: Dict[str, Any] = dict(unit_campaign_models.load_unit_campaign_or_not_found(unit_campaign_id))
+    unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
+    return campaign
+
+
+# --- createUnitCampaign (§1.5.1) -------------------------------------------------
+
+# A generated code that collides is re-generated rather than rejected: the
+# collision is a 1-in-36^16 event, and a create the user must re-type is a worse
+# outcome than one more read. The ceiling keeps a storage fault from turning the
+# loop into a stall.
+_JOIN_CODE_ATTEMPTS = 3
+
+
+def _fresh_join_code() -> str:
+    """A join code no pointer claims (§5.5 uniqueness as a read)."""
+    for _ in range(_JOIN_CODE_ATTEMPTS):
+        code = str(unit_campaign_models.new_join_code())
+        if not unit_campaign_models.join_code_taken(code):
+            return code
+    raise AppError(ErrorCode.CONFLICT, "Could not allocate a unique join code. Retry the create.")
+
+
+def _require_usable_catalog(catalog_id: str) -> None:
+    """Require the referenced catalog to exist and be selectable by a new campaign."""
+    catalog = unit_campaign_models.read_catalog(catalog_id)
+    if catalog is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Catalog not found")
+    if not unit_campaign_models.catalog_is_usable(catalog):
+        raise AppError(ErrorCode.INVALID_INPUT, "That catalog is deleted and cannot be used by a new Unit Campaign.")
+
+
+def _created_campaign_payload(unit_campaign_id: str) -> Dict[str, Any]:
+    """Reload a campaign this handler just wrote, for the result and for replay."""
+    campaign = unit_campaign_models.read_unit_campaign(unit_campaign_id)
+    if campaign is None:
+        raise AppError(ErrorCode.INTERNAL_ERROR, "created Unit Campaign could not be loaded")
+    return campaign_payload(campaign)
+
+
+def _create_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Create a Unit Campaign and its join-code pointer in one transaction.
+
+    The join code is generated server-side and never derived from the campaign's
+    name or year, so renaming a campaign cannot orphan the code its Scouts hold.
+    The parent Unit's id is the marker's resource scope — unlike ``createUnit``,
+    whose Unit does not exist yet and therefore bootstraps (§8.9).
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    unit_id = _resource_id(payload, "unitId")
+    catalog_id = _resource_id(payload, "catalogId")
+    runner = IdempotentMutationRunner()
+
+    keys = _campaign_marker(
+        caller_id=caller_id, operation=CREATE_UNIT_CAMPAIGN_FIELD, scope=unit_id, idempotency_key=key
+    )
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        CREATE_UNIT_CAMPAIGN_FIELD,
+        lambda stored: _created_campaign_payload(str(stored)),
+    )
+    if replayed is not None:
+        return replayed
+
+    unit_auth.require_unit_admin(caller_id, unit_id)
+    _require_usable_catalog(catalog_id)
+
+    unit_campaign_id = str(unit_campaign_models.new_unit_campaign_id())
+    now_iso = utc_now_iso()
+    campaign = unit_campaign_models.build_unit_campaign_item(
+        unit_campaign_id=unit_campaign_id,
+        unit_id=unit_id,
+        campaign_name=payload.get("campaignName"),
+        campaign_year=payload.get("campaignYear"),
+        catalog_id=catalog_id,
+        join_code=_fresh_join_code(),
+        created_by_account_id=caller_id,
+        now_iso=now_iso,
+    )
+    pointer = unit_campaign_models.build_join_code_pointer_item(
+        join_code=campaign["joinCode"], unit_campaign_id=unit_campaign_id, now_iso=now_iso
+    )
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=unit_campaign_id)
+    for action, body in unit_campaign_models.create_campaign_actions(campaign, pointer):
+        plan.add(action, body)
+    runner.execute(
+        keys,
+        plan,
+        operation=CREATE_UNIT_CAMPAIGN_FIELD,
+        fingerprint=fingerprint,
+        result_id=unit_campaign_id,
+        load_result=lambda stored: _created_campaign_payload(str(stored)),
+    )
+    log.info(
+        "Unit Campaign created",
+        unit_campaign_id=unit_campaign_id,
+        unit_id=unit_id,
+        caller_id=caller_id,
+        catalog_id=catalog_id,
+    )
+    return _created_campaign_payload(unit_campaign_id)
+
+
+# --- updateUnitCampaign (§1.5.2) -------------------------------------------------
+
+# The keys a campaign update legitimately carries that are also immutable storage
+# fields: the locator and the concurrency token. Everything else named in
+# ``IMMUTABLE_CAMPAIGN_FIELDS`` arriving in the input is a refused write.
+_CAMPAIGN_UPDATE_PASSTHROUGH: frozenset[str] = frozenset({"unitCampaignId", "version", "idempotency"})
+
+
+def _campaign_changes(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Only name, year, and isActive are writable; immutability is refused, not ignored.
+
+    ``catalogId`` is what inventory, Order origin, and event product identity key
+    on, so a metadata update that relocated it would move a campaign's whole
+    product identity implicitly. A caller who wants a different catalog gets a
+    new Unit Campaign (CAMP-M-02-02).
+    """
+    smuggled = {
+        field: payload[field]
+        for field in payload
+        if field in unit_campaign_models.IMMUTABLE_CAMPAIGN_FIELDS and field not in _CAMPAIGN_UPDATE_PASSTHROUGH
+    }
+    unit_campaign_models.reject_immutable_campaign_changes(smuggled)
+
+    changes: Dict[str, Any] = {}
+    if "campaignName" in payload:
+        changes["campaignName"] = unit_models.normalize_required_text(payload["campaignName"], "campaignName")
+    if "campaignYear" in payload:
+        changes["campaignYear"] = unit_campaign_models.normalize_campaign_year(payload["campaignYear"])
+    if "isActive" in payload:
+        if not isinstance(payload["isActive"], bool):
+            raise AppError(ErrorCode.INVALID_INPUT, "isActive must be a boolean")
+        changes["isActive"] = payload["isActive"]
+    if not changes:
+        raise AppError(ErrorCode.INVALID_INPUT, "At least one Unit Campaign field must change")
+    return changes
+
+
+def _versioned_campaign_update(
+    unit_campaign_id: str, changes: Mapping[str, Any], *, expected_version: int, caller_id: str
+) -> Dict[str, Any]:
+    """The conditional campaign update: one version guard over every written field.
+
+    Deactivation writes this row and nothing else — no inventory adjustment, no
+    obligation change, no balance rewrite (CAMP-M-02-01). Active state is a
+    predicate the join and listing paths read, not a counter to unwind.
+    """
+    names: Dict[str, str] = {"#version": "version", "#updatedAt": "updatedAt", "#updatedBy": "updatedByAccountId"}
+    values: Dict[str, Any] = {
+        ":expectedVersion": wire_value(expected_version),
+        ":one": wire_value(1),
+        ":updatedAt": wire_value(utc_now_iso()),
+        ":updatedBy": wire_value(caller_id),
+    }
+    sets: List[str] = ["#version = #version + :one", "#updatedAt = :updatedAt", "#updatedBy = :updatedBy"]
+    for field, value in changes.items():
+        names[f"#{field}"] = field
+        values[f":{field}"] = wire_value(value)
+        sets.append(f"#{field} = :{field}")
+    return {
+        "TableName": tables.unit_campaigns.table_name,
+        "Key": wire_key(unit_campaign_models.unit_campaign_metadata_key(unit_campaign_id)),
+        "UpdateExpression": "SET " + ", ".join(sets),
+        "ExpressionAttributeNames": names,
+        "ExpressionAttributeValues": values,
+        "ConditionExpression": "#version = :expectedVersion",
+        "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+    }
+
+
+def _update_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Rename, re-year, or deactivate a Unit Campaign under ``expectedVersion``.
+
+    Tenancy is read off the stored campaign rather than the request, so an admin
+    of one Unit cannot write another Unit's campaign by guessing its id. The
+    replay check precedes the version guard for the usual reason: a completed
+    retry must not collide with the version its own first attempt wrote.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    unit_campaign_id = _resource_id(payload, "unitCampaignId")
+    expected_version = _expected_version(payload)
+    runner = IdempotentMutationRunner()
+
+    keys = _campaign_marker(
+        caller_id=caller_id, operation=UPDATE_UNIT_CAMPAIGN_FIELD, scope=unit_campaign_id, idempotency_key=key
+    )
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        UPDATE_UNIT_CAMPAIGN_FIELD,
+        lambda stored: _created_campaign_payload(str(stored)),
+    )
+    if replayed is not None:
+        return replayed
+
+    campaign = unit_campaign_models.load_unit_campaign_or_not_found(unit_campaign_id)
+    unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
+    changes = _campaign_changes(payload)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=unit_campaign_id)
+    plan.add(
+        "Update",
+        _versioned_campaign_update(unit_campaign_id, changes, expected_version=expected_version, caller_id=caller_id),
+    )
+    runner.execute(
+        keys,
+        plan,
+        operation=UPDATE_UNIT_CAMPAIGN_FIELD,
+        fingerprint=fingerprint,
+        result_id=unit_campaign_id,
+        load_result=lambda stored: _created_campaign_payload(str(stored)),
+    )
+    refreshed = _created_campaign_payload(unit_campaign_id)
+    log.info(
+        "Unit Campaign updated",
+        unit_campaign_id=unit_campaign_id,
+        caller_id=caller_id,
+        version=refreshed["version"],
+        changed=sorted(changes),
+    )
+    return refreshed
+
+
+# --- unitCampaignJoinInfo (§1.5.3) -----------------------------------------------
+
+_JOIN_CODE_UNUSABLE = "Join code not found or no longer active"
+
+
+def _display_name(unit: Mapping[str, Any]) -> str:
+    """The Unit name a Scout sees before joining.
+
+    ``displayName`` is optional storage, so the metadata a Unit is always
+    required to carry forms the fallback: the preview field is non-null, and a
+    Unit with no chosen name still has a truthful one.
+    """
+    stored = unit.get("displayName")
+    if stored:
+        return str(stored)
+    return f"{unit['unitType']} {unit['unitNumber']} ({unit['city']}, {unit['state']})"
+
+
+def _join_preview_payload(unit_campaign: Mapping[str, Any]) -> Dict[str, Any]:
+    """Build the member-safe preview, and nothing else, from a resolved campaign.
+
+    The five fields below are the whole allowlist §3.2 gives a bare join code: no
+    join code, no campaign or unit ids, no catalog id, no settings, no roster, no
+    counts. A later field added here is a disclosure, which is why the projection
+    is written out rather than filtered from the item.
+    """
+    unit = unit_models.read_unit(str(unit_campaign["unitId"]))
+    catalog = unit_campaign_models.read_catalog(str(unit_campaign["catalogId"]))
+    if unit is None or catalog is None:
+        # A pointer to a campaign whose Unit or catalog is gone is unusable, and
+        # the only honest answer is the one an unknown code already gets.
+        raise AppError(ErrorCode.NOT_FOUND, _JOIN_CODE_UNUSABLE)
+    return {
+        "unitDisplayName": _display_name(unit),
+        "campaignName": unit_campaign["campaignName"],
+        "campaignYear": _number(unit_campaign["campaignYear"]),
+        "catalogName": str(catalog["catalogName"]),
+        "isActive": bool(unit_campaign["isActive"]),
+    }
+
+
+def _join_info(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Resolve a join code for any authenticated Account (§1.5.3).
+
+    Two consistent reads — pointer, then the campaign it names — so a code that
+    was just revoked or a campaign that was just deactivated stops answering
+    immediately rather than from a cache. Unknown, malformed, dangling, and
+    inactive codes answer identically: a probe learns nothing about which case it
+    hit, and an anonymous caller never reaches here (AUTH-C-01).
+    """
+    unit_campaign = unit_campaign_models.resolve_join_code(
+        unit_campaign_models.normalize_join_code(_query_argument(event, "joinCode"))
+    )
+    if unit_campaign is None:
+        raise AppError(ErrorCode.NOT_FOUND, _JOIN_CODE_UNUSABLE)
+    preview = _join_preview_payload(unit_campaign)
+    # The caller is recorded, never the code: a join code is a credential, and a
+    # code being walked through an account is the enumeration this read invites.
+    get_logger(__name__).info(
+        "Unit Campaign join preview served",
+        caller_id=caller_id,
+        unit_campaign_id=unit_campaign["unitCampaignId"],
+    )
+    return preview
+
+
+# --- joinUnitCampaign (§1.5.4) ---------------------------------------------------
+
+
+def _joined_membership_payload(unit_campaign_id: str, campaign_id: str) -> Dict[str, Any]:
+    """Reload the membership a join wrote, for the result and for a replay.
+
+    The Scout identity comes from the Campaign row rather than from the caller:
+    the fingerprint already binds ``campaignId``, so a replay resolves the same
+    Profile the original attempt did.
+    """
+    scout = unit_campaign_models.read_scout_campaign(campaign_id)
+    membership = unit_campaign_models.read_membership(unit_campaign_id, str(scout["profileId"])) if scout else None
+    if membership is None:
+        raise AppError(ErrorCode.INTERNAL_ERROR, "joined membership could not be loaded")
+    return membership_payload(membership)
+
+
+def _join_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Join a Scout Campaign to a Unit Campaign with its code (§1.5.4).
+
+    Four rows commit together — membership, guard, the Campaign's joined-scope
+    link, and the marker — so a Scout is never a member in one row and unjoined
+    in another. Authorization is the existing Profile Owner/WRITE rule: the join
+    is an act of the Scout, not an appointment by a Unit Admin, which is why a
+    READ-only share and a substituted ``campaignId`` both fail here
+    (CAMP-M-03-02).
+
+    The idempotency marker is scoped to the join code: the same code plus the
+    same key is one join, however many campaigns the caller names in between.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    join_code = unit_campaign_models.normalize_join_code(_resource_id(payload, "joinCode"))
+    campaign_id = _resource_id(payload, "campaignId")
+    runner = IdempotentMutationRunner()
+
+    keys = _campaign_marker(
+        caller_id=caller_id, operation=JOIN_UNIT_CAMPAIGN_FIELD, scope=join_code, idempotency_key=key
+    )
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        JOIN_UNIT_CAMPAIGN_FIELD,
+        lambda stored: _joined_membership_payload(str(stored), campaign_id),
+    )
+    if replayed is not None:
+        return replayed
+
+    scout = unit_campaign_models.read_scout_campaign(campaign_id)
+    if scout is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Campaign not found")
+    profile_id = str(scout["profileId"])
+    require_profile_access(caller_id, profile_id, "WRITE")
+
+    unit_campaign = unit_campaign_models.resolve_join_code(join_code)
+    if unit_campaign is None:
+        raise AppError(ErrorCode.NOT_FOUND, _JOIN_CODE_UNUSABLE)
+    unit_campaign_id = str(unit_campaign["unitCampaignId"])
+
+    guard = unit_campaign_models.read_membership_guard(campaign_id)
+    target = unit_campaign_models.guard_active_unit_campaign_id(guard)
+    if target is not None and target != unit_campaign_id:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "This Scout Campaign is already joined to another Unit Campaign; leave that roster before joining this one.",
+        )
+    membership = unit_campaign_models.read_membership(unit_campaign_id, profile_id)
+    if membership is not None and str(membership["campaignId"]) != campaign_id:
+        raise AppError(ErrorCode.CONFLICT, "This Scout's roster entry belongs to a different Scout Campaign.")
+    if membership is not None and str(membership["status"]) == unit_campaign_models.MEMBERSHIP_STATUS_ACTIVE:
+        raise AppError(ErrorCode.CONFLICT, "This Scout Campaign already has an active membership here.")
+
+    now_iso = utc_now_iso()
+    member = unit_campaign_models.build_membership_item(
+        unit_campaign_id=unit_campaign_id,
+        unit_id=str(unit_campaign["unitId"]),
+        campaign_id=campaign_id,
+        profile_id=profile_id,
+        joined_by_account_id=caller_id,
+        now_iso=now_iso,
+    )
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=unit_campaign_id)
+    if membership is None:
+        plan.add(*unit_campaign_models.put_membership_action(member))
+    else:
+        plan.add(
+            *unit_campaign_models.reactivate_membership_action(member, expected_version=_number(membership["version"]))
+        )
+    plan.add(
+        *unit_campaign_models.guard_claim_action(
+            campaign_id=campaign_id,
+            profile_id=profile_id,
+            active_unit_campaign_id=unit_campaign_id,
+            expected_membership_version=_number(guard["membershipVersion"]) if guard is not None else None,
+            now_iso=now_iso,
+        )
+    )
+    plan.add(
+        *unit_campaign_models.campaign_latest_link_action(
+            profile_id=profile_id,
+            campaign_id=campaign_id,
+            unit_id=str(unit_campaign["unitId"]),
+            unit_campaign_id=unit_campaign_id,
+        )
+    )
+    runner.execute(
+        keys,
+        plan,
+        operation=JOIN_UNIT_CAMPAIGN_FIELD,
+        fingerprint=fingerprint,
+        result_id=unit_campaign_id,
+        load_result=lambda stored: _joined_membership_payload(str(stored), campaign_id),
+    )
+    log.info(
+        "Scout Campaign joined",
+        unit_campaign_id=unit_campaign_id,
+        campaign_id=campaign_id,
+        caller_id=caller_id,
+        rejoined=membership is not None,
+    )
+    return _joined_membership_payload(unit_campaign_id, campaign_id)
+
+
+# --- removeUnitCampaignMembership (§1.5.5) ---------------------------------------
+
+
+def _remove_membership(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Set a roster entry REMOVED and free the Scout Campaign's guard (§1.5.5).
+
+    Removal is a status transition, never a delete: signups, work, credit,
+    custody, and Orders keep pointing at this record, and the Campaign keeps its
+    joined-scope link, so joined history survives a removal (API-FIX-05). What
+    removal does change is eligibility, and it changes it in one transaction: the
+    guard version this write bumps is exactly the version a signup conditions on,
+    so a signup racing the removal is cancelled rather than committed after it
+    (CAMP-M-04-02).
+
+    Two versions are required because two rows move. A caller holding either one
+    stale loses the whole transaction — the roster is never REMOVED while the
+    slot is still claimed (§1.5.5, VER-01).
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    unit_campaign_id = _resource_id(payload, "unitCampaignId")
+    campaign_id = _resource_id(payload, "campaignId")
+    membership_version = _positive_int(payload, "expectedMembershipVersion")
+    guard_version = _positive_int(payload, "expectedGuardVersion")
+    runner = IdempotentMutationRunner()
+
+    keys = _campaign_marker(
+        caller_id=caller_id, operation=REMOVE_MEMBERSHIP_FIELD, scope=unit_campaign_id, idempotency_key=key
+    )
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        REMOVE_MEMBERSHIP_FIELD,
+        lambda stored: _joined_membership_payload(str(stored), campaign_id),
+    )
+    if replayed is not None:
+        return replayed
+
+    campaign = unit_campaign_models.load_unit_campaign_or_not_found(unit_campaign_id)
+    unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
+    scout = unit_campaign_models.read_scout_campaign(campaign_id)
+    if scout is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Campaign not found")
+    membership = unit_campaign_models.read_membership(unit_campaign_id, str(scout["profileId"]))
+    if membership is None or str(membership["campaignId"]) != campaign_id:
+        raise AppError(ErrorCode.NOT_FOUND, "Roster entry not found")
+
+    now_iso = utc_now_iso()
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=unit_campaign_id)
+    plan.add(
+        *unit_campaign_models.remove_membership_action(
+            unit_campaign_id=unit_campaign_id,
+            profile_id=str(scout["profileId"]),
+            expected_version=membership_version,
+            removed_by_account_id=caller_id,
+            now_iso=now_iso,
+        )
+    )
+    plan.add(
+        *unit_campaign_models.guard_release_action(
+            campaign_id=campaign_id,
+            expected_membership_version=guard_version,
+            expected_unit_campaign_id=unit_campaign_id,
+            now_iso=now_iso,
+        )
+    )
+    runner.execute(
+        keys,
+        plan,
+        operation=REMOVE_MEMBERSHIP_FIELD,
+        fingerprint=fingerprint,
+        result_id=unit_campaign_id,
+        load_result=lambda stored: _joined_membership_payload(str(stored), campaign_id),
+    )
+    log.info(
+        "Unit Campaign membership removed",
+        unit_campaign_id=unit_campaign_id,
+        campaign_id=campaign_id,
+        caller_id=caller_id,
+    )
+    return _joined_membership_payload(unit_campaign_id, campaign_id)
+
+
+# --- campaign and roster queries (§1.5.6) ----------------------------------------
+
+
+def _get_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One campaign's administrative view, join code and version included.
+
+    A Scout who holds the join code uses ``unitCampaignJoinInfo`` instead: this
+    query answers nothing to an account without a grant on the parent Unit
+    (UNIT-Q-07-02, AUTH-U).
+    """
+    return campaign_payload(_campaign_admin_guard(event, caller_id, "unitCampaignId"))
+
+
+def _optional_boolean(event: Dict[str, Any], name: str) -> Optional[bool]:
+    """Read an optional boolean filter argument (``isActive``)."""
+    arguments = event.get("arguments")
+    value = arguments.get(name) if isinstance(arguments, Mapping) else None
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise AppError(ErrorCode.INVALID_INPUT, f"{name} must be a boolean")
+    return value
+
+
+def _list_campaigns(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """A Unit's campaigns, newest first, optionally filtered by active state.
+
+    The active filter is part of the cursor's scope: a cursor issued for the
+    active list is refused against the deactivated list rather than silently
+    skipping rows (PAGE-01, UNIT-Q-08-01).
+    """
+    unit_id = _query_argument(event, "unitId")
+    unit_auth.require_unit_admin(caller_id, unit_id)
+    is_active = _optional_boolean(event, "isActive")
+    items = [
+        campaign_payload(campaign)
+        for campaign in unit_campaign_models.list_unit_campaigns(unit_id)
+        if is_active is None or bool(campaign["isActive"]) == is_active
+    ]
+    filter_token = "all" if is_active is None else str(is_active).lower()
+    return dict(paginate_page(items, f"{UNIT_CAMPAIGNS_FIELD}#{unit_id}#{filter_token}", _page_argument(event)))
+
+
+def _catalog_products(catalog: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """The catalog's products in display order (the SDL ``Product`` shape).
+
+    Returned as stored, including a catalog later soft-deleted: a campaign's
+    sales sheets and Order history keep their product names and prices, which is
+    why deletion is refused while a campaign references the catalog and is not
+    allowed to rewrite the campaign.
+    """
+    products = [item for item in (catalog.get("products") or []) if isinstance(item, Mapping)]
+    return [
+        {
+            "productId": str(item["productId"]),
+            "productName": str(item["productName"]),
+            "description": item.get("description"),
+            "price": float(item["price"]),
+            "sortOrder": int(item["sortOrder"]),
+        }
+        for item in sorted(products, key=lambda product: int(product["sortOrder"]))
+    ]
+
+
+def _campaign_catalog(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The campaign's catalog and products, for browser sales sheets (§1.5.6).
+
+    Admin-only: products and prices are not participant data at Stage 1, and the
+    join preview gives the catalog's name alone.
+    """
+    campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
+    catalog = unit_campaign_models.read_catalog(str(campaign["catalogId"]))
+    if catalog is None:
+        raise AppError(ErrorCode.NOT_FOUND, "catalog could not be loaded")
+    return {
+        "catalogId": str(catalog["catalogId"]),
+        "catalogName": str(catalog["catalogName"]),
+        "products": _catalog_products(catalog),
+    }
+
+
+def _list_roster(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """A campaign's roster, removed history included unless filtered out (§1.5.6).
+
+    Removed entries stay because the credit, Orders, and custody that belong to a
+    Scout who left are still this campaign's history; filtering to ACTIVE is a
+    presentation choice, not a deletion (UNIT-Q-09-01).
+    """
+    campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
+    arguments = event.get("arguments")
+    raw_status = arguments.get("status") if isinstance(arguments, Mapping) else None
+    status = None if raw_status is None else unit_campaign_models.normalize_membership_status(raw_status)
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    items = [
+        membership_payload(membership)
+        for membership in unit_campaign_models.list_memberships(unit_campaign_id, status=status)
+    ]
+    return dict(
+        paginate_page(
+            items, f"{UNIT_CAMPAIGN_ROSTER_FIELD}#{unit_campaign_id}#{status or 'ALL'}", _page_argument(event)
+        )
+    )
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -1005,6 +1723,15 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     MY_UNITS_FIELD: _my_units,
     UNIT_FIELD: _get_unit,
     UNIT_ADMINS_FIELD: _list_admins,
+    CREATE_UNIT_CAMPAIGN_FIELD: _create_campaign,
+    UPDATE_UNIT_CAMPAIGN_FIELD: _update_campaign,
+    JOIN_PREVIEW_FIELD: _join_info,
+    JOIN_UNIT_CAMPAIGN_FIELD: _join_campaign,
+    REMOVE_MEMBERSHIP_FIELD: _remove_membership,
+    UNIT_CAMPAIGN_FIELD: _get_campaign,
+    UNIT_CAMPAIGNS_FIELD: _list_campaigns,
+    UNIT_CAMPAIGN_CATALOG_FIELD: _campaign_catalog,
+    UNIT_CAMPAIGN_ROSTER_FIELD: _list_roster,
 }
 
 

@@ -36,6 +36,7 @@ The invariants enforced here:
 from __future__ import annotations
 
 import secrets
+import uuid
 from decimal import Decimal
 from string import ascii_uppercase, digits
 from typing import Any, Dict, List, Optional
@@ -162,6 +163,16 @@ def normalize_campaign_year(value: Any) -> int:
 def new_join_code() -> str:
     """A fresh 16-character join code, generated where the campaign is created."""
     return "".join(secrets.choice(JOIN_CODE_ALPHABET) for _ in range(JOIN_CODE_LENGTH))
+
+
+def new_unit_campaign_id() -> str:
+    """A stable Unit Campaign identity, generated before any write.
+
+    Never derived from name, year, or join code: renaming a campaign or
+    re-issuing its code must not move its inventory, roster, or Order origin
+    (§5.5, and the same law the Unit identity follows).
+    """
+    return str(uuid.uuid4())
 
 
 def is_valid_join_code(value: Any) -> bool:
@@ -455,6 +466,49 @@ def list_memberships_for_campaign(campaign_id: str) -> List[Dict[str, Any]]:
             },
         )
     )
+
+
+def read_scout_campaign(campaign_id: str) -> Optional[Dict[str, Any]]:
+    """The existing-application Scout Campaign row behind a ``campaignId``.
+
+    Read through ``campaignId-index``, which is eventually consistent — that is
+    acceptable only because it answers "which Profile owns this Campaign", and
+    every write that follows conditions on the base-row item existing
+    (:func:`campaign_latest_link_action`). A deleted Campaign therefore cancels
+    the join transaction whole rather than producing a membership with no owner.
+    """
+    rows = list(
+        query_all_items(
+            tables.campaigns,
+            {
+                "IndexName": "campaignId-index",
+                "KeyConditionExpression": "campaignId = :campaign_id",
+                "ExpressionAttributeValues": {":campaign_id": campaign_id},
+            },
+        )
+    )
+    return dict(rows[0]) if rows else None
+
+
+def read_catalog(catalog_id: str) -> Optional[Dict[str, Any]]:
+    """The existing-application catalog a Unit Campaign references (§5.5).
+
+    Read consistently because a create validates usability against it: a
+    recently deleted catalog must not slip through on a stale read.
+    """
+    response = tables.catalogs.get_item(Key={"catalogId": catalog_id}, ConsistentRead=True)
+    item = response.get("Item")
+    return dict(item) if isinstance(item, dict) else None
+
+
+def catalog_is_usable(catalog: Optional[Dict[str, Any]]) -> bool:
+    """Whether a new campaign may point at this catalog: it exists, undeleted.
+
+    A soft-deleted catalog stays readable for campaigns already using it — their
+    printed materials and Order history keep their product names — but it cannot
+    be chosen by a new campaign (§1.5.1).
+    """
+    return catalog is not None and not catalog.get("isDeleted")
 
 
 def read_membership_guard(campaign_id: str) -> Optional[Dict[str, Any]]:
