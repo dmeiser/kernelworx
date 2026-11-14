@@ -31,6 +31,9 @@ os.environ["ORDERS_TABLE_NAME"] = "kernelworx-orders-v2-ue1-dev"
 os.environ["SHARES_TABLE_NAME"] = "kernelworx-shares-ue1-dev"
 os.environ["INVITES_TABLE_NAME"] = "kernelworx-invites-ue1-dev"
 os.environ["SHARED_CAMPAIGNS_TABLE_NAME"] = "kernelworx-shared-campaigns-ue1-dev"
+os.environ["UNITS_TABLE_NAME"] = "kernelworx-units-ue1-dev"
+os.environ["UNIT_CAMPAIGNS_TABLE_NAME"] = "kernelworx-unit-campaigns-ue1-dev"
+os.environ["PUBLIC_ORDER_THROTTLES_TABLE_NAME"] = "kernelworx-public-order-throttles-ue1-dev"
 # S3 bucket names
 os.environ["EXPORTS_BUCKET"] = "kernelworx-exports-ue1-dev"
 
@@ -81,6 +84,9 @@ def aws_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SHARES_TABLE_NAME", "kernelworx-shares-ue1-dev")
     monkeypatch.setenv("INVITES_TABLE_NAME", "kernelworx-invites-ue1-dev")
     monkeypatch.setenv("SHARED_CAMPAIGNS_TABLE_NAME", "kernelworx-shared-campaigns-ue1-dev")
+    monkeypatch.setenv("UNITS_TABLE_NAME", "kernelworx-units-ue1-dev")
+    monkeypatch.setenv("UNIT_CAMPAIGNS_TABLE_NAME", "kernelworx-unit-campaigns-ue1-dev")
+    monkeypatch.setenv("PUBLIC_ORDER_THROTTLES_TABLE_NAME", "kernelworx-public-order-throttles-ue1-dev")
     monkeypatch.setenv("EXPORTS_BUCKET", "kernelworx-exports-ue1-dev")
 
 
@@ -148,6 +154,20 @@ def orders_table(dynamodb_table: Any) -> Any:
     """Get the orders DynamoDB table."""
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
     return dynamodb.Table("kernelworx-orders-v2-ue1-dev")
+
+
+@pytest.fixture
+def units_table(dynamodb_table: Any) -> Any:
+    """Get the Show & Sell Units DynamoDB table."""
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    return dynamodb.Table("kernelworx-units-ue1-dev")
+
+
+@pytest.fixture
+def unit_campaigns_table(dynamodb_table: Any) -> Any:
+    """Get the Show & Sell Unit Campaigns DynamoDB table."""
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    return dynamodb.Table("kernelworx-unit-campaigns-ue1-dev")
 
 
 @pytest.fixture
