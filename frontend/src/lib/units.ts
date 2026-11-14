@@ -211,3 +211,53 @@ export function joinableProfiles<T extends { profileId: string }>(
 interface ShareWithPermissions {
   permissions?: readonly string[] | null;
 }
+import type { ApolloClient, DocumentNode } from '@apollo/client';
+
+/**
+ * One page of a Show & Sell connection, in the shape every Show & Sell list query
+ * answers (`items` plus `pageInfo`).
+ */
+export interface ConnectionPage<T> {
+  items: T[];
+  pageInfo: { endCursor: string | null; hasNextPage: boolean };
+}
+
+interface ConnectionRead {
+  query: DocumentNode;
+  field: string;
+  limit: number;
+  variables?: Record<string, unknown>;
+}
+
+/** One page of a connection, read by cursor; a GraphQL error is thrown, not swallowed. */
+async function readConnectionPage<T>(
+  client: ApolloClient,
+  read: ConnectionRead,
+  cursor: string,
+): Promise<Partial<ConnectionPage<T>> | undefined> {
+  const { data, error } = await client.query<Record<string, Partial<ConnectionPage<T>> | undefined>>({
+    query: read.query,
+    variables: { ...(read.variables ?? {}), page: { limit: read.limit, cursor } },
+    fetchPolicy: 'network-only',
+  });
+  if (error) throw error;
+  return data ? data[read.field] : undefined;
+}
+
+/** The cursor to read next, or null when this page is the end of the connection. */
+function nextCursorOf(page: Partial<ConnectionPage<unknown>>): string | null {
+  const info = page.pageInfo;
+  return info && info.hasNextPage ? (info.endCursor ?? null) : null;
+}
+
+export async function drainConnection<T>(client: ApolloClient, read: ConnectionRead, cursor: string): Promise<T[]> {
+  const items: T[] = [];
+  let next: string | null = cursor;
+  while (next) {
+    const page = await readConnectionPage<T>(client, read, next);
+    if (!page) break;
+    items.push(...(page.items ?? []));
+    next = nextCursorOf(page);
+  }
+  return items;
+}

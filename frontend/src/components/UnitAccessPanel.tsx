@@ -14,7 +14,7 @@
  * merely in this button's visibility).
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, {useCallback, useState} from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import {
   Box,
@@ -43,6 +43,8 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { ErrorAlert } from './ErrorAlert';
 import { LoadingState } from './LoadingState';
 import { QueryGate } from './QueryGate';
+import { ConnectionRestNotice } from './ConnectionRestNotice';
+import { useCompleteConnection } from '../hooks/useCompleteConnection';
 import { UNIT_PAGE_SIZE, bareAccountId, isStaleVersionError, newIdempotencyKey, refreshQuery } from '../lib/units';
 import type {
   GqlListUnitAdminsQuery,
@@ -64,11 +66,26 @@ interface PendingGrantRevocation {
 }
 
 export const UnitAccessPanel: React.FC<UnitAccessPanelProps> = ({ unit, callerAccountId, onUnitChanged }) => {
+  const unitPage = { unitId: unit.unitId };
   const admins = useQuery<GqlListUnitAdminsQuery>(LIST_UNIT_ADMINS, {
-    variables: { unitId: unit.unitId, page: { limit: UNIT_PAGE_SIZE } },
+    variables: { ...unitPage, page: { limit: UNIT_PAGE_SIZE } },
   });
   const invites = useQuery<GqlListUnitInvitesQuery>(LIST_UNIT_INVITES, {
-    variables: { unitId: unit.unitId, page: { limit: UNIT_PAGE_SIZE } },
+    variables: { ...unitPage, page: { limit: UNIT_PAGE_SIZE } },
+  });
+  // Both lists decide what an admin can do next — who is still an admin, which codes
+  // are still live — so a truncated page would be a wrong answer, not a short one.
+  const completeAdmins = useCompleteConnection<GqlUnitAccessGrant>(admins.data?.unitAdmins, {
+    query: LIST_UNIT_ADMINS,
+    field: 'unitAdmins',
+    limit: UNIT_PAGE_SIZE,
+    variables: unitPage,
+  });
+  const completeInvites = useCompleteConnection<GqlUnitInvite>(invites.data?.unitInvites, {
+    query: LIST_UNIT_INVITES,
+    field: 'unitInvites',
+    limit: UNIT_PAGE_SIZE,
+    variables: unitPage,
   });
   const [createdCode, setCreatedCode] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
@@ -76,8 +93,8 @@ export const UnitAccessPanel: React.FC<UnitAccessPanelProps> = ({ unit, callerAc
   const [pendingGrant, setPendingGrant] = useState<PendingGrantRevocation | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const grantList = useMemo(() => readGrants(admins.data), [admins.data]);
-  const inviteList = useMemo(() => readInvites(invites.data), [invites.data]);
+  const grantList = completeAdmins.items;
+  const inviteList = completeInvites.items;
   const caller = bareAccountId(callerAccountId);
   const pendingAccountId = bareAccountId(readPendingAccount(pendingGrant));
 
@@ -110,6 +127,11 @@ export const UnitAccessPanel: React.FC<UnitAccessPanelProps> = ({ unit, callerAc
           callerAccountId={caller}
           lastAdmin={unit.adminCount <= 1}
           onRequestRevoke={(grant) => setPendingGrant({ grant, idempotencyKey: newIdempotencyKey() })}
+        />
+
+        <ConnectionRestNotice
+          loading={completeAdmins.loadingRest || completeInvites.loadingRest}
+          failed={completeAdmins.failedRest || completeInvites.failedRest}
         />
 
         <InviteSection
@@ -229,13 +251,7 @@ function useAccessMutations(args: AccessMutationArgs) {
   return { handleCreateInvite, handleRevokeInvite, handleRevokeGrant, creatingInvite };
 }
 
-function readGrants(data: GqlListUnitAdminsQuery | undefined): GqlUnitAccessGrant[] {
-  return data?.unitAdmins.items ?? [];
-}
 
-function readInvites(data: GqlListUnitInvitesQuery | undefined): GqlUnitInvite[] {
-  return data?.unitInvites.items ?? [];
-}
 
 function readInviteCode(result: unknown): string | null {
   const code = (result as { data?: { createUnitInvite?: { inviteCode?: string } } } | undefined)?.data?.createUnitInvite

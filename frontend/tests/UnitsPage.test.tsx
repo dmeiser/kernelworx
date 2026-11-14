@@ -348,4 +348,37 @@ describe('UnitsPage', () => {
 
     expect(await screen.findByText('Could not create the Unit.')).toBeInTheDocument();
   });
+
+
+  it('reads every page of the Units list, because page one is not the answer to which Units are yours', async () => {
+    const firstPage = {
+      request: { query: MY_UNITS, variables: PAGED },
+      result: {
+        data: {
+          __typename: 'Query',
+          myUnits: {
+            __typename: 'UnitConnection',
+            items: [unitFixture()],
+            pageInfo: { __typename: 'PageInfo', endCursor: 'units-cursor-2', hasNextPage: true },
+          },
+        },
+      },
+    };
+    const secondPage = {
+      request: { query: MY_UNITS, variables: { page: { limit: UNIT_PAGE_SIZE, cursor: 'units-cursor-2' } } },
+      result: {
+        data: {
+          myUnits: {
+            __typename: 'UnitConnection',
+            items: [unitFixture({ unitId: 'UNIT#crew-529', unitType: 'Crew', unitNumber: 529 })],
+            pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+          },
+        },
+      },
+    };
+    renderPage([firstPage, secondPage]);
+
+    expect(await screen.findByTestId('unit-name-UNIT#pack-3149')).toBeInTheDocument();
+    expect(await screen.findByTestId('unit-name-UNIT#crew-529')).toBeInTheDocument();
+  });
 });

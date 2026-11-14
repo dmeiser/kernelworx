@@ -12,7 +12,7 @@
  * query returns is a button that cannot work.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, {useState} from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import {
   Box,
@@ -34,6 +34,8 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { ErrorAlert, ErrorNote } from './ErrorAlert';
 import { LoadingState } from './LoadingState';
 import { QueryGate } from './QueryGate';
+import { ConnectionRestNotice } from './ConnectionRestNotice';
+import { useCompleteConnection } from '../hooks/useCompleteConnection';
 import { UNIT_PAGE_SIZE, newIdempotencyKey, refreshQuery } from '../lib/units';
 import type {
   GqlListUnitCampaignRosterQuery,
@@ -48,9 +50,6 @@ function toStatusFilter(status: StatusFilter): GqlMembershipStatus | undefined {
   return status === 'active' ? 'ACTIVE' : 'REMOVED';
 }
 
-function readRoster(data: GqlListUnitCampaignRosterQuery | undefined): GqlUnitCampaignMembership[] {
-  return data?.unitCampaignRoster.items ?? [];
-}
 
 function rosterCount(rows: GqlUnitCampaignMembership[]): string {
   return `${rows.length} roster ${rows.length === 1 ? 'entry' : 'entries'}`;
@@ -75,11 +74,19 @@ export const UnitRosterPanel: React.FC<UnitRosterPanelProps> = ({ unitCampaignId
   const [pending, setPending] = useState<PendingRemoval | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const rosterFilter = { unitCampaignId, status: toStatusFilter(status) };
   const roster = useQuery<GqlListUnitCampaignRosterQuery>(LIST_UNIT_CAMPAIGN_ROSTER, {
-    variables: { unitCampaignId, status: toStatusFilter(status), page: { limit: UNIT_PAGE_SIZE } },
+    variables: { ...rosterFilter, page: { limit: UNIT_PAGE_SIZE } },
   });
   const [removeMembership, { loading }] = useMutation(REMOVE_UNIT_CAMPAIGN_MEMBERSHIP);
-  const rows = useMemo(() => readRoster(roster.data), [roster.data]);
+  // One page is what the query asks for; the cursor is what makes the list complete.
+  const completeRoster = useCompleteConnection<GqlUnitCampaignMembership>(roster.data?.unitCampaignRoster, {
+    query: LIST_UNIT_CAMPAIGN_ROSTER,
+    field: 'unitCampaignRoster',
+    limit: UNIT_PAGE_SIZE,
+    variables: rosterFilter,
+  });
+  const rows = completeRoster.items;
 
   const handleRemove = async () => {
     if (!pending) return;
@@ -110,6 +117,7 @@ export const UnitRosterPanel: React.FC<UnitRosterPanelProps> = ({ unitCampaignId
       failure={<ErrorAlert message="Could not load this campaign's roster." />}
     >
       <RosterBody
+        rest={{ loading: completeRoster.loadingRest, failed: completeRoster.failedRest }}
         rows={rows}
         status={status}
         onStatusChange={setStatus}
@@ -134,7 +142,8 @@ const RosterBody: React.FC<{
   onAskRemove: (pending: PendingRemoval) => void;
   onCancelRemove: () => void;
   onConfirmRemove: () => Promise<void>;
-}> = ({ rows, status, onStatusChange, actionError, loading, pending, onAskRemove, onCancelRemove, onConfirmRemove }) => (
+  rest: { loading: boolean; failed: boolean };
+}> = ({ rest, rows, status, onStatusChange, actionError, loading, pending, onAskRemove, onCancelRemove, onConfirmRemove }) => (
   <Box sx={{ pt: 2 }}>
     <ErrorNote message={actionError} />
     <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
@@ -154,6 +163,8 @@ const RosterBody: React.FC<{
         {rosterCount(rows)}
       </Typography>
     </Stack>
+
+    <ConnectionRestNotice loading={rest.loading} failed={rest.failed} />
 
     <Card variant="outlined">
       <Table size="small">

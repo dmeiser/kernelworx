@@ -358,4 +358,44 @@ describe('UnitAccessPanel', () => {
     expect(await screen.findByText('No invites are waiting.')).toBeInTheDocument();
     expect(screen.queryByTestId('invite-code-value')).not.toBeInTheDocument();
   });
+
+
+  it('lists every admin, not the first page of them', async () => {
+    const extra = [
+      grantFixture({ accountId: 'ACCOUNT#ten' }),
+      grantFixture({ accountId: 'ACCOUNT#eleven' }),
+    ];
+    const mocks = [
+      {
+        request: { query: LIST_UNIT_ADMINS, variables: ADMIN_PAGE },
+        result: {
+          data: {
+            unitAdmins: {
+              __typename: 'UnitAccessGrantConnection',
+              items: [grantFixture({ accountId: 'ACCOUNT#avery' })],
+              pageInfo: { __typename: 'PageInfo', endCursor: 'admins-cursor-2', hasNextPage: true },
+            },
+          },
+        },
+      },
+      {
+        request: { query: LIST_UNIT_ADMINS, variables: { ...ADMIN_PAGE, page: { limit: UNIT_PAGE_SIZE, cursor: 'admins-cursor-2' } } },
+        result: {
+          data: {
+            unitAdmins: {
+              __typename: 'UnitAccessGrantConnection',
+              items: extra,
+              pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+            },
+          },
+        },
+      },
+      invitesQuery([]),
+    ];
+    renderPanel(mocks, unitFixture({ adminCount: 3 }));
+
+    expect(await screen.findByTestId('admin-row-ACCOUNT#avery')).toBeInTheDocument();
+    expect(await screen.findByTestId('admin-row-ACCOUNT#ten')).toBeInTheDocument();
+    expect(await screen.findByTestId('admin-row-ACCOUNT#eleven')).toBeInTheDocument();
+  });
 });

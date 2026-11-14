@@ -24,6 +24,8 @@ import type { GateQuery } from '../components/QueryGate';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { FormDialog } from '../components/FormDialog';
 import { QueryGate } from '../components/QueryGate';
+import { ConnectionRestNotice } from '../components/ConnectionRestNotice';
+import { useCompleteConnection } from '../hooks/useCompleteConnection';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorAlert } from '../components/ErrorAlert';
 import { LoadingState } from '../components/LoadingState';
@@ -36,6 +38,12 @@ import type { GqlMyUnitsQuery, GqlUnit } from '../types/graphql-generated';
 export const UnitsPage: React.FC = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const unitList = useQuery<GqlMyUnitsQuery>(MY_UNITS, { variables: { page: { limit: UNIT_PAGE_SIZE } } });
+  // The list of the caller's own Units is only correct when every page of it is here.
+  const completeUnits = useCompleteConnection<GqlUnit>(unitList.data?.myUnits, {
+    query: MY_UNITS,
+    field: 'myUnits',
+    limit: UNIT_PAGE_SIZE,
+  });
   const openCreate = () => setCreateOpen(true);
 
   return (
@@ -53,7 +61,7 @@ export const UnitsPage: React.FC = () => {
 
       <RedeemInviteCard onRedeemed={unitList.refetch} />
 
-      <UnitListSection result={unitList} onCreate={openCreate} />
+      <UnitListSection result={unitList} units={completeUnits.items} rest={completeUnits} onCreate={openCreate} />
 
       {createOpen && <CreateUnitDialog onClose={() => setCreateOpen(false)} onCreated={unitList.refetch} />}
     </>
@@ -64,16 +72,19 @@ export const UnitsPage: React.FC = () => {
  * The list owns only the read's presentation: an empty account still has to be
  * told how to get a first Unit, and a failed read must not look like an empty one.
  */
-const UnitListSection: React.FC<{ result: GateQuery; onCreate: () => void }> = ({ result, onCreate }) => (
+const UnitListSection: React.FC<{
+  result: GateQuery;
+  units: GqlUnit[];
+  rest: { loadingRest: boolean; failedRest: boolean };
+  onCreate: () => void;
+}> = ({ result, units, rest, onCreate }) => (
   <QueryGate
     query={result}
     loading={<LoadingState />}
     failure={<ErrorAlert message="Could not load your Units." />}
   >
-    <UnitListBody
-      units={(result.data as GqlMyUnitsQuery | undefined)?.myUnits.items ?? []}
-      onCreate={onCreate}
-    />
+    <UnitListBody units={units} onCreate={onCreate} />
+    <ConnectionRestNotice loading={rest.loadingRest} failed={rest.failedRest} />
   </QueryGate>
 );
 

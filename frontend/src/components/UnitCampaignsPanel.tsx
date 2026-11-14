@@ -14,7 +14,7 @@
  * new participation, and touches no balance, obligation, or history.
  */
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, {useCallback, useState} from 'react';
 import { useMutation, useQuery } from '@apollo/client/react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -43,6 +43,8 @@ import { FormDialog } from './FormDialog';
 import { ErrorNote } from './ErrorAlert';
 import { LoadingState } from './LoadingState';
 import { QueryGate } from './QueryGate';
+import { ConnectionRestNotice } from './ConnectionRestNotice';
+import { useCompleteConnection } from '../hooks/useCompleteConnection';
 import { useCatalogsData } from '../hooks/useCatalogsData';
 import { CREATE_UNIT_CAMPAIGN, LIST_UNIT_CAMPAIGNS, UPDATE_UNIT_CAMPAIGN } from '../lib/graphql';
 import { SHOW_SELL_BASE, UNIT_PAGE_SIZE, newIdempotencyKey, refreshQuery, unitCampaignStatusLabel } from '../lib/units';
@@ -60,9 +62,6 @@ function toIsActiveFilter(filter: ActiveFilter): boolean | undefined {
   return filter === 'active';
 }
 
-function readCampaigns(data: GqlListUnitCampaignsQuery | undefined): GqlUnitCampaignAdmin[] {
-  return data?.unitCampaigns.items ?? [];
-}
 
 function readCreatedCampaign(result: unknown): GqlUnitCampaignAdmin | null {
   const created = (result as { data?: { createUnitCampaign?: GqlUnitCampaignAdmin } } | undefined)?.data
@@ -81,11 +80,20 @@ export const UnitCampaignsPanel: React.FC<UnitCampaignsPanelProps> = ({ unit }) 
   const [createdCampaign, setCreatedCampaign] = useState<GqlUnitCampaignAdmin | null>(null);
   const [pendingToggle, setPendingToggle] = useState<PendingToggle | null>(null);
 
+  const campaignFilter = { unitId: unit.unitId, isActive: toIsActiveFilter(filter) };
   const campaigns = useQuery<GqlListUnitCampaignsQuery>(LIST_UNIT_CAMPAIGNS, {
-    variables: { unitId: unit.unitId, isActive: toIsActiveFilter(filter), page: { limit: UNIT_PAGE_SIZE } },
+    variables: { ...campaignFilter, page: { limit: UNIT_PAGE_SIZE } },
+  });
+  // A Unit admin choosing which campaign to open has to see all of them; page one is
+  // not the answer to "which campaigns does this Unit have".
+  const completeCampaigns = useCompleteConnection<GqlUnitCampaignAdmin>(campaigns.data?.unitCampaigns, {
+    query: LIST_UNIT_CAMPAIGNS,
+    field: 'unitCampaigns',
+    limit: UNIT_PAGE_SIZE,
+    variables: campaignFilter,
   });
   const applyToggle = useCampaignToggle();
-  const rows = useMemo(() => readCampaigns(campaigns.data), [campaigns.data]);
+  const rows = completeCampaigns.items;
   const refetchCampaigns = campaigns.refetch;
 
   // A campaign that exists must be in the list that says which campaigns exist;
@@ -127,6 +135,7 @@ export const UnitCampaignsPanel: React.FC<UnitCampaignsPanelProps> = ({ unit }) 
         </Stack>
 
         <CampaignTable rows={rows} onAskToggle={setPendingToggle} />
+        <ConnectionRestNotice loading={completeCampaigns.loadingRest} failed={completeCampaigns.failedRest} />
         <CreateCampaignDialog unit={unit} open={createOpen} onClose={() => setCreateOpen(false)} onCreated={handleCreated} />
         <ToggleConfirm
           pending={pendingToggle}

@@ -422,4 +422,39 @@ describe('UnitCampaignsPanel', () => {
     await waitFor(() => expect(screen.queryByTestId('created-campaign-note')).not.toBeInTheDocument());
     expect(await screen.findByText(/No campaigns here yet/)).toBeInTheDocument();
   });
+
+
+  it('shows the campaigns on later pages too, because choosing one needs the whole list', async () => {
+    const second = campaignFixture({ unitCampaignId: 'UNITCAMP#pack-3149-winter', campaignName: 'Winter Popcorn', joinCode: 'JOIN1234CODE5679' });
+    const mocks = [
+      {
+        request: { query: LIST_UNIT_CAMPAIGNS, variables: { unitId: UNIT_ID, isActive: undefined, page: { limit: UNIT_PAGE_SIZE } } },
+        result: {
+          data: {
+            unitCampaigns: {
+              __typename: 'UnitCampaignAdminConnection',
+              items: [campaignFixture()],
+              pageInfo: { __typename: 'PageInfo', endCursor: 'campaigns-cursor-2', hasNextPage: true },
+            },
+          },
+        },
+      },
+      {
+        request: { query: LIST_UNIT_CAMPAIGNS, variables: { unitId: UNIT_ID, isActive: undefined, page: { limit: UNIT_PAGE_SIZE, cursor: 'campaigns-cursor-2' } } },
+        result: {
+          data: {
+            unitCampaigns: {
+              __typename: 'UnitCampaignAdminConnection',
+              items: [second],
+              pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+            },
+          },
+        },
+      },
+    ];
+    renderPanel(mocks);
+
+    expect(await screen.findByTestId(`campaign-row-${CAMPAIGN_ID}`)).toBeInTheDocument();
+    expect(await screen.findByTestId('campaign-row-UNITCAMP#pack-3149-winter')).toBeInTheDocument();
+  });
 });

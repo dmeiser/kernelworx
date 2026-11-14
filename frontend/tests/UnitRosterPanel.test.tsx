@@ -254,4 +254,97 @@ describe('UnitRosterPanel', () => {
 
     expect(await screen.findByText('That Scout could not be removed.')).toBeInTheDocument();
   });
+
+
+  it('walks the roster cursor, so the list is the whole roster and not page one', async () => {
+    const firstPage = {
+      request: { query: LIST_UNIT_CAMPAIGN_ROSTER, variables: PAGE },
+      result: {
+        data: {
+          unitCampaignRoster: {
+            __typename: 'UnitCampaignMembershipConnection',
+            items: [devon],
+            pageInfo: { __typename: 'PageInfo', endCursor: 'roster-cursor-2', hasNextPage: true },
+          },
+        },
+      },
+    };
+    const secondPage = {
+      request: { query: LIST_UNIT_CAMPAIGN_ROSTER, variables: { ...PAGE, page: { limit: UNIT_PAGE_SIZE, cursor: 'roster-cursor-2' } } },
+      result: {
+        data: {
+          unitCampaignRoster: {
+            __typename: 'UnitCampaignMembershipConnection',
+            items: [blake],
+            pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+          },
+        },
+      },
+    };
+    renderPanel([firstPage, secondPage]);
+
+    expect(await screen.findByTestId('roster-row-PROFILE#devon')).toBeInTheDocument();
+    expect(await screen.findByTestId('roster-row-PROFILE#blake')).toBeInTheDocument();
+    expect(screen.getByTestId('roster-count')).toHaveTextContent('2 roster entries');
+  });
+
+  it('says it is still fetching when a page two is on its way', async () => {
+    const firstPage = {
+      request: { query: LIST_UNIT_CAMPAIGN_ROSTER, variables: PAGE },
+      result: {
+        data: {
+          unitCampaignRoster: {
+            __typename: 'UnitCampaignMembershipConnection',
+            items: [devon],
+            pageInfo: { __typename: 'PageInfo', endCursor: 'roster-cursor-2', hasNextPage: true },
+          },
+        },
+      },
+    };
+    const secondPage = {
+      request: { query: LIST_UNIT_CAMPAIGN_ROSTER, variables: { ...PAGE, page: { limit: UNIT_PAGE_SIZE, cursor: 'roster-cursor-2' } } },
+      delay: 150,
+      result: {
+        data: {
+          unitCampaignRoster: {
+            __typename: 'UnitCampaignMembershipConnection',
+            items: [blake],
+            pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+          },
+        },
+      },
+    };
+    renderPanel([firstPage, secondPage]);
+
+    // The count a partial list shows is a claim about the roster, so the screen says
+    // while the claim is provisional rather than letting a short list read as final.
+    expect(await screen.findByTestId('roster-row-PROFILE#devon')).toBeInTheDocument();
+    expect(await screen.findByTestId('connection-rest-loading')).toBeInTheDocument();
+
+    await waitFor(() => expect(screen.queryByTestId('connection-rest-loading')).not.toBeInTheDocument());
+    expect(await screen.findByTestId('roster-row-PROFILE#blake')).toBeInTheDocument();
+  });
+
+  it('says when the rest of the roster could not be fetched', async () => {
+    const firstPage = {
+      request: { query: LIST_UNIT_CAMPAIGN_ROSTER, variables: PAGE },
+      result: {
+        data: {
+          unitCampaignRoster: {
+            __typename: 'UnitCampaignMembershipConnection',
+            items: [devon],
+            pageInfo: { __typename: 'PageInfo', endCursor: 'roster-cursor-2', hasNextPage: true },
+          },
+        },
+      },
+    };
+    const failedPage = {
+      request: { query: LIST_UNIT_CAMPAIGN_ROSTER, variables: { ...PAGE, page: { limit: UNIT_PAGE_SIZE, cursor: 'roster-cursor-2' } } },
+      error: new GraphQLError('offline'),
+    };
+    renderPanel([firstPage, failedPage]);
+
+    expect(await screen.findByTestId('roster-row-PROFILE#devon')).toBeInTheDocument();
+    expect(await screen.findByText('The rest of this list could not be loaded, so some rows are not shown.')).toBeInTheDocument();
+  });
 });

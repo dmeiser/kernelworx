@@ -10,6 +10,7 @@ import { GraphQLError } from 'graphql';
 import {
   bareAccountId,
   createWriteIntent,
+  drainConnection,
   isDuplicateUnitError,
   isStaleVersionError,
   joinableProfiles,
@@ -124,5 +125,61 @@ describe('naming', () => {
       'PROFILE#shared',
     ]);
     expect(joinableProfiles(undefined, undefined)).toEqual([]);
+  });
+
+
+  it('treats a share with no permission list as not joinable', () => {
+    const owned = [{ profileId: 'PROFILE#own', displayName: 'Owned' }];
+    expect(joinableProfiles(owned, [{ profileId: 'PROFILE#share', permissions: null }])).toEqual(owned);
+  });
+
+  it('walks a connection by cursor until the server stops handing one out', async () => {
+    const reads: unknown[] = [];
+    const pages: Record<string, unknown> = {
+      'cursor-1': { items: ['a'], pageInfo: { endCursor: 'cursor-2', hasNextPage: true } },
+      'cursor-2': { items: ['b'], pageInfo: { endCursor: null, hasNextPage: false } },
+    };
+    const client = {
+      query: async (options: { variables: unknown }) => {
+        reads.push(options.variables);
+        const cursor = (options.variables as { page: { cursor: string } }).page.cursor;
+        return { data: { myUnits: pages[cursor] } };
+      },
+    };
+
+    const items = await drainConnection(client as never, { query: {} as never, field: 'myUnits', limit: 50, variables: { unitId: 'UNIT#x' } }, 'cursor-1');
+
+    expect(items).toEqual(['a', 'b']);
+    expect(reads).toEqual([
+      { unitId: 'UNIT#x', page: { limit: 50, cursor: 'cursor-1' } },
+      { unitId: 'UNIT#x', page: { limit: 50, cursor: 'cursor-2' } },
+    ]);
+  });
+
+  it('stops a cursor walk on a page that cannot name the next one, and refuses one that failed', async () => {
+    const answers: unknown[] = [
+      // A page that claims more but issues no cursor cannot be walked further.
+      { myUnits: { items: ['a'], pageInfo: { hasNextPage: true } } },
+    ];
+    const client = { query: async () => ({ data: answers.shift() }) };
+    await expect(drainConnection(client as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1')).resolves.toEqual(['a']);
+
+    // A connection that is not in the response at all ends the walk rather than
+    // inventing an empty page.
+    const missing = { query: async () => ({ data: {} }) };
+    await expect(drainConnection(missing as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1')).resolves.toEqual([]);
+
+    // A page that carries no items contributes nothing rather than throwing.
+    const noItems = { query: async () => ({ data: { myUnits: { pageInfo: { hasNextPage: false } } } }) };
+    await expect(drainConnection(noItems as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1')).resolves.toEqual([]);
+
+    // A response with no data at all ends the walk rather than fabricating a page.
+    const noData = { query: async () => ({}) };
+    await expect(drainConnection(noData as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1')).resolves.toEqual([]);
+
+    // A failed read is an error, not a short list: the caller has to be able to tell
+    // "there is no more" from "I could not find out".
+    const failed = { query: async () => ({ error: new Error('offline') }) };
+    await expect(drainConnection(failed as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1')).rejects.toThrow('offline');
   });
 });
