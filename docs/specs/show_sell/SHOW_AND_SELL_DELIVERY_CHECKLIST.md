@@ -4,6 +4,8 @@
 **Last updated:** 2026-10-30  
 **Rule:** Do not mark a stage complete until its implementation, tests, cleanup, and validation evidence are complete.
 
+**Evidence-source rule:** Evidence must come from an environment this repository can actually produce; a requirement on a retired path (such as the former per-PR ephemeral stack, retired by WORK-76) is a defect in the checklist, not a blocker on the wave.
+
 **Leaf-item standard:** Every leaf is one bounded subagent work order: a named deliverable, its contract, and its acceptance evidence. Parent items are coordination structure, not work orders. Leaves in one stage may run in parallel only when they do not edit the same GraphQL SDL block, infrastructure block, frontend route, fixture module, or aggregate write path. Unit grants, inventory balances, event aggregates, and finalization writes each require a single named write owner. Existing-file integration work is mapped in `docs/SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md`.
 
 - [ ] 1. Stage: Standalone Unit and Unit Campaign foundation
@@ -45,7 +47,7 @@
     - [ ] 1.8.1. Run all Stage 1 model and resolver unit tests, including invite boundaries, existing-grant redemption, final-grant, membership guards, immutable catalog, and idempotency failure paths.
     - [ ] 1.8.2. Run live `AUTH-U`, `AUTH-P`, and `AUTH-C` integration tests for create/redeem/revoke, removed admins, READ/non-owner WRITE, global ADMIN, anonymous/API-key, and cross-Unit denial, asserting zero writes on denial.
     - [ ] 1.8.3. Concurrency-test one invite with two redeemers, grant revocation versus redemption, final-grant races, simultaneous Campaign joins, and membership removal versus signup.
-    - [ ] 1.8.4. Run `SS-SM-01`, `SS-SM-02`, and all Stage 1 endpoint descriptions against an ephemeral stack, retaining `DATA_ID`, error extensions, screenshots, and cleanup evidence.
+    - [ ] 1.8.4. Run `SS-SM-01`, `SS-SM-02`, and all Stage 1 endpoint descriptions against `dev` after the merge SHA's `Deploy Dev` run is green, retaining `DATA_ID`, error extensions, screenshots, and cleanup evidence.
     - [ ] 1.8.5. Verify identical create/redeem/join retries return original results after Unit creation or invite consumption, changed fingerprints fail, and no duplicate Unit/grant/pointer/membership/adminCount effect occurs.
     - [ ] 1.8.6. Run backend/frontend lint, format, type checks, unit tests and coverage gates, resolver build, OpenTofu validation, IAM/recovery checks, and the static security guards.
     - [ ] 1.8.7. Clean every Stage 1 Unit/grant/invite/pointer/membership/Campaign/catalog/Scout fixture using the test-only Unit cascade and prove another lane remains untouched.
@@ -84,7 +86,7 @@
     - [ ] 2.8.2. Integration-test stock-only adjustments and prove they create no Order, Show & Sell sale, payment, trade, fulfillment, obligation, or Scout-credit effect.
     - [ ] 2.8.3. Prove the exact issue 4 → sale 3 → sale 2 with one fulfilled → issue 2 → return 1 sequence, ending Kernel 5, With Scout 1, total owned 6, and no double stock decrement.
     - [ ] 2.8.4. Concurrency-test issue/receipt/adjustment/fulfillment/custody-return/duplicate-reversal/idempotent-retry races and assert zero partial effects on every failure.
-    - [ ] 2.8.5. Run `SS-SM-03`, `SS-SM-04`, `INV-Q`, `INV-M`, `ORD-API`, and raw-data endpoint descriptions against an ephemeral stack with persisted balance/audit assertions.
+    - [ ] 2.8.5. Run `SS-SM-03`, `SS-SM-04`, `INV-Q`, `INV-M`, `ORD-API`, and raw-data endpoint descriptions against `dev` after the merge SHA's `Deploy Dev` run is green, with persisted balance/audit assertions.
     - [ ] 2.8.6. Verify removed Unit Admin, cross-Unit `NOT_FOUND`, READ-only denial, non-owner WRITE success/revocation, global ADMIN isolation, anonymous/API-key denial, and participant/admin output separation.
     - [ ] 2.8.7. Run backend/frontend coverage, lint/type checks, infrastructure validation, 90/91-action tests, and movement-to-balance reconciliation; then clean all Stage 2 records without touching another lane.
 
@@ -116,7 +118,7 @@
     - [ ] 3.5.3. Build slot administration and participant opportunity/signup screens with arbitrary duration/capacity, cross-campaign conflict errors, and participant-safe data only. Add `SS-SM-06`, capacity-1, Full Booth conflict, unjoined Emery, READ-only denial, and 20-slot tests.
     - [ ] 3.5.4. Build work-confirmation and calendar-data screens with per-slot actual-minute entry/unconfirmation, pending preview, and on-demand calendar-data action for Unit Admin or Owner/WRITE only. Add 75/115-minute, zero-unconfirm, duration-validation, participant-safe DTO, and no-server-artifact tests.
   - [ ] 3.6. Complete event infrastructure and fixtures in parallel.
-    - [ ] 3.6.1. Add `show_and_sells` OpenTofu table with documented metadata/slot/signup keys and future sale/finalization/We Owe namespaces, PITR, least-privilege IAM, and recovery imports. Add tofu, IAM transaction-access, recovery, and ephemeral plan/apply validation.
+    - [ ] 3.6.1. Add `show_and_sells` OpenTofu table with documented metadata/slot/signup keys and future sale/finalization/We Owe namespaces, PITR, least-privilege IAM, and recovery imports. Add tofu, IAM transaction-access, recovery, and the applied `dev` plan from `Deploy Dev` for the merge SHA: tables, PITR, TTL, IAM grants, plus per-environment validation where a deployable path exists.
     - [ ] 3.6.2. Add deterministic event/slot/allocation/conflict fixtures for `T0`-relative past/future/ACTIVE/ENDED/REOPENED/FINALIZED/CANCELLED states, four-box events, 16-product catalog, 90/120/180-minute slots, removed members, stale versions, and race barriers. Add `API-FIX-01/03`, `SS-SM-05/06/11`, and lane cleanup tests.
   - [ ] 3.7. Testing and validation — required to complete Stage 3
     - [ ] 3.7.1. Run four-box sequential/overlap oracles, adjacency/multi-interval checks, target-zero, omitted-product-no-write, physical-stock-unchanged, and 16th-product-in-a-separate-batch cases.
@@ -190,7 +192,7 @@
     - [ ] 5.5.7. Run `SS-SM-05`, `SS-SM-08`, `SS-SM-09`, and all finalization/projection endpoint descriptions; then run coverage, lint/type checks, reconciliation, and complete lane cleanup.
 
 - [ ] 6. Stage: End-to-end vertical-slice acceptance checkpoint
-  - [ ] 6.1. Prepare the ephemeral acceptance run.
+  - [ ] 6.1. Prepare one green `Deploy Dev` run at the stage's merge SHA as the acceptance run.
     - [ ] 6.1.1. Create a secret-free run manifest with stack ID, commit SHA, endpoints, `RUN_ID`, worker count, and deployment outputs; generate integration/frontend env files using `scripts/generate_integration_env.py` and complete one application smoke request.
     - [ ] 6.1.2. Build the independent vertical-slice fixture with attempt-unique Unit/Campaign/catalog/products, all personas, grants, inventory, payment methods, events, sales, and finalization states. Produce an ID/version manifest and cleanup manifest without sharing mutable state with another scenario.
   - [ ] 6.2. Automate the integrated golden path and numerical oracles.
@@ -207,7 +209,7 @@
     - [ ] 6.4.1. Exercise 20 slots, capacity/finalization combinations, a 16th product in an independent batch, largest computed immediate and mixed-We Owe sales, complete returns/work/credit, later reductions, and idempotency markers. Prove over-90 plans fail before writing and every accepted maximal fixture finalizes.
     - [ ] 6.4.2. Run the scripted product review of golden paths, accessibility warnings, sales/We Owe, exact credit, reopen, Council Needs, and limits. Classify every mismatch as an implementation defect or an explicit requirements decision; do not change an oracle to match defective behavior.
   - [ ] 6.5. Testing and validation — required to complete Stage 6
-    - [ ] 6.5.1. Require one green ephemeral run for every golden-path, oracle, security, concurrency/idempotency, and maximum-shape suite before Stage 7 work proceeds; blocked fixtures may not be skipped or counted as passes.
+    - [ ] 6.5.1. Require one green `Deploy Dev` run at the stage's merge SHA for every golden-path, oracle, security, concurrency/idempotency, and maximum-shape suite before Stage 7 work proceeds; blocked fixtures may not be skipped or counted as passes.
     - [ ] 6.5.2. Reconcile independent beginning/ending balances to every receipt, adjustment, assignment, sale, return, fulfillment, reversal, and finalization delta, and prove zero duplicate idempotent effects and zero cross-tenant disclosures.
     - [ ] 6.5.3. Run backend/frontend/resolver/OpenTofu/security/coverage CI gates and then verify every Stage 6 `DATA_ID` entity, QR object, browser context, and download is removed without affecting another lane.
 
@@ -290,7 +292,7 @@
     - [ ] 9.4.3. Run resolver bundling, AppSync compatibility, OpenTofu formatting/validation, complexity, security, and recovery-coverage checks.
     - [ ] 9.4.4. Measure four-worker runtime, browser CPU/memory, Cognito/AppSync/DynamoDB throttling, and cleanup reliability; change worker count only from recorded evidence.
   - [ ] 9.5. Final release validation — required to complete Stage 9
-    - [ ] 9.5.1. Require all unit, integration, E2E, concurrency, accessibility, report-parity, and infrastructure checks to pass in ephemeral CI.
+    - [ ] 9.5.1. Require all unit, integration, E2E, concurrency, accessibility, report-parity, and infrastructure checks to pass at the release head, plus a green `Deploy Dev` for the accumulated `dev` commit.
     - [ ] 9.5.2. Require repeated full-suite runs with no flaky tenant leaks, duplicate writes, stuck lanes, or cleanup failures.
     - [ ] 9.5.3. Verify every synthetic Unit, grant, event, sale, obligation, movement, QR object, download, and Account-owned test record is cleaned.
     - [ ] 9.5.4. Complete the deployment/runbook, security review, rollback plan, operational report-data checks, and explicit production-smoke scope approval.
