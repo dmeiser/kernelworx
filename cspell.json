@@ -58,6 +58,7 @@
     "PROD#[A-Za-z0-9-]+",
     "UNIT#[A-Za-z0-9-]+",
     "UNITCAMP#[A-Za-z0-9-]+",
+    "\\bJOIN[A-Z0-9]{12}\\b",
     "CAT~[A-Za-z0-9-]+",
     "SHARED-[A-Za-z0-9]+",
     "[A-Za-z0-9_-]+@[A-Za-z0-9.-]+",

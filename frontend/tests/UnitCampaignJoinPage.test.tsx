@@ -14,7 +14,7 @@ import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { GraphQLError } from 'graphql';
 import { UnitCampaignJoinPage } from '../src/pages/UnitCampaignJoinPage';
-import { GET_UNIT_CAMPAIGN_JOIN_INFO, JOIN_UNIT_CAMPAIGN, LIST_MY_PROFILES } from '../src/lib/graphql';
+import { GET_UNIT_CAMPAIGN_JOIN_INFO, JOIN_UNIT_CAMPAIGN, LIST_MY_PROFILES, LIST_MY_SHARES } from '../src/lib/graphql';
 import { joinPreviewFixture, membershipFixture, scoutProfileFixture } from './helpers/unitFixtures';
 import { chooseOption, typeInto } from './helpers/unitUi';
 
@@ -60,9 +60,39 @@ async function enterCode(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByTestId('lookup-join-code'));
 }
 
+function sharesQuery(shares: unknown[]) {
+  return { request: { query: LIST_MY_SHARES, variables: {} }, result: { data: { listMyShares: shares } } };
+}
+
+function sharedProfileFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    __typename: 'SharedProfile',
+    profileId: 'PROFILE#shared-write',
+    ownerAccountId: 'ACCOUNT#another',
+    sellerName: 'Shared Scout',
+    unitType: 'Pack',
+    unitNumber: 3149,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    isOwner: false,
+    permissions: ['WRITE'],
+    latestCampaign: {
+      __typename: 'Campaign',
+      campaignId: 'CAMPAIGN#shared-write',
+      campaignName: 'Shared 2026',
+      campaignYear: 2026,
+      isActive: true,
+    },
+    ...overrides,
+  };
+}
+
 function renderPage(mocks: unknown[]) {
+  // The page reads shares alongside owned profiles; a test that does not care about
+  // them still has to answer the read, or the picker's list is only half a list.
+  const withShares = [...mocks, sharesQuery([])] as never[];
   render(
-    <MockedProvider mocks={mocks as never}>
+    <MockedProvider mocks={withShares}>
       <UnitCampaignJoinPage />
     </MockedProvider>,
   );
@@ -295,5 +325,44 @@ describe('UnitCampaignJoinPage', () => {
     await enterCode(user);
 
     expect(await screen.findByText('That code does not match an open campaign.')).toBeInTheDocument();
+  });
+
+  it('offers a profile shared with WRITE, and joins through it', async () => {
+    const shared = sharedProfileFixture();
+    const readOnly = sharedProfileFixture({
+      profileId: 'PROFILE#shared-read',
+      permissions: ['READ'],
+      latestCampaign: { ...sharedProfileFixture().latestCampaign, campaignId: 'CAMPAIGN#shared-read' },
+    });
+    const mocks = [
+      profilesQuery([devon]),
+      sharesQuery([shared, readOnly]),
+      joinInfoQuery,
+      {
+        request: {
+          query: JOIN_UNIT_CAMPAIGN,
+          variables: {
+            input: { joinCode: JOIN_CODE, campaignId: 'CAMPAIGN#shared-write', idempotency: { idempotencyKey: 'test-idem-1' } },
+          },
+        },
+        result: { data: { joinUnitCampaign: membershipFixture() } },
+      },
+      profilesQuery([devon]),
+      sharesQuery([shared, readOnly]),
+    ];
+    renderPage(mocks);
+    const user = userEvent.setup();
+
+    await enterCode(user);
+    const picker = await screen.findByTestId('join-profile');
+    await user.click(picker.querySelector('.MuiSelect-select') as HTMLElement);
+
+    expect(await screen.findByTestId('join-profile-option-PROFILE#shared-write')).toBeInTheDocument();
+    expect(screen.queryByTestId('join-profile-option-PROFILE#shared-read')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('join-profile-option-PROFILE#shared-write'));
+    await user.click(await screen.findByTestId('submit-join'));
+
+    expect(await screen.findByTestId('join-success')).toBeInTheDocument();
   });
 });

@@ -636,7 +636,7 @@ def create_campaign_actions(campaign: Dict[str, Any], pointer: Dict[str, Any]) -
     campaign or its pointer, and because the pointer is keyed by the code alone, a
     second create that drew the same code fails this pair's own condition rather than
     quietly reserving the code twice. The :func:`join_code_taken` read that callers
-    run first is only an optimisation that avoids a wasted transaction; it is not what
+    run first is only an optimization that avoids a wasted transaction; it is not what
     makes the code unique (§5.5).
     """
     return [

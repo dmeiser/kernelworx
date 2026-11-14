@@ -313,12 +313,12 @@ def test_two_creates_drawing_one_join_code_leave_one_reservation(
 ) -> None:
     """A join-code collision is decided by the write, not by the read before it.
 
-    The pre-read that avoids re-drawing a taken code is an optimisation. Two creates
+    The pre-read that avoids re-drawing a taken code is an optimization. Two creates
     can interleave past it and both believe the code is free — so the pointer row,
     keyed by the code alone, has to be what refuses the second one. The loser is told
     to retry, and a retry draws a code that is now visibly taken.
     """
-    contested = "JOINAA11BB22CC33"
+    contested = "JOINTESTCODE1234"
     monkeypatch.setattr(ucm, "new_join_code", lambda: contested)
     monkeypatch.setattr(ucm, "join_code_taken", lambda *_args, **_kwargs: False)
 

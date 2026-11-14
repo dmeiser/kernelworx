@@ -284,7 +284,7 @@ describe('UnitCampaignWorkspacePage', () => {
 
   it('saves two edits made in one mounted screen as two separate writes', async () => {
     const renamed = campaignFixture({ campaignName: 'Winter Popcorn', version: 2 });
-    const reyearred = campaignFixture({ campaignName: 'Winter Popcorn', campaignYear: 2027, version: 3 });
+    const yearEdited = campaignFixture({ campaignName: 'Winter Popcorn', campaignYear: 2027, version: 3 });
     const saveName = {
       request: {
         query: UPDATE_UNIT_CAMPAIGN,
@@ -313,9 +313,9 @@ describe('UnitCampaignWorkspacePage', () => {
           },
         },
       },
-      result: { data: { updateUnitCampaign: reyearred } },
+      result: { data: { updateUnitCampaign: yearEdited } },
     };
-    renderWorkspace([campaignMock(), rosterMock([]), saveName, campaignMock(renamed), saveYear, campaignMock(reyearred)]);
+    renderWorkspace([campaignMock(), rosterMock([]), saveName, campaignMock(renamed), saveYear, campaignMock(yearEdited)]);
     const user = userEvent.setup();
 
     const name = (await screen.findByTestId('campaign-name')).querySelector('input') as HTMLInputElement;

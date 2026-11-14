@@ -182,3 +182,32 @@ export const createWriteIntent = (): WriteIntent => {
     },
   };
 };
+
+/**
+ * The Scout profiles the caller may join a Unit Campaign with: the ones they own,
+ * plus the ones shared to them with WRITE.
+ *
+ * A shared WRITE profile is the normal arrangement for a family with one account
+ * managing two Scouts, and the backend accepts the join for it — a picker that shows
+ * only owned profiles would hide a membership the caller is entitled to make. A READ
+ * share is not joinable, because joining writes to the profile. An owned profile is
+ * never replaced by its share entry, and no profile appears twice.
+ */
+/** A share joins on the holder's behalf only when it carries WRITE. */
+const isJoinableShare = (permissions?: readonly string[] | null): boolean => (permissions ?? []).includes('WRITE');
+
+export function joinableProfiles<T extends { profileId: string }>(
+  owned: readonly T[] | undefined,
+  shared: readonly (ShareWithPermissions & { profileId: string })[] | undefined,
+): T[] {
+  const byId = new Map<string, T>((owned ?? []).map((profile) => [profile.profileId, profile]));
+  const claimed = (shared ?? []).filter((share) => isJoinableShare(share.permissions));
+  for (const share of claimed) {
+    if (!byId.has(share.profileId)) byId.set(share.profileId, share as unknown as T);
+  }
+  return Array.from(byId.values());
+}
+
+interface ShareWithPermissions {
+  permissions?: readonly string[] | null;
+}

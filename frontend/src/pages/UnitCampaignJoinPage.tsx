@@ -16,12 +16,12 @@ import React, { useState } from 'react';
 import { useLazyQuery, useMutation, useQuery } from '@apollo/client/react';
 import { Alert, Box, Button, Card, CardContent, Chip, Stack, TextField, Typography } from '@mui/material';
 import HowToRegIcon from '@mui/icons-material/HowToReg';
-import { GET_UNIT_CAMPAIGN_JOIN_INFO, JOIN_UNIT_CAMPAIGN, LIST_MY_PROFILES } from '../lib/graphql';
+import { GET_UNIT_CAMPAIGN_JOIN_INFO, JOIN_UNIT_CAMPAIGN, LIST_MY_PROFILES, LIST_MY_SHARES } from '../lib/graphql';
 import { JoinProfilePicker } from '../components/JoinProfilePicker';
 import { ErrorAlert, ErrorNote } from '../components/ErrorAlert';
 import { PageHeader } from '../components/PageHeader';
-import { newIdempotencyKey, refreshQuery } from '../lib/units';
-import type { GqlGetUnitCampaignJoinInfoQuery, GqlListMyProfilesQuery } from '../types/graphql-generated';
+import { joinableProfiles, newIdempotencyKey, refreshQuery } from '../lib/units';
+import type { GqlGetUnitCampaignJoinInfoQuery, GqlListMyProfilesQuery, GqlListMySharesQuery } from '../types/graphql-generated';
 
 interface JoinedNotice {
   campaignName: string;
@@ -56,6 +56,9 @@ export const UnitCampaignJoinPage: React.FC = () => {
   // afterwards must not re-point the preview at whatever the new text names.
   const [lookupJoinInfo, lookup] = useLazyQuery<GqlGetUnitCampaignJoinInfoQuery>(GET_UNIT_CAMPAIGN_JOIN_INFO);
   const profiles = useQuery<GqlListMyProfilesQuery>(LIST_MY_PROFILES, { variables: { limit: 100 } });
+  // A profile shared with WRITE joins on the holder's behalf, so the picker's list is
+  // both sources; a failed shares read simply leaves the owned profiles.
+  const shares = useQuery<GqlListMySharesQuery>(LIST_MY_SHARES);
   const preview = readPreview(lookup.data);
 
   const handleLookup = () => {
@@ -91,10 +94,10 @@ export const UnitCampaignJoinPage: React.FC = () => {
       <JoinProfileCard
         preview={preview}
         joined={joined}
-        profiles={readProfiles(profiles.data)}
+        profiles={joinableProfiles(readProfiles(profiles.data), shares.data?.listMyShares)}
         joinCode={lookedUpCode}
         onJoined={setJoined}
-        onProfileUsed={profiles.refetch}
+        onProfileUsed={() => Promise.all([profiles.refetch(), shares.refetch()])}
       />
       <JoinedNoticeAlert notice={joined} />
     </>

@@ -12,6 +12,7 @@ import {
   createWriteIntent,
   isDuplicateUnitError,
   isStaleVersionError,
+  joinableProfiles,
   newIdempotencyKey,
   refreshQuery,
   unitCampaignStatusLabel,
@@ -109,5 +110,19 @@ describe('naming', () => {
 
     expect(intent.keyFor(first)).toBe(intent.keyFor({ city: 'Fairfield', version: { expectedVersion: 3 } }));
     expect(intent.keyFor({ city: 'Fairfield', version: { expectedVersion: 4 } })).not.toBe(intent.keyFor(first));
+  });
+
+
+  it('lists the profiles a Scout may join with: owned, plus WRITE shares once', () => {
+    const owned = [{ profileId: 'PROFILE#devon' }];
+    const write = { profileId: 'PROFILE#shared', permissions: ['WRITE'] };
+    const read = { profileId: 'PROFILE#reader', permissions: ['READ'] };
+    const duplicate = { profileId: 'PROFILE#devon', permissions: ['WRITE'] };
+
+    expect(joinableProfiles(owned, [write, read, duplicate]).map((profile) => profile.profileId)).toEqual([
+      'PROFILE#devon',
+      'PROFILE#shared',
+    ]);
+    expect(joinableProfiles(undefined, undefined)).toEqual([]);
   });
 });

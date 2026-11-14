@@ -10,18 +10,25 @@
 
 import React from 'react';
 import { MenuItem, TextField } from '@mui/material';
-import type { GqlListMyProfilesQuery } from '../types/graphql-generated';
+/**
+ * What the picker needs, which both an owned profile and a shared one carries. A
+ * profile shared with WRITE is joinable by someone who does not own it, so the two
+ * sources are not the same type and are not forced to be.
+ */
+export interface JoinableProfile {
+  profileId: string;
+  sellerName: string;
+  latestCampaign?: { campaignId?: string | null; campaignName?: string | null } | null;
+}
 
-type ScoutProfile = GqlListMyProfilesQuery['listMyProfiles']['profiles'][number];
-
-function profileLabel(profile: ScoutProfile): string {
+function profileLabel(profile: JoinableProfile): string {
   const campaign = profile.latestCampaign?.campaignName;
   if (!campaign) return `${profile.sellerName} · no campaign yet`;
   return `${profile.sellerName} · ${campaign}`;
 }
 
 interface JoinProfilePickerProps {
-  profiles: ScoutProfile[];
+  profiles: JoinableProfile[];
   value: string;
   onChange: (profileId: string) => void;
   disabled?: boolean;
