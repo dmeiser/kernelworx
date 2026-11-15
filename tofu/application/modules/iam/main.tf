@@ -805,6 +805,19 @@ resource "aws_iam_role_policy" "lambda_public_orders_dynamodb" {
 # =============================================================================
 # Unit tenant Lambda (Wave 2 §1.7 / SCOPE-1): one function serves the 19 Stage 1
 # Unit/Unit Campaign operations. Scoped like every other domain role (#326).
+#
+# DynamoDB scope verified against the handler source including the shared
+# helpers it calls, and pinned behaviorally by
+# tests/unit/test_unit_tenant_role_scope.py (which records the real
+# (table, action) pairs the ten mutations issue and fails on any pair this
+# policy does not grant):
+#   - units / unit_campaigns: the aggregate tables every Stage 1 row and
+#     idempotency marker lives on — full item actions plus the transaction.
+#   - public_order_throttles: GetItem/UpdateItem, the invite redemption counter.
+#   - accounts / catalogs / profiles / shares / campaigns: reads (authorization,
+#     display, and the join's campaign locator through campaignId-index).
+#   - campaigns: one UpdateItem on the base table, the joined-scope link §8.2
+#     requires in the join's transaction. The only legacy write in Stage 1.
 # =============================================================================
 
 resource "aws_iam_role" "lambda_unit_tenant_execution" {
@@ -822,11 +835,12 @@ resource "aws_iam_role_policy_attachment" "lambda_unit_tenant_basic" {
 }
 
 data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
-  # The two aggregate tables are the whole write surface: Unit rows, admin
-  # grants, invites, Unit Campaigns, rosters, membership guards, and the
-  # idempotency markers all live on them, and every Stage 1 mutation commits
-  # its plan through TransactWriteItems (hence ConditionCheckItem; the
-  # marker/fingerprint guards ride those transactions).
+  # The two aggregate tables carry every Stage 1 write except the one legacy
+  # join link scoped below: Unit rows, admin grants, invites, Unit Campaigns,
+  # rosters, membership guards, and the idempotency markers all live on them,
+  # and every Stage 1 mutation commits its plan through TransactWriteItems
+  # (hence ConditionCheckItem; the marker/fingerprint guards ride those
+  # transactions).
   statement {
     effect = "Allow"
     actions = [
@@ -858,7 +872,7 @@ data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
   # Authorization and join inputs that live outside the Unit tables: Profile
   # ownership/shares, the catalog usability guard, the account directory for
   # invite/grant display, and the legacy Campaign read behind the join guard.
-  # Read-only: Stage 1 never writes a legacy row.
+  # Reads only; the single legacy write Stage 1 makes is scoped below.
   statement {
     effect  = "Allow"
     actions = ["dynamodb:GetItem", "dynamodb:BatchGetItem", "dynamodb:Query"]
@@ -866,6 +880,23 @@ data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
       [for k in ["accounts", "campaigns", "catalogs", "profiles", "shares"] : var.dynamodb_table_arns[k]],
       [for k in ["accounts", "campaigns", "catalogs", "profiles", "shares"] : "${var.dynamodb_table_arns[k]}/index/*"],
     )
+  }
+
+  # The one legacy write Stage 1 makes (§8.2): joinUnitCampaign points the
+  # joined Scout Campaign at its Unit Campaign on the campaigns table inside
+  # the same transaction as the membership, the roster and the membership
+  # guard, so a Scout Campaign is never joined in one row and unjoined in the
+  # other. Removal never rewrites the pair — the link is history and only the
+  # guard says whether it is current (§5.6). Base table only: the
+  # campaignId-index GSI is how the join locates the campaign and is never
+  # written. TransactWriteItems rides with UpdateItem because the item actions
+  # are not permission to invoke the transaction API
+  # (docs/specs/show_sell/SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md §4.2),
+  # and without it the whole join cancels with AccessDeniedException.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:UpdateItem", "dynamodb:TransactWriteItems"]
+    resources = [var.dynamodb_table_arns["campaigns"]]
   }
 }
 

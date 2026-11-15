@@ -9,7 +9,8 @@ every link is one a plausible-looking wiring pass drops:
 - the Lambda function itself, with the handler entry point and the env vars
   the TableAccessor reads (UNITS_TABLE_NAME / UNIT_CAMPAIGNS_TABLE_NAME);
 - a scoped execution role (the #326 domain-role split: no function falls back
-  to a broad role, and the Unit role never writes a legacy table);
+  to a broad role, and the Unit role's only write outside its own tables is the
+  §8.2 join link on the legacy campaigns table -- named, not implied);
 - the AppSync AWS_LAMBDA data source;
 - a resolver for every one of the 19 SDL fields -- nine queries and ten
   mutations -- all bound to that one data source, so tenant isolation stays
@@ -20,6 +21,7 @@ Parsed with python-hcl2 through the harness in ``test_edge_security.py``.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from tests.unit.test_edge_security import TF_APP, block, load_hcl
@@ -58,6 +60,23 @@ MUTATION_FIELDS = {
 
 def _hcl(path: Path) -> dict:
     return load_hcl(path)
+
+
+_ARN_KEYS = re.compile(r'dynamodb_table_arns\["([a-z_]+)"\]')
+_FOR_KEYS = re.compile(r"for k in \[([^\]]*)\]")
+
+
+def _table_keys(statement: dict) -> set[str]:
+    """The ``dynamodb_table_arns`` keys one policy statement's resources name.
+
+    Both spellings in this policy: the direct ``arns["units"]`` lookup and the
+    ``for k in [...]`` comprehension the read statement builds.
+    """
+    text = str(statement["resources"]).replace("\\", "")
+    keys = set(_ARN_KEYS.findall(text))
+    for group in _FOR_KEYS.findall(text):
+        keys |= {item.strip().strip('"') for item in group.split(",") if item.strip()}
+    return keys
 
 
 def _resource(doc: dict, rtype: str, name: str, section: str = "resource") -> dict:
@@ -125,23 +144,42 @@ def test_every_environment_assigns_the_scoped_unit_tenant_role() -> None:
                 )
 
 
-def test_unit_tenant_role_is_scoped_write_unit_tables_read_everything_else() -> None:
+def test_unit_tenant_role_writes_the_unit_tables_and_the_join_link_only() -> None:
+    """The write surface is the two aggregate tables, the counter, and one link.
+
+    The §8.2 join writes the Scout Campaign's joined-scope link on the legacy
+    ``campaigns`` table in the same transaction as the membership and the guard,
+    so the role must grant that one write — a join without it cancels with
+    ``AccessDeniedException`` against real DynamoDB, which moto never shows.
+    ``test_unit_tenant_role_scope.py`` proves the grant matches what the handler
+    actually issues; this test proves nothing else is writable.
+    """
     doc = _hcl(IAM_MODULE)
     _resource(doc, "aws_iam_role", "lambda_unit_tenant_execution")
     policy = _resource(doc, "aws_iam_policy_document", "lambda_unit_tenant_dynamodb", section="data")
     statements = [block(s) for s in policy["statement"]]
 
     write_actions = {"dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem"}
+    writable: set[str] = set()
     for statement in statements:
-        actions = set(statement["actions"])
-        resources = str(statement["resources"])
-        if write_actions & actions:
-            assert "units" in resources or "unit_campaigns" in resources or "public_order_throttles" in resources, (
-                "write actions must stay on the Unit aggregate tables and the throttle counter"
+        if not write_actions & set(statement["actions"]):
+            continue
+        keys = _table_keys(statement)
+        writable |= keys
+        assert keys <= {"units", "unit_campaigns", "public_order_throttles", "campaigns"}, (
+            f"write actions outside the Unit tables, the counter and the join link: {keys}"
+        )
+        if "campaigns" in keys and "unit_campaigns" not in keys:
+            assert set(statement["actions"]) == {"dynamodb:UpdateItem", "dynamodb:TransactWriteItems"}, (
+                "the join link is one conditional update: no PutItem, DeleteItem or ConditionCheckItem on a legacy table"
             )
-            assert '["accounts"' not in resources and "campaigns_table_arns" not in resources, (
-                "Stage 1 never writes a legacy row"
+            assert "/index/" not in str(statement["resources"]), (
+                "the joined-scope link is written on the base table; the campaignId-index GSI is a locator only"
             )
+    assert writable == {"units", "unit_campaigns", "public_order_throttles", "campaigns"}, (
+        f"unexpected legacy write surface: {writable - {'units', 'unit_campaigns', 'public_order_throttles'}}"
+    )
+
     joined = " ".join(str(s["actions"]) for s in statements)
     assert "dynamodb:TransactWriteItems" in joined, "every Stage 1 mutation commits through a conditional transaction"
     assert "dynamodb:ConditionCheckItem" in joined, "the marker guards ride those transactions"

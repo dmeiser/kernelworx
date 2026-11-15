@@ -88,6 +88,13 @@ export function membershipGuardCurrencyCheck(unitCampaignsTable, campaignId, gua
 // condition) neither. Returns an empty list when the message carries no list,
 // and the caller's fallback decides. String()/concat only: this file is inlined
 // into resolvers Terraform loads with templatefile() (#570).
+//
+// Known fragility, accepted because it is pinned rather than silent: the reason
+// list is read out of a human-readable message, so if AWS rewords it this
+// returns [] and a genuine membership-pin conflict degrades to the fallback's
+// "cap rejected" answer — the write is still refused either way, only the
+// reason the buyer is told goes wrong. lib/order_origin.test.js pins the
+// current message shape, so a reword fails there instead of on dev.
 export function cancelledTransactIndexes(error) {
     const match = String((error && error.message) || '').match(/\[([^\]]*)\]/);
     const indexes = [];
