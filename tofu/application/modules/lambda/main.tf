@@ -136,6 +136,18 @@ locals {
       timeout     = 60
       memory_size = 512
     }
+    # Wave 2 Unit tenant: one function serves all 19 Stage 1 Unit/Unit Campaign
+    # operations (queries need the same grant lookup as the mutations, so the
+    # routing lives in the handler and tenant isolation stays in one place).
+    "unit-operations" = {
+      handler     = "handlers.unit_operations.handle_unit_operation"
+      timeout     = 30
+      memory_size = 256
+      extra_env = {
+        UNITS_TABLE_NAME          = var.table_names.units
+        UNIT_CAMPAIGNS_TABLE_NAME = var.table_names.unit_campaigns
+      }
+    }
     "delete-campaign-orders" = {
       handler     = "handlers.campaign_operations.delete_campaign_orders"
       timeout     = 60

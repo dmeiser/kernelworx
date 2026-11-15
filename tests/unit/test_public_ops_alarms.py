@@ -238,7 +238,7 @@ def test_public_abuse_metric_filters_watch_the_exact_resolver_markers() -> None:
     """SEC-8: token mismatches and cap/throttle rejections answer HTTP 200, so
     they never touch 4XXError. The filters below count the exact console.error
     marker strings the APPSYNC_JS resolvers emit
-    (validate_public_token_step2_fn.js / increment_public_order_count_fn.js /
+    (validate_public_token_step2_fn.js / create_public_order_fn.js /
     throttle_public_order_create_fn.js) in the AppSync resolver log group."""
     filters = {label: body for label, body in _alarms_of_type("aws_cloudwatch_log_metric_filter")}
     assert set(filters) == {"public_token_mismatch", "public_cap_rejected"}

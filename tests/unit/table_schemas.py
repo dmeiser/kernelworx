@@ -333,12 +333,179 @@ def create_shared_campaigns_table_schema() -> dict[str, Any]:
     }
 
 
+def create_units_table_schema() -> dict[str, Any]:
+    """
+    Schema for the Show & Sell Units table (data model §6.1).
+
+    Key structure: PK=pk, SK=sk
+      UNIT#<unitId> / METADATA                     Unit
+      UNIT#<unitId> / GRANT#<accountId>            UnitAccessGrant
+      UNIT#<unitId> / PAYMENT#<normalizedName>     UnitPaymentMethod
+      INVITE#<inviteCode> / UNIT#<unitId>          UnitInvite
+      IDEM#<actorId>#<operationType>#<scope> / IDEM#<idempotencyKey>   marker
+    GSIs:
+    - accountId-unitId-index: "my Units" discovery from a caller's grant
+    - unitId-createdAt-index: invites for Unit administration (sparse)
+    - metadataKey-createdAt-index: duplicate warning lookup (never authorization)
+    TTL: expiresAtEpoch (UnitInvite expiry and the seven-day marker horizon share
+    the attribute name; DynamoDB allows one TTL attribute per table).
+    """
+    return {
+        "TableName": "kernelworx-units-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "pk", "AttributeType": "S"},
+            {"AttributeName": "sk", "AttributeType": "S"},
+            {"AttributeName": "accountId", "AttributeType": "S"},
+            {"AttributeName": "unitId", "AttributeType": "S"},
+            {"AttributeName": "createdAt", "AttributeType": "S"},
+            {"AttributeName": "metadataKey", "AttributeType": "S"},
+        ],
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "accountId-unitId-index",
+                "KeySchema": [
+                    {"AttributeName": "accountId", "KeyType": "HASH"},
+                    {"AttributeName": "unitId", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "unitId-createdAt-index",
+                "KeySchema": [
+                    {"AttributeName": "unitId", "KeyType": "HASH"},
+                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "metadataKey-createdAt-index",
+                "KeySchema": [
+                    {"AttributeName": "metadataKey", "KeyType": "HASH"},
+                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": True},
+    }
+
+
+def create_unit_campaigns_table_schema() -> dict[str, Any]:
+    """
+    Schema for the Show & Sell Unit Campaigns table (data model §6.2).
+
+    Key structure: PK=pk, SK=sk, holding UnitCampaign metadata, memberships,
+    join-code pointers, Scout commitment/membership guards, and Scout Campaign
+    Show & Sell totals (later stages).
+    GSIs:
+    - unitId-createdAt-index: Unit Campaign list for a Unit
+    - campaignId-index: membership lookup by Scout Campaign
+    - profileId-unitCampaignId-index: membership/commitment discovery
+    - catalogId-index: catalog-usage guard for Unit Campaign references
+    Key structure also hosts campaign-scoped idempotency markers
+    (IDEM#<actorId>#<operationType>#<scope> / IDEM#<idempotencyKey>; data model
+    §8.9 - join now, sales later), so the marker TTL is armed here exactly as
+    on the units table.
+    """
+    return {
+        "TableName": "kernelworx-unit-campaigns-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "pk", "AttributeType": "S"},
+            {"AttributeName": "sk", "AttributeType": "S"},
+            {"AttributeName": "unitId", "AttributeType": "S"},
+            {"AttributeName": "createdAt", "AttributeType": "S"},
+            {"AttributeName": "campaignId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+            {"AttributeName": "unitCampaignId", "AttributeType": "S"},
+            {"AttributeName": "catalogId", "AttributeType": "S"},
+        ],
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "unitId-createdAt-index",
+                "KeySchema": [
+                    {"AttributeName": "unitId", "KeyType": "HASH"},
+                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "campaignId-index",
+                "KeySchema": [
+                    {"AttributeName": "campaignId", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "profileId-unitCampaignId-index",
+                "KeySchema": [
+                    {"AttributeName": "profileId", "KeyType": "HASH"},
+                    {"AttributeName": "unitCampaignId", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "catalogId-index",
+                "KeySchema": [
+                    {"AttributeName": "catalogId", "KeyType": "HASH"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": True},
+    }
+
+
+# Tables that host idempotency markers (data model §8.9). The marker's
+# seven-day TTL (MARKER_TTL_ATTRIBUTE, "expiresAtEpoch") must be armed on
+# EVERY one of them: a marker written to a table without TTL would silently
+# live forever instead of expiring. Tests enumerate this tuple rather than
+# pinning one table's TTL, so a new marker-capable table cannot land
+# un-armed. The marker-capable set is exactly the Show & Sell aggregate
+# tables the marker key contract names; the legacy `invites` table is NOT
+# marker-capable (its TTL stays the string `expiresAt`).
+MARKER_CAPABLE_TABLE_KEYS = ("units", "unit_campaigns")
+
+
+def create_public_order_throttles_table_schema() -> dict[str, Any]:
+    """
+    Schema for the throttle table (data model §6.6).
+
+    Single hash key `key`; TTL on `expiresAt`. Two independent counter
+    contracts share it: the public-order share-token window
+    ("<shareToken>#<windowStartEpoch>") and the Unit-invite redemption window
+    ("UNIT_INVITE_REDEMPTION#<accountId>#WINDOW#<yyyy-MM-ddTHH>"). Not part of
+    ``get_all_table_schemas``/``create_all_tables``: the 10-table
+    fixture-count contract stays exact, and tests that exercise the §6.6
+    counters create this table explicitly (see
+    tests/unit/test_unit_invites.py).
+    """
+    return {
+        "TableName": "kernelworx-public-order-throttles-ue1-dev",
+        "KeySchema": [{"AttributeName": "key", "KeyType": "HASH"}],
+        "AttributeDefinitions": [{"AttributeName": "key", "AttributeType": "S"}],
+        "BillingMode": "PAY_PER_REQUEST",
+        "TimeToLiveSpecification": {"AttributeName": "expiresAt", "Enabled": True},
+    }
+
+
 def get_all_table_schemas() -> list[dict[str, Any]]:
     """
     Get all table schemas as a list.
 
     Returns:
-        List of table schema dictionaries suitable for dynamodb.create_table(**schema)
+        List of table schema dictionaries suitable for dynamodb.create_table(**schema),
+        in table order: accounts, catalogs, profiles, campaigns, orders,
+        shares, invites, shared_campaigns, units, unit_campaigns.
     """
     return [
         create_accounts_table_schema(),
@@ -349,6 +516,8 @@ def get_all_table_schemas() -> list[dict[str, Any]]:
         create_shares_table_schema(),
         create_invites_table_schema(),
         create_shared_campaigns_table_schema(),
+        create_units_table_schema(),
+        create_unit_campaigns_table_schema(),
     ]
 
 
@@ -369,6 +538,8 @@ def create_all_tables(dynamodb_resource: Any) -> dict[str, Any]:
         - shares: Shares table
         - invites: Invites table
         - shared_campaigns: Shared campaigns table
+        - units: Units table
+        - unit_campaigns: Unit campaigns table
     """
     tables: dict[str, Any] = {}
 
@@ -381,11 +552,20 @@ def create_all_tables(dynamodb_resource: Any) -> dict[str, Any]:
         ("shares", create_shares_table_schema),
         ("invites", create_invites_table_schema),
         ("shared_campaigns", create_shared_campaigns_table_schema),
+        ("units", create_units_table_schema),
+        ("unit_campaigns", create_unit_campaigns_table_schema),
     ]
 
     for name, schema_creator in schema_creators:
         schema = schema_creator()
-        tables[name] = dynamodb_resource.create_table(**schema)
+        # DynamoDB configures TTL on a separate call; the schema dict carries it
+        # so contract tests can assert the TTL attribute name, and the fixture
+        # applies it so the mock table matches the deployed table.
+        ttl = schema.pop("TimeToLiveSpecification", None)
+        table = dynamodb_resource.create_table(**schema)
+        if ttl is not None:
+            dynamodb_resource.meta.client.update_time_to_live(TableName=table.table_name, TimeToLiveSpecification=ttl)
+        tables[name] = table
 
     return tables
 
@@ -400,4 +580,6 @@ TABLE_NAMES = {
     "shares": "kernelworx-shares-ue1-dev",
     "invites": "kernelworx-invites-ue1-dev",
     "shared_campaigns": "kernelworx-shared-campaigns-ue1-dev",
+    "units": "kernelworx-units-ue1-dev",
+    "unit_campaigns": "kernelworx-unit-campaigns-ue1-dev",
 }

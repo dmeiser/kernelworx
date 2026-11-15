@@ -76,6 +76,10 @@ const PaymentMethodsPage = lazyRoute(() =>
 const HomePage = lazyRoute(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
 const StoryPage = lazyRoute(() => import('./pages/StoryPage').then((m) => ({ default: m.StoryPage })));
 
+// The Show & Sell subtree is preview-gated inside its own route element, so the
+// routes, the pages, and the navigation all answer to one flag.
+const ShowSellRoutes = lazyRoute(() => import('./ShowSellRoutes').then((m) => ({ default: m.ShowSellRoutes })));
+
 const PublicOrderPage = lazyRoute(() =>
   import('./pages/PublicOrderPage').then((m) => ({ default: m.PublicOrderPage })),
 );
@@ -247,6 +251,15 @@ function AuthedRoutes() {
                   element={
                     <ProtectedAppRoute>
                       <HomePage />
+                    </ProtectedAppRoute>
+                  }
+                />
+
+                <Route
+                  path="/show-sell/*"
+                  element={
+                    <ProtectedAppRoute>
+                      <ShowSellRoutes />
                     </ProtectedAppRoute>
                   }
                 />

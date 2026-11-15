@@ -29,7 +29,10 @@ import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import CampaignIcon from '@mui/icons-material/Campaign';
 import PaymentIcon from '@mui/icons-material/Payment';
+import GroupWorkIcon from '@mui/icons-material/GroupWork';
 import { useAuth } from '../contexts/AuthContext';
+import { useShowSellPreview } from '../hooks/useShowSellPreview';
+import { SHOW_SELL_BASE } from '../lib/units';
 import { Toast } from './Toast';
 import { Outlet } from 'react-router-dom';
 import { LIST_MY_SHARED_CAMPAIGNS } from '../lib/graphql';
@@ -104,9 +107,10 @@ const DrawerContent: React.FC<{
   isActive: (path: string) => boolean;
   hasSharedCampaigns: boolean;
   isAdmin: boolean;
+  showSellPreview: boolean;
   displayName: string;
   onLogout: () => void;
-}> = ({ onNavigate, isActive, hasSharedCampaigns, isAdmin, displayName, onLogout }) => (
+}> = ({ onNavigate, isActive, hasSharedCampaigns, isAdmin, showSellPreview, displayName, onLogout }) => (
   <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
     <Toolbar />
     <Divider sx={{ borderColor: brand.border.secondary }} />
@@ -171,6 +175,36 @@ const DrawerContent: React.FC<{
         <ListItemText primary="Accept Invite" />
       </ListItemButton>
 
+      {/* Show & Sell is preview-gated: the links hide together with the routes, so
+          a preview account is never offered a screen that then refuses it. */}
+      {showSellPreview && (
+        <>
+          <Divider sx={sectionDividerSx} />
+          <ListItemButton
+            onClick={() => onNavigate(`${SHOW_SELL_BASE}/units`)}
+            selected={isActive(`${SHOW_SELL_BASE}/units`)}
+            sx={navItemSx}
+            data-testid="nav-units"
+          >
+            <ListItemIcon>
+              <GroupWorkIcon />
+            </ListItemIcon>
+            <ListItemText primary="Units" />
+          </ListItemButton>
+          <ListItemButton
+            onClick={() => onNavigate(`${SHOW_SELL_BASE}/join`)}
+            selected={isActive(`${SHOW_SELL_BASE}/join`)}
+            sx={navItemSx}
+            data-testid="nav-join-campaign"
+          >
+            <ListItemIcon>
+              <CardGiftcardIcon />
+            </ListItemIcon>
+            <ListItemText primary="Join a Campaign" />
+          </ListItemButton>
+        </>
+      )}
+
       <Divider sx={sectionDividerSx} />
 
       <ListItemButton onClick={() => onNavigate('/settings')} selected={isActive('/settings')} sx={navItemSx}>
@@ -223,6 +257,7 @@ const DrawerContent: React.FC<{
 
 export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   const { account, logout, isAdmin } = useAuth();
+  const { enabled: showSellPreview } = useShowSellPreview();
   const [mobileDrawerOpen, setMobileDrawerOpen] = React.useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -278,6 +313,7 @@ export const AppLayout: React.FC<{ children?: React.ReactNode }> = ({ children }
       mobileDrawerOpen={mobileDrawerOpen}
       hasSharedCampaigns={hasSharedCampaigns}
       isAdmin={Boolean(isAdmin)}
+      showSellPreview={showSellPreview}
       children={children}
     />
   );
@@ -293,6 +329,7 @@ const AppLayoutView: React.FC<{
   mobileDrawerOpen: boolean;
   hasSharedCampaigns: boolean;
   isAdmin: boolean;
+  showSellPreview: boolean;
   children?: React.ReactNode;
 }> = ({
   isDesktop,
@@ -304,6 +341,7 @@ const AppLayoutView: React.FC<{
   mobileDrawerOpen,
   hasSharedCampaigns,
   isAdmin,
+  showSellPreview,
   children,
 }) => (
   <Box sx={{ display: 'flex' }}>
@@ -417,6 +455,7 @@ const AppLayoutView: React.FC<{
           isActive={isActive}
           hasSharedCampaigns={hasSharedCampaigns}
           isAdmin={isAdmin}
+          showSellPreview={showSellPreview}
           displayName={displayName}
           onLogout={onLogout}
         />
@@ -437,6 +476,7 @@ const AppLayoutView: React.FC<{
           isActive={isActive}
           hasSharedCampaigns={hasSharedCampaigns}
           isAdmin={isAdmin}
+          showSellPreview={showSellPreview}
           displayName={displayName}
           onLogout={onLogout}
         />

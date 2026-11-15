@@ -661,7 +661,7 @@ Direct grant authorization and invite redemption use consistent base-table reads
 | `UNIT_CAMPAIGN#<unitCampaignId>` | `MEMBERSHIP#<profileId>` | `UnitCampaignMembership` (one immutable `campaignId` per Scout) |
 | `PROFILE#<profileId>` | `COMMITMENT_GUARD` | `ScoutCommitmentGuard` |
 | `PROFILE#<profileId>` | `COMMITMENT#<startAt>#<unitCampaignId>#<slotId>` | `ScoutCommitment` projection across all campaigns |
-| `JOIN_CODE#<joinCode>` | `UNIT_CAMPAIGN#<unitCampaignId>` | Join-code pointer |
+| `JOIN_CODE#<joinCode>` | `POINTER` | Join-code pointer — one reservation row per code, so a second claim on the same code fails the write rather than the read that preceded it |
 | `SCOUT_CAMPAIGN#<campaignId>` | `MEMBERSHIP_GUARD` | `ScoutCampaignMembershipGuard` / authoritative active-join lock |
 | `UNIT_CAMPAIGN#<unitCampaignId>#SCOUT_CAMPAIGN#<campaignId>` | `SHOW_AND_SELL_TOTAL` | Unit-Campaign-scoped `ScoutCampaignShowAndSellTotal` |
 

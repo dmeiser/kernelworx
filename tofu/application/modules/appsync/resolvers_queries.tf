@@ -635,3 +635,137 @@ resource "aws_appsync_resolver" "public_order_receipt" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# === SHOW & SELL — UNIT TENANT QUERIES (Stage 1, §1.5.6 / §1.7) ===============
+# All nine Stage 1 Unit reads run on the unit-operations Lambda through one
+# data source: each query needs the same Unit Admin grant lookup as the
+# mutations, so splitting the reads out would put tenant isolation in two
+# places. lambda_unit_resolver.js is the module's standard direct Lambda
+# invoker (#337 payload, #329 structured errors). The handler refuses any
+# fieldName it does not own, so an unwired SDL field fails closed.
+
+resource "aws_appsync_resolver" "my_units" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "myUnits"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unit"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_admins" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitAdmins"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_invites" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitInvites"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_campaign_join_info" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignJoinInfo"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_campaign" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaign"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_campaign_catalog" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignCatalog"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_campaigns" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaigns"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_campaign_roster" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignRoster"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

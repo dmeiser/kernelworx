@@ -2,6 +2,12 @@ import { util } from '@aws-appsync/utils';
 import { normalizeIdOrPrefix } from './lib/ids.js';
 
 export function request(ctx) {
+    // LOCATOR ONLY. The campaign item's base-table key is (profileId, campaignId),
+    // and the caller knows only campaignId, so this GSI query exists to learn the
+    // key. Nothing downstream may trust the projection it returns: get_campaign_strong_for_order_fn
+    // re-reads the item from the base table immediately, and that read is what the
+    // catalog gate, the isActive default, and the Order's origin are taken from.
+    //
     // The GSI key is the DB form, so normalize before the lookup: create_order_fn
     // normalizes its own copy, but an unprefixed input would already have failed
     // this Step 1 query (#717).

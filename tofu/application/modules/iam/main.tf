@@ -802,6 +802,110 @@ resource "aws_iam_role_policy" "lambda_public_orders_dynamodb" {
   policy = data.aws_iam_policy_document.lambda_public_orders_dynamodb.json
 }
 
+# =============================================================================
+# Unit tenant Lambda (Wave 2 §1.7 / SCOPE-1): one function serves the 19 Stage 1
+# Unit/Unit Campaign operations. Scoped like every other domain role (#326).
+#
+# DynamoDB scope verified against the handler source including the shared
+# helpers it calls, and pinned behaviorally by
+# tests/unit/test_unit_tenant_role_scope.py (which records the real
+# (table, action) pairs the ten mutations issue and fails on any pair this
+# policy does not grant):
+#   - units / unit_campaigns: the aggregate tables every Stage 1 row and
+#     idempotency marker lives on — full item actions plus the transaction.
+#   - public_order_throttles: GetItem/UpdateItem, the invite redemption counter.
+#   - accounts / catalogs / profiles / shares / campaigns: reads (authorization,
+#     display, and the join's campaign locator through campaignId-index).
+#   - campaigns: one UpdateItem on the base table, the joined-scope link §8.2
+#     requires in the join's transaction. The only legacy write in Stage 1.
+# =============================================================================
+
+resource "aws_iam_role" "lambda_unit_tenant_execution" {
+  name               = "${var.name_prefix}-lambda-unit-tenant-exec${local.role_suffix}"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_unit_tenant_basic" {
+  role       = aws_iam_role.lambda_unit_tenant_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
+  # The two aggregate tables carry every Stage 1 write except the one legacy
+  # join link scoped below: Unit rows, admin grants, invites, Unit Campaigns,
+  # rosters, membership guards, and the idempotency markers all live on them,
+  # and every Stage 1 mutation commits its plan through TransactWriteItems
+  # (hence ConditionCheckItem; the marker/fingerprint guards ride those
+  # transactions).
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:BatchGetItem",
+      "dynamodb:Query",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [
+      var.dynamodb_table_arns["units"],
+      "${var.dynamodb_table_arns["units"]}/index/*",
+      var.dynamodb_table_arns["unit_campaigns"],
+      "${var.dynamodb_table_arns["unit_campaigns"]}/index/*",
+    ]
+  }
+
+  # The redemption throttle counter reuses the shared throttle table: one
+  # atomic UpdateItem increment per failed invite redemption, TTL-expired.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
+    resources = [var.dynamodb_table_arns["public_order_throttles"]]
+  }
+
+  # Authorization and join inputs that live outside the Unit tables: Profile
+  # ownership/shares, the catalog usability guard, the account directory for
+  # invite/grant display, and the legacy Campaign read behind the join guard.
+  # Reads only; the single legacy write Stage 1 makes is scoped below.
+  statement {
+    effect  = "Allow"
+    actions = ["dynamodb:GetItem", "dynamodb:BatchGetItem", "dynamodb:Query"]
+    resources = concat(
+      [for k in ["accounts", "campaigns", "catalogs", "profiles", "shares"] : var.dynamodb_table_arns[k]],
+      [for k in ["accounts", "campaigns", "catalogs", "profiles", "shares"] : "${var.dynamodb_table_arns[k]}/index/*"],
+    )
+  }
+
+  # The one legacy write Stage 1 makes (§8.2): joinUnitCampaign points the
+  # joined Scout Campaign at its Unit Campaign on the campaigns table inside
+  # the same transaction as the membership, the roster and the membership
+  # guard, so a Scout Campaign is never joined in one row and unjoined in the
+  # other. Removal never rewrites the pair — the link is history and only the
+  # guard says whether it is current (§5.6). Base table only: the
+  # campaignId-index GSI is how the join locates the campaign and is never
+  # written. TransactWriteItems rides with UpdateItem because the item actions
+  # are not permission to invoke the transaction API
+  # (docs/specs/show_sell/SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md §4.2),
+  # and without it the whole join cancels with AccessDeniedException.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:UpdateItem", "dynamodb:TransactWriteItems"]
+    resources = [var.dynamodb_table_arns["campaigns"]]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_unit_tenant_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_unit_tenant_execution.id
+  policy = data.aws_iam_policy_document.lambda_unit_tenant_dynamodb.json
+}
+
 data "aws_iam_policy_document" "lambda_public_orders_s3" {
   # Grants only what the buyer's pre-signed QR GETs need at request time. The
   # handler itself never calls S3 (signing is local), so this statement is
@@ -1021,6 +1125,11 @@ output "lambda_payment_execution_role_arn" {
 output "lambda_profile_sharing_execution_role_arn" {
   description = "ARN of the scoped Lambda execution role for the profile/sharing domain (transfer-ownership, delete-profile-cascade). Chunk 2 of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
   value       = aws_iam_role.lambda_profile_sharing_execution.arn
+}
+
+output "lambda_unit_tenant_execution_role_arn" {
+  description = "Scoped execution role for the unit-operations Lambda (Unit tenant, Wave 2)."
+  value       = aws_iam_role.lambda_unit_tenant_execution.arn
 }
 
 output "lambda_public_orders_execution_role_arn" {

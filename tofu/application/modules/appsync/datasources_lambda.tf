@@ -25,6 +25,19 @@ resource "aws_appsync_datasource" "unit_reporting" {
   }
 }
 
+# Wave 2 Unit tenant (§1.7 / SCOPE-1): one data source behind all 19 Stage 1
+# Unit/Unit Campaign operations. The handler routes on info.fieldName, exactly
+# as the public-orders router does, so tenant isolation lives in one place.
+resource "aws_appsync_datasource" "unit_operations" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "UnitOperationsDS"
+  type             = "AWS_LAMBDA"
+  service_role_arn = var.appsync_service_role_arn
+
+  lambda_config {
+    function_arn = var.lambda_function_arns["unit-operations"]
+  }
+}
 
 resource "aws_appsync_datasource" "delete_campaign_orders" {
   api_id           = aws_appsync_graphql_api.main.id

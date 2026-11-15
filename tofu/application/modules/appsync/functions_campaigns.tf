@@ -463,19 +463,13 @@ resource "aws_appsync_function" "throttle_public_order_create" {
   code = file("${local.js_resolvers_dir}/throttle_public_order_create_fn.js")
 }
 
-# Step 6: the cap CONDITION (atomic ADD on the campaign). Runs before the write.
-resource "aws_appsync_function" "increment_public_order_count" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.campaigns.name
-  name        = "IncrementPublicOrderCountFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/increment_public_order_count_fn.js")
-}
+# Retired by the ARCH-1 fold: the cap CONDITION (atomic ADD on the Campaign)
+# now rides inside create_public_order's TransactWriteItems, so the standalone
+# IncrementPublicOrderCountFn step is gone. The resource is deleted rather than
+# left unreferenced: an orphan function still ships a bundle and invites a
+# re-add that silently pushes the pipeline back over AppSync's 10-function cap.
+# History lives in git; create_public_order_fn pins the folded ADD and the
+# condition that enforces the cap.
 
 # #746: maintain the denormalized Campaign.totalOrders / Campaign.totalRevenue
 # counters on the campaign item. Runs AFTER the order write in the

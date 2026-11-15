@@ -49,6 +49,23 @@ resource "aws_appsync_datasource" "campaigns" {
   }
 }
 
+# Show & Sell §1.4 (data model §5.5-§5.6): Unit Campaign metadata, Scout
+# memberships, and the per-campaign join guard. The order pipelines read the guard
+# through this source because it is the only strongly consistent answer to "which
+# Unit Campaign is this Scout Campaign joined to right now"; the Campaign row's own
+# link is a latest-link that removal retains.
+resource "aws_appsync_datasource" "unit_campaigns" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "UnitCampaignsDS"
+  type             = "AMAZON_DYNAMODB"
+  service_role_arn = var.appsync_service_role_arn
+
+  dynamodb_config {
+    table_name = var.dynamodb_table_names.unit_campaigns
+    region     = var.aws_region
+  }
+}
+
 resource "aws_appsync_datasource" "orders" {
   api_id           = aws_appsync_graphql_api.main.id
   name             = "OrdersDS"

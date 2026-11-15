@@ -104,6 +104,45 @@ resource "aws_appsync_function" "get_campaign_for_order" {
   code = file("${local.js_resolvers_dir}/get_campaign_for_order_fn.js")
 }
 
+# Strongly consistent re-read of the campaign the GSI locator above found. The
+# base table is keyed by (profileId, campaignId), so the GSI query is needed only
+# to learn the key; every check and the Order's origin come from this item.
+resource "aws_appsync_function" "get_campaign_strong_for_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.campaigns.name
+  name        = "GetCampaignStrongForOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_campaign_strong_for_order_fn.js")
+}
+
+# The join guard read (data model §5.6): which Unit Campaign this Scout Campaign
+# is joined to at this moment. §1.4.3 requires an Order to record that, and the
+# Campaign row cannot answer it -- removal keeps the link there.
+resource "aws_appsync_function" "get_membership_guard_for_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.unit_campaigns.name
+  name        = "GetMembershipGuardForOrderFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_membership_guard_for_order_fn.js")
+}
+
+# Retired by the ARCH-1 fold: the guard row carries the parent Unit beside the
+# pointer (denormalized by the join claim, cleared by removal), so the minter
+# needs no second lookup. The resource is deleted rather than left unreferenced:
+# an orphan function still ships a bundle and invites a re-add that silently
+# pushes the pipeline back over the 10-function cap. History lives in git;
+# get_membership_guard_for_order_fn.test.js pins the guard-only read.
+
 resource "aws_appsync_function" "get_catalog" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.catalogs.name
@@ -127,7 +166,15 @@ resource "aws_appsync_function" "create_order" {
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/create_order_fn.js")
+  # templatefile() (not file()): FUNC-3 makes this write a TransactWriteItems
+  # whenever a membership guard row exists, and each transact item's `table`
+  # field must be the REAL AWS table name (AppSync takes it literally rather
+  # than defaulting to the datasource's table - same lesson as
+  # create_public_order_fn.js above).
+  code = templatefile("${local.js_resolvers_dir}/create_order_fn.js", {
+    orders_table_name         = var.dynamodb_table_names.orders
+    unit_campaigns_table_name = var.dynamodb_table_names.unit_campaigns
+  })
 }
 
 resource "aws_appsync_function" "query_order" {
@@ -220,8 +267,9 @@ resource "aws_appsync_function" "create_public_order" {
   # escaping rules are the module-wide ones (#570): every surviving
   # dollar-brace sequence is interpolated, so a literal must be written $${...}.
   code = templatefile("${local.js_resolvers_dir}/create_public_order_fn.js", {
-    orders_table_name    = var.dynamodb_table_names.orders
-    campaigns_table_name = var.dynamodb_table_names.campaigns
+    orders_table_name         = var.dynamodb_table_names.orders
+    campaigns_table_name      = var.dynamodb_table_names.campaigns
+    unit_campaigns_table_name = var.dynamodb_table_names.unit_campaigns
   })
 }
 

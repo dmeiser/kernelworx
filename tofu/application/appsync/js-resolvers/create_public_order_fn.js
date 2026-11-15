@@ -1,7 +1,8 @@
 import { util } from '@aws-appsync/utils';
 import { enrichLineItems } from './lib/line_items.js';
 import { buildOrderKey } from './lib/order_keys.js';
-import { composePublicOrderReceipt } from './lib/public_order.js';
+import { composePublicOrderReceipt, PUBLIC_ORDER_CAP, isConditionFailure } from './lib/public_order.js';
+import { orderOrigin, membershipGuardCurrencyCheck, cancelledTransactIndexes } from './lib/order_origin.js';
 
 // Loaded via Terraform templatefile() (functions_orders.tf): a dollar-brace
 // sequence here is Terraform-interpolated, not JS. In a template/string literal
@@ -16,9 +17,10 @@ import { composePublicOrderReceipt } from './lib/public_order.js';
 // integration run on the mega branch).
 const ordersTableName = '${orders_table_name}';
 const campaignsTableName = '${campaigns_table_name}';
+const unitCampaignsTableName = '${unit_campaigns_table_name}';
 
-// Step 7 of the publicCreateOrder pipeline (#679 write slice, spec §5.3):
-// write the order. A CLONE of create_order_fn.js that shares its price and
+// Step 6 of the publicCreateOrder pipeline (#679 write slice, spec §5.3):
+// write the order AND enforce the cap. A CLONE of create_order_fn.js that shares its price and
 // line-item core (lib/line_items.js) but reads the STASH, not ctx.args.input -
 // the values that passed the anonymous-input checks are the trimmed, bounded
 // ones step 2 mapped, and re-reading the caller's raw input here would write
@@ -46,33 +48,47 @@ const campaignsTableName = '${campaigns_table_name}';
 // path carries the same gap. Fixing that path is a separate issue - silently
 // changing live authenticated behavior is not this slice's call.
 //
-// ARCH-1 fix: race between public order creation and campaign deletion.
-// The increment_public_order_count step (step 6) increments the campaign's
-// publicOrderCount with a condition that the campaign row exists. However,
-// the campaign could be deleted between step 6 and this step (step 7), leaving
-// an orphaned order under a deleted campaign. To prevent this, the write runs
-// as a TransactWriteItems with two operations (each transact item MUST carry
-// its own `operation` field - AppSync rejects an item without one):
-//   1. UpdateItem on the campaigns table: maintains the denormalized
-//      totalOrders/totalRevenue counters (#746) AND, through its condition,
-//      verifies the campaign item still exists (attribute_exists(campaignId)
-//      on the campaign's partition key) - the ARCH-1 existence guard. The
-//      guard lives ON this UpdateItem, not on a standalone ConditionCheck,
-//      because DynamoDB rejects a transaction with two operations on the
-//      same item ("Transaction request cannot include multiple operations on
-//      one item"), and the counters must live on exactly this item.
+// ARCH-1 fix, both halves: the folded cap ADD below replaces the old
+// increment_public_order_count step (this resolver is at the 10-function cap,
+// so the cap gate had to move into this transaction), and the race with
+// campaign deletion is closed the same way. The write runs as a
+// TransactWriteItems with two operations, plus a third when a guard row was
+// read (each transact item MUST carry its own `operation` field - AppSync
+// rejects an item without one):
+//   1. UpdateItem on the campaigns table: the cap ADD plus the
+//      denormalized totalOrders/totalRevenue counters (#746), with one
+//      condition that is both the authoritative cap bound and the existence
+//      guard. A concurrent deleteCampaign deletes this same item, failing the
+//      condition and cancelling the whole transaction, so no orphaned order is
+//      ever written. The guard lives ON this UpdateItem, not on a standalone
+//      ConditionCheck, because DynamoDB rejects a transaction with two
+//      operations on the same item ("Transaction request cannot include
+//      multiple operations on one item"), and both ADDs must live on exactly
+//      this item.
 //   2. PutItem on the orders table: writes the order row.
-// The totals update rides INSIDE the transaction rather than as a follow-up
-// sync_campaign_totals pipeline step because the publicCreateOrder resolver
-// is already at AppSync's 10-function cap; atomic is also strictly better -
+//   3. ConditionCheck on the membership guard row (FUNC-3), present only when
+//      the pipeline read a guard: a removal, move, or rejoin after the strong
+//      read fails the pin and cancels the transaction, so the joined scope
+//      this Order stamps is the one that was current at commit -- or nothing
+//      commits at all.
+// One UpdateItem instead of the old UpdateItem-plus-step because the
+// publicCreateOrder resolver is at AppSync's 10-function cap; atomic is also
+// strictly better -
 // order row and counters commit or cancel together, so the partial-failure
 // drift documented on sync_campaign_totals_fn cannot occur on this path.
 // Both operations succeed or fail atomically, so a concurrent campaign deletion
 // (which deletes the campaign item) cancels the transaction with
 // TransactionCanceledException and no order row is written. The cap itself is
-// still enforced only by step 6 - this transaction's condition guards
-// existence, not the count, so a cancellation here means the campaign is
-// gone and surfaces as NOT_FOUND, never as a limit error.
+// enforced only by this transaction now: a cancellation whose campaigns-item
+// reason fired means the cap bound refused or the campaign row is gone - the
+// single condition cannot tell them apart, and the retired increment step
+// answered that union as PUBLIC_ORDER_LIMIT_EXCEEDED with its
+// PUBLIC_ORDER_CAP_REJECTED marker, so the folded transaction keeps that
+// answer (HTTP 200, counted by the public-cap-rejected filter, invisible to
+// the 4XX alarm). A cancellation whose guard-pin reason fired is a membership
+// move, and answers CONFLICT so the buyer can retry against the new state.
+// Folding also retires the accepted overcount the standalone step documented:
+// the cap ADD is inside the transaction, so a cancelled create burns nothing.
 //
 // Result-shape note: a successful TransactWriteItems returns
 // {keys: [<each item's key>], cancellationReasons: null} - the written
@@ -139,6 +155,16 @@ export function request(ctx) {
         updatedAt: now
     };
 
+    // §1.4.3 (API-FIX-05): a public order belongs to the Unit the campaign was
+    // joined to at the moment of sale. Unfulfilled public orders count toward
+    // that Unit's Council demand, so the answer comes from the membership guard
+    // the pipeline read strongly, not from the campaign's latest-link pair that
+    // removal retains. The fields are storage-only: no public read selects them
+    // (public API-key surface guard).
+    const origin = orderOrigin(stash.membershipGuard);
+    orderItem.unitId = origin.unitId;
+    orderItem.unitCampaignId = origin.unitCampaignId;
+
     if (mapped.customerEmail) {
         orderItem.customerEmail = mapped.customerEmail;
     }
@@ -165,53 +191,86 @@ export function request(ctx) {
         ctx.stash.orderItem = orderItem;
     }
 
-    // The campaign item's partition key is the profileId. We verify the
-    // campaign still exists before writing the order: a ConditionCheck on the
-    // campaign table plus the PutItem on the orders table, atomically.
+    // The campaign item's partition key is the profileId. The write runs as one
+    // transaction with three effects: the cap ADD (folded in from the old
+    // increment_public_order_count step, ARCH-1), the #746 totals ADD, and the
+    // order PutItem. Folding is what keeps this resolver at the 10-function cap:
+    // the ADD's own condition is the authoritative cap bound, and the totals
+    // ADD's attribute_exists doubles as the existence guard -- a concurrent
+    // deleteCampaign deletes this same item, failing the condition and
+    // cancelling the whole transaction, so no orphaned order is ever written.
+    // One transaction means one operation on this item is forbidden twice:
+    // DynamoDB rejects two transact items on the same key, so the cap and the
+    // totals ride a single ADD with both counters. Nothing burns on a
+    // cancelled transaction -- the ADDs apply only on commit, so even the
+    // accepted overcount the standalone step documented is retired here.
+    // The guard pin (FUNC-3), appended last when a guard row was read, makes
+    // the stamped origin current-at-commit or the order simply does not commit.
+    // FUNC-3: the join-scope stamp is only as honest as the write that carries
+    // it. When a guard row was read, the transaction pins it: a removal, a
+    // move, or a rejoin between the strong read and this commit fails the
+    // ConditionCheck and cancels the whole transaction, so no Order commits
+    // with a scope that was not current at commit. The pin rides LAST, so the
+    // response's positional reading of the cancellation reasons is stable.
+    const transactItems = [
+        {
+            // UpdateItem on the campaigns table: the cap ADD plus the #746
+            // denormalized totalOrders/totalRevenue counters, atomically.
+            operation: 'UpdateItem',
+            table: campaignsTableName,
+            key: util.dynamodb.toMapValues({ profileId: profileId, campaignId: campaignId }),
+            update: {
+                expression: 'ADD #publicOrderCount :one, #totalOrders :one, #totalRevenue :amount',
+                expressionNames: { '#publicOrderCount': 'publicOrderCount', '#totalOrders': 'totalOrders', '#totalRevenue': 'totalRevenue' },
+                expressionValues: util.dynamodb.toMapValues({ ':one': 1, ':amount': orderItem.totalAmount })
+            },
+            condition: {
+                expression: 'attribute_exists(campaignId) AND (attribute_not_exists(#publicOrderCount) OR #publicOrderCount < :cap)',
+                expressionNames: { '#publicOrderCount': 'publicOrderCount' },
+                expressionValues: util.dynamodb.toMapValues({ ':cap': PUBLIC_ORDER_CAP })
+            }
+        },
+        {
+            // PutItem: write the order row.
+            operation: 'PutItem',
+            table: ordersTableName,
+            key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),
+            attributeValues: util.dynamodb.toMapValues(orderItem)
+        }
+    ];
+    const guardPin = membershipGuardCurrencyCheck(unitCampaignsTableName, campaignId, stash.membershipGuard);
+    if (guardPin !== null) {
+        transactItems.push(guardPin);
+    }
     return {
         operation: 'TransactWriteItems',
-        transactItems: [
-            {
-                // UpdateItem on the campaigns table (#746): maintains the
-                // denormalized totalOrders/totalRevenue counters, and through
-                // its condition verifies the campaign item still exists (the
-                // ARCH-1 guard). A concurrent deleteCampaign deletes this
-                // item, failing the condition and cancelling the entire
-                // transaction. DynamoDB forbids two operations on one item in
-                // a transaction, so the existence guard cannot be a separate
-                // ConditionCheck on this same item.
-                operation: 'UpdateItem',
-                table: campaignsTableName,
-                key: util.dynamodb.toMapValues({ profileId: profileId, campaignId: campaignId }),
-                update: {
-                    expression: 'ADD #totalOrders :one, #totalRevenue :amount',
-                    expressionNames: { '#totalOrders': 'totalOrders', '#totalRevenue': 'totalRevenue' },
-                    expressionValues: util.dynamodb.toMapValues({ ':one': 1, ':amount': orderItem.totalAmount })
-                },
-                condition: {
-                    expression: 'attribute_exists(campaignId)'
-                }
-            },
-            {
-                // PutItem: write the order row.
-                operation: 'PutItem',
-                table: ordersTableName,
-                key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),
-                attributeValues: util.dynamodb.toMapValues(orderItem)
-            }
-        ]
+        transactItems: transactItems
     };
 }
 
 export function response(ctx) {
     if (ctx.error) {
-        // A cancellation at this step means the ConditionCheck found no
-        // campaign row: the campaign was deleted between step 6's increment
-        // and this write. No order row was written (the transaction is
-        // atomic). The cap is enforced only by step 6, so this is a
-        // NOT_FOUND, not a limit error.
+        // A cancellation lists one reason per transact item, in the order of
+        // request(): [0] the campaigns UpdateItem (cap bound + row existence,
+        // one condition), [1] the orders PutItem (no condition), [2] the guard
+        // pin (only when a guard row was read). Item 0 failing cannot say
+        // whether the cap refused or the campaign was deleted -- the retired
+        // increment step answered that union as the limit error with its
+        // CloudWatch marker (the public-cap-rejected filter counts
+        // PUBLIC_ORDER_CAP_REJECTED; cap rejections answer HTTP 200 and stay
+        // invisible to the 4XX alarm), and the folded transaction keeps that
+        // answer. Item 2 failing is a membership move: the join scope stamped
+        // here would not have been current at commit, so the order is refused
+        // (CONFLICT) and the buyer's retry re-reads the guard. Marker only --
+        // no campaign material.
         if (ctx.error.type === 'DynamoDB:TransactionCanceledException') {
-            util.error('Campaign is no longer available', 'NOT_FOUND');
+            const failed = cancelledTransactIndexes(ctx.error);
+            if (failed.indexOf(2) !== -1) {
+                util.error('The campaign changed while this order was being placed; try again', 'CONFLICT');
+                return null;
+            }
+            console.error('PUBLIC_ORDER_CAP_REJECTED');
+            util.error('This campaign has reached its public order limit', 'PUBLIC_ORDER_LIMIT_EXCEEDED');
             return null;
         }
         util.error(ctx.error.message, ctx.error.type);

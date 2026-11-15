@@ -15,8 +15,13 @@ import { util } from '@aws-appsync/utils';
 //                                       ownership confirmation; SEC-4)
 //   get_catalog                       (CatalogsDS, reused as-is)
 //   validate_payment_method_public    (AccountsDS, clone: no name oracle)
-//   increment_public_order_count      (CampaignsDS, the cap CONDITION)
-//   create_public_order               (OrdersDS, the PutItem + receipt mint)
+//   get_membership_guard_for_order    (UnitCampaignsDS, §5.6 join guard: the
+//                                       current join, read strongly; carries the
+//                                       parent Unit beside the pointer)
+//   create_public_order               (OrdersDS, cap ADD folded into the
+//                                       TransactWriteItems + receipt mint;
+//                                       ARCH-1 keeps this resolver at the
+//                                       10-function cap)
 //   send_public_order_emails          (PublicOrdersDS, best-effort SES send)
 // The root passes the write step's composed receipt through. It is a pass-
 // through rather than an empty resolver because the mutation's return type is

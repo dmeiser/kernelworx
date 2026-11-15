@@ -1,7 +1,7 @@
 """Tests for src/utils/dynamodb.py - centralized table access utilities."""
 
 import os
-from typing import Generator
+from typing import Any, Generator
 from unittest.mock import MagicMock, patch
 
 import boto3
@@ -16,6 +16,11 @@ from src.utils.dynamodb import (
     reset_dynamodb_resource,
     reset_singleton,
     tables,
+)
+from tests.unit.table_schemas import (
+    create_public_order_throttles_table_schema,
+    create_unit_campaigns_table_schema,
+    create_units_table_schema,
 )
 
 
@@ -32,6 +37,9 @@ def reset_between_tests(aws_credentials: None) -> Generator[None, None, None]:
         "CATALOGS_TABLE_NAME",
         "INVITES_TABLE_NAME",
         "SHARED_CAMPAIGNS_TABLE_NAME",
+        "UNITS_TABLE_NAME",
+        "UNIT_CAMPAIGNS_TABLE_NAME",
+        "PUBLIC_ORDER_THROTTLES_TABLE_NAME",
     ]
     original_values = {k: os.environ.get(k) for k in table_env_vars}
 
@@ -296,6 +304,85 @@ class TestTableProperties:
                 reset_singleton()
                 table = tables.shared_campaigns
                 assert table.name == "custom-shared-campaigns"
+
+
+class TestShowAndSellTableAccessors:
+    """Show & Sell Stage 1 accessors (data model §6.1-6.2, impact map §3.4/§4.4).
+
+    ``public_order_throttles`` already existed as an AWS table but had no
+    accessor: the Unit-invite redemption throttle reuses it under a distinct
+    key contract, so the helper layer needs the handle.
+    """
+
+    @pytest.mark.parametrize(
+        ("accessor", "env_name"),
+        [
+            ("units", "UNITS_TABLE_NAME"),
+            ("unit_campaigns", "UNIT_CAMPAIGNS_TABLE_NAME"),
+            ("public_order_throttles", "PUBLIC_ORDER_THROTTLES_TABLE_NAME"),
+        ],
+    )
+    def test_missing_env_raises(self, aws_credentials: None, accessor: str, env_name: str) -> None:
+        """Each accessor reads its own environment variable and fails loudly without it."""
+        with mock_aws():
+            with pytest.raises(ValueError, match=f"Required environment variable '{env_name}' is not set"):
+                _ = getattr(tables, accessor)
+
+    @pytest.mark.parametrize(
+        ("accessor", "env_name", "schema_factory", "custom_name"),
+        [
+            ("units", "UNITS_TABLE_NAME", create_units_table_schema, "custom-units"),
+            (
+                "unit_campaigns",
+                "UNIT_CAMPAIGNS_TABLE_NAME",
+                create_unit_campaigns_table_schema,
+                "custom-unit-campaigns",
+            ),
+            (
+                "public_order_throttles",
+                "PUBLIC_ORDER_THROTTLES_TABLE_NAME",
+                create_public_order_throttles_table_schema,
+                "custom-throttles",
+            ),
+        ],
+    )
+    def test_custom_table_name(
+        self,
+        aws_credentials: None,
+        accessor: str,
+        env_name: str,
+        schema_factory: Any,
+        custom_name: str,
+    ) -> None:
+        """The accessor resolves the name from the environment, not a convention."""
+        with mock_aws():
+            dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+            schema = schema_factory()
+            schema["TableName"] = custom_name
+            ttl = schema.pop("TimeToLiveSpecification", None)
+            dynamodb.create_table(**schema)
+            if ttl is not None:
+                dynamodb.meta.client.update_time_to_live(TableName=custom_name, TimeToLiveSpecification=ttl)
+            with patch.dict(os.environ, {env_name: custom_name}):
+                reset_singleton()
+                assert getattr(tables, accessor).name == custom_name
+
+    def test_overrides_apply_to_new_tables(self) -> None:
+        """override_table works for the new logical names (test monkeypatch support)."""
+        units = MagicMock()
+        units.name = "mock-units"
+        unit_campaigns = MagicMock()
+        unit_campaigns.name = "mock-unit-campaigns"
+        throttles = MagicMock()
+        throttles.name = "mock-throttles"
+
+        override_table("units", units)
+        override_table("unit_campaigns", unit_campaigns)
+        override_table("public_order_throttles", throttles)
+
+        assert tables.units is units
+        assert tables.unit_campaigns is unit_campaigns
+        assert tables.public_order_throttles is throttles
 
 
 class TestTableOverrides:
