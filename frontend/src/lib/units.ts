@@ -244,20 +244,59 @@ async function readConnectionPage<T>(
   return data ? data[read.field] : undefined;
 }
 
-/** The cursor to read next, or null when this page is the end of the connection. */
-function nextCursorOf(page: Partial<ConnectionPage<unknown>>): string | null {
+/**
+ * The cursor to read next, or null when this page is the end of the connection.
+ *
+ * A page that claims more but cannot say how to reach it is refused, not
+ * treated as the end: `hasNextPage: true` with no cursor means the drain would
+ * stop with rows it has admitted exist still unfetched, and presenting that
+ * partial list as complete is exactly the silence §1.5.6 rules out.
+ */
+function nextCursorOf(page: Partial<ConnectionPage<unknown>>, read: ConnectionRead, readCursor: string): string | null {
   const info = page.pageInfo;
-  return info && info.hasNextPage ? (info.endCursor ?? null) : null;
+  if (!info || !info.hasNextPage) return null;
+  return advanceCursorOf(info.endCursor ?? null, read, readCursor);
 }
 
+/**
+ * The cursor that advances this walk, or the fault that says it cannot.
+ *
+ * Two shapes make the walk unsound rather than merely finished: no cursor at
+ * all, and a cursor that names the page already read (the same page answers
+ * forever). Both throw, because a caller that renders what it collected has to
+ * know that the list is not complete.
+ */
+function advanceCursorOf(end: string | null, read: ConnectionRead, readCursor: string): string | null {
+  if (end === null) {
+    throw new Error(`connection ${read.field} reports a next page with no cursor`);
+  }
+  if (end === readCursor) {
+    // Reading the same cursor again answers the same page forever: a cursor
+    // that does not advance is a broken pagination contract, not a slow one.
+    throw new Error(`connection ${read.field} cursor did not advance`);
+  }
+  return end;
+}
+
+/**
+ * Walk a connection to its end, from `cursor` onward.
+ *
+ * Every way the walk can come apart — a field missing from the response, a
+ * page claiming a next page it cannot name, a cursor that never moves — throws
+ * rather than returning what it has collected: a caller that renders the result
+ * as the full list must never be handed a prefix of it and told, by silence,
+ * that it is everything.
+ */
 export async function drainConnection<T>(client: ApolloClient, read: ConnectionRead, cursor: string): Promise<T[]> {
   const items: T[] = [];
   let next: string | null = cursor;
   while (next) {
     const page = await readConnectionPage<T>(client, read, next);
-    if (!page) break;
+    if (!page) {
+      throw new Error(`connection query returned no ${read.field} payload`);
+    }
     items.push(...(page.items ?? []));
-    next = nextCursorOf(page);
+    next = nextCursorOf(page, read, next);
   }
   return items;
 }

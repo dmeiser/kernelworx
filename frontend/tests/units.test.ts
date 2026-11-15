@@ -156,30 +156,50 @@ describe('naming', () => {
     ]);
   });
 
-  it('stops a cursor walk on a page that cannot name the next one, and refuses one that failed', async () => {
-    const answers: unknown[] = [
-      // A page that claims more but issues no cursor cannot be walked further.
-      { myUnits: { items: ['a'], pageInfo: { hasNextPage: true } } },
-    ];
-    const client = { query: async () => ({ data: answers.shift() }) };
-    await expect(drainConnection(client as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1')).resolves.toEqual(['a']);
+  it('refuses every way a cursor walk can present a partial list as complete', async () => {
+    // PERF-1: a page that claims more but issues no cursor is a broken
+    // pagination contract. Stopping there would render the prefix as the whole
+    // list, so the drain throws instead.
+    const cursorless = {
+      query: async () => ({ data: { myUnits: { items: ['a'], pageInfo: { hasNextPage: true } } } }),
+    };
+    await expect(
+      drainConnection(cursorless as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1'),
+    ).rejects.toThrow('reports a next page with no cursor');
 
-    // A connection that is not in the response at all ends the walk rather than
-    // inventing an empty page.
+    // A cursor that answers the same page again never advances the walk; it is
+    // a loop, not a slow server.
+    const stuck = {
+      query: async () => ({ data: { myUnits: { items: ['a'], pageInfo: { endCursor: 'cursor-1', hasNextPage: true } } } }),
+    };
+    await expect(
+      drainConnection(stuck as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1'),
+    ).rejects.toThrow('cursor did not advance');
+
+    // A connection that is not in the response at all is a refused read, not an
+    // empty list.
     const missing = { query: async () => ({ data: {} }) };
-    await expect(drainConnection(missing as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1')).resolves.toEqual([]);
+    await expect(
+      drainConnection(missing as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1'),
+    ).rejects.toThrow('returned no myUnits payload');
+
+    // A response with no data at all is refused for the same reason.
+    const noData = { query: async () => ({}) };
+    await expect(
+      drainConnection(noData as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1'),
+    ).rejects.toThrow('returned no myUnits payload');
 
     // A page that carries no items contributes nothing rather than throwing.
     const noItems = { query: async () => ({ data: { myUnits: { pageInfo: { hasNextPage: false } } } }) };
-    await expect(drainConnection(noItems as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1')).resolves.toEqual([]);
-
-    // A response with no data at all ends the walk rather than fabricating a page.
-    const noData = { query: async () => ({}) };
-    await expect(drainConnection(noData as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1')).resolves.toEqual([]);
+    await expect(
+      drainConnection(noItems as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1'),
+    ).resolves.toEqual([]);
 
     // A failed read is an error, not a short list: the caller has to be able to tell
     // "there is no more" from "I could not find out".
     const failed = { query: async () => ({ error: new Error('offline') }) };
-    await expect(drainConnection(failed as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1')).rejects.toThrow('offline');
+    await expect(
+      drainConnection(failed as never, { query: {} as never, field: 'myUnits', limit: 50 }, 'cursor-1'),
+    ).rejects.toThrow('offline');
   });
 });

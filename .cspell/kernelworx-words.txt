@@ -550,9 +550,11 @@ actuals
 autonumber
 CUST
 DTEND
+cursorless
 DTSTAMP
 DTSTART
 finalizable
+noload
 inspectable
 oversum
 PITR
@@ -567,8 +569,10 @@ Transactionally
 unconfirm
 unconfirmation
 unconfirms
+unfetched
 unfinalized
 unrequested
+unwired
 VCALENDAR
 VEVENT
 waitlist

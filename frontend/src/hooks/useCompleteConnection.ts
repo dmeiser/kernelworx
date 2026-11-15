@@ -65,8 +65,15 @@ export function useCompleteConnection<T>(
   const { cursor, more } = continuationOf(firstPage);
 
   useEffect(() => {
-    if (!more || !cursor) {
+    if (!more) {
       setRest(noRest());
+      return;
+    }
+    if (!cursor) {
+      // The first page says there is more and hands back no way to reach it.
+      // Saying nothing would render the prefix as the whole list; the panel
+      // gets the same failed state a failed continuation gets.
+      setRest({ items: [], loading: false, failed: true });
       return;
     }
     let active = true;
