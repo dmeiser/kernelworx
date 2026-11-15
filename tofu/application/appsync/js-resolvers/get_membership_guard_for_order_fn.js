@@ -17,11 +17,12 @@ export function request(ctx) {
         util.error('campaignId is required to read the join guard', 'INVALID_INPUT');
     }
     return {
-        operation: 'Get',
+        operation: 'GetItem',
         key: util.dynamodb.toMapValues({
             pk: 'SCOUT_CAMPAIGN#' + campaignId,
             sk: 'MEMBERSHIP_GUARD'
-        })
+        }),
+        consistentRead: true
     };
 }
 

@@ -3,9 +3,10 @@ import assert from 'node:assert';
 import { request, response } from './get_campaign_strong_for_order_fn.js';
 
 describe('get_campaign_strong_for_order_fn request', () => {
-    it('gets the campaign by its base-table key, which only the locator could supply', () => {
+    it('gets the campaign by its base-table key, strongly, which only the locator could supply', () => {
         const result = request({ stash: { campaign: { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#c1' } } });
-        assert.strictEqual(result.operation, 'Get');
+        assert.strictEqual(result.operation, 'GetItem');
+        assert.strictEqual(result.consistentRead, true);
         assert.deepStrictEqual(result.key, { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#c1' });
     });
 

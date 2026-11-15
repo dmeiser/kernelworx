@@ -5,7 +5,8 @@ import { request, response } from './get_membership_guard_for_order_fn.js';
 describe('get_membership_guard_for_order_fn request', () => {
     it('gets the guard addressed by the campaign alone, strongly', () => {
         const result = request({ stash: { campaignId: 'CAMPAIGN#c1' } });
-        assert.strictEqual(result.operation, 'Get');
+        assert.strictEqual(result.operation, 'GetItem');
+        assert.strictEqual(result.consistentRead, true);
         assert.deepStrictEqual(result.key, { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD' });
     });
 

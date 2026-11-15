@@ -17,11 +17,12 @@ export function request(ctx) {
         util.error('Campaign not found', 'NOT_FOUND');
     }
     return {
-        operation: 'Get',
+        operation: 'GetItem',
         key: util.dynamodb.toMapValues({
             profileId: String(located.profileId),
             campaignId: String(located.campaignId)
-        })
+        }),
+        consistentRead: true
     };
 }
 
