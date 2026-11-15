@@ -91,6 +91,18 @@ def _put(units_table: Any, item: Dict[str, Any]) -> None:
     units_table.put_item(Item=item)
 
 
+def _live_created_at() -> datetime:
+    """A creation instant whose 14-day expiry is still ahead of the wall clock.
+
+    ``read_invite`` applies the expiry against ``datetime.now`` — it has no
+    ``now`` parameter to pin — so an invite row stamped on a fixed calendar day
+    stops reading as active the day its 14 days run out, whatever the code does.
+    The two reads that go through it stamp their rows live; the shape assertions
+    keep the fixed instant so their expected text stays exact.
+    """
+    return datetime.now(timezone.utc)
+
+
 # --- key layout (data model §6.1) ------------------------------------------------
 
 
@@ -389,7 +401,9 @@ def test_invite_reads_by_code_alone(units_table: Any) -> None:
     """Redemption knows only the credential: the invite is addressed by pk."""
     _put(
         units_table,
-        build_invite_item(invite_code=CODE_ACTIVE, unit_id=PACK_ID, created_by_account_id=AVERY, created_at=CREATED_AT),
+        build_invite_item(
+            invite_code=CODE_ACTIVE, unit_id=PACK_ID, created_by_account_id=AVERY, created_at=_live_created_at()
+        ),
     )
     found = read_invite(CODE_ACTIVE)
     assert found is not None
@@ -401,7 +415,7 @@ def test_invite_reads_by_code_alone(units_table: Any) -> None:
 def test_revoked_and_consumed_invites_read_identically(units_table: Any) -> None:
     """Deleting the row is how revocation and redemption both take an invite out."""
     item = build_invite_item(
-        invite_code=CODE_ACTIVE, unit_id=PACK_ID, created_by_account_id=AVERY, created_at=CREATED_AT
+        invite_code=CODE_ACTIVE, unit_id=PACK_ID, created_by_account_id=AVERY, created_at=_live_created_at()
     )
     _put(units_table, item)
     assert read_invite(CODE_ACTIVE) is not None
