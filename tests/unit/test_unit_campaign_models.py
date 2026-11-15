@@ -137,6 +137,8 @@ def test_catalog_visibility_follows_the_way_the_catalog_read_grants_it() -> None
     assert ucm.catalog_visible_to({"catalogId": "CATALOG#a", "ownerAccountId": "ACCOUNT#avery"}, "ACCOUNT#avery")
     assert not ucm.catalog_visible_to({"catalogId": "CATALOG#a", "isPublic": False, "ownerAccountId": "ACCOUNT#blake"}, "ACCOUNT#avery")
     assert not ucm.catalog_visible_to(None, "ACCOUNT#avery")
+    assert ucm.catalog_visible_to({"catalogId": "CATALOG#a", "ownerAccountId": "ACCOUNT#avery"}, "avery")
+    assert ucm.catalog_visible_to({"catalogId": "CATALOG#a", "ownerAccountId": "avery"}, "ACCOUNT#avery")
 def test_key_layout_matches_the_data_model() -> None:
     """Every row type lands on the §6.2 partition/sort pair — no drift allowed."""
     assert ucm.unit_campaign_metadata_key(PACK_ID) == {"pk": f"UNIT_CAMPAIGN#{PACK_ID}", "sk": "METADATA"}

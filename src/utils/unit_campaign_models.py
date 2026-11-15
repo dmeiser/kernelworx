@@ -45,6 +45,7 @@ from boto3.dynamodb.conditions import Key
 
 from .dynamodb import tables
 from .errors import AppError, ErrorCode
+from .ids import ensure_account_id
 from .mutations import wire_key, wire_value
 from .pagination import query_all_items
 from .unit_models import MAX_ID_LENGTH, METADATA_SK, normalize_required_text
@@ -532,7 +533,7 @@ def catalog_visible_to(catalog: Optional[Dict[str, Any]], account_id: str) -> bo
     return bool(
         catalog.get("isPublic") is True
         or catalog.get("catalogType") == "ADMIN_MANAGED"
-        or catalog.get("ownerAccountId") == account_id
+        or ensure_account_id(catalog.get("ownerAccountId")) == ensure_account_id(account_id)
     )
 
 
