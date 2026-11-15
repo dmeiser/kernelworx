@@ -444,8 +444,13 @@ def test_a_throttled_attempt_counter_stays_retryable(units_table: Any, monkeypat
     assert _grant_accounts(units_table, PACK_ID) == []
 
 
-def test_a_broken_replay_never_writes_a_second_result(units_table: Any, monkeypatch: Any) -> None:
-    """A committed marker whose rows vanished is an internal fault, not a re-attempt."""
+def test_a_replay_of_a_consumed_invite_returns_the_original_answer(units_table: Any, monkeypatch: Any) -> None:
+    """Redemption deletes the invite, and a grant can be revoked afterwards.
+
+    Neither row is a place a retry can re-derive its answer from, so the marker
+    carries the answer: the caller of a committed request gets the same result
+    again, and nothing is written a second time.
+    """
     from src.utils import unit_auth, unit_models
 
     _seed_unit(units_table, PACK_ID, admins=[AVERY])
@@ -454,12 +459,10 @@ def test_a_broken_replay_never_writes_a_second_result(units_table: Any, monkeypa
     redeemed = _redeem(CASEY, CODE_A, "replay-redeem")
 
     monkeypatch.setattr(unit_models, "read_invite", lambda invite_code: None)
-    assert_is_error(_invite_call(CREATE_INVITE_FIELD, AVERY, key="replay-invite"), ErrorCode.INTERNAL_ERROR)
+    assert _invite_call(CREATE_INVITE_FIELD, AVERY, key="replay-invite") == created
     monkeypatch.setattr(unit_auth, "read_grant", lambda unit_id, account_id: None)
-    assert_is_error(_redeem(CASEY, CODE_A, "replay-redeem"), ErrorCode.INTERNAL_ERROR)
+    assert _redeem(CASEY, CODE_A, "replay-redeem") == redeemed
 
-    # Neither broken replay minted a second invite or a second grant.
-    assert created["inviteCode"] and redeemed["accountId"] == CASEY
     assert len(_marker_rows(units_table)) == 2
     assert _invite_pks(units_table) == [f"INVITE#{created['inviteCode']}"]
     assert sorted(_grant_accounts(units_table, PACK_ID)) == sorted([AVERY, CASEY])

@@ -15,6 +15,7 @@ stub client because moto cannot throttle on demand.
 
 from __future__ import annotations
 
+import json
 import time
 from decimal import Decimal
 from typing import Any, cast
@@ -461,6 +462,85 @@ class TestExecute:
             assert stored["resultId"] == {"S": "UNIT#u-9"}
             assert stored["fingerprint"] == {"S": fingerprint}
 
+    def test_the_completed_marker_carries_the_result_a_retry_replays(self) -> None:
+        """The retry answers with the payload, not with a re-read of the rows.
+
+        SEC-1's contract at the helper level: the answer the first attempt was
+        authorized to produce is stored with the marker, so a retry of a
+        committed mutation returns THAT result even after the rows it describes
+        have moved on or been consumed.
+        """
+        with mock_aws():
+            client = _client()
+            runner = IdempotentMutationRunner(client)
+            keys = _keys()
+            fingerprint = normalized_fingerprint(_payload())
+            plan = _staged_plan(client, keys, fingerprint, extra=[_unit_put("u-1")])
+            runner.execute(
+                keys,
+                plan,
+                operation="createUnit",
+                fingerprint=fingerprint,
+                result_id="UNIT#u-1",
+                result_payload=lambda: {"unitId": "UNIT#u-1", "version": 1},
+            )
+            stored = _get(client, keys)
+            assert stored is not None
+            assert json.loads(stored["resultPayload"]["S"]) == {"unitId": "UNIT#u-1", "version": 1}
+
+            def loader(result_id: str) -> str:  # pragma: no cover - must never run
+                raise AssertionError(f"the loader must not run when the marker carries its result: {result_id}")
+
+            replayed = runner.execute(
+                keys,
+                _staged_plan(client, keys, fingerprint, extra=[_unit_put("u-1")]),
+                operation="createUnit",
+                fingerprint=fingerprint,
+                result_id="UNIT#u-1",
+                load_result=loader,
+            )
+            assert replayed == {"unitId": "UNIT#u-1", "version": 1}
+            assert client.scan(TableName=UNITS_TABLE)["Count"] == 2
+
+    def test_a_result_that_cannot_be_serialized_completes_and_replays_from_the_loader(self) -> None:
+        """A payload fault is not a reason to fail a committed mutation.
+
+        The transaction already committed; refusing the request would report a
+        write the caller did not get. The marker keeps its result reference, and
+        the retry falls back to the caller's loader — the narrow case that
+        loader exists for.
+        """
+        with mock_aws():
+            client = _client()
+            runner = IdempotentMutationRunner(client)
+            keys = _keys()
+            fingerprint = normalized_fingerprint(_payload())
+            plan = _staged_plan(client, keys, fingerprint, extra=[_unit_put("u-1")])
+            result_id = runner.execute(
+                keys,
+                plan,
+                operation="createUnit",
+                fingerprint=fingerprint,
+                result_id="UNIT#u-1",
+                result_payload=lambda: {"cannot": {1, 2}},  # a set: json.dumps raises TypeError
+            )
+            assert result_id == "UNIT#u-1"
+            stored = _get(client, keys)
+            assert stored is not None
+            assert stored["status"] == {"S": MARKER_STATUS_COMPLETED}
+            assert stored["resultId"] == {"S": "UNIT#u-1"}
+            assert "resultPayload" not in stored, "a payload that could not be stored is not a marker attribute"
+
+            replayed = runner.execute(
+                keys,
+                _staged_plan(client, keys, fingerprint, extra=[_unit_put("u-1")]),
+                operation="createUnit",
+                fingerprint=fingerprint,
+                result_id="UNIT#u-1",
+                load_result=lambda stored_id: f"replayed:{stored_id}",
+            )
+            assert replayed == "replayed:UNIT#u-1"
+
     def test_same_key_different_fingerprint_is_invalid_input_and_writes_nothing(self) -> None:
         with mock_aws():
             client = _client()
@@ -716,7 +796,23 @@ class TestExecute:
                 "status": {"S": MARKER_STATUS_COMPLETED},
                 "resultId": {"S": "UNIT#u-1"},
             }
-        ) == ("sha256:x", MARKER_STATUS_COMPLETED, "UNIT#u-1")
+        ) == ("sha256:x", MARKER_STATUS_COMPLETED, "UNIT#u-1", None)
+
+    def test_a_completed_marker_reads_back_the_result_it_replays(self) -> None:
+        """The payload is the authorized answer the first attempt returned. A
+        replay reads it verbatim rather than asking the table, which may have
+        moved on (an intervening update) or lost the row entirely (a redeemed
+        invite)."""
+        from src.utils.mutations import _marker_from_item
+
+        assert _marker_from_item(
+            {
+                "fingerprint": {"S": "sha256:x"},
+                "status": {"S": MARKER_STATUS_COMPLETED},
+                "resultId": {"S": "UNIT#u-1"},
+                "resultPayload": {"S": '{"unitId": "UNIT#u-1", "version": 2}'},
+            }
+        ) == ("sha256:x", MARKER_STATUS_COMPLETED, "UNIT#u-1", '{"unitId": "UNIT#u-1", "version": 2}')
 
     def test_unknown_marker_status_fails_closed(self) -> None:
         with mock_aws():

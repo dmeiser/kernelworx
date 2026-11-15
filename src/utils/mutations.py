@@ -378,7 +378,10 @@ def build_marker_item(
 
     The marker is an implementation detail, not a domain model (data model
     §8.9): it carries only the fingerprint, the status, and the original result
-    reference a completed retry replays.
+    reference a completed retry replays. The staged item carries no
+    ``resultPayload`` because at staging time there is no result to store: the
+    payload rides the flip to COMPLETED (``complete_marker``), which is the point
+    the mutation's answer exists.
     """
     item: dict[str, Any] = {
         "pk": {"S": keys.pk},
@@ -688,8 +691,8 @@ def _is_marker_condition_rejection(exc: BaseException) -> bool:
     return False
 
 
-def _marker_from_item(item: Mapping[str, Any]) -> tuple[str, str, Optional[str]]:
-    """Read ``(fingerprint, status, result_id)`` out of a marker item.
+def _marker_from_item(item: Mapping[str, Any]) -> tuple[str, str, Optional[str], Optional[str]]:
+    """Read ``(fingerprint, status, result_id, result_payload)`` out of a marker item.
 
     Raises:
         AppError: INTERNAL_ERROR when a marker we found does not carry the
@@ -703,17 +706,46 @@ def _marker_from_item(item: Mapping[str, Any]) -> tuple[str, str, Optional[str]]
         raise AppError(ErrorCode.INTERNAL_ERROR, _MARKER_CORRUPT_MESSAGE)
     if not isinstance(status, dict) or not isinstance(status.get("S"), str):
         raise AppError(ErrorCode.INTERNAL_ERROR, _MARKER_CORRUPT_MESSAGE)
-    result_id = item.get("resultId")
     return (
         fingerprint["S"],
         status["S"],
-        result_id["S"] if isinstance(result_id, dict) and isinstance(result_id.get("S"), str) else None,
+        _string_attribute(item.get("resultId")),
+        _string_attribute(item.get("resultPayload")),
     )
+
+
+def _string_attribute(value: Any) -> Optional[str]:
+    """The string of a DynamoDB ``S`` attribute, or None when it is absent."""
+    if isinstance(value, dict):
+        text = value.get("S")
+        if isinstance(text, str):
+            return text
+    return None
 
 
 def utc_now_iso() -> str:
     """Timestamp used for marker audit fields."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _render_result_payload(builder: Optional[Callable[[], Any]], *, operation: str, keys: MarkerKeys) -> Optional[str]:
+    """Serialize this mutation's result for the marker, or None if there is none.
+
+    A result that cannot be serialized is not a reason to fail a committed
+    mutation: the marker keeps its result reference and a retry falls back to the
+    caller's loader.
+    """
+    if builder is None:
+        return None
+    try:
+        return json.dumps(builder())
+    except TypeError, ValueError:
+        logger.warning(
+            "Idempotency result payload could not be stored; replay will re-read",
+            operation=operation,
+            table_name=keys.table_name,
+        )
+        return None
 
 
 class IdempotentMutationRunner:
@@ -777,7 +809,7 @@ class IdempotentMutationRunner:
         marker = self.load_marker(keys)
         if marker is None:
             return (False, None)
-        marker_fingerprint, status, result_id = _marker_from_item(marker)
+        marker_fingerprint, status, result_id, result_payload = _marker_from_item(marker)
         if marker_fingerprint != fingerprint:
             # Same key, different normalized content: never write, never replay.
             logger.warning(
@@ -798,17 +830,59 @@ class IdempotentMutationRunner:
         # writes already committed and only the status back-fill is pending. The
         # result reference was staged with the insert precisely so this retry is
         # answerable.
+        return (
+            True,
+            self._replayed_result(
+                keys,
+                operation=operation,
+                result_id=result_id,
+                result_payload=result_payload,
+                load_result=load_result,
+            ),
+        )
+
+    def _replayed_result(
+        self,
+        keys: MarkerKeys,
+        *,
+        operation: str,
+        result_id: Optional[str],
+        result_payload: Optional[str],
+        load_result: Optional[Callable[[str], Any]],
+    ) -> Any:
+        """The answer the first attempt was authorized to return.
+
+        A completed marker carries that answer verbatim (``resultPayload``), and
+        replaying the stored text is the whole contract. Re-reading the row
+        instead answers with whatever the row says NOW: after an intervening
+        update it is a different result than the caller already received, and for
+        a mutation that consumed its subject - a redeemed invite, a removed
+        membership - the row is gone and the retry of a committed request fails
+        outright.
+
+        Only a marker whose payload back-fill never happened (a process that died
+        between the commit and the flip) falls back to the caller's loader. That
+        is strictly better than refusing the retry, and it is the narrow case the
+        loader exists for.
+        """
+        if result_payload is not None:
+            try:
+                return json.loads(result_payload)
+            except ValueError:
+                logger.error(
+                    "Idempotency marker payload is unreadable", operation=operation, table_name=keys.table_name
+                )
+                raise AppError(ErrorCode.INTERNAL_ERROR, _MARKER_CORRUPT_MESSAGE) from None
         if load_result is None or result_id is None:
             logger.error(
                 "Idempotency marker cannot be replayed",
                 operation=operation,
                 table_name=keys.table_name,
-                marker_status=status,
                 has_result_id=result_id is not None,
                 has_loader=load_result is not None,
             )
             raise AppError(ErrorCode.INTERNAL_ERROR, _MARKER_CORRUPT_MESSAGE)
-        return (True, load_result(result_id))
+        return load_result(result_id)
 
     def execute(
         self,
@@ -819,6 +893,7 @@ class IdempotentMutationRunner:
         fingerprint: str,
         result_id: Optional[str] = None,
         load_result: Optional[Callable[[str], Any]] = None,
+        result_payload: Optional[Callable[[], Any]] = None,
         backfill_marker: bool = True,
     ) -> Any:
         """Run the whole contract for one mutation and return its result value.
@@ -832,8 +907,12 @@ class IdempotentMutationRunner:
             result_id: Identifier of the row this mutation creates, recorded in
                 the marker so a replay can be answered. Required when
                 ``load_result`` is given.
-            load_result: Called with the marker's stored ``resultId`` to rebuild
-                the original result for a completed retry.
+            load_result: Fallback for a marker whose payload back-fill never
+                happened: called with the stored ``resultId`` to rebuild a result.
+            result_payload: Called once after the transaction commits to produce
+                the result this mutation returns. It is stored on the marker so a
+                retry replays THAT result rather than re-deriving one from state
+                that may since have moved on or been consumed.
             backfill_marker: When True, the marker is flipped to COMPLETED with
                 the result id after the transaction commits.
 
@@ -883,7 +962,12 @@ class IdempotentMutationRunner:
                 ) from exc
             raise classified from exc
         if backfill_marker and result_id is not None:
-            self.complete_marker(keys, fingerprint=fingerprint, result_id=result_id)
+            self.complete_marker(
+                keys,
+                fingerprint=fingerprint,
+                result_id=result_id,
+                result_payload=_render_result_payload(result_payload, operation=operation, keys=keys),
+            )
         return result_id
 
     def stage_marker(self, plan: WritePlan, keys: MarkerKeys, *, fingerprint: str, result_id: str) -> None:
@@ -915,8 +999,15 @@ class IdempotentMutationRunner:
             },
         )
 
-    def complete_marker(self, keys: MarkerKeys, *, fingerprint: str, result_id: str) -> None:
-        """Flip a marker to COMPLETED with its result reference.
+    def complete_marker(
+        self,
+        keys: MarkerKeys,
+        *,
+        fingerprint: str,
+        result_id: str,
+        result_payload: Optional[str] = None,
+    ) -> None:
+        """Flip a marker to COMPLETED with its result reference and result.
 
         Conditional on the fingerprint and the in-flight status, so a concurrent
         writer that replaced the marker can never be overwritten by this
@@ -926,12 +1017,13 @@ class IdempotentMutationRunner:
             self._get_client().update_item(
                 TableName=keys.table_name,
                 Key={"pk": {"S": keys.pk}, "sk": {"S": keys.sk}},
-                UpdateExpression="SET #status = :completed, #resultId = :resultId, #updatedAt = :now",
+                UpdateExpression=_marker_completion_expression(result_payload),
                 ExpressionAttributeNames={
                     "#status": "status",
                     "#resultId": "resultId",
                     "#updatedAt": "updatedAt",
                     "#fingerprint": "fingerprint",
+                    **({"#payload": "resultPayload"} if result_payload is not None else {}),
                 },
                 ExpressionAttributeValues={
                     ":completed": {"S": MARKER_STATUS_COMPLETED},
@@ -939,8 +1031,22 @@ class IdempotentMutationRunner:
                     ":resultId": {"S": result_id},
                     ":now": {"S": utc_now_iso()},
                     ":fingerprint": {"S": fingerprint},
+                    **({":payload": {"S": result_payload}} if result_payload is not None else {}),
                 },
                 ConditionExpression="#fingerprint = :fingerprint AND #status = :in_flight",
             )
         except (ClientError, BotoCoreError) as exc:
             raise classify_transaction_error(exc, operation="completeIdempotencyMarker") from exc
+
+
+def _marker_completion_expression(result_payload: Optional[str]) -> str:
+    """The flip expression, with the result payload carried when one exists.
+
+    ``resultPayload`` is what makes a retry replay the authorized answer instead
+    of re-reading state that the first attempt - or a later one - has since
+    changed.
+    """
+    base = "SET #status = :completed, #resultId = :resultId, #updatedAt = :now"
+    if result_payload is None:
+        return base
+    return base + ", #payload = :payload"

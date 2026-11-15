@@ -498,14 +498,16 @@ def test_the_campaign_year_moves_with_the_season_it_names(seeded: Dict[str, Any]
     assert _read_campaign(PACK_3149_FALL)["campaignYear"] == 2027
 
 
-def test_a_replayed_create_that_lost_its_campaign_is_an_internal_fault(
+def test_a_replayed_create_answers_the_original_result_even_after_the_rows_moved(
     seeded: Dict[str, Any], unit_campaigns_table: Any
 ) -> None:
-    """A committed marker whose rows vanished is not answered by writing again."""
+    """The stored payload outlives the rows: a deactivation after the write does
+    not move the answer a retry replays."""
     created = _call(CREATE_UNIT_CAMPAIGN_FIELD, "Avery", input=_create_input())
-    unit_campaigns_table.delete_item(Key=ucm.unit_campaign_metadata_key(str(created["unitCampaignId"])))
-    assert_is_error(_call(CREATE_UNIT_CAMPAIGN_FIELD, "Avery", input=_create_input()), ErrorCode.INTERNAL_ERROR)
-    assert ucm.read_unit_campaign(str(created["unitCampaignId"])) is None
+    _update(str(created["unitCampaignId"]), "Avery", {"campaignName": "Renamed After"}, 1)
+    replayed = _call(CREATE_UNIT_CAMPAIGN_FIELD, "Avery", input=_create_input())
+    assert replayed == created
+    assert _read_campaign(str(created["unitCampaignId"]))["campaignName"] == "Renamed After"
 
 
 def test_update_is_refused_for_a_campaign_of_another_unit(seeded: Dict[str, Any]) -> None:
@@ -715,12 +717,23 @@ def test_two_first_joins_cannot_both_claim_the_slot(seeded: Dict[str, Any], monk
     assert _scout_campaign("Taylor")["unitCampaignId"] == PACK_3149_FALL
 
 
-def test_a_broken_join_replay_is_an_internal_fault(seeded: Dict[str, Any], campaigns_table: Any) -> None:
-    """The retry cannot re-derive a membership that is gone, and does not re-join."""
-    _join("Blake", FALL_CODE, _CAMPAIGN_OF["Blake"])
-    campaigns_table.delete_item(Key={"profileId": _PROFILE_OF["Blake"], "campaignId": _CAMPAIGN_OF["Blake"]})
-    assert_is_error(_join("Blake", FALL_CODE, _CAMPAIGN_OF["Blake"]), ErrorCode.INTERNAL_ERROR)
-    assert _read_membership(PACK_3149_FALL, "Blake")["status"] == "ACTIVE"
+def test_a_join_replay_answers_the_join_not_the_removal_that_followed(
+    seeded: Dict[str, Any], unit_campaigns_table: Any
+) -> None:
+    """The stored payload outlives the rows: a removal after the join does not
+    move the answer a retry replays, and the retry does not re-join."""
+    joined = _join("Blake", FALL_CODE, _CAMPAIGN_OF["Blake"], key="join-blake-1")
+    assert joined["status"] == "ACTIVE"
+    guard = ucm.read_membership_guard(_CAMPAIGN_OF["Blake"])
+    assert guard is not None and int(guard["membershipVersion"]) == 1
+    removed = _remove("Avery", PACK_3149_FALL, _CAMPAIGN_OF["Blake"], 1, 1)
+    assert removed["status"] == "REMOVED" and removed["removedByAccountId"] == AVERY, removed
+    # The retry authenticates first, and Blake still holds WRITE on the Scout
+    # profile, so the stored join answers instead of a re-join or a refusal.
+    replayed = _join("Blake", FALL_CODE, _CAMPAIGN_OF["Blake"], key="join-blake-1")
+    assert replayed == joined
+    assert _read_membership(PACK_3149_FALL, "Blake")["status"] == "REMOVED"
+    assert ucm.guard_active_unit_campaign_id(ucm.read_membership_guard(_CAMPAIGN_OF["Blake"])) is None
 
 
 def test_a_roster_entry_for_another_scout_campaign_conflicts(seeded: Dict[str, Any], unit_campaigns_table: Any) -> None:

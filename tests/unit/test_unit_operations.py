@@ -576,32 +576,150 @@ def test_a_non_integer_expected_version_is_rejected(units_table: Any) -> None:
     assert stored["version"] == 1 and stored["city"] == "Aurora"
 
 
-def test_a_replay_that_cannot_be_answered_is_an_internal_fault(units_table: Any, monkeypatch: Any) -> None:
-    """A committed marker whose rows vanished must not be answered by re-writing."""
-    from src.utils import unit_auth, unit_models
+def test_a_replay_answers_from_the_marker_not_from_the_rows_it_consumed(units_table: Any, monkeypatch: Any) -> None:
+    """A retry returns the result its first attempt was authorized to produce.
+
+    Re-reading the created rows would answer the same request twice with two
+    different answers -- or with an internal fault once a later write has moved or
+    removed them -- which is not what an idempotent retry promises.
+    """
+    from src.utils import unit_models
 
     created = _create(units_table, AVERY)
-    original_read_unit = unit_models.read_unit
 
     monkeypatch.setattr(unit_models, "read_unit", lambda unit_id: None)
+    replay = _create(units_table, AVERY)
+    assert replay == created
+
+    # The replay wrote nothing: still one Unit, one METADATA row.
+    assert len([row for row in _rows(units_table) if row["sk"] == "METADATA"]) == 1
+
+
+def test_a_replay_with_an_unreadable_payload_fails_closed(units_table: Any) -> None:
+    """A marker whose stored result cannot be read is an internal fault.
+
+    Answering it by re-running the mutation would apply a committed write twice,
+    which is the failure the marker exists to prevent.
+    """
+    from src.utils.dynamodb import get_dynamodb_client, tables
+
+    _create(units_table, AVERY)
+    marker = _markers(units_table)[0]
+    # Written through the wire-form client: the resource layer would store the
+    # {"S": ...} map as a nested attribute instead of a string.
+    get_dynamodb_client().update_item(
+        TableName=tables.units.table_name,
+        Key={"pk": {"S": marker["pk"]}, "sk": {"S": marker["sk"]}},
+        UpdateExpression="SET resultPayload = :bad",
+        ExpressionAttributeValues={":bad": {"S": "{not json"}},
+    )
+
     assert_is_error(_create(units_table, AVERY), ErrorCode.INTERNAL_ERROR)
-
-    monkeypatch.setattr(unit_models, "read_unit", original_read_unit)
-    monkeypatch.setattr(unit_auth, "read_grant", lambda unit_id, account_id: None)
-    assert_is_error(_create(units_table, AVERY), ErrorCode.INTERNAL_ERROR)
-
-    # Neither broken replay wrote a second Unit or grant.
-    rows = _rows(units_table)
-    assert len([row for row in rows if row["sk"] == "METADATA"]) == 1
-    assert created["unit"]["unitId"]
+    assert len([row for row in _rows(units_table) if row["sk"] == "METADATA"]) == 1
 
 
-def test_a_replayed_update_that_lost_its_unit_is_an_internal_fault(units_table: Any, monkeypatch: Any) -> None:
-    """The same rule on the update path: no fresh write behind a broken replay."""
-    _seed_unit(units_table, PACK_ID, admins=[AVERY])
-    updated = _update(units_table, AVERY, PACK_ID, 1, city="Boulder", key="u-lost")
+def test_a_replayed_update_reports_its_own_write_not_the_one_after_it(units_table: Any) -> None:
+    """An intervening update must not rewrite what a retry reports."""
+    _seed_unit(units_table, PACK_ID, admins=[AVERY, CASEY])
+    updated = _update(units_table, AVERY, PACK_ID, 1, city="Boulder", key="u-replay")
     assert updated["version"] == 2
 
-    units_table.delete_item(Key={"pk": f"UNIT#{PACK_ID}", "sk": "METADATA"})
-    replay = _update(units_table, AVERY, PACK_ID, 1, city="Boulder", key="u-lost")
-    assert_is_error(replay, ErrorCode.INTERNAL_ERROR)
+    # CASEY moves the same Unit afterwards. AVERY's retry is not about that write.
+    later = _update(units_table, CASEY, PACK_ID, 2, city="Denver", key="u-intervening")
+    assert later["version"] == 3
+
+    replay = _update(units_table, AVERY, PACK_ID, 1, city="Boulder", key="u-replay")
+    assert replay["version"] == 2
+    assert replay["city"] == "Boulder"
+
+    current = [row for row in _rows(units_table) if row["sk"] == "METADATA"][0]
+    assert current["city"] == "Denver", "the replay must not re-apply its own update"
+
+
+def test_a_revoked_admin_cannot_replay_an_older_update(units_table: Any) -> None:
+    """Current authorization runs before the replay short-circuit.
+
+    The marker belongs to the caller, but it is not a credential: a caller whose
+    admin grant was removed since the original attempt is denied the same way any
+    other request from them is, rather than being handed the answer an earlier
+    attempt produced.
+    """
+    _seed_unit(units_table, PACK_ID, admins=[AVERY, CASEY])
+    updated = _update(units_table, AVERY, PACK_ID, 1, city="Boulder", key="u-revoked")
+    assert updated["version"] == 2
+
+    revoked = _revoke(units_table, CASEY, PACK_ID, AVERY, 2, key="revoke-avery")
+    assert revoked["adminCount"] == 1
+
+    assert_is_error(_update(units_table, AVERY, PACK_ID, 1, city="Boulder", key="u-revoked"), ErrorCode.NOT_FOUND)
+    current = [row for row in _rows(units_table) if row["sk"] == "METADATA"][0]
+    assert current["city"] == "Boulder", "a denied replay must not write"
+
+
+# --- the loader fallback: a marker whose result payload was never stored -----
+
+
+def _strip_marker_payload(units_table: Any) -> None:
+    """Remove the stored result from the Unit's completed idempotency marker.
+
+    That is the shape of a marker whose payload never landed: the process died
+    between the commit and the flip, or the result could not be serialized. The
+    retry is then answered from the rows the mutation wrote, which is why the
+    loaders are still wired.
+    """
+    from src.utils.dynamodb import get_dynamodb_client, tables
+
+    marker = _markers(units_table)[0]
+    get_dynamodb_client().update_item(
+        TableName=tables.units.table_name,
+        Key={"pk": {"S": marker["pk"]}, "sk": {"S": marker["sk"]}},
+        UpdateExpression="REMOVE resultPayload",
+    )
+
+
+def test_a_replay_with_no_stored_payload_is_answered_from_the_rows(units_table: Any) -> None:
+    """The loader is a fallback, not a fault: a completed retry still replays."""
+    created = _create(units_table, AVERY)
+    _strip_marker_payload(units_table)
+
+    assert _create(units_table, AVERY) == created
+    assert len([row for row in _rows(units_table) if row["sk"] == "METADATA"]) == 1
+
+
+def test_a_replay_whose_created_unit_row_is_gone_reports_an_internal_fault(units_table: Any) -> None:
+    """A committed create whose row cannot be re-read is never answered as absent.
+
+    The caller is not naming a Unit it has no claim on; the handler is being
+    asked what its own committed write produced, and it cannot say. That is
+    INTERNAL_ERROR -- and the write is not re-run, which would duplicate a
+    committed mutation.
+    """
+    created = _create(units_table, AVERY)
+    unit_id = str(created["unit"]["unitId"])
+    _strip_marker_payload(units_table)
+    units_table.delete_item(Key={"pk": f"UNIT#{unit_id}", "sk": "METADATA"})
+
+    assert_is_error(_create(units_table, AVERY), ErrorCode.INTERNAL_ERROR)
+    assert [row for row in _rows(units_table) if row["sk"] == "METADATA"] == []
+
+
+def test_a_replay_whose_creator_grant_is_gone_reports_an_internal_fault(units_table: Any) -> None:
+    """Half a payload is not a payload: the grant half is read as strictly as the Unit."""
+    created = _create(units_table, AVERY)
+    unit_id = str(created["unit"]["unitId"])
+    _strip_marker_payload(units_table)
+    units_table.delete_item(Key={"pk": f"UNIT#{unit_id}", "sk": f"GRANT#{AVERY}"})
+
+    assert_is_error(_create(units_table, AVERY), ErrorCode.INTERNAL_ERROR)
+
+
+def test_a_replayed_update_with_nothing_to_load_reports_an_internal_fault(units_table: Any, monkeypatch: Any) -> None:
+    """The update's loader reports the same class of fault as the create's."""
+    from src.utils import unit_models
+
+    _seed_unit(units_table, PACK_ID, admins=[AVERY])
+    _update(units_table, AVERY, PACK_ID, 1, city="Boulder", key="u-noload")
+    _strip_marker_payload(units_table)
+
+    monkeypatch.setattr(unit_models, "read_unit", lambda unit_id: None)
+    assert_is_error(_update(units_table, AVERY, PACK_ID, 1, city="Boulder", key="u-noload"), ErrorCode.INTERNAL_ERROR)

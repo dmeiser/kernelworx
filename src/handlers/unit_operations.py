@@ -269,6 +269,24 @@ def _marker(*, caller_id: str, operation: str, scope: str, idempotency_key: str)
     )
 
 
+def _once(builder: Callable[[], Dict[str, Any]]) -> Callable[[], Dict[str, Any]]:
+    """Evaluate a result builder at most once.
+
+    The marker back-fill and the handler's own return must agree on exactly what
+    this mutation produced. Two separate reads could disagree when another writer
+    moves the row in between, and then the stored replay answer would not be the
+    answer the caller actually received.
+    """
+    stored: Dict[str, Dict[str, Any]] = {}
+
+    def read() -> Dict[str, Any]:
+        if not stored:
+            stored["value"] = builder()
+        return stored["value"]
+
+    return read
+
+
 def _replay(
     runner: Any, keys: Any, fingerprint: str, operation: str, load_result: Callable[[str], Any]
 ) -> Optional[Dict[str, Any]]:
@@ -322,15 +340,28 @@ def _put_action(item: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _loaded_or_internal(row: Optional[Mapping[str, Any]], what: str) -> Dict[str, Any]:
+    """The row a result is read from, or the internal fault when it is gone.
+
+    Every caller of this has just committed the row, or is replaying a marker
+    that says it committed. A row that cannot be read back is therefore not a
+    caller error and never a ``NOT_FOUND`` answer: it means the handler cannot
+    say what its own write produced, which is exactly what ``INTERNAL_ERROR``
+    reports. ``what`` names the row so the log identifies the fault without
+    describing the caller's data.
+    """
+    if row is None:
+        raise AppError(ErrorCode.INTERNAL_ERROR, f"{what}")
+    return dict(row)
+
+
 def _create_payload(unit_id: str) -> Dict[str, Any]:
     """Rebuild the ``CreateUnitPayload`` for a fresh write or a completed retry."""
-    unit = unit_models.read_unit(unit_id)
-    if unit is None:
-        raise AppError(ErrorCode.INTERNAL_ERROR, "created Unit could not be loaded")
-    unit = dict(unit)
-    grant = unit_auth.read_grant(str(unit["unitId"]), str(unit["createdByAccountId"]))
-    if grant is None:
-        raise AppError(ErrorCode.INTERNAL_ERROR, "creator access grant could not be loaded")
+    unit = _loaded_or_internal(unit_models.read_unit(unit_id), "created Unit could not be loaded")
+    grant = _loaded_or_internal(
+        unit_auth.read_grant(str(unit["unitId"]), str(unit["createdByAccountId"])),
+        "creator access grant could not be loaded",
+    )
     return {"unit": unit_payload(unit), "grant": grant_payload(grant)}
 
 
@@ -371,6 +402,7 @@ def _create_unit(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
             )
         ),
     )
+    build_result = _once(lambda: _create_payload(unit_id))
     runner.execute(
         keys,
         plan,
@@ -378,9 +410,10 @@ def _create_unit(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         fingerprint=fingerprint,
         result_id=unit_id,
         load_result=lambda stored: _create_payload(str(stored)),
+        result_payload=build_result,
     )
     log.info("Unit created", unit_id=unit_id, caller_id=caller_id)
-    return _create_payload(unit_id)
+    return build_result()
 
 
 # --- updateUnit (§1.2.2) ---------------------------------------------------------
@@ -418,10 +451,7 @@ _GEOGRAPHY: frozenset[str] = frozenset(_METADATA_FIELDS)
 
 def _require_stored_unit(unit_id: str) -> Dict[str, Any]:
     """Load a Unit this handler just wrote; a missing row is an internal fault."""
-    unit = unit_models.read_unit(unit_id)
-    if unit is None:
-        raise AppError(ErrorCode.INTERNAL_ERROR, "updated Unit could not be loaded")
-    return dict(unit)
+    return _loaded_or_internal(unit_models.read_unit(unit_id), "updated Unit could not be loaded")
 
 
 def _versioned_unit_update(unit_id: str, changes: Mapping[str, Any], *, expected_version: int) -> Dict[str, Any]:
@@ -451,10 +481,12 @@ def _versioned_unit_update(unit_id: str, changes: Mapping[str, Any], *, expected
 def _update_unit(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     """Apply a Unit Admin's metadata/settings change under ``expectedVersion``.
 
-    The replay check runs before the version guard for the same reason the
-    duplicate gate sits behind it: a completed retry must return the original
-    result rather than a ``CONFLICT`` against the version its own first attempt
-    wrote.
+    Current authorization runs FIRST: a caller whose admin grant was revoked
+    since the original attempt gets the same denial here as any other request,
+    not a replayed answer. Behind it, the replay check runs before the version
+    guard for the same reason the duplicate gate sits behind it: a completed
+    retry must return the original result rather than a ``CONFLICT`` against the
+    version its own first attempt wrote.
     """
     log = get_logger(__name__)
     payload = _require_input(event)
@@ -465,13 +497,13 @@ def _update_unit(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     runner = IdempotentMutationRunner()
 
     keys = _marker(caller_id=caller_id, operation=UPDATE_UNIT_FIELD, scope=unit_id, idempotency_key=key)
+    unit_auth.require_unit_admin(caller_id, unit_id)
     replayed = _replay(
         runner, keys, fingerprint, UPDATE_UNIT_FIELD, lambda stored: unit_payload(_require_stored_unit(str(stored)))
     )
     if replayed is not None:
         return replayed
 
-    unit_auth.require_unit_admin(caller_id, unit_id)
     current = unit_models.load_unit_or_not_found(unit_id)
     changes = _changed_fields(payload)
     _refresh_metadata_key(current, changes)
@@ -481,6 +513,7 @@ def _update_unit(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=unit_id)
     plan.add("Update", _versioned_unit_update(unit_id, changes, expected_version=expected_version))
+    build_result = _once(lambda: unit_payload(_require_stored_unit(unit_id)))
     runner.execute(
         keys,
         plan,
@@ -488,10 +521,11 @@ def _update_unit(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         fingerprint=fingerprint,
         result_id=unit_id,
         load_result=lambda stored: unit_payload(_require_stored_unit(str(stored))),
+        result_payload=build_result,
     )
-    refreshed = _require_stored_unit(unit_id)
-    log.info("Unit updated", unit_id=unit_id, caller_id=caller_id, version=refreshed["version"])
-    return unit_payload(refreshed)
+    result = build_result()
+    log.info("Unit updated", unit_id=unit_id, caller_id=caller_id, version=result["version"])
+    return result
 
 
 # --- revokeUnitAccessGrant (§1.2.3) ----------------------------------------------
@@ -525,9 +559,11 @@ def _revoke_grant(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
 
     Revoking the caller's own grant is allowed while another admin remains — the
     product renders no self-removal control, and the direct-API denial of the
-    final grant (UNIT-M-06-02) comes from the same guard either way. The replay
-    check runs first so an identical retry of a completed revocation cannot fall
-    over the grant its own first attempt deleted.
+    final grant (UNIT-M-06-02) comes from the same guard either way. The caller's
+    current admin status is checked first, so a revoked caller cannot use a
+    replay to read the answer an earlier attempt produced; behind it, the replay
+    check runs before the grant lookup so an identical retry of a completed
+    revocation cannot fall over the grant its own first attempt deleted.
     """
     log = get_logger(__name__)
     payload = _require_input(event)
@@ -539,13 +575,13 @@ def _revoke_grant(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     runner = IdempotentMutationRunner()
 
     keys = _marker(caller_id=caller_id, operation=REVOKE_GRANT_FIELD, scope=unit_id, idempotency_key=key)
+    unit_auth.require_unit_admin(caller_id, unit_id)
     replayed = _replay(
         runner, keys, fingerprint, REVOKE_GRANT_FIELD, lambda stored: unit_payload(_require_stored_unit(str(stored)))
     )
     if replayed is not None:
         return replayed
 
-    unit_auth.require_unit_admin(caller_id, unit_id)
     unit = unit_models.load_unit_or_not_found(unit_id)
     if unit_auth.read_grant(unit_id, target_account_id) is None:
         raise AppError(ErrorCode.NOT_FOUND, "Unit access grant not found")
@@ -565,6 +601,7 @@ def _revoke_grant(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         },
     )
     plan.add("Update", _grant_count_update(unit_id, expected_version=expected_version))
+    build_result = _once(lambda: unit_payload(_require_stored_unit(unit_id)))
     runner.execute(
         keys,
         plan,
@@ -572,16 +609,17 @@ def _revoke_grant(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         fingerprint=fingerprint,
         result_id=unit_id,
         load_result=lambda stored: unit_payload(_require_stored_unit(str(stored))),
+        result_payload=build_result,
     )
-    refreshed = _require_stored_unit(unit_id)
+    result = build_result()
     log.info(
         "Unit access grant revoked",
         unit_id=unit_id,
         caller_id=caller_id,
         revoked_account_id=target_account_id,
-        admin_count=refreshed["adminCount"],
+        admin_count=result["adminCount"],
     )
-    return unit_payload(refreshed)
+    return result
 
 
 # --- Unit invites (§1.3.1, §1.3.2, §1.3.3) --------------------------------------
@@ -645,11 +683,11 @@ def _create_invite(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     runner = IdempotentMutationRunner()
 
     keys = _marker(caller_id=caller_id, operation=CREATE_INVITE_FIELD, scope=unit_id, idempotency_key=key)
+    _require_active_admin(caller_id, unit_id)
     replayed = _replay(runner, keys, fingerprint, CREATE_INVITE_FIELD, lambda stored: _loaded_invite(str(stored)))
     if replayed is not None:
         return replayed
 
-    _require_active_admin(caller_id, unit_id)
     active = unit_models.list_active_invites(unit_id)
     if len(active) >= MAX_ACTIVE_UNIT_INVITES:
         raise AppError(
@@ -668,6 +706,7 @@ def _create_invite(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=invite_code)
     plan.add("Put", _put_action(item))
+    build_result = _once(lambda: _loaded_invite(invite_code))
     runner.execute(
         keys,
         plan,
@@ -675,17 +714,17 @@ def _create_invite(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         fingerprint=fingerprint,
         result_id=invite_code,
         load_result=lambda stored: _loaded_invite(str(stored)),
+        result_payload=build_result,
     )
     log.info("Unit invite created", unit_id=unit_id, caller_id=caller_id, invite_expires_at=item["expiresAt"])
-    return _loaded_invite(invite_code)
+    # The invite this call created is stored on the marker, so a retry of it is
+    # answered even after the code is redeemed or revoked and the row is gone.
+    return build_result()
 
 
 def _loaded_invite(invite_code: str) -> Dict[str, Any]:
     """Load the invite a request just created or must replay."""
-    invite = unit_models.read_invite(invite_code)
-    if invite is None:
-        raise AppError(ErrorCode.INTERNAL_ERROR, "unit invite could not be loaded")
-    return invite_payload(invite)
+    return invite_payload(_loaded_or_internal(unit_models.read_invite(invite_code), "unit invite could not be loaded"))
 
 
 def _current_redemption_window() -> tuple[str, int]:
@@ -776,9 +815,9 @@ def _attempt_counter_failure(exc: ClientError) -> "AppErrorType":
 
 def _redeemed_payload(unit_id: str, account_id: str) -> Dict[str, Any]:
     """Load the grant a redemption produced (or must replay)."""
-    grant = unit_auth.read_grant(unit_id, account_id)
-    if grant is None:
-        raise AppError(ErrorCode.INTERNAL_ERROR, "redeemed Unit access grant could not be loaded")
+    grant = _loaded_or_internal(
+        unit_auth.read_grant(unit_id, account_id), "redeemed Unit access grant could not be loaded"
+    )
     return grant_payload(grant)
 
 
@@ -847,6 +886,7 @@ def _redeem_invite(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         )
         plan.add("Put", _put_action(grant))
         plan.add("Update", _grant_count_increment(unit_id))
+    build_result = _once(lambda: _redeemed_payload(unit_id, caller_id))
     runner.execute(
         keys,
         plan,
@@ -854,9 +894,13 @@ def _redeem_invite(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         fingerprint=fingerprint,
         result_id=unit_id,
         load_result=lambda stored: _redeemed_payload(str(stored), caller_id),
+        result_payload=build_result,
     )
     log.info("Unit invite redeemed", unit_id=unit_id, caller_id=caller_id, already_admin=existing is not None)
-    return _redeemed_payload(unit_id, caller_id)
+    # The grant the redemption produced rides on the marker: the invite row is
+    # deleted by this very transaction, and the grant can be revoked afterwards,
+    # so neither is a reliable place to re-derive the answer from.
+    return build_result()
 
 
 def _delete_invite_action(invite: Mapping[str, Any]) -> Dict[str, Any]:
@@ -909,11 +953,11 @@ def _revoke_invite(event: Dict[str, Any], caller_id: str) -> bool:
     runner = IdempotentMutationRunner()
 
     keys = _marker(caller_id=caller_id, operation=REVOKE_INVITE_FIELD, scope=unit_id, idempotency_key=key)
+    _require_active_admin(caller_id, unit_id)
     replayed = _replay(runner, keys, fingerprint, REVOKE_INVITE_FIELD, lambda stored: True)
     if replayed is not None:
         return True
 
-    _require_active_admin(caller_id, unit_id)
     invite = unit_models.read_invite(invite_code) if unit_models.is_valid_invite_code(invite_code) else None
     if invite is None or str(invite["unitId"]) != unit_id:
         raise AppError(ErrorCode.NOT_FOUND, "Invite not found")
@@ -928,6 +972,7 @@ def _revoke_invite(event: Dict[str, Any], caller_id: str) -> bool:
         fingerprint=fingerprint,
         result_id=invite_code,
         load_result=lambda stored: True,
+        result_payload=lambda: True,
     )
     log.info("Unit invite revoked", unit_id=unit_id, caller_id=caller_id)
     return True
@@ -1134,9 +1179,9 @@ def _require_usable_catalog(catalog_id: str, caller_id: str) -> None:
 
 def _created_campaign_payload(unit_campaign_id: str) -> Dict[str, Any]:
     """Reload a campaign this handler just wrote, for the result and for replay."""
-    campaign = unit_campaign_models.read_unit_campaign(unit_campaign_id)
-    if campaign is None:
-        raise AppError(ErrorCode.INTERNAL_ERROR, "created Unit Campaign could not be loaded")
+    campaign = _loaded_or_internal(
+        unit_campaign_models.read_unit_campaign(unit_campaign_id), "created Unit Campaign could not be loaded"
+    )
     return campaign_payload(campaign)
 
 
@@ -1159,6 +1204,12 @@ def _create_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     keys = _campaign_marker(
         caller_id=caller_id, operation=CREATE_UNIT_CAMPAIGN_FIELD, scope=unit_id, idempotency_key=key
     )
+    # Authorization runs before the replay: a caller whose admin grant was
+    # revoked since the original attempt gets the same denial as any other
+    # request, not a replayed answer.
+    unit_auth.require_unit_admin(caller_id, unit_id)
+    _require_usable_catalog(catalog_id, caller_id)
+
     replayed = _replay(
         runner,
         keys,
@@ -1168,9 +1219,6 @@ def _create_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     )
     if replayed is not None:
         return replayed
-
-    unit_auth.require_unit_admin(caller_id, unit_id)
-    _require_usable_catalog(catalog_id, caller_id)
 
     unit_campaign_id = str(unit_campaign_models.new_unit_campaign_id())
     now_iso = utc_now_iso()
@@ -1192,6 +1240,7 @@ def _create_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=unit_campaign_id)
     for action, body in unit_campaign_models.create_campaign_actions(campaign, pointer):
         plan.add(action, body)
+    build_result = _once(lambda: _created_campaign_payload(unit_campaign_id))
     runner.execute(
         keys,
         plan,
@@ -1199,6 +1248,7 @@ def _create_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         fingerprint=fingerprint,
         result_id=unit_campaign_id,
         load_result=lambda stored: _created_campaign_payload(str(stored)),
+        result_payload=build_result,
     )
     log.info(
         "Unit Campaign created",
@@ -1207,7 +1257,9 @@ def _create_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         caller_id=caller_id,
         catalog_id=catalog_id,
     )
-    return _created_campaign_payload(unit_campaign_id)
+    # The created row rides on the marker, because a deactivation or a catalog
+    # change after this write would otherwise move the answer a retry replays.
+    return build_result()
 
 
 # --- updateUnitCampaign (§1.5.2) -------------------------------------------------
@@ -1283,9 +1335,11 @@ def _update_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     """Rename, re-year, or deactivate a Unit Campaign under ``expectedVersion``.
 
     Tenancy is read off the stored campaign rather than the request, so an admin
-    of one Unit cannot write another Unit's campaign by guessing its id. The
-    replay check precedes the version guard for the usual reason: a completed
-    retry must not collide with the version its own first attempt wrote.
+    of one Unit cannot write another Unit's campaign by guessing its id. Current
+    authorization runs first: a caller whose grant lapsed answers FORBIDDEN, not a
+    replayed campaign. Behind it, the replay check precedes the version guard for
+    the usual reason: a completed retry must not collide with the version its own
+    first attempt wrote.
     """
     log = get_logger(__name__)
     payload = _require_input(event)
@@ -1298,6 +1352,8 @@ def _update_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     keys = _campaign_marker(
         caller_id=caller_id, operation=UPDATE_UNIT_CAMPAIGN_FIELD, scope=unit_campaign_id, idempotency_key=key
     )
+    campaign = unit_campaign_models.load_unit_campaign_or_not_found(unit_campaign_id)
+    unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
     replayed = _replay(
         runner,
         keys,
@@ -1308,8 +1364,6 @@ def _update_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     if replayed is not None:
         return replayed
 
-    campaign = unit_campaign_models.load_unit_campaign_or_not_found(unit_campaign_id)
-    unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
     changes = _campaign_changes(payload)
 
     plan = WritePlan()
@@ -1318,6 +1372,7 @@ def _update_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         "Update",
         _versioned_campaign_update(unit_campaign_id, changes, expected_version=expected_version, caller_id=caller_id),
     )
+    build_result = _once(lambda: _created_campaign_payload(unit_campaign_id))
     runner.execute(
         keys,
         plan,
@@ -1325,8 +1380,9 @@ def _update_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         fingerprint=fingerprint,
         result_id=unit_campaign_id,
         load_result=lambda stored: _created_campaign_payload(str(stored)),
+        result_payload=build_result,
     )
-    refreshed = _created_campaign_payload(unit_campaign_id)
+    refreshed = build_result()
     log.info(
         "Unit Campaign updated",
         unit_campaign_id=unit_campaign_id,
@@ -1415,9 +1471,7 @@ def _joined_membership_payload(unit_campaign_id: str, campaign_id: str) -> Dict[
     """
     scout = unit_campaign_models.read_scout_campaign(campaign_id)
     membership = unit_campaign_models.read_membership(unit_campaign_id, str(scout["profileId"])) if scout else None
-    if membership is None:
-        raise AppError(ErrorCode.INTERNAL_ERROR, "joined membership could not be loaded")
-    return membership_payload(membership)
+    return membership_payload(_loaded_or_internal(membership, "joined membership could not be loaded"))
 
 
 def _join_scout_profile(caller_id: str, campaign_id: str) -> str:
@@ -1540,6 +1594,13 @@ def _join_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     that is not this Campaign's, an already-active membership) is decided before
     any row is written, so a join that is refused leaves nothing behind.
 
+    The replay check runs first here, unlike the admin-gated mutations: the join
+    is an act of the Scout, not an admin, so there is no revoked-admin exposure
+    for SEC-1 to close, and a code holder or Scout must be able to replay the
+    answer its committed attempt produced. The business refusals stay behind the
+    replay for the same reason — a completed retry answers the original
+    membership instead of re-running guards that may since have changed.
+
     The idempotency marker is scoped to the join code: the same code plus the
     same key is one join, however many campaigns the caller names in between.
     """
@@ -1592,6 +1653,7 @@ def _join_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         guard,
         now_iso,
     )
+    build_result = _once(lambda: _joined_membership_payload(unit_campaign_id, campaign_id))
     runner.execute(
         keys,
         plan,
@@ -1599,6 +1661,7 @@ def _join_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         fingerprint=fingerprint,
         result_id=unit_campaign_id,
         load_result=lambda stored: _joined_membership_payload(str(stored), campaign_id),
+        result_payload=build_result,
     )
     log.info(
         "Scout Campaign joined",
@@ -1607,7 +1670,10 @@ def _join_campaign(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         caller_id=caller_id,
         rejoined=membership is not None,
     )
-    return _joined_membership_payload(unit_campaign_id, campaign_id)
+    # The membership rides on the marker: a removal after this write blanks the
+    # guard and flips the row, so re-reading them would answer the removal, not
+    # this join.
+    return build_result()
 
 
 # --- removeUnitCampaignMembership (§1.5.5) ---------------------------------------
@@ -1627,6 +1693,10 @@ def _remove_membership(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     Two versions are required because two rows move. A caller holding either one
     stale loses the whole transaction — the roster is never REMOVED while the
     slot is still claimed (§1.5.5, VER-01).
+
+    Current authorization runs first: a caller whose admin grant was revoked
+    since the original attempt gets the same denial as any other request, not a
+    replayed membership.
     """
     log = get_logger(__name__)
     payload = _require_input(event)
@@ -1641,6 +1711,8 @@ def _remove_membership(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     keys = _campaign_marker(
         caller_id=caller_id, operation=REMOVE_MEMBERSHIP_FIELD, scope=unit_campaign_id, idempotency_key=key
     )
+    campaign = unit_campaign_models.load_unit_campaign_or_not_found(unit_campaign_id)
+    unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
     replayed = _replay(
         runner,
         keys,
@@ -1651,8 +1723,6 @@ def _remove_membership(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     if replayed is not None:
         return replayed
 
-    campaign = unit_campaign_models.load_unit_campaign_or_not_found(unit_campaign_id)
-    unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
     scout = unit_campaign_models.read_scout_campaign(campaign_id)
     if scout is None:
         raise AppError(ErrorCode.NOT_FOUND, "Campaign not found")
@@ -1680,6 +1750,7 @@ def _remove_membership(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
             now_iso=now_iso,
         )
     )
+    build_result = _once(lambda: _joined_membership_payload(unit_campaign_id, campaign_id))
     runner.execute(
         keys,
         plan,
@@ -1687,6 +1758,7 @@ def _remove_membership(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         fingerprint=fingerprint,
         result_id=unit_campaign_id,
         load_result=lambda stored: _joined_membership_payload(str(stored), campaign_id),
+        result_payload=build_result,
     )
     log.info(
         "Unit Campaign membership removed",
@@ -1694,7 +1766,9 @@ def _remove_membership(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
         campaign_id=campaign_id,
         caller_id=caller_id,
     )
-    return _joined_membership_payload(unit_campaign_id, campaign_id)
+    # The removed row rides on the marker, so a retry answers the removal it
+    # produced rather than the row's current (possibly rejoined) state.
+    return build_result()
 
 
 # --- campaign and roster queries (§1.5.6) ----------------------------------------
