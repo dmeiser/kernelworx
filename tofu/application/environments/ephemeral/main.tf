@@ -181,6 +181,10 @@ module "lambda" {
     # #679 (public-orders offer slice): the public buyer order offer + receipt
     # Lambda uses its own scoped role (the anonymous-facing read path).
     "public-orders" = module.iam.lambda_public_orders_execution_role_arn
+    # Wave 2 Unit tenant: the unit-operations Lambda (the 19 Stage 1 Unit/Unit
+    # Campaign operations) uses its own scoped role: the two Unit aggregate
+    # tables read-write, the legacy tables it authorizes against read-only.
+    "unit-operations" = module.iam.lambda_unit_tenant_execution_role_arn
   }
   exports_bucket_name = module.s3.exports_bucket_name
 
@@ -193,6 +197,8 @@ module "lambda" {
     shares           = module.dynamodb.shares_table_name
     invites          = module.dynamodb.invites_table_name
     shared_campaigns = module.dynamodb.shared_campaigns_table_name
+    units            = module.dynamodb.units_table_name
+    unit_campaigns   = module.dynamodb.unit_campaigns_table_name
   }
 
   user_pool_id = module.cognito.user_pool_id

@@ -802,6 +802,79 @@ resource "aws_iam_role_policy" "lambda_public_orders_dynamodb" {
   policy = data.aws_iam_policy_document.lambda_public_orders_dynamodb.json
 }
 
+# =============================================================================
+# Unit tenant Lambda (Wave 2 §1.7 / SCOPE-1): one function serves the 19 Stage 1
+# Unit/Unit Campaign operations. Scoped like every other domain role (#326).
+# =============================================================================
+
+resource "aws_iam_role" "lambda_unit_tenant_execution" {
+  name               = "${var.name_prefix}-lambda-unit-tenant-exec${local.role_suffix}"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  lifecycle {
+    prevent_destroy = var.prevent_destroy
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_unit_tenant_basic" {
+  role       = aws_iam_role.lambda_unit_tenant_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
+  # The two aggregate tables are the whole write surface: Unit rows, admin
+  # grants, invites, Unit Campaigns, rosters, membership guards, and the
+  # idempotency markers all live on them, and every Stage 1 mutation commits
+  # its plan through TransactWriteItems (hence ConditionCheckItem; the
+  # marker/fingerprint guards ride those transactions).
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:BatchGetItem",
+      "dynamodb:Query",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [
+      var.dynamodb_table_arns["units"],
+      "${var.dynamodb_table_arns["units"]}/index/*",
+      var.dynamodb_table_arns["unit_campaigns"],
+      "${var.dynamodb_table_arns["unit_campaigns"]}/index/*",
+    ]
+  }
+
+  # The redemption throttle counter reuses the shared throttle table: one
+  # atomic UpdateItem increment per failed invite redemption, TTL-expired.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem", "dynamodb:UpdateItem"]
+    resources = [var.dynamodb_table_arns["public_order_throttles"]]
+  }
+
+  # Authorization and join inputs that live outside the Unit tables: Profile
+  # ownership/shares, the catalog usability guard, the account directory for
+  # invite/grant display, and the legacy Campaign read behind the join guard.
+  # Read-only: Stage 1 never writes a legacy row.
+  statement {
+    effect  = "Allow"
+    actions = ["dynamodb:GetItem", "dynamodb:BatchGetItem", "dynamodb:Query"]
+    resources = concat(
+      [for k in ["accounts", "campaigns", "catalogs", "profiles", "shares"] : var.dynamodb_table_arns[k]],
+      [for k in ["accounts", "campaigns", "catalogs", "profiles", "shares"] : "${var.dynamodb_table_arns[k]}/index/*"],
+    )
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_unit_tenant_dynamodb" {
+  name   = "dynamodb-access"
+  role   = aws_iam_role.lambda_unit_tenant_execution.id
+  policy = data.aws_iam_policy_document.lambda_unit_tenant_dynamodb.json
+}
+
 data "aws_iam_policy_document" "lambda_public_orders_s3" {
   # Grants only what the buyer's pre-signed QR GETs need at request time. The
   # handler itself never calls S3 (signing is local), so this statement is
@@ -1021,6 +1094,11 @@ output "lambda_payment_execution_role_arn" {
 output "lambda_profile_sharing_execution_role_arn" {
   description = "ARN of the scoped Lambda execution role for the profile/sharing domain (transfer-ownership, delete-profile-cascade). Chunk 2 of the #326 per-domain role split; see lambda_domain_role_arns in the lambda module."
   value       = aws_iam_role.lambda_profile_sharing_execution.arn
+}
+
+output "lambda_unit_tenant_execution_role_arn" {
+  description = "Scoped execution role for the unit-operations Lambda (Unit tenant, Wave 2)."
+  value       = aws_iam_role.lambda_unit_tenant_execution.arn
 }
 
 output "lambda_public_orders_execution_role_arn" {
