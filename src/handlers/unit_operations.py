@@ -1570,6 +1570,7 @@ def _stage_join_plan(
             campaign_id=campaign_id,
             profile_id=profile_id,
             active_unit_campaign_id=unit_campaign_id,
+            unit_id=str(unit_campaign["unitId"]),
             expected_membership_version=_number(guard["membershipVersion"]) if guard is not None else None,
             now_iso=now_iso,
         )

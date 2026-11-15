@@ -41,7 +41,11 @@ ACTIVE_UNIT_CAMPAIGN = "aws_appsync_function.get_active_unit_campaign_for_order"
 ORDER_WRITE = "aws_appsync_function.create_order"
 PUBLIC_ORDER_WRITE = "aws_appsync_function.create_public_order"
 
-GUARD_STEPS = (STRONG_CAMPAIGN, GUARD, ACTIVE_UNIT_CAMPAIGN)
+# ARCH-1: the denormalized guard row carries the parent Unit beside the
+# pointer, so the guard read is the whole origin -- no second lookup. The old
+# get_active_unit_campaign_for_order step is deleted (resource and both pipeline
+# slots), not left unreferenced.
+GUARD_STEPS = (STRONG_CAMPAIGN, GUARD)
 
 
 def _function_attrs(file: str) -> dict[str, dict]:
@@ -72,8 +76,9 @@ def test_create_order_reads_join_scope_from_the_guard_before_it_writes() -> None
         "the campaign's base-table key is only learnable from the campaignId-index locator, so the "
         "strong re-read has to follow it -- and everything downstream then trusts the strong read"
     )
-    assert _before(pipeline, GUARD, ACTIVE_UNIT_CAMPAIGN), (
-        "the Unit behind the pointer cannot be named before the pointer is known"
+    assert GUARD in pipeline and ACTIVE_UNIT_CAMPAIGN not in pipeline, (
+        "the guard read names both halves of the scope (ARCH-1 denormalization); "
+        "the second lookup step is deleted, not left unreferenced"
     )
 
 
@@ -82,19 +87,23 @@ def test_public_create_order_reads_join_scope_from_the_guard_before_it_writes() 
     scope must come from the same current read, before the transaction write."""
     pipeline = _pipeline("resolvers_mutations.tf", "public_create_order")
 
-    for step in (GUARD, ACTIVE_UNIT_CAMPAIGN):
-        assert step in pipeline, f"{step} is not in the publicCreateOrder pipeline"
-        assert _before(pipeline, step, PUBLIC_ORDER_WRITE), f"{step} must run before the order write"
+    assert GUARD in pipeline, "the guard read is not in the publicCreateOrder pipeline"
+    assert ACTIVE_UNIT_CAMPAIGN not in pipeline, (
+        "the second lookup step is deleted under ARCH-1; the guard names the Unit"
+    )
+    assert _before(pipeline, GUARD, PUBLIC_ORDER_WRITE), "the guard must run before the order write"
 
 
 def test_guard_reads_use_the_unit_campaigns_table_and_its_datasource() -> None:
     """The guard lives in the unit_campaigns table, not the campaigns table the
     pipeline already reaches: reading the wrong table answers a stale question."""
     functions = _function_attrs("functions_orders.tf")
-    for step in (GUARD, ACTIVE_UNIT_CAMPAIGN):
-        attrs = functions[step.split(".")[-1]]
-        data_source = attrs["data_source"]
-        assert "aws_appsync_datasource.unit_campaigns" in str(data_source), f"{step} reads the wrong table"
+    attrs = functions[GUARD.split(".")[-1]]
+    data_source = attrs["data_source"]
+    assert "aws_appsync_datasource.unit_campaigns" in str(data_source), f"{GUARD} reads the wrong table"
+    assert "get_active_unit_campaign_for_order" not in functions, (
+        "the ARCH-1 deleted step must not linger as an unreferenced function resource"
+    )
 
     datasources = load_hcl(APPSYNC_DIR / "datasources_dynamodb.tf")
     names = {
@@ -108,7 +117,7 @@ def test_guard_reads_use_the_unit_campaigns_table_and_its_datasource() -> None:
 
 
 def test_minters_take_the_origin_from_the_guard_and_not_the_campaign_link() -> None:
-    """Both minters call ``orderOrigin`` with the guard and the Unit Campaign row.
+    """Both minters call ``orderOrigin`` with the guard alone.
 
     ``orderOrigin(campaign)`` would keep every existing mocked test green while
     still attributing a post-removal Order to the Unit the Scout left, so the
@@ -118,8 +127,8 @@ def test_minters_take_the_origin_from_the_guard_and_not_the_campaign_link() -> N
     public = (JS_DIR / "create_public_order_fn.js").read_text()
     origin_lib = (JS_DIR / "lib" / "order_origin.js").read_text()
 
-    assert "orderOrigin(ctx.stash.membershipGuard, ctx.stash.activeUnitCampaign)" in create
-    assert "orderOrigin(stash.membershipGuard, stash.activeUnitCampaign)" in public
+    assert "orderOrigin(ctx.stash.membershipGuard)" in create
+    assert "orderOrigin(stash.membershipGuard)" in public
     assert "orderOrigin(campaign)" not in create and "orderOrigin(campaign)" not in public
 
     # The origin module has no campaign input at all: there is nothing in it that

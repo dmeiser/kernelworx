@@ -308,6 +308,7 @@ def build_membership_guard_item(
     campaign_id: Any,
     profile_id: Any,
     active_unit_campaign_id: Optional[str],
+    unit_id: Optional[str] = None,
     membership_version: Any,
     now_iso: Any,
 ) -> Dict[str, Any]:
@@ -315,7 +316,12 @@ def build_membership_guard_item(
 
     ``activeUnitCampaignId`` is written only when one is active: the attribute
     being absent is the removed/independent shape, so no read has to distinguish
-    an absent attribute from a stored null.
+    an absent attribute from a stored null. ``unitId`` is denormalized with the
+    same rule: the Order write origin (§1.4.3) reads the guard strongly and must
+    name the Unit without a second lookup, which is what keeps the order
+    pipelines within AppSync's function cap. Rows written before this
+    denormalization predate the field; readers treat a missing ``unitId`` as an
+    unknown Unit, never as an independent campaign.
     """
     version = (
         membership_version if isinstance(membership_version, int) and not isinstance(membership_version, bool) else 0
@@ -332,6 +338,8 @@ def build_membership_guard_item(
     }
     if active_unit_campaign_id is not None:
         item["activeUnitCampaignId"] = normalize_campaign_id(active_unit_campaign_id, "activeUnitCampaignId")
+    if unit_id is not None:
+        item["unitId"] = normalize_campaign_id(unit_id, "unitId")
     return item
 
 
@@ -750,6 +758,7 @@ def guard_claim_action(
     campaign_id: str,
     profile_id: str,
     active_unit_campaign_id: str,
+    unit_id: str,
     expected_membership_version: Optional[int],
     now_iso: str,
 ) -> Action:
@@ -765,12 +774,17 @@ def guard_claim_action(
     ``expected_membership_version`` is None only when the caller's consistent read
     found no guard row; that read and this write are the same pair of eyes on one
     key.
+
+    ``unit_id`` rides on the guard so the Order origin read (§1.4.3) names the
+    Unit from the same strongly consistent Get, with no second lookup — the
+    claim rewrites it on every move, and release clears it with the pointer.
     """
     if expected_membership_version is None:
         item = build_membership_guard_item(
             campaign_id=campaign_id,
             profile_id=profile_id,
             active_unit_campaign_id=active_unit_campaign_id,
+            unit_id=unit_id,
             membership_version=1,
             now_iso=now_iso,
         )
@@ -781,16 +795,18 @@ def guard_claim_action(
             "TableName": tables.unit_campaigns.table_name,
             "Key": wire_key(guard_key(campaign_id)),
             "UpdateExpression": (
-                "SET #active = :active, #membershipVersion = #membershipVersion + :one, #updatedAt = :updatedAt"
+                "SET #active = :active, #unit = :unit, #membershipVersion = #membershipVersion + :one, #updatedAt = :updatedAt"
             ),
             "ExpressionAttributeNames": {
                 "#pk": "pk",
                 "#active": "activeUnitCampaignId",
+                "#unit": "unitId",
                 "#membershipVersion": "membershipVersion",
                 "#updatedAt": "updatedAt",
             },
             "ExpressionAttributeValues": {
                 ":active": wire_value(active_unit_campaign_id),
+                ":unit": wire_value(unit_id),
                 ":one": wire_value(1),
                 ":updatedAt": wire_value(now_iso),
                 ":version": wire_value(expected_membership_version),
@@ -810,9 +826,10 @@ def guard_release_action(
     """Free the active-join slot: clear the target, bump the version (§8.2).
 
     ``activeUnitCampaignId`` is REMOVEd rather than set to null, keeping "no
-    active join" a single representable shape. Naming the expected target in the
-    condition is what stops a removal from clearing a slot a newer join already
-    took.
+    active join" a single representable shape — and the denormalized ``unitId``
+    leaves with it, so a released guard never names a Unit it is not joined to.
+    Naming the expected target in the condition is what stops a removal from
+    clearing a slot a newer join already took.
     """
     return (
         "Update",
@@ -820,11 +837,12 @@ def guard_release_action(
             "TableName": tables.unit_campaigns.table_name,
             "Key": wire_key(guard_key(campaign_id)),
             "UpdateExpression": (
-                "SET #membershipVersion = #membershipVersion + :one, #updatedAt = :updatedAt REMOVE #active"
+                "SET #membershipVersion = #membershipVersion + :one, #updatedAt = :updatedAt REMOVE #active, #unit"
             ),
             "ExpressionAttributeNames": {
                 "#pk": "pk",
                 "#active": "activeUnitCampaignId",
+                "#unit": "unitId",
                 "#membershipVersion": "membershipVersion",
                 "#updatedAt": "updatedAt",
             },

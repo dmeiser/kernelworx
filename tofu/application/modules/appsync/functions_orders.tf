@@ -136,20 +136,12 @@ resource "aws_appsync_function" "get_membership_guard_for_order" {
   code = file("${local.js_resolvers_dir}/get_membership_guard_for_order_fn.js")
 }
 
-# Names the Unit behind the guard's pointer, and is skipped (request returns null)
-# when there is no current join.
-resource "aws_appsync_function" "get_active_unit_campaign_for_order" {
-  api_id      = aws_appsync_graphql_api.main.id
-  data_source = aws_appsync_datasource.unit_campaigns.name
-  name        = "GetActiveUnitCampaignForOrderFn${local.env_suffix}"
-
-  runtime {
-    name            = "APPSYNC_JS"
-    runtime_version = "1.0.0"
-  }
-
-  code = file("${local.js_resolvers_dir}/get_active_unit_campaign_for_order_fn.js")
-}
+# Retired by the ARCH-1 fold: the guard row carries the parent Unit beside the
+# pointer (denormalized by the join claim, cleared by removal), so the minter
+# needs no second lookup. The resource is deleted rather than left unreferenced:
+# an orphan function still ships a bundle and invites a re-add that silently
+# pushes the pipeline back over the 10-function cap. History lives in git;
+# get_membership_guard_for_order_fn.test.js pins the guard-only read.
 
 resource "aws_appsync_function" "get_catalog" {
   api_id      = aws_appsync_graphql_api.main.id
@@ -174,7 +166,15 @@ resource "aws_appsync_function" "create_order" {
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/create_order_fn.js")
+  # templatefile() (not file()): FUNC-3 makes this write a TransactWriteItems
+  # whenever a membership guard row exists, and each transact item's `table`
+  # field must be the REAL AWS table name (AppSync takes it literally rather
+  # than defaulting to the datasource's table - same lesson as
+  # create_public_order_fn.js above).
+  code = templatefile("${local.js_resolvers_dir}/create_order_fn.js", {
+    orders_table_name         = var.dynamodb_table_names.orders
+    unit_campaigns_table_name = var.dynamodb_table_names.unit_campaigns
+  })
 }
 
 resource "aws_appsync_function" "query_order" {
@@ -267,8 +267,9 @@ resource "aws_appsync_function" "create_public_order" {
   # escaping rules are the module-wide ones (#570): every surviving
   # dollar-brace sequence is interpolated, so a literal must be written $${...}.
   code = templatefile("${local.js_resolvers_dir}/create_public_order_fn.js", {
-    orders_table_name    = var.dynamodb_table_names.orders
-    campaigns_table_name = var.dynamodb_table_names.campaigns
+    orders_table_name         = var.dynamodb_table_names.orders
+    campaigns_table_name      = var.dynamodb_table_names.campaigns
+    unit_campaigns_table_name = var.dynamodb_table_names.unit_campaigns
   })
 }
 

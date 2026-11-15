@@ -10,14 +10,19 @@
 // The membership guard (data model §5.6: `SCOUT_CAMPAIGN#<campaignId>` /
 // `MEMBERSHIP_GUARD`) is the only current answer to "which Unit Campaign is this
 // campaign joined to right now": `activeUnitCampaignId` is written only while a
-// join is live, and removal clears it. So the origin is read from the guard, which
-// is a strongly consistent Get on the unit_campaigns table, and the Unit itself
-// comes from that Unit Campaign's own metadata row -- never from the campaign's
-// retained link, and never from the campaignId-index projection, which is
-// eventually consistent on top of a field that is already retroactive.
+// join is live, and removal clears it. The guard row ALSO carries the parent
+// Unit's id beside the pointer -- written by the join claim, cleared by removal
+// -- so the Order origin needs exactly one strongly consistent Get: the guard
+// answers both halves of the scope with no second lookup.
+//
+// Rows written before the denormalization predate `unitId`: a guard that names
+// a Unit Campaign but carries no Unit records the pointer it did name and no
+// Unit, because neither half is invented.
 //
 // An independent campaign records both fields as null, which makes "independent"
 // a recorded fact rather than an absence that later acquires a meaning.
+
+import { util } from '@aws-appsync/utils';
 
 // The Unit Campaign this campaign is joined to *now*, or null when it is joined to
 // none. Plain String() rather than a template literal: esbuild inlines this module
@@ -31,10 +36,70 @@ export function currentUnitCampaignId(guard) {
 }
 
 // The joined scope to stamp on an Order. `guard` is the strongly read membership
-// guard; `unitCampaign` is the metadata row of the Unit Campaign the guard points
-// at (absent when there is no current join, or when that row is gone).
-export function orderOrigin(guard, unitCampaign) {
+// guard; the Unit rides on it, so there is no second row to name and no second
+// argument to take. A caller that reaches for the Unit Campaign row or the
+// campaign's retained pair is reaching for the stale or over-fetched answer:
+// the guard alone is the current one.
+export function orderOrigin(guard) {
     const unitCampaignId = currentUnitCampaignId(guard);
-    const unitId = unitCampaign && unitCampaign.unitId != null ? String(unitCampaign.unitId) : null;
+    const unitId = guard && guard.unitId != null ? String(guard.unitId) : null;
     return { unitId: unitId, unitCampaignId: unitCampaignId };
+}
+
+// FUNC-3: an origin stamped from a strong read stops being a stale answer only
+// when the write itself refuses if the guard moves between the read and the
+// commit. This is the guard row's ConditionCheck for that transaction: it pins
+// exactly what the read saw -- the same live join, or (row present, join
+// already removed) still no live join at all. A removal, a move, or a rejoin
+// to a different Unit Campaign fails the condition and cancels the whole
+// transaction, so an Order never commits with a scope that was not current at
+// commit.
+//
+// A guard ABSENT at the read has nothing to pin: the campaign was independent
+// when the pipeline asked, an Order created in that window belongs to no Unit,
+// and a join committing afterwards is later than the sale -- there is no old
+// scope to follow into another Unit. DynamoDB's ConditionCheck also fails on a
+// missing row, so an "absent" pin could only ever break independent orders.
+// Returns null in that case, and the caller writes without the pin.
+export function membershipGuardCurrencyCheck(unitCampaignsTable, campaignId, guard) {
+    if (!guard) {
+        return null;
+    }
+    const joinedTo = currentUnitCampaignId(guard);
+    return {
+        operation: 'ConditionCheck',
+        table: unitCampaignsTable,
+        key: util.dynamodb.toMapValues({ pk: 'SCOUT_CAMPAIGN#' + campaignId, sk: 'MEMBERSHIP_GUARD' }),
+        condition:
+            joinedTo !== null
+                ? {
+                      expression: 'activeUnitCampaignId = :joinedTo',
+                      expressionValues: util.dynamodb.toMapValues({ ':joinedTo': joinedTo })
+                  }
+                : { expression: 'attribute_not_exists(activeUnitCampaignId)' }
+    };
+}
+
+// Which transact items of a cancelled TransactWriteItems failed. DynamoDB
+// reports the per-item cancellation reasons, in transactItems order, inside
+// the message: "... for specific reasons [None, ConditionalCheckFailedException,
+// None]". The index is what distinguishes the causes the single error type
+// cannot: the campaigns bound, the membership pin, or (the PutItem has no
+// condition) neither. Returns an empty list when the message carries no list,
+// and the caller's fallback decides. String()/concat only: this file is inlined
+// into resolvers Terraform loads with templatefile() (#570).
+export function cancelledTransactIndexes(error) {
+    const match = String((error && error.message) || '').match(/\[([^\]]*)\]/);
+    const indexes = [];
+    if (!match) {
+        return indexes;
+    }
+    const parts = match[1].split(',');
+    for (let i = 0; i < parts.length; i++) {
+        const reason = parts[i].trim();
+        if (reason !== '' && reason !== 'None' && reason !== 'null') {
+            indexes.push(i);
+        }
+    }
+    return indexes;
 }

@@ -3,7 +3,17 @@ import { validatePhone, validateAddress } from './lib/validation.js';
 import { normalizeId } from './lib/ids.js';
 import { enrichLineItems } from './lib/line_items.js';
 import { buildOrderKey } from './lib/order_keys.js';
-import { orderOrigin } from './lib/order_origin.js';
+import { orderOrigin, membershipGuardCurrencyCheck } from './lib/order_origin.js';
+
+// Loaded via Terraform templatefile() (functions_orders.tf), like the public
+// write step it clones: the Order write runs as a TransactWriteItems whenever
+// a membership guard row was read (FUNC-3), and a TransactWriteItems item's
+// `table` field is the literal AWS table name -- AppSync does not default it
+// to the datasource's table. Only declared placeholders may be interpolated
+// (#570; tests/unit/check_templatefile_escaping.test.ts), so this file carries
+// no dollar-brace sequence outside the two constants below.
+const ordersTableName = '${orders_table_name}';
+const unitCampaignsTableName = '${unit_campaigns_table_name}';
 
 function validateCustomer(input) {
     if (!input.customerName || (typeof input.customerName === 'string' && !input.customerName.trim())) {
@@ -11,7 +21,7 @@ function validateCustomer(input) {
         return {};
     }
 
-    const phoneValue = input.customerPhone != null ? `${input.customerPhone}`.trim() : '';
+    const phoneValue = input.customerPhone != null ? String(input.customerPhone).trim() : '';
     const hasAddress = input.customerAddress != null;
     let customerPhone = undefined;
 
@@ -106,8 +116,9 @@ export function request(ctx) {
     // the question *now*. The Campaign's own unitId/unitCampaignId pair is the
     // latest link and removal keeps it, so an Order written after the Scout left
     // would follow them into another Unit. The membership guard is the current
-    // answer; the Unit comes from that Unit Campaign's own metadata row.
-    const origin = orderOrigin(ctx.stash.membershipGuard, ctx.stash.activeUnitCampaign);
+    // answer: the join claim denormalized the parent Unit beside the pointer,
+    // so the guard alone names both halves of the scope with one strong read.
+    const origin = orderOrigin(ctx.stash.membershipGuard);
     orderItem.unitId = origin.unitId;
     orderItem.unitCampaignId = origin.unitCampaignId;
 
@@ -139,16 +150,57 @@ export function request(ctx) {
     // campaigns-table key, so no lookup is needed to address the counter.
     ctx.stash.totalsDelta = { profileId: profileId, campaignId: campaignId, count: 1, revenue: totalAmount };
 
+    // FUNC-3: when a membership guard row was read, the Order write commits
+    // with a ConditionCheck pinning that guard. A removal, move, or rejoin
+    // between the strong guard read and this commit fails the pin and cancels
+    // the transaction, so the joined scope this Order stamps was current at
+    // commit -- or no Order committed at all. (The guard reads happen inside
+    // the same pipeline run; only the totals counters trail, via
+    // sync_campaign_totals_fn.) With no guard row -- the independent-campaign
+    // shape -- there is nothing to pin and the plain PutItem is kept.
+    const guardPin = membershipGuardCurrencyCheck(unitCampaignsTableName, campaignId, ctx.stash.membershipGuard);
+    if (guardPin === null) {
+        return {
+            operation: 'PutItem',
+            key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),
+            attributeValues: util.dynamodb.toMapValues(orderItem)
+        };
+    }
+    // TransactWriteItems returns only the written KEYS, not attributes, so
+    // response() returns the stashed row -- the transaction is atomic, so it
+    // is by construction exactly what was stored.
+    ctx.stash.orderItem = orderItem;
     return {
-        operation: 'PutItem',
-        key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),
-        attributeValues: util.dynamodb.toMapValues(orderItem)
+        operation: 'TransactWriteItems',
+        transactItems: [
+            {
+                // PutItem: write the order row.
+                operation: 'PutItem',
+                table: ordersTableName,
+                key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),
+                attributeValues: util.dynamodb.toMapValues(orderItem)
+            },
+            guardPin
+        ]
     };
 }
 
 export function response(ctx) {
     if (ctx.error) {
+        if (ctx.error.type === 'DynamoDB:TransactionCanceledException') {
+            // The only condition in this transaction is the guard pin, so a
+            // cancellation has exactly one cause: the Scout's join moved while
+            // the order was in flight and the scope it would stamp is stale.
+            // Nothing committed; a retry re-reads the guard and stamps the
+            // scope that IS current.
+            util.error('The campaign changed while this order was being placed; try again', 'CONFLICT');
+            return null;
+        }
         util.error(ctx.error.message, ctx.error.type);
+        return null;
+    }
+    if (ctx.stash && ctx.stash.orderItem) {
+        return ctx.stash.orderItem;
     }
     const order = ctx.result;
     return order;

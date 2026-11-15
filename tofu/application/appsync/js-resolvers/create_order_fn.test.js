@@ -130,13 +130,19 @@ describe('create_order_fn request', () => {
   // the only read that answers "joined to what, right now". The Campaign row's own
   // pair is a latest-link that removal retains, so it is never the source.
   const JOINED_STASH = {
-    membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-pack-3149-fall-2026' },
-    activeUnitCampaign: { pk: 'UNIT_CAMPAIGN#uc-pack-3149-fall-2026', sk: 'METADATA', unitId: 'UNIT#pack-3149' },
+    membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-pack-3149-fall-2026', unitId: 'UNIT#pack-3149' },
   };
+
+  // The order row rides either shape: a lone PutItem when there is no guard
+  // row to pin, or the PutItem inside a transaction that carries the pin.
+  function writtenRow(ctx) {
+    const req = request(ctx);
+    return req.operation === 'PutItem' ? req.attributeValues : req.transactItems[0].attributeValues;
+  }
 
   it('captures the joined scope on the order row from the join guard (API-FIX-05)', () => {
     const ctx = { ...baseCtx, stash: { ...baseCtx.stash, ...JOINED_STASH } };
-    const order = request(ctx).attributeValues;
+    const order = writtenRow(ctx);
     assert.strictEqual(order.unitId, 'UNIT#pack-3149');
     assert.strictEqual(order.unitCampaignId, 'uc-pack-3149-fall-2026');
   });
@@ -152,7 +158,7 @@ describe('create_order_fn request', () => {
         campaign: { profileId: 'PROFILE#p1', unitId: 'UNIT#pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' },
       },
     };
-    const order = request(ctx).attributeValues;
+    const order = writtenRow(ctx);
     assert.strictEqual(order.unitId, null);
     assert.strictEqual(order.unitCampaignId, null);
   });
@@ -163,11 +169,10 @@ describe('create_order_fn request', () => {
       stash: {
         ...baseCtx.stash,
         campaign: { profileId: 'PROFILE#p1', unitId: 'UNIT#pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' },
-        membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-crew-529-spring-2027' },
-        activeUnitCampaign: { pk: 'UNIT_CAMPAIGN#uc-crew-529-spring-2027', sk: 'METADATA', unitId: 'UNIT#crew-529' },
+        membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-crew-529-spring-2027', unitId: 'UNIT#crew-529' },
       },
     };
-    const order = request(ctx).attributeValues;
+    const order = writtenRow(ctx);
     assert.strictEqual(order.unitId, 'UNIT#crew-529');
     assert.strictEqual(order.unitCampaignId, 'uc-crew-529-spring-2027');
   });
@@ -178,10 +183,9 @@ describe('create_order_fn request', () => {
       stash: {
         ...baseCtx.stash,
         membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-pack-3149-fall-2026' },
-        activeUnitCampaign: null,
       },
     };
-    const order = request(ctx).attributeValues;
+    const order = writtenRow(ctx);
     assert.strictEqual(order.unitCampaignId, 'uc-pack-3149-fall-2026');
     assert.strictEqual(order.unitId, null);
   });
@@ -193,6 +197,49 @@ describe('create_order_fn request', () => {
     assert.strictEqual(order.unitId, null);
     assert.strictEqual(order.unitCampaignId, null);
   });
+
+  it('writes a plain PutItem when no guard row was read', () => {
+    // Nothing to pin: an independent campaign has no guard row, and a join that
+    // commits afterwards is later than this sale. The PutItem also keeps using
+    // the datasource's default table -- no injected table name involved.
+    const result = request(baseCtx);
+    assert.strictEqual(result.operation, 'PutItem');
+    assert.strictEqual(result.table, undefined);
+  });
+
+  it('pins the guard in a transaction when a live join was read (FUNC-3)', () => {
+    const stash = { ...baseCtx.stash, ...JOINED_STASH };
+    const result = request({ ...baseCtx, stash });
+    assert.strictEqual(result.operation, 'TransactWriteItems');
+    assert.strictEqual(result.transactItems[0].operation, 'PutItem');
+    // Real table names, injected by templatefile(); a literal logical name here
+    // is what produced AccessDenied on table/Orders in a past deploy.
+    assert.strictEqual(result.transactItems[0].table, '${orders_table_name}');
+    const pin = result.transactItems[1];
+    assert.strictEqual(pin.operation, 'ConditionCheck');
+    assert.strictEqual(pin.table, '${unit_campaigns_table_name}');
+    assert.deepStrictEqual(pin.key, { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD' });
+    assert.strictEqual(pin.condition.expression, 'activeUnitCampaignId = :joinedTo');
+    assert.deepStrictEqual(pin.condition.expressionValues, { ':joinedTo': 'uc-pack-3149-fall-2026' });
+    // A cancelled transaction returns only keys, so the write stashes the row
+    // it composed and response() replays it.
+    assert.deepStrictEqual(stash.orderItem.orderId, result.transactItems[0].key.orderId);
+  });
+
+  it('pins "still no live join" when the guard row exists without one (FUNC-3)', () => {
+    // Removal keeps the row and clears the pointer; a rejoin between the read
+    // and this commit must fail the pin, not stamp the old removal.
+    const ctx = {
+      ...baseCtx,
+      stash: {
+        ...baseCtx.stash,
+        membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD' },
+      },
+    };
+    const pin = request(ctx).transactItems[1];
+    assert.strictEqual(pin.condition.expression, 'attribute_not_exists(activeUnitCampaignId)');
+    assert.strictEqual(pin.condition.expressionValues, undefined);
+  });
 });
 
 describe('create_order_fn response', () => {
@@ -200,6 +247,23 @@ describe('create_order_fn response', () => {
     const order = { orderId: 'ORDER#1', campaignId: 'CAMPAIGN#1' };
     const result = response({ result: order });
     assert.deepStrictEqual(result, order);
+  });
+
+  it('replays the stashed row for a transaction write', () => {
+    // TransactWriteItems returns only the written keys, so the mutation's
+    // Order answer comes from the row request() composed and stashed.
+    const order = { orderId: 'ORDER#1', campaignId: 'CAMPAIGN#c1' };
+    const result = response({ stash: { orderItem: order }, result: { keys: [{ campaignId: 'CAMPAIGN#c1', orderId: 'ORDER#1' }] } });
+    assert.deepStrictEqual(result, order);
+  });
+
+  it('maps a transaction cancellation to CONFLICT (FUNC-3: the join moved mid-flight)', () => {
+    // The guard pin is the only condition in this transaction, so a
+    // cancellation means the stamped scope would not have been current.
+    assert.throws(
+      () => response({ error: { type: 'DynamoDB:TransactionCanceledException', message: 'Transaction cancelled' } }),
+      /CONFLICT: The campaign changed while this order was being placed/
+    );
   });
 
   it('throws on AppSync error', () => {

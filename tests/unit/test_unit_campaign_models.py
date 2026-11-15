@@ -552,6 +552,7 @@ def _join_actions(membership: Dict[str, Any], *, expected_guard_version: Any) ->
             campaign_id=str(membership["campaignId"]),
             profile_id=str(membership["profileId"]),
             active_unit_campaign_id=str(membership["unitCampaignId"]),
+            unit_id=str(membership["unitId"]),
             expected_membership_version=expected_guard_version,
             now_iso=NOW,
         ),
@@ -719,6 +720,7 @@ def test_rejoin_reactivates_the_same_record_and_takes_the_guard_again(
                 campaign_id=PACK_CAMPAIGN,
                 profile_id=PACK_PROFILE,
                 active_unit_campaign_id=PACK_ID,
+                unit_id="unit-pack-3149-aurora",
                 expected_membership_version=2,
                 now_iso=NOW,
             ),
@@ -829,6 +831,7 @@ def test_guard_claim_against_a_missing_guard_row_cannot_double_create(
                 campaign_id=PACK_CAMPAIGN,
                 profile_id=PACK_PROFILE,
                 active_unit_campaign_id=PACK_ID,
+                unit_id="unit-pack-3149-aurora",
                 expected_membership_version=None,
                 now_iso=NOW,
             )
@@ -841,6 +844,7 @@ def test_guard_claim_against_a_missing_guard_row_cannot_double_create(
                     campaign_id=PACK_CAMPAIGN,
                     profile_id=PACK_PROFILE,
                     active_unit_campaign_id=CREW_ID,
+                    unit_id="unit-crew-529-denver",
                     expected_membership_version=None,
                     now_iso=NOW,
                 )

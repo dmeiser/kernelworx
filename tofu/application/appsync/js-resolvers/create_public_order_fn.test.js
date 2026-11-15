@@ -41,7 +41,7 @@ describe('create_public_order request', () => {
         assert.throws(() => request({ stash }), /INVALID_INPUT: Product missing not found in catalog/);
     });
 
-    it('uses TransactWriteItems with ConditionCheck on campaign and PutItem on orders', () => {
+    it('uses TransactWriteItems with the folded cap+totals UpdateItem and the order PutItem', () => {
         const stash = makeStash();
         const req = request({ stash });
         assert.strictEqual(req.operation, 'TransactWriteItems');
@@ -49,11 +49,14 @@ describe('create_public_order request', () => {
 
         // ARCH-1: each transact item MUST carry its own operation field -
         // AppSync rejects a TransactWriteItems item without one.
-        // First item: UpdateItem on the campaigns table (#746) - maintains
-        // the denormalized totalOrders/totalRevenue counters and, through its
-        // condition, guards campaign existence (ARCH-1). DynamoDB forbids two
-        // operations on one item in a transaction, so the guard is a
-        // condition on this UpdateItem, not a separate ConditionCheck.
+        // First item: UpdateItem on the campaigns table carrying BOTH the cap
+        // ADD (folded in from the old increment_public_order_count step so the
+        // resolver fits the 10-function cap) and the #746
+        // totalOrders/totalRevenue counters. Its condition is the cap bound
+        // plus row existence; DynamoDB forbids two operations on one item in a
+        // transaction, so the two ADDs ride one expression. The cap counter
+        // drifts up by one on a cancelled transaction (accepted overcount);
+        // the totals apply only on commit.
         // The source is templatefile()'d at deploy time; in tests the
         // placeholder stays literal, which also pins the real-name injection:
         // a hardcoded logical name here is what broke the deployed pipeline.
@@ -61,13 +64,18 @@ describe('create_public_order request', () => {
         assert.strictEqual(totalsUpdate.operation, 'UpdateItem');
         assert.strictEqual(totalsUpdate.table, '${campaigns_table_name}');
         assert.deepStrictEqual(totalsUpdate.key, { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#c1' });
-        assert.strictEqual(totalsUpdate.update.expression, 'ADD #totalOrders :one, #totalRevenue :amount');
+        assert.strictEqual(totalsUpdate.update.expression, 'ADD #publicOrderCount :one, #totalOrders :one, #totalRevenue :amount');
         assert.deepStrictEqual(totalsUpdate.update.expressionNames, {
+            '#publicOrderCount': 'publicOrderCount',
             '#totalOrders': 'totalOrders',
             '#totalRevenue': 'totalRevenue',
         });
         assert.deepStrictEqual(totalsUpdate.update.expressionValues, { ':one': 1, ':amount': 10 });
-        assert.strictEqual(totalsUpdate.condition.expression, 'attribute_exists(campaignId)');
+        assert.deepStrictEqual(totalsUpdate.condition.expressionValues, { ':cap': 500 });
+        assert.strictEqual(
+            totalsUpdate.condition.expression,
+            'attribute_exists(campaignId) AND (attribute_not_exists(#publicOrderCount) OR #publicOrderCount < :cap)'
+        );
 
         // Second item: PutItem on the orders table (placeholder stays literal
         // in tests; see the ConditionCheck item above).
@@ -103,14 +111,44 @@ describe('create_public_order request', () => {
 });
 
 describe('create_public_order response', () => {
-    it('maps TransactionCanceledException to NOT_FOUND (campaign deleted between increment and write)', () => {
-        // ARCH-1: a cancellation at this step means the ConditionCheck found no
-        // campaign row - the deleteCampaign raced in after step 6. No order row
-        // was written, and the cap is enforced only by step 6, so this is
-        // NOT_FOUND, not a limit error.
+    it('maps the campaigns-item cancellation to the limit error, cap and vanished row alike (ARCH-1 union)', () => {
+        // The cap bound and row existence ride ONE condition on the campaigns
+        // UpdateItem, so a first-item failure cannot tell them apart -- and the
+        // retired increment step answered that same union as the limit error.
+        // The CloudWatch marker is kept: the public-cap-rejected filter counts
+        // it, and cap answers stay invisible to the 4XX alarm.
+        assert.throws(
+            () =>
+                response({
+                    error: {
+                        type: 'DynamoDB:TransactionCanceledException',
+                        message: 'Transaction cancelled, reasons [ConditionalCheckFailed, None]',
+                    },
+                }),
+            /PUBLIC_ORDER_LIMIT_EXCEEDED: This campaign has reached its public order limit/
+        );
+    });
+
+    it('maps a guard-pin cancellation to CONFLICT (FUNC-3: the join moved mid-flight)', () => {
+        // Reason index 2 is the guard ConditionCheck: removal, a move, or a
+        // rejoin between the strong read and the commit. Nothing was written;
+        // the retry re-reads the guard.
+        assert.throws(
+            () =>
+                response({
+                    error: {
+                        type: 'DynamoDB:TransactionCanceledException',
+                        message: 'Transaction cancelled, reasons [None, None, ConditionalCheckFailed]',
+                    },
+                }),
+            /CONFLICT: The campaign changed while this order was being placed/
+        );
+    });
+
+    it('falls back to the limit error when the message carries no reason list', () => {
         assert.throws(
             () => response({ error: { type: 'DynamoDB:TransactionCanceledException', message: 'Transaction cancelled' } }),
-            /NOT_FOUND: Campaign is no longer available/
+            /PUBLIC_ORDER_LIMIT_EXCEEDED: This campaign has reached its public order limit/
         );
     });
 
@@ -155,8 +193,7 @@ describe('create_public_order response', () => {
         // removal retains.
         const joined = request({
             stash: makeStash({
-                membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-crew-529-spring-2027' },
-                activeUnitCampaign: { pk: 'UNIT_CAMPAIGN#uc-crew-529-spring-2027', sk: 'METADATA', unitId: 'UNIT#crew-529' },
+                membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-crew-529-spring-2027', unitId: 'UNIT#crew-529' },
             }),
         });
         const order = request({ stash: makeStash() });
@@ -184,11 +221,31 @@ describe('create_public_order response', () => {
         const moved = request({
             stash: makeStash({
                 campaign: { campaignId: 'CAMPAIGN#c1', unitId: 'UNIT#pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' },
-                membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-crew-529-spring-2027' },
-                activeUnitCampaign: { pk: 'UNIT_CAMPAIGN#uc-crew-529-spring-2027', sk: 'METADATA', unitId: 'UNIT#crew-529' },
+                membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-crew-529-spring-2027', unitId: 'UNIT#crew-529' },
             }),
         });
         assert.strictEqual(written(moved).unitId, 'UNIT#crew-529');
         assert.strictEqual(written(moved).unitCampaignId, 'uc-crew-529-spring-2027');
+    });
+
+    it('pins the guard as the LAST transact item when a join scope was read (FUNC-3)', () => {
+        const req = request({
+            stash: makeStash({
+                membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-crew-529-spring-2027', unitId: 'UNIT#crew-529' },
+            }),
+        });
+        assert.strictEqual(req.transactItems.length, 3);
+        const pin = req.transactItems[2];
+        assert.strictEqual(pin.operation, 'ConditionCheck');
+        assert.strictEqual(pin.table, '${unit_campaigns_table_name}');
+        assert.deepStrictEqual(pin.key, { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD' });
+        assert.strictEqual(pin.condition.expression, 'activeUnitCampaignId = :joinedTo');
+        assert.deepStrictEqual(pin.condition.expressionValues, { ':joinedTo': 'uc-crew-529-spring-2027' });
+    });
+
+    it('carries no guard pin for an independent campaign', () => {
+        const req = request({ stash: makeStash() });
+        assert.strictEqual(req.transactItems.length, 2);
+        assert.ok(req.transactItems.every((item) => item.operation !== 'ConditionCheck'));
     });
 });

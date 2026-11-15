@@ -708,13 +708,16 @@ def membership_guard_item(
     profile_id: str,
     *,
     active_unit_campaign_id: Optional[str] = None,
+    unit_id: Optional[str] = None,
     membership_version: int = 1,
     updated_at: Optional[str] = None,
 ) -> Dict[str, Any]:
     """The join guard at ``SCOUT_CAMPAIGN#<campaignId>`` / ``MEMBERSHIP_GUARD`` (§6.2).
 
     ``active_unit_campaign_id=None`` is the removed/independent shape: the
-    attribute is absent (nullable), never a null value.
+    attribute is absent (nullable), never a null value. ``unit_id`` rides beside
+    the pointer exactly as a live claim writes it — absent when nothing is
+    active, and pre-unitId rows are simply read as an unknown Unit.
     """
     item: Dict[str, Any] = {
         "pk": f"SCOUT_CAMPAIGN#{campaign_id}",
@@ -726,6 +729,8 @@ def membership_guard_item(
     }
     if active_unit_campaign_id is not None:
         item["activeUnitCampaignId"] = active_unit_campaign_id
+    if unit_id is not None:
+        item["unitId"] = unit_id
     return item
 
 
@@ -804,7 +809,8 @@ def seed_unit_campaign_fixtures(unit_campaigns_table: Any) -> List[Dict[str, Any
     The guard set is derived from the membership fixtures so the two can never
     drift: one guard per Scout campaign that has (or had) a membership, its
     ``membershipVersion`` mirroring the membership's version and its
-    ``activeUnitCampaignId`` set only while a membership is ACTIVE.
+    ``activeUnitCampaignId`` set only while a membership is ACTIVE — with the
+    parent Unit's id denormalized beside it, exactly as a live claim writes it.
     """
     written: List[Dict[str, Any]] = []
     for unit_campaign_id, spec in UNIT_CAMPAIGNS.items():
@@ -851,6 +857,7 @@ def seed_unit_campaign_fixtures(unit_campaigns_table: Any) -> List[Dict[str, Any
             campaign_id,
             guard["profileId"],
             active_unit_campaign_id=guard["active"],
+            unit_id=UNIT_CAMPAIGNS[guard["active"]]["unitId"] if guard["active"] is not None else None,
             membership_version=guard["membershipVersion"],
         )
         unit_campaigns_table.put_item(Item=item)
