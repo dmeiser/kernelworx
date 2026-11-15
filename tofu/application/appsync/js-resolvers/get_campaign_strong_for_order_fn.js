@@ -18,9 +18,12 @@ export function request(ctx) {
     }
     return {
         operation: 'GetItem',
+        // `+ ''`, never String(...): APPSYNC_JS has no String() global and refuses
+        // the code at CreateFunction/UpdateFunction. Both values are already
+        // strings here, so this only keeps the DynamoDB key type well-formed.
         key: util.dynamodb.toMapValues({
-            profileId: String(located.profileId),
-            campaignId: String(located.campaignId)
+            profileId: located.profileId + '',
+            campaignId: located.campaignId + ''
         }),
         consistentRead: true
     };
@@ -44,6 +47,6 @@ export function response(ctx) {
     }
     ctx.stash.campaign = campaign;
     ctx.stash.catalogId = normalizeIdOrPrefix(campaign.catalogId, 'CATALOG#');
-    ctx.stash.campaignId = String(campaign.campaignId);
+    ctx.stash.campaignId = campaign.campaignId + '';
     return campaign;
 }

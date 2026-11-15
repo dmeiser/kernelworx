@@ -10,9 +10,10 @@ import { validateAddress, validatePhone } from './validation.js';
 // the receipt shape - live here and are pinned by lib/public_order.test.js.
 //
 // APPSYNC_JS 1.0.0 rejects constructs Node accepts (the `in` operator,
-// Boolean(...), Number.isInteger, .call/.apply/.bind). Nothing in this file may
-// use them; only `check_appsync_js_compatibility.test.ts` covers part of the
-// list, so the rest is a review obligation.
+// Boolean(...), String(...), Number.isInteger, .call/.apply/.bind, a regex,
+// `while`/`try`/`throw`/`continue`). Nothing in this file may use them;
+// `check_appsync_js_compatibility.test.ts` covers the whole list, including this
+// module, which esbuild inlines into the bundles that load it.
 
 // Lifetime cap per anchor campaign (spec D6/Q2). The AUTHORITATIVE bound is the
 // ConditionExpression this constant feeds into increment_public_order_count_fn:

@@ -112,4 +112,27 @@ describe('cancelledTransactIndexes', () => {
         assert.deepStrictEqual(cancelledTransactIndexes({ message: 'Transaction cancelled' }), []);
         assert.deepStrictEqual(cancelledTransactIndexes({}), []);
     });
+
+    it('reports nothing when the list is not closed', () => {
+        // The reason list is read positionally, so an unterminated bracket is not
+        // a list: the caller's fallback decides, exactly as when there is none.
+        assert.deepStrictEqual(cancelledTransactIndexes({ message: 'reasons [None, ConditionalCheckFailed' }), []);
+    });
+
+    it('counts positions across an empty entry', () => {
+        // `None` and an empty slot both mean "this item was fine"; the index of a
+        // later failure must still be its own position, not a compacted one.
+        assert.deepStrictEqual(cancelledTransactIndexes({ message: 'reasons [, None, ConditionalCheckFailed]' }), [2]);
+    });
+});
+
+describe('orderOrigin coercion', () => {
+    it('serves the joined scope as text, whatever type the guard row carried', () => {
+        // Written as a concatenation, not String(): the APPSYNC_JS runtime has no
+        // String() global and refuses code that calls it. Same answer either way.
+        assert.deepStrictEqual(orderOrigin({ activeUnitCampaignId: 3149, unitId: 42 }), {
+            unitId: '42',
+            unitCampaignId: '3149'
+        });
+    });
 });

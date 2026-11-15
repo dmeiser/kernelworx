@@ -154,6 +154,7 @@ favicons
 fieldset
 fileName
 fileobj
+filesha256
 finditer
 findme
 firstmate
