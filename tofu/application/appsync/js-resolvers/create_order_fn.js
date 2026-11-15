@@ -21,7 +21,9 @@ function validateCustomer(input) {
         return {};
     }
 
-    const phoneValue = input.customerPhone != null ? String(input.customerPhone).trim() : '';
+    // `+ ''` rather than String(...): APPSYNC_JS has no String() global, and code
+    // that calls it is refused at CreateFunction/UpdateFunction.
+    const phoneValue = input.customerPhone != null ? (input.customerPhone + '').trim() : '';
     const hasAddress = input.customerAddress != null;
     let customerPhone = undefined;
 

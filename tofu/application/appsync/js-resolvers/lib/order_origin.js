@@ -25,14 +25,23 @@
 import { util } from '@aws-appsync/utils';
 
 // The Unit Campaign this campaign is joined to *now*, or null when it is joined to
-// none. Plain String() rather than a template literal: esbuild inlines this module
-// into resolvers Terraform loads with templatefile(), and a dollar-brace sequence
-// there is parsed as a Terraform expression and fails every plan (#570).
+// none. Plain concatenation rather than a template literal: esbuild inlines this
+// module into resolvers Terraform loads with templatefile(), and a dollar-brace
+// sequence there is parsed as a Terraform expression and fails every plan (#570).
 export function currentUnitCampaignId(guard) {
     if (!guard || guard.activeUnitCampaignId == null) {
         return null;
     }
-    return String(guard.activeUnitCampaignId);
+    return asText(guard.activeUnitCampaignId);
+}
+
+// The only string coercion these helpers need. Written as concatenation because
+// APPSYNC_JS has no String() global: `String(x)` is refused at deploy time with
+// `BadRequestException: The code contains one or more errors.` Deploy run
+// 43759285075 rejected exactly the four bundles that carried it and accepted the
+// 167 that did not.
+function asText(value) {
+    return typeof value === 'string' ? value : value + '';
 }
 
 // The joined scope to stamp on an Order. `guard` is the strongly read membership
@@ -42,7 +51,7 @@ export function currentUnitCampaignId(guard) {
 // the guard alone is the current one.
 export function orderOrigin(guard) {
     const unitCampaignId = currentUnitCampaignId(guard);
-    const unitId = guard && guard.unitId != null ? String(guard.unitId) : null;
+    const unitId = guard && guard.unitId != null ? asText(guard.unitId) : null;
     return { unitId: unitId, unitCampaignId: unitCampaignId };
 }
 
@@ -86,8 +95,9 @@ export function membershipGuardCurrencyCheck(unitCampaignsTable, campaignId, gua
 // None]". The index is what distinguishes the causes the single error type
 // cannot: the campaigns bound, the membership pin, or (the PutItem has no
 // condition) neither. Returns an empty list when the message carries no list,
-// and the caller's fallback decides. String()/concat only: this file is inlined
-// into resolvers Terraform loads with templatefile() (#570).
+// and the caller's fallback decides. Plain concatenation, never a template
+// literal: this file is inlined into resolvers Terraform loads with
+// templatefile() (#570).
 //
 // Known fragility, accepted because it is pinned rather than silent: the reason
 // list is read out of a human-readable message, so if AWS rewords it this
@@ -95,18 +105,29 @@ export function membershipGuardCurrencyCheck(unitCampaignsTable, campaignId, gua
 // "cap rejected" answer — the write is still refused either way, only the
 // reason the buyer is told goes wrong. lib/order_origin.test.js pins the
 // current message shape, so a reword fails there instead of on dev.
+//
+// Read with indexOf/split/for-of only: APPSYNC_JS rejects a regex literal,
+// `.match`, the classic `for (init; cond; afterthought)` loop and `++`, so the
+// naive parse of this message is exactly the shape the runtime refuses.
 export function cancelledTransactIndexes(error) {
-    const match = String((error && error.message) || '').match(/\[([^\]]*)\]/);
     const indexes = [];
-    if (!match) {
+    const message = error && typeof error.message === 'string' ? error.message : '';
+    const opened = message.indexOf('[');
+    if (opened === -1) {
         return indexes;
     }
-    const parts = match[1].split(',');
-    for (let i = 0; i < parts.length; i++) {
-        const reason = parts[i].trim();
-        if (reason !== '' && reason !== 'None' && reason !== 'null') {
-            indexes.push(i);
+    const afterOpen = message.substring(opened + 1);
+    const closed = afterOpen.indexOf(']');
+    if (closed === -1) {
+        return indexes;
+    }
+    let position = 0;
+    for (const reason of afterOpen.substring(0, closed).split(',')) {
+        const trimmed = reason.trim();
+        if (trimmed !== '' && trimmed !== 'None' && trimmed !== 'null') {
+            indexes.push(position);
         }
+        position = position + 1;
     }
     return indexes;
 }
