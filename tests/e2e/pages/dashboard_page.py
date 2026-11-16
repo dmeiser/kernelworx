@@ -132,6 +132,22 @@ class DashboardPage(BasePage):
         card.get_by_role("button", name=self._VIEW_CAMPAIGNS_TEXT, exact=True).click()
         self.wait_for_loading()
 
+    def create_profile(self, name: str) -> None:
+        """Create an owned Scout profile through the *Create Scout* dialog.
+
+        The create control has no ``data-testid``, so it is matched by its
+        accessible name, the same way the dashboard locators are.
+
+        Args:
+            name: seller name to submit.
+        """
+        self._create_scout_button().click()
+        dialog = self.page.get_by_role("dialog")
+        self.page.get_by_label("Scout Name").fill(name)
+        self.page.get_by_role("button", name=self._CREATE_SCOUT_TEXT, exact=True).click()
+        expect(dialog).to_be_hidden(timeout=15_000)
+        self.wait_for_loading()
+
     def wait_for_profiles_loaded(self, timeout: int = 15_000) -> None:
         """Block until the dashboard has finished loading profiles.
 
