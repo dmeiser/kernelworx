@@ -122,6 +122,15 @@ locals {
     SHARES_TABLE_NAME           = var.table_names.shares
     INVITES_TABLE_NAME          = var.table_names.invites
     SHARED_CAMPAIGNS_TABLE_NAME = var.table_names.shared_campaigns
+    # The shared attempt-counter table (data model §6.6): the public-order
+    # share-token window and the Unit-invite redemption window. Visibility here
+    # is not authorization — the scoped execution role decides who may touch it
+    # (impact map §4.1 note) — but a handler that reaches the table without this
+    # name dies in ``get_required_env`` inside the request, and the caller is
+    # answered INTERNAL_ERROR instead of its domain error. QA found exactly that
+    # on dev at 2f457c5e: redeemUnitInvite answered every unusable code with
+    # INTERNAL_ERROR and the redemption throttle stopped counting.
+    PUBLIC_ORDER_THROTTLES_TABLE_NAME = var.table_names.public_order_throttles
   }
 
   # Lambda functions configuration

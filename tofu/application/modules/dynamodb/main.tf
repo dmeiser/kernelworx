@@ -1361,6 +1361,16 @@ output "shared_campaigns_table_name" {
   value       = aws_dynamodb_table.shared_campaigns.name
 }
 
+# The throttle table carries two independent counter contracts: the public-order
+# share-token window and the Unit-invite redemption window (data model §6.6).
+# Both writers resolve its name through this output, the documented wiring
+# interface (impact map §4.1) — a counter whose name never reaches the writer is
+# a counter that does not count.
+output "public_order_throttles_table_name" {
+  description = "Name of the public order throttles DynamoDB table"
+  value       = aws_dynamodb_table.public_order_throttles.name
+}
+
 # Show & Sell wave 1 — the five individual table-name outputs are the
 # documented downstream wiring interface (SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md
 # §4.1): later waves' Lambda environment variables and resolver wiring resolve
