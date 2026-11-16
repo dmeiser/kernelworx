@@ -1529,6 +1529,98 @@ input AdjustCouncilOnOrderInput {
 }
 
 # ============================================================================
+# Show & Sell — Scout custody (delivery checklist §2.3, data model §5.9)
+# ============================================================================
+
+"""One Scout's custody of one product in one Unit Campaign: unsold unit-owned stock issued for individual sales. Stock with a Scout is not sellable Kernel stock until it is returned or consumed by a sale; it still counts in total unit-owned stock (spec CUST-01)."""
+type ScoutCustodyBalance {
+  """The Unit Campaign the custody belongs to."""
+  unitCampaignId: ID!
+  """The product the Scout holds."""
+  productId: ID!
+  """The Scout holding the stock."""
+  profileId: ID!
+  """The Scout Campaign used for this Scout's individual sales."""
+  campaignId: ID!
+  """Unsold unit-owned Kernels with this Scout; never negative."""
+  withScoutQty: Int!
+  """Custody version, incremented by every issue, sale, and return on this row."""
+  version: Int!
+  """When the custody row was created."""
+  createdAt: AWSDateTime
+  """When the custody row was last written."""
+  updatedAt: AWSDateTime
+}
+
+"""A page of Scout custody balances, ordered by product then Scout. Carries the aggregate the inventory board needs alongside the per-Scout rows."""
+type ScoutCustodyBalanceConnection {
+  """The custody rows on this page."""
+  items: [ScoutCustodyBalance!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+  """Total With Scout quantity across the whole filtered set, not just this page."""
+  totalWithScoutQty: Int!
+}
+
+"""One product and how many Kernels of it it names."""
+input ProductQuantityInput {
+  """The product."""
+  productId: ID!
+  """Positive number of Kernels."""
+  quantity: Int!
+}
+
+"""Input for issueStockToScout. Moves unassigned Kernel stock into one Scout's custody; never sells anything."""
+input IssueStockToScoutInput {
+  """The Unit Campaign issuing the stock."""
+  unitCampaignId: ID!
+  """The Scout Campaign of the roster identity being issued to; must match the roster row."""
+  campaignId: ID!
+  """The Scout's profile; must be an ACTIVE member of this campaign's roster."""
+  profileId: ID!
+  """The product being issued."""
+  productId: ID!
+  """Positive number of Kernels to issue; cannot exceed the unassigned stock."""
+  quantity: Int!
+  """Business moment of the issue; defaults to now."""
+  occurredAt: AWSDateTime
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for returnStockFromScout. One atomic batch: every product returns or none does."""
+input ReturnStockFromScoutInput {
+  """The Unit Campaign taking the stock back."""
+  unitCampaignId: ID!
+  """The Scout Campaign the custody was issued under; must match the custody rows."""
+  campaignId: ID!
+  """The Scout returning the stock. A removed Scout's custody still returns."""
+  profileId: ID!
+  """Non-empty, at most one entry per product; the batch must fit the 90-action write plan."""
+  items: [ProductQuantityInput!]!
+  """Business moment of the return; defaults to now."""
+  occurredAt: AWSDateTime
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""What one issue produced: the product's stock position and the Scout's custody."""
+type IssueStockToScoutPayload {
+  """The product's position after the issue: Kernel stock down, With Scout up."""
+  inventoryPosition: InventoryPosition!
+  """The Scout's custody row after the issue."""
+  custodyBalance: ScoutCustodyBalance!
+}
+
+"""What one return batch produced, in the order the request named its products."""
+type ReturnStockFromScoutPayload {
+  """Each returned product's position, with Kernel stock back up."""
+  inventoryPositions: [InventoryPosition!]!
+  """Each returned product's custody row for that Scout."""
+  custodyBalances: [ScoutCustodyBalance!]!
+}
+
+# ============================================================================
 # Query Root
 # ============================================================================
 
@@ -1620,6 +1712,24 @@ type Query {
     """Pagination parameters."""
     page: PageInput
   ): InventoryMovementConnection!
+  """What a Unit Campaign has out with its Scouts, per Scout and in aggregate. Unit Admin for the parent Unit."""
+  scoutCustodyBalances(
+    """The Unit Campaign ID."""
+    unitCampaignId: ID!
+    """Filter to one Scout's custody rows."""
+    profileId: ID
+    """Filter to one product's custody rows."""
+    productId: ID
+    """Pagination parameters."""
+    page: PageInput
+  ): ScoutCustodyBalanceConnection!
+  """One Scout's own custody in one Unit Campaign. Profile Owner/WRITE/READ for that Scout, or Unit Admin for the parent Unit; never another Scout's rows."""
+  myScoutCustody(
+    """The Scout's profile ID."""
+    profileId: ID!
+    """The Unit Campaign ID."""
+    unitCampaignId: ID!
+  ): [ScoutCustodyBalance!]!
 
   # Account queries
   """The authenticated caller's account. The row is created automatically on first read if it does not yet exist."""
@@ -1886,6 +1996,16 @@ type Mutation {
     """The on-order adjustment."""
     input: AdjustCouncilOnOrderInput!
   ): InventoryPosition!
+  """Issue unassigned Kernel stock to an ACTIVE Scout on this campaign's roster. Unit Admin for the parent Unit; Kernel stock down, With Scout up, total unit-owned stock unchanged, and no Order, sale, credit, or We Owe effect."""
+  issueStockToScout(
+    """The issue."""
+    input: IssueStockToScoutInput!
+  ): IssueStockToScoutPayload!
+  """Return one Scout's unsold custody to Kernel stock as one atomic batch: any over-return or oversized batch refuses the whole request. Unit Admin for the parent Unit."""
+  returnStockFromScout(
+    """The return batch."""
+    input: ReturnStockFromScoutInput!
+  ): ReturnStockFromScoutPayload!
 
   # Account mutations
   """Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account."""

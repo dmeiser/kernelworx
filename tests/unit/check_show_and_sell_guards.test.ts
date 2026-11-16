@@ -109,6 +109,8 @@ const SS_QUERY_FIELDS: string[] = [
   "unitCampaignRoster",
   "inventoryPositions",
   "inventoryMovements",
+  "scoutCustodyBalances",
+  "myScoutCustody",
 ];
 
 const SS_MUTATION_FIELDS: string[] = [

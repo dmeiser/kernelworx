@@ -800,3 +800,34 @@ resource "aws_appsync_resolver" "inventory_movements" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Stage 2 Scout custody reads (§2.3.3). Same unit resolver on the same UnitOperationsDS
+# data source as every other Unit/inventory field: the tenant check and the Profile
+# share check are in the handler, so a new read only adds a field name to its router.
+resource "aws_appsync_resolver" "scout_custody_balances" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "scoutCustodyBalances"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "my_scout_custody" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "myScoutCustody"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

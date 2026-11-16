@@ -577,6 +577,33 @@ export type GqlInventoryPositionConnection = {
   pageInfo: GqlPageInfo;
 };
 
+/** Input for issueStockToScout. Moves unassigned Kernel stock into one Scout's custody; never sells anything. */
+export type GqlIssueStockToScoutInput = {
+  /** The Scout Campaign of the roster identity being issued to; must match the roster row. */
+  campaignId: Scalars['ID']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Business moment of the issue; defaults to now. */
+  occurredAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  /** The product being issued. */
+  productId: Scalars['ID']['input'];
+  /** The Scout's profile; must be an ACTIVE member of this campaign's roster. */
+  profileId: Scalars['ID']['input'];
+  /** Positive number of Kernels to issue; cannot exceed the unassigned stock. */
+  quantity: Scalars['Int']['input'];
+  /** The Unit Campaign issuing the stock. */
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** What one issue produced: the product's stock position and the Scout's custody. */
+export type GqlIssueStockToScoutPayload = {
+  __typename?: 'IssueStockToScoutPayload';
+  /** The Scout's custody row after the issue. */
+  custodyBalance: GqlScoutCustodyBalance;
+  /** The product's position after the issue: Kernel stock down, With Scout up. */
+  inventoryPosition: GqlInventoryPosition;
+};
+
 /** Input for joinUnitCampaign. The caller must have Owner or WRITE on the campaign's Scout. */
 export type GqlJoinUnitCampaignInput = {
   /** The caller's Scout Campaign (must match the roster identity). */
@@ -682,6 +709,8 @@ export type GqlMutation = {
   deleteSellerProfile: Scalars['Boolean']['output'];
   /** Delete a shared campaign the caller created. Returns true on success. */
   deleteSharedCampaign: Scalars['Boolean']['output'];
+  /** Issue unassigned Kernel stock to an ACTIVE Scout on this campaign's roster. Unit Admin for the parent Unit; Kernel stock down, With Scout up, total unit-owned stock unchanged, and no Order, sale, credit, or We Owe effect. */
+  issueStockToScout: GqlIssueStockToScoutPayload;
   /** Join a Unit Campaign with a join code. Any authenticated account with Owner or WRITE on the Scout. */
   joinUnitCampaign: GqlUnitCampaignMembership;
   /** Place a public order on a campaign whose share token is in the request. Returns the buyer's receipt. A never-enabled campaign, a disabled campaign, and a bad token all return NOT_FOUND so probing cannot distinguish them; a campaign at its order cap returns PUBLIC_ORDER_LIMIT_EXCEEDED. */
@@ -696,6 +725,8 @@ export type GqlMutation = {
   removeUnitCampaignMembership: GqlUnitCampaignMembership;
   /** Get pre-signed S3 credentials to upload a QR code for one of the caller's payment methods. */
   requestPaymentMethodQRCodeUpload: GqlS3UploadInfo;
+  /** Return one Scout's unsold custody to Kernel stock as one atomic batch: any over-return or oversized batch refuses the whole request. Unit Admin for the parent Unit. */
+  returnStockFromScout: GqlReturnStockFromScoutPayload;
   /** Remove a share's access to a profile the caller owns. Returns true on success. */
   revokeShare: Scalars['Boolean']['output'];
   /** Revoke a Unit Admin grant; the last grant returns CONFLICT. Unit Admin for that Unit. */
@@ -886,6 +917,11 @@ export type GqlMutation_DeleteSharedCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_IssueStockToScoutArgs = {
+  input: GqlIssueStockToScoutInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_JoinUnitCampaignArgs = {
   input: GqlJoinUnitCampaignInput;
 };
@@ -918,6 +954,11 @@ export type GqlMutation_RemoveUnitCampaignMembershipArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_RequestPaymentMethodQrCodeUploadArgs = {
   paymentMethodName: Scalars['String']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_ReturnStockFromScoutArgs = {
+  input: GqlReturnStockFromScoutInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1123,6 +1164,14 @@ export type GqlProductInput = {
   sortOrder: Scalars['Int']['input'];
 };
 
+/** One product and how many Kernels of it it names. */
+export type GqlProductQuantityInput = {
+  /** The product. */
+  productId: Scalars['ID']['input'];
+  /** Positive number of Kernels. */
+  quantity: Scalars['Int']['input'];
+};
+
 /** An invitation for another account to join a seller profile, redeemable by its invite code. */
 export type GqlProfileInvite = {
   __typename?: 'ProfileInvite';
@@ -1326,6 +1375,8 @@ export type GqlQuery = {
   listSharesByProfile: Array<GqlShare>;
   /** The payment methods available to the caller: the caller's stored custom methods plus the built-in "Cash" and "Check" methods, sorted by name. */
   myPaymentMethods: Array<GqlPaymentMethod>;
+  /** One Scout's own custody in one Unit Campaign. Profile Owner/WRITE/READ for that Scout, or Unit Admin for the parent Unit; never another Scout's rows. */
+  myScoutCustody: Array<GqlScoutCustodyBalance>;
   /** The Units on which the caller holds a Unit Admin grant. No cross-Unit data. */
   myUnits: GqlUnitConnection;
   /** The payment methods stored for a profile's owner. The caller must have access to the profile; READ-only callers see the method names but not their QR codes (qrCodeUrl is null). */
@@ -1334,6 +1385,8 @@ export type GqlQuery = {
   publicGetOrderOffer: GqlPublicOrderOffer;
   /** Fetch the buyer's receipt for a public order. Served to an API-key caller; the receipt token in the URL is the authorization. An unknown campaign/suffix, an absent or mismatched token, and a token that does not match the order all return the same NOT_FOUND. */
   publicGetOrderReceipt: GqlPublicOrderReceiptLookup;
+  /** What a Unit Campaign has out with its Scouts, per Scout and in aggregate. Unit Admin for the parent Unit. */
+  scoutCustodyBalances: GqlScoutCustodyBalanceConnection;
   /** The unit's settings and admin count. Unit Admin for that Unit. */
   unit?: Maybe<GqlUnit>;
   /** The unit's admin grants; account email/name limited to administration needs. Unit Admin. */
@@ -1488,6 +1541,12 @@ export type GqlQuery_ListSharesByProfileArgs = {
 };
 
 /** The root query object for the KernelWorx API. */
+export type GqlQuery_MyScoutCustodyArgs = {
+  profileId: Scalars['ID']['input'];
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
 export type GqlQuery_MyUnitsArgs = {
   page?: InputMaybe<GqlPageInput>;
 };
@@ -1508,6 +1567,14 @@ export type GqlQuery_PublicGetOrderReceiptArgs = {
   campaignId: Scalars['ID']['input'];
   orderSuffix: Scalars['String']['input'];
   receiptToken: Scalars['String']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ScoutCustodyBalancesArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  profileId?: InputMaybe<Scalars['ID']['input']>;
+  unitCampaignId: Scalars['ID']['input'];
 };
 
 /** The root query object for the KernelWorx API. */
@@ -1598,6 +1665,31 @@ export type GqlRemoveUnitCampaignMembershipInput = {
   unitCampaignId: Scalars['ID']['input'];
 };
 
+/** Input for returnStockFromScout. One atomic batch: every product returns or none does. */
+export type GqlReturnStockFromScoutInput = {
+  /** The Scout Campaign the custody was issued under; must match the custody rows. */
+  campaignId: Scalars['ID']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Non-empty, at most one entry per product; the batch must fit the 90-action write plan. */
+  items: Array<GqlProductQuantityInput>;
+  /** Business moment of the return; defaults to now. */
+  occurredAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  /** The Scout returning the stock. A removed Scout's custody still returns. */
+  profileId: Scalars['ID']['input'];
+  /** The Unit Campaign taking the stock back. */
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** What one return batch produced, in the order the request named its products. */
+export type GqlReturnStockFromScoutPayload = {
+  __typename?: 'ReturnStockFromScoutPayload';
+  /** Each returned product's custody row for that Scout. */
+  custodyBalances: Array<GqlScoutCustodyBalance>;
+  /** Each returned product's position, with Kernel stock back up. */
+  inventoryPositions: Array<GqlInventoryPosition>;
+};
+
 /** Input for revokeShare. Removes a share's access to a profile (owner only). */
 export type GqlRevokeShareInput = {
   /** The ID of the profile the share is on. */
@@ -1637,6 +1729,38 @@ export type GqlS3UploadInfo = {
   s3Key: Scalars['String']['output'];
   /** The pre-signed S3 URL to POST the file to. */
   uploadUrl: Scalars['String']['output'];
+};
+
+/** One Scout's custody of one product in one Unit Campaign: unsold unit-owned stock issued for individual sales. Stock with a Scout is not sellable Kernel stock until it is returned or consumed by a sale; it still counts in total unit-owned stock (spec CUST-01). */
+export type GqlScoutCustodyBalance = {
+  __typename?: 'ScoutCustodyBalance';
+  /** The Scout Campaign used for this Scout's individual sales. */
+  campaignId: Scalars['ID']['output'];
+  /** When the custody row was created. */
+  createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  /** The product the Scout holds. */
+  productId: Scalars['ID']['output'];
+  /** The Scout holding the stock. */
+  profileId: Scalars['ID']['output'];
+  /** The Unit Campaign the custody belongs to. */
+  unitCampaignId: Scalars['ID']['output'];
+  /** When the custody row was last written. */
+  updatedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  /** Custody version, incremented by every issue, sale, and return on this row. */
+  version: Scalars['Int']['output'];
+  /** Unsold unit-owned Kernels with this Scout; never negative. */
+  withScoutQty: Scalars['Int']['output'];
+};
+
+/** A page of Scout custody balances, ordered by product then Scout. Carries the aggregate the inventory board needs alongside the per-Scout rows. */
+export type GqlScoutCustodyBalanceConnection = {
+  __typename?: 'ScoutCustodyBalanceConnection';
+  /** The custody rows on this page. */
+  items: Array<GqlScoutCustodyBalance>;
+  /** Cursor state for this page. */
+  pageInfo: GqlPageInfo;
+  /** Total With Scout quantity across the whole filtered set, not just this page. */
+  totalWithScoutQty: Scalars['Int']['output'];
 };
 
 /** A seller (scout unit) profile that owns campaigns. Returned for the caller's own profiles and for profiles shared to them. */

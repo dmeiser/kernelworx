@@ -37,14 +37,18 @@ from src.handlers.unit_operations import (
     CREATE_UNIT_FIELD,
     INVENTORY_MOVEMENTS_FIELD,
     INVENTORY_POSITIONS_FIELD,
+    ISSUE_STOCK_FIELD,
     JOIN_PREVIEW_FIELD,
     JOIN_UNIT_CAMPAIGN_FIELD,
+    MY_SCOUT_CUSTODY_FIELD,
     MY_UNITS_FIELD,
     RECORD_RECEIPT_FIELD,
     REDEEM_INVITE_FIELD,
     REMOVE_MEMBERSHIP_FIELD,
+    RETURN_STOCK_FIELD,
     REVOKE_GRANT_FIELD,
     REVOKE_INVITE_FIELD,
+    SCOUT_CUSTODY_FIELD,
     UNIT_ADMINS_FIELD,
     UNIT_CAMPAIGN_CATALOG_FIELD,
     UNIT_CAMPAIGN_FIELD,
@@ -81,7 +85,12 @@ LEGACY_TABLE_KEYS = {"accounts", "campaigns", "catalogs", "profiles", "shares"}
 WRITE_ACTIONS = {"PutItem", "UpdateItem", "DeleteItem", "ConditionCheckItem"}
 
 # The transaction API carries item operations; IAM names them per item.
-ITEM_ACTIONS = {"Put": "PutItem", "Update": "UpdateItem", "Delete": "DeleteItem", "ConditionCheck": "ConditionCheckItem"}
+ITEM_ACTIONS = {
+    "Put": "PutItem",
+    "Update": "UpdateItem",
+    "Delete": "DeleteItem",
+    "ConditionCheck": "ConditionCheckItem",
+}
 
 _ARN_KEYS = re.compile(r'dynamodb_table_arns\["([a-z_]+)"\]')
 _FOR_KEYS = re.compile(r"for k in \[([^\]]*)\]")
@@ -207,9 +216,7 @@ def assert_within_role_scope(calls: List[Tuple[str, str]]) -> None:
 def assert_only_the_join_link_writes_a_legacy_table(calls: List[Tuple[str, str]]) -> None:
     """The §8.2 joined-scope link is the only legacy row Stage 1 writes."""
     legacy_writes = {
-        (action, table)
-        for action, table in calls
-        if action in WRITE_ACTIONS and _table_key(table) in LEGACY_TABLE_KEYS
+        (action, table) for action, table in calls if action in WRITE_ACTIONS and _table_key(table) in LEGACY_TABLE_KEYS
     }
     link = ("UpdateItem", _physical_table("campaigns"))
     assert legacy_writes <= {link}, f"unexpected legacy writes: {sorted(legacy_writes - {link})}"
@@ -354,9 +361,7 @@ def test_every_stage_one_mutation_stays_inside_the_shipped_role(
             mutation={"unitId": PACK_3149, "inviteCode": invite["inviteCode"], **_idem("revoke-invite")},
         )
     )
-    second_invite = _ok(
-        _call(CREATE_INVITE_FIELD, "Avery", mutation={"unitId": PACK_3149, **_idem("create-invite-2")})
-    )
+    second_invite = _ok(_call(CREATE_INVITE_FIELD, "Avery", mutation={"unitId": PACK_3149, **_idem("create-invite-2")}))
     _ok(
         _call(
             REDEEM_INVITE_FIELD,
@@ -536,7 +541,9 @@ def test_the_three_balance_mutations_touch_only_the_inventory_table(
     inventory = _physical_table("inventory")
     writes = {pair for pair in dynamodb_calls.calls if pair[0] in WRITE_ACTIONS}
     assert writes, "a balance mutation issued no write at all"
-    assert {table for _, table in writes} == {inventory}, f"a balance mutation wrote outside inventory: {sorted(writes)}"
+    assert {table for _, table in writes} == {inventory}, (
+        f"a balance mutation wrote outside inventory: {sorted(writes)}"
+    )
     assert ("TransactWriteItems", inventory) in dynamodb_calls.calls, (
         "the balance write no longer rides one conditional transaction"
     )
@@ -544,10 +551,81 @@ def test_the_three_balance_mutations_touch_only_the_inventory_table(
     assert_within_role_scope(dynamodb_calls.calls)
 
 
+def test_the_custody_writes_touch_only_the_inventory_table(
+    stocked: Dict[str, Any], dynamodb_calls: DynamoDbCallRecorder
+) -> None:
+    """§2.3.1/§2.3.2: an issue and a return write balance, custody, movement, marker — nowhere else.
+
+    Custody is the one Stage 2 write that also touches a Scout identity, so it is the
+    write most likely to reach across a table boundary: the roster row and the joined
+    Campaign are read for eligibility and never written, and the Kernels move between
+    two attributes of one balance row. Anything else is an AccessDeniedException on
+    `dev` under the shipped Unit-tenant policy.
+    """
+    _ok(
+        _call(
+            RECORD_RECEIPT_FIELD,
+            "Avery",
+            mutation={
+                "unitCampaignId": PACK_3149_FALL,
+                "productId": INVENTORY_PRODUCT,
+                "quantity": 10,
+                **_idem("scope-custody-seed"),
+            },
+        )
+    )
+    dynamodb_calls.attach()
+
+    _ok(
+        _call(
+            ISSUE_STOCK_FIELD,
+            "Avery",
+            mutation={
+                "unitCampaignId": PACK_3149_FALL,
+                "profileId": PROFILES["Devon"]["profileId"],
+                "campaignId": PROFILES["Devon"]["campaignId"],
+                "productId": INVENTORY_PRODUCT,
+                "quantity": 4,
+                **_idem("scope-issue"),
+            },
+        )
+    )
+    _ok(
+        _call(
+            RETURN_STOCK_FIELD,
+            "Avery",
+            mutation={
+                "unitCampaignId": PACK_3149_FALL,
+                "profileId": PROFILES["Devon"]["profileId"],
+                "campaignId": PROFILES["Devon"]["campaignId"],
+                "items": [{"productId": INVENTORY_PRODUCT, "quantity": 4}],
+                **_idem("scope-return"),
+            },
+        )
+    )
+
+    inventory = _physical_table("inventory")
+    writes = {pair for pair in dynamodb_calls.calls if pair[0] in WRITE_ACTIONS}
+    assert writes, "a custody mutation issued no write at all"
+    assert {table for _, table in writes} == {inventory}, (
+        f"a custody mutation wrote outside inventory: {sorted(writes)}"
+    )
+    assert ("TransactWriteItems", inventory) in dynamodb_calls.calls, (
+        "the custody write no longer rides one conditional transaction"
+    )
+    # The roster row and the joined Campaign are read for eligibility; neither is written.
+    assert ("Query", _physical_table("unit_campaigns")) in dynamodb_calls.calls or (
+        "GetItem",
+        _physical_table("unit_campaigns"),
+    ) in dynamodb_calls.calls, "the roster eligibility read stopped consulting the roster"
+    assert_only_the_join_link_writes_a_legacy_table(dynamodb_calls.calls)
+    assert_within_role_scope(dynamodb_calls.calls)
+
+
 def test_every_stage_two_query_stays_inside_the_shipped_role(
     stocked: Dict[str, Any], dynamodb_calls: DynamoDbCallRecorder
 ) -> None:
-    """§2.2.4: the position and history reads ask only for what the role grants."""
+    """§2.2.4/§2.3.3: the position, history, and custody reads ask only for what the role grants."""
     _ok(
         _call(
             RECORD_RECEIPT_FIELD,
@@ -560,11 +638,37 @@ def test_every_stage_two_query_stays_inside_the_shipped_role(
             },
         )
     )
+    _ok(
+        _call(
+            ISSUE_STOCK_FIELD,
+            "Avery",
+            mutation={
+                "unitCampaignId": PACK_3149_FALL,
+                "profileId": PROFILES["Devon"]["profileId"],
+                "campaignId": PROFILES["Devon"]["campaignId"],
+                "productId": INVENTORY_PRODUCT,
+                "quantity": 2,
+                **_idem("scope-read-issue"),
+            },
+        )
+    )
     dynamodb_calls.attach()
 
     positions = _ok(_call(INVENTORY_POSITIONS_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL}))
     movements = _ok(_call(INVENTORY_MOVEMENTS_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL}))
+    # Both §2.3.3 reads run through the same handler and the same table: the admin
+    # board reads the campaign partition, the participant read adds a share check and
+    # no storage access at all.
+    custody = _ok(_call(SCOUT_CUSTODY_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL}))
+    mine = _ok(
+        _call(
+            MY_SCOUT_CUSTODY_FIELD,
+            "Devon",
+            arguments={"unitCampaignId": PACK_3149_FALL, "profileId": PROFILES["Devon"]["profileId"]},
+        )
+    )
     assert positions["items"] and movements["items"], "a read of an empty table audits nothing"
+    assert custody["items"] and mine, "a custody read of an empty table audits nothing"
 
     assert not [pair for pair in dynamodb_calls.calls if pair[0] in WRITE_ACTIONS], (
         "a Stage 2 query wrote something: the audit trail stops being a record of mutations"
