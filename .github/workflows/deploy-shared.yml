@@ -11,6 +11,11 @@ on:
         description: "Path to the OpenTofu environment directory"
         required: true
         type: string
+      checkout-ref:
+        description: "Commit to check out and deploy. Empty means the run's own head, which is what a push deploy wants."
+        required: false
+        type: string
+        default: ""
       aws-role-session-name:
         description: "AWS role session name for this deployment"
         required: true
@@ -107,6 +112,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Empty for every push-triggered caller, which is the unchanged
+          # behaviour: the run's own head. A dispatched dev deploy names the
+          # commit it resolved, so the tree it serves is that commit and not
+          # whatever the dispatch ref happened to point at.
+          ref: ${{ inputs.checkout-ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -398,6 +409,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Empty for every push-triggered caller, which is the unchanged
+          # behaviour: the run's own head. A dispatched dev deploy names the
+          # commit it resolved, so the tree it serves is that commit and not
+          # whatever the dispatch ref happened to point at.
+          ref: ${{ inputs.checkout-ref }}
 
       # setup-python is incompatible with this container: it installs a CPython
       # built for the ubuntu-26.04 runner whose _ssl requires OPENSSL_3.3.0,

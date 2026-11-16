@@ -280,6 +280,80 @@ enforces and for the entry points that call it.
 
 **Key flags/arguments:** None (sourced library).
 
+### `scripts/dev_deploy_gate.py`
+
+**Guard the dev deploy path: resolve a manually dispatched deploy ref, and report
+deploy drift.** Speaks only to the GitHub REST API using the run's own identity
+(`GITHUB_TOKEN` and `GITHUB_REPOSITORY`); it takes no AWS credential, and neither
+command deploys anything.
+
+- `resolve-ref --ref <branch|tag|sha> --branch dev` — resolves the ref a dispatched
+  `Deploy Dev` run names to a full commit SHA and publishes it as the `sha` step output
+  (`$GITHUB_OUTPUT`). The ref is refused unless it is `dev`'s head or a commit already
+  merged into `dev`, so a hand-run deploy cannot put an unreleased tree on
+  `https://dev.kernelworx.app`. Exit `0` for a deployable commit, `2` for a refusal or an
+  API failure.
+- `check-drift --branch dev --workflow-file deploy-dev.yml` — compares the branch head with
+  the head of the last successful deploy run. Exit `0` when they agree; a deploy run for the
+  head that is still queued or running is reported as in progress, not as drift, because the
+  post-deploy smoke tests run 45-50 minutes. Exit `1` on drift, naming both SHAs, and `2`
+  when the comparison could not be made (the check is inconclusive, not clean).
+
+Tests: `tests/unit/test_dev_deploy_gate.py` drives both commands against a fake GitHub
+transport, and pins the workflow contract — including the rule that the drift check may
+never deploy.
+
+---
+
+## Dev deploy: a merged commit with no `Deploy Dev` run
+
+**Symptom.** A pull request merged into `dev`, its checks green, and
+`https://dev.kernelworx.app` still serves the previous release — and the Actions tab holds
+no `Deploy Dev` run for the merge commit at all. GitHub never emitted the push event for the
+ref change, so nothing started. Observed on 2026-11-16: `dev` moved to
+`526690b03bb88e09c88a5d786de30bd89716bf2c` with no workflow run of any kind for that SHA,
+while the newest run in the repository was the pull request's CI.
+
+**Check.**
+
+```bash
+gh api repos/dmeiser/kernelworx/commits/dev --jq .sha            # what dev says is released
+gh run list --workflow=deploy-dev.yml --branch dev --limit 5     # what actually deployed
+```
+
+Or run the comparison as a job, or locally:
+
+```bash
+gh workflow run dev-drift-check.yml --ref dev
+GITHUB_TOKEN=$(gh auth token) GITHUB_REPOSITORY=dmeiser/kernelworx \
+  python3 scripts/dev_deploy_gate.py check-drift
+```
+
+**Recover, without writing to `dev`.**
+
+```bash
+gh workflow run deploy-dev.yml --ref dev -f ref=dev
+```
+
+`--ref dev` selects the copy of the workflow that lives on `dev` (a dispatch trigger exists
+only where the file exists), and `ref=dev` is the input naming the tree to deploy: the
+`resolve-deploy-ref` job turns it into a full SHA and refuses anything that is not `dev`'s
+head or already merged into it. To roll the environment back to an older `dev` commit, pass
+its full SHA instead: `-f ref=<sha>`.
+
+**Confirm the recovery landed.**
+
+```bash
+gh run list --workflow=deploy-dev.yml --branch dev --limit 1
+python3 scripts/dev_deploy_gate.py check-drift    # exit 0 once that run is green
+```
+
+**Why it was silent, and what watches it now.** A workflow only starts on an event GitHub
+emits, so a lost push event leaves nothing queued and no gate red. `dev-drift-check.yml`
+compares the two heads twice an hour and fails with both SHAs when they differ. GitHub
+honours a schedule only for workflow files on the default branch, so until that file reaches
+`main` the check is run by hand with the command above.
+
 ---
 
 ## Repo-Root Operational Tooling
@@ -304,7 +378,13 @@ enforces and for the entry points that call it.
 ### GitHub Actions workflows (`.github/workflows/`)
 
 - **`ci.yml`** — Standard CI pipeline (spellcheck + lint + typecheck + codegen-sync + complexity + test + guards + js-resolvers + infra lint)
-- **`deploy-dev.yml`** / **`deploy-prod.yml`** — Environment deployment workflows
+- **`deploy-dev.yml`** / **`deploy-prod.yml`** — Environment deployment workflows.
+  `deploy-dev.yml` also runs on `workflow_dispatch` with an optional `ref` input (default
+  `dev`), which is how a lost push event is recovered without writing to `dev`: see
+  [Dev deploy: a merged commit with no `Deploy Dev` run](#dev-deploy-a-merged-commit-with-no-deploy-dev-run).
+- **`dev-drift-check.yml`** — Compares `dev`'s head with the head of the last successful
+  `Deploy Dev` run and fails, naming both SHAs, when they differ. It reports only and can
+  deploy nothing.
 - **`deploy-shared.yml`** — Shared infrastructure (Cognito, CloudFront, WAF) deployment
 - **`ephemeral-test.yml`** — Ephemeral environment test creation/destruction
 - **`ephemeral-teardown-on-merge.yml`** — Automatic teardown of ephemeral stacks on PR merge
@@ -334,6 +414,8 @@ enforces and for the entry points that call it.
 | Check WCAG contrast of brand colors                         | `scripts/contrast_check.py`                |
 | Sync Route53 DNS to CloudFlare                              | `scripts/sync-to-cloudflare.sh`            |
 | Generate integration test env config from tofu outputs      | `scripts/generate_integration_env.py`      |
+| Check whether a dev merge actually deployed                 | `scripts/dev_deploy_gate.py check-drift`   |
+| Resolve the commit a dispatched dev deploy may serve         | `scripts/dev_deploy_gate.py resolve-ref`   |
 
 ---
 

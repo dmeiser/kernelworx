@@ -1,0 +1,55 @@
+name: Dev Deploy Drift Check
+
+# A merge into dev whose push event never arrives produces no Deploy Dev run:
+# dev advertises a fix that https://dev.kernelworx.app does not serve, the
+# "merged to dev with a green deploy" step the whole delivery chain is ordered
+# by cannot be satisfied, and nothing goes red. On 2026-11-16 dev moved to
+# 526690b0 with no workflow run of any kind for that SHA, and the gap was found
+# by reading gh run list, not by the pipeline.
+#
+# This job compares dev's head with the head of the last successful Deploy Dev
+# run and fails, naming both SHAs, when they differ. It reports only: it holds
+# no cloud credential, no runner token that can assume a role, and no
+# deployment environment, and it calls no reusable deploy workflow. A guard test
+# fails if any of those appear here.
+#
+# GitHub honours a schedule only for workflow files on the repository's default
+# branch, so this schedule becomes effective when the file reaches main. Before
+# that, and to check by hand at any time:
+#
+#     gh workflow run dev-drift-check.yml --ref dev
+on:
+  schedule:
+    # Twice an hour, offset from the hour boundary because GitHub delays
+    # schedules scheduled there. A Deploy Dev run for dev's head that is still
+    # going is reported as in progress, not as drift, so the 45-50 minute
+    # smoke-test window does not raise a false alarm after every merge.
+    - cron: "6,36 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: dev-deploy-drift
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: dev head against the last successful Deploy Dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Check for deploy drift
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/dev_deploy_gate.py check-drift --branch dev --workflow-file deploy-dev.yml
