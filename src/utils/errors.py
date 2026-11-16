@@ -69,6 +69,9 @@ class ErrorCode:
     # across the GraphQL boundary (impact map §3.1).
     OPERATION_TOO_LARGE = "OPERATION_TOO_LARGE"
 
+    # Alive-once guard: Cognito rejects legacy authentication flow names mixed with
+    # ALLOW_* flags (InvalidParameterException, deploy run 43913201081), so this
+    # enum may not drop the spelling the client still sends.
     # Abuse limits (data model §6.6: Unit-invite redemption attempt 11 in one
     # UTC hour). Distinct from RESOURCE_BUSY: retrying the same attempt within
     # the window cannot succeed.
