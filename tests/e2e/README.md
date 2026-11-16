@@ -19,6 +19,11 @@ with:
 ./tofu/application/scripts/deploy.sh dev apply
 ```
 
+Show & Sell journeys also need the signed-in fixture identities
+(`qa-show-sell-*@dev.kernelworx.app`). Create or refresh them with
+`uv run python scripts/qa_fixture.py up` and load the passwords it writes; see
+[docs/QA_FIXTURE_RUNBOOK.md](../docs/QA_FIXTURE_RUNBOOK.md).
+
 ### 2. `.env` configuration
 
 Copy `.env.example` to `.env` in the repository root and populate the
