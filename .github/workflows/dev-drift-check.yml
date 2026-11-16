@@ -13,11 +13,15 @@ name: Dev Deploy Drift Check
 # deployment environment, and it calls no reusable deploy workflow. A guard test
 # fails if any of those appear here.
 #
-# GitHub honours a schedule only for workflow files on the repository's default
-# branch, so this schedule becomes effective when the file reaches main. Before
-# that, and to check by hand at any time:
+# GitHub registers a workflow only from the repository's default branch, so both
+# the schedule and dispatch by name take effect when this file reaches main. Until
+# then, run the comparison locally -- and after, it stays the way to check without
+# waiting for the schedule:
 #
-#     gh workflow run dev-drift-check.yml --ref dev
+#     GITHUB_TOKEN=$(gh auth token) GITHUB_REPOSITORY=dmeiser/kernelworx \
+#       python3 scripts/dev_deploy_gate.py check-drift
+#
+# Once the file is on main: gh workflow run dev-drift-check.yml --ref dev
 on:
   schedule:
     # Twice an hour, offset from the hour boundary because GitHub delays
