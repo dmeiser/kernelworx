@@ -243,7 +243,7 @@ def test_up_writes_a_readable_secrets_file_outside_the_repo(mod: ModuleType, tmp
 
 
 def test_no_password_ever_reaches_stdout(mod: ModuleType, tmp_path: Path) -> None:
-    """Behavioural gate: every verb's output is checked against every password."""
+    """Behavioral gate: every verb's output is checked against every password."""
     c = StubCognito(users=_fixture_users(mod))
     secrets_file = str(tmp_path / "secrets.json")
     captured = io.StringIO()

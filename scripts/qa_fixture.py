@@ -332,7 +332,7 @@ def apply_down(
     have = pool_users(c)
     mem = group_members(c)
     present = [m for m in mails.values() if m in have]
-    subs = {_attrs(have[m]).get("sub") for m in present if m in have}
+    subs = {s for s in (_attrs(have[m]).get("sub") for m in present) if s}
     rows, unattributed = owned_rows(d, subs)
 
     print(f"plan: delete {len(present)} fixture users", file=out)

@@ -92,6 +92,7 @@ Cooldown
 cooldown
 coppa
 costEstimator
+CREAT
 creatorMessage
 ctype
 Cub
@@ -535,6 +536,7 @@ wordmark
 worktree
 worx
 wrongpassword
+WRONLY
 wxyz
 xlarge
 xlink
