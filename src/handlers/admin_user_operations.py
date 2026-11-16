@@ -406,6 +406,7 @@ def _scan_accounts_page(
     # ``len(items)`` is only the subset it returned. The safety budget must bound
     # the former so a table of removed/filtered items cannot blow past it.
     scanned_count = response.get("ScannedCount", len(items))
+    # return the list
     return items, last_key, scanned_count
 
 
