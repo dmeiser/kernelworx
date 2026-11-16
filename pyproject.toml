@@ -43,7 +43,7 @@ dev = [
 # silently flip (see tests/unit/test_except_syntax.py).
 target-version = "py314"
 line-length = 120
-lint.extend-select = ["I"]
+lint.extend-select = ["I", "ERA", "TD", "FIX"]
 # Use Ruff for linting, import sorting, and formatting. Run `ruff check` and `ruff format` to apply fixes.
 
 [tool.mypy]

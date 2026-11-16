@@ -38,6 +38,41 @@ This file contains repository-specific agent rules. Agents should follow these w
 - **Accessibility**: Target WCAG 2.1 AAA (aspirational). High contrast, keyboard navigation, screen reader support.
 - **Testing**: 100% unit test coverage required. No exceptions.
 
+## Comments
+
+A comment may exist only to answer: **why does this particular confusing piece of code exist, and what problem was it meant to solve?**
+
+The test to apply: *delete the comment. Does the next reader now do something wrong?* No → delete it. Yes → keep it, and make it say what goes wrong.
+
+### Delete
+
+| Kind | Example |
+|---|---|
+| restates what the code says | `# increment the counter` above `count += 1`; `# return the list` |
+| narrates a platform or vendor rule | "GitHub registers a workflow only from the default branch" |
+| narrates current repo or pipeline state | "until this file reaches main"; "not yet registered"; "for now" |
+| change history | `# added in #123`; `# since WORK-202` |
+| factory vocabulary | card keys, lane names, agent names, status names |
+| TODO/FIXME/XXX with no owner and no trigger | `# TODO: fix this` |
+| commented-out code | a code sketch left inside a comment block |
+
+### Keep
+
+| Kind | Example |
+|---|---|
+| the constraint that forced an odd shape | upstream issue id, provider gap, ordering requirement, an API that rejects a natural spelling |
+| the incident, with its handle | the SHA / run id / error string that is the only durable record of why |
+| a guard whose absence is invisible | `# must stay ALLOW_USER_AUTH: Cognito rejects legacy flow names mixed with ALLOW_*` |
+
+**Before writing the why-comment, check whether renaming or restructuring removes the need.** A comment is the last resort for confusing code, not the first.
+
+Platform and vendor facts do not belong in code comments. They belong in `AGENTS.md`, which exists for exactly that purpose and is read by every agent that meets this repo.
+
+### Mechanical gates
+
+- `uv run ruff check src/ tests/` selects `ERA` (commented-out code) and `TD`/`FIX` (TODO/FIXME/XXX markers), so the two delete-row kinds that can be caught by tokens fail the backend gate directly.
+- `.github/workflows/comment-only-diff.yml` fails a pull request whose entire diff is comments, blank lines, and docs prose. When a comment-only change is genuinely needed (correcting a wrong reader-facing claim), add the `comment-only` label and state, on its own description line starting with `Claim:`, which claim was wrong.
+
 ## Code Quality Standards
 
 All code changes must meet the following quality metrics before work is considered complete.

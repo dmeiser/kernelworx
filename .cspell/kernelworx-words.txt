@@ -464,6 +464,7 @@ tflint
 tflock
 tfoot
 tfstate
+tfvars
 thead
 timeframe
 timeoutId

@@ -590,13 +590,9 @@ def reject_immutable_campaign_changes(changes: Any) -> None:
 # --- Transaction actions ---------------------------------------------------------
 #
 # Each helper returns a ``WritePlan``-shaped pair, ``(action, body)``, with the
-# body already in DynamoDB wire form, so a resolver composes them without
-# re-deriving which operation a guard belongs to::
-#
-#     for action, body in ucm.create_campaign_actions(campaign, pointer):
-#         plan.add(action, body)
-#
-# That keeps the 90-action budget (data model §8.10) measured against the plan
+# body already in DynamoDB wire form, so a resolver adds the pairs to its plan
+# directly instead of re-deriving which operation a guard belongs to. That
+# keeps the 90-action budget (data model §8.10) measured against the plan
 # DynamoDB will actually run, and it keeps every condition below the one place
 # where it can be audited.
 
