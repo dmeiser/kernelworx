@@ -189,16 +189,17 @@ module "lambda" {
   exports_bucket_name = module.s3.exports_bucket_name
 
   table_names = {
-    accounts         = module.dynamodb.accounts_table_name
-    catalogs         = module.dynamodb.catalogs_table_name
-    profiles         = module.dynamodb.profiles_table_name
-    campaigns        = module.dynamodb.campaigns_table_name
-    orders           = module.dynamodb.orders_table_name
-    shares           = module.dynamodb.shares_table_name
-    invites          = module.dynamodb.invites_table_name
-    shared_campaigns = module.dynamodb.shared_campaigns_table_name
-    units            = module.dynamodb.units_table_name
-    unit_campaigns   = module.dynamodb.unit_campaigns_table_name
+    accounts               = module.dynamodb.accounts_table_name
+    catalogs               = module.dynamodb.catalogs_table_name
+    profiles               = module.dynamodb.profiles_table_name
+    campaigns              = module.dynamodb.campaigns_table_name
+    orders                 = module.dynamodb.orders_table_name
+    shares                 = module.dynamodb.shares_table_name
+    invites                = module.dynamodb.invites_table_name
+    shared_campaigns       = module.dynamodb.shared_campaigns_table_name
+    public_order_throttles = module.dynamodb.public_order_throttles_table_name
+    units                  = module.dynamodb.units_table_name
+    unit_campaigns         = module.dynamodb.unit_campaigns_table_name
   }
 
   user_pool_id = module.cognito.user_pool_id

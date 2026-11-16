@@ -6,8 +6,19 @@ resolver that exists only in schema and source answers nothing on
 ``dev.kernelworx.app``. This file pins the deployed path end to end, because
 every link is one a plausible-looking wiring pass drops:
 
-- the Lambda function itself, with the handler entry point and the env vars
-  the TableAccessor reads (UNITS_TABLE_NAME / UNIT_CAMPAIGNS_TABLE_NAME);
+- the Lambda function itself, with the handler entry point and an env var for
+  every table its ``TableAccessor`` reads. Not just the two Unit aggregate
+  tables: the §6.6 invite-redemption counter lives on the shared
+  ``public_order_throttles`` table, and a table the handler reaches without a
+  deployed ``<TABLE>_TABLE_NAME`` fails at the accessor's
+  ``get_required_env`` — the domain answer (``NOT_FOUND`` for an unusable
+  invite) is replaced by ``INTERNAL_ERROR`` and the throttle stops counting.
+  The unit suite cannot see that hole because ``conftest`` injects every table
+  name into the test process; QA found it live on ``dev`` at ``2f457c5e``. So
+  the env pin below is derived from the handler's own table closure, and the
+  role grant and the three environments' ``table_names`` maps are checked
+  against the same closure — env var, IAM grant and plan-time wiring are one
+  chain, and a missing link at any of the three makes the table unreachable;
 - a scoped execution role (the #326 domain-role split: no function falls back
   to a broad role, and the Unit role's only write outside its own tables is the
   §8.2 join link on the legacy campaigns table -- named, not implied);
@@ -25,9 +36,11 @@ import re
 from pathlib import Path
 
 from tests.unit.test_edge_security import TF_APP, block, load_hcl
+from tests.unit.test_lambda_table_env_closure import SRC, closure_table_keys, workload_env
 
 MODULES = TF_APP / "modules"
 ENVIRONMENTS = TF_APP / "environments"
+UNIT_HANDLER = SRC / "handlers" / "unit_operations.py"
 
 LAMBDA_MODULE = MODULES / "lambda" / "main.tf"
 IAM_MODULE = MODULES / "iam" / "main.tf"
@@ -123,6 +136,43 @@ def test_unit_operations_lambda_declares_the_handler_and_table_env() -> None:
     assert "UNIT_CAMPAIGNS_TABLE_NAME" in extra_env and "unit_campaigns" in str(
         extra_env["UNIT_CAMPAIGNS_TABLE_NAME"]
     ), "the Unit Campaign aggregate table must be in the environment too"
+
+
+def test_unit_operations_env_names_every_table_its_closure_reaches() -> None:
+    """An env var for each table the Unit handler can ask the accessor for.
+
+    ``TableAccessor._get_table`` calls ``get_required_env("<TABLE>_TABLE_NAME")``, so
+    an un-wired table is not a degraded feature: it raises inside the request, the
+    generic decorator answers ``INTERNAL_ERROR``, and on ``redeemUnitInvite`` that
+    replaced the documented ``NOT_FOUND`` for every unusable code while the §6.6
+    counter stopped counting (QA, ``2f457c5e``). The closure derivation itself lives
+    in ``test_lambda_table_env_closure.py``, which applies the same rule to every
+    deployed Lambda and to the environments' ``table_names`` maps; this pin stays
+    because it names the contract Stage 1 broke.
+    """
+    env = workload_env("unit-operations")
+    for key in sorted(closure_table_keys(UNIT_HANDLER)):
+        var = f"{key.upper()}_TABLE_NAME"
+        assert var in env, (
+            f"the unit-operations closure reads tables.{key}, but the deployed Lambda carries no {var}: "
+            "get_required_env raises and the caller is answered INTERNAL_ERROR"
+        )
+        assert f"table_names.{key}" in env[var], f"{var} must come from var.table_names.{key}, not a literal name"
+
+
+def test_unit_tenant_role_grants_every_table_the_closure_reaches() -> None:
+    """The last link: an env var the role cannot use is still an unreachable table.
+
+    moto never evaluates IAM, so a table the handler reads and the role omits shows
+    up only as ``AccessDeniedException`` on ``dev`` — the same failure shape as the
+    missing env var this file's other pins catch.
+    """
+    policy = _resource(_hcl(IAM_MODULE), "aws_iam_policy_document", "lambda_unit_tenant_dynamodb", section="data")
+    granted: set[str] = set()
+    for statement in [block(s) for s in policy["statement"]]:
+        granted |= _table_keys(statement)
+    missing = closure_table_keys(UNIT_HANDLER) - granted
+    assert not missing, f"the unit-tenant role grants no access to {sorted(missing)}, which the handler reads"
 
 
 def test_every_environment_assigns_the_scoped_unit_tenant_role() -> None:
