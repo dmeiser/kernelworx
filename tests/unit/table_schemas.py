@@ -470,10 +470,11 @@ def create_unit_campaigns_table_schema() -> dict[str, Any]:
 # EVERY one of them: a marker written to a table without TTL would silently
 # live forever instead of expiring. Tests enumerate this tuple rather than
 # pinning one table's TTL, so a new marker-capable table cannot land
-# un-armed. The marker-capable set is exactly the Show & Sell aggregate
-# tables the marker key contract names; the legacy `invites` table is NOT
-# marker-capable (its TTL stays the string `expiresAt`).
-MARKER_CAPABLE_TABLE_KEYS = ("units", "unit_campaigns")
+# un-armed. The marker-capable set is exactly the Show & Sell aggregate tables
+# the marker key contract names; the legacy `invites` table is NOT marker-capable
+# (its TTL stays the string `expiresAt`). `inventory` joins it in Stage 2: a
+# receipt or adjustment stages its marker on the table whose rows it writes.
+MARKER_CAPABLE_TABLE_KEYS = ("units", "unit_campaigns", "inventory")
 
 
 def create_public_order_throttles_table_schema() -> dict[str, Any]:
@@ -495,6 +496,65 @@ def create_public_order_throttles_table_schema() -> dict[str, Any]:
         "AttributeDefinitions": [{"AttributeName": "key", "AttributeType": "S"}],
         "BillingMode": "PAY_PER_REQUEST",
         "TimeToLiveSpecification": {"AttributeName": "expiresAt", "Enabled": True},
+    }
+
+
+def create_inventory_table_schema() -> dict[str, Any]:
+    """
+    Schema for the inventory table (data model §5.7, §5.8, §5.11, §6.3).
+
+    One partition per Unit Campaign holds that campaign's balances
+    (`PRODUCT#<productId>#BALANCE`), event allocations, Scout custody rows, and the
+    append-only movement trail. The three GSIs are audit locators only — the
+    balance read is a partition query, and the movement trail is read through the
+    product prefix — so no read of record depends on an index being current.
+    TTL is the shared seven-day idempotency-marker horizon (`expiresAtEpoch`,
+    §8.9); balance and movement rows never carry an expiry.
+
+    Not part of ``get_all_table_schemas``/``create_all_tables``: the 10-table
+    fixture-count contract stays exact, and the tests that exercise inventory
+    create this table explicitly (see tests/unit/test_inventory_operations.py).
+    """
+    return {
+        "TableName": "kernelworx-inventory-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "pk", "AttributeType": "S"},
+            {"AttributeName": "sk", "AttributeType": "S"},
+            {"AttributeName": "showAndSellId", "AttributeType": "S"},
+            {"AttributeName": "profileId", "AttributeType": "S"},
+            {"AttributeName": "unitCampaignId", "AttributeType": "S"},
+            {"AttributeName": "movementType", "AttributeType": "S"},
+            {"AttributeName": "occurredAt", "AttributeType": "S"},
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "showAndSellId-index",
+                "KeySchema": [{"AttributeName": "showAndSellId", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "profileId-unitCampaignId-index",
+                "KeySchema": [
+                    {"AttributeName": "profileId", "KeyType": "HASH"},
+                    {"AttributeName": "unitCampaignId", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "movementType-occurredAt-index",
+                "KeySchema": [
+                    {"AttributeName": "movementType", "KeyType": "HASH"},
+                    {"AttributeName": "occurredAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": True},
     }
 
 

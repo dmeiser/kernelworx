@@ -94,6 +94,9 @@ function definition(name: string): Definition {
 
 // --- The operation surface whose auth paths must exist (Unit + Profile) ---
 
+// Stage 1 (§1) plus the Stage 2 balance surface (§2.1/§2.2): the auth guard
+// below is only as wide as this list, so a new mutation that skips it is a
+// mutation nobody checked for an auth path.
 const SS_QUERY_FIELDS: string[] = [
   "myUnits",
   "unit",
@@ -104,6 +107,8 @@ const SS_QUERY_FIELDS: string[] = [
   "unitCampaignCatalog",
   "unitCampaigns",
   "unitCampaignRoster",
+  "inventoryPositions",
+  "inventoryMovements",
 ];
 
 const SS_MUTATION_FIELDS: string[] = [
@@ -117,6 +122,9 @@ const SS_MUTATION_FIELDS: string[] = [
   "updateUnitCampaign",
   "joinUnitCampaign",
   "removeUnitCampaignMembership",
+  "recordInventoryReceipt",
+  "adjustInventory",
+  "adjustCouncilOnOrder",
 ];
 
 /**

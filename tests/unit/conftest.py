@@ -12,7 +12,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from tests.unit.table_schemas import create_all_tables
+from tests.unit.table_schemas import create_all_tables, create_inventory_table_schema
 
 # Set environment variables at module load time so that module-level code in
 # Lambda handlers (e.g. get_required_env calls) sees them during test collection.
@@ -33,6 +33,7 @@ os.environ["INVITES_TABLE_NAME"] = "kernelworx-invites-ue1-dev"
 os.environ["SHARED_CAMPAIGNS_TABLE_NAME"] = "kernelworx-shared-campaigns-ue1-dev"
 os.environ["UNITS_TABLE_NAME"] = "kernelworx-units-ue1-dev"
 os.environ["UNIT_CAMPAIGNS_TABLE_NAME"] = "kernelworx-unit-campaigns-ue1-dev"
+os.environ["INVENTORY_TABLE_NAME"] = "kernelworx-inventory-ue1-dev"
 os.environ["PUBLIC_ORDER_THROTTLES_TABLE_NAME"] = "kernelworx-public-order-throttles-ue1-dev"
 # S3 bucket names
 os.environ["EXPORTS_BUCKET"] = "kernelworx-exports-ue1-dev"
@@ -86,6 +87,7 @@ def aws_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SHARED_CAMPAIGNS_TABLE_NAME", "kernelworx-shared-campaigns-ue1-dev")
     monkeypatch.setenv("UNITS_TABLE_NAME", "kernelworx-units-ue1-dev")
     monkeypatch.setenv("UNIT_CAMPAIGNS_TABLE_NAME", "kernelworx-unit-campaigns-ue1-dev")
+    monkeypatch.setenv("INVENTORY_TABLE_NAME", "kernelworx-inventory-ue1-dev")
     monkeypatch.setenv("PUBLIC_ORDER_THROTTLES_TABLE_NAME", "kernelworx-public-order-throttles-ue1-dev")
     monkeypatch.setenv("EXPORTS_BUCKET", "kernelworx-exports-ue1-dev")
 
@@ -168,6 +170,26 @@ def unit_campaigns_table(dynamodb_table: Any) -> Any:
     """Get the Show & Sell Unit Campaigns DynamoDB table."""
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
     return dynamodb.Table("kernelworx-unit-campaigns-ue1-dev")
+
+
+@pytest.fixture
+def inventory_table(dynamodb_table: Any) -> Any:
+    """Get the Show & Sell inventory table.
+
+    Created on top of the standard fixture set and deleted afterwards rather than
+    added to ``create_all_tables``: the 10-table fixture contract is pinned by
+    ``test_table_schemas`` and by the ``list_tables()`` assertion in
+    ``test_handler_error_and_fallback_paths``, and the same precedent already covers
+    the §6.6 throttle table.
+    """
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    schema = create_inventory_table_schema()
+    ttl = schema.pop("TimeToLiveSpecification", None)
+    table = dynamodb.create_table(**schema)
+    if ttl is not None:
+        dynamodb.meta.client.update_time_to_live(TableName=table.table_name, TimeToLiveSpecification=ttl)
+    yield table
+    table.delete()
 
 
 @pytest.fixture

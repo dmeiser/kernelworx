@@ -296,6 +296,16 @@ class TableAccessor:
         return self._get_table("unit_campaigns")
 
     @property
+    def inventory(self) -> "Table":
+        """Get the Show & Sell inventory table instance (data model §6.3).
+
+        One table carries four row kinds under one ``UNIT_CAMPAIGN#`` partition
+        key: balance, event allocation, Scout custody, and the append-only
+        movement history. Balances are versioned aggregates; movements never are.
+        """
+        return self._get_table("inventory")
+
+    @property
     def public_order_throttles(self) -> "Table":
         """Get public order throttles table instance.
 

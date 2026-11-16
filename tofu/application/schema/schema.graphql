@@ -1325,6 +1325,210 @@ input RemoveUnitCampaignMembershipInput {
 }
 
 # ============================================================================
+# Show & Sell and inventory — Stage 2: inventory balances, receipt, adjustment
+#
+# The §5.7 balance and §5.8 audit trail for one Unit Campaign's products. The
+# balance is one row per (unitCampaignId, productId); every change to it appends an
+# InventoryMovement that says which quantity moved, who moved it, and why. The
+# assigned/unassigned/overage/With-Scout numbers are never stored: a position is
+# computed server-side from the open event allocations and the custody rows, so a
+# page cannot display a counter some earlier write forgot to maintain (§7).
+#
+# Same posture as Stage 1: every field is Cognito-only (the API's Cognito mode
+# defaults to ALLOW and the API-key mode defaults to DENY, so a field with no
+# @aws_ directive is unreachable by the public orders key) and Unit Admin
+# authorization lives in the resolver.
+# ============================================================================
+
+"""How one product's stock or custody moved. Closed set (spec §5.8); a movement row is append-only and corrections are new linked movements."""
+enum InventoryMovementType {
+  """Stock received into the campaign's central Kernel balance."""
+  RECEIPT
+  """Manual signed change to central Kernel stock; always carries a reason."""
+  STOCK_ADJUSTMENT
+  """Manual signed change to the separate Council-on-order balance."""
+  COUNCIL_ON_ORDER_ADJUST
+  """Stock reserved to a Show & Sell event."""
+  EVENT_ASSIGN
+  """Event reservation reduced by an admin."""
+  EVENT_MANUAL_REDUCE
+  """Event reservation reduced automatically at a limit."""
+  EVENT_AUTO_REDUCE
+  """Stock sold and handed over during the event itself."""
+  EVENT_IMMEDIATE_SALE
+  """Unsold event reservation released back to the campaign."""
+  EVENT_RELEASE
+  """Event stock returned after the event and reconciled to the balance."""
+  EVENT_RETURN_RECONCILE
+  """Balance correction made when a finalized event is re-opened."""
+  EVENT_RE_FINALIZE_ADJUST
+  """Stock issued into one Scout's custody."""
+  SCOUT_ISSUE
+  """Custody consumed by the Scout's own sale."""
+  SCOUT_SALE_CONSUME
+  """Custody returned by the Scout to central stock."""
+  SCOUT_RETURN
+  """Stock consumed by an individual Order fulfillment."""
+  INDIVIDUAL_FULFILL
+  """Stock reserved for a We Owe obligation."""
+  WE_OWE_RESERVE
+  """A We Owe reservation released back to sellable stock."""
+  WE_OWE_RELEASE
+  """Stock consumed by fulfilling a We Owe obligation."""
+  WE_OWE_FULFILL
+  """Reversal of an earlier movement; mirrors the deltas of what it reverses."""
+  REVERSAL
+}
+
+"""One product's stock position: the §5.7 balance row plus the §7 quantities derived from the open event allocations and custody rows. A product with no balance row yet answers as zeros at version 0."""
+type InventoryPosition {
+  """The Unit Campaign the balance belongs to."""
+  unitCampaignId: ID!
+  """The catalog product this balance is for."""
+  productId: ID!
+  """Central physical Kernel stock, including assigned and We Owe-reserved Kernels."""
+  kernelPhysicalQty: Int!
+  """Portion of physical stock reserved for We Owe obligations."""
+  soldInPossessionQty: Int!
+  """Expected Council supply on order for this product; never subtracted automatically."""
+  councilOnOrderQty: Int!
+  """Balance version, incremented by every stock write; 0 when no balance row exists yet."""
+  version: Int!
+  """When the balance row was created, or null before the first receipt."""
+  createdAt: AWSDateTime
+  """When the balance row was last written, or null before the first receipt."""
+  updatedAt: AWSDateTime
+  """Sellable now: kernelPhysicalQty - soldInPossessionQty."""
+  sellableKernelQty: Int!
+  """Kernels still owed by open event allocations."""
+  assignedOpenQty: Int!
+  """Sellable Kernels not claimed by any open allocation: max(0, sellable - assignedOpen)."""
+  unassignedKernelQty: Int!
+  """Open allocations exceeding sellable stock: max(0, assignedOpen - sellable). A shortage, never a negative unassigned value."""
+  assignmentOverageQty: Int!
+  """Kernels physically in Scout custody for this product."""
+  withScoutQty: Int!
+  """Everything the campaign owns for this product and has not delivered: kernelPhysicalQty + withScoutQty."""
+  totalUnitOwnedUndeliveredQty: Int!
+}
+
+"""A page of inventory positions."""
+type InventoryPositionConnection {
+  """The positions on this page."""
+  items: [InventoryPosition!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+}
+
+"""Append-only audit record of one inventory change (spec §5.8). Never edited: a correction is a new movement linked to the original."""
+type InventoryMovement {
+  """The movement's own ID."""
+  movementId: ID!
+  """The Unit Campaign whose balance moved."""
+  unitCampaignId: ID!
+  """The product whose balance moved."""
+  productId: ID!
+  """What kind of change this was."""
+  movementType: InventoryMovementType!
+  """Signed change to central physical Kernel stock; 0 when not applicable."""
+  kernelPhysicalDelta: Int!
+  """Signed change to We Owe-reserved central stock; 0 when not applicable."""
+  soldPossessionDelta: Int!
+  """Signed change to one Scout's custody; 0 when not applicable."""
+  withScoutDelta: Int!
+  """Explanation of an allocation change; allocations stay authoritative; 0 when not applicable."""
+  assignedDelta: Int!
+  """Signed change to the separate Council-on-order balance; 0 when not applicable."""
+  councilOnOrderDelta: Int!
+  """The Scout whose custody or individual fulfillment this is, when applicable."""
+  profileId: ID
+  """The Show & Sell event this movement belongs to, when applicable."""
+  showAndSellId: ID
+  """The sale this movement belongs to, when applicable."""
+  saleId: ID
+  """The individual Order this movement belongs to, when applicable."""
+  orderId: ID
+  """The We Owe obligation this movement belongs to, when applicable."""
+  weOweId: ID
+  """The fulfillment this movement belongs to, when applicable."""
+  fulfillmentId: ID
+  """The finalization this movement belongs to, when applicable."""
+  finalizationId: ID
+  """Why the change was made; mandatory for manual adjustments and reconciliation."""
+  reason: String
+  """The account that performed the action."""
+  actorAccountId: ID!
+  """Business moment of the change."""
+  occurredAt: AWSDateTime!
+  """The InventoryBalance version this movement produced, or null for a movement that changed no balance."""
+  inventoryVersion: Int
+  """The idempotency key of the request that wrote this movement."""
+  idempotencyKey: String!
+}
+
+"""A page of inventory movements, newest first."""
+type InventoryMovementConnection {
+  """The movements on this page."""
+  items: [InventoryMovement!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+}
+
+"""Inclusive instant window for a history read; at most 366 days wide."""
+input DateRangeFilter {
+  """First instant to include."""
+  startAt: AWSDateTime
+  """Last instant to include; must be after startAt."""
+  endAt: AWSDateTime
+}
+
+"""Input for recordInventoryReceipt. Stock only: no Order, payment, credit, or We Owe effect."""
+input RecordInventoryReceiptInput {
+  """The Unit Campaign receiving the stock."""
+  unitCampaignId: ID!
+  """The catalog product received; must be a product of this campaign's catalog."""
+  productId: ID!
+  """Positive number of Kernels received."""
+  quantity: Int!
+  """Business moment the stock arrived; defaults to now."""
+  occurredAt: AWSDateTime
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for adjustInventory. Signed, never zero, and always explained."""
+input AdjustInventoryInput {
+  """The Unit Campaign whose stock is changing."""
+  unitCampaignId: ID!
+  """The product whose central Kernel stock is changing."""
+  productId: ID!
+  """Signed change to central physical stock; the result must keep kernelPhysicalQty >= soldInPossessionQty >= 0."""
+  quantityDelta: Int!
+  """Why the stock changed: miscount, damage, gift, trade. Mandatory."""
+  reason: String!
+  """Business moment of the change; defaults to now."""
+  occurredAt: AWSDateTime
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for adjustCouncilOnOrder. Changes the separate on-order balance only, never Kernel stock."""
+input AdjustCouncilOnOrderInput {
+  """The Unit Campaign whose on-order balance is changing."""
+  unitCampaignId: ID!
+  """The product the Council has on order."""
+  productId: ID!
+  """Signed change to councilOnOrderQty; the result cannot be negative."""
+  quantityDelta: Int!
+  """Why the on-order expectation changed; optional."""
+  reason: String
+  """Business moment of the change; defaults to now."""
+  occurredAt: AWSDateTime
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+# ============================================================================
 # Query Root
 # ============================================================================
 
@@ -1388,6 +1592,34 @@ type Query {
     """Pagination parameters."""
     page: PageInput
   ): UnitCampaignMembershipConnection!
+
+  # Show & Sell — inventory balances and audit (Stage 2)
+  """What a Unit Campaign holds per product, with the derived quantities computed server-side. Unit Admin for the parent Unit."""
+  inventoryPositions(
+    """The Unit Campaign ID."""
+    unitCampaignId: ID!
+    """Limit the page to these products (at most 15). Omit for every product the campaign has inventory rows for."""
+    productIds: [ID!]
+    """Pagination parameters."""
+    page: PageInput
+  ): InventoryPositionConnection!
+  """One Unit Campaign's inventory movement history, newest first. Unit Admin for the parent Unit."""
+  inventoryMovements(
+    """The Unit Campaign ID."""
+    unitCampaignId: ID!
+    """Filter to one product's history."""
+    productId: ID
+    """Filter to one movement type."""
+    movementType: InventoryMovementType
+    """Filter to one Show & Sell event's movements."""
+    showAndSellId: ID
+    """Filter to one Scout's custody and fulfillment movements."""
+    profileId: ID
+    """Inclusive window of business moments; at most 366 days wide."""
+    dateRange: DateRangeFilter
+    """Pagination parameters."""
+    page: PageInput
+  ): InventoryMovementConnection!
 
   # Account queries
   """The authenticated caller's account. The row is created automatically on first read if it does not yet exist."""
@@ -1637,6 +1869,23 @@ type Mutation {
     """The removal request."""
     input: RemoveUnitCampaignMembershipInput!
   ): UnitCampaignMembership!
+
+  # Show & Sell — inventory balances (Stage 2)
+  """Receive stock for one catalog product. Unit Admin for the parent Unit; creates no Order, payment, credit, or We Owe obligation."""
+  recordInventoryReceipt(
+    """The receipt."""
+    input: RecordInventoryReceiptInput!
+  ): InventoryPosition!
+  """Adjust a product's central Kernel stock by a signed amount, with a mandatory reason. Unit Admin for the parent Unit."""
+  adjustInventory(
+    """The adjustment."""
+    input: AdjustInventoryInput!
+  ): InventoryPosition!
+  """Adjust the separate Council-on-order balance by a signed amount. Unit Admin for the parent Unit; never changes Kernel stock."""
+  adjustCouncilOnOrder(
+    """The on-order adjustment."""
+    input: AdjustCouncilOnOrderInput!
+  ): InventoryPosition!
 
   # Account mutations
   """Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account."""

@@ -1,8 +1,9 @@
-"""Unit mutation handlers (delivery checklist §1.2).
+"""Unit and inventory handlers (delivery checklist §1.2, §2.2).
 
-One Lambda serves the three Stage 1 Unit write surfaces, routed on
-``info.fieldName`` exactly as ``public_orders_router`` routes the public-orders
-Lambda, and driven by the event shape the Stage 1 fixtures build
+One Lambda serves the Stage 1 Unit/Unit Campaign write surfaces and the Stage 2
+inventory balance writes, routed on ``info.fieldName`` exactly as
+``public_orders_router`` routes the public-orders Lambda, and driven by the event
+shape the Stage 1 fixtures build
 (``tests/unit/show_sell_fixtures.unit_operation_event``):
 
 - ``createUnit`` (§1.2.1) — any authenticated Account becomes the Unit's first
@@ -42,10 +43,10 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, 
 from botocore.exceptions import ClientError
 
 try:  # pragma: no cover
-    from utils import unit_auth, unit_campaign_models, unit_models
+    from utils import inventory_models, unit_auth, unit_campaign_models, unit_models
     from utils.import_fallback import import_from_utils
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils import unit_auth, unit_campaign_models, unit_models
+    from ..utils import inventory_models, unit_auth, unit_campaign_models, unit_models
     from ..utils.import_fallback import import_from_utils
 
 
@@ -106,9 +107,25 @@ UNIT_CAMPAIGN_FIELD = "unitCampaign"
 UNIT_CAMPAIGNS_FIELD = "unitCampaigns"
 UNIT_CAMPAIGN_CATALOG_FIELD = "unitCampaignCatalog"
 UNIT_CAMPAIGN_ROSTER_FIELD = "unitCampaignRoster"
+RECORD_RECEIPT_FIELD = "recordInventoryReceipt"
+ADJUST_INVENTORY_FIELD = "adjustInventory"
+ADJUST_COUNCIL_FIELD = "adjustCouncilOnOrder"
+INVENTORY_POSITIONS_FIELD = "inventoryPositions"
+INVENTORY_MOVEMENTS_FIELD = "inventoryMovements"
 
 MAX_ACTIVE_UNIT_INVITES = 20
 INVITE_FAILURES_PER_HOUR = 10
+# The filter set that pins an ``inventoryMovements`` cursor to the read it came from.
+# Order matters: the token is what makes a cursor from one filtered page unusable on
+# another filter combination.
+_MOVEMENT_FILTER_ORDER: tuple[str, ...] = (
+    "productId",
+    "movementType",
+    "showAndSellId",
+    "profileId",
+    "startAt",
+    "endAt",
+)
 # The §6.6 counter contract on the existing throttle table: its own key prefix
 # and window bucket keep it apart from public-order share-token throttling.
 _THROTTLE_KEY_PREFIX = "UNIT_INVITE_REDEMPTION"
@@ -1891,6 +1908,510 @@ def _list_roster(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     )
 
 
+# --- Stage 2 inventory writes (§2.2) ---------------------------------------------
+
+
+def _inventory_marker(*, caller_id: str, operation: str, scope: str, idempotency_key: str) -> Any:
+    """Resolve this request's marker address on the inventory table.
+
+    A stock marker lives on the table whose rows the mutation writes, so one
+    campaign's audit or cleanup sweep sees the requests that touched its stock and a
+    receipt does not put a row on the Units aggregate (§8.9). The resource scope is
+    the Unit Campaign, which every inventory mutation addresses.
+    """
+    return marker_keys(
+        table_key="inventory",
+        table_name=tables.inventory.table_name,
+        actor_id=caller_id,
+        operation=operation,
+        scope=scope,
+        idempotency_key=idempotency_key,
+    )
+
+
+def _campaign_for_inventory_write(payload: Mapping[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Load the addressed Unit Campaign and require admin of its Unit.
+
+    Tenancy comes from the campaign's own ``unitId``, never from a Unit id in the
+    request: a campaign id is not an access path, and this is the same rule the
+    campaign-scoped reads use (§1.5.6, AUTH-U).
+    """
+    unit_campaign_id = _resource_id(payload, "unitCampaignId")
+    campaign: Dict[str, Any] = dict(unit_campaign_models.load_unit_campaign_or_not_found(unit_campaign_id))
+    unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
+    return campaign
+
+
+def _catalog_product_ids(catalog: Mapping[str, Any]) -> set[str]:
+    """The product ids a campaign's catalog offers."""
+    products = catalog.get("products") or []
+    return {str(item["productId"]) for item in products if isinstance(item, Mapping) and item.get("productId")}
+
+
+def _require_catalog_product(campaign: Mapping[str, Any], product_id: str) -> None:
+    """Require a receipt's product to be one this campaign sells (§2.2.1).
+
+    A receipt is how stock enters the catalog a Scout can buy from, so stock for a
+    product the campaign does not offer is stock nobody can sell and nothing can
+    account for at finalization. The catalog named on the campaign row is the
+    allowlist; the caller does not choose it.
+
+    An adjustment is deliberately NOT gated this way: a catalog that dropped a
+    product still leaves Kernels in the physical count, and an admin has to be able
+    to count them out. Refusing the adjustment would strand the stock in a balance
+    no one may correct.
+    """
+    catalog = unit_campaign_models.read_catalog(str(campaign["catalogId"]))
+    if catalog is None:
+        raise AppError(ErrorCode.NOT_FOUND, "The campaign's catalog could not be loaded")
+    if product_id not in _catalog_product_ids(catalog):
+        raise AppError(ErrorCode.INVALID_INPUT, "productId is not a product of this campaign's catalog")
+
+
+def _balance_quantity(existing: Optional[Mapping[str, Any]], attribute: str) -> int:
+    """One quantity on the read balance, or zero for a product with no balance row."""
+    if existing is None:
+        return 0
+    return _number(existing.get(attribute, 0))
+
+
+def _require_balance_floor(existing: Optional[Mapping[str, Any]], delta: int) -> None:
+    """Refuse an adjustment whose result breaks §4.1 before anything is staged.
+
+    The same floor rides the write condition, so this is not the race guard — the
+    condition is. What the pre-check buys is the right verdict for a request that was
+    impossible the moment it arrived: ``INVALID_INPUT`` the caller can act on, rather
+    than ``CONFLICT``, which tells them to re-read something that never changed.
+    """
+    physical = _balance_quantity(existing, inventory_models.KERNEL_PHYSICAL_QTY)
+    reserved = _balance_quantity(existing, inventory_models.SOLD_IN_POSSESSION_QTY)
+    if physical + delta < 0:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "quantityDelta would leave fewer Kernels in physical stock than this campaign holds",
+        )
+    if physical + delta < reserved:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            f"quantityDelta would take physical stock below the {reserved} Kernels already reserved for We Owe",
+        )
+
+
+def _require_council_floor(existing: Optional[Mapping[str, Any]], delta: int) -> None:
+    """Refuse an on-order adjustment that would drive the separate balance negative."""
+    if _balance_quantity(existing, inventory_models.COUNCIL_ON_ORDER_QTY) + delta < 0:
+        raise AppError(ErrorCode.INVALID_INPUT, "quantityDelta would leave Council-on-order below zero")
+
+
+def _stage_balance_change(
+    plan: Any,
+    unit_campaign_id: str,
+    product_id: str,
+    existing: Optional[Mapping[str, Any]],
+    *,
+    kernel_physical_delta: int,
+    council_on_order_delta: int,
+    occurred_at: str,
+) -> int:
+    """Stage the one balance write this mutation makes, and report the version it produces.
+
+    A DynamoDB transaction may not address the same item twice, so a delta cannot
+    ride a read-then-increment pair; the write is chosen from the read this request
+    already took. Two shapes:
+
+    - no row yet — a conditional ``Put`` of the post-delta balance. The
+      ``attribute_not_exists`` guard is what makes two concurrent first receipts of one
+      product cancel one another instead of each starting from zero, and because the
+      pre-check rejected a delta that would take zero below itself, the row this
+      creates is legal by construction.
+    - a row exists — a version-guarded increment carrying the §4.1 floors in its
+      condition, so a writer whose read went stale loses the whole transaction rather
+      than driving physical stock under what We Owe already reserved.
+    """
+    if existing is None:
+        item = inventory_models.build_inventory_balance_item(
+            unit_campaign_id=unit_campaign_id,
+            product_id=product_id,
+            kernel_physical_qty=kernel_physical_delta,
+            council_on_order_qty=council_on_order_delta,
+            now_iso=occurred_at,
+        )
+        plan.add(*inventory_models.put_inventory_balance_action(item))
+        return 1
+    current_version = _number(existing[inventory_models.VERSION_ATTRIBUTE])
+    plan.add(
+        *inventory_models.inventory_balance_delta_action(
+            unit_campaign_id=unit_campaign_id,
+            product_id=product_id,
+            existing=existing,
+            expected_version=current_version,
+            kernel_physical_delta=kernel_physical_delta,
+            council_on_order_delta=council_on_order_delta,
+            now_iso=occurred_at,
+        )
+    )
+    return current_version + 1
+
+
+def _position_sections(unit_campaign_id: str, product_id: str) -> Dict[str, List[Dict[str, Any]]]:
+    """The balance, allocation, and custody rows behind one product, read consistently."""
+    return dict(inventory_models.inventory_position_rows(unit_campaign_id, product_id))
+
+
+def _balance_payload(balance: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project a stored ``InventoryBalance`` row onto the SDL fields (§5.7)."""
+    return {
+        "unitCampaignId": str(balance["unitCampaignId"]),
+        "productId": str(balance["productId"]),
+        "kernelPhysicalQty": _number(balance[inventory_models.KERNEL_PHYSICAL_QTY]),
+        "soldInPossessionQty": _number(balance[inventory_models.SOLD_IN_POSSESSION_QTY]),
+        "councilOnOrderQty": _number(balance[inventory_models.COUNCIL_ON_ORDER_QTY]),
+        "version": _number(balance[inventory_models.VERSION_ATTRIBUTE]),
+        "createdAt": str(balance["createdAt"]),
+        "updatedAt": str(balance["updatedAt"]),
+    }
+
+
+def _zero_position(unit_campaign_id: str, product_id: str) -> Dict[str, Any]:
+    """The balance half of a position that has no row yet.
+
+    A catalog product with nothing received is a real state of a campaign's stock, so
+    it answers with zeros at version 0 rather than as missing: version 0 says no row
+    exists behind the number.
+    """
+    return {
+        "unitCampaignId": unit_campaign_id,
+        "productId": product_id,
+        "kernelPhysicalQty": 0,
+        "soldInPossessionQty": 0,
+        "councilOnOrderQty": 0,
+        "version": 0,
+        "createdAt": None,
+        "updatedAt": None,
+    }
+
+
+def _position_payload(
+    unit_campaign_id: str,
+    product_id: str,
+    sections: Optional[Mapping[str, List[Dict[str, Any]]]] = None,
+) -> Dict[str, Any]:
+    """One product's position: its stored balance plus the §7 quantities derived from the rows.
+
+    The derived quantities are computed from the allocation and custody rows on every
+    read, never from a stored copy, so a page cannot show a number some earlier write
+    forgot to update.
+    """
+    buckets = sections if sections is not None else _position_sections(unit_campaign_id, product_id)
+    balance = buckets["balance"][0] if buckets["balance"] else None
+    derived = inventory_models.derived_inventory_quantities(balance, buckets["allocations"], buckets["custody"])
+    stored = _balance_payload(balance) if balance is not None else _zero_position(unit_campaign_id, product_id)
+    return {**stored, **derived}
+
+
+def _written_position(unit_campaign_id: str, product_id: str) -> Dict[str, Any]:
+    """Rebuild a position this handler just wrote; a missing row is an internal fault."""
+    if not _position_sections(unit_campaign_id, product_id)["balance"]:
+        raise AppError(ErrorCode.INTERNAL_ERROR, "updated inventory balance could not be loaded")
+    return _position_payload(unit_campaign_id, product_id)
+
+
+def _movement_payload(movement: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project an append-only ``InventoryMovement`` row onto the SDL fields (§5.8)."""
+    version = movement.get(inventory_models.INVENTORY_VERSION_ATTRIBUTE)
+    return {
+        "movementId": str(movement[inventory_models.MOVEMENT_ID_ATTRIBUTE]),
+        "unitCampaignId": str(movement[inventory_models.UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+        "productId": str(movement[inventory_models.PRODUCT_ID_ATTRIBUTE]),
+        "movementType": str(movement[inventory_models.MOVEMENT_TYPE_ATTRIBUTE]),
+        "kernelPhysicalDelta": _number(movement.get(inventory_models.KERNEL_PHYSICAL_DELTA, 0)),
+        "soldPossessionDelta": _number(movement.get(inventory_models.SOLD_POSSESSION_DELTA, 0)),
+        "withScoutDelta": _number(movement.get(inventory_models.WITH_SCOUT_DELTA, 0)),
+        "assignedDelta": _number(movement.get(inventory_models.ASSIGNED_DELTA, 0)),
+        "councilOnOrderDelta": _number(movement.get(inventory_models.COUNCIL_ON_ORDER_DELTA, 0)),
+        "profileId": movement.get(inventory_models.PROFILE_ID_ATTRIBUTE),
+        "showAndSellId": movement.get(inventory_models.SHOW_AND_SELL_ID_ATTRIBUTE),
+        "saleId": movement.get(inventory_models.SALE_ID_ATTRIBUTE),
+        "orderId": movement.get(inventory_models.ORDER_ID_ATTRIBUTE),
+        "weOweId": movement.get(inventory_models.WE_OWE_ID_ATTRIBUTE),
+        "fulfillmentId": movement.get(inventory_models.FULFILLMENT_ID_ATTRIBUTE),
+        "finalizationId": movement.get(inventory_models.FINALIZATION_ID_ATTRIBUTE),
+        "reason": movement.get(inventory_models.REASON_ATTRIBUTE),
+        "actorAccountId": str(movement[inventory_models.ACTOR_ACCOUNT_ID_ATTRIBUTE]),
+        "occurredAt": str(movement[inventory_models.OCCURRED_AT_ATTRIBUTE]),
+        "inventoryVersion": None if version is None else _number(version),
+        "idempotencyKey": str(movement[inventory_models.IDEMPOTENCY_KEY_ATTRIBUTE]),
+    }
+
+
+def _apply_balance_change(
+    payload: Mapping[str, Any],
+    campaign: Mapping[str, Any],
+    *,
+    caller_id: str,
+    field: str,
+    movement_type: str,
+    product_id: str,
+    kernel_physical_delta: int,
+    council_on_order_delta: int,
+    reason: Optional[str],
+    occurred_at: str,
+) -> Dict[str, Any]:
+    """Commit one balance change, its movement, and its marker in one transaction.
+
+    The three Stage 2 balance writes differ only in which quantity moves, whether the
+    product has to be in the catalog, and whether a reason is mandatory. Everything
+    else is the same contract and lives here once: current authorization ahead of the
+    replay (a revoked admin gets the denial, not a replayed answer), the replay ahead
+    of the floor check (a completed retry must not collide with the version its own
+    first attempt wrote, and a retry of a rejected request is still rejected), the
+    marker staged first in the plan, and one conditional balance write paired with one
+    appended movement (§8.4, §8.9).
+
+    The movement's ``inventoryVersion`` is the version the balance write produces. The
+    version guard inside that write is what makes the statement true: a writer whose
+    read went stale cancels the whole plan, so no movement is ever recorded against a
+    balance this request did not change.
+    """
+    log = get_logger(__name__)
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    runner = IdempotentMutationRunner()
+    keys = _inventory_marker(caller_id=caller_id, operation=field, scope=unit_campaign_id, idempotency_key=key)
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        field,
+        lambda stored: _written_position(unit_campaign_id, str(stored)),
+    )
+    if replayed is not None:
+        return replayed
+
+    existing = inventory_models.read_inventory_balance(unit_campaign_id, product_id)
+    if kernel_physical_delta:
+        _require_balance_floor(existing, kernel_physical_delta)
+    if council_on_order_delta:
+        _require_council_floor(existing, council_on_order_delta)
+
+    movement_id = str(inventory_models.new_inventory_movement_id())
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=product_id)
+    version = _stage_balance_change(
+        plan,
+        unit_campaign_id,
+        product_id,
+        existing,
+        kernel_physical_delta=kernel_physical_delta,
+        council_on_order_delta=council_on_order_delta,
+        occurred_at=occurred_at,
+    )
+    plan.add(
+        *inventory_models.put_inventory_movement_action(
+            inventory_models.build_inventory_movement_item(
+                movement_id=movement_id,
+                unit_campaign_id=unit_campaign_id,
+                product_id=product_id,
+                movement_type=movement_type,
+                actor_account_id=caller_id,
+                occurred_at=occurred_at,
+                idempotency_key=key,
+                kernel_physical_delta=kernel_physical_delta,
+                council_on_order_delta=council_on_order_delta,
+                reason=reason,
+                inventory_version=version,
+            )
+        )
+    )
+    build_result = _once(lambda: _written_position(unit_campaign_id, product_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=field,
+        fingerprint=fingerprint,
+        result_id=product_id,
+        load_result=lambda stored: _written_position(unit_campaign_id, str(stored)),
+        result_payload=build_result,
+    )
+    log.info(
+        "Inventory balance changed",
+        unit_campaign_id=unit_campaign_id,
+        product_id=product_id,
+        movement_type=movement_type,
+        movement_id=movement_id,
+        version=version,
+        caller_id=caller_id,
+    )
+    return build_result()
+
+
+# --- recordInventoryReceipt (§2.2.1) ---------------------------------------------
+
+
+def _record_receipt(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Receive stock into one product's physical balance.
+
+    A receipt moves ``kernelPhysicalQty`` and nothing else: it creates no Order, no
+    payment, no credit, and no We Owe obligation, which is what keeps the stock count
+    the admin enters separate from the money a Show & Sell settles (§2.2.1). The
+    product must be in the campaign's catalog; ``occurredAt`` is the business moment
+    the stock arrived, which the admin may backdate because the audit trail records
+    what happened rather than what the terminal saw.
+    """
+    payload = _require_input(event)
+    campaign = _campaign_for_inventory_write(payload, caller_id)
+    product_id = inventory_models.normalize_inventory_id(payload.get("productId"), "productId")
+    quantity = inventory_models.normalize_quantity(payload.get("quantity"), "quantity", minimum=1)
+    occurred_at = inventory_models.normalize_moment(payload.get("occurredAt") or utc_now_iso(), "occurredAt")
+    _require_catalog_product(campaign, product_id)
+    return _apply_balance_change(
+        payload,
+        campaign,
+        caller_id=caller_id,
+        field=RECORD_RECEIPT_FIELD,
+        movement_type=inventory_models.RECEIPT,
+        product_id=product_id,
+        kernel_physical_delta=quantity,
+        council_on_order_delta=0,
+        reason=None,
+        occurred_at=occurred_at,
+    )
+
+
+# --- adjustInventory (§2.2.2) ----------------------------------------------------
+
+
+def _adjust_inventory(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Move physical stock by a signed amount, with a mandatory reason.
+
+    The reason is not decoration: an adjustment is the one path that changes stock
+    with no Order and no event behind it, so the audit row has to say why — a counted
+    miscount, damage, a gift, a trade. A trade or gift still adjusts only stock here:
+    taking payment for it is a different operation with its own record, and an
+    adjustment that also moved money would make the two balances impossible to
+    reconcile against each other (INV-M-02-02).
+    """
+    payload = _require_input(event)
+    campaign = _campaign_for_inventory_write(payload, caller_id)
+    product_id = inventory_models.normalize_inventory_id(payload.get("productId"), "productId")
+    delta = inventory_models.normalize_signed_delta(payload.get("quantityDelta"), "quantityDelta", nonzero=True)
+    reason = inventory_models.normalize_reason(payload.get("reason"), "reason", required=True)
+    occurred_at = inventory_models.normalize_moment(payload.get("occurredAt") or utc_now_iso(), "occurredAt")
+    return _apply_balance_change(
+        payload,
+        campaign,
+        caller_id=caller_id,
+        field=ADJUST_INVENTORY_FIELD,
+        movement_type=inventory_models.STOCK_ADJUSTMENT,
+        product_id=product_id,
+        kernel_physical_delta=delta,
+        council_on_order_delta=0,
+        reason=reason,
+        occurred_at=occurred_at,
+    )
+
+
+# --- adjustCouncilOnOrder (§2.2.3) -----------------------------------------------
+
+
+def _adjust_council(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Move the separate Council-on-order balance and nothing else.
+
+    Council-on-order is expected supply the Council has promised to bring: it is
+    counted beside the campaign's Kernels, never inside them, so this write touches
+    ``councilOnOrderQty`` alone and leaves physical, sellable, assigned, custody, and
+    We Owe demand exactly as they were. It is deliberately not derived from the
+    campaign's Council Needs — a need is a request, an on-order is a promise, and
+    auto-subtracting one from the other would make both unreadable (§4.1).
+    """
+    payload = _require_input(event)
+    campaign = _campaign_for_inventory_write(payload, caller_id)
+    product_id = inventory_models.normalize_inventory_id(payload.get("productId"), "productId")
+    delta = inventory_models.normalize_signed_delta(payload.get("quantityDelta"), "quantityDelta", nonzero=True)
+    reason = inventory_models.normalize_reason(payload.get("reason"), "reason", required=False)
+    occurred_at = inventory_models.normalize_moment(payload.get("occurredAt") or utc_now_iso(), "occurredAt")
+    return _apply_balance_change(
+        payload,
+        campaign,
+        caller_id=caller_id,
+        field=ADJUST_COUNCIL_FIELD,
+        movement_type=inventory_models.COUNCIL_ON_ORDER_ADJUST,
+        product_id=product_id,
+        kernel_physical_delta=0,
+        council_on_order_delta=delta,
+        reason=reason,
+        occurred_at=occurred_at,
+    )
+
+
+# --- Stage 2 inventory reads (§2.2.4) --------------------------------------------
+
+
+def _optional_argument(event: Dict[str, Any], name: str) -> Any:
+    """One optional top-level query argument, as the caller sent it."""
+    arguments = event.get("arguments")
+    return arguments.get(name) if isinstance(arguments, Mapping) else None
+
+
+def _inventory_positions(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """What a campaign holds per product, with the derived quantities computed server-side.
+
+    An explicit ``productIds`` list answers in the order the caller asked, and answers
+    a product with no balance row at zero — the admin screen has to show the catalog
+    product that nothing has been received for. Without a list, the products the
+    campaign has inventory rows for come back in sort-key order.
+    """
+    campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    product_ids = inventory_models.normalize_product_ids(_optional_argument(event, "productIds"))
+    sections = inventory_models.campaign_product_sections(unit_campaign_id, product_ids or None)
+    if product_ids:
+        positions = [_position_payload(unit_campaign_id, pid, sections[pid]) for pid in product_ids]
+    else:
+        positions = [_position_payload(unit_campaign_id, pid, bucket) for pid, bucket in sections.items()]
+    scope = f"{INVENTORY_POSITIONS_FIELD}#{unit_campaign_id}#{','.join(product_ids) if product_ids else 'ALL'}"
+    return dict(paginate_page(positions, scope, _page_argument(event)))
+
+
+def _movement_filters(event: Dict[str, Any]) -> Dict[str, Any]:
+    """The validated ``inventoryMovements`` filter set, with the date range split open."""
+    start_at, end_at = inventory_models.normalize_date_range(_optional_argument(event, "dateRange"))
+    values: Dict[str, Any] = {"startAt": start_at, "endAt": end_at}
+    for name in ("productId", "showAndSellId", "profileId"):
+        raw = _optional_argument(event, name)
+        values[name] = None if raw is None else inventory_models.normalize_inventory_id(raw, name)
+    raw_type = _optional_argument(event, "movementType")
+    values["movementType"] = None if raw_type is None else inventory_models.normalize_movement_type(raw_type)
+    return values
+
+
+def _inventory_movements(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One campaign's movement history, newest first, with §5.8 filters.
+
+    Every filter is part of the cursor scope, so a cursor from a product-filtered page
+    cannot walk an unfiltered history: the caller would receive rows they never asked
+    for, and the page boundary would misreport what the filter selected (PAGE-01).
+    The read returns rows in business-time order and this reverses them, because an
+    audit screen opens at the most recent change (§5.1 ``newest first``).
+    """
+    campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    filters = _movement_filters(event)
+    rows = inventory_models.list_inventory_movements(
+        unit_campaign_id,
+        product_id=filters["productId"],
+        movement_type=filters["movementType"],
+        show_and_sell_id=filters["showAndSellId"],
+        profile_id=filters["profileId"],
+        start_at=filters["startAt"],
+        end_at=filters["endAt"],
+    )
+    items = [_movement_payload(row) for row in reversed(rows)]
+    token = "#".join("" if filters[name] is None else str(filters[name]) for name in _MOVEMENT_FILTER_ORDER)
+    return dict(paginate_page(items, f"{INVENTORY_MOVEMENTS_FIELD}#{unit_campaign_id}#{token}", _page_argument(event)))
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -1914,6 +2435,11 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     UNIT_CAMPAIGNS_FIELD: _list_campaigns,
     UNIT_CAMPAIGN_CATALOG_FIELD: _campaign_catalog,
     UNIT_CAMPAIGN_ROSTER_FIELD: _list_roster,
+    RECORD_RECEIPT_FIELD: _record_receipt,
+    ADJUST_INVENTORY_FIELD: _adjust_inventory,
+    ADJUST_COUNCIL_FIELD: _adjust_council,
+    INVENTORY_POSITIONS_FIELD: _inventory_positions,
+    INVENTORY_MOVEMENTS_FIELD: _inventory_movements,
 }
 
 

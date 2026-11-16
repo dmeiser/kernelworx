@@ -82,6 +82,38 @@ export type GqlAddressInput = {
   zipCode?: InputMaybe<Scalars['String']['input']>;
 };
 
+/** Input for adjustCouncilOnOrder. Changes the separate on-order balance only, never Kernel stock. */
+export type GqlAdjustCouncilOnOrderInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Business moment of the change; defaults to now. */
+  occurredAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  /** The product the Council has on order. */
+  productId: Scalars['ID']['input'];
+  /** Signed change to councilOnOrderQty; the result cannot be negative. */
+  quantityDelta: Scalars['Int']['input'];
+  /** Why the on-order expectation changed; optional. */
+  reason?: InputMaybe<Scalars['String']['input']>;
+  /** The Unit Campaign whose on-order balance is changing. */
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** Input for adjustInventory. Signed, never zero, and always explained. */
+export type GqlAdjustInventoryInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Business moment of the change; defaults to now. */
+  occurredAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  /** The product whose central Kernel stock is changing. */
+  productId: Scalars['ID']['input'];
+  /** Signed change to central physical stock; the result must keep kernelPhysicalQty >= soldInPossessionQty >= 0. */
+  quantityDelta: Scalars['Int']['input'];
+  /** Why the stock changed: miscount, damage, gift, trade. Mandatory. */
+  reason: Scalars['String']['input'];
+  /** The Unit Campaign whose stock is changing. */
+  unitCampaignId: Scalars['ID']['input'];
+};
+
 /** An admin view of a Cognito user, merging Cognito identity data with the stored Account record. Admin-only. */
 export type GqlAdminUser = {
   __typename?: 'AdminUser';
@@ -394,10 +426,155 @@ export type GqlCreateUnitPayload = {
   unit: GqlUnit;
 };
 
+/** Inclusive instant window for a history read; at most 366 days wide. */
+export type GqlDateRangeFilter = {
+  /** Last instant to include; must be after startAt. */
+  endAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  /** First instant to include. */
+  startAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
+};
+
 /** Idempotency for a mutation: a client key scoped to the caller, operation, and resource. */
 export type GqlIdempotencyInput = {
   /** Client-supplied idempotency key (1-128 trimmed characters). */
   idempotencyKey: Scalars['String']['input'];
+};
+
+/** Append-only audit record of one inventory change (spec §5.8). Never edited: a correction is a new movement linked to the original. */
+export type GqlInventoryMovement = {
+  __typename?: 'InventoryMovement';
+  /** The account that performed the action. */
+  actorAccountId: Scalars['ID']['output'];
+  /** Explanation of an allocation change; allocations stay authoritative; 0 when not applicable. */
+  assignedDelta: Scalars['Int']['output'];
+  /** Signed change to the separate Council-on-order balance; 0 when not applicable. */
+  councilOnOrderDelta: Scalars['Int']['output'];
+  /** The finalization this movement belongs to, when applicable. */
+  finalizationId?: Maybe<Scalars['ID']['output']>;
+  /** The fulfillment this movement belongs to, when applicable. */
+  fulfillmentId?: Maybe<Scalars['ID']['output']>;
+  /** The idempotency key of the request that wrote this movement. */
+  idempotencyKey: Scalars['String']['output'];
+  /** The InventoryBalance version this movement produced, or null for a movement that changed no balance. */
+  inventoryVersion?: Maybe<Scalars['Int']['output']>;
+  /** Signed change to central physical Kernel stock; 0 when not applicable. */
+  kernelPhysicalDelta: Scalars['Int']['output'];
+  /** The movement's own ID. */
+  movementId: Scalars['ID']['output'];
+  /** What kind of change this was. */
+  movementType: GqlInventoryMovementType;
+  /** Business moment of the change. */
+  occurredAt: Scalars['AWSDateTime']['output'];
+  /** The individual Order this movement belongs to, when applicable. */
+  orderId?: Maybe<Scalars['ID']['output']>;
+  /** The product whose balance moved. */
+  productId: Scalars['ID']['output'];
+  /** The Scout whose custody or individual fulfillment this is, when applicable. */
+  profileId?: Maybe<Scalars['ID']['output']>;
+  /** Why the change was made; mandatory for manual adjustments and reconciliation. */
+  reason?: Maybe<Scalars['String']['output']>;
+  /** The sale this movement belongs to, when applicable. */
+  saleId?: Maybe<Scalars['ID']['output']>;
+  /** The Show & Sell event this movement belongs to, when applicable. */
+  showAndSellId?: Maybe<Scalars['ID']['output']>;
+  /** Signed change to We Owe-reserved central stock; 0 when not applicable. */
+  soldPossessionDelta: Scalars['Int']['output'];
+  /** The Unit Campaign whose balance moved. */
+  unitCampaignId: Scalars['ID']['output'];
+  /** The We Owe obligation this movement belongs to, when applicable. */
+  weOweId?: Maybe<Scalars['ID']['output']>;
+  /** Signed change to one Scout's custody; 0 when not applicable. */
+  withScoutDelta: Scalars['Int']['output'];
+};
+
+/** A page of inventory movements, newest first. */
+export type GqlInventoryMovementConnection = {
+  __typename?: 'InventoryMovementConnection';
+  /** The movements on this page. */
+  items: Array<GqlInventoryMovement>;
+  /** Cursor state for this page. */
+  pageInfo: GqlPageInfo;
+};
+
+/** How one product's stock or custody moved. Closed set (spec §5.8); a movement row is append-only and corrections are new linked movements. */
+export type GqlInventoryMovementType =
+  /** Manual signed change to the separate Council-on-order balance. */
+  | 'COUNCIL_ON_ORDER_ADJUST'
+  /** Stock reserved to a Show & Sell event. */
+  | 'EVENT_ASSIGN'
+  /** Event reservation reduced automatically at a limit. */
+  | 'EVENT_AUTO_REDUCE'
+  /** Stock sold and handed over during the event itself. */
+  | 'EVENT_IMMEDIATE_SALE'
+  /** Event reservation reduced by an admin. */
+  | 'EVENT_MANUAL_REDUCE'
+  /** Unsold event reservation released back to the campaign. */
+  | 'EVENT_RELEASE'
+  /** Event stock returned after the event and reconciled to the balance. */
+  | 'EVENT_RETURN_RECONCILE'
+  /** Balance correction made when a finalized event is re-opened. */
+  | 'EVENT_RE_FINALIZE_ADJUST'
+  /** Stock consumed by an individual Order fulfillment. */
+  | 'INDIVIDUAL_FULFILL'
+  /** Stock received into the campaign's central Kernel balance. */
+  | 'RECEIPT'
+  /** Reversal of an earlier movement; mirrors the deltas of what it reverses. */
+  | 'REVERSAL'
+  /** Stock issued into one Scout's custody. */
+  | 'SCOUT_ISSUE'
+  /** Custody returned by the Scout to central stock. */
+  | 'SCOUT_RETURN'
+  /** Custody consumed by the Scout's own sale. */
+  | 'SCOUT_SALE_CONSUME'
+  /** Manual signed change to central Kernel stock; always carries a reason. */
+  | 'STOCK_ADJUSTMENT'
+  /** Stock consumed by fulfilling a We Owe obligation. */
+  | 'WE_OWE_FULFILL'
+  /** A We Owe reservation released back to sellable stock. */
+  | 'WE_OWE_RELEASE'
+  /** Stock reserved for a We Owe obligation. */
+  | 'WE_OWE_RESERVE';
+
+/** One product's stock position: the §5.7 balance row plus the §7 quantities derived from the open event allocations and custody rows. A product with no balance row yet answers as zeros at version 0. */
+export type GqlInventoryPosition = {
+  __typename?: 'InventoryPosition';
+  /** Kernels still owed by open event allocations. */
+  assignedOpenQty: Scalars['Int']['output'];
+  /** Open allocations exceeding sellable stock: max(0, assignedOpen - sellable). A shortage, never a negative unassigned value. */
+  assignmentOverageQty: Scalars['Int']['output'];
+  /** Expected Council supply on order for this product; never subtracted automatically. */
+  councilOnOrderQty: Scalars['Int']['output'];
+  /** When the balance row was created, or null before the first receipt. */
+  createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  /** Central physical Kernel stock, including assigned and We Owe-reserved Kernels. */
+  kernelPhysicalQty: Scalars['Int']['output'];
+  /** The catalog product this balance is for. */
+  productId: Scalars['ID']['output'];
+  /** Sellable now: kernelPhysicalQty - soldInPossessionQty. */
+  sellableKernelQty: Scalars['Int']['output'];
+  /** Portion of physical stock reserved for We Owe obligations. */
+  soldInPossessionQty: Scalars['Int']['output'];
+  /** Everything the campaign owns for this product and has not delivered: kernelPhysicalQty + withScoutQty. */
+  totalUnitOwnedUndeliveredQty: Scalars['Int']['output'];
+  /** Sellable Kernels not claimed by any open allocation: max(0, sellable - assignedOpen). */
+  unassignedKernelQty: Scalars['Int']['output'];
+  /** The Unit Campaign the balance belongs to. */
+  unitCampaignId: Scalars['ID']['output'];
+  /** When the balance row was last written, or null before the first receipt. */
+  updatedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  /** Balance version, incremented by every stock write; 0 when no balance row exists yet. */
+  version: Scalars['Int']['output'];
+  /** Kernels physically in Scout custody for this product. */
+  withScoutQty: Scalars['Int']['output'];
+};
+
+/** A page of inventory positions. */
+export type GqlInventoryPositionConnection = {
+  __typename?: 'InventoryPositionConnection';
+  /** The positions on this page. */
+  items: Array<GqlInventoryPosition>;
+  /** Cursor state for this page. */
+  pageInfo: GqlPageInfo;
 };
 
 /** Input for joinUnitCampaign. The caller must have Owner or WRITE on the campaign's Scout. */
@@ -443,6 +620,10 @@ export type GqlMembershipStatus =
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation = {
   __typename?: 'Mutation';
+  /** Adjust the separate Council-on-order balance by a signed amount. Unit Admin for the parent Unit; never changes Kernel stock. */
+  adjustCouncilOnOrder: GqlInventoryPosition;
+  /** Adjust a product's central Kernel stock by a signed amount, with a mandatory reason. Unit Admin for the parent Unit. */
+  adjustInventory: GqlInventoryPosition;
   /** Delete a specific share, revoking that account's access to a profile (admin only). Returns true on success. */
   adminDeleteShare: Scalars['Boolean']['output'];
   /** Delete all campaigns across all profiles owned by the given account (admin only). Returns the number of campaigns deleted. */
@@ -505,6 +686,8 @@ export type GqlMutation = {
   joinUnitCampaign: GqlUnitCampaignMembership;
   /** Place a public order on a campaign whose share token is in the request. Returns the buyer's receipt. A never-enabled campaign, a disabled campaign, and a bad token all return NOT_FOUND so probing cannot distinguish them; a campaign at its order cap returns PUBLIC_ORDER_LIMIT_EXCEEDED. */
   publicCreateOrder: GqlPublicOrderReceipt;
+  /** Receive stock for one catalog product. Unit Admin for the parent Unit; creates no Order, payment, credit, or We Owe obligation. */
+  recordInventoryReceipt: GqlInventoryPosition;
   /** Redeem an invite code to grant the caller access to a profile. Returns the created share. */
   redeemProfileInvite: GqlShare;
   /** Redeem a single-use, unexpired invite to become a Unit Admin. Any authenticated account. */
@@ -545,6 +728,16 @@ export type GqlMutation = {
   updateUnit: GqlUnit;
   /** Update a Unit Campaign's name, year, and active state. Unit Admin for the parent Unit. */
   updateUnitCampaign: GqlUnitCampaignAdmin;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_AdjustCouncilOnOrderArgs = {
+  input: GqlAdjustCouncilOnOrderInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_AdjustInventoryArgs = {
+  input: GqlAdjustInventoryInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -700,6 +893,11 @@ export type GqlMutation_JoinUnitCampaignArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_PublicCreateOrderArgs = {
   input: GqlPublicCreateOrderInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_RecordInventoryReceiptArgs = {
+  input: GqlRecordInventoryReceiptInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1102,6 +1300,10 @@ export type GqlQuery = {
   getSharedCampaign?: Maybe<GqlSharedCampaign>;
   /** Generate a unit-level sales report for a unit and season, covering only the sellers (profiles) the caller can read. catalogId is required so the report reflects a single catalog. */
   getUnitReport?: Maybe<GqlUnitReport>;
+  /** One Unit Campaign's inventory movement history, newest first. Unit Admin for the parent Unit. */
+  inventoryMovements: GqlInventoryMovementConnection;
+  /** What a Unit Campaign holds per product, with the derived quantities computed server-side. Unit Admin for the parent Unit. */
+  inventoryPositions: GqlInventoryPositionConnection;
   /** List the campaigns on a profile, with pagination. The caller must have read access to the profile. */
   listCampaignsByProfile: GqlCampaignConnection;
   /** Return the IDs of every catalog used by a campaign the caller owns or has access to via a share. */
@@ -1238,6 +1440,24 @@ export type GqlQuery_GetUnitReportArgs = {
 };
 
 /** The root query object for the KernelWorx API. */
+export type GqlQuery_InventoryMovementsArgs = {
+  dateRange?: InputMaybe<GqlDateRangeFilter>;
+  movementType?: InputMaybe<GqlInventoryMovementType>;
+  page?: InputMaybe<GqlPageInput>;
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  profileId?: InputMaybe<Scalars['ID']['input']>;
+  showAndSellId?: InputMaybe<Scalars['ID']['input']>;
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_InventoryPositionsArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  productIds?: InputMaybe<Array<Scalars['ID']['input']>>;
+  unitCampaignId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
 export type GqlQuery_ListCampaignsByProfileArgs = {
   limit?: InputMaybe<Scalars['Int']['input']>;
   nextToken?: InputMaybe<Scalars['String']['input']>;
@@ -1334,6 +1554,20 @@ export type GqlQuery_UnitCampaignsArgs = {
 export type GqlQuery_UnitInvitesArgs = {
   page?: InputMaybe<GqlPageInput>;
   unitId: Scalars['ID']['input'];
+};
+
+/** Input for recordInventoryReceipt. Stock only: no Order, payment, credit, or We Owe effect. */
+export type GqlRecordInventoryReceiptInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Business moment the stock arrived; defaults to now. */
+  occurredAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  /** The catalog product received; must be a product of this campaign's catalog. */
+  productId: Scalars['ID']['input'];
+  /** Positive number of Kernels received. */
+  quantity: Scalars['Int']['input'];
+  /** The Unit Campaign receiving the stock. */
+  unitCampaignId: Scalars['ID']['input'];
 };
 
 /** Input for redeemProfileInvite. Redeems an invite code to gain access to a profile. */

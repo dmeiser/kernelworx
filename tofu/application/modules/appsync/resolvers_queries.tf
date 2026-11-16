@@ -769,3 +769,34 @@ resource "aws_appsync_resolver" "unit_campaign_roster" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Stage 2 inventory reads (§2.2.4). Same UnitOperationsDS unit resolver as the
+# Stage 1 Unit reads: tenant isolation and the Unit Admin check live in the one
+# handler, so a new read is a new field name in its router, not a new data source.
+resource "aws_appsync_resolver" "inventory_positions" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "inventoryPositions"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "inventory_movements" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "inventoryMovements"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
