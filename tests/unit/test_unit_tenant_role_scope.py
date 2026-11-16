@@ -1,7 +1,7 @@
 """Behavioral scope check for the Unit tenant execution role (Wave 2 §1.7 / SCOPE-1).
 
-The ten Stage 1 Unit/Unit Campaign mutations run in the ``unit-operations``
-Lambda under the scoped role in ``tofu/application/modules/iam/main.tf``.
+The Stage 1 Unit/Unit Campaign fields and the Stage 2 inventory fields run in the
+``unit-operations`` Lambda under the scoped role in ``tofu/application/modules/iam/main.tf``.
 ``test_unit_tenant_wiring.py`` pins what that policy declares; this file pins the
 other half of the contract — what the handler actually asks DynamoDB for. moto
 never evaluates IAM, so a handler that stages an action the role omits stays
@@ -30,12 +30,17 @@ import botocore.client
 import pytest
 
 from src.handlers.unit_operations import (
+    ADJUST_COUNCIL_FIELD,
+    ADJUST_INVENTORY_FIELD,
     CREATE_INVITE_FIELD,
     CREATE_UNIT_CAMPAIGN_FIELD,
     CREATE_UNIT_FIELD,
+    INVENTORY_MOVEMENTS_FIELD,
+    INVENTORY_POSITIONS_FIELD,
     JOIN_PREVIEW_FIELD,
     JOIN_UNIT_CAMPAIGN_FIELD,
     MY_UNITS_FIELD,
+    RECORD_RECEIPT_FIELD,
     REDEEM_INVITE_FIELD,
     REMOVE_MEMBERSHIP_FIELD,
     REVOKE_GRANT_FIELD,
@@ -130,7 +135,7 @@ def _physical_table(key: str) -> str:
 
 
 def _table_key(physical: str) -> str:
-    for key in {"units", "unit_campaigns", "public_order_throttles"} | LEGACY_TABLE_KEYS:
+    for key in {"units", "unit_campaigns", "public_order_throttles", "inventory"} | LEGACY_TABLE_KEYS:
         if _physical_table(key) == physical:
             return key
     return physical
@@ -448,5 +453,120 @@ def test_every_stage_one_query_stays_inside_the_shipped_role(
 
     assert not [pair for pair in dynamodb_calls.calls if pair[0] in WRITE_ACTIONS], (
         "a Stage 1 query wrote something: the read audit stops being a read audit"
+    )
+    assert_within_role_scope(dynamodb_calls.calls)
+
+
+# --- Stage 2: the inventory balance writes and the reads that answer from them ---
+
+INVENTORY_PRODUCT = f"{DEFAULT_CATALOG}#prod-1"
+
+
+@pytest.fixture
+def stocked(
+    units_table: Any,
+    unit_campaigns_table: Any,
+    profiles_table: Any,
+    campaigns_table: Any,
+    shares_table: Any,
+    catalogs_table: Any,
+    inventory_table: Any,
+) -> Dict[str, Any]:
+    """The Stage 1 world plus the empty inventory table Stage 2 writes into."""
+    return seed_show_sell_fixtures(
+        units_table,
+        profiles_table=profiles_table,
+        campaigns_table=campaigns_table,
+        shares_table=shares_table,
+        unit_campaigns_table=unit_campaigns_table,
+        catalogs_table=catalogs_table,
+    )
+
+
+def test_the_three_balance_mutations_touch_only_the_inventory_table(
+    stocked: Dict[str, Any], dynamodb_calls: DynamoDbCallRecorder
+) -> None:
+    """§2.2.1-03: balance, movement, and marker are inventory rows, and nothing else is.
+
+    Stage 2's promise is that a stock count moves without touching money. A write
+    that reached the Order, payment, or We Owe tables here is an
+    AccessDeniedException on `dev` today, and a reconciliation hole the day the role
+    grew that grant.
+    """
+    dynamodb_calls.attach()
+
+    _ok(
+        _call(
+            RECORD_RECEIPT_FIELD,
+            "Avery",
+            mutation={
+                "unitCampaignId": PACK_3149_FALL,
+                "productId": INVENTORY_PRODUCT,
+                "quantity": 10,
+                **_idem("scope-receipt"),
+            },
+        )
+    )
+    _ok(
+        _call(
+            ADJUST_INVENTORY_FIELD,
+            "Avery",
+            mutation={
+                "unitCampaignId": PACK_3149_FALL,
+                "productId": INVENTORY_PRODUCT,
+                "quantityDelta": -3,
+                "reason": "gifted a case to the fire company",
+                **_idem("scope-adjust"),
+            },
+        )
+    )
+    _ok(
+        _call(
+            ADJUST_COUNCIL_FIELD,
+            "Avery",
+            mutation={
+                "unitCampaignId": PACK_3149_FALL,
+                "productId": INVENTORY_PRODUCT,
+                "quantityDelta": 4,
+                **_idem("scope-council"),
+            },
+        )
+    )
+
+    inventory = _physical_table("inventory")
+    writes = {pair for pair in dynamodb_calls.calls if pair[0] in WRITE_ACTIONS}
+    assert writes, "a balance mutation issued no write at all"
+    assert {table for _, table in writes} == {inventory}, f"a balance mutation wrote outside inventory: {sorted(writes)}"
+    assert ("TransactWriteItems", inventory) in dynamodb_calls.calls, (
+        "the balance write no longer rides one conditional transaction"
+    )
+    assert_only_the_join_link_writes_a_legacy_table(dynamodb_calls.calls)
+    assert_within_role_scope(dynamodb_calls.calls)
+
+
+def test_every_stage_two_query_stays_inside_the_shipped_role(
+    stocked: Dict[str, Any], dynamodb_calls: DynamoDbCallRecorder
+) -> None:
+    """§2.2.4: the position and history reads ask only for what the role grants."""
+    _ok(
+        _call(
+            RECORD_RECEIPT_FIELD,
+            "Avery",
+            mutation={
+                "unitCampaignId": PACK_3149_FALL,
+                "productId": INVENTORY_PRODUCT,
+                "quantity": 10,
+                **_idem("scope-read-seed"),
+            },
+        )
+    )
+    dynamodb_calls.attach()
+
+    positions = _ok(_call(INVENTORY_POSITIONS_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL}))
+    movements = _ok(_call(INVENTORY_MOVEMENTS_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL}))
+    assert positions["items"] and movements["items"], "a read of an empty table audits nothing"
+
+    assert not [pair for pair in dynamodb_calls.calls if pair[0] in WRITE_ACTIONS], (
+        "a Stage 2 query wrote something: the audit trail stops being a record of mutations"
     )
     assert_within_role_scope(dynamodb_calls.calls)

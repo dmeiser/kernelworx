@@ -305,3 +305,225 @@ describe("Show & Sell Stage 1 SDL (schema.graphql)", () => {
     expect([...fieldNameSet(versioned)]).toEqual(["expectedVersion"]);
   });
 });
+
+// --- Stage 2 (§2.1/§2.2): the inventory balance surface -----------------------
+
+/** DATA_MODEL §5.8 movement taxonomy: the closed set, and only those values. */
+const SS2_ENUMS: Record<string, string[]> = {
+  InventoryMovementType: [
+    "RECEIPT",
+    "STOCK_ADJUSTMENT",
+    "COUNCIL_ON_ORDER_ADJUST",
+    "EVENT_ASSIGN",
+    "EVENT_MANUAL_REDUCE",
+    "EVENT_AUTO_REDUCE",
+    "EVENT_IMMEDIATE_SALE",
+    "EVENT_RELEASE",
+    "EVENT_RETURN_RECONCILE",
+    "EVENT_RE_FINALIZE_ADJUST",
+    "SCOUT_ISSUE",
+    "SCOUT_SALE_CONSUME",
+    "SCOUT_RETURN",
+    "INDIVIDUAL_FULFILL",
+    "WE_OWE_RESERVE",
+    "WE_OWE_RELEASE",
+    "WE_OWE_FULFILL",
+    "REVERSAL",
+  ],
+};
+
+const SS2_OUTPUT_TYPES: string[] = [
+  "InventoryPosition",
+  "InventoryMovement",
+  "InventoryMovementConnection",
+  "InventoryPositionConnection",
+];
+
+const SS2_INPUT_TYPES: string[] = ["DateRangeFilter", "RecordInventoryReceiptInput", "AdjustInventoryInput", "AdjustCouncilOnOrderInput"];
+
+const SS2_QUERY_FIELDS: string[] = ["inventoryPositions", "inventoryMovements"];
+
+const SS2_MUTATION_FIELDS: string[] = ["recordInventoryReceipt", "adjustInventory", "adjustCouncilOnOrder"];
+
+const SS2_CONNECTION_ITEMS: Record<string, string> = {
+  InventoryMovementConnection: "InventoryMovement",
+  InventoryPositionConnection: "InventoryPosition",
+};
+
+const SS2_LIST_QUERY_RETURN: Record<string, string> = {
+  inventoryMovements: "InventoryMovementConnection",
+};
+
+/**
+ * The exact field set of each Stage 2 type (GRAPHQL_API §5.1/§5.2, DATA_MODEL
+ * §5.7-§5.8, §7). The six derived quantities are part of the contract: a board
+ * that re-computes `unassignedKernelQty` in the browser is a second source of
+ * truth for what may be sold.
+ */
+const SS2_TYPE_FIELDS: Record<string, string[]> = {
+  InventoryPosition: [
+    "unitCampaignId",
+    "productId",
+    "kernelPhysicalQty",
+    "soldInPossessionQty",
+    "councilOnOrderQty",
+    "version",
+    "createdAt",
+    "updatedAt",
+    "sellableKernelQty",
+    "assignedOpenQty",
+    "unassignedKernelQty",
+    "assignmentOverageQty",
+    "withScoutQty",
+    "totalUnitOwnedUndeliveredQty",
+  ],
+  InventoryMovement: [
+    "movementId",
+    "unitCampaignId",
+    "productId",
+    "movementType",
+    "kernelPhysicalDelta",
+    "soldPossessionDelta",
+    "withScoutDelta",
+    "assignedDelta",
+    "councilOnOrderDelta",
+    "profileId",
+    "showAndSellId",
+    "saleId",
+    "orderId",
+    "weOweId",
+    "fulfillmentId",
+    "finalizationId",
+    "reason",
+    "actorAccountId",
+    "occurredAt",
+    "inventoryVersion",
+    "idempotencyKey",
+  ],
+  InventoryMovementConnection: ["items", "pageInfo"],
+  InventoryPositionConnection: ["items", "pageInfo"],
+  DateRangeFilter: ["startAt", "endAt"],
+  RecordInventoryReceiptInput: ["unitCampaignId", "productId", "quantity", "occurredAt", "idempotency"],
+  AdjustInventoryInput: ["unitCampaignId", "productId", "quantityDelta", "reason", "occurredAt", "idempotency"],
+  AdjustCouncilOnOrderInput: ["unitCampaignId", "productId", "quantityDelta", "reason", "occurredAt", "idempotency"],
+};
+
+describe("Show & Sell Stage 2 inventory SDL (schema.graphql)", () => {
+  test("the movement type enum carries exactly the DATA_MODEL §5.11 values", () => {
+    for (const [name, values] of Object.entries(SS2_ENUMS)) {
+      const def = definition(name);
+      expect(def.kind, `${name} must be an enum`).toBe("enum");
+      const found = def.body.split("\n").map((l) => l.trim()).filter((l) => /^[A-Z][A-Z0-9_]*$/.test(l));
+      expect(found, `${name} values`).toEqual(values);
+    }
+  });
+
+  test("every Stage 2 type and input is present with exactly the contract fields", () => {
+    for (const name of [...SS2_OUTPUT_TYPES, ...SS2_INPUT_TYPES]) {
+      const def = definition(name);
+      expect(["type", "input"].includes(def.kind), `${name} must be a type or input`).toBe(true);
+    }
+    for (const [name, expected] of Object.entries(SS2_TYPE_FIELDS)) {
+      expect([...fieldNameSet(definition(name))], `${name} fields`).toEqual(expected);
+    }
+  });
+
+  test("every Stage 2 query and mutation root field is present", () => {
+    for (const name of SS2_QUERY_FIELDS) {
+      expect(rootFieldByName("Query", name), `Query.${name} is missing`).toBeDefined();
+    }
+    for (const name of SS2_MUTATION_FIELDS) {
+      expect(rootFieldByName("Mutation", name), `Mutation.${name} is missing`).toBeDefined();
+    }
+  });
+
+  test("the Stage 2 connections and list query keep the shared pagination contract", () => {
+    const positions = rootFieldByName("Query", "inventoryPositions")!;
+    for (const [conn, element] of Object.entries(SS2_CONNECTION_ITEMS)) {
+      const def = definition(conn);
+      const items = fieldsOf(def).find((f) => f.name === "items");
+      expect(returnTypeName(items!.text), `${conn}.items element`).toBe(element);
+      const pageInfo = fieldsOf(def).find((f) => f.name === "pageInfo");
+      expect(returnTypeName(pageInfo!.text), `${conn}.pageInfo type`).toBe("PageInfo");
+    }
+    for (const [query, conn] of Object.entries(SS2_LIST_QUERY_RETURN)) {
+      const field = rootFieldByName("Query", query)!;
+      expect(field.text, `${query} takes a PageInput`).toMatch(/page\s*:\s*PageInput/);
+      expect(returnTypeName(field.text), `${query} return type`).toBe(conn);
+      expect(field.text, `${query} returns a non-null connection`).toMatch(new RegExp(`\\):\\s*${conn}!`));
+    }
+    // `inventoryPositions` is a bounded read of one campaign's rows, so it is a
+    // connection too: a Pack with hundreds of catalog products has no unbounded
+    // list to hand a browser.
+    expect(positions.text).toMatch(/page\s*:\s*PageInput/);
+    expect(returnTypeName(positions.text)).toBe("InventoryPositionConnection");
+    // A range that has not ended yet is open-ended, and the whole window is
+    // optional, so both instants are nullable.
+    const range = fieldsOf(definition("DateRangeFilter"));
+    expect(range.find((f) => f.name === "startAt")!.text).toMatch(/startAt\s*:\s*AWSDateTime(?!!)/);
+    expect(range.find((f) => f.name === "endAt")!.text).toMatch(/endAt\s*:\s*AWSDateTime(?!!)/);
+    // Every history filter of GRAPHQL_API §5.1 has to exist, or the browser has
+    // no way to ask for one event's or one Scout's movements.
+    const movements = rootFieldByName("Query", "inventoryMovements")!;
+    for (const arg of ["unitCampaignId: ID!", "productId: ID", "movementType: InventoryMovementType", "showAndSellId: ID", "profileId: ID", "dateRange: DateRangeFilter", "page: PageInput"]) {
+      expect(movements.text, `inventoryMovements(${arg}) is missing`).toContain(arg);
+    }
+    expect(positions.text).toContain("productIds: [ID!]");
+  });
+
+  test("every Stage 2 mutation is idempotent and carries no client version", () => {
+    for (const name of SS2_MUTATION_FIELDS) {
+      const field = rootFieldByName("Mutation", name)!;
+      expect(field.text, `${name} takes its input`).toMatch(/input\s*:\s*\w+Input!/);
+    }
+    // §5.2: "Balance versions are server-managed and returned for subsequent
+    // retry/verification" - a caller that could send an expectedVersion would be
+    // asserting a number it cannot have read atomically with its write.
+    for (const name of ["RecordInventoryReceiptInput", "AdjustInventoryInput", "AdjustCouncilOnOrderInput"]) {
+      const input = definition(name);
+      const idem = fieldsOf(input).find((f) => f.name === "idempotency");
+      expect(idem!.text, `${name}.idempotency is required`).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
+      expect(fieldNameSet(input).has("version"), `${name} must not carry a version`).toBe(false);
+      expect(fieldNameSet(input).has("movementType"), `${name} must not choose the movement type`).toBe(false);
+    }
+    const receipt = fieldsOf(definition("RecordInventoryReceiptInput"));
+    expect(receipt.find((f) => f.name === "quantity")!.text).toMatch(/quantity\s*:\s*Int!/);
+    expect(receipt.some((f) => f.name === "reason"), "a receipt needs no reason").toBe(false);
+    const adjust = fieldsOf(definition("AdjustInventoryInput"));
+    expect(adjust.find((f) => f.name === "quantityDelta")!.text).toMatch(/quantityDelta\s*:\s*Int!/);
+    expect(adjust.find((f) => f.name === "reason")!.text, "a stock adjustment must be explained").toMatch(/reason\s*:\s*String!/);
+    const council = fieldsOf(definition("AdjustCouncilOnOrderInput"));
+    expect(council.find((f) => f.name === "reason")!.text, "an on-order note is optional").toMatch(/reason\s*:\s*String(?!!)/);
+  });
+
+  test("AUTH: no Stage 2 field or type carries an auth directive (Cognito-only)", () => {
+    for (const name of [...SS2_QUERY_FIELDS, ...SS2_MUTATION_FIELDS]) {
+      const field = rootFieldByName("Query", name) ?? rootFieldByName("Mutation", name);
+      expect(field, `${name} is missing`).toBeDefined();
+      expect(field!.directives, `${name} must be directive-free`).toEqual([]);
+      expect(field!.directives).not.toContain(API_KEY);
+    }
+    for (const name of [...SS2_OUTPUT_TYPES, ...SS2_INPUT_TYPES]) {
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+    }
+  });
+
+  test("no Stage 2 type or field name is a reserved or invalid GraphQL token", () => {
+    const RESERVED = new Set([
+      "query", "mutation", "subscription", "type", "input", "interface", "enum", "union",
+      "scalar", "implements", "extend", "directive", "schema", "fragment", "on", "repeatable",
+    ]);
+    const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    const names = [
+      ...SS2_QUERY_FIELDS,
+      ...SS2_MUTATION_FIELDS,
+      ...SS2_OUTPUT_TYPES,
+      ...SS2_INPUT_TYPES,
+      ...Object.keys(SS2_ENUMS),
+    ];
+    for (const name of names) {
+      expect(NAME.test(name), `${name} must be a valid GraphQL Name`).toBe(true);
+      expect(RESERVED.has(name), `${name} is a reserved GraphQL keyword`).toBe(false);
+    }
+  });
+});

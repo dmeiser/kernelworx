@@ -56,6 +56,8 @@ QUERY_FIELDS = {
     "unitCampaignCatalog",
     "unitCampaigns",
     "unitCampaignRoster",
+    "inventoryPositions",
+    "inventoryMovements",
 }
 MUTATION_FIELDS = {
     "createUnit",
@@ -68,6 +70,9 @@ MUTATION_FIELDS = {
     "updateUnitCampaign",
     "joinUnitCampaign",
     "removeUnitCampaignMembership",
+    "recordInventoryReceipt",
+    "adjustInventory",
+    "adjustCouncilOnOrder",
 }
 
 
@@ -216,8 +221,8 @@ def test_unit_tenant_role_writes_the_unit_tables_and_the_join_link_only() -> Non
             continue
         keys = _table_keys(statement)
         writable |= keys
-        assert keys <= {"units", "unit_campaigns", "public_order_throttles", "campaigns"}, (
-            f"write actions outside the Unit tables, the counter and the join link: {keys}"
+        assert keys <= {"units", "unit_campaigns", "inventory", "public_order_throttles", "campaigns"}, (
+            f"write actions outside the Unit tables, the inventory table, the counter and the join link: {keys}"
         )
         if "campaigns" in keys and "unit_campaigns" not in keys:
             assert set(statement["actions"]) == {"dynamodb:UpdateItem", "dynamodb:TransactWriteItems"}, (
@@ -226,8 +231,8 @@ def test_unit_tenant_role_writes_the_unit_tables_and_the_join_link_only() -> Non
             assert "/index/" not in str(statement["resources"]), (
                 "the joined-scope link is written on the base table; the campaignId-index GSI is a locator only"
             )
-    assert writable == {"units", "unit_campaigns", "public_order_throttles", "campaigns"}, (
-        f"unexpected legacy write surface: {writable - {'units', 'unit_campaigns', 'public_order_throttles'}}"
+    assert writable == {"units", "unit_campaigns", "inventory", "public_order_throttles", "campaigns"}, (
+        f"unexpected write surface: {writable - {'units', 'unit_campaigns', 'inventory', 'public_order_throttles'}}"
     )
 
     joined = " ".join(str(s["actions"]) for s in statements)
@@ -243,7 +248,14 @@ def test_unit_operations_datasource_is_lambda_backed() -> None:
     assert "unit-operations" in str(config["function_arn"]), "the data source must invoke the unit-operations Lambda"
 
 
-def test_all_nineteen_stage_one_fields_are_resolved_on_that_datasource() -> None:
+def test_all_twenty_four_unit_fields_are_resolved_on_that_datasource() -> None:
+    """Eleven queries and thirteen mutations, Stage 1 and Stage 2 alike.
+
+    Stage 2 adds two inventory reads and three balance writes to the same data
+    source: tenant isolation and the Unit Admin check live in the one handler, so a
+    new field is a new name in its router, and an unbound SDL field answers nothing
+    on ``dev``.
+    """
     bound: dict[str, str] = {}
     for doc in _resolver_docs():
         for resource in doc.get("resource", []):
@@ -261,4 +273,4 @@ def test_all_nineteen_stage_one_fields_are_resolved_on_that_datasource() -> None
         assert f"Query:{field}" in bound, f"Query.{field} has no resolver on UnitOperationsDS"
     for field in sorted(MUTATION_FIELDS):
         assert f"Mutation:{field}" in bound, f"Mutation.{field} has no resolver on UnitOperationsDS"
-    assert len(bound) == 19, f"expected exactly the 19 Stage 1 resolvers, got {sorted(bound)}"
+    assert len(bound) == 24, f"expected exactly the 24 Unit-tenant resolvers, got {sorted(bound)}"

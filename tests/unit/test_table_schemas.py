@@ -9,6 +9,7 @@ from tests.unit.table_schemas import (
     create_all_tables,
     create_campaigns_table_schema,
     create_catalogs_table_schema,
+    create_inventory_table_schema,
     create_invites_table_schema,
     create_orders_table_schema,
     create_profiles_table_schema,
@@ -24,6 +25,7 @@ from tests.unit.table_schemas import (
 MARKER_FACTORIES = {
     "units": create_units_table_schema,
     "unit_campaigns": create_unit_campaigns_table_schema,
+    "inventory": create_inventory_table_schema,
 }
 
 
@@ -408,6 +410,63 @@ class TestUnitCampaignsTableSchema:
         for gsi in schema["GlobalSecondaryIndexes"]:
             for key in gsi["KeySchema"]:
                 assert key["AttributeName"] in declared, f"{gsi['IndexName']} uses undeclared {key['AttributeName']}"
+
+
+class TestInventoryTableSchema:
+    """Tests for the Show & Sell inventory table schema (data model §5.7, §5.8, §6.3)."""
+
+    def test_table_name(self):
+        schema = create_inventory_table_schema()
+        assert schema["TableName"] == "kernelworx-inventory-ue1-dev"
+
+    def test_key_schema_is_pk_sk(self):
+        """One partition per Unit Campaign; balance, allocation, custody, movement share it."""
+        schema = create_inventory_table_schema()
+        assert schema["KeySchema"] == [
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ]
+
+    def test_has_the_three_contracted_indexes(self):
+        gsi_names = {gsi["IndexName"] for gsi in create_inventory_table_schema()["GlobalSecondaryIndexes"]}
+        assert gsi_names == {
+            "showAndSellId-index",
+            "profileId-unitCampaignId-index",
+            "movementType-occurredAt-index",
+        }
+
+    def test_index_key_shapes(self):
+        indexes = {
+            gsi["IndexName"]: gsi["KeySchema"] for gsi in create_inventory_table_schema()["GlobalSecondaryIndexes"]
+        }
+        assert indexes["showAndSellId-index"] == [{"AttributeName": "showAndSellId", "KeyType": "HASH"}]
+        assert indexes["profileId-unitCampaignId-index"] == [
+            {"AttributeName": "profileId", "KeyType": "HASH"},
+            {"AttributeName": "unitCampaignId", "KeyType": "RANGE"},
+        ]
+        assert indexes["movementType-occurredAt-index"] == [
+            {"AttributeName": "movementType", "KeyType": "HASH"},
+            {"AttributeName": "occurredAt", "KeyType": "RANGE"},
+        ]
+
+    def test_every_gsi_key_attribute_is_declared(self):
+        schema = create_inventory_table_schema()
+        declared = {a["AttributeName"] for a in schema["AttributeDefinitions"]}
+        for gsi in schema["GlobalSecondaryIndexes"]:
+            for key in gsi["KeySchema"]:
+                assert key["AttributeName"] in declared, f"{gsi['IndexName']} uses undeclared {key['AttributeName']}"
+
+    def test_not_in_the_always_created_fixture_set(self):
+        """The 10-table fixture contract stays exact; inventory is created per test.
+
+        `test_handler_error_and_fallback_paths` pins `list_tables()` to this list, so
+        a table added to the shared fixture would break that contract for every test.
+        The inventory tests create the table themselves (same precedent as the §6.6
+        throttle table).
+        """
+        names = [schema["TableName"] for schema in get_all_table_schemas()]
+        assert create_inventory_table_schema()["TableName"] not in names
+        assert "inventory" not in TABLE_NAMES
 
 
 @pytest.fixture

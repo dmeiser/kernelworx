@@ -1095,3 +1095,48 @@ resource "aws_appsync_resolver" "remove_unit_campaign_membership" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Stage 2 inventory balance writes (§2.2.1-2.2.3). Each is one conditional
+# TransactWriteItems (marker + balance + movement) inside the unit-operations
+# Lambda, so the resolver stays a thin unit invoke: no pipeline, no stash.
+resource "aws_appsync_resolver" "record_inventory_receipt" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "recordInventoryReceipt"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "adjust_inventory" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "adjustInventory"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "adjust_council_on_order" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "adjustCouncilOnOrder"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

@@ -861,6 +861,29 @@ data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
     ]
   }
 
+  # Stage 2 inventory: the §5.7 balance and §5.8 movement rows for one Unit
+  # Campaign's products. Every Stage 2 stock mutation commits balance + movement +
+  # marker in one TransactWriteItems, and the balance write is conditional
+  # (attribute_not_exists for the first receipt of a product, version + §4.1 floor
+  # guards afterwards), so ConditionCheckItem rides with the item actions and
+  # TransactWriteItems rides with them because the item actions are not permission
+  # to invoke the transaction API.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [
+      var.dynamodb_table_arns["inventory"],
+      "${var.dynamodb_table_arns["inventory"]}/index/*",
+    ]
+  }
+
   # The redemption throttle counter reuses the shared throttle table: one
   # atomic UpdateItem increment per failed invite redemption, TTL-expired.
   statement {

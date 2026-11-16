@@ -155,6 +155,7 @@ locals {
       extra_env = {
         UNITS_TABLE_NAME          = var.table_names.units
         UNIT_CAMPAIGNS_TABLE_NAME = var.table_names.unit_campaigns
+        INVENTORY_TABLE_NAME      = var.table_names.inventory
       }
     }
     "delete-campaign-orders" = {
