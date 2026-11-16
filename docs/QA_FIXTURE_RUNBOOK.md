@@ -177,8 +177,10 @@ Measured 2026-11-16 with the QA identity (`aws` request ids are given so the rea
 can be re-run and checked):
 
 ```text
-DescribeUserPool            UsernameAttributes=['email']  AutoVerifiedAttributes=None
-ListUsers                   26 users; Username == sub for 25 of them
+DescribeUserPool request-id=6743ec1e-0cf1-4f10-b299-76cfef5f5422
+                          UsernameAttributes=['email']  AutoVerifiedAttributes=None
+ListUsers request-id=8be598f5-8b94-4717-859d-6a536caa4082
+                          26 users; Username == sub for 25 of them
 outlier                     Username=Google_111807007628636882761  sub=24f8f4e8-7021-70a9-9cf3-cf38ce4258fe
 admin_get_user(qa-show-sell-admin@dev.kernelworx.app)  Username=94187428-20e1-70d6-94cb-7f68f80c72dd  request-id=a8ff6a9a-1c0d-4f96-80df-03477e421863
 admin_get_user(test-owner@dev.kernelworx.app)          Username=54f8a468-d041-700e-50f9-1a3f854bd6fc  request-id=6c3f9177-ade4-4894-854d-17626a4db74f
