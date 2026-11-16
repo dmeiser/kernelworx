@@ -230,21 +230,43 @@ def evidence_dir(lane: dict[str, str]) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _screenshot(page: Page, name: str, evidence_dir: Path, masks: list[Locator] | None = None) -> str:
+def _screenshot(page: Page, name: str, evidence_dir: Path, masks: list[Locator]) -> str:
     """Capture one step screenshot and return its file name.
 
     Args:
         page: the page to capture.
         name: step name, used as the file stem.
         evidence_dir: artifact directory.
-        masks: locators whose pixels are replaced, for fixture codes.
+        masks: locators whose pixels are replaced.  Required on purpose: the
+            evidence directory outlives the run, and any screenshot of a Unit
+            Campaign page shows its live 16-character join code
+            (``frontend/src/pages/UnitCampaignWorkspacePage.tsx:138``), which no
+            text scan can take back out of pixels.
 
     Returns:
         The screenshot's file name.
     """
     path = evidence_dir / f"{name}.png"
-    page.screenshot(path=str(path), full_page=True, mask=masks or [])
+    page.screenshot(path=str(path), full_page=True, mask=masks)
     return path.name
+
+
+def _masked_code_elements(page: Page) -> int:
+    """Count the fixture-code elements on screen that a screenshot is masking.
+
+    The record claims fixture codes are absent from the evidence, and pixels are
+    the one channel no after-the-fact scan can redact.  Saying how many code
+    elements were on screen is what makes that claim checkable: a step on a Unit
+    Campaign page reports a non-zero count, so an unmasked screenshot there
+    cannot hide behind a mask list that matched nothing.
+
+    Args:
+        page: the persona's page, at the moment its screenshot was taken.
+
+    Returns:
+        How many elements the mask list matched.
+    """
+    return sum(locator.count() for locator in code_mask_locators(page))
 
 
 @contextlib.contextmanager
@@ -615,8 +637,10 @@ def _write_evidence(evidence_dir: Path, evidence: dict[str, Any]) -> None:
         "created.",
         "",
         "Fixture codes (the Unit invite and the Unit Campaign join code) are deliberately",
-        "absent: the checklist requires that they do not appear in evidence. Screenshots",
-        "mask them, and traces carry same-length redactions in their place.",
+        "absent: the checklist requires that they do not appear in evidence.  Every screenshot",
+        "passes the page object's code-mask selectors, and `maskedCodeElements` on a step is",
+        "how many of those surfaces were on screen and painted out; traces carry same-length",
+        "redactions in their place.",
         "",
     ]
     for step in evidence["steps"]:
@@ -677,7 +701,7 @@ def test_show_sell_stage1_journey(
             outside = ShowSellPage(outside_page)
             units_closed = not outside.gate_opens(UNIT_ROUTE, "create-unit")
             join_closed = not outside.gate_opens(JOIN_ROUTE, "lookup-join-code")
-            shot = _screenshot(outside_page, "01-gate-closed-outside", evidence_dir)
+            shot = _screenshot(outside_page, "01-gate-closed-outside", evidence_dir, masks=outside.code_mask_locators())
             assert units_closed, "the units route opened for an account outside the preview group"
             assert join_closed, "the join route opened for an account outside the preview group"
             record(
@@ -700,7 +724,7 @@ def test_show_sell_stage1_journey(
             profile_state = _ensure_scout_profile(scout_page, lane["scout_name"])
             scout_profile_id = _profile_id_for(scout_token, lane["scout_name"])
             campaign_state = _ensure_scout_campaign(scout_page, lane["campaign_name"], scout_profile_id)
-            shot = _screenshot(scout_page, "02-scout-fixtures", evidence_dir)
+            shot = _screenshot(scout_page, "02-scout-fixtures", evidence_dir, masks=scout.code_mask_locators())
             record(
                 "The Scout holds the preview gate and the fixtures the join needs",
                 "passed",
@@ -739,7 +763,7 @@ def test_show_sell_stage1_journey(
             created["unitId"] = unit_id
             admin.open_unit(unit_id)
             admin.open_tab("tab-settings")
-            shot = _screenshot(admin_page, "03-unit-created", evidence_dir)
+            shot = _screenshot(admin_page, "03-unit-created", evidence_dir, masks=admin.code_mask_locators())
             record(
                 "The gate opens for the admin, who creates the Unit",
                 "passed",
@@ -762,7 +786,12 @@ def test_show_sell_stage1_journey(
             record(
                 "The admin creates a Unit invite",
                 "passed",
-                {"inviteCode": "redacted, 16 characters", "inviteCodeLength": len(invite_code), "screenshot": shot},
+                {
+                    "maskedCodeElements": _masked_code_elements(admin_page),
+                    "inviteCode": "redacted, 16 characters",
+                    "inviteCodeLength": len(invite_code),
+                    "screenshot": shot,
+                },
             )
 
             admin.open_tab("tab-campaigns")
@@ -780,6 +809,7 @@ def test_show_sell_stage1_journey(
                 "The admin creates the Unit Campaign on a fixed catalog",
                 "passed",
                 {
+                    "maskedCodeElements": _masked_code_elements(admin_page),
                     "unitCampaignId": campaign_id,
                     "campaign": f"{lane['campaign_name']} {CAMPAIGN_YEAR}",
                     "catalog": lane["admin_catalog"],
@@ -796,7 +826,9 @@ def test_show_sell_stage1_journey(
             admin2.goto_units()
             admin2.redeem_invite(invite_code)
             admin2_page.get_by_test_id(f"open-unit-{unit_id}").wait_for(state="visible", timeout=20_000)
-            shot = _screenshot(admin2_page, "06-invite-redeemed-admin2", evidence_dir)
+            shot = _screenshot(
+                admin2_page, "06-invite-redeemed-admin2", evidence_dir, masks=admin2.code_mask_locators()
+            )
             record(
                 "The second admin redeems the invite and becomes a Unit admin",
                 "passed",
@@ -812,7 +844,12 @@ def test_show_sell_stage1_journey(
             record(
                 "The Scout joins the Unit Campaign with the Scout profile",
                 "passed",
-                {"scoutProfileId": scout_profile_id, "joinConfirmationVisible": True, "screenshot": shot},
+                {
+                    "maskedCodeElements": _masked_code_elements(scout_page),
+                    "scoutProfileId": scout_profile_id,
+                    "joinConfirmationVisible": True,
+                    "screenshot": shot,
+                },
             )
 
         # --- Step 6: roster, roster removal, close, then teardown -------------
@@ -827,14 +864,19 @@ def test_show_sell_stage1_journey(
             admin.open_campaign_roster(campaign_id)
             roster_rows = admin.wait_for_roster_row(scout_profile_id)
             active_before_removal = _active_roster_rows(admin_token, campaign_id)
-            shot = _screenshot(admin_page, "08-roster-shows-scout", evidence_dir)
+            shot = _screenshot(admin_page, "08-roster-shows-scout", evidence_dir, masks=admin.code_mask_locators())
             assert any(profile_key(row) == profile_key(scout_profile_id) for row in roster_rows), (
                 f"the roster does not list {scout_profile_id}: {roster_rows}"
             )
             record(
                 "The roster lists the joined Scout",
                 "passed",
-                {"rosterRows": roster_rows, "activeRosterRows": len(active_before_removal), "screenshot": shot},
+                {
+                    "maskedCodeElements": _masked_code_elements(admin_page),
+                    "rosterRows": roster_rows,
+                    "activeRosterRows": len(active_before_removal),
+                    "screenshot": shot,
+                },
             )
 
             roster_row = admin.remove_roster_member(scout_profile_id)
@@ -843,7 +885,7 @@ def test_show_sell_stage1_journey(
             rows_after_removal = _roster_after_removal(admin_token, campaign_id, scout_profile_id)
             active_after_removal = [row for row in rows_after_removal if row.get("status") == "ACTIVE"]
             removed_rows = [row for row in rows_after_removal if row.get("status") == "REMOVED"]
-            shot = _screenshot(admin_page, "09-roster-removal", evidence_dir)
+            shot = _screenshot(admin_page, "09-roster-removal", evidence_dir, masks=admin.code_mask_locators())
             assert not still_removable, "the removed row still offers a removal control"
             assert not active_after_removal, f"the roster still holds ACTIVE rows: {active_after_removal}"
             assert any(
@@ -853,6 +895,7 @@ def test_show_sell_stage1_journey(
                 "The admin removes the Scout from the roster",
                 "passed",
                 {
+                    "maskedCodeElements": _masked_code_elements(admin_page),
                     "activeRowsBeforeRemoval": len(active_before_removal),
                     "rosterStatusAfterRemoval": status_after_removal,
                     "activeRowsAfterRemoval": len(active_after_removal),
@@ -872,12 +915,16 @@ def test_show_sell_stage1_journey(
             if status_after_close != "Closed":
                 admin.close_campaign(campaign_id)
             status_after_close = admin.wait_for_campaign_status(campaign_id, "Closed")
-            shot = _screenshot(admin_page, "10-campaign-closed", evidence_dir)
+            shot = _screenshot(admin_page, "10-campaign-closed", evidence_dir, masks=admin.code_mask_locators())
             assert status_after_close == "Closed", f"the Unit Campaign did not close: {status_after_close!r}"
             record(
                 "The admin closes the Unit Campaign",
                 "passed",
-                {"statusAfterClose": status_after_close, "screenshot": shot},
+                {
+                    "maskedCodeElements": _masked_code_elements(admin_page),
+                    "statusAfterClose": status_after_close,
+                    "screenshot": shot,
+                },
             )
 
             admin.open_tab("tab-access")
@@ -891,7 +938,7 @@ def test_show_sell_stage1_journey(
                 grants_after = admin.wait_for_admin_grant_gone(account_id)
             server_grants = _await_grants_without(admin_token, unit_id, other_grants)
             alerts = admin_page.locator("[role='alert']").all_inner_texts()
-            shot = _screenshot(admin_page, "11-grants-after-teardown", evidence_dir)
+            shot = _screenshot(admin_page, "11-grants-after-teardown", evidence_dir, masks=admin.code_mask_locators())
             assert len(grants_after) < len(grants), f"revoking {other_grants} left the grant table at {grants_after}"
             record(
                 "Teardown revokes the second admin grant",

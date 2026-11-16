@@ -27,7 +27,12 @@ environment, and the artifact scan is pure file work.
 from __future__ import annotations
 
 import ast
+import json
 import os
+import re
+import shlex
+import subprocess
+import sys
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -52,6 +57,12 @@ IDENTITY_VARS = (
 PREVIEW_GROUP = "show-sell-preview"
 #: A value that must never appear in a message: it stands in for a real password.
 SENTINEL_PASSWORD = "NotARealFixturePassword-7x"
+#: A fixture password is generated from ``letters + digits + "!@#$%^&*-_+="``, so a
+#: loader that pastes a value into a shell command without quoting it is running
+#: the password as shell syntax.
+SHELL_HOSTILE_PASSWORD = "Fixture!@#$%^&*-_+=7x'\"$(`x`)"
+#: The fixture writer's own variable for where its ``0600`` file lives.
+SECRETS_FILE_VAR = "QA_FIXTURE_SECRETS_FILE"
 
 
 def _source(path: Path) -> str:
@@ -241,6 +252,162 @@ def test_failure_evidence_masks_live_fixture_codes() -> None:
 
     failure_body = ast.unparse(_function(_tree(SPEC), "_record_failure"))
     assert "mask=code_mask_locators(page)" in failure_body, "the failure screenshot is taken unmasked"
+
+
+def test_no_step_screenshot_can_omit_its_masks() -> None:
+    """Every screenshot passes a mask list, and ``masks`` has no default to fall back on.
+
+    Steps 8 and 9 are the Unit Campaign's roster page, which renders
+    ``Join code: <strong data-testid="join-code">`` while the campaign is open
+    (``frontend/src/pages/UnitCampaignWorkspacePage.tsx:138``).  QA read a live join
+    code out of ``08-roster-shows-scout.png`` and ``09-roster-removal.png`` while the
+    same record claimed fixture codes were absent: those two call sites simply
+    omitted ``masks=``, and the parameter's ``None`` default let them.  Pixels are
+    the one evidence channel ``redact_and_scan`` cannot repair afterwards.
+    """
+    tree = _tree(SPEC)
+    shots = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "_screenshot"
+    ]
+    assert len(shots) >= 11, f"the journey records {len(shots)} screenshots; 12 steps expect at least 11"
+    for call in shots:
+        step = call.args[1].value if len(call.args) > 1 and isinstance(call.args[1], ast.Constant) else "<unknown>"
+        masks = [keyword for keyword in call.keywords if keyword.arg == "masks"]
+        assert masks, f"the {step!r} screenshot at line {call.lineno} is taken with no masks"
+        assert "code_mask_locators" in ast.unparse(masks[0].value), f"the {step!r} screenshot masks a different list"
+
+    signature = _function(tree, "_screenshot").args
+    assert not signature.defaults, "_screenshot masks has a default, so a call site can forget it silently"
+    assert not any(default is not None for default in signature.kw_defaults), (
+        "_screenshot masks has a default, so a call site can forget it silently"
+    )
+
+    # The failure path calls the browser API directly, so it is pinned the same way.
+    direct = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "screenshot"
+    ]
+    assert direct, "no direct page.screenshot call found"
+    for call in direct:
+        assert any(keyword.arg == "mask" for keyword in call.keywords), (
+            f"page.screenshot at line {call.lineno} has no mask"
+        )
+
+
+def test_code_bearing_steps_record_what_the_mask_matched() -> None:
+    """The record says how many code elements were on screen, not only that codes are absent.
+
+    A mask list that matched nothing looks identical to a code-free page in the
+    artifacts.  Counting the matched elements is what lets a reader tell "nothing to
+    hide" from "the mask missed", which is the difference QA had to find by eye.
+    """
+    source = _source(SPEC)
+    assert source.count('"maskedCodeElements"') >= 5, (
+        "the invite, join, roster, and close steps each record the mask target count"
+    )
+    helper = _function(_tree(SPEC), "_masked_code_elements")
+    assert "code_mask_locators" in ast.unparse(helper), "the count is taken from a different list than the mask"
+
+
+def test_the_runbook_loads_the_fixture_file_as_json(tmp_path: Path) -> None:
+    """The human-runner recipe is executed here, against a fixture file of the real shape.
+
+    ``scripts/qa_fixture.py`` ends ``write_secrets()`` in ``json.dump``, so the
+    ``0600`` file is JSON.  The first version of this runbook told a reader to
+    ``. ~/qa-fixture/secrets.json``; QA ran it verbatim and got nine ``command not
+    found`` lines, zero exported keys, and a run that stopped naming the base URL it
+    could not find.  The recipe is now a JSON read, and it is only a doc until this
+    test runs it: the block from the README is executed with a synthetic file whose
+    values are the hostile ones the fixture alphabet allows.
+    """
+    readme = _source(E2E_DIR / "README.md")
+    for needle in (SECRETS_FILE_VAR, "~/.kernelworx/qa-fixture-secrets.json", "json.dump"):
+        assert needle in readme, f"tests/e2e/README.md does not document {needle}"
+    assert "set -a; ." not in readme, "the runbook still tells a reader to source the JSON file"
+
+    agents = _source(REPO_ROOT / "AGENTS.md")
+    assert SECRETS_FILE_VAR in agents, "AGENTS.md does not say where the fixture file lives"
+    assert "json.dump" in agents, "AGENTS.md does not say the fixture file is JSON"
+
+    block = _bash_block(readme, SECRETS_FILE_VAR).replace("uv run python", shlex.quote(sys.executable))
+    secrets = tmp_path / "qa-fixture-secrets.json"
+    secrets.write_text(
+        json.dumps(
+            {
+                "TEST_QA_SHOW_SELL_BASE_URL": "https://dev.kernelworx.app",
+                "TEST_QA_SHOW_SELL_ADMIN_EMAIL": "qa-show-sell-admin@dev.kernelworx.app",
+                "TEST_QA_SHOW_SELL_ADMIN_PASSWORD": SENTINEL_PASSWORD,
+                "TEST_QA_SHOW_SELL_SCOUT_PASSWORD": SHELL_HOSTILE_PASSWORD,
+                "TEST_OWNER_PASSWORD": "not-a-fixture-key",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    env = {**os.environ, SECRETS_FILE_VAR: str(secrets)}
+
+    loaded = subprocess.run(["bash", "-c", block], env=env, capture_output=True, text=True, check=False)
+    assert loaded.returncode == 0, f"the documented loader stopped: {loaded.stderr}"
+    assert loaded.stdout == "", f"the loader echoed something: {loaded.stdout!r}"
+
+    probe = "\n".join(
+        (
+            block,
+            'printf "email=%s\\n" "$TEST_QA_SHOW_SELL_ADMIN_EMAIL"',
+            'printf "base=%s\\n" "$TEST_QA_SHOW_SELL_BASE_URL"',
+            'printf "admin=%s\\n" "${TEST_QA_SHOW_SELL_ADMIN_PASSWORD:-unset}"',
+            'printf "scout=%s\\n" "${TEST_QA_SHOW_SELL_SCOUT_PASSWORD:-unset}"',
+            'printf "owner=%s\\n" "${TEST_OWNER_PASSWORD-unset}"',
+            'printf "count=%s\\n" "$(env | grep -c \'^TEST_QA_SHOW_SELL_[A-Z0-9_]*=\')"',
+        )
+    )
+    exported = subprocess.run(["bash", "-c", probe], env=env, capture_output=True, text=True, check=False)
+    assert exported.returncode == 0, f"the exported values are unusable: {exported.stderr}"
+    assert f"admin={SENTINEL_PASSWORD}" in exported.stdout, "the fixture password did not reach the environment"
+    assert f"scout={SHELL_HOSTILE_PASSWORD}" in exported.stdout, (
+        "a password with shell metacharacters was mangled, not exported"
+    )
+    assert "email=qa-show-sell-admin@dev.kernelworx.app" in exported.stdout
+    assert "base=https://dev.kernelworx.app" in exported.stdout, (
+        "the recipe leaves the run without the base URL it needs"
+    )
+    assert "owner=unset" in exported.stdout, "the loader exports keys the harness never reads"
+    assert "count=4" in exported.stdout, "the loader exported the wrong number of fixture keys"
+
+    # The defect, kept as a control: sourcing that same JSON file exports nothing.
+    sourced = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'set -a; . "{secrets}"; set +a; '
+            """printf "count=%s\\n" "$(env | grep -c '^TEST_QA_SHOW_SELL_[A-Z0-9_]*=')\"""",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "count=0" in sourced.stdout, (
+        "sourcing the fixture JSON now works, so this control and the runbook warning need re-reading"
+    )
+
+
+def _bash_block(source: str, marker: str) -> str:
+    """Return the single fenced ``bash`` block in *source* that contains *marker*.
+
+    Args:
+        source: markdown text.
+        marker: text that identifies the block.
+
+    Returns:
+        The block's contents.
+    """
+    blocks = [block for block in re.findall(r"```bash\n(.*?)```", source, re.DOTALL) if marker in block]
+    assert len(blocks) == 1, f"expected exactly one bash block naming {marker}, found {len(blocks)}"
+    return blocks[0]
 
 
 def test_harness_holds_no_aws_sdk_and_no_cognito_admin_actions() -> None:

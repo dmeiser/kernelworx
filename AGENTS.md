@@ -105,6 +105,23 @@ file ever names the fixture identities or this spec.
   being redacted. `tests/e2e/utils/show_sell_evidence.py` owns that behaviour and
   lives outside the spec so the unit suite can test it — importing the spec from
   `tests/unit` fails on its `slow` marker under the root pytest config.
+- **The fixture secrets file is JSON, at a path the fixture script owns.**
+  `scripts/qa_fixture.py` writes `$QA_FIXTURE_SECRETS_FILE` (default
+  `~/.kernelworx/qa-fixture-secrets.json`, mode `0600`) with `json.dump`, and its
+  password alphabet is `letters + digits + "!@#$%^&*-_+="`. A runbook that sources
+  it (`set -a; . file; set +a`) exports nothing and the journey stops on a missing
+  base URL; read it with a JSON parser and quote every value on the way into the
+  shell. `tests/e2e/README.md` carries the loader, and the guard test runs that
+  documented block against a synthetic file of the real shape.
+- **Screenshot masking is a required argument, not a convention.** `_screenshot`
+  takes `masks` with no default, and the page object's `CODE_MASK_SELECTORS` is the
+  one list that step screenshots, the failure screenshot, and the
+  `maskedCodeElements` count all read. The reason is not cosmetic: the Unit Campaign
+  workspace renders `Join code: <strong data-testid="join-code">` while the campaign
+  is open (`frontend/src/pages/UnitCampaignWorkspacePage.tsx:138`), and the roster
+  and close steps run on that page — an unmasked screenshot there photographs a live
+  fixture code, and `redact_and_scan` only reads text, so pixels cannot be repaired
+  afterwards.
 - **Storage ids come back in two spellings**: `listMyProfiles` answers
   `PROFILE#<uuid>`, `getMyAccount` answers `ACCOUNT#<sub>`, Unit ids are bare
   UUIDs, and the page-object test ids are suffixed with the UI's spelling. Compare

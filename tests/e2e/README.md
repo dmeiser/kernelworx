@@ -225,20 +225,48 @@ that path the command is the whole recipe — nothing to find, nothing to source
 uv run pytest tests/e2e/test_smoke_show_sell.py -v
 ```
 
-A human runner holds the same variables in the `0600` file the fixture script
-writes, so that path starts by reading it:
+A human runner holds the same variables in the `0600` file `scripts/qa_fixture.py`
+writes. That file is **JSON, not shell**: `write_secrets()` ends in `json.dump`, so
+it has to be read by a JSON parser. Sourcing it is the failure a reader hits first —
+`.` hands each `"KEY": "value"` line to bash as a command, which answers `command
+not found` nine times, exports nothing, and the journey then stops with `the
+acceptance run needs the deployed app URL`. A `jq` expression works too; what never
+works is treating JSON as a shell script.
+
+The file is `$QA_FIXTURE_SECRETS_FILE`, defaulting to
+`~/.kernelworx/qa-fixture-secrets.json` — the location and format the fixture script
+defines, with `docs/QA_FIXTURE_RUNBOOK.md` as its runbook. Read it from the
+repository root (and never with `set -x`, which would echo the exports):
 
 ```bash
-set -a; . ~/qa-fixture/secrets.json; set +a
-export TEST_QA_SHOW_SELL_BASE_URL=https://dev.kernelworx.app
+export QA_FIXTURE_SECRETS_FILE="${QA_FIXTURE_SECRETS_FILE:-$HOME/.kernelworx/qa-fixture-secrets.json}"
+eval "$(uv run python -c '
+import json, os, shlex
+values = json.load(open(os.environ["QA_FIXTURE_SECRETS_FILE"], encoding="utf-8"))
+for key in sorted(values):
+    if key.startswith("TEST_QA_SHOW_SELL_"):
+        print(f"export {key}={shlex.quote(values[key])}")
+')"
+```
+
+That loader prints nothing: the `export` lines are captured by `$(…)` and evaluated,
+never echoed. Only `TEST_QA_SHOW_SELL_*` keys are exported, and `shlex.quote` is not
+decorative — the fixture password alphabet is
+`string.ascii_letters + string.digits + "!@#$%^&*-_+="`, so an unquoted value would
+be re-parsed by the shell. Then run the journey:
+
+```bash
 export TEST_USER_POOL_CLIENT_ID=<the KernelWorx-Web client of the dev pool>
 uv run pytest tests/e2e/test_smoke_show_sell.py -v
 ```
 
 Either way the run needs three things and stops naming the key when one is
 missing: the eight `TEST_QA_SHOW_SELL_*` identity values, a base URL, and
-`TEST_USER_POOL_CLIENT_ID`. Nothing in that list is a repository secret, and
-nothing needs AWS credentials.
+`TEST_USER_POOL_CLIENT_ID`. The fixture file carries the first two — its nine keys
+include `TEST_QA_SHOW_SELL_BASE_URL` — and the client id is the one id
+`uv run python scripts/qa_fixture.py up` prints in its sign-in proof. Nothing in
+that list is a repository secret, and nothing needs AWS credentials to run the
+journey itself.
 
 `TEST_USER_POOL_CLIENT_ID` sits outside the card's nine-key list and has to be
 written into the QA environment alongside them. The dev pool has many clients
@@ -254,6 +282,16 @@ by name is not an option — see the deploy-smoke entry in `AGENTS.md`.
   trace is NDJSON with byte offsets, so a different length corrupts it. A password
   found in any artifact **fails the run** instead of being redacted: an artifact
   that carried a credential is compromised, not clean.
+- **Masking is a required argument, not a habit.** `_screenshot` takes `masks` with
+  no default, and every step passes `code_mask_locators()` from the page object, so
+  one list covers every code surface (`CODE_MASK_SELECTORS`) for step and failure
+  screenshots alike. That is because the Unit Campaign page renders
+  `Join code: <strong data-testid="join-code">` while the campaign is open
+  (`frontend/src/pages/UnitCampaignWorkspacePage.tsx:138`) — the roster steps are on
+  that page, so an unmasked screenshot there photographs a live join code, and
+  pixels survive a text scan. The code-bearing steps also record
+  `maskedCodeElements`, the count of elements the mask matched, so the record says
+  what was hidden rather than only claiming nothing was visible.
 - **The app client is supplied, never looked up.** See the deploy-smoke entry in
   `AGENTS.md`; the dev pool has many clients named `KernelWorx-Web`.
 - **One origin drives the browser and the probes.** `tests/e2e/pages/base_page.py`
