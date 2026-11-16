@@ -58,6 +58,74 @@ Never mix bare legacy flow names (`USER_PASSWORD_AUTH`) with `ALLOW_*` names in 
 
 `scripts/qa_fixture.py` (`status` / `up` / `down`) is the only supported way to put a signed-in identity on `https://dev.kernelworx.app`: it admin-creates the four `qa-show-sell-*@dev.kernelworx.app` identities in pool `us-east-1_sDiuCOarb`, sets the `show-sell-preview` membership the preview gate has to be provable against from both sides, and writes generated passwords only to a `0600` file outside the tree. The pool id, the group, the IAM boundaries of `kernelworx-qa-ue1-dev` (notably: no `DescribeUserPoolClient`), the alias trap where `Username` is a UUID while rows are keyed on `sub`, and the finding that the dev pool holds many app clients all named `KernelWorx-Web` are in `docs/QA_FIXTURE_RUNBOOK.md`. Do not ask a QA run to sign up through the UI and confirm by mail: run `up`.
 
+## Show & Sell acceptance journey: fixture identities, and where its passwords live
+
+`tests/e2e/test_smoke_show_sell.py` is the re-runnable Playwright harness for the
+Stage 1 Show & Sell journey against a deployed stack, and the runbook is
+`tests/e2e/README.md`. It is a harness and a reproducible record of what the
+deployed build answered — QA executes the acceptance criteria itself, so the
+harness is not the evidence and a green run is not a checklist box. It is marked
+`slow`, never `smoke`, and **no CI workflow runs it or holds its passwords**: the
+guard test `tests/unit/test_show_sell_acceptance_harness.py` fails if a workflow
+file ever names the fixture identities or this spec.
+
+- The identities are the standing fixture accounts
+  `qa-show-sell-{admin,admin2,scout,outside}@dev.kernelworx.app` in the dev pool
+  (`us-east-1_sDiuCOarb`). `scripts/qa_fixture.py` will be the **only** entry point
+  that creates, refreshes, or deletes them and their group membership; it lands with
+  WORK-201, so today the accounts exist on the pool and no repository file
+  provisions them. The harness consumes them through the `TEST_QA_SHOW_SELL_*`
+  environment and holds no AWS credentials — do not add boto3 or a Cognito admin
+  call to make a lane runnable: a second provisioning path drifts, and the dev pool
+  already holds eighteen app clients named `KernelWorx-Web` from earlier ones.
+- **One origin variable has to reach both halves of the run.** The page objects and
+  `tests/e2e/utils/auth.py` navigate `E2E_BASE_URL` (default
+  `https://localhost:5173`); the GraphQL helper prefers the card's
+  `TEST_QA_SHOW_SELL_BASE_URL`. `publish_base_url()` in
+  `tests/e2e/utils/show_sell_graphql.py` writes the resolved origin into
+  `E2E_BASE_URL`, and the spec's session-scoped `target_origin` fixture calls it
+  before any navigation. That is what makes the documented command runnable by a
+  lane holding only the QA environment; without it the browser drives a local Vite
+  server and the journey dies in step 1.
+- **The preview gate covers `/show-sell/join`, not only the admin screens.**
+  `frontend/src/ShowSellRoutes.tsx` gates the whole `/show-sell/*` tree, so the
+  fixture Scout must hold `show-sell-preview` or the join step cannot open its own
+  page (verified: the Scout is redirected to `/`, the admin is not). `outside` is
+  the only non-member and carries the closed half of the gate. WORK-201's identity
+  table still lists `qa-show-sell-scout` **outside** that group — fix that row before
+  running its `up`, because an `up` that moves the Scout out silently removes the
+  join step's precondition, and the harness's step-2 error names this file.
+- **Supply the app client id, never resolve it by name.** Unlike the deploy-smoke
+  step above, this run takes `TEST_USER_POOL_CLIENT_ID` from the environment: with
+  eighteen same-named clients, a name lookup succeeds about as often as it fails,
+  and it fails later with a message that says nothing about the pool.
+- **Email is an alias in this pool, so `Username` is a UUID** — sign-in and any
+  Cognito-side lookup by address behave differently from the username. The app's
+  gate reads the `cognito:groups` claim, which is what the fixture script sets.
+- **Artifact hygiene:** start the Playwright trace *after* login (a trace records
+  the request body, and login posts the Cognito password); overwrite the 16-char
+  fixture codes in traces with a *same-length* placeholder (trace entries are NDJSON
+  with byte offsets); a password found in any artifact fails the run rather than
+  being redacted. `tests/e2e/utils/show_sell_evidence.py` owns that behaviour and
+  lives outside the spec so the unit suite can test it — importing the spec from
+  `tests/unit` fails on its `slow` marker under the root pytest config.
+- **Storage ids come back in two spellings**: `listMyProfiles` answers
+  `PROFILE#<uuid>`, `getMyAccount` answers `ACCOUNT#<sub>`, Unit ids are bare
+  UUIDs, and the page-object test ids are suffixed with the UI's spelling. Compare
+  through `profile_key` / `bare_account_id`, or a joined Scout and the caller's own
+  admin grant both read as missing.
+- **A GraphQL error code has four homes, and the frontend reads one of them.** The
+  decorated-Lambda path answers `extensions.code`/`extensions.errorCode` (#329);
+  an AppSync JS resolver answers the error's own top-level `errorType` plus
+  `errorInfo.errorCode`, with **no** `extensions` and no `details` — `AppError.details`
+  is not forwarded across the boundary (`src/handlers/unit_operations.py` says so
+  at the duplicate raise). `tests/e2e/utils/show_sell_graphql.py:error_summaries`
+  reads all four; `frontend/src/lib/units.ts:graphQLErrorCode`/`isDuplicateUnitError`
+  read only `extensions`, so the exact type/number/city/state duplicate never opens
+  its second-intent confirm in the browser — the raw resolver sentence lands in
+  `[role='alert']` instead (verified against dev on 2026-11-15). Read the code from
+  every slot in test code; do not "fix" the frontend by matching message text.
+
 ## Cognito USER_AUTH first-factor menu: no client-level AllowedFirstAuthFactors (#336)
 
 The USER_AUTH (choice-based) first-factor menu is governed by exactly three inputs, none of them app-client-level: the pool's `Policies.SignInPolicy.AllowedFirstAuthFactors` (provider `sign_in_policy` on `aws_cognito_user_pool.main`; dev live = `["WEB_AUTHN","PASSWORD"]`), the client's `ALLOW_USER_AUTH` in `explicit_auth_flows`, and per-user factor availability — per the AWS developer guide a preferred challenge only engages "if your user, user pool, and app client are all configured" (for `WEB_AUTHN` the user must have a registered passkey). There is NO app-client-level `AllowedFirstAuthFactors` in the Cognito API (verified 2026-09-20: no `--allowed-first-auth-factors` flag on `aws cognito-idp update-user-pool-client` in aws CLI 2.36.49; the botocore 1.40.61 cognito-idp model carries the member only in `SignInPolicyType`; the current AWS API Reference `UserPoolClientType` omits it; the live dev `describe-user-pool-client` omits it). When a user's `SELECT_CHALLENGE` menu lacks `WEB_AUTHN`, check the pool list, the client flow, and whether that user registered a passkey (`GetUserAuthFactors` with a signed-in user's token) — do not attempt to provision client-level first auth factors via CLI or boto3.

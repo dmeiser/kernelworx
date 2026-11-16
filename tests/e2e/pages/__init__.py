@@ -16,6 +16,7 @@ from .public_pages import PublicPages
 from .reports_page import ReportsPage
 from .share_page import SharePage
 from .shared_campaigns_page import SharedCampaignsPage
+from .show_sell_page import ShowSellPage
 from .user_data_page import UserDataPage
 from .user_settings_page import UserSettingsPage
 
@@ -36,6 +37,7 @@ __all__ = [
     "ReportsPage",
     "SharePage",
     "SharedCampaignsPage",
+    "ShowSellPage",
     "UserDataPage",
     "UserSettingsPage",
 ]

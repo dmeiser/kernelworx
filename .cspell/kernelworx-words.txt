@@ -360,6 +360,10 @@ qrcodeurl
 queryable
 randomising
 readonly
+redact
+redacted
+redaction
+redactions
 refetch
 refetches
 refetched
