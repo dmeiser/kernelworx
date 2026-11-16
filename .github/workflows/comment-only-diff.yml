@@ -1,0 +1,56 @@
+name: Comment-only diff check
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    # labeled/edited re-run the job so a PR can earn the `comment-only` label
+    # plus a `Claim:` line without pushing a commit; see AGENT.md, "Comments".
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - labeled
+      - edited
+
+permissions:
+  contents: read
+
+concurrency:
+  group: comment-only-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  comment-only:
+    name: Comment-only diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # The script diffs merge-base..head, so history must exist locally.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Comment-only diff check
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 scripts/check_comment_only_diff.py
+
+      - name: Generate job summary
+        if: success()
+        run: |
+          echo "## ✅ Comment-only Diff Check Passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Diff carries code, or the PR is a justified comment-only change (AGENT.md → Comments)" >> $GITHUB_STEP_SUMMARY

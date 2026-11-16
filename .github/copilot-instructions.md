@@ -443,4 +443,8 @@ npm run test -- --coverage
 - **Check AGENT.md** for detailed quality standards
 - **Ask the repo owner** before making large design changes
 - **Maintain 100% test coverage** - no exceptions!
+
+## 15. Comments
+
+A comment may exist only to answer why the code exists and what problem it solved; apply the deletion test — if deleting the comment would not make the next reader do something wrong, delete it. `AGENT.md` → "Comments" carries the rule, the delete/keep tables, and the CI gates that enforce it.
 ````

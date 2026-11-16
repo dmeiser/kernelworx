@@ -56,7 +56,7 @@ def _reads_sub_from_identity(tree: ast.Module) -> List[int]:
         return _is_identity_source(node) or (isinstance(node, ast.Name) and node.id in identity_names)
 
     for node in ast.walk(tree):
-        # dialect: event["identity"]["sub"]
+        # dialect: a nested-subscript read of the identity sub
         if isinstance(node, ast.Subscript) and is_identity_expr(node.value):
             slice_node = node.slice
             if isinstance(slice_node, ast.Constant) and slice_node.value == "sub":

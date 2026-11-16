@@ -199,8 +199,8 @@ class TestFingerprint:
 class TestMarkerKeys:
     def test_key_carries_actor_operation_and_scope(self) -> None:
         keys = _keys()
-        # '#' inside a segment is escaped ('%23'), so the actor segment
-        # ACCOUNT#alex renders as ACCOUNT%23alex and cannot blur into the
+        # a hash sign inside a segment is escaped, so the actor segment
+        # renders with it percent-encoded and cannot blur into the
         # operation/scope boundaries.
         assert keys.pk == f"IDEM#ACCOUNT%23alex#createUnit#{BOOTSTRAP_SCOPE}"
         assert keys.sk == "IDEM#k-1"
