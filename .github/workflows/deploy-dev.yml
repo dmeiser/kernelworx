@@ -1,9 +1,23 @@
 name: Deploy Dev
 
+# The push trigger is the normal path: a merge into dev deploys. The dispatch
+# trigger exists because a push event is not guaranteed to arrive - on
+# 2026-11-16 dev moved to 526690b0 with no workflow run of any kind for it, so
+# the merged fix was never deployed and the only way to recover was to write to
+# dev again. `gh workflow run deploy-dev.yml --ref dev -f ref=dev` recovers the
+# same tree without touching the branch. resolve-deploy-ref below refuses a ref
+# that is not dev's head or a commit already merged into dev.
 on:
   push:
     branches:
       - dev
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or full commit SHA to deploy. Must be dev's head or a commit already merged into dev."
+        required: false
+        default: dev
+        type: string
 
 concurrency:
   group: deploy-dev
@@ -35,11 +49,45 @@ jobs:
           echo "url=$e2e_url" >> "$GITHUB_OUTPUT"
           echo "E2E_BASE_URL_DEV=$e2e_url"
 
+  resolve-deploy-ref:
+    name: Resolve the dev commit to deploy
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      # A push run deploys the commit that was pushed, so the run's head and the
+      # tree that lands on dev.kernelworx.app are the same commit. A dispatch run
+      # has no push behind it: the operator names the ref and the guard resolves
+      # it to a full SHA, refusing anything outside dev's history so a hand-run
+      # deploy can never serve an unreleased tree.
+      - name: Resolve the deploy ref
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_SHA: ${{ github.sha }}
+          DISPATCH_REF: ${{ github.event.inputs.ref }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            python3 scripts/dev_deploy_gate.py resolve-ref --ref "${DISPATCH_REF:-dev}" --branch dev
+          else
+            echo "sha=$PUSH_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
-    needs: resolve-vars
+    needs: [resolve-vars, resolve-deploy-ref]
     uses: ./.github/workflows/deploy-shared.yml
     with:
       environment: dev
+      checkout-ref: ${{ needs.resolve-deploy-ref.outputs.sha }}
       tofu-directory: tofu/application/environments/dev
       aws-role-session-name: github-actions-deploy-dev
       smoke-role-session-name: github-actions-smoke-tests-dev
