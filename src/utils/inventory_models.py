@@ -135,6 +135,7 @@ ENTITY_TYPE_ATTRIBUTE = "entityType"
 BALANCE_ENTITY_TYPE = "InventoryBalance"
 CUSTODY_ENTITY_TYPE = "ScoutCustodyBalance"
 ALLOCATION_ENTITY_TYPE = "EventInventoryAllocation"
+MOVEMENT_ENTITY_TYPE = "InventoryMovement"
 
 _SECTION_BY_ENTITY_TYPE: dict[str, str] = {
     BALANCE_ENTITY_TYPE: "balance",
@@ -670,7 +671,7 @@ def build_inventory_movement_item(
     item: Dict[str, Any] = {
         "pk": inventory_pk(str(unit_campaign_id)),
         "sk": movement_sk(str(product_id), moment, str(movement_id)),
-        ENTITY_TYPE_ATTRIBUTE: "InventoryMovement",
+        ENTITY_TYPE_ATTRIBUTE: MOVEMENT_ENTITY_TYPE,
         UNIT_CAMPAIGN_ID_ATTRIBUTE: normalize_inventory_id(unit_campaign_id, "unitCampaignId"),
         MOVEMENT_ID_ATTRIBUTE: normalize_inventory_id(movement_id, MOVEMENT_ID_ATTRIBUTE),
         PRODUCT_ID_ATTRIBUTE: normalize_inventory_id(product_id, "productId"),
@@ -1011,25 +1012,44 @@ def list_inventory_movements(
     campaign's audit history is one partition's worth of rows, and filtering after
     the key range is cheaper and always correct, unlike an index read that may be
     behind the write being audited.
+
+    Which rows are movements is decided by the ``entityType`` attribute, never by
+    the sort key. DynamoDB rejects a Query whose ``FilterExpression`` names a key
+    attribute of the table or index it is reading — ``ValidationException: Filter
+    Expression can only contain non-primary key attributes: Primary key attribute:
+    sk`` — so the ``contains(#sk, '#MOVEMENT#')`` filter this read used to carry
+    failed EVERY deployed call, campaign-populated or empty, while moto accepted
+    it and the local suite stayed green. On the service the key attributes belong
+    in the key condition; only non-key attributes may be filtered.
     """
-    names = {"#pk": "pk", "#sk": "sk"}
+    names = {"#pk": "pk"}
     values: Dict[str, Any] = {":pk": inventory_pk(unit_campaign_id)}
     filters: List[str] = []
+    # The discriminator every row of this table carries. Handing a balance,
+    # allocation or custody row to a movement projection is an internal fault, not
+    # an empty page, so this filter is unconditional.
+    names[f"#{ENTITY_TYPE_ATTRIBUTE}"] = ENTITY_TYPE_ATTRIBUTE
+    values[":movementEntityType"] = MOVEMENT_ENTITY_TYPE
+    filters.append(f"#{ENTITY_TYPE_ATTRIBUTE} = :movementEntityType")
     if product_id is not None:
-        values[":prefix"] = product_scope_prefix(product_id)
+        # One product's audit trail is a contiguous sort-key range, so the marker
+        # belongs in the key condition, where naming a key attribute is allowed and
+        # the balance, allocation and custody rows of that product are never read.
+        values[":prefix"] = product_movement_prefix(product_id)
         key_condition = "#pk = :pk and begins_with(#sk, :prefix)"
+        names["#sk"] = "sk"
+        # A key prefix is never an exact product match: product ids carry ``#``
+        # inside them, so the range for ``A`` also holds the rows of a product
+        # spelled ``A#<marker>`` (§6.3 resolves an ambiguous segment from the row's
+        # own attribute, never from a split of its sort key).
+        names[f"#{PRODUCT_ID_ATTRIBUTE}"] = PRODUCT_ID_ATTRIBUTE
+        values[":movementProductId"] = normalize_inventory_id(product_id, "productId")
+        filters.append(f"#{PRODUCT_ID_ATTRIBUTE} = :movementProductId")
     else:
         # A campaign-wide history read: the partition is the campaign, and no key
-        # condition can name the middle of a sort key.
+        # condition can name the middle of a sort key, so every row kind of the
+        # partition is read and the ``entityType`` filter discards the rest.
         key_condition = "#pk = :pk"
-    # The product prefix alone does not isolate the audit trail: a product's range
-    # also holds its balance, allocation and custody rows, and handing one to a
-    # movement projection is an internal fault, not an empty page. The
-    # ``#MOVEMENT#`` segment separates audit rows from the rows that share the
-    # partition. `contains` is a filter, not a key condition, so DynamoDB applies
-    # it after the range.
-    values[":marker"] = f"#{MOVEMENT_SK_MARKER}#"
-    filters.append("contains(#sk, :marker)")
     if movement_type is not None:
         names["#movementType"] = MOVEMENT_TYPE_ATTRIBUTE
         values[":movementType"] = movement_type
@@ -1054,7 +1074,7 @@ def list_inventory_movements(
         "KeyConditionExpression": key_condition,
         "ExpressionAttributeNames": names,
         "ExpressionAttributeValues": values,
-        # The marker filter is unconditional, so every history read carries one.
+        # The ``entityType`` filter is unconditional, so every history read carries one.
         "FilterExpression": " and ".join(filters),
     }
     rows = query_all_items(tables.inventory, query)

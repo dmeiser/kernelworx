@@ -12,6 +12,8 @@ import boto3
 import pytest
 from moto import mock_aws
 
+from src.utils.dynamodb import get_dynamodb_resource
+from tests.unit.dynamodb_query_guard import install_query_filter_guard
 from tests.unit.table_schemas import create_all_tables, create_inventory_table_schema
 
 # Set environment variables at module load time so that module-level code in
@@ -181,6 +183,13 @@ def inventory_table(dynamodb_table: Any) -> Any:
     ``test_table_schemas`` and by the ``list_tables()`` assertion in
     ``test_handler_error_and_fallback_paths``, and the same precedent already covers
     the §6.6 throttle table.
+
+    The client the handlers use for this table is also taught the service's rule
+    that a ``Query`` may not filter on a key attribute of the scope it reads. moto
+    answers such a call and the service answers it with ``ValidationException``, so
+    without this the inventory reads are tested against a DynamoDB that does not
+    exist anywhere the app runs (WORK-158: ``inventoryMovements`` failed every
+    deployed call while ``INV-Q-02`` and ``PAGE-01`` stayed green).
     """
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
     schema = create_inventory_table_schema()
@@ -188,6 +197,7 @@ def inventory_table(dynamodb_table: Any) -> Any:
     table = dynamodb.create_table(**schema)
     if ttl is not None:
         dynamodb.meta.client.update_time_to_live(TableName=table.table_name, TimeToLiveSpecification=ttl)
+    install_query_filter_guard(get_dynamodb_resource().meta.client, schema)
     yield table
     table.delete()
 
