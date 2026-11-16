@@ -18,8 +18,10 @@ permissions:
   contents: read
 
 concurrency:
+  # Runs queue, never cancel: a label event re-triggers this tiny job, and a
+  # cancelled run reads as a failed check to every consumer of the checks
+  # list - PR #951 woke its own CI watcher on such a cancellation.
   group: comment-only-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
 
 jobs:
   comment-only:
