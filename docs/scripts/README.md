@@ -323,8 +323,11 @@ gh run list --workflow=deploy-dev.yml --branch dev --limit 5     # what actually
 
 Or run the comparison as a job, or locally:
 
+The workflow cannot be dispatched by name until it is registered, and GitHub registers
+workflows only from the default branch; until this one reaches `main`, the local command
+is the only way to run the check on demand.
+
 ```bash
-gh workflow run dev-drift-check.yml --ref dev
 GITHUB_TOKEN=$(gh auth token) GITHUB_REPOSITORY=dmeiser/kernelworx \
   python3 scripts/dev_deploy_gate.py check-drift
 ```
