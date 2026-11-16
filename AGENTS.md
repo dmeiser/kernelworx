@@ -56,7 +56,7 @@ Never mix bare legacy flow names (`USER_PASSWORD_AUTH`) with `ALLOW_*` names in 
 
 ## Show & Sell QA login fixture on the dev pool
 
-`scripts/qa_fixture.py` (`status` / `up` / `down`) is the only supported way to put a signed-in identity on `https://dev.kernelworx.app`: it admin-creates the four `qa-show-sell-*@dev.kernelworx.app` identities in pool `us-east-1_sDiuCOarb`, sets the `show-sell-preview` membership the preview gate has to be provable against from both sides (admin, admin2 and scout are members; `outside` is kept out, because the gate covers the whole `/show-sell/*` tree and a non-member scout cannot open its own join page), and writes generated passwords only to a `0600` file outside the tree. The pool id, the group, the IAM boundaries of `kernelworx-qa-ue1-dev` (notably: no `DescribeUserPoolClient`), the alias trap where `Username` is a UUID while rows are keyed on `sub`, and the finding that the dev pool holds many app clients all named `KernelWorx-Web` are in `docs/QA_FIXTURE_RUNBOOK.md`. Do not ask a QA run to sign up through the UI and confirm by mail: run `up`.
+`scripts/qa_fixture.py` (`status` / `up` / `down`) is the only supported way to put a signed-in identity on `https://dev.kernelworx.app`: it admin-creates the four `qa-show-sell-*@dev.kernelworx.app` identities in pool `us-east-1_sDiuCOarb`, sets the `show-sell-preview` membership the preview gate has to be provable against from both sides (admin, admin2 and scout are members; `outside` is kept out, because the gate covers the whole `/show-sell/*` tree and a non-member scout cannot open its own join page), and writes generated passwords only to a `0600` file outside the tree. The pool id, the group, the IAM boundaries of `kernelworx-qa-ue1-dev` (notably: no `DescribeUserPoolClient`), the measured identity shape (the pool declares `username_attributes = ["email"]`, yet every stored `Username` is the UUID `sub` — a `Google_<id>` row excepted — so rows join on `sub` and never on `Username`), the teardown ordering (`down` deletes rows before identities, and a failed row delete leaves the identities so attribution survives the retry), the attribution rule (a row is fixture-owned only when its own key or owner attribute spells a fixture identity — sharing a partition key with a fixture row is **not** attribution, and the plan prints the evidence that selected each row), the fact that `kernelworx-qa-ue1-dev` can `dynamodb:Scan` only the three swept tables, and the finding that the dev pool holds eighteen app clients all named `KernelWorx-Web` are all in `docs/QA_FIXTURE_RUNBOOK.md`. Do not ask a QA run to sign up through the UI and confirm by mail: run `up`.
 
 ## Show & Sell acceptance journey: fixture identities, and where its passwords live
 
@@ -99,8 +99,12 @@ file ever names the fixture identities or this spec.
   step above, this run takes `TEST_USER_POOL_CLIENT_ID` from the environment: with
   eighteen same-named clients, a name lookup succeeds about as often as it fails,
   and it fails later with a message that says nothing about the pool.
-- **Email is an alias in this pool, so `Username` is a UUID** — sign-in and any
-  Cognito-side lookup by address behave differently from the username. The app's
+- **The stored `Username` is not the address, though the address resolves.** The
+  pool declares `username_attributes = ["email"]`, and every stored `Username` read
+  from the dev pool on 2026-11-16 is a UUID equal to that user's `sub` (the one
+  exception is a `Google_<id>` federated row). Sign-in and Cognito admin lookups
+  accept the address; code that treats the stored `Username` as an address matches
+  nothing, and application rows are keyed on the `sub` claim. The app's preview
   gate reads the `cognito:groups` claim, which is what the fixture script sets.
 - **Artifact hygiene:** start the Playwright trace *after* login (a trace records
   the request body, and login posts the Cognito password); overwrite the 16-char

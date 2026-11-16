@@ -269,9 +269,13 @@ by name is not an option — see the deploy-smoke entry in `AGENTS.md`.
   setting the QA key alone is enough. If that fixture is ever removed, the journey
   drives a local Vite server while its queries hit dev, and it fails in step 1 on a
   page that never loaded.
-- **`Username` is a UUID for these accounts** — the pool keeps an email *alias*, so
-  Cognito-side lookups by address do not match the username. Group membership is
-  what the app reads (`cognito:groups`), and the fixture script is what sets it.
+- **`Username` is not the address for these accounts.** The pool declares
+  `username_attributes = ["email"]`, and every stored `Username` read back from it
+  on 2026-11-16 is a UUID equal to that user's `sub` (the pool's one exception is a
+  `Google_<id>` federated row). Sign-in and Cognito admin lookups take the address
+  and resolve it, but code that treats the stored `Username` as an address matches
+  nothing. Group membership is what the app reads (`cognito:groups`), and the
+  fixture script is what sets it.
 - **Ids come back in two spellings.** `listMyProfiles` answers `PROFILE#<uuid>`,
   `getMyAccount` answers `ACCOUNT#<sub>`, Unit ids are bare UUIDs. The page object
   compares them through `profile_key` and `show_sell_evidence.bare_account_id`;

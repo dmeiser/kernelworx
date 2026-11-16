@@ -42,6 +42,14 @@ class CognitoError(Exception):
     """Base for the stub's modeled Cognito service exceptions."""
 
 
+class DynamoError(Exception):
+    """Base for the stub's modeled DynamoDB service exceptions."""
+
+
+class DeleteRejected(DynamoError):
+    """A delete call that fails mid-sweep: throttling, denied, transport."""
+
+
 class UsernameExists(CognitoError):
     pass
 
@@ -63,6 +71,7 @@ class StubCognito:
         group: List[str] | None = None,
         clients: List[Dict[str, str]] | None = None,
         pages: int = 1,
+        fail_delete: List[str] | None = None,
     ) -> None:
         self.users: Dict[str, Dict[str, Any]] = {u["email"]: u for u in (users or [])}
         self.group = set(group or [])
@@ -71,6 +80,7 @@ class StubCognito:
         self.calls: List[str] = []
         self.deleted: List[str] = []
         self.passwords: Dict[str, str] = {}
+        self.fail_delete = set(fail_delete or [])
 
     # -- reads ------------------------------------------------------------- #
 
@@ -118,6 +128,8 @@ class StubCognito:
 
     def admin_delete_user(self, *, Username: str, **_: Any) -> None:
         self.calls.append(f"delete-user:{Username}")
+        if Username in self.fail_delete:
+            raise DeleteRejected("access denied")
         self.deleted.append(Username)
         self.users.pop(Username, None)
 
@@ -136,7 +148,7 @@ class StubCognito:
     def _record(self, mail: str) -> Dict[str, Any]:
         u = self.users[mail]
         return {
-            "Username": f"uuid-{mail}",  # the pool aliases e-mail: Username is a UUID
+            "Username": f"uuid-{mail}",  # stored Username is the UUID sub, not the address
             "UserStatus": u.get("status", "CONFIRMED"),
             "Attributes": [
                 {"Name": "email", "Value": mail},
@@ -155,17 +167,32 @@ class StubCognito:
 
 
 class StubDynamo:
-    """Enough of ``dynamodb`` to exercise the sweep's attribution rules."""
+    """Enough of ``dynamodb`` to exercise the sweep's attribution and failure rules."""
 
-    def __init__(self, tables: Dict[str, List[Dict[str, Any]]]) -> None:
+    def __init__(
+        self,
+        tables: Dict[str, List[Dict[str, Any]]],
+        fail_keys: Dict[str, List[Dict[str, str]]] | None = None,
+    ) -> None:
         self.tables = tables
         self.deleted: List[tuple[str, Dict[str, str]]] = []
+        self.fail_keys = fail_keys or {}
 
     def scan(self, *, TableName: str, **_: Any) -> Dict[str, Any]:
-        return {"Items": self.tables.get(TableName, [])}
+        return {"Items": list(self.tables.get(TableName, []))}
 
     def delete_item(self, *, TableName: str, Key: Dict[str, Any]) -> None:
-        self.deleted.append((TableName, {k: v["S"] for k, v in Key.items()}))
+        key = {k: v["S"] for k, v in Key.items()}
+        for bad in self.fail_keys.get(TableName, []):
+            if bad == key:
+                # One-shot: a throttle or denied call is transient, so the retry works.
+                self.fail_keys[TableName].remove(bad)
+                raise DeleteRejected("ThrottlingException")
+        self.deleted.append((TableName, key))
+        # A real table forgets the row, so a second ``down`` sees only what is left.
+        self.tables[TableName] = [
+            item for item in self.tables.get(TableName, []) if {k: item[k]["S"] for k in key} != key
+        ]
 
 
 def _s(value: str) -> Dict[str, Any]:
@@ -335,11 +362,15 @@ def _rows() -> Dict[str, List[Dict[str, Any]]]:
         "kernelworx-units-ue1-dev": [
             _item(pk="UNIT#u1", sk="META", createdByAccountId="ACCOUNT#sub-admin"),
             _item(pk="UNIT#u1", sk="ROLE#qa-show-sell-admin@dev.kernelworx.app"),
+            _item(pk="UNIT#u1", sk="ROLE#someone-else@example.com"),
             _item(pk="UNIT#u9", sk="META", createdByAccountId="ACCOUNT#someone-else"),
+            _item(pk="IDEM#sub-admin#createUnit#BOOTSTRAP", sk="IDEM#req-1"),
+            _item(pk="IDEM#someone-else#createUnit#BOOTSTRAP", sk="IDEM#req-2"),
         ],
         "kernelworx-unit-campaigns-ue1-dev": [
             _item(pk="UNIT#u1", sk="CAMPAIGN#c1", createdByAccountId="ACCOUNT#sub-admin"),
             _item(pk="UNIT#u9", sk="CAMPAIGN#c9", createdByAccountId="ACCOUNT#someone-else"),
+            _item(pk="UNIT#u9", sk="GRANT#ACCOUNT#sub-admin"),
         ],
     }
 
@@ -363,7 +394,117 @@ def test_down_deletes_only_fixture_owned_rows(mod: ModuleType) -> None:
     for _t, key in d.deleted:
         assert "someone-else" not in key.values() and "u9" not in key.values()
     assert "plan: delete 4 fixture users" in text
+    assert "sweep  tables: accounts, units, unit-campaigns" in text, "the sweep's coverage must be visible"
     assert text.index("plan:") < text.index("deleted user"), "the plan must precede the write"
+    assert text.index("deleted row") < text.index("deleted user"), "rows go before the users they depend on"
+
+
+def test_a_key_naming_a_fixture_identity_is_attributable(mod: ModuleType) -> None:
+    """``GRANT#ACCOUNT#<sub>`` and ``ROLE#<fixture address>`` are fixture rows.
+
+    A global ``ACCOUNT#`` strip turns ``GRANT#ACCOUNT#<sub>`` into
+    ``GRANT#<sub>``, which matches nothing and silently leaves the row behind.
+    """
+    users = _fixture_users(mod)
+    users[0]["sub"] = "sub-admin"
+    c = StubCognito(users=users)
+    d = StubDynamo(_rows())
+
+    mod.apply_down(c, d, assume_yes=True, out=io.StringIO(), secrets_file="does-not-exist.json")
+    deleted = {(t, k.get("sk") or k.get("accountId")) for t, k in d.deleted}
+
+    assert ("kernelworx-unit-campaigns-ue1-dev", "GRANT#ACCOUNT#sub-admin") in deleted
+    assert ("kernelworx-units-ue1-dev", "ROLE#qa-show-sell-admin@dev.kernelworx.app") in deleted
+
+
+def test_a_third_party_row_on_a_fixture_partition_is_never_deleted(mod: ModuleType) -> None:
+    """Sharing a partition key with a fixture row is not attribution.
+
+    ``UNIT#u1/ROLE#someone-else@example.com`` is another tenant's grant on a
+    fixture Unit; deleting it would reach into their data, so it is reported
+    and left alone.
+    """
+    users = _fixture_users(mod)
+    users[0]["sub"] = "sub-admin"
+    c = StubCognito(users=users)
+    d = StubDynamo(_rows())
+    out = io.StringIO()
+
+    mod.apply_down(c, d, assume_yes=True, out=out, secrets_file="does-not-exist.json")
+
+    assert ("kernelworx-units-ue1-dev", {"pk": "UNIT#u1", "sk": "ROLE#someone-else@example.com"}) not in d.deleted
+    assert "UNIT#u1/ROLE#someone-else@example.com  (not attributable to a fixture sub)" in out.getvalue()
+
+
+def test_the_plan_says_which_evidence_owns_each_row(mod: ModuleType) -> None:
+    """Attribution has to be checkable by the person reading the plan.
+
+    The three shapes the rule accepts are different claims, so the plan names the
+    one that selected each row — and the idempotency rows, whose only identity is
+    segment 2 of the partition key, are shown for both the fixture caller and a
+    stranger's.
+    """
+    users = _fixture_users(mod)
+    users[0]["sub"] = "sub-admin"
+    c = StubCognito(users=users)
+    d = StubDynamo(_rows())
+    out = io.StringIO()
+
+    mod.apply_down(c, d, assume_yes=True, out=out, secrets_file="does-not-exist.json")
+    text = out.getvalue()
+
+    assert "UNIT#u1/META  [createdByAccountId names a fixture sub]" in text
+    assert "ROLE#qa-show-sell-admin@dev.kernelworx.app  [key names a fixture address]" in text
+    assert "GRANT#ACCOUNT#sub-admin  [key names a fixture sub]" in text
+    assert "IDEM#sub-admin#createUnit#BOOTSTRAP/IDEM#req-1  [key names a fixture sub]" in text
+    assert "IDEM#someone-else#createUnit#BOOTSTRAP/IDEM#req-2  [key names a fixture sub]" not in text
+    assert "left   units          IDEM#someone-else#createUnit#BOOTSTRAP/IDEM#req-2" in text
+
+
+def test_a_failed_row_delete_keeps_the_users_and_a_second_down_finishes(mod: ModuleType) -> None:
+    """The state this script exists to prevent must not be created by the script.
+
+    Rows are attributable only while the users exist. So a row that fails must
+    not be paid for by deleting the user: the sweep reports it, keeps every
+    identity, exits non-zero, and a second ``down`` re-derives the same subs and
+    deletes what is left.
+    """
+    users = _fixture_users(mod)
+    users[0]["sub"] = "sub-admin"
+    c = StubCognito(users=users)
+    d = StubDynamo(_rows(), fail_keys={"kernelworx-units-ue1-dev": [{"pk": "UNIT#u1", "sk": "META"}]})
+    first = io.StringIO()
+
+    code = mod.apply_down(c, d, assume_yes=True, out=first, secrets_file="does-not-exist.json")
+    text = first.getvalue()
+
+    assert code == 1, "a partial teardown must not report success"
+    assert "FAILED row   units          UNIT#u1/META  DeleteRejected" in text
+    assert "re-run `down` to finish" in text
+    assert c.deleted == [], "no fixture user may go while its rows are still there"
+
+    second = io.StringIO()
+    code = mod.apply_down(c, d, assume_yes=True, out=second, secrets_file="does-not-exist.json")
+
+    assert code == 0
+    assert sorted(c.deleted) == sorted(mod.emails().values())
+    assert ("kernelworx-units-ue1-dev", {"pk": "UNIT#u1", "sk": "META"}) in d.deleted
+
+
+def test_a_failed_user_delete_is_reported_without_losing_the_rest(mod: ModuleType, tmp_path: Path) -> None:
+    survivors = f"qa-show-sell-scout@{mod.DOMAIN}"
+    users = _fixture_users(mod)
+    c = StubCognito(users=users, fail_delete=[survivors])
+    path = tmp_path / "secrets.json"
+    mod.apply_up(c, io.StringIO(), secrets_file=str(path))
+    out = io.StringIO()
+
+    code = mod.apply_down(c, StubDynamo({}), assume_yes=True, out=out, secrets_file=str(path))
+
+    assert code == 1
+    assert f"FAILED user  {survivors}" in out.getvalue()
+    assert len(c.deleted) == len(mod.IDENTS) - 1, "the other identities still go"
+    assert survivors in c.users
 
 
 def test_sweep_refuses_rows_it_cannot_attribute(mod: ModuleType) -> None:
@@ -414,6 +555,30 @@ def test_down_removes_the_secrets_file_it_wrote(mod: ModuleType, tmp_path: Path)
 
     mod.apply_down(c, StubDynamo({}), assume_yes=True, out=io.StringIO(), secrets_file=str(path))
     assert not path.exists(), "teardown must not leave credentials behind"
+
+
+def test_down_removes_a_stale_secrets_file_even_with_nothing_to_delete(mod: ModuleType, tmp_path: Path) -> None:
+    """An empty pool is not a reason to leave a password file on disk."""
+    path = tmp_path / "secrets.json"
+    path.write_text('{"TEST_QA_SHOW_SELL_ADMIN_PASSWORD": "x"}', encoding="utf-8")
+    out = io.StringIO()
+
+    code = mod.apply_down(StubCognito(), StubDynamo({}), assume_yes=True, out=out, secrets_file=str(path))
+
+    assert code == 0
+    assert "nothing to delete" in out.getvalue()
+    assert not path.exists(), "the empty path still has to drop the credentials"
+
+
+def test_status_never_builds_a_dynamodb_client(mod: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``status`` is read-only on Cognito and must not need table permissions."""
+
+    def no_dynamo() -> Any:
+        raise AssertionError("status must not open a DynamoDB client")
+
+    monkeypatch.setattr(mod, "cip", lambda: StubCognito())
+    monkeypatch.setattr(mod, "ddb", no_dynamo)
+    assert mod.main(["qa_fixture.py", "status"], io.StringIO()) == 0
 
 
 # --------------------------------------------------------------------------- #

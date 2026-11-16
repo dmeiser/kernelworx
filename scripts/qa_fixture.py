@@ -29,15 +29,30 @@ the pool holds without writing anything.
 
 What the pool does to anyone joining users to rows
 --------------------------------------------------
-The pool uses **e-mail as an alias, so ``Username`` is a UUID**, and the app
-keys its rows on the ``sub`` claim (``ACCOUNT#<sub>``). Anything that joins a
-Cognito user to an application row by ``Username`` silently compares a UUID to
-an e-mail address and matches nothing. Match on ``email`` or ``sub``.
+Measured on ``us-east-1_sDiuCOarb`` on 2026-11-16: the pool declares
+``username_attributes = ["email"]`` (``tofu/application/modules/cognito/main.tf:191``),
+and every stored ``Username`` in it is a UUID equal to that user's ``sub`` —
+including the users ``scripts/create-test-users.sh`` admin-creates with
+``--username "$email"``, whose ``--username`` value is accepted as a handle and
+then aliased, not kept. The one exception is a federated sign-up, whose
+``Username`` is ``Google_<id>``.
+
+So the address resolves on every ``admin_*`` call this script makes, but it is
+**not** what ``Username`` holds, and the app keys its rows on the token's
+``sub`` claim (``ACCOUNT#<sub>``). Anything that joins a Cognito user to an
+application row by ``Username``, or that assumes the stored ``Username`` is an
+address, silently matches nothing. Join on ``sub`` or ``email``;
+:func:`pool_users` keys by address for exactly this reason.
 
 Teardown is deliberate: ``down`` prints its full plan first, asks before it
-writes, and deletes nothing it cannot attribute to a fixture ``sub``. Rows it
-cannot attribute are reported and left alone — an append-only audit row that
-refuses deletion is a fact to report, not a license to guess.
+writes, deletes the rows before the identities, and deletes nothing it cannot
+attribute to a fixture ``sub``. The plan names the evidence for every row — the
+key spells the identity, or the owner attribute does — because a person checking
+the plan should not have to re-derive the rule. A failed delete is reported per
+item, keeps the exit code non-zero, and leaves the identities in place so a
+re-run is still attributable. Rows it cannot attribute are reported and left
+alone — an append-only audit row that refuses deletion is a fact to report, not a
+license to guess.
 """
 
 from __future__ import annotations
@@ -279,50 +294,83 @@ def _flatten(item: dict[str, Any]) -> dict[str, str]:
     return {k: next(iter(v.values())) for k, v in item.items() if isinstance(v, dict) and len(v) == 1}
 
 
-def _strip_prefix(value: str) -> str:
-    return value.replace("ACCOUNT#", "")
+def _segments(value: str) -> set[str]:
+    """The value itself plus each of its ``#``-separated parts."""
+    return set(value.split("#")) if value else set()
 
 
-def owned_rows(d: Any, subs: Iterable[str]) -> tuple[list[tuple[str, str, dict[str, str]]], list[tuple[str, str]]]:
+def _owner_ids(value: str) -> set[str]:
+    """Account ids spelled anywhere in a key or attribute value.
+
+    Covers the bare ``sub``, the ``ACCOUNT#<sub>`` spelling the app uses, and a
+    nested key such as ``GRANT#ACCOUNT#<sub>``. A global ``ACCOUNT#`` strip would
+    turn that last one into ``GRANT#<sub>`` and lose the match, which is how the
+    next key shape gets silently mis-attributed.
+    """
+    parts = value.split("#") if value else []
+    embedded = {parts[i + 1] for i, p in enumerate(parts) if p == "ACCOUNT" and i + 1 < len(parts)}
+    return embedded | set(parts)
+
+
+def owned_rows(
+    d: Any, subs: Iterable[str]
+) -> tuple[list[tuple[str, str, dict[str, str], str]], list[tuple[str, str]]]:
     """Rows attributable to the fixture accounts, and rows that merely look related.
 
-    A row is deletable only when a fixture ``sub`` appears in its key or in its
-    owner attribute, or when it shares a partition key with such a row. Anything
-    else is reported as unattributed and never deleted: guessing here would
-    reach into another tenant's data.
+    A row is deletable only when a fixture identity is spelled in the row itself:
+    a key part is exactly a fixture address (``…/ROLE#<fixture address>``), a key
+    part is a fixture ``sub`` (``ACCOUNT#<sub>``, ``IDEM#<sub>#<action>#<uuid>``,
+    ``UNIT#<id>/GRANT#<sub>``), or the owner attribute carries it
+    (``createdByAccountId=ACCOUNT#<sub>`` on a ``METADATA`` row whose key is an
+    opaque id). Everything else is reported as unattributed and never deleted,
+    including rows that share a partition key with a fixture row: a third
+    party's ``MEMBERSHIP#PROFILE#<their sub>`` on a fixture campaign is their
+    data, and guessing here would reach into another tenant.
+
+    Each deletable row comes back with the evidence that selected it, because a
+    person reading the plan has to be able to check every row against these
+    shapes without re-deriving the rule.
     """
     wanted = {s for s in subs if s}
-    deletable: list[tuple[str, str, dict[str, str]]] = []
+    mails = set(emails().values())
+    deletable: list[tuple[str, str, dict[str, str], str]] = []
     unattributed: list[tuple[str, str]] = []
     if not wanted:
         return deletable, unattributed
     for label, (table, key_names, owner_attr) in TABLES.items():
-        owned_pks: set[str] = set()
         skipped: list[tuple[str, str]] = []
         scan_kw: dict[str, Any] = {"TableName": table, "ConsistentRead": False}
-        rows: list[dict[str, str]] = []
+        rows: list[tuple[dict[str, str], str]] = []
         while True:
             page = d.scan(**scan_kw)
             for item in page.get("Items", []):
                 flat = _flatten(item)
                 key_vals = {k: flat.get(k, "") for k in key_names}
-                owner = _strip_prefix(flat.get(owner_attr, ""))
-                key_hit = any(_strip_prefix(v) in wanted for v in key_vals.values())
-                if owner in wanted or key_hit:
-                    rows.append(key_vals)
-                    pk = key_names[0]
-                    if key_vals.get(pk):
-                        owned_pks.add(key_vals[pk])
+                parts = {p for v in key_vals.values() for p in _segments(v)}
+                owners = _owner_ids(flat.get(owner_attr, ""))
+                if parts & mails:
+                    rows.append((key_vals, "key names a fixture address"))
+                elif parts & wanted:
+                    rows.append((key_vals, "key names a fixture sub"))
+                elif owners & wanted:
+                    rows.append((key_vals, f"{owner_attr} names a fixture sub"))
                 else:
                     skipped.append((label, "/".join(key_vals.values())))
             if "LastEvaluatedKey" not in page:
                 break
             scan_kw["ExclusiveStartKey"] = page["LastEvaluatedKey"]
-        for key_vals in rows:
-            deletable.append((label, "/".join(key_vals.values()), {k: key_vals[k] for k in key_names}))
+        for key_vals, reason in rows:
+            deletable.append((label, "/".join(key_vals.values()), {k: key_vals[k] for k in key_names}, reason))
         for label_skipped, key in skipped:
             unattributed.append((label_skipped, key))
     return deletable, unattributed
+
+
+def _remove_secrets(secrets_file: str, out: TextIO) -> None:
+    """Drop the credentials file, whether or not there was anything to delete."""
+    if os.path.exists(secrets_file):
+        os.remove(secrets_file)
+        print(f"removed {secrets_file}", file=out)
 
 
 def apply_down(
@@ -333,7 +381,16 @@ def apply_down(
     confirm: Callable[[str], str] = input,
     secrets_file: str = SECRETS_FILE,
 ) -> int:
-    """Delete the fixture identities and the rows they own. Plan first, always."""
+    """Delete the fixture rows first, then the identities. Plan first, always.
+
+    The order is the point. Rows are attributable only while the users exist, so
+    a row that fails to delete must never be followed by deleting the user whose
+    ``sub`` attributes it: that would strand rows nothing can attribute later,
+    the exact state this script exists to prevent. So each item is attempted on
+    its own, a failure is printed rather than aborting the sweep, and if any row
+    failed the users are left in place and the exit code is non-zero — the next
+    ``down`` re-derives the same subs and finishes the job.
+    """
     mails = emails()
     have = pool_users(c)
     mem = group_members(c)
@@ -346,37 +403,64 @@ def apply_down(
         print(f"  user   {mail}", file=out)
     if not present:
         print("  user   (none present)", file=out)
-    for label, key, _key_doc in rows:
-        print(f"  row    {label:<14} {key}", file=out)
+    for label, key, _key_doc, reason in rows:
+        print(f"  row    {label:<14} {key}  [{reason}]", file=out)
     if not rows:
         print("  row    (no fixture-owned rows found)", file=out)
     for label, key in unattributed:
         print(f"  left   {label:<14} {key}  (not attributable to a fixture sub)", file=out)
+    print(
+        f"  sweep  tables: {', '.join(TABLES)} — rows in any other table are left behind",
+        file=out,
+    )
 
     if not present and not rows:
         print("nothing to delete", file=out)
+        _remove_secrets(secrets_file, out)
         return 0
     if not assume_yes:
         if confirm("proceed? [y/N] ").strip().lower() != "y":
             print("aborted", file=out)
             return 1
 
+    row_failures = 0
+    for label, key, key_doc, _reason in rows:
+        table = TABLES[label][0]
+        try:
+            d.delete_item(TableName=table, Key={k: {"S": v} for k, v in key_doc.items()})
+            print(f"  deleted row  {label:<14} {key}", file=out)
+        except Exception as exc:  # noqa: BLE001 - report and keep sweeping; never abort mid-table
+            row_failures += 1
+            print(f"  FAILED row   {label:<14} {key}  {type(exc).__name__}", file=out)
+    if row_failures:
+        print(
+            f"  {row_failures} row delete(s) failed: the fixture users are kept so their rows "
+            "stay attributable — re-run `down` to finish",
+            file=out,
+        )
+        return 1
+
+    user_failures = 0
     for mail in present:
         try:
             c.admin_user_global_sign_out(UserPoolId=POOL, Username=mail)
         except Exception:  # noqa: BLE001 - never signed in
             pass
-        if mail in mem:
-            c.admin_remove_user_from_group(UserPoolId=POOL, Username=mail, GroupName=GROUP)
-        c.admin_delete_user(UserPoolId=POOL, Username=mail)
-        print(f"  deleted user {mail}", file=out)
-    for label, key, key_doc in rows:
-        table = TABLES[label][0]
-        d.delete_item(TableName=table, Key={k: {"S": v} for k, v in key_doc.items()})
-        print(f"  deleted row  {label:<14} {key}", file=out)
-    if os.path.exists(secrets_file):
-        os.remove(secrets_file)
-        print(f"removed {secrets_file}", file=out)
+        try:
+            if mail in mem:
+                c.admin_remove_user_from_group(UserPoolId=POOL, Username=mail, GroupName=GROUP)
+        except Exception:  # noqa: BLE001 - the user delete does not depend on the group edge
+            pass
+        try:
+            c.admin_delete_user(UserPoolId=POOL, Username=mail)
+            print(f"  deleted user {mail}", file=out)
+        except Exception as exc:  # noqa: BLE001 - report the survivor instead of losing the rest
+            user_failures += 1
+            print(f"  FAILED user  {mail}  {type(exc).__name__}", file=out)
+    _remove_secrets(secrets_file, out)
+    if user_failures:
+        print(f"  {user_failures} user delete(s) failed; their rows are already gone — re-run `down`", file=out)
+        return 1
     return 0
 
 
@@ -385,7 +469,7 @@ def main(argv: list[str], out: TextIO = sys.stdout) -> int:
     if action not in {"status", "up", "down"}:
         print(__doc__, file=out)
         return 2
-    cognito, dynamo = cip(), ddb()
+    cognito = cip()
     if action == "status":
         render_status(cognito, out)
         return 0
@@ -394,7 +478,7 @@ def main(argv: list[str], out: TextIO = sys.stdout) -> int:
         sign_in_proof(cognito, values, out)
         render_status(cognito, out)
         return 0
-    return apply_down(cognito, dynamo, "--yes" in argv, out)
+    return apply_down(cognito, ddb(), "--yes" in argv, out)
 
 
 if __name__ == "__main__":
