@@ -581,5 +581,7 @@ unwired
 VCALENDAR
 VEVENT
 waitlist
+shlex
+startswith
 xdist
 zoneinfo
