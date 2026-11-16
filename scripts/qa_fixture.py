@@ -60,10 +60,16 @@ BASE_URL = "https://dev.kernelworx.app"
 CLIENT_NAME = "KernelWorx-Web"
 
 # Identity local-part -> (secrets key suffix, member of GROUP?)
+# The scout is a group member because ``frontend/src/ShowSellRoutes.tsx`` gates the
+# whole ``/show-sell/*`` tree, ``/show-sell/join`` included: a scout outside the
+# group cannot open its own join page, so the joined half of the Stage 1 journey
+# cannot run. ``outside`` is the identity that carries the closed half of the gate,
+# and it is the only one kept out. (Verified by the WORK-200 journey on the dev
+# stack; see ``tests/e2e/README.md``.)
 IDENTS: dict[str, tuple[str, bool]] = {
     "qa-show-sell-admin": ("ADMIN", True),
     "qa-show-sell-admin2": ("ADMIN2", True),
-    "qa-show-sell-scout": ("SCOUT", False),
+    "qa-show-sell-scout": ("SCOUT", True),
     "qa-show-sell-outside": ("OUTSIDE", False),
 }
 

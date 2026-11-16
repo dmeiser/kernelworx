@@ -181,11 +181,10 @@ The journey signs in as four fixture accounts that already exist on the dev pool
 | `scout` | `qa-show-sell-scout@dev.kernelworx.app` | **yes** | holds the catalog, Scout profile, and Scout Campaign the join needs; joins by code |
 | `outside` | `qa-show-sell-outside@dev.kernelworx.app` | **no** | the closed half of the gate, and the no-grant refusal probe |
 
-`scripts/qa_fixture.py` is the **only** thing that will create, refresh, or delete
-those identities and their group membership — and it lands with WORK-201, which is
-still in progress. Until that script is in the tree, the four accounts exist on the
-dev pool and nothing in this repository provisions them; this harness only reads
-what the environment gives it. It never calls a Cognito admin API and holds no AWS
+`scripts/qa_fixture.py` is the **only** thing that creates, refreshes, or deletes
+those identities and their group membership — it lands with WORK-201. The four
+accounts exist on the dev pool; this harness only reads what the environment
+gives it. It never calls a Cognito admin API and holds no AWS
 credentials — that is structural, not a style choice: a second script provisioning
 the same accounts is how the dev pool accumulated eighteen app clients named
 `KernelWorx-Web`, only one of which allows `USER_PASSWORD_AUTH`.
@@ -195,12 +194,13 @@ the **whole** `/show-sell/*` tree, including `/show-sell/join`. A Scout outside 
 group cannot open its own join page, so the join step cannot run. `outside` is what
 carries the closed half of the gate assertion, and it never joins anything.
 
-**The correction that has to land before WORK-201's first `up`:** its identity
-table still places `qa-show-sell-scout` **outside** `show-sell-preview`. Running
-`up` with that table moves the Scout out of the group and silently removes this
-journey's step-2 precondition — the join page stops opening. The evidence is this
-journey's own steps: the Scout opens `/show-sell/join`, `outside` is redirected off
-it. Whoever runs `up` changes the Scout's row to a group member first.
+**Landed with WORK-201:** that table used to place `qa-show-sell-scout` **outside**
+`show-sell-preview`, and that is the state the pool held when this journey was
+first run — the Scout was redirected off `/show-sell/join`, `outside` was redirected
+off it too. `up` now asserts the Scout as a member and keeps only `outside` out, so
+running it repairs this journey's step-2 precondition instead of removing it. Do
+not move the Scout back out: no `up` and no manual `admin-remove-user-from-group`
+may take the group away from it.
 
 ### Environment
 

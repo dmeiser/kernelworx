@@ -6,6 +6,11 @@ client (no AWS access, no real pool):
 
 * ``up`` is idempotent — an existing user is refreshed, not re-created, and a
   pool that already holds the fixture ends with exactly four identities.
+* The ``show-sell-preview`` shape is re-asserted on every ``up``: admin, admin2
+  and scout go in, ``outside`` stays out. The join step of the Stage 1 journey
+  needs the scout in the group, and the closed half of the gate needs exactly
+  one identity held out, so a membership that drifted is corrected in both
+  directions rather than inherited.
 * ``down`` deletes only rows a fixture ``sub`` owns, and reports every row it
   cannot attribute instead of deleting it.
 * ``status`` renders a pool with no users, no group members and no strays.
@@ -202,6 +207,7 @@ def test_up_creates_missing_identities_and_sets_the_group(mod: ModuleType, tmp_p
     assert c.group == {
         f"qa-show-sell-admin@{mod.DOMAIN}",
         f"qa-show-sell-admin2@{mod.DOMAIN}",
+        f"qa-show-sell-scout@{mod.DOMAIN}",
     }
     assert values["TEST_QA_SHOW_SELL_BASE_URL"] == "https://dev.kernelworx.app"
     assert len(values) == 1 + 2 * len(mod.IDENTS)
@@ -219,11 +225,17 @@ def test_up_is_idempotent_when_the_users_already_exist(mod: ModuleType, tmp_path
         assert c.calls.count(f"set-password:{mail}") == 1
     assert "refreshed" in out.getvalue()
     assert len(c.users) == len(mod.IDENTS), "re-running up must not add a fifth identity"
-    # The scout/outside identities are asserted out of the group: the gate has
-    # to be provable both ways.
-    for local in ("qa-show-sell-scout", "qa-show-sell-outside"):
-        assert f"remove-group:{local}@{mod.DOMAIN}" in c.calls
-    assert c.group == {f"qa-show-sell-admin@{mod.DOMAIN}", f"qa-show-sell-admin2@{mod.DOMAIN}"}
+    # Membership is re-asserted in both directions: a scout that drifted out is
+    # put back (the journey's join step needs it), and outside is asserted out so
+    # the closed half of the gate always has an identity to prove it with.
+    assert f"add-group:qa-show-sell-scout@{mod.DOMAIN}" in c.calls
+    assert f"remove-group:qa-show-sell-outside@{mod.DOMAIN}" in c.calls
+    assert not any(call.startswith("remove-group:qa-show-sell-scout") for call in c.calls)
+    assert c.group == {
+        f"qa-show-sell-admin@{mod.DOMAIN}",
+        f"qa-show-sell-admin2@{mod.DOMAIN}",
+        f"qa-show-sell-scout@{mod.DOMAIN}",
+    }
 
 
 def test_up_writes_a_readable_secrets_file_outside_the_repo(mod: ModuleType, tmp_path: Path) -> None:

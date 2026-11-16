@@ -16,13 +16,18 @@ Pool `us-east-1_sDiuCOarb` (`kernelworx-users-ue1-dev`, `us-east-1`), group
 | --- | --- | --- |
 | `qa-show-sell-admin@dev.kernelworx.app` | creates the Unit and the Unit Campaign, invites the second admin | member |
 | `qa-show-sell-admin2@dev.kernelworx.app` | accepts the invite, redeems it, acts as the second admin | member |
-| `qa-show-sell-scout@dev.kernelworx.app` | joins a campaign by code, appears on the roster | not a member |
+| `qa-show-sell-scout@dev.kernelworx.app` | joins a campaign by code, appears on the roster | member |
 | `qa-show-sell-outside@dev.kernelworx.app` | an account that never joins — the negative half of the preview gate | not a member |
 
-Two members and one sign-in-capable non-member is the minimum that shows the
-preview gate from both sides. `up` asserts that shape every run: it adds the two
-admins to the group and removes the other two, so a membership that drifted is
-corrected rather than inherited.
+Three members and one sign-in-capable non-member is the minimum that shows the
+preview gate from both sides. The scout has to be a member because
+`frontend/src/ShowSellRoutes.tsx` gates the **whole** `/show-sell/*` tree,
+`/show-sell/join` included: a scout outside the group is redirected to `/` and
+cannot open its own join page, which is the precondition the Stage 1 journey in
+`tests/e2e/README.md` needs. `outside` is what carries the closed half of the
+gate. `up` asserts that shape every run: it adds admin, admin2 and scout to the
+group and removes `outside`, so a membership that drifted is corrected rather
+than inherited.
 
 ## Commands
 
@@ -144,6 +149,24 @@ qa-show-sell-scout@dev.kernelworx.app    CONFIRMED verified=true preview=no  wan
 qa-show-sell-outside@dev.kernelworx.app  CONFIRMED verified=true preview=no  want=False
 users total=26  leaked strays=0
 ```
+
+That transcript is the state as created on 2026-11-16, and the scout's row reads
+`preview=no want=False` because the script's table said so at that moment. The scout
+holds the group in the pool now — re-read later the same day, and the add was not
+made by this script:
+
+```text
+pool us-east-1_sDiuCOarb  group show-sell-preview  members: ['qa-show-sell-admin2@dev.kernelworx.app', 'qa-show-sell-admin@dev.kernelworx.app', 'qa-show-sell-scout@dev.kernelworx.app']
+qa-show-sell-scout@dev.kernelworx.app        CONFIRMED  verified=true  preview=yes  want=True
+qa-show-sell-outside@dev.kernelworx.app      CONFIRMED  verified=true  preview=no   want=False
+app clients named KernelWorx-Web: 18 of 18 (a name lookup is only safe when this is 1)
+users total=26  leaked strays=0
+```
+
+That out-of-band add is exactly the drift the old table would have undone: an `up`
+run against it would have removed the scout from the group and broken the journey's
+step-2 precondition. The table above is the contract now, so `up` asserts the scout
+as a member and the drift cannot come back on a run.
 
 Because `up` generates a **new password every run**, rotating on purpose is
 fine but rotating by accident is not: if the passwords are already distributed
