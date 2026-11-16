@@ -225,9 +225,14 @@ MOVEMENT_REQUIRED_LINKS: dict[str, frozenset[str]] = {
     EVENT_RELEASE: frozenset({SHOW_AND_SELL_ID_ATTRIBUTE}),
     EVENT_RETURN_RECONCILE: frozenset({SHOW_AND_SELL_ID_ATTRIBUTE}),
     EVENT_RE_FINALIZE_ADJUST: frozenset({SHOW_AND_SELL_ID_ATTRIBUTE}),
-    SCOUT_ISSUE: frozenset({PROFILE_ID_ATTRIBUTE, SHOW_AND_SELL_ID_ATTRIBUTE}),
+    # Issuing to a Scout and taking stock back are custody acts, not event acts
+    # (spec CUST-01, CUST-06): stock moves from the Kernel's shelf to the Scout's
+    # trunk outside any Show & Sell, so the Scout is the only source the row can
+    # name. Requiring an event here would leave the two operations that create and
+    # undo a custody with nothing legal to write.
+    SCOUT_ISSUE: frozenset({PROFILE_ID_ATTRIBUTE}),
     SCOUT_SALE_CONSUME: frozenset({PROFILE_ID_ATTRIBUTE, SALE_ID_ATTRIBUTE}),
-    SCOUT_RETURN: frozenset({PROFILE_ID_ATTRIBUTE, SHOW_AND_SELL_ID_ATTRIBUTE}),
+    SCOUT_RETURN: frozenset({PROFILE_ID_ATTRIBUTE}),
     INDIVIDUAL_FULFILL: frozenset({ORDER_ID_ATTRIBUTE, FULFILLMENT_ID_ATTRIBUTE}),
     WE_OWE_RESERVE: frozenset({WE_OWE_ID_ATTRIBUTE}),
     WE_OWE_RELEASE: frozenset({WE_OWE_ID_ATTRIBUTE}),
@@ -423,6 +428,37 @@ def normalize_product_ids(value: Any) -> List[str]:
     if len(set(ids)) != len(ids):
         raise _invalid("productIds", "must not repeat a product")
     return ids
+
+
+def normalize_return_items(value: Any) -> list[tuple[str, int]]:
+    """Validate a ``returnStockFromScout`` batch: (productId, quantity) pairs.
+
+    Three rules the atomic return depends on (§2.3.2):
+
+    - non-empty — an empty batch is a click that would write a marker and a
+      movement for nothing, and the caller would be told its return succeeded;
+    - a positive quantity per product — a return of zero or a negative quantity is
+      an issue wearing a return's clothes, and the movement type would lie;
+    - no repeated product — one custody row per (product, Scout), so two entries
+      for one product are two writes to the same row, which DynamoDB forbids in one
+      transaction anyway. Rejecting the request is the honest answer.
+
+    The pairs come back in the order the caller sent them: the batch's movements and
+    its result follow that order, which is what makes a retry of a committed return
+    answer with the same list.
+    """
+    if not isinstance(value, (list, tuple)) or not value:
+        raise _invalid("items", "must contain at least one product to return")
+    items: list[tuple[str, int]] = []
+    for entry in value:
+        if not isinstance(entry, Mapping):
+            raise _invalid("items", "each item needs a productId and a quantity")
+        product_id = normalize_inventory_id(entry.get("productId"), "productId")
+        quantity = normalize_quantity(entry.get("quantity"), "quantity", minimum=1)
+        items.append((product_id, quantity))
+    if len({product_id for product_id, _quantity in items}) != len(items):
+        raise _invalid("items", "must not repeat a product")
+    return items
 
 
 def normalize_movement_type(value: Any, field: str = "movementType") -> str:
@@ -980,6 +1016,43 @@ def read_campaign_inventory_rows(unit_campaign_id: str) -> List[Dict[str, Any]]:
     )
 
 
+def read_scout_custody(unit_campaign_id: str, product_id: str, profile_id: str) -> Optional[Dict[str, Any]]:
+    """Strongly consistent read of one Scout's custody of one product (§5.9).
+
+    The read is consistent because an issue or return conditions on the row it
+    reads: a custody ``version`` is what serializes issue, sale and return for one
+    Scout (§5.9), and an eventually consistent read would let two returns of the
+    last two Kernels both believe they hold them.
+    """
+    response = tables.inventory.get_item(Key=custody_key(unit_campaign_id, product_id, profile_id), ConsistentRead=True)
+    item = response.get("Item")
+    return cast(Optional[Dict[str, Any]], dict(item) if isinstance(item, dict) else None)
+
+
+def campaign_custody_rows(
+    unit_campaign_id: str, *, profile_id: Optional[str] = None, product_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """One campaign's custody rows, in sort-key order (product first, then Scout).
+
+    The campaign partition is the right scope for both custody reads: the admin
+    board asks "what does this campaign have out with Scouts", and the participant
+    read asks the same question for one Scout. Filtering on the row's own
+    ``profileId``/``productId`` attributes rather than by the partition's ``profileId``
+    GSI is deliberate — an issue and the read that answers it must agree, and a
+    GSI is eventually consistent.
+    """
+    rows = [
+        cast(Dict[str, Any], dict(row))
+        for row in read_campaign_inventory_rows(unit_campaign_id)
+        if row.get(ENTITY_TYPE_ATTRIBUTE) == CUSTODY_ENTITY_TYPE
+    ]
+    if profile_id is not None:
+        rows = [row for row in rows if row.get(PROFILE_ID_ATTRIBUTE) == profile_id]
+    if product_id is not None:
+        rows = [row for row in rows if row.get(PRODUCT_ID_ATTRIBUTE) == product_id]
+    return rows
+
+
 def product_inventory_sections(rows: Sequence[Mapping[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """Bucket campaign rows under one product prefix into balance/allocations/custody.
 
@@ -1235,6 +1308,83 @@ def inventory_balance_delta_action(
         {
             "TableName": tables.inventory.table_name,
             "Key": wire_key(balance_key(unit_campaign_id, product_id)),
+            "UpdateExpression": "SET " + ", ".join(sets),
+            "ExpressionAttributeNames": names,
+            "ExpressionAttributeValues": values,
+            "ConditionExpression": " AND ".join(conditions),
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def put_scout_custody_action(item: Mapping[str, Any]) -> tuple[str, Dict[str, Any]]:
+    """Create the custody row a Scout does not have yet for this product.
+
+    ``attribute_not_exists`` is the race guard, the same shape as the first receipt
+    of a product: two concurrent issues to one Scout for one product cannot both
+    start from zero, and the loser cancels its whole transaction instead of
+    overwriting the row the winner wrote.
+    """
+    return (
+        "Put",
+        {
+            "TableName": tables.inventory.table_name,
+            "Item": {name: wire_value(value) for name, value in item.items()},
+            "ConditionExpression": "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
+            "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def scout_custody_delta_action(
+    *,
+    unit_campaign_id: str,
+    product_id: str,
+    profile_id: str,
+    existing: Optional[Mapping[str, Any]],
+    expected_version: int,
+    with_scout_delta: int,
+    now_iso: str,
+) -> tuple[str, Dict[str, Any]]:
+    """One versioned custody change whose §5.9 floor rides in the condition.
+
+    ``version`` is what §5.9 gives a custody row so that issue, sale and return for
+    one Scout serialize; pinning it here is what makes "the Scout holds three" a
+    statement about the row this request read rather than about a row that moved
+    underneath it. ``withScoutQty >= -delta`` closes the other half: two returns of
+    the same three Kernels cannot both succeed, and With Scout can never go negative
+    (CUST-04). As in :func:`inventory_balance_delta_action`, DynamoDB allows no
+    arithmetic inside a condition, so the bound is stated against the value this
+    request read — and it is safe rather than stale because the version pin cancels
+    the plan whole if anything else moved the row.
+    """
+    names = {
+        "#version": VERSION_ATTRIBUTE,
+        "#updatedAt": UPDATED_AT_ATTRIBUTE,
+        f"#{WITH_SCOUT_QTY}": WITH_SCOUT_QTY,
+    }
+    values: Dict[str, Any] = {
+        ":expectedVersion": wire_value(expected_version),
+        ":one": wire_value(1),
+        ":updatedAt": wire_value(normalize_moment(now_iso, UPDATED_AT_ATTRIBUTE)),
+        ":scoutDelta": wire_value(with_scout_delta),
+    }
+    sets = [
+        "#version = #version + :one",
+        "#updatedAt = :updatedAt",
+        f"#{WITH_SCOUT_QTY} = #{WITH_SCOUT_QTY} + :scoutDelta",
+    ]
+    conditions = ["#version = :expectedVersion"]
+    custody_floor = -with_scout_delta
+    if custody_floor > 0:
+        values[":scoutFloor"] = wire_value(custody_floor)
+        conditions.append(f"#{WITH_SCOUT_QTY} >= :scoutFloor")
+    return (
+        "Update",
+        {
+            "TableName": tables.inventory.table_name,
+            "Key": wire_key(custody_key(unit_campaign_id, product_id, profile_id)),
             "UpdateExpression": "SET " + ", ".join(sets),
             "ExpressionAttributeNames": names,
             "ExpressionAttributeValues": values,

@@ -112,6 +112,10 @@ ADJUST_INVENTORY_FIELD = "adjustInventory"
 ADJUST_COUNCIL_FIELD = "adjustCouncilOnOrder"
 INVENTORY_POSITIONS_FIELD = "inventoryPositions"
 INVENTORY_MOVEMENTS_FIELD = "inventoryMovements"
+ISSUE_STOCK_FIELD = "issueStockToScout"
+RETURN_STOCK_FIELD = "returnStockFromScout"
+SCOUT_CUSTODY_FIELD = "scoutCustodyBalances"
+MY_SCOUT_CUSTODY_FIELD = "myScoutCustody"
 
 MAX_ACTIVE_UNIT_INVITES = 20
 INVITE_FAILURES_PER_HOUR = 10
@@ -2412,6 +2416,516 @@ def _inventory_movements(event: Dict[str, Any], caller_id: str) -> Dict[str, Any
     return dict(paginate_page(items, f"{INVENTORY_MOVEMENTS_FIELD}#{unit_campaign_id}#{token}", _page_argument(event)))
 
 
+# --- Scout custody (§2.3) --------------------------------------------------------
+
+
+def _custody_payload(custody: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project a stored ``ScoutCustodyBalance`` row onto the SDL fields (§5.9).
+
+    The projection carries no actor or account field: the same shape answers the
+    admin board and the Scout's own read, and a participant-facing custody list that
+    named which admin issued the stock would be a leak the §2.3.3 contract refuses
+    (INV-Q-05-01).
+    """
+    return {
+        "unitCampaignId": str(custody[inventory_models.UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+        "productId": str(custody[inventory_models.PRODUCT_ID_ATTRIBUTE]),
+        "profileId": str(custody[inventory_models.PROFILE_ID_ATTRIBUTE]),
+        "campaignId": str(custody[inventory_models.CAMPAIGN_ID_ATTRIBUTE]),
+        "withScoutQty": _number(custody.get(inventory_models.WITH_SCOUT_QTY, 0)),
+        "version": _number(custody[inventory_models.VERSION_ATTRIBUTE]),
+        "createdAt": str(custody[inventory_models.CREATED_AT_ATTRIBUTE]),
+        "updatedAt": str(custody[inventory_models.UPDATED_AT_ATTRIBUTE]),
+    }
+
+
+def _custody_row_for_profile(custody_rows: List[Dict[str, Any]], profile_id: str) -> Optional[Dict[str, Any]]:
+    """The one custody row of this product that belongs to ``profile_id``."""
+    for row in custody_rows:
+        if str(row[inventory_models.PROFILE_ID_ATTRIBUTE]) == profile_id:
+            return row
+    return None
+
+
+def _issued_roster_identity(unit_campaign_id: str, campaign_id: str, profile_id: str) -> Dict[str, Any]:
+    """The roster row an issue requires: this Scout, ACTIVE, and this Campaign.
+
+    §2.3.1 makes the roster the eligibility gate, and the row is read consistently
+    because the write that follows is decided by it. Three refusals, each naming
+    what the caller has to fix:
+
+    - no row — this Scout has never joined, so there is no identity to issue to
+      (``NOT_FOUND``: there is nothing here to act on);
+    - ``REMOVED`` — the Scout left the roster, and issuing more stock to a Scout who
+      is no longer selling strands it (spec AC-47 keeps their existing custody
+      intact; it does not invite more);
+    - a different ``campaignId`` — the roster names one Scout Campaign per Scout, so
+      a request naming another is not the same Scout (§2.3.1 "exact Campaign/Profile
+      identity", CAMP-M-03's identity rule on the write side).
+    """
+    membership: Dict[str, Any] | None = unit_campaign_models.read_membership(unit_campaign_id, profile_id)
+    if membership is None:
+        raise AppError(ErrorCode.NOT_FOUND, "This Scout is not on this campaign's roster")
+    if str(membership["status"]) != unit_campaign_models.MEMBERSHIP_STATUS_ACTIVE:
+        raise AppError(ErrorCode.CONFLICT, "This Scout's roster entry is REMOVED; rejoin before stock is issued")
+    if str(membership["campaignId"]) != campaign_id:
+        raise AppError(ErrorCode.CONFLICT, "This Scout's roster entry belongs to a different Scout Campaign")
+    return membership
+
+
+def _require_unassigned_stock(
+    balance: Optional[Mapping[str, Any]], allocations: List[Dict[str, Any]], quantity: int
+) -> None:
+    """Refuse an issue that would take stock an open Show & Sell already promises.
+
+    CUST-01 lets a Kernel issue only *available unassigned* stock: the quantity a
+    campaign holds that is neither reserved for We Owe nor still claimed by an OPEN
+    allocation. Checking ``kernelPhysicalQty`` alone would let a Kernel hand a Scout
+    the Kernels tomorrow's event is holding, and the event would arrive short with no
+    row anywhere saying why.
+
+    Like the adjustment floor in :func:`_require_balance_floor`, this pre-check buys
+    the actionable verdict, not the race guard: the balance's version pin plus its
+    ``kernelPhysicalQty >= quantity`` condition are what cancel the loser of a race
+    for the last Kernel, and every allocation write bumps that same version (§3.2.3).
+    """
+    unassigned = inventory_models.unassigned_kernel_qty(balance, allocations)
+    if quantity > unassigned:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            f"quantity exceeds the {unassigned} unassigned Kernels this campaign holds for that product",
+        )
+
+
+def _stage_custody_change(
+    plan: Any,
+    unit_campaign_id: str,
+    product_id: str,
+    profile_id: str,
+    campaign_id: str,
+    existing: Optional[Mapping[str, Any]],
+    *,
+    with_scout_delta: int,
+    occurred_at: str,
+) -> int:
+    """Stage this request's custody write and report the version it produces.
+
+    The same two shapes as the balance half (§8.4): a conditional ``Put`` when this
+    Scout holds none of this product yet, and a version-guarded increment with the
+    ``withScoutQty >= 0`` floor in its condition afterwards. ``campaignId`` is written
+    only on the create path — it is part of the custody's identity (§5.9 "the Scout
+    Campaign used for individual sales"), so a later issue to a re-joined Scout does
+    not silently re-point stock the Scout already holds at a different Campaign.
+    """
+    if existing is None:
+        item = inventory_models.build_scout_custody_balance_item(
+            unit_campaign_id=unit_campaign_id,
+            product_id=product_id,
+            profile_id=profile_id,
+            campaign_id=campaign_id,
+            with_scout_qty=with_scout_delta,
+            now_iso=occurred_at,
+        )
+        plan.add(*inventory_models.put_scout_custody_action(item))
+        return 1
+    current_version = _number(existing[inventory_models.VERSION_ATTRIBUTE])
+    plan.add(
+        *inventory_models.scout_custody_delta_action(
+            unit_campaign_id=unit_campaign_id,
+            product_id=product_id,
+            profile_id=profile_id,
+            existing=existing,
+            expected_version=current_version,
+            with_scout_delta=with_scout_delta,
+            now_iso=occurred_at,
+        )
+    )
+    return current_version + 1
+
+
+def _custody_position_and_balance(unit_campaign_id: str, product_id: str, profile_id: str) -> Dict[str, Any]:
+    """What one issue produced: the product's position and that Scout's custody."""
+    custody = inventory_models.read_scout_custody(unit_campaign_id, product_id, profile_id)
+    return {
+        "inventoryPosition": _written_position(unit_campaign_id, product_id),
+        "custodyBalance": _custody_payload(_loaded_or_internal(custody, "updated custody balance could not be loaded")),
+    }
+
+
+def _custody_identity_payload(unit_campaign_id: str, profile_id: str) -> Dict[str, Any]:
+    """Every product one Scout holds in one campaign: positions plus custody balances.
+
+    This is the recovery answer for a ``returnStockFromScout`` whose marker lost its
+    payload back-fill (§8.9). It is derivable from the custody rows alone because a
+    return never deletes a custody row — it drives ``withScoutQty`` to zero and leaves
+    the version history — so the products a committed return touched are exactly the
+    products still carrying a row for this Scout.
+    """
+    rows = inventory_models.campaign_custody_rows(unit_campaign_id, profile_id=profile_id)
+    return {
+        "inventoryPositions": [
+            _position_payload(unit_campaign_id, str(row[inventory_models.PRODUCT_ID_ATTRIBUTE])) for row in rows
+        ],
+        "custodyBalances": [_custody_payload(row) for row in rows],
+    }
+
+
+def _write_custody_movements(
+    plan: Any,
+    unit_campaign_id: str,
+    *,
+    movement_type: str,
+    profile_id: str,
+    occurred_at: str,
+    idempotency_key: str,
+    caller_id: str,
+    movements: List[tuple[str, int, int, int]],
+) -> None:
+    """Append one movement per product a custody write moved (§5.8).
+
+    ``movements`` is ``(productId, kernelPhysicalDelta, withScoutDelta, balanceVersion)``
+    in the request's own order, so the audit trail and the returned lists read the way
+    the caller sent them. Two things the row must get right: the ``profileId``, because
+    a custody movement that does not say whose trunk the stock went into cannot be
+    traced to anything, and the ``inventoryVersion`` of the balance this same
+    transaction wrote, because that is how an audit reader lines the movement up
+    against the aggregate it produced.
+    """
+    for product_id, kernel_delta, scout_delta, balance_version in movements:
+        plan.add(
+            *inventory_models.put_inventory_movement_action(
+                inventory_models.build_inventory_movement_item(
+                    movement_id=str(inventory_models.new_inventory_movement_id()),
+                    unit_campaign_id=unit_campaign_id,
+                    product_id=product_id,
+                    movement_type=movement_type,
+                    actor_account_id=caller_id,
+                    occurred_at=occurred_at,
+                    idempotency_key=idempotency_key,
+                    kernel_physical_delta=kernel_delta,
+                    with_scout_delta=scout_delta,
+                    profile_id=profile_id,
+                    inventory_version=balance_version,
+                )
+            )
+        )
+
+
+# --- issueStockToScout (§2.3.1) --------------------------------------------------
+
+
+def _issue_stock(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Move unassigned Kernel stock into one Scout's custody.
+
+    Four rows, one transaction: the idempotency marker, the product's balance down,
+    the Scout's custody up, and one ``SCOUT_ISSUE`` movement. That pairing is the
+    whole point of CUST-01 — total unit-owned stock does not change, so a balance
+    that moved without its custody row (or the reverse) is stock that left the
+    campaign through a door nothing recorded. The result is both halves of the move:
+    the product's position and the custody balance.
+
+    Nothing here sells anything: no Order, no sale, no We Owe, no credit (AC-03).
+    Issuing is a delivery of stock, and the money only ever follows a sale.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    campaign = _campaign_for_inventory_write(payload, caller_id)
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    campaign_id = inventory_models.normalize_inventory_id(payload.get("campaignId"), "campaignId")
+    profile_id = inventory_models.normalize_inventory_id(payload.get("profileId"), "profileId")
+    product_id = inventory_models.normalize_inventory_id(payload.get("productId"), "productId")
+    quantity = inventory_models.normalize_quantity(payload.get("quantity"), "quantity", minimum=1)
+    occurred_at = inventory_models.normalize_moment(payload.get("occurredAt") or utc_now_iso(), "occurredAt")
+
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    runner = IdempotentMutationRunner()
+    keys = _inventory_marker(
+        caller_id=caller_id, operation=ISSUE_STOCK_FIELD, scope=unit_campaign_id, idempotency_key=key
+    )
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        ISSUE_STOCK_FIELD,
+        lambda _stored: _custody_position_and_balance(unit_campaign_id, product_id, profile_id),
+    )
+    if replayed is not None:
+        return replayed
+
+    _issued_roster_identity(unit_campaign_id, campaign_id, profile_id)
+    sections = _position_sections(unit_campaign_id, product_id)
+    balance = sections["balance"][0] if sections["balance"] else None
+    custody = _custody_row_for_profile(sections["custody"], profile_id)
+    if custody is not None and str(custody[inventory_models.CAMPAIGN_ID_ATTRIBUTE]) != campaign_id:
+        raise AppError(ErrorCode.CONFLICT, "This Scout's custody of that product belongs to a different Scout Campaign")
+    _require_unassigned_stock(balance, sections["allocations"], quantity)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=product_id)
+    version = _stage_balance_change(
+        plan,
+        unit_campaign_id,
+        product_id,
+        balance,
+        kernel_physical_delta=-quantity,
+        council_on_order_delta=0,
+        occurred_at=occurred_at,
+    )
+    _stage_custody_change(
+        plan,
+        unit_campaign_id,
+        product_id,
+        profile_id,
+        campaign_id,
+        custody,
+        with_scout_delta=quantity,
+        occurred_at=occurred_at,
+    )
+    _write_custody_movements(
+        plan,
+        unit_campaign_id,
+        movement_type=inventory_models.SCOUT_ISSUE,
+        profile_id=profile_id,
+        occurred_at=occurred_at,
+        idempotency_key=key,
+        caller_id=caller_id,
+        movements=[(product_id, -quantity, quantity, version)],
+    )
+    build_result = _once(lambda: _custody_position_and_balance(unit_campaign_id, product_id, profile_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=ISSUE_STOCK_FIELD,
+        fingerprint=fingerprint,
+        result_id=product_id,
+        load_result=lambda _stored: _custody_position_and_balance(unit_campaign_id, product_id, profile_id),
+        result_payload=build_result,
+    )
+    log.info(
+        "Stock issued to Scout",
+        unit_campaign_id=unit_campaign_id,
+        product_id=product_id,
+        profile_id=profile_id,
+        quantity=quantity,
+        balance_version=version,
+        caller_id=caller_id,
+    )
+    return build_result()
+
+
+# --- returnStockFromScout (§2.3.2) -----------------------------------------------
+
+
+def _returned_custody(
+    unit_campaign_id: str, campaign_id: str, profile_id: str, items: List[tuple[str, int]]
+) -> List[Dict[str, Any]]:
+    """Read and check every custody row a return touches, before any of it is staged.
+
+    §2.3.2 refuses an over-return "before writing", and the whole batch shares one
+    verdict: returning four of a product the Scout holds three of fails the batch, and
+    the three of the other product is not partially returned (INV-M-05-02). So every
+    row is read and checked here first; only a batch that survives comes back, and the
+    caller stages it without reading again.
+
+    The custody row, not the roster, carries the identity for a return. A Scout can be
+    removed from the roster, or the whole campaign deactivated, and still be holding
+    Kernels (AC-47 keeps that custody standing); refusing the return then would strand
+    the stock with no path back, which is the opposite of CUST-06. So the checks are
+    that the custody exists, and that the ``campaignId`` the caller named is the one
+    the custody row itself records.
+    """
+    rows: List[Dict[str, Any]] = []
+    for product_id, quantity in items:
+        custody = inventory_models.read_scout_custody(unit_campaign_id, product_id, profile_id)
+        if custody is None:
+            raise AppError(ErrorCode.INVALID_INPUT, "That Scout holds none of that product to return")
+        if str(custody[inventory_models.CAMPAIGN_ID_ATTRIBUTE]) != campaign_id:
+            raise AppError(ErrorCode.CONFLICT, "That custody belongs to a different Scout Campaign")
+        held = _number(custody.get(inventory_models.WITH_SCOUT_QTY, 0))
+        if quantity > held:
+            raise AppError(
+                ErrorCode.INVALID_INPUT,
+                f"quantity exceeds the {held} Kernels that Scout holds of that product",
+            )
+        rows.append({"productId": product_id, "quantity": quantity, "custody": custody})
+    return rows
+
+
+def _returned_positions(unit_campaign_id: str, profile_id: str, planned: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The batch's answer: each returned product's position and custody, in request order."""
+    positions: List[Dict[str, Any]] = []
+    balances: List[Dict[str, Any]] = []
+    for entry in planned:
+        product_id = str(entry["productId"])
+        positions.append(_written_position(unit_campaign_id, product_id))
+        custody = inventory_models.read_scout_custody(unit_campaign_id, product_id, profile_id)
+        balances.append(_custody_payload(_loaded_or_internal(custody, "returned custody balance could not be loaded")))
+    return {"inventoryPositions": positions, "custodyBalances": balances}
+
+
+def _return_stock(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Take a Scout's unsold custody back into Kernel stock, one atomic batch.
+
+    The batch is what "one click" means operationally: a Kernel standing at a Scout's
+    door with two of X and three of Y must not end up with the X returned and the Y
+    lost because a second request failed. Every product's balance up, custody down, and
+    ``SCOUT_RETURN`` movement ride the same ``TransactWriteItems`` as the marker, so
+    INV-M-05-01's "both updated balances in one atomic result" and INV-M-05-02's
+    whole-batch refusal are the same mechanism (§8.4).
+
+    The 90-action budget is enforced by ``WritePlan`` while the plan is staged: the
+    91st action raises before a single DynamoDB call is made, which is INV-M-05-03's
+    "fails before writing", and the caller splits the return into batches that each
+    fit. Counting it here as well would put the same budget in two places and let them
+    drift.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    campaign = _campaign_for_inventory_write(payload, caller_id)
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    campaign_id = inventory_models.normalize_inventory_id(payload.get("campaignId"), "campaignId")
+    profile_id = inventory_models.normalize_inventory_id(payload.get("profileId"), "profileId")
+    items = inventory_models.normalize_return_items(payload.get("items"))
+    occurred_at = inventory_models.normalize_moment(payload.get("occurredAt") or utc_now_iso(), "occurredAt")
+
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    runner = IdempotentMutationRunner()
+    keys = _inventory_marker(
+        caller_id=caller_id, operation=RETURN_STOCK_FIELD, scope=unit_campaign_id, idempotency_key=key
+    )
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        RETURN_STOCK_FIELD,
+        lambda stored: _custody_identity_payload(unit_campaign_id, str(stored)),
+    )
+    if replayed is not None:
+        return replayed
+
+    membership = unit_campaign_models.read_membership(unit_campaign_id, profile_id)
+    if membership is not None and str(membership["campaignId"]) != campaign_id:
+        raise AppError(ErrorCode.CONFLICT, "This Scout's roster entry belongs to a different Scout Campaign")
+    planned = _returned_custody(unit_campaign_id, campaign_id, profile_id, items)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=profile_id)
+    movements: List[tuple[str, int, int, int]] = []
+    for entry in planned:
+        product_id = str(entry["productId"])
+        quantity = int(entry["quantity"])
+        existing = inventory_models.read_inventory_balance(unit_campaign_id, product_id)
+        version = _stage_balance_change(
+            plan,
+            unit_campaign_id,
+            product_id,
+            existing,
+            kernel_physical_delta=quantity,
+            council_on_order_delta=0,
+            occurred_at=occurred_at,
+        )
+        _stage_custody_change(
+            plan,
+            unit_campaign_id,
+            product_id,
+            profile_id,
+            campaign_id,
+            entry["custody"],
+            with_scout_delta=-quantity,
+            occurred_at=occurred_at,
+        )
+        movements.append((product_id, quantity, -quantity, version))
+    _write_custody_movements(
+        plan,
+        unit_campaign_id,
+        movement_type=inventory_models.SCOUT_RETURN,
+        profile_id=profile_id,
+        occurred_at=occurred_at,
+        idempotency_key=key,
+        caller_id=caller_id,
+        movements=movements,
+    )
+    build_result = _once(lambda: _returned_positions(unit_campaign_id, profile_id, planned))
+    runner.execute(
+        keys,
+        plan,
+        operation=RETURN_STOCK_FIELD,
+        fingerprint=fingerprint,
+        result_id=profile_id,
+        load_result=lambda stored: _custody_identity_payload(unit_campaign_id, str(stored)),
+        result_payload=build_result,
+    )
+    log.info(
+        "Scout custody returned",
+        unit_campaign_id=unit_campaign_id,
+        profile_id=profile_id,
+        products=len(planned),
+        actions=plan.action_count,
+        caller_id=caller_id,
+    )
+    return build_result()
+
+
+# --- scoutCustodyBalances / myScoutCustody (§2.3.3) ------------------------------
+
+
+def _scout_custody_balances(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """What a campaign has out with its Scouts: per Scout, per product, and in total.
+
+    CUST-02 requires both views, and the aggregate is computed over the filtered set
+    rather than the current page: a board paging through forty custody rows still has
+    to show the one number the Kernel acts on, and a total that changed with the page
+    would be a second source of truth (RPT-09 keeps it separate from every stock-need
+    calculation).
+    """
+    campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    raw_profile = _optional_argument(event, "profileId")
+    raw_product = _optional_argument(event, "productId")
+    profile_id = None if raw_profile is None else inventory_models.normalize_inventory_id(raw_profile, "profileId")
+    product_id = None if raw_product is None else inventory_models.normalize_inventory_id(raw_product, "productId")
+    rows = inventory_models.campaign_custody_rows(unit_campaign_id, profile_id=profile_id, product_id=product_id)
+    page = dict(
+        paginate_page(
+            [_custody_payload(row) for row in rows],
+            f"{SCOUT_CUSTODY_FIELD}#{unit_campaign_id}#{profile_id or 'ALL'}#{product_id or 'ALL'}",
+            _page_argument(event),
+        )
+    )
+    page["totalWithScoutQty"] = sum(_number(row.get(inventory_models.WITH_SCOUT_QTY, 0)) for row in rows)
+    return page
+
+
+def _my_scout_custody(event: Dict[str, Any], caller_id: str) -> List[Dict[str, Any]]:
+    """One Scout's own custody in one campaign, for the people who may see that Scout.
+
+    Two doors, and only one of them has to open (§5.1): a Profile READ/Owner/WRITE
+    holder acting for their own Scout, or a Unit Admin of the campaign addressed. The
+    admin door is checked first because it is the cheaper and more common one, and a
+    failed admin check is not the answer on its own — Riley holds READ on Avery's
+    profile and needs the read to work without any Unit grant at all (INV-Q-05-01).
+
+    What makes this participant-safe is the scope, not a projection: the rows come
+    from one campaign partition and are filtered to one ``profileId``, so no other
+    Scout's row can appear, and the payload carries no actor, reason, or movement
+    field to begin with. Riley asking for Blake's custody is refused by the profile
+    check; a revoked share stops working the day the share row is deleted
+    (INV-Q-05's revoked-access case).
+    """
+    profile_id = inventory_models.normalize_inventory_id(_query_argument(event, "profileId"), "profileId")
+    campaign: Dict[str, Any] = dict(
+        unit_campaign_models.load_unit_campaign_or_not_found(_query_argument(event, "unitCampaignId"))
+    )
+    try:
+        unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
+    except AppError:
+        require_profile_access(caller_id, profile_id, "READ")
+    rows = inventory_models.campaign_custody_rows(str(campaign["unitCampaignId"]), profile_id=profile_id)
+    return [_custody_payload(row) for row in rows]
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -2440,6 +2954,10 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     ADJUST_COUNCIL_FIELD: _adjust_council,
     INVENTORY_POSITIONS_FIELD: _inventory_positions,
     INVENTORY_MOVEMENTS_FIELD: _inventory_movements,
+    ISSUE_STOCK_FIELD: _issue_stock,
+    RETURN_STOCK_FIELD: _return_stock,
+    SCOUT_CUSTODY_FIELD: _scout_custody_balances,
+    MY_SCOUT_CUSTODY_FIELD: _my_scout_custody,
 }
 
 

@@ -337,21 +337,46 @@ const SS2_OUTPUT_TYPES: string[] = [
   "InventoryMovement",
   "InventoryMovementConnection",
   "InventoryPositionConnection",
+  "ScoutCustodyBalance",
+  "ScoutCustodyBalanceConnection",
+  "IssueStockToScoutPayload",
+  "ReturnStockFromScoutPayload",
 ];
 
-const SS2_INPUT_TYPES: string[] = ["DateRangeFilter", "RecordInventoryReceiptInput", "AdjustInventoryInput", "AdjustCouncilOnOrderInput"];
+const SS2_INPUT_TYPES: string[] = [
+  "DateRangeFilter",
+  "RecordInventoryReceiptInput",
+  "AdjustInventoryInput",
+  "AdjustCouncilOnOrderInput",
+  "ProductQuantityInput",
+  "IssueStockToScoutInput",
+  "ReturnStockFromScoutInput",
+];
 
-const SS2_QUERY_FIELDS: string[] = ["inventoryPositions", "inventoryMovements"];
+const SS2_QUERY_FIELDS: string[] = [
+  "inventoryPositions",
+  "inventoryMovements",
+  "scoutCustodyBalances",
+  "myScoutCustody",
+];
 
-const SS2_MUTATION_FIELDS: string[] = ["recordInventoryReceipt", "adjustInventory", "adjustCouncilOnOrder"];
+const SS2_MUTATION_FIELDS: string[] = [
+  "recordInventoryReceipt",
+  "adjustInventory",
+  "adjustCouncilOnOrder",
+  "issueStockToScout",
+  "returnStockFromScout",
+];
 
 const SS2_CONNECTION_ITEMS: Record<string, string> = {
   InventoryMovementConnection: "InventoryMovement",
   InventoryPositionConnection: "InventoryPosition",
+  ScoutCustodyBalanceConnection: "ScoutCustodyBalance",
 };
 
 const SS2_LIST_QUERY_RETURN: Record<string, string> = {
   inventoryMovements: "InventoryMovementConnection",
+  scoutCustodyBalances: "ScoutCustodyBalanceConnection",
 };
 
 /**
@@ -402,10 +427,26 @@ const SS2_TYPE_FIELDS: Record<string, string[]> = {
   ],
   InventoryMovementConnection: ["items", "pageInfo"],
   InventoryPositionConnection: ["items", "pageInfo"],
+  ScoutCustodyBalance: [
+    "unitCampaignId",
+    "productId",
+    "profileId",
+    "campaignId",
+    "withScoutQty",
+    "version",
+    "createdAt",
+    "updatedAt",
+  ],
+  ScoutCustodyBalanceConnection: ["items", "pageInfo", "totalWithScoutQty"],
+  IssueStockToScoutPayload: ["inventoryPosition", "custodyBalance"],
+  ReturnStockFromScoutPayload: ["inventoryPositions", "custodyBalances"],
   DateRangeFilter: ["startAt", "endAt"],
   RecordInventoryReceiptInput: ["unitCampaignId", "productId", "quantity", "occurredAt", "idempotency"],
   AdjustInventoryInput: ["unitCampaignId", "productId", "quantityDelta", "reason", "occurredAt", "idempotency"],
   AdjustCouncilOnOrderInput: ["unitCampaignId", "productId", "quantityDelta", "reason", "occurredAt", "idempotency"],
+  ProductQuantityInput: ["productId", "quantity"],
+  IssueStockToScoutInput: ["unitCampaignId", "campaignId", "profileId", "productId", "quantity", "occurredAt", "idempotency"],
+  ReturnStockFromScoutInput: ["unitCampaignId", "campaignId", "profileId", "items", "occurredAt", "idempotency"],
 };
 
 describe("Show & Sell Stage 2 inventory SDL (schema.graphql)", () => {
@@ -479,7 +520,7 @@ describe("Show & Sell Stage 2 inventory SDL (schema.graphql)", () => {
     // §5.2: "Balance versions are server-managed and returned for subsequent
     // retry/verification" - a caller that could send an expectedVersion would be
     // asserting a number it cannot have read atomically with its write.
-    for (const name of ["RecordInventoryReceiptInput", "AdjustInventoryInput", "AdjustCouncilOnOrderInput"]) {
+    for (const name of ["RecordInventoryReceiptInput", "AdjustInventoryInput", "AdjustCouncilOnOrderInput", "IssueStockToScoutInput", "ReturnStockFromScoutInput"]) {
       const input = definition(name);
       const idem = fieldsOf(input).find((f) => f.name === "idempotency");
       expect(idem!.text, `${name}.idempotency is required`).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
@@ -494,6 +535,57 @@ describe("Show & Sell Stage 2 inventory SDL (schema.graphql)", () => {
     expect(adjust.find((f) => f.name === "reason")!.text, "a stock adjustment must be explained").toMatch(/reason\s*:\s*String!/);
     const council = fieldsOf(definition("AdjustCouncilOnOrderInput"));
     expect(council.find((f) => f.name === "reason")!.text, "an on-order note is optional").toMatch(/reason\s*:\s*String(?!!)/);
+  });
+
+  test("the Scout custody reads and writes keep the §2.3.3 and §5.9 contract", () => {
+    // CUST-02: the inventory board shows With Scout per Scout and in aggregate, and the
+    // aggregate covers the whole filtered set, so it travels on the connection.
+    const connection = fieldsOf(definition("ScoutCustodyBalanceConnection"));
+    expect(connection.find((f) => f.name === "totalWithScoutQty")!.text).toMatch(/totalWithScoutQty\s*:\s*Int!/);
+    const custodyRead = rootFieldByName("Query", "scoutCustodyBalances")!;
+    for (const arg of ["unitCampaignId: ID!", "profileId: ID", "productId: ID", "page: PageInput"]) {
+      expect(custodyRead.text, `scoutCustodyBalances(${arg}) is missing`).toContain(arg);
+    }
+
+    // §5.1: the participant read is one Scout's own rows in one campaign, so it is
+    // addressed by both ids and is not a paged list.
+    const mine = rootFieldByName("Query", "myScoutCustody")!;
+    for (const arg of ["profileId: ID!", "unitCampaignId: ID!"]) {
+      expect(mine.text, `myScoutCustody(${arg}) is missing`).toContain(arg);
+    }
+    expect(mine.text, "myScoutCustody is not a paged list").not.toMatch(/page\s*:\s*PageInput/);
+    expect(mine.text).toMatch(/\):\s*\[ScoutCustodyBalance!\]!/);
+
+    // DATA_MODEL §5.9: the custody row is stock, not audit. The same projection answers
+    // the admin board and the Scout, so it carries no actor, reason, or owner field —
+    // INV-Q-05 refuses a participant custody read any part of the audit trail.
+    const custody = fieldsOf(definition("ScoutCustodyBalance"));
+    for (const forbidden of ["actorAccountId", "reason", "ownerAccountId", "email", "name", "idempotencyKey"]) {
+      expect(custody.some((f) => f.name === forbidden), `ScoutCustodyBalance.${forbidden} would leak`).toBe(false);
+    }
+    expect(custody.find((f) => f.name === "withScoutQty")!.text).toMatch(/withScoutQty\s*:\s*Int!/);
+
+    // §2.3.2: a return is one atomic batch over distinct products, so its input names a
+    // list of product/quantity pairs; §2.3.1 issues one product at a time.
+    const batch = fieldsOf(definition("ReturnStockFromScoutInput"));
+    expect(batch.find((f) => f.name === "items")!.text).toMatch(/items\s*:\s*\[ProductQuantityInput!\]!/);
+    const pair = fieldsOf(definition("ProductQuantityInput"));
+    expect([...fieldNameSet(definition("ProductQuantityInput"))]).toEqual(["productId", "quantity"]);
+    expect(pair.find((f) => f.name === "quantity")!.text).toMatch(/quantity\s*:\s*Int!/);
+    // Both writes name the roster identity as a profile/Campaign pair, so a request
+    // cannot re-point an existing custody row at another Scout Campaign.
+    for (const name of ["IssueStockToScoutInput", "ReturnStockFromScoutInput"]) {
+      const input = fieldsOf(definition(name));
+      expect(input.some((f) => f.name === "campaignId"), `${name}.campaignId`).toBe(true);
+      expect(input.some((f) => f.name === "profileId"), `${name}.profileId`).toBe(true);
+    }
+    // The payload is the pair of balances that moved, never a recomputed board.
+    const issuePayload = fieldsOf(definition("IssueStockToScoutPayload"));
+    expect(returnTypeName(issuePayload.find((f) => f.name === "inventoryPosition")!.text)).toBe("InventoryPosition");
+    expect(returnTypeName(issuePayload.find((f) => f.name === "custodyBalance")!.text)).toBe("ScoutCustodyBalance");
+    const returnPayload = fieldsOf(definition("ReturnStockFromScoutPayload"));
+    expect(returnPayload.find((f) => f.name === "inventoryPositions")!.text).toMatch(/:\s*\[InventoryPosition!\]!/);
+    expect(returnPayload.find((f) => f.name === "custodyBalances")!.text).toMatch(/:\s*\[ScoutCustodyBalance!\]!/);
   });
 
   test("AUTH: no Stage 2 field or type carries an auth directive (Cognito-only)", () => {

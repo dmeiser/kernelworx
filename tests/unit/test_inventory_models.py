@@ -19,8 +19,10 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 import pytest
+from botocore.exceptions import ClientError
 
 from src.utils import inventory_models as inv
+from src.utils.dynamodb import get_dynamodb_client
 from src.utils.errors import AppError, ErrorCode
 
 CAMPAIGN = "uc-pack-3149-fall-2026"
@@ -179,15 +181,24 @@ def test_a_balance_row_may_not_hold_stock_below_what_we_owe_reserved() -> None:
         _balance(3, 4)
     assert caught.value.error_code is ErrorCode.INVALID_INPUT
     assert "kernelPhysicalQty" in str(caught.value.message)
-    assert any("kernelPhysicalQty is below soldInPossessionQty" in v for v in inv.balance_invariant_violations(
-        {"kernelPhysicalQty": 3, "soldInPossessionQty": 4, "councilOnOrderQty": 0}
-    ))
-    assert any("soldInPossessionQty is negative" in v for v in inv.balance_invariant_violations(
-        {"kernelPhysicalQty": 5, "soldInPossessionQty": -1, "councilOnOrderQty": 0}
-    ))
-    assert any("councilOnOrderQty is negative" in v for v in inv.balance_invariant_violations(
-        {"kernelPhysicalQty": 5, "soldInPossessionQty": 0, "councilOnOrderQty": -1}
-    ))
+    assert any(
+        "kernelPhysicalQty is below soldInPossessionQty" in v
+        for v in inv.balance_invariant_violations(
+            {"kernelPhysicalQty": 3, "soldInPossessionQty": 4, "councilOnOrderQty": 0}
+        )
+    )
+    assert any(
+        "soldInPossessionQty is negative" in v
+        for v in inv.balance_invariant_violations(
+            {"kernelPhysicalQty": 5, "soldInPossessionQty": -1, "councilOnOrderQty": 0}
+        )
+    )
+    assert any(
+        "councilOnOrderQty is negative" in v
+        for v in inv.balance_invariant_violations(
+            {"kernelPhysicalQty": 5, "soldInPossessionQty": 0, "councilOnOrderQty": -1}
+        )
+    )
 
 
 def test_the_invariant_checkers_classify_a_stored_row_without_raising() -> None:
@@ -198,12 +209,13 @@ def test_the_invariant_checkers_classify_a_stored_row_without_raising() -> None:
     ``bool`` is never a count — a missing quantity reads as zero, which is what the
     §4.1 comparison then judges.
     """
-    assert inv.balance_invariant_violations(
-        {"kernelPhysicalQty": Decimal("9"), "soldInPossessionQty": Decimal("4"), "councilOnOrderQty": "3"}
-    ) == []
-    assert inv.balance_invariant_violations(
-        {"kernelPhysicalQty": True, "soldInPossessionQty": None}
-    ) == []
+    assert (
+        inv.balance_invariant_violations(
+            {"kernelPhysicalQty": Decimal("9"), "soldInPossessionQty": Decimal("4"), "councilOnOrderQty": "3"}
+        )
+        == []
+    )
+    assert inv.balance_invariant_violations({"kernelPhysicalQty": True, "soldInPossessionQty": None}) == []
     assert inv.custody_invariant_violations({"withScoutQty": "two"}) == []
 
 
@@ -253,16 +265,19 @@ def test_allocation_status_moves_once_and_never_back() -> None:
         assert f"from {current} to {target}" in str(caught.value.message)
     with pytest.raises(AppError):
         inv.normalize_allocation_status("DONE")
-    assert inv.build_event_inventory_allocation_item(
-        unit_campaign_id=CAMPAIGN,
-        product_id=PRODUCT,
-        show_and_sell_id=EVENT,
-        start_at="2026-11-07T08:00:00+00:00",
-        end_at="2026-11-07T12:00:00+00:00",
-        allocated_qty=4,
-        status=inv.ALLOCATION_CANCELLED,
-        now_iso=NOW,
-    )["status"] == "CANCELLED"
+    assert (
+        inv.build_event_inventory_allocation_item(
+            unit_campaign_id=CAMPAIGN,
+            product_id=PRODUCT,
+            show_and_sell_id=EVENT,
+            start_at="2026-11-07T08:00:00+00:00",
+            end_at="2026-11-07T12:00:00+00:00",
+            allocated_qty=4,
+            status=inv.ALLOCATION_CANCELLED,
+            now_iso=NOW,
+        )["status"]
+        == "CANCELLED"
+    )
 
 
 def test_custody_is_one_row_per_product_and_scout_and_names_its_campaign() -> None:
@@ -322,6 +337,25 @@ def test_a_movement_names_the_event_sale_order_or_scout_it_came_from() -> None:
         _movement(inv.INDIVIDUAL_FULFILL, kernel_physical_delta=-1, order_id="order-1")
     with pytest.raises(AppError):
         _movement(inv.RECEIPT, kernel_physical_delta=1, movement_type="DONATION")  # type: ignore[arg-type]
+
+
+def test_a_custody_movement_needs_the_scout_and_never_an_event_it_did_not_happen_at() -> None:
+    """§2.3 issue and return are custody acts, not event acts (CUST-01, CUST-06).
+
+    Stock goes from the Kernel's shelf to the Scout's trunk outside any Show & Sell,
+    so the Scout is the only source the row can honestly name. Demanding a
+    ``showAndSellId`` here would make the two movements that create and undo a custody
+    impossible to record, and inventing one would put a stock change behind an event
+    that never promised it.
+    """
+    issued = _movement(inv.SCOUT_ISSUE, kernel_physical_delta=-3, with_scout_delta=3, profile_id=SCOUT)
+    returned = _movement(inv.SCOUT_RETURN, kernel_physical_delta=3, with_scout_delta=-3, profile_id=SCOUT)
+    assert issued["profileId"] == SCOUT and "showAndSellId" not in issued
+    assert returned["profileId"] == SCOUT and "showAndSellId" not in returned
+    for kind in (inv.SCOUT_ISSUE, inv.SCOUT_RETURN):
+        with pytest.raises(AppError) as caught:
+            _movement(kind, kernel_physical_delta=-1, with_scout_delta=1)
+        assert "profileId" in str(caught.value.message)
 
 
 # --- validators -------------------------------------------------------------------
@@ -396,6 +430,30 @@ def test_the_position_product_list_is_capped_and_deduplicated() -> None:
         inv.normalize_product_ids([PRODUCT, PRODUCT])
     with pytest.raises(AppError):
         inv.normalize_product_ids(PRODUCT)
+
+
+def test_a_custody_return_batch_needs_a_product_and_a_positive_quantity_each() -> None:
+    """§2.3.2: a return is a batch of (product, quantity) pairs, and the batch is the atom.
+
+    An empty batch is a click that would write a marker and no stock movement; a
+    repeated product is two writes to one custody row, which one transaction cannot
+    do at all; a zero or negative quantity is an issue wearing a return's shape.
+    """
+    assert inv.normalize_return_items(
+        [{"productId": PRODUCT, "quantity": 2}, {"productId": SIBLING, "quantity": 3}]
+    ) == [
+        (PRODUCT, 2),
+        (SIBLING, 3),
+    ]
+    for batch in (None, [], PRODUCT, [{"productId": PRODUCT}], [{"quantity": 2}]):
+        with pytest.raises(AppError) as caught:
+            inv.normalize_return_items(batch)
+        assert caught.value.error_code is ErrorCode.INVALID_INPUT
+    for quantity in (0, -3, "two", None, True):
+        with pytest.raises(AppError, match="quantity"):
+            inv.normalize_return_items([{"productId": PRODUCT, "quantity": quantity}])
+    with pytest.raises(AppError, match="must not repeat"):
+        inv.normalize_return_items([{"productId": PRODUCT, "quantity": 1}, {"productId": PRODUCT, "quantity": 2}])
 
 
 # --- the derived quantities (§2.1.2) ----------------------------------------------
@@ -571,7 +629,16 @@ def test_every_position_quantity_is_computed_from_the_raw_rows(
 def test_no_derived_quantity_is_stored_on_any_row() -> None:
     """A stored copy is a counter a later write can forget, and a page would read it."""
     balance = _balance(10, on_order=4)
-    stored = set(balance) - {"pk", "sk", "entityType", "unitCampaignId", "productId", "version", "createdAt", "updatedAt"}
+    stored = set(balance) - {
+        "pk",
+        "sk",
+        "entityType",
+        "unitCampaignId",
+        "productId",
+        "version",
+        "createdAt",
+        "updatedAt",
+    }
     assert stored == set(inv.BALANCE_QUANTITY_ATTRIBUTES)
     for name in ("sellableKernelQty", "assignedOpenQty", "unassignedKernelQty", "assignmentOverageQty", "withScoutQty"):
         assert name not in balance
@@ -594,9 +661,12 @@ def _put(table: Any, item: Dict[str, Any]) -> None:
 def test_a_product_range_returns_only_that_product(inventory_table: Any) -> None:
     """The prefix ends in ``#`` so ``prod-1`` never answers with ``prod-10``."""
     for product in (PRODUCT, SIBLING):
-        _put(inventory_table, inv.build_inventory_balance_item(
-            unit_campaign_id=CAMPAIGN, product_id=product, kernel_physical_qty=7, now_iso=NOW
-        ))
+        _put(
+            inventory_table,
+            inv.build_inventory_balance_item(
+                unit_campaign_id=CAMPAIGN, product_id=product, kernel_physical_qty=7, now_iso=NOW
+            ),
+        )
     rows = inv.read_inventory_product_rows(CAMPAIGN, PRODUCT)
     assert [row["sk"] for row in rows] == [inv.balance_sk(PRODUCT)]
     assert inv.read_inventory_balance(CAMPAIGN, PRODUCT)["productId"] == PRODUCT
@@ -610,21 +680,34 @@ def test_sections_bucket_by_the_product_attribute_not_a_split_of_the_sort_key(in
     the numbers would add up to a total no Scout could sell.
     """
     for product in (PRODUCT, SIBLING):
-        _put(inventory_table, inv.build_inventory_balance_item(
-            unit_campaign_id=CAMPAIGN, product_id=product, kernel_physical_qty=4, now_iso=NOW
-        ))
-        _put(inventory_table, inv.build_scout_custody_balance_item(
-            unit_campaign_id=CAMPAIGN, product_id=product, profile_id=SCOUT, campaign_id="CAMPAIGN#devon", now_iso=NOW
-        ))
-        _put(inventory_table, inv.build_event_inventory_allocation_item(
-            unit_campaign_id=CAMPAIGN,
-            product_id=product,
-            show_and_sell_id=EVENT,
-            start_at="2026-11-07T08:00:00+00:00",
-            end_at="2026-11-07T12:00:00+00:00",
-            allocated_qty=2,
-            now_iso=NOW,
-        ))
+        _put(
+            inventory_table,
+            inv.build_inventory_balance_item(
+                unit_campaign_id=CAMPAIGN, product_id=product, kernel_physical_qty=4, now_iso=NOW
+            ),
+        )
+        _put(
+            inventory_table,
+            inv.build_scout_custody_balance_item(
+                unit_campaign_id=CAMPAIGN,
+                product_id=product,
+                profile_id=SCOUT,
+                campaign_id="CAMPAIGN#devon",
+                now_iso=NOW,
+            ),
+        )
+        _put(
+            inventory_table,
+            inv.build_event_inventory_allocation_item(
+                unit_campaign_id=CAMPAIGN,
+                product_id=product,
+                show_and_sell_id=EVENT,
+                start_at="2026-11-07T08:00:00+00:00",
+                end_at="2026-11-07T12:00:00+00:00",
+                allocated_qty=2,
+                now_iso=NOW,
+            ),
+        )
     _put(
         inventory_table,
         inv.build_inventory_movement_item(
@@ -661,9 +744,12 @@ def test_a_position_row_that_names_no_product_is_not_a_position(inventory_table:
     Bucketing it under an empty key would merge every malformed row of the campaign
     into one imaginary product and report its stock somewhere it cannot be traced.
     """
-    _put(inventory_table, inv.build_inventory_balance_item(
-        unit_campaign_id=CAMPAIGN, product_id=PRODUCT, kernel_physical_qty=4, now_iso=NOW
-    ))
+    _put(
+        inventory_table,
+        inv.build_inventory_balance_item(
+            unit_campaign_id=CAMPAIGN, product_id=PRODUCT, kernel_physical_qty=4, now_iso=NOW
+        ),
+    )
     for sk, entity in (
         (inv.balance_sk("orphan"), inv.BALANCE_ENTITY_TYPE),
         (inv.custody_sk("orphan", SCOUT), inv.CUSTODY_ENTITY_TYPE),
@@ -708,7 +794,9 @@ def test_a_history_read_applies_every_filter_it_was_given(inventory_table: Any) 
     )
     _put(
         inventory_table,
-        inv.build_inventory_balance_item(unit_campaign_id=CAMPAIGN, product_id=PRODUCT, kernel_physical_qty=3, now_iso=NOW),
+        inv.build_inventory_balance_item(
+            unit_campaign_id=CAMPAIGN, product_id=PRODUCT, kernel_physical_qty=3, now_iso=NOW
+        ),
     )
 
     campaign_wide = inv.list_inventory_movements(CAMPAIGN)
@@ -739,3 +827,205 @@ def test_a_history_read_applies_every_filter_it_was_given(inventory_table: Any) 
         end_at="2026-11-07T23:59:59+00:00",
     )
     assert [row["movementId"] for row in combined] == ["mov-1"]
+
+
+# --- custody reads and conditional custody writes (§2.3) --------------------------
+
+
+def _transact(*actions: tuple[str, Dict[str, Any]]) -> None:
+    """Run model-built actions through the real transaction API.
+
+    The actions are the shapes the resolvers stage, and moto evaluates conditions and
+    versions: this is where a floor that should cancel is proven to cancel, which no
+    pure-python assertion can show. The plain client is required, not
+    ``table.meta.client`` — the staged items are already wire-form, and the service
+    resource's client re-encodes them as maps.
+    """
+    items = [{action: dict(params)} for action, params in actions]
+    get_dynamodb_client().transact_write_items(TransactItems=items)
+
+
+def test_a_balance_floor_cancels_the_request_that_read_the_last_kernel(inventory_table: Any) -> None:
+    """§4.1 as DynamoDB enforces it: the loser of the race for the last unit writes nothing.
+
+    The pre-read check buys the actionable message; the version pin plus the quantity
+    floor is what makes "the last Kernel" a fact the transaction re-checks. The
+    survivor is the request that still held the floor, and the shelf never goes below it.
+    """
+    _put(
+        inventory_table,
+        inv.build_inventory_balance_item(
+            unit_campaign_id=CAMPAIGN, product_id=PRODUCT, kernel_physical_qty=1, now_iso=NOW
+        ),
+    )
+    stale = inv.read_inventory_balance(CAMPAIGN, PRODUCT)
+    assert stale is not None
+
+    def stage(delta: int, version: int) -> None:
+        _transact(
+            inv.inventory_balance_delta_action(
+                unit_campaign_id=CAMPAIGN,
+                product_id=PRODUCT,
+                existing=stale,
+                expected_version=version,
+                kernel_physical_delta=delta,
+                now_iso=NOW,
+            )
+        )
+
+    stage(-1, 1)
+    assert inv.read_inventory_balance(CAMPAIGN, PRODUCT)["kernelPhysicalQty"] == 0
+    with pytest.raises(ClientError) as caught:
+        stage(-1, 1)
+    assert caught.value.response["Error"]["Code"] == "TransactionCanceledException"
+    assert "ConditionalCheckFailed" in str(caught.value)
+    assert inv.read_inventory_balance(CAMPAIGN, PRODUCT)["kernelPhysicalQty"] == 0
+
+
+def test_a_custody_row_reads_back_and_bounces_on_its_version(inventory_table: Any) -> None:
+    """The custody read a write conditions on, and the version pin that serializes it."""
+    _put(
+        inventory_table,
+        inv.build_scout_custody_balance_item(
+            unit_campaign_id=CAMPAIGN,
+            product_id=PRODUCT,
+            profile_id=SCOUT,
+            campaign_id="CAMPAIGN#devon-fixture",
+            with_scout_qty=3,
+            now_iso=NOW,
+        ),
+    )
+    row = inv.read_scout_custody(CAMPAIGN, PRODUCT, SCOUT)
+    assert row is not None
+    assert (row["withScoutQty"], row["version"]) == (3, 1)
+    assert inv.read_scout_custody(CAMPAIGN, PRODUCT, "PROFILE#prof-nobody") is None
+
+    def change(existing: Any, version: int, delta: int) -> None:
+        _transact(
+            inv.scout_custody_delta_action(
+                unit_campaign_id=CAMPAIGN,
+                product_id=PRODUCT,
+                profile_id=SCOUT,
+                existing=existing,
+                expected_version=version,
+                with_scout_delta=delta,
+                now_iso=NOW,
+            )
+        )
+
+    change(row, 1, -2)
+    after = inv.read_scout_custody(CAMPAIGN, PRODUCT, SCOUT)
+    assert (after["withScoutQty"], after["version"]) == (1, 2)
+
+    # The stale read from before that write is a request that no longer holds those Kernels.
+    with pytest.raises(ClientError) as caught:
+        change(row, 1, -1)
+    assert caught.value.response["Error"]["Code"] == "TransactionCanceledException"
+    assert inv.read_scout_custody(CAMPAIGN, PRODUCT, SCOUT)["withScoutQty"] == 1
+
+
+def test_a_custody_floor_cancels_the_second_return_of_the_same_kernels(inventory_table: Any) -> None:
+    """CUST-04: With Scout cannot go negative, so two returns of three cannot both land."""
+    _put(
+        inventory_table,
+        inv.build_scout_custody_balance_item(
+            unit_campaign_id=CAMPAIGN,
+            product_id=PRODUCT,
+            profile_id=SCOUT,
+            campaign_id="CAMPAIGN#devon-fixture",
+            with_scout_qty=3,
+            now_iso=NOW,
+        ),
+    )
+    held = inv.read_scout_custody(CAMPAIGN, PRODUCT, SCOUT)
+
+    def return_three() -> None:
+        _transact(
+            inv.scout_custody_delta_action(
+                unit_campaign_id=CAMPAIGN,
+                product_id=PRODUCT,
+                profile_id=SCOUT,
+                existing=held,
+                expected_version=1,
+                with_scout_delta=-3,
+                now_iso=NOW,
+            )
+        )
+
+    return_three()
+    with pytest.raises(ClientError) as caught:
+        return_three()
+    assert caught.value.response["Error"]["Code"] == "TransactionCanceledException"
+    assert inv.read_scout_custody(CAMPAIGN, PRODUCT, SCOUT)["withScoutQty"] == 0
+
+
+def test_the_first_custody_row_for_a_product_is_a_conditional_put(inventory_table: Any) -> None:
+    """Two concurrent first issues to one Scout cannot both start from zero."""
+    item = inv.build_scout_custody_balance_item(
+        unit_campaign_id=CAMPAIGN,
+        product_id=PRODUCT,
+        profile_id=SCOUT,
+        campaign_id="CAMPAIGN#devon-fixture",
+        with_scout_qty=2,
+        now_iso=NOW,
+    )
+    action = inv.put_scout_custody_action(item)
+    assert action[0] == "Put"
+    _transact(action)
+    assert inv.read_scout_custody(CAMPAIGN, PRODUCT, SCOUT)["withScoutQty"] == 2
+    with pytest.raises(ClientError) as caught:
+        _transact(action)
+    assert caught.value.response["Error"]["Code"] == "TransactionCanceledException"
+    assert inv.read_scout_custody(CAMPAIGN, PRODUCT, SCOUT)["withScoutQty"] == 2
+
+
+def test_a_campaign_custody_read_sees_only_custody_rows_and_the_filter_it_asked_for(inventory_table: Any) -> None:
+    """The admin board's read: Scout rows only, filtered by Scout and by product."""
+    for row in (
+        inv.build_scout_custody_balance_item(
+            unit_campaign_id=CAMPAIGN,
+            product_id=PRODUCT,
+            profile_id=SCOUT,
+            campaign_id="CAMPAIGN#devon-fixture",
+            with_scout_qty=4,
+            now_iso=NOW,
+        ),
+        inv.build_scout_custody_balance_item(
+            unit_campaign_id=CAMPAIGN,
+            product_id=PRODUCT,
+            profile_id=OTHER_SCOUT,
+            campaign_id="CAMPAIGN#riley-fixture",
+            with_scout_qty=1,
+            now_iso=NOW,
+        ),
+        inv.build_scout_custody_balance_item(
+            unit_campaign_id=CAMPAIGN,
+            product_id=SIBLING,
+            profile_id=SCOUT,
+            campaign_id="CAMPAIGN#devon-fixture",
+            with_scout_qty=2,
+            now_iso=NOW,
+        ),
+        inv.build_inventory_balance_item(
+            unit_campaign_id=CAMPAIGN, product_id=PRODUCT, kernel_physical_qty=10, now_iso=NOW
+        ),
+        _movement(inv.SCOUT_ISSUE, kernel_physical_delta=-4, with_scout_delta=4, profile_id=SCOUT),
+    ):
+        _put(inventory_table, row)
+
+    every = inv.campaign_custody_rows(CAMPAIGN)
+    assert [(row["profileId"], row["productId"], row["withScoutQty"]) for row in every] == [
+        (SCOUT, PRODUCT, 4),
+        (OTHER_SCOUT, PRODUCT, 1),
+        (SCOUT, SIBLING, 2),
+    ]
+    assert [row["profileId"] for row in inv.campaign_custody_rows(CAMPAIGN, profile_id=SCOUT)] == [SCOUT, SCOUT]
+    assert [
+        (row["profileId"], row["productId"]) for row in inv.campaign_custody_rows(CAMPAIGN, product_id=PRODUCT)
+    ] == [
+        (SCOUT, PRODUCT),
+        (OTHER_SCOUT, PRODUCT),
+    ]
+    assert inv.campaign_custody_rows(CAMPAIGN, profile_id=SCOUT, product_id=SIBLING)[0]["withScoutQty"] == 2
+    assert inv.campaign_custody_rows(CAMPAIGN, profile_id="PROFILE#prof-nobody") == []
+    assert inv.campaign_custody_rows("uc-nothing-here") == []

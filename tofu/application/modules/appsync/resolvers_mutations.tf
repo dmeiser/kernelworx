@@ -1140,3 +1140,35 @@ resource "aws_appsync_resolver" "adjust_council_on_order" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Stage 2 Scout custody writes (§2.3.1, §2.3.2). The whole write is one conditional
+# TransactWriteItems inside the UnitOperationsDS handler (balance + custody + movement +
+# idempotency marker), so the resolver stays a thin unit invoke like the other Stage 2
+# mutations: no pipeline, no second data source, nothing for a partial failure to drift.
+resource "aws_appsync_resolver" "issue_stock_to_scout" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "issueStockToScout"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "return_stock_from_scout" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "returnStockFromScout"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

@@ -58,6 +58,8 @@ QUERY_FIELDS = {
     "unitCampaignRoster",
     "inventoryPositions",
     "inventoryMovements",
+    "scoutCustodyBalances",
+    "myScoutCustody",
 }
 MUTATION_FIELDS = {
     "createUnit",
@@ -73,6 +75,8 @@ MUTATION_FIELDS = {
     "recordInventoryReceipt",
     "adjustInventory",
     "adjustCouncilOnOrder",
+    "issueStockToScout",
+    "returnStockFromScout",
 }
 
 
@@ -248,13 +252,13 @@ def test_unit_operations_datasource_is_lambda_backed() -> None:
     assert "unit-operations" in str(config["function_arn"]), "the data source must invoke the unit-operations Lambda"
 
 
-def test_all_twenty_four_unit_fields_are_resolved_on_that_datasource() -> None:
-    """Eleven queries and thirteen mutations, Stage 1 and Stage 2 alike.
+def test_all_twenty_eight_unit_fields_are_resolved_on_that_datasource() -> None:
+    """Thirteen queries and fifteen mutations, Stage 1 and Stage 2 alike.
 
-    Stage 2 adds two inventory reads and three balance writes to the same data
-    source: tenant isolation and the Unit Admin check live in the one handler, so a
-    new field is a new name in its router, and an unbound SDL field answers nothing
-    on ``dev``.
+    Stage 2 adds the inventory and custody reads and the balance and custody writes to
+    the same data source: tenant isolation, the Unit Admin check, and the Profile share
+    check all live in the one handler, so a new field is a new name in its router, and an
+    unbound SDL field answers nothing on ``dev``.
     """
     bound: dict[str, str] = {}
     for doc in _resolver_docs():
@@ -273,4 +277,4 @@ def test_all_twenty_four_unit_fields_are_resolved_on_that_datasource() -> None:
         assert f"Query:{field}" in bound, f"Query.{field} has no resolver on UnitOperationsDS"
     for field in sorted(MUTATION_FIELDS):
         assert f"Mutation:{field}" in bound, f"Mutation.{field} has no resolver on UnitOperationsDS"
-    assert len(bound) == 24, f"expected exactly the 24 Unit-tenant resolvers, got {sorted(bound)}"
+    assert len(bound) == 28, f"expected exactly the 28 Unit-tenant resolvers, got {sorted(bound)}"
