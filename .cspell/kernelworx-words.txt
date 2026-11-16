@@ -79,6 +79,7 @@ clickjacking
 clsx
 cmdline
 codegen
+COarb
 Cognito
 cognitoonly
 componentkit
@@ -91,6 +92,7 @@ Cooldown
 cooldown
 coppa
 costEstimator
+CREAT
 creatorMessage
 ctype
 Cub
@@ -104,6 +106,7 @@ Deduplicate
 deepcopy
 defval
 delenv
+Diu
 Delete
 Deregister
 designmd
@@ -151,6 +154,7 @@ exfiltration
 exportable
 falsey
 favicons
+fldubai
 fieldset
 fileName
 fileobj
@@ -233,6 +237,7 @@ keyId
 keyout
 keypair
 keyProvider
+kwpod
 kwonlyargs
 labelId
 Landing
@@ -250,6 +255,8 @@ lockup
 lookup
 mailto
 Maïs
+maildrop
+maxxspace
 manageScout
 marketing
 materialise
@@ -387,6 +394,7 @@ sameSite
 Scout
 Scouting
 scoutsPage
+sDiuCOarb
 scrollable
 Search
 secondaryText
@@ -532,6 +540,7 @@ wordmark
 worktree
 worx
 wrongpassword
+WRONLY
 wxyz
 xlarge
 xlink
