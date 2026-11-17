@@ -595,3 +595,8 @@ shlex
 startswith
 xdist
 zoneinfo
+pytestconfig
+testsfailed
+libx
+movflags
+faststart
