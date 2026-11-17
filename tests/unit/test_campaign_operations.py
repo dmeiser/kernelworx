@@ -12,8 +12,10 @@ from src.handlers.campaign_operations import (
     _verify_order_keys_deleted,
     batch_delete_keys,
     delete_campaign_orders,
+    delete_fulfillments_for_orders,
     delete_order_keys,
     delete_orders_for_campaign,
+    fulfillment_keys_for_orders,
 )
 from src.utils.errors import AppError, ErrorCode
 from tests.unit.fixtures import batch_delete_table, unprocessed_batches
@@ -770,3 +772,89 @@ class TestDeleteOrdersForCampaign:
             mock_delete.assert_called_once()
             mock_verify.assert_called_once_with(orders)
             mock_logger.info.assert_called_once()
+
+
+class TestFulfillmentKeysForOrders:
+    """ARCH-1: the delete sweep reads only key pairs, from the base table, per Order."""
+
+    def test_one_strongly_consistent_partition_read_per_order(self) -> None:
+        """Test that each Order is read from the base table with ConsistentRead."""
+        row = {"pk": "ORDER#1", "sk": "FULFILLMENT#2024-10-02T00:00:00+00:00#ful-1"}
+        with (
+            patch("src.handlers.campaign_operations.tables"),
+            patch("src.handlers.campaign_operations.query_all_items", return_value=[row]) as mock_query,
+        ):
+            keys = fulfillment_keys_for_orders(["ORDER#1", "ORDER#2"])
+
+        assert keys == [{"pk": "ORDER#1", "sk": row["sk"]}] * 2
+        assert mock_query.call_count == 2
+        for call in mock_query.call_args_list:
+            params = call.args[1]
+            assert params["ConsistentRead"] is True
+            assert params["KeyConditionExpression"] == "pk = :pk"
+
+    def test_a_row_without_its_key_pair_is_never_handed_to_the_batch_writer(self) -> None:
+        """Test that a malformed row is skipped rather than sent as an incomplete key.
+
+        DynamoDB rejects the whole BatchWriteItem for one key missing `sk`, which would
+        strand every sibling record of the sweep, so the sweep keeps only complete pairs.
+        """
+        rows = [{"pk": "ORDER#1"}, {"sk": "FULFILLMENT#x"}, "not-a-row", {"pk": "ORDER#1", "sk": "FULFILLMENT#a"}]
+        with (
+            patch("src.handlers.campaign_operations.tables"),
+            patch("src.handlers.campaign_operations.query_all_items", return_value=rows),
+        ):
+            keys = fulfillment_keys_for_orders(["ORDER#1"])
+
+        assert keys == [{"pk": "ORDER#1", "sk": "FULFILLMENT#a"}]
+
+
+class TestDeleteFulfillmentsForOrders:
+    """ARCH-1: the sweep deletes the children, then refuses to call it done while any remain."""
+
+    def test_orders_without_history_touch_nothing(self) -> None:
+        """Test that an empty sweep does not open a batch writer."""
+        with (
+            patch("src.handlers.campaign_operations.tables"),
+            patch("src.handlers.campaign_operations.query_all_items", return_value=[]),
+            patch("src.handlers.campaign_operations.batch_delete_keys") as mock_delete,
+        ):
+            assert delete_fulfillments_for_orders(["ORDER#1"]) == 0
+
+        mock_delete.assert_not_called()
+
+    def test_the_children_are_deleted_and_counted(self) -> None:
+        """Test the sweep -> batch delete -> verify path reports the deleted count."""
+        keys = [{"pk": "ORDER#1", "sk": "FULFILLMENT#2024-10-02T00:00:00+00:00#ful-1"}]
+        mock_logger = MagicMock()
+        with (
+            patch("src.handlers.campaign_operations.tables"),
+            patch("src.handlers.campaign_operations.query_all_items", side_effect=[keys, []]) as mock_query,
+            patch("src.handlers.campaign_operations.batch_delete_keys", return_value=1) as mock_delete,
+        ):
+            assert delete_fulfillments_for_orders(["ORDER#1"], logger=mock_logger) == 1
+
+        assert mock_query.call_count == 2, "the sweep verifies the rows it deleted are gone"
+        mock_delete.assert_called_once()
+        assert mock_delete.call_args.args[1] == keys
+        assert mock_delete.call_args.args[2] == ["pk", "sk"]
+        mock_logger.info.assert_called_once()
+
+    def test_history_that_survives_the_batch_delete_stops_the_cascade(self) -> None:
+        """Test that a record still present after the batch delete is a hard stop.
+
+        Silent survival here is the same defect one level down from the one being fixed:
+        the cascade would report success while leaving behind an orphan no surface can
+        reverse or read, next to an inventory movement that already moved stock.
+        """
+        keys = [{"pk": "ORDER#1", "sk": "FULFILLMENT#2024-10-02T00:00:00+00:00#ful-1"}]
+        with (
+            patch("src.handlers.campaign_operations.tables"),
+            patch("src.handlers.campaign_operations.query_all_items", side_effect=[keys, keys]),
+            patch("src.handlers.campaign_operations.batch_delete_keys", return_value=1),
+        ):
+            with pytest.raises(AppError) as excinfo:
+                delete_fulfillments_for_orders(["ORDER#1"])
+
+        assert excinfo.value.error_code == ErrorCode.CONFLICT
+        assert "1 fulfillment record(s) are still present" in excinfo.value.message
