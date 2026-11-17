@@ -317,6 +317,10 @@ export type GqlCreateOrderInput = {
   customerName: Scalars['String']['input'];
   /** The customer's phone number. */
   customerPhone?: InputMaybe<Scalars['String']['input']>;
+  /** How this order draws on Scout custody. Absent means NONE: an ordinary order that consumes no custody and writes no fulfillment record. CONSUME_SCOUT_CUSTODY is a door-to-door sale, and insufficient custody never blocks it (§10.1). */
+  fulfillmentMode?: InputMaybe<GqlOrderFulfillmentMode>;
+  /** 1-128 character key that makes a retried request one request. Required when fulfillmentMode is CONSUME_SCOUT_CUSTODY, because that is the only mode that moves stock; recommended for every new order (§10.1). */
+  idempotencyKey?: InputMaybe<Scalars['String']['input']>;
   /** The products and quantities to order; prices are looked up from the campaign's catalog. */
   lineItems: Array<GqlLineItemInput>;
   /** Free-text notes about the order. */
@@ -1185,6 +1189,13 @@ export type GqlOrderFulfillmentConnection = {
   /** Pagination state for this read. */
   pageInfo: GqlPageInfo;
 };
+
+/** How a new individual Order draws on Scout custody at creation (§10.1). Absent means NONE, which is every order written before Wave 3. */
+export type GqlOrderFulfillmentMode =
+  /** A door-to-door sale: consume min(orderedQty, availableWithScoutQty) per line out of the Scout's custody, never blocking for insufficient custody and never decrementing Kernel stock (§10.2). */
+  | 'CONSUME_SCOUT_CUSTODY'
+  /** An ordinary order: no custody is consumed and no fulfillment record is written. */
+  | 'NONE';
 
 /** Direction of an OrderFulfillment record: a fulfillment or its reversal (§5.19). Quantity is always positive; this field carries the direction. */
 export type GqlOrderFulfillmentRecordType =

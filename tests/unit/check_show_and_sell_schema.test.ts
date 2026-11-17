@@ -685,6 +685,14 @@ const SS3_INPUT_FIELDS: Record<string, string[]> = {
 
 const SS3_MUTATION_FIELDS: string[] = ["fulfillIndividualOrderLine", "reverseIndividualOrderFulfillment"];
 
+// §2.4.2 extends the EXISTING createOrder rather than adding a second order mutation, so
+// the mode enum and the two new input fields are pinned against the input's full field
+// set: a mode that could be spelled any of four ways, or a key the resolver could not
+// echo back, both make a retried sale consume custody twice.
+const SS3_MODE_ENUM = "OrderFulfillmentMode";
+const SS3_MODE_VALUES: string[] = ["NONE", "CONSUME_SCOUT_CUSTODY"];
+const SS3_CREATE_ORDER_NEW_FIELDS: string[] = ["fulfillmentMode", "idempotencyKey"];
+
 describe("Show & Sell Stage 3 order-fulfillment SDL (schema.graphql)", () => {
   test("the two fulfillment enums carry exactly the DATA_MODEL §5.19 values", () => {
     for (const [name, values] of Object.entries(SS3_ENUMS)) {
@@ -794,8 +802,41 @@ describe("Show & Sell Stage 3 order-fulfillment SDL (schema.graphql)", () => {
     expect(items!.text, "the audit page carries no participant projection").not.toMatch(/Participant/);
   });
 
+  test("§2.4.2: createOrder gains the custody mode and its key, and nothing else (§10.1)", () => {
+    const mode = definition(SS3_MODE_ENUM);
+    expect(mode.kind, `${SS3_MODE_ENUM} must be an enum`).toBe("enum");
+    const found = mode.body.split("\n").map((l) => l.trim()).filter((l) => /^[A-Z][A-Z0-9_]*$/.test(l));
+    expect(found, `${SS3_MODE_ENUM} values`).toEqual(SS3_MODE_VALUES);
+
+    const input = definition("CreateOrderInput");
+    const fields = fieldsOf(input);
+    const names = fieldNameSet(input);
+    for (const name of SS3_CREATE_ORDER_NEW_FIELDS) {
+      expect(names.has(name), `CreateOrderInput.${name} is missing`).toBe(true);
+      // Both optional: an absent mode is NONE, which is every Order this pipeline wrote
+      // before Wave 3, and a NONE order needs no key because it moves no stock.
+      const field = fields.find((f) => f.name === name)!;
+      expect(field.text, `${name} is optional`).not.toMatch(/:\s*\w+!\s*$/);
+    }
+    expect(fields.find((f) => f.name === "fulfillmentMode")!.text).toMatch(/fulfillmentMode\s*:\s*OrderFulfillmentMode/);
+    expect(fields.find((f) => f.name === "idempotencyKey")!.text).toMatch(/idempotencyKey\s*:\s*String/);
+
+    // The mode is the only new decision the caller makes. Nothing here lets a caller name
+    // the scope the sale consumes from, the amount it consumes, or the Scout: the guard
+    // read answers whose campaign this is and min(ordered, available) decides the rest.
+    for (const forbidden of ["unitId", "unitCampaignId", "consumedQuantity", "source", "expectedVersion"]) {
+      expect(names.has(forbidden), `CreateOrderInput.${forbidden} would let the caller choose it`).toBe(false);
+    }
+
+    // createOrder keeps its existing shape: one input, the Order payload it had. A second
+    // custody mutation would be a second order write owner, and §2.4 names one.
+    const mutation = rootFieldByName("Mutation", "createOrder")!;
+    expect(mutation.text, "createOrder takes CreateOrderInput").toMatch(/input\s*:\s*CreateOrderInput!/);
+    expect(returnTypeName(mutation.text), "createOrder still answers the Order it wrote").toBe("Order");
+  });
+
   test("AUTH: no Stage 3 fulfillment type, input, enum, or field carries an auth directive", () => {
-    for (const name of [...Object.keys(SS3_TYPE_FIELDS), ...Object.keys(SS3_INPUT_FIELDS), ...Object.keys(SS3_ENUMS)]) {
+    for (const name of [...Object.keys(SS3_TYPE_FIELDS), ...Object.keys(SS3_INPUT_FIELDS), ...Object.keys(SS3_ENUMS), SS3_MODE_ENUM]) {
       expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
     }
     for (const name of [...SS3_MUTATION_FIELDS, "orderFulfillments"]) {

@@ -51,3 +51,140 @@ describe('get_membership_guard_for_order_fn response', () => {
         );
     });
 });
+
+// §2.4.2 — the same step now also reads the custody rows and the idempotency marker for a
+// door-to-door sale. The shape of this read is the constraint that decides the whole
+// design: AppSync allows one datastore call per pipeline function and createOrder's
+// resolver already carries the 10 functions AppSync allows, so the sale's three reads ride
+// ONE cross-table BatchGetItem rather than adding a step. An order that is not a sale must
+// keep issuing exactly the GetItem above.
+describe('get_membership_guard_for_order_fn request: CONSUME_SCOUT_CUSTODY read', () => {
+    const ACCOUNT = '11111111-1111-4111-8111-111111111111';
+    const UNIT_CAMPAIGNS_TABLE = '${unit_campaigns_table_name}';
+    const INVENTORY_TABLE = '${inventory_table_name}';
+    const FULFILLMENTS_TABLE = '${order_fulfillments_table_name}';
+
+    function saleCtx(options) {
+        const opts = options || {};
+        const stash = {
+            campaignId: 'CAMPAIGN#c1',
+            profileId: 'PROFILE#p1',
+            campaign: { profileId: 'PROFILE#p1', unitId: 'UNIT#pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' }
+        };
+        if (opts.unlinked === true) {
+            delete stash.campaign.unitCampaignId;
+        }
+        const input = Object.assign(
+            {
+                profileId: 'PROFILE#p1',
+                campaignId: 'CAMPAIGN#c1',
+                fulfillmentMode: 'CONSUME_SCOUT_CUSTODY',
+                idempotencyKey: 'sale-1',
+                lineItems: [{ productId: 'PROD#1', quantity: 4 }, { productId: 'PROD#2', quantity: 1 }, { productId: 'PROD#1', quantity: 2 }]
+            },
+            opts.input || {}
+        );
+        return { args: { input }, identity: { claims: { sub: ACCOUNT } }, stash };
+    }
+
+    it('reads guard, custody and marker in one strongly consistent call', () => {
+        const result = request(saleCtx());
+        assert.strictEqual(result.operation, 'BatchGetItem');
+        const tableNames = Object.keys(result.tables);
+        assert.deepStrictEqual(tableNames, [UNIT_CAMPAIGNS_TABLE, INVENTORY_TABLE, FULFILLMENTS_TABLE]);
+        for (const name of tableNames) {
+            assert.strictEqual(result.tables[name].consistentRead, true, `${name} must be strong: the sale's scope and version pins are both facts about now`);
+        }
+        assert.deepStrictEqual(result.tables[UNIT_CAMPAIGNS_TABLE].keys, [{ pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD' }]);
+        assert.deepStrictEqual(result.tables[INVENTORY_TABLE].keys, [
+            { pk: 'UNIT_CAMPAIGN#uc-pack-3149-fall-2026', sk: 'PRODUCT#PROD#1#CUSTODY#PROFILE#p1' },
+            { pk: 'UNIT_CAMPAIGN#uc-pack-3149-fall-2026', sk: 'PRODUCT#PROD#2#CUSTODY#PROFILE#p1' }
+        ]);
+        assert.deepStrictEqual(result.tables[FULFILLMENTS_TABLE].keys, [{ pk: 'IDEM#' + ACCOUNT + '#createOrder#CAMPAIGN%23c1', sk: 'IDEM#sale-1' }]);
+    });
+
+    it('stashes what the write step must re-check before it consumes anything', () => {
+        const ctx = saleCtx();
+        request(ctx);
+        assert.deepStrictEqual(ctx.stash.custodySaleRead, {
+            unitCampaignId: 'uc-pack-3149-fall-2026',
+            profileId: 'PROFILE#p1',
+            idempotencyKey: 'sale-1'
+        });
+    });
+
+    it('reads no custody for a campaign that has never been joined, and still reads the marker', () => {
+        // A campaign with no link has no Unit Campaign to hold custody, so the inventory
+        // table simply is not part of the call.
+        const result = request(saleCtx({ unlinked: true }));
+        assert.deepStrictEqual(Object.keys(result.tables), [UNIT_CAMPAIGNS_TABLE, FULFILLMENTS_TABLE]);
+    });
+
+    it('refuses a sale with no key, before reading a marker it cannot name', () => {
+        assert.throws(() => request(saleCtx({ input: { idempotencyKey: null } })), /INVALID_INPUT: idempotencyKey is required when fulfillmentMode = CONSUME_SCOUT_CUSTODY/);
+    });
+
+    it('refuses a sale with no session, because the marker is keyed by the caller', () => {
+        const ctx = saleCtx();
+        delete ctx.identity;
+        assert.throws(() => request(ctx), /UNAUTHORIZED: A signed-in account is required to place a custody sale/);
+    });
+
+    it('leaves a NONE-mode order on the single GetItem it used before', () => {
+        const result = request({ args: { input: { fulfillmentMode: null } }, stash: { campaignId: 'CAMPAIGN#c1' } });
+        assert.strictEqual(result.operation, 'GetItem');
+    });
+});
+
+describe('get_membership_guard_for_order_fn response: batched answer', () => {
+    const UNIT_CAMPAIGNS_TABLE = '${unit_campaigns_table_name}';
+    const INVENTORY_TABLE = '${inventory_table_name}';
+    const FULFILLMENTS_TABLE = '${order_fulfillments_table_name}';
+
+    function batchCtx(data) {
+        return { stash: { custodySaleRead: { unitCampaignId: 'uc-1', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1' } }, result: { data } };
+    }
+
+    it('splits the batch into guard, custody rows and marker', () => {
+        const ctx = batchCtx({
+            [UNIT_CAMPAIGNS_TABLE]: [{ pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-1' }],
+            [INVENTORY_TABLE]: [{ productId: 'PROD#1', withScoutQty: 7, version: 4 }],
+            [FULFILLMENTS_TABLE]: [{ pk: 'IDEM#a#createOrder#CAMPAIGN%23c1', sk: 'IDEM#sale-1', status: 'COMPLETED' }]
+        });
+        const returned = response(ctx);
+        const stash = ctx.stash;
+        assert.strictEqual(returned, 'uc-1');
+        assert.strictEqual(stash.membershipGuard.activeUnitCampaignId, 'uc-1');
+        assert.deepStrictEqual(stash.custodyRows, [{ productId: 'PROD#1', withScoutQty: 7, version: 4 }]);
+        assert.strictEqual(stash.idempotencyMarker.status, 'COMPLETED');
+    });
+
+    it('reads a missing guard, custody and marker as none of each, never an error', () => {
+        // BatchGetItem omits what it did not find, which is exactly an unjoined campaign,
+        // a Scout holding nothing, and a first attempt at this key.
+        const ctx = batchCtx({});
+        assert.strictEqual(response(ctx), null);
+        const stash = ctx.stash;
+        assert.strictEqual(stash.membershipGuard, null);
+        assert.deepStrictEqual(stash.custodyRows, []);
+        assert.strictEqual(stash.idempotencyMarker, null);
+    });
+
+    it('keeps the plain GetItem shape for a NONE-mode order', () => {
+        const stash = {};
+        response({ stash, result: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-9' } });
+        assert.strictEqual(stash.activeUnitCampaignId, 'uc-9');
+        assert.strictEqual(stash.custodyRows, undefined);
+        assert.strictEqual(stash.idempotencyMarker, undefined);
+    });
+
+    it('surfaces a batch failure instead of reading it as no join', () => {
+        assert.throws(() => batchThrowing(), /THROTTLED: throttled/);
+    });
+
+    function batchThrowing() {
+        const ctx = batchCtx({});
+        ctx.error = { message: 'throttled', type: 'THROTTLED' };
+        return response(ctx);
+    }
+});

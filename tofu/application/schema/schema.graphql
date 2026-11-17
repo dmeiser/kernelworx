@@ -368,6 +368,14 @@ enum OrderFulfillmentSource {
   EXTERNAL_COUNCIL
 }
 
+"""How a new individual Order draws on Scout custody at creation (§10.1). Absent means NONE, which is every order written before Wave 3."""
+enum OrderFulfillmentMode {
+  """An ordinary order: no custody is consumed and no fulfillment record is written."""
+  NONE
+  """A door-to-door sale: consume min(orderedQty, availableWithScoutQty) per line out of the Scout's custody, never blocking for insufficient custody and never decrementing Kernel stock (§10.2)."""
+  CONSUME_SCOUT_CUSTODY
+}
+
 """Direction of an OrderFulfillment record: a fulfillment or its reversal (§5.19). Quantity is always positive; this field carries the direction."""
 enum OrderFulfillmentRecordType {
   """Positive fulfillment of an Order line."""
@@ -814,6 +822,10 @@ input CreateOrderInput {
   lineItems: [LineItemInput!]!
   """Free-text notes about the order."""
   notes: String
+  """How this order draws on Scout custody. Absent means NONE: an ordinary order that consumes no custody and writes no fulfillment record. CONSUME_SCOUT_CUSTODY is a door-to-door sale, and insufficient custody never blocks it (§10.1)."""
+  fulfillmentMode: OrderFulfillmentMode
+  """1-128 character key that makes a retried request one request. Required when fulfillmentMode is CONSUME_SCOUT_CUSTODY, because that is the only mode that moves stock; a NONE order accepts the field and records nothing for it, because it has no stock effect to replay (§10.1)."""
+  idempotencyKey: String
 }
 
 """Input for updateOrder. Only the provided fields are changed; providing lineItems replaces all existing line items."""

@@ -133,7 +133,13 @@ resource "aws_appsync_function" "get_membership_guard_for_order" {
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/get_membership_guard_for_order_fn.js")
+  # templatefile() because §2.4.2 turned this single GetItem into a cross-table
+  # BatchGetItem for a custody sale, and BatchGetItem names every table it reads.
+  code = templatefile("${local.js_resolvers_dir}/get_membership_guard_for_order_fn.js", {
+    unit_campaigns_table_name     = var.dynamodb_table_names.unit_campaigns
+    inventory_table_name          = var.dynamodb_table_names.inventory
+    order_fulfillments_table_name = var.dynamodb_table_names.order_fulfillments
+  })
 }
 
 # Retired by the ARCH-1 fold: the guard row carries the parent Unit beside the
@@ -171,9 +177,15 @@ resource "aws_appsync_function" "create_order" {
   # field must be the REAL AWS table name (AppSync takes it literally rather
   # than defaulting to the datasource's table - same lesson as
   # create_public_order_fn.js above).
+  # §2.4.2 adds two more: a door-to-door sale's custody decrement and its movement are
+  # TransactWriteItems actions on the inventory table, and its fulfillment records and
+  # idempotency marker are actions on the order_fulfillments table. AppSync takes each
+  # item's `table` literally, so all four names must be real.
   code = templatefile("${local.js_resolvers_dir}/create_order_fn.js", {
-    orders_table_name         = var.dynamodb_table_names.orders
-    unit_campaigns_table_name = var.dynamodb_table_names.unit_campaigns
+    orders_table_name             = var.dynamodb_table_names.orders
+    unit_campaigns_table_name     = var.dynamodb_table_names.unit_campaigns
+    inventory_table_name          = var.dynamodb_table_names.inventory
+    order_fulfillments_table_name = var.dynamodb_table_names.order_fulfillments
   })
 }
 
