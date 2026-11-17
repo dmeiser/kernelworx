@@ -14,7 +14,11 @@ from moto import mock_aws
 
 from src.utils.dynamodb import get_dynamodb_resource
 from tests.unit.dynamodb_query_guard import install_query_filter_guard
-from tests.unit.table_schemas import create_all_tables, create_inventory_table_schema
+from tests.unit.table_schemas import (
+    create_all_tables,
+    create_inventory_table_schema,
+    create_order_fulfillments_table_schema,
+)
 
 # Set environment variables at module load time so that module-level code in
 # Lambda handlers (e.g. get_required_env calls) sees them during test collection.
@@ -36,9 +40,12 @@ os.environ["SHARED_CAMPAIGNS_TABLE_NAME"] = "kernelworx-shared-campaigns-ue1-dev
 os.environ["UNITS_TABLE_NAME"] = "kernelworx-units-ue1-dev"
 os.environ["UNIT_CAMPAIGNS_TABLE_NAME"] = "kernelworx-unit-campaigns-ue1-dev"
 os.environ["INVENTORY_TABLE_NAME"] = "kernelworx-inventory-ue1-dev"
+os.environ["ORDER_FULFILLMENTS_TABLE_NAME"] = "kernelworx-order-fulfillments-ue1-dev"
 os.environ["PUBLIC_ORDER_THROTTLES_TABLE_NAME"] = "kernelworx-public-order-throttles-ue1-dev"
 # S3 bucket names
 os.environ["EXPORTS_BUCKET"] = "kernelworx-exports-ue1-dev"
+
+
 
 
 @pytest.fixture(autouse=True)
@@ -90,6 +97,7 @@ def aws_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("UNITS_TABLE_NAME", "kernelworx-units-ue1-dev")
     monkeypatch.setenv("UNIT_CAMPAIGNS_TABLE_NAME", "kernelworx-unit-campaigns-ue1-dev")
     monkeypatch.setenv("INVENTORY_TABLE_NAME", "kernelworx-inventory-ue1-dev")
+    monkeypatch.setenv("ORDER_FULFILLMENTS_TABLE_NAME", "kernelworx-order-fulfillments-ue1-dev")
     monkeypatch.setenv("PUBLIC_ORDER_THROTTLES_TABLE_NAME", "kernelworx-public-order-throttles-ue1-dev")
     monkeypatch.setenv("EXPORTS_BUCKET", "kernelworx-exports-ue1-dev")
 
@@ -198,6 +206,26 @@ def inventory_table(dynamodb_table: Any) -> Any:
     if ttl is not None:
         dynamodb.meta.client.update_time_to_live(TableName=table.table_name, TimeToLiveSpecification=ttl)
     install_query_filter_guard(get_dynamodb_resource().meta.client, schema)
+    yield table
+    table.delete()
+
+
+@pytest.fixture
+def order_fulfillments_table(dynamodb_table: Any) -> Any:
+    """Get the Show & Sell order-fulfillments table.
+
+    Created on top of the standard fixture set and deleted afterwards, exactly as
+    the inventory table does it, so the pinned 10-table fixture contract stays
+    exact. The handler writes this table through the plain client inside a
+    TransactWriteItems, so the fixture also has to exist for the transactional
+    writes to be exercised at all (WORK-160, checklist §2.4).
+    """
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    schema = create_order_fulfillments_table_schema()
+    ttl = schema.pop("TimeToLiveSpecification", None)
+    table = dynamodb.create_table(**schema)
+    if ttl is not None:
+        dynamodb.meta.client.update_time_to_live(TableName=table.table_name, TimeToLiveSpecification=ttl)
     yield table
     table.delete()
 

@@ -434,6 +434,33 @@ export type GqlDateRangeFilter = {
   startAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
 };
 
+/** Input for fulfillIndividualOrderLine. Fills part or all of one individual Order line from a Kernel-chosen source. */
+export type GqlFulfillIndividualOrderLineInput = {
+  /** The Order.fulfillmentVersion this caller read. A stale value conflicts instead of double-fulfilling one line. */
+  expectedFulfillmentVersion: Scalars['Int']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The stable line identity (§5.19). A pre-Wave-3 line carries no identity, so nothing can name it. */
+  lineItemId: Scalars['ID']['input'];
+  /** The Order whose line is fulfilled. Its own immutable Unit scope decides whose admin may act. */
+  orderId: Scalars['ID']['input'];
+  /** Kernels fulfilled on this line; cannot exceed the line's still-unfulfilled quantity. */
+  quantity: Scalars['Int']['input'];
+  /** KERNEL_STOCK consumes unassigned Kernel stock; EXTERNAL_COUNCIL consumes no Kernel stock at all. SCOUT_CUSTODY is consumed by the sale itself, so it is not a choice here. */
+  source: GqlOrderFulfillmentSource;
+};
+
+/** What one fulfillment produced. `inventoryPosition` is absent exactly when the source moved no Kernel stock. */
+export type GqlFulfillIndividualOrderLinePayload = {
+  __typename?: 'FulfillIndividualOrderLinePayload';
+  /** The append-only FULFILL record this request wrote. */
+  fulfillment: GqlOrderFulfillment;
+  /** The product's stock position, present only for a KERNEL_STOCK fulfillment. */
+  inventoryPosition?: Maybe<GqlInventoryPosition>;
+  /** The Order after the fulfillment, with the line's fulfilledQuantity and fulfillmentVersion moved. */
+  order: GqlOrder;
+};
+
 /** Idempotency for a mutation: a client key scoped to the caller, operation, and resource. */
 export type GqlIdempotencyInput = {
   /** Client-supplied idempotency key (1-128 trimmed characters). */
@@ -713,6 +740,8 @@ export type GqlMutation = {
   deleteSellerProfile: Scalars['Boolean']['output'];
   /** Delete a shared campaign the caller created. Returns true on success. */
   deleteSharedCampaign: Scalars['Boolean']['output'];
+  /** Fulfill part or all of one individual Order line from Kernel stock or an external Council supply. Unit Admin for the Order's immutable originating Unit. Kernel stock is taken only for KERNEL_STOCK, and never more than the line still owes (§5.19). */
+  fulfillIndividualOrderLine: GqlFulfillIndividualOrderLinePayload;
   /** Issue unassigned Kernel stock to an ACTIVE Scout on this campaign's roster. Unit Admin for the parent Unit; Kernel stock down, With Scout up, total unit-owned stock unchanged, and no Order, sale, credit, or We Owe effect. */
   issueStockToScout: GqlIssueStockToScoutPayload;
   /** Join a Unit Campaign with a join code. Any authenticated account with Owner or WRITE on the Scout. */
@@ -731,6 +760,8 @@ export type GqlMutation = {
   requestPaymentMethodQRCodeUpload: GqlS3UploadInfo;
   /** Return one Scout's unsold custody to Kernel stock as one atomic batch: any over-return or oversized batch refuses the whole request. Unit Admin for the parent Unit. */
   returnStockFromScout: GqlReturnStockFromScoutPayload;
+  /** Undo one fulfillment, restoring the line's unfulfilled quantity and only the stock source that fulfillment took. Unit Admin for the Order's immutable originating Unit. At most one reversal exists per fulfillment, and the deterministic key is what enforces it. */
+  reverseIndividualOrderFulfillment: GqlReverseIndividualOrderFulfillmentPayload;
   /** Remove a share's access to a profile the caller owns. Returns true on success. */
   revokeShare: Scalars['Boolean']['output'];
   /** Revoke a Unit Admin grant; the last grant returns CONFLICT. Unit Admin for that Unit. */
@@ -921,6 +952,11 @@ export type GqlMutation_DeleteSharedCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_FulfillIndividualOrderLineArgs = {
+  input: GqlFulfillIndividualOrderLineInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_IssueStockToScoutArgs = {
   input: GqlIssueStockToScoutInput;
 };
@@ -963,6 +999,11 @@ export type GqlMutation_RequestPaymentMethodQrCodeUploadArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_ReturnStockFromScoutArgs = {
   input: GqlReturnStockFromScoutInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_ReverseIndividualOrderFulfillmentArgs = {
+  input: GqlReverseIndividualOrderFulfillmentInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1134,6 +1175,15 @@ export type GqlOrderFulfillment = {
   unitCampaignId?: Maybe<Scalars['ID']['output']>;
   /** Originating Unit scope copied immutably from the Order; null for an independent campaign. */
   unitId?: Maybe<Scalars['ID']['output']>;
+};
+
+/** One Order's full fulfillment and reversal audit history, oldest first. */
+export type GqlOrderFulfillmentConnection = {
+  __typename?: 'OrderFulfillmentConnection';
+  /** The fulfillment and reversal records, with the administrative audit fields. */
+  items: Array<GqlOrderFulfillment>;
+  /** Pagination state for this read. */
+  pageInfo: GqlPageInfo;
 };
 
 /** Direction of an OrderFulfillment record: a fulfillment or its reversal (§5.19). Quantity is always positive; this field carries the direction. */
@@ -1459,6 +1509,8 @@ export type GqlQuery = {
   myScoutCustody: Array<GqlScoutCustodyBalance>;
   /** The Units on which the caller holds a Unit Admin grant. No cross-Unit data. */
   myUnits: GqlUnitConnection;
+  /** One Order's full fulfillment and reversal audit, oldest first, including who recorded each record and which inventory movement moved the stock. Unit Admin for the Order's immutable originating Unit; a participant reads the audit-free `Order.fulfillments` instead (§10.2). */
+  orderFulfillments: GqlOrderFulfillmentConnection;
   /** The payment methods stored for a profile's owner. The caller must have access to the profile; READ-only callers see the method names but not their QR codes (qrCodeUrl is null). */
   paymentMethodsForProfile: Array<GqlPaymentMethod>;
   /** Fetch the public order page's offer: seller, campaign, catalog products, and allowed payment methods. A campaign that never enabled public orders, is disabled, or carries a token mismatch all return the same NOT_FOUND, so probing cannot distinguish them. */
@@ -1632,6 +1684,12 @@ export type GqlQuery_MyUnitsArgs = {
 };
 
 /** The root query object for the KernelWorx API. */
+export type GqlQuery_OrderFulfillmentsArgs = {
+  orderId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+};
+
+/** The root query object for the KernelWorx API. */
 export type GqlQuery_PaymentMethodsForProfileArgs = {
   profileId: Scalars['ID']['input'];
 };
@@ -1768,6 +1826,29 @@ export type GqlReturnStockFromScoutPayload = {
   custodyBalances: Array<GqlScoutCustodyBalance>;
   /** Each returned product's position, with Kernel stock back up. */
   inventoryPositions: Array<GqlInventoryPosition>;
+};
+
+/** Input for reverseIndividualOrderFulfillment. Undoes one fulfillment and returns only the stock source it took. */
+export type GqlReverseIndividualOrderFulfillmentInput = {
+  /** The Order.fulfillmentVersion this caller read. */
+  expectedFulfillmentVersion: Scalars['Int']['input'];
+  /** The FULFILL record to reverse. A REVERSAL cannot be reversed. */
+  fulfillmentId: Scalars['ID']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The Order the fulfillment belongs to. */
+  orderId: Scalars['ID']['input'];
+};
+
+/** What one reversal produced. `inventoryPosition` is absent exactly when the reversed source moved no Kernel stock. */
+export type GqlReverseIndividualOrderFulfillmentPayload = {
+  __typename?: 'ReverseIndividualOrderFulfillmentPayload';
+  /** The product's stock position, present only when the reversed source was KERNEL_STOCK. */
+  inventoryPosition?: Maybe<GqlInventoryPosition>;
+  /** The Order after the reversal, with the line's fulfilledQuantity back down and fulfillmentVersion moved. */
+  order: GqlOrder;
+  /** The append-only REVERSAL record this request wrote, linked to the fulfillment it undoes. */
+  reversal: GqlOrderFulfillment;
 };
 
 /** Input for revokeShare. Removes a share's access to a profile (owner only). */

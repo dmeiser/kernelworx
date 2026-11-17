@@ -884,6 +884,50 @@ data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
     ]
   }
 
+  # Wave 3 §2.4 individual-Order fulfillment: the append-only OrderFulfillment
+  # rows of data model §6.5. The fulfillment and reversal mutations commit
+  # marker + Order + fulfillment row (+ balance/movement rows on the inventory
+  # table) in one TransactWriteItems, and the row write is conditional
+  # (attribute_not_exists on pk/sk — that condition IS the "at most one reversal
+  # per fulfillment" rule, because the reversal's sort key is derived from the
+  # id it reverses). Read side: the per-Order audit is a partition Query, and the
+  # campaignId GSI answers Campaign-wide history. No DeleteItem — the history is
+  # append-only and a cleanup sweep that deletes audit rows is a data-loss
+  # incident, not maintenance.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [
+      var.dynamodb_table_arns["order_fulfillments"],
+      "${var.dynamodb_table_arns["order_fulfillments"]}/index/*",
+    ]
+  }
+
+  # Wave 3 §2.4: the Order row a fulfillment moves. UpdateItem only, and base
+  # table only — a fulfillment changes exactly lineItems, fulfillmentVersion and
+  # updatedAt on a row that already exists, never creates or deletes one. The
+  # orders table's create and delete owners stay createOrder/publicCreateOrder
+  # and the delete cascades; granting PutItem or DeleteItem here would put a
+  # second writer on the whole Order shape.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:UpdateItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [var.dynamodb_table_arns["orders"]]
+  }
+
   # The redemption throttle counter reuses the shared throttle table: one
   # atomic UpdateItem increment per failed invite redemption, TTL-expired.
   statement {

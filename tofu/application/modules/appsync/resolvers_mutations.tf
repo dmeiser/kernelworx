@@ -1172,3 +1172,38 @@ resource "aws_appsync_resolver" "return_stock_from_scout" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Stage 3 §2.4 individual-Order fulfillment writes. Each is one conditional
+# TransactWriteItems inside the UnitOperationsDS handler — idempotency marker +
+# the conditioned Order row (lineItems, fulfillmentVersion, updatedAt) + the
+# append-only OrderFulfillment row, plus the balance delta and InventoryMovement
+# when the source moved Kernel stock — so the resolver stays a thin unit invoke.
+# The authorization is in the handler too: Unit Admin of the Order's immutable
+# originating unitId, read off the Order row, never off a Unit id the caller sends.
+resource "aws_appsync_resolver" "fulfill_individual_order_line" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "fulfillIndividualOrderLine"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "reverse_individual_order_fulfillment" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "reverseIndividualOrderFulfillment"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

@@ -474,7 +474,7 @@ def create_unit_campaigns_table_schema() -> dict[str, Any]:
 # the marker key contract names; the legacy `invites` table is NOT marker-capable
 # (its TTL stays the string `expiresAt`). `inventory` joins it in Stage 2: a
 # receipt or adjustment stages its marker on the table whose rows it writes.
-MARKER_CAPABLE_TABLE_KEYS = ("units", "unit_campaigns", "inventory")
+MARKER_CAPABLE_TABLE_KEYS = ("units", "unit_campaigns", "inventory", "order_fulfillments")
 
 
 def create_public_order_throttles_table_schema() -> dict[str, Any]:
@@ -550,6 +550,53 @@ def create_inventory_table_schema() -> dict[str, Any]:
                 "KeySchema": [
                     {"AttributeName": "movementType", "KeyType": "HASH"},
                     {"AttributeName": "occurredAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": True},
+    }
+
+
+def create_order_fulfillments_table_schema() -> dict[str, Any]:
+    """
+    Schema for the individual-Order fulfillment table (data model §6.5).
+
+    One partition per Order (`ORDER#<orderId>`) holds its append-only
+    fulfillment history: `FULFILLMENT#<createdAt>#<fulfillmentId>` for a
+    fulfillment and the deterministic `REVERSAL#<reversalOfFulfillmentId>`
+    for the single reversal that fulfillment can ever have. The
+    `campaignId-createdAt-index` GSI is a Campaign-history locator only; the
+    per-Order audit read is a partition query, so no read of a record depends
+    on an index being current.
+
+    TTL is the shared seven-day idempotency-marker horizon (`expiresAtEpoch`,
+    §8.9): fulfillment and reversal rows never carry an expiry, because the
+    row is the audit trail of a sale.
+
+    Not part of ``get_all_table_schemas``/``create_all_tables``: the 10-table
+    fixture-count contract stays exact, and the tests that exercise
+    fulfillment create this table explicitly (WORK-160, checklist §2.4).
+    """
+    return {
+        "TableName": "kernelworx-order-fulfillments-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "pk", "AttributeType": "S"},
+            {"AttributeName": "sk", "AttributeType": "S"},
+            {"AttributeName": "campaignId", "AttributeType": "S"},
+            {"AttributeName": "createdAt", "AttributeType": "S"},
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "campaignId-createdAt-index",
+                "KeySchema": [
+                    {"AttributeName": "campaignId", "KeyType": "HASH"},
+                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
             },

@@ -1700,6 +1700,68 @@ type ReturnStockFromScoutPayload {
   custodyBalances: [ScoutCustodyBalance!]!
 }
 
+# === Show & Sell — individual Order fulfillment (delivery checklist §2.4, data model §5.19) ===
+# Authorization lives in the resolver: Unit Admin for the Order's IMMUTABLE
+# originating Unit, read off the Order row itself, never off a Unit id the caller
+# supplies (AUTH-U). The Order's `fulfillmentVersion` is the serialization point
+# for fulfill, reverse, and a line edit against one Order.
+
+"""Input for fulfillIndividualOrderLine. Fills part or all of one individual Order line from a Kernel-chosen source."""
+input FulfillIndividualOrderLineInput {
+  """The Order whose line is fulfilled. Its own immutable Unit scope decides whose admin may act."""
+  orderId: ID!
+  """The stable line identity (§5.19). A pre-Wave-3 line carries no identity, so nothing can name it."""
+  lineItemId: ID!
+  """Kernels fulfilled on this line; cannot exceed the line's still-unfulfilled quantity."""
+  quantity: Int!
+  """KERNEL_STOCK consumes unassigned Kernel stock; EXTERNAL_COUNCIL consumes no Kernel stock at all. SCOUT_CUSTODY is consumed by the sale itself, so it is not a choice here."""
+  source: OrderFulfillmentSource!
+  """The Order.fulfillmentVersion this caller read. A stale value conflicts instead of double-fulfilling one line."""
+  expectedFulfillmentVersion: Int!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for reverseIndividualOrderFulfillment. Undoes one fulfillment and returns only the stock source it took."""
+input ReverseIndividualOrderFulfillmentInput {
+  """The Order the fulfillment belongs to."""
+  orderId: ID!
+  """The FULFILL record to reverse. A REVERSAL cannot be reversed."""
+  fulfillmentId: ID!
+  """The Order.fulfillmentVersion this caller read."""
+  expectedFulfillmentVersion: Int!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""What one fulfillment produced. `inventoryPosition` is absent exactly when the source moved no Kernel stock."""
+type FulfillIndividualOrderLinePayload {
+  """The Order after the fulfillment, with the line's fulfilledQuantity and fulfillmentVersion moved."""
+  order: Order!
+  """The append-only FULFILL record this request wrote."""
+  fulfillment: OrderFulfillment!
+  """The product's stock position, present only for a KERNEL_STOCK fulfillment."""
+  inventoryPosition: InventoryPosition
+}
+
+"""What one reversal produced. `inventoryPosition` is absent exactly when the reversed source moved no Kernel stock."""
+type ReverseIndividualOrderFulfillmentPayload {
+  """The Order after the reversal, with the line's fulfilledQuantity back down and fulfillmentVersion moved."""
+  order: Order!
+  """The append-only REVERSAL record this request wrote, linked to the fulfillment it undoes."""
+  reversal: OrderFulfillment!
+  """The product's stock position, present only when the reversed source was KERNEL_STOCK."""
+  inventoryPosition: InventoryPosition
+}
+
+"""One Order's full fulfillment and reversal audit history, oldest first."""
+type OrderFulfillmentConnection {
+  """The fulfillment and reversal records, with the administrative audit fields."""
+  items: [OrderFulfillment!]!
+  """Pagination state for this read."""
+  pageInfo: PageInfo!
+}
+
 # ============================================================================
 # Query Root
 # ============================================================================
@@ -1810,6 +1872,13 @@ type Query {
     """The Unit Campaign ID."""
     unitCampaignId: ID!
   ): [ScoutCustodyBalance!]!
+  """One Order's full fulfillment and reversal audit, oldest first, including who recorded each record and which inventory movement moved the stock. Unit Admin for the Order's immutable originating Unit; a participant reads the audit-free `Order.fulfillments` instead (§10.2)."""
+  orderFulfillments(
+    """The Order ID."""
+    orderId: ID!
+    """Pagination parameters."""
+    page: PageInput
+  ): OrderFulfillmentConnection!
 
   # Account queries
   """The authenticated caller's account. The row is created automatically on first read if it does not yet exist."""
@@ -2086,6 +2155,16 @@ type Mutation {
     """The return batch."""
     input: ReturnStockFromScoutInput!
   ): ReturnStockFromScoutPayload!
+  """Fulfill part or all of one individual Order line from Kernel stock or an external Council supply. Unit Admin for the Order's immutable originating Unit. Kernel stock is taken only for KERNEL_STOCK, and never more than the line still owes (§5.19)."""
+  fulfillIndividualOrderLine(
+    """The fulfillment."""
+    input: FulfillIndividualOrderLineInput!
+  ): FulfillIndividualOrderLinePayload!
+  """Undo one fulfillment, restoring the line's unfulfilled quantity and only the stock source that fulfillment took. Unit Admin for the Order's immutable originating Unit. At most one reversal exists per fulfillment, and the deterministic key is what enforces it."""
+  reverseIndividualOrderFulfillment(
+    """The reversal."""
+    input: ReverseIndividualOrderFulfillmentInput!
+  ): ReverseIndividualOrderFulfillmentPayload!
 
   # Account mutations
   """Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account."""

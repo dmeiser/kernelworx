@@ -156,6 +156,12 @@ locals {
         UNITS_TABLE_NAME          = var.table_names.units
         UNIT_CAMPAIGNS_TABLE_NAME = var.table_names.unit_campaigns
         INVENTORY_TABLE_NAME      = var.table_names.inventory
+        # Wave 3 §2.4: fulfillIndividualOrderLine, reverseIndividualOrderFulfillment
+        # and the orderFulfillments audit query all write/read this table through the
+        # unit-operations handler. A deployed function that reaches a table the
+        # environment never names dies in get_required_env and answers
+        # INTERNAL_ERROR, so the accessor and the env land together.
+        ORDER_FULFILLMENTS_TABLE_NAME = var.table_names.order_fulfillments
       }
     }
     "delete-campaign-orders" = {

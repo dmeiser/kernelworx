@@ -831,3 +831,22 @@ resource "aws_appsync_resolver" "my_scout_custody" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Stage 3 §2.4.5: one Order's full fulfillment audit, administrative fields and all,
+# on the same unit resolver and data source as every other Unit field. Kept separate
+# from the Order.fulfillments field resolver because the two answers are different on
+# purpose: this one is the Unit Admin's audit trail, that one is the participant-safe
+# projection with the actor and movement ids removed (§10.2).
+resource "aws_appsync_resolver" "order_fulfillments_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "orderFulfillments"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

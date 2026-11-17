@@ -23,9 +23,8 @@ every link is one a plausible-looking wiring pass drops:
   to a broad role, and the Unit role's only write outside its own tables is the
   §8.2 join link on the legacy campaigns table -- named, not implied);
 - the AppSync AWS_LAMBDA data source;
-- a resolver for every one of the 19 SDL fields -- nine queries and ten
-  mutations -- all bound to that one data source, so tenant isolation stays
-  in the single handler that enforces it.
+- a resolver for every Unit-tenant SDL field, all bound to that one data
+  source, so tenant isolation stays in the single handler that enforces it.
 
 Parsed with python-hcl2 through the harness in ``test_edge_security.py``.
 """
@@ -60,6 +59,7 @@ QUERY_FIELDS = {
     "inventoryMovements",
     "scoutCustodyBalances",
     "myScoutCustody",
+    "orderFulfillments",
 }
 MUTATION_FIELDS = {
     "createUnit",
@@ -77,6 +77,8 @@ MUTATION_FIELDS = {
     "adjustCouncilOnOrder",
     "issueStockToScout",
     "returnStockFromScout",
+    "fulfillIndividualOrderLine",
+    "reverseIndividualOrderFulfillment",
 }
 
 
@@ -225,9 +227,30 @@ def test_unit_tenant_role_writes_the_unit_tables_and_the_join_link_only() -> Non
             continue
         keys = _table_keys(statement)
         writable |= keys
-        assert keys <= {"units", "unit_campaigns", "inventory", "public_order_throttles", "campaigns"}, (
-            f"write actions outside the Unit tables, the inventory table, the counter and the join link: {keys}"
-        )
+        assert keys <= {
+            "units",
+            "unit_campaigns",
+            "inventory",
+            "public_order_throttles",
+            "campaigns",
+            "order_fulfillments",
+            "orders",
+        }, f"write actions outside the Unit tables, the inventory and fulfillment tables, the counter and the links: {keys}"
+        if "orders" in keys and "order_fulfillments" not in keys:
+            assert set(statement["actions"]) <= {
+                "dynamodb:GetItem",
+                "dynamodb:Query",
+                "dynamodb:UpdateItem",
+                "dynamodb:ConditionCheckItem",
+                "dynamodb:TransactWriteItems",
+            }, (
+                "a fulfillment moves lineItems and fulfillmentVersion on an Order that already exists: "
+                "no PutItem or DeleteItem on the legacy orders table — its create and delete owners stay "
+                "createOrder/publicCreateOrder and the delete cascades"
+            )
+            assert "/index/" not in str(statement["resources"]), (
+                "the Order row a fulfillment conditions on is read and written by its base-table key"
+            )
         if "campaigns" in keys and "unit_campaigns" not in keys:
             assert set(statement["actions"]) == {"dynamodb:UpdateItem", "dynamodb:TransactWriteItems"}, (
                 "the join link is one conditional update: no PutItem, DeleteItem or ConditionCheckItem on a legacy table"
@@ -235,9 +258,15 @@ def test_unit_tenant_role_writes_the_unit_tables_and_the_join_link_only() -> Non
             assert "/index/" not in str(statement["resources"]), (
                 "the joined-scope link is written on the base table; the campaignId-index GSI is a locator only"
             )
-    assert writable == {"units", "unit_campaigns", "inventory", "public_order_throttles", "campaigns"}, (
-        f"unexpected write surface: {writable - {'units', 'unit_campaigns', 'inventory', 'public_order_throttles'}}"
-    )
+    assert writable == {
+        "units",
+        "unit_campaigns",
+        "inventory",
+        "public_order_throttles",
+        "campaigns",
+        "order_fulfillments",
+        "orders",
+    }, f"unexpected write surface: {writable}"
 
     joined = " ".join(str(s["actions"]) for s in statements)
     assert "dynamodb:TransactWriteItems" in joined, "every Stage 1 mutation commits through a conditional transaction"
@@ -252,13 +281,14 @@ def test_unit_operations_datasource_is_lambda_backed() -> None:
     assert "unit-operations" in str(config["function_arn"]), "the data source must invoke the unit-operations Lambda"
 
 
-def test_all_twenty_eight_unit_fields_are_resolved_on_that_datasource() -> None:
-    """Thirteen queries and fifteen mutations, Stage 1 and Stage 2 alike.
+def test_all_thirty_one_unit_fields_are_resolved_on_that_datasource() -> None:
+    """Fourteen queries and seventeen mutations, Stage 1 through Stage 3 alike.
 
     Stage 2 adds the inventory and custody reads and the balance and custody writes to
-    the same data source: tenant isolation, the Unit Admin check, and the Profile share
-    check all live in the one handler, so a new field is a new name in its router, and an
-    unbound SDL field answers nothing on ``dev``.
+    the same data source, and Stage 3 §2.4 adds the two Order-fulfillment mutations and
+    the fulfillment audit query: tenant isolation, the Unit Admin check, and the Profile
+    share check all live in the one handler, so a new field is a new name in its router,
+    and an unbound SDL field answers nothing on ``dev``.
     """
     bound: dict[str, str] = {}
     for doc in _resolver_docs():
@@ -277,4 +307,4 @@ def test_all_twenty_eight_unit_fields_are_resolved_on_that_datasource() -> None:
         assert f"Query:{field}" in bound, f"Query.{field} has no resolver on UnitOperationsDS"
     for field in sorted(MUTATION_FIELDS):
         assert f"Mutation:{field}" in bound, f"Mutation.{field} has no resolver on UnitOperationsDS"
-    assert len(bound) == 28, f"expected exactly the 28 Unit-tenant resolvers, got {sorted(bound)}"
+    assert len(bound) == 31, f"expected exactly the 31 Unit-tenant resolvers, got {sorted(bound)}"

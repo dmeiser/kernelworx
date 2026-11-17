@@ -454,6 +454,80 @@ def share_item(owner: str, target: str, permissions: str) -> Dict[str, Any]:
     }
 
 
+# The product the Show & Sell fixture catalog offers, spelled the way this
+# application spells product ids: the catalog id is part of the id.
+FIXTURE_PRODUCT_ID = "CATALOG#fixture-default#prod-1"
+
+
+def order_line_item(
+    *,
+    product_id: str = FIXTURE_PRODUCT_ID,
+    quantity: int = 4,
+    price: Decimal = Decimal("3.50"),
+    line_item_id: str = "line-fixture-1",
+    fulfilled_quantity: int = 0,
+) -> Dict[str, Any]:
+    """One Order line in the shape the ``createOrder`` pipeline stores it (§5.19).
+
+    ``lineItemId`` and ``fulfilledQuantity`` are Wave 3's additions: §5.19 lets a line be
+    fulfilled only once it carries an identity a fulfillment can name, so a fixture
+    without them is deliberately a pre-Wave-3 row.
+    """
+    return {
+        "productId": product_id,
+        "productName": "Fixture Trail Mix",
+        "quantity": quantity,
+        "pricePerUnit": price,
+        "subtotal": price * quantity,
+        "lineItemId": line_item_id,
+        "fulfilledQuantity": fulfilled_quantity,
+    }
+
+
+def sold_order_item(
+    owner: str,
+    *,
+    suffix: str = "order-1",
+    unit_id: Optional[str] = None,
+    unit_campaign_id: Optional[str] = None,
+    lines: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """An individual Order row in the orders table (PK campaignId, SK orderId).
+
+    The id follows the grammar in ``src/utils/order_keys.py`` —
+    ``ORDER#<bare campaign id>#<suffix>`` — because the §2.4 fulfillment resolvers read
+    the hash key out of the id itself, so a fixture with any other spelling exercises
+    only the refusal path. The rest of the shape is what the ``createOrder`` pipeline
+    stores, ``fulfillmentVersion: 0`` included: that is where an unfulfilled Order starts.
+
+    ``unit_id``/``unit_campaign_id`` are the immutable originating scope captured at sale
+    time (API-FIX-05). Omit both for an independent sale, which is the case §2.4 has to
+    refuse: an Order with no Unit has no Unit Admin to authorize.
+    """
+    info = PROFILES[owner]
+    campaign_id = str(info["campaignId"])
+    bare_campaign_id = campaign_id.split("#", 1)[1] if campaign_id.startswith("CAMPAIGN#") else campaign_id
+    now = T0.isoformat()
+    line_items = lines if lines is not None else [order_line_item()]
+    item = {
+        "orderId": f"ORDER#{bare_campaign_id}#{suffix}",
+        "campaignId": campaign_id,
+        "profileId": info["profileId"],
+        "customerName": "Fixture Customer",
+        "orderDate": now,
+        "paymentMethod": "Cash",
+        "lineItems": line_items,
+        "totalAmount": sum((line["subtotal"] for line in line_items), Decimal("0")),
+        "createdAt": now,
+        "updatedAt": now,
+        "fulfillmentVersion": 0,
+    }
+    if unit_id is not None and unit_campaign_id is not None:
+        item["unitId"] = unit_id
+        item["unitCampaignId"] = unit_campaign_id
+    return item
+
+
 # ---------------------------------------------------------------------------
 # Seeding and the test-only Unit cascade (FIX-AC cross-lane non-deletion).
 # ---------------------------------------------------------------------------

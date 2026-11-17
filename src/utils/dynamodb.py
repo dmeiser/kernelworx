@@ -306,6 +306,21 @@ class TableAccessor:
         return self._get_table("inventory")
 
     @property
+    def order_fulfillments(self) -> "Table":
+        """Get the individual-Order fulfillment table instance (data model §6.5).
+
+        One partition per Order (``ORDER#<orderId>``) holding its append-only
+        fulfillment and reversal history: ``FULFILLMENT#<createdAt>#<fulfillmentId>``
+        for a fulfillment, and the deterministic ``REVERSAL#<reversalOfFulfillmentId>``
+        for the one reversal a fulfillment can ever have — at-most-once is a key fact
+        here, not a check. ``campaignId-createdAt-index`` answers Campaign-wide
+        fulfillment history. The seven-day TTL applies to marker rows only: a
+        fulfillment row never carries ``expiresAtEpoch``, because deleting audit
+        history a week after the sale is not a cleanup, it is a loss.
+        """
+        return self._get_table("order_fulfillments")
+
+    @property
     def public_order_throttles(self) -> "Table":
         """Get public order throttles table instance.
 

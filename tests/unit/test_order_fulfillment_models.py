@@ -378,3 +378,36 @@ def test_the_version_condition_carries_the_pre_wave_3_disjunction() -> None:
         "ExpressionAttributeNames": {"#fulfillmentVersion": "fulfillmentVersion"},
         "ExpressionAttributeValues": {":expectedFulfillmentVersion": {"N": "7"}},
     }
+
+
+def test_the_line_wire_encoder_keeps_every_type_the_js_write_path_stored() -> None:
+    """A re-stored line keeps its attribute types, or the Order row's prices change type.
+
+    ``lineItems`` is written by the ``createOrder``/``updateOrder`` JS pipeline through
+    ``util.dynamodb.toDynamoDB``, and a fulfillment re-writes the whole list.
+    ``mutations.wire_value`` is scalar-only and would turn a price into a ``STRING``, so
+    this encoder is total over every JSON type that path can store: number as ``N`` (a
+    float keeps its exact decimal rather than a scientific one), boolean as ``BOOL``,
+    absent as ``NULL``, text as ``S``.
+    """
+    assert ofm.wire_line_item_value(Decimal("3.50")) == {"N": "3.50"}
+    assert ofm.wire_line_item_value(4) == {"N": "4"}
+    assert ofm.wire_line_item_value(19.99) == {"N": "19.99"}
+    assert ofm.wire_line_item_value(0.0001) == {"N": "0.0001"}
+    assert ofm.wire_line_item_value(True) == {"BOOL": True}
+    assert ofm.wire_line_item_value(None) == {"NULL": True}
+    assert ofm.wire_line_item_value(LINE_FIRST) == {"S": LINE_FIRST}
+
+
+def test_the_line_list_is_a_list_of_maps_under_one_attribute() -> None:
+    """``L`` of ``M``, not a stringified blob: a nested map has to stay a map."""
+    encoded = ofm.wire_line_items(
+        [{"lineItemId": LINE_FIRST, "quantity": 5, "pricePerUnit": Decimal("3.50"), "fulfilledQuantity": 1}]
+    )
+    assert list(encoded) == ["L"]
+    (only,) = encoded["L"]
+    attributes = only["M"]
+    assert attributes["lineItemId"] == {"S": LINE_FIRST}
+    assert attributes["pricePerUnit"] == {"N": "3.50"}
+    assert attributes["quantity"] == {"N": "5"}
+    assert attributes["fulfilledQuantity"] == {"N": "1"}

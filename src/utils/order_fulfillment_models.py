@@ -29,18 +29,22 @@ Authorization is not this module's question — the resolvers answer who may cal
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 from typing import Any, Dict, List, Mapping, Optional
 
+from .dynamodb import tables
 from .errors import AppError, ErrorCode
+from .ids import ensure_campaign_id
 from .inventory_models import (
     normalize_inventory_id,
     normalize_moment,
     normalize_quantity,
     normalize_signed_delta,
 )
-from .mutations import wire_value
-from .order_keys import ORDER_ID_PREFIX
+from .mutations import wire_key, wire_value
+from .order_keys import ORDER_ID_PREFIX, parse_order_id
+from .pagination import query_all_items
 from .unit_models import MAX_ID_LENGTH, normalize_required_text
 
 # --- Key layout (data model §6.5) -------------------------------------------------
@@ -379,6 +383,25 @@ def _order_lines(order: Mapping[str, Any]) -> List[Mapping[str, Any]]:
     return entries
 
 
+def order_line_items(order: Mapping[str, Any]) -> List[Mapping[str, Any]]:
+    """The Order row's line items, as mappings (the public half of :func:`_order_lines`).
+
+    A resolver returning an Order has to project its lines, and it must see exactly the
+    lines this module's arithmetic sees — a caller that read the raw attribute would
+    treat a malformed entry as a line and write a change against it.
+    """
+    return _order_lines(order)
+
+
+def find_order_line(order: Mapping[str, Any], line_item_id: str) -> Optional[Mapping[str, Any]]:
+    """The line with this ``lineItemId``, or ``None`` (the public half of :func:`_find_line`).
+
+    The fulfillment resolvers look a line up twice — once to check the request against
+    it, once to read the product it names — and one lookup rule has to answer both.
+    """
+    return _find_line(order, line_item_id)
+
+
 def _find_line(order: Mapping[str, Any], line_item_id: str) -> Optional[Mapping[str, Any]]:
     """The line whose ``lineItemId`` matches, or ``None``.
 
@@ -478,3 +501,178 @@ def fulfillment_version_condition(expected_version: int) -> Dict[str, Any]:
         "ExpressionAttributeNames": {placeholder: FULFILLMENT_VERSION_ATTRIBUTE},
         "ExpressionAttributeValues": {":expectedFulfillmentVersion": wire_value(expected_version)},
     }
+
+
+# --- Identity minting and the Order row's address ---------------------------------
+
+
+def new_fulfillment_id() -> str:
+    """Mint one fulfillment/reversal identity (§5.19).
+
+    A UUID, for the reason the movement ids are: two concurrent fulfillments of one
+    Order must not collide on an id a writer guessed, and the id is what the
+    deterministic reversal key is later derived from, so a collision would silently
+    make one of two reversals impossible.
+    """
+    return str(uuid.uuid4())
+
+
+def order_row_key(order_id: Any) -> Optional[Dict[str, str]]:
+    """The ``{campaignId, orderId}`` key of the Order row this id addresses.
+
+    The ``orders`` table is hash-keyed on ``campaignId``, so a fulfillment request
+    that names only an Order still has to be resolved to that pair, and the id itself
+    carries it: ``ORDER#<bare campaign id>#<suffix>`` (``src/utils/order_keys.py``).
+    Deriving it from the id is what makes the follow-up read a strongly consistent
+    ``GetItem`` rather than a GSI lookup — the rule this codebase applies everywhere
+    an authorization decision follows a read.
+
+    ``None`` means the value cannot address a campaign-keyed Order at all: a legacy
+    ``ORDER#<uuid>`` row embeds no campaign, and guessing one would let a fulfillment
+    write against whichever row the guess happened to hit.
+    """
+    parsed = parse_order_id(order_id)
+    campaign_id = ensure_campaign_id(parsed[0]) if parsed is not None else None
+    if campaign_id is None:
+        return None
+    return {"campaignId": campaign_id, "orderId": str(order_id)}
+
+
+# --- Reads (data model §6.5 partition) --------------------------------------------
+
+
+def fulfillment_rows(order_id: Any) -> List[Dict[str, Any]]:
+    """Every fulfillment and reversal of one Order, in sort-key (oldest-first) order.
+
+    Read consistently, for both callers. The audit query has to show an admin the
+    fulfillment they just recorded — a history that lags their own write reads as a
+    lost sale — and the reversal path is a read that decides a write, which is the
+    same rule the inventory reads follow (§8.4). The partition is the whole history
+    of one Order, so this stays one query with no index to be stale.
+    """
+    return list(
+        query_all_items(
+            tables.order_fulfillments,
+            {
+                "KeyConditionExpression": "#pk = :pk",
+                "ExpressionAttributeNames": {"#pk": "pk"},
+                "ExpressionAttributeValues": {":pk": fulfillment_partition_key(str(order_id))},
+                "ConsistentRead": True,
+            },
+        )
+    )
+
+
+def find_fulfillment(order_id: Any, fulfillment_id: Any) -> Optional[Dict[str, Any]]:
+    """The one record in this Order's history carrying ``fulfillment_id``.
+
+    Matched on the attribute, and scoped to the Order's own partition rather than
+    searched globally: an id from another Order is not found here, which is what
+    makes "wrong parent" a ``NOT_FOUND`` instead of a reversal of someone else's
+    fulfillment (§2.4.4's wrong-parent case).
+    """
+    wanted = normalize_inventory_id(fulfillment_id, FULFILLMENT_ID_ATTRIBUTE)
+    for row in fulfillment_rows(order_id):
+        if row.get(FULFILLMENT_ID_ATTRIBUTE) == wanted:
+            return row
+    return None
+
+
+# --- Transaction actions ----------------------------------------------------------
+
+
+def wire_line_item_value(value: Any) -> Dict[str, Any]:
+    """Encode one line-item attribute in DynamoDB wire form.
+
+    ``mutations.wire_value`` is scalar-only and would store a float price as a
+    ``STRING``; the ``orders`` row's ``lineItems`` is a list of maps whose prices are
+    numbers the JS write path stored as ``N``. Re-writing them as strings would
+    silently change the type of every price on the row, so this encoder mirrors the
+    JS types: numbers stay ``N`` (``repr`` keeps a float's exact decimal, and a read
+    back of a ``Decimal`` stays exact through ``str``).
+
+    It is total over every type a line-item map can hold — number, boolean, null, text
+    — rather than only the four attributes written so far, because a fulfillment
+    re-writes the WHOLE list: an attribute this encoder did not recognize would be
+    stored as its ``str()`` and every reader of the row would see a string where a
+    number used to be. The pin in ``tests/unit/test_order_fulfillment_models.py`` holds
+    each branch.
+    """
+    if isinstance(value, bool):
+        return {"BOOL": value}
+    if isinstance(value, (int, Decimal)):
+        return {"N": str(value)}
+    if isinstance(value, float):
+        return {"N": repr(value)}
+    if value is None:
+        return {"NULL": True}
+    return {"S": str(value)}
+
+
+def wire_line_items(lines: List[Mapping[str, Any]]) -> Dict[str, Any]:
+    """The whole ``lineItems`` attribute in wire form (``L`` of ``M``)."""
+    return {"L": [{"M": {name: wire_line_item_value(value) for name, value in line.items()}} for line in lines]}
+
+
+def order_fulfillment_update_action(
+    *, order: Mapping[str, Any], line_items: List[Mapping[str, Any]], expected_version: int, occurred_at: str
+) -> tuple[str, Dict[str, Any]]:
+    """The one conditioned ``UpdateItem`` this fulfillment makes on the Order row.
+
+    Three attributes move together: the line list carrying the new
+    ``fulfillmentQuantity``, the ``fulfillmentVersion`` incremented from the value the
+    caller named, and ``updatedAt``. The version is set absolutely rather than
+    incremented because ``expected_version`` is already pinned in the condition from
+    :func:`fulfillment_version_condition` — the write cannot land on a row that moved,
+    so ``expected + 1`` is provably the next version when it lands.
+
+    The condition is why no read-then-write pair is needed here, and why this is the
+    only write shape an Order row gets from this surface: a fulfillment never creates
+    or deletes an Order, and never touches anything but these three attributes, so
+    the Order's create/delete owners (the ``createOrder``/``publicCreateOrder``
+    pipelines and the delete cascades) stay single.
+    """
+    condition = fulfillment_version_condition(expected_version)
+    names = dict(condition["ExpressionAttributeNames"])
+    names["#" + LINE_ITEMS_ATTRIBUTE] = LINE_ITEMS_ATTRIBUTE
+    names["#" + FULFILLMENT_VERSION_ATTRIBUTE] = FULFILLMENT_VERSION_ATTRIBUTE
+    names["#updatedAt"] = "updatedAt"
+    values = dict(condition["ExpressionAttributeValues"])
+    values[":lineItems"] = wire_line_items(line_items)
+    values[":nextFulfillmentVersion"] = wire_value(expected_version + 1)
+    values[":updatedAt"] = wire_value(normalize_moment(occurred_at, "updatedAt"))
+    return (
+        "Update",
+        {
+            "TableName": tables.orders.table_name,
+            "Key": wire_key({"campaignId": order[CAMPAIGN_ID_ATTRIBUTE], "orderId": order[ORDER_ID_ATTRIBUTE]}),
+            "UpdateExpression": (
+                "SET #lineItems = :lineItems, #fulfillmentVersion = :nextFulfillmentVersion, #updatedAt = :updatedAt"
+            ),
+            "ExpressionAttributeNames": names,
+            "ExpressionAttributeValues": values,
+            "ConditionExpression": condition["ConditionExpression"],
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def put_fulfillment_action(item: Mapping[str, Any]) -> tuple[str, Dict[str, Any]]:
+    """Append one fulfillment or reversal row, conditional on it not existing yet.
+
+    The condition is the whole enforcement of "at most one reversal per fulfillment":
+    the reversal's sort key is deterministic (:func:`reversal_sort_key`), so the
+    second reversal of one fulfillment fails this condition rather than racing a
+    read. Same shape as the movement append in :mod:`src.utils.inventory_models`, and
+    for the same reason — history is corrected by a new linked row, never by an edit.
+    """
+    return (
+        "Put",
+        {
+            "TableName": tables.order_fulfillments.table_name,
+            "Item": {name: wire_value(value) for name, value in item.items()},
+            "ConditionExpression": "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
+            "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )

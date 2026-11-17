@@ -11,6 +11,7 @@ from tests.unit.table_schemas import (
     create_catalogs_table_schema,
     create_inventory_table_schema,
     create_invites_table_schema,
+    create_order_fulfillments_table_schema,
     create_orders_table_schema,
     create_profiles_table_schema,
     create_shared_campaigns_table_schema,
@@ -26,6 +27,7 @@ MARKER_FACTORIES = {
     "units": create_units_table_schema,
     "unit_campaigns": create_unit_campaigns_table_schema,
     "inventory": create_inventory_table_schema,
+    "order_fulfillments": create_order_fulfillments_table_schema,
 }
 
 

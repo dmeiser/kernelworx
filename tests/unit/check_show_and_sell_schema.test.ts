@@ -667,7 +667,23 @@ const SS3_TYPE_FIELDS: Record<string, string[]> = {
     "reversalOfFulfillmentId",
     "createdAt",
   ],
+  FulfillIndividualOrderLinePayload: ["order", "fulfillment", "inventoryPosition"],
+  ReverseIndividualOrderFulfillmentPayload: ["order", "reversal", "inventoryPosition"],
+  OrderFulfillmentConnection: ["items", "pageInfo"],
 };
+
+/**
+ * The §2.4.3/§2.4.4 inputs. Neither carries a Unit id, a campaign id, a profile
+ * id, a product id, or a price: §5.19 makes the Order row itself the source of
+ * the immutable originating scope and of the product the line sells, so a caller
+ * that could name them could draw stock from a Unit the Order never belonged to.
+ */
+const SS3_INPUT_FIELDS: Record<string, string[]> = {
+  FulfillIndividualOrderLineInput: ["orderId", "lineItemId", "quantity", "source", "expectedFulfillmentVersion", "idempotency"],
+  ReverseIndividualOrderFulfillmentInput: ["orderId", "fulfillmentId", "expectedFulfillmentVersion", "idempotency"],
+};
+
+const SS3_MUTATION_FIELDS: string[] = ["fulfillIndividualOrderLine", "reverseIndividualOrderFulfillment"];
 
 describe("Show & Sell Stage 3 order-fulfillment SDL (schema.graphql)", () => {
   test("the two fulfillment enums carry exactly the DATA_MODEL §5.19 values", () => {
@@ -710,9 +726,82 @@ describe("Show & Sell Stage 3 order-fulfillment SDL (schema.graphql)", () => {
     );
   });
 
-  test("AUTH: no Stage 3 fulfillment type or enum carries an auth directive (Cognito-only)", () => {
-    for (const name of [...Object.keys(SS3_TYPE_FIELDS), ...Object.keys(SS3_ENUMS)]) {
+  test("§2.4.3/§2.4.4: the inputs carry exactly the fields a caller may choose", () => {
+    for (const [name, fields] of Object.entries(SS3_INPUT_FIELDS)) {
+      expect(fieldNameSet(definition(name)), `${name} field set`).toEqual(new Set(fields));
+    }
+    for (const name of SS3_MUTATION_FIELDS) {
+      const field = rootFieldByName("Mutation", name)!;
+      expect(field.text, `${name} takes its input`).toMatch(/input\s*:\s*\w+Input!/);
+      expect(returnTypeName(field.text), `${name} return type`).toMatch(/Payload$/);
+      expect(field.text, `${name} returns a non-null payload`).toMatch(/\):\s*\w+Payload!/);
+    }
+  });
+
+  test("§2.4.3/§2.4.4: nothing the server derives is a caller argument", () => {
+    // No unitId, unitCampaignId, campaignId, profileId or productId: the Order row's own
+    // immutable origin scope decides both whose admin may act and whose stock is drawn
+    // (AUTH-U), and the line names the product it sells.
+    for (const name of Object.keys(SS3_INPUT_FIELDS)) {
+      const input = fieldNameSet(definition(name));
+      for (const forbidden of ["unitId", "unitCampaignId", "campaignId", "profileId", "productId", "pricePerUnit"]) {
+        expect(input.has(forbidden), `${name}.${forbidden} would let the caller choose the scope`).toBe(false);
+      }
+      const idem = fieldsOf(definition(name)).find((f) => f.name === "idempotency");
+      expect(idem!.text, `${name}.idempotency is required`).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
+      const version = fieldsOf(definition(name)).find((f) => f.name === "expectedFulfillmentVersion");
+      expect(version!.text, `${name}.expectedFulfillmentVersion is required`).toMatch(/expectedFulfillmentVersion\s*:\s*Int!/);
+    }
+    // The source is the Kernel's choice when fulfilling and the record's fact when
+    // reversing: a reversal that took a source argument could restore stock the
+    // fulfillment never consumed (§2.4.4, AC-06).
+    const fulfill = fieldsOf(definition("FulfillIndividualOrderLineInput"));
+    expect(fulfill.find((f) => f.name === "source")!.text).toMatch(/source\s*:\s*OrderFulfillmentSource!/);
+    expect(fulfill.find((f) => f.name === "quantity")!.text).toMatch(/quantity\s*:\s*Int!/);
+    const reversal = fieldNameSet(definition("ReverseIndividualOrderFulfillmentInput"));
+    expect(reversal.has("source"), "a reversal inherits its source").toBe(false);
+    expect(reversal.has("quantity"), "a reversal inherits its quantity").toBe(false);
+  });
+
+  test("§2.4.3/§2.4.4: the payload answers the Order, the record, and a position only when stock moved", () => {
+    for (const [payload, record] of [["FulfillIndividualOrderLinePayload", "fulfillment"], ["ReverseIndividualOrderFulfillmentPayload", "reversal"]]) {
+      const order = fieldsOf(definition(payload)).find((f) => f.name === "order");
+      expect(returnTypeName(order!.text), `${payload}.order`).toBe("Order");
+      expect(order!.text, `${payload}.order is non-null`).toMatch(/order\s*:\s*Order!/);
+      const row = fieldsOf(definition(payload)).find((f) => f.name === record);
+      expect(returnTypeName(row!.text), `${payload}.${record}`).toBe("OrderFulfillment");
+      expect(row!.text, `${payload}.${record} is non-null`).toMatch(new RegExp(`${record}:\\s*OrderFulfillment!`));
+      // Nullable, and absent exactly when no Kernel balance moved: an external-Council
+      // fulfillment that answered a position would read as though stock had left it.
+      const position = fieldsOf(definition(payload)).find((f) => f.name === "inventoryPosition");
+      expect(returnTypeName(position!.text), `${payload}.inventoryPosition`).toBe("InventoryPosition");
+      expect(position!.text, `${payload}.inventoryPosition is nullable`).toMatch(/inventoryPosition\s*:\s*InventoryPosition\s*$/);
+    }
+  });
+
+  test("§2.4.5: orderFulfillments is a paged read of the full audit type", () => {
+    const field = rootFieldByName("Query", "orderFulfillments")!;
+    expect(field.text, "orderFulfillments takes orderId").toMatch(/orderId\s*:\s*ID!/);
+    expect(field.text, "orderFulfillments takes a PageInput").toMatch(/page\s*:\s*PageInput/);
+    expect(returnTypeName(field.text), "orderFulfillments return type").toBe("OrderFulfillmentConnection");
+    expect(field.text, "orderFulfillments returns a non-null connection").toMatch(/\):\s*OrderFulfillmentConnection!/);
+    const items = fieldsOf(definition("OrderFulfillmentConnection")).find((f) => f.name === "items");
+    expect(returnTypeName(items!.text), "the audit page is the full audit type").toBe("OrderFulfillment");
+    expect(items!.text, "items is [OrderFulfillment!]!").toMatch(/items\s*:\s*\[OrderFulfillment!\]!/);
+    // The participant projection is never a connection element: the audit fields belong
+    // to the Unit-Admin query alone, and `Order.fulfillments` stays the only answer
+    // every caller gets (§10.2).
+    expect(items!.text, "the audit page carries no participant projection").not.toMatch(/Participant/);
+  });
+
+  test("AUTH: no Stage 3 fulfillment type, input, enum, or field carries an auth directive", () => {
+    for (const name of [...Object.keys(SS3_TYPE_FIELDS), ...Object.keys(SS3_INPUT_FIELDS), ...Object.keys(SS3_ENUMS)]) {
       expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+    }
+    for (const name of [...SS3_MUTATION_FIELDS, "orderFulfillments"]) {
+      const field = rootFieldByName("Mutation", name) ?? rootFieldByName("Query", name);
+      expect(field, `${name} is missing`).toBeDefined();
+      expect(field!.directives, `${name} must be directive-free`).toEqual([]);
     }
   });
 });
