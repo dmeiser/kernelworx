@@ -18,7 +18,15 @@ describe('enrichLineItems', () => {
         );
 
         assert.deepStrictEqual(enrichedLineItems, [
-            { productId: 'PROD#1', productName: 'Popcorn', quantity: 3, pricePerUnit: 1.99, subtotal: 5.97 },
+            {
+                productId: 'PROD#1',
+                productName: 'Popcorn',
+                quantity: 3,
+                pricePerUnit: 1.99,
+                subtotal: 5.97,
+                lineItemId: 'auto-generated-id',
+                fulfilledQuantity: 0,
+            },
         ]);
         assert.strictEqual(totalAmountCents, 597);
     });
@@ -85,6 +93,84 @@ describe('enrichLineItems', () => {
         assert.throws(
             () => enrichLineItems([{ productId: 'PROD#1', quantity: 1 }], { products: [] }),
             /INVALID_INPUT: Product PROD#1 not found in catalog/
+        );
+    });
+
+    // §5.19 (checklist 2.4.1): a line's identity is minted once and survives an
+    // edit, and its fulfilled count rides along, because a fulfillment recorded
+    // against a lineItemId is only meaningful if that id still names the line.
+    it('mints a distinct identity per line on the create path, with nothing fulfilled', () => {
+        const { enrichedLineItems } = enrichLineItems(
+            [{ productId: 'PROD#1', quantity: 2 }, { productId: 'PROD#2', quantity: 1 }],
+            CATALOG,
+            []
+        );
+
+        assert.strictEqual(enrichedLineItems.length, 2);
+        // The harness stubs util.autoId() to a constant, so uniqueness is not
+        // what this pins; what it pins is that every line gets an identity and a
+        // zero fulfilled count rather than an absent one.
+        for (const line of enrichedLineItems) {
+            assert.strictEqual(typeof line.lineItemId, 'string');
+            assert.ok(line.lineItemId.length > 0);
+            assert.strictEqual(line.fulfilledQuantity, 0);
+        }
+    });
+
+    it('inherits identity and the fulfilled count from the stored lines on an edit', () => {
+        const stored = [
+            { productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 2, quantity: 3 },
+            { productId: 'PROD#1', lineItemId: 'LINE#B', fulfilledQuantity: 0, quantity: 1 },
+        ];
+        const { enrichedLineItems } = enrichLineItems(
+            [{ productId: 'PROD#1', quantity: 4 }, { productId: 'PROD#1', quantity: 1 }],
+            CATALOG,
+            stored
+        );
+
+        assert.strictEqual(enrichedLineItems[0].lineItemId, 'LINE#A');
+        assert.strictEqual(enrichedLineItems[0].fulfilledQuantity, 2);
+        // The second incoming line takes the only remaining unconsumed id: two
+        // lines of one product must not collapse onto the same identity.
+        assert.strictEqual(enrichedLineItems[1].lineItemId, 'LINE#B');
+        assert.strictEqual(enrichedLineItems[1].fulfilledQuantity, 0);
+    });
+
+    it('keeps a caller-named lineItemId when it names a stored line', () => {
+        const stored = [{ productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 1 }];
+        const { enrichedLineItems } = enrichLineItems(
+            [{ productId: 'PROD#1', quantity: 5, lineItemId: 'LINE#A' }],
+            CATALOG,
+            stored
+        );
+
+        assert.strictEqual(enrichedLineItems[0].lineItemId, 'LINE#A');
+        assert.strictEqual(enrichedLineItems[0].fulfilledQuantity, 1);
+    });
+
+    it('refuses a lineItemId that names no line on this order', () => {
+        assert.throws(
+            () =>
+                enrichLineItems(
+                    [{ productId: 'PROD#1', quantity: 1, lineItemId: 'LINE#GHOST' }],
+                    CATALOG,
+                    [{ productId: 'PROD#1', lineItemId: 'LINE#A' }]
+                ),
+            /INVALID_INPUT: Unknown lineItemId LINE#GHOST for this order/
+        );
+    });
+
+    it('refuses to edit a line below the quantity already fulfilled', () => {
+        // The stored line has 3 ordered / 2 fulfilled. Editing it to 1 ordered
+        // would leave a fulfillment naming a line that no longer owes it.
+        assert.throws(
+            () =>
+                enrichLineItems(
+                    [{ productId: 'PROD#1', quantity: 1 }],
+                    CATALOG,
+                    [{ productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 2, quantity: 3 }]
+                ),
+            /INVALID_INPUT: Quantity of 1 is below the line's already-fulfilled amount of 2/
         );
     });
 });

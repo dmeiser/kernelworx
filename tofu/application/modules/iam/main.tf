@@ -1031,6 +1031,26 @@ data "aws_iam_policy_document" "appsync_dynamodb" {
     ]
     resources = concat(local.dynamodb_table_arns, local.dynamodb_index_arns)
   }
+
+  # Wave 3 §10.2: the Order.fulfillments field resolver (UNIT resolver on
+  # OrderFulfillmentsDS) answers every participant with one Order's fulfillment
+  # history. Read-only on purpose - fulfillment/reversal rows are written only
+  # by the unit-operations transaction path, never through AppSync. The blanket
+  # statement above already admits this table today; naming the grant here pins
+  # the resolver's exact read (GetItem/Query, table plus indexes) so a later
+  # narrowing of the blanket list stays a deliberate act and this field's read
+  # is auditable by name.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+    ]
+    resources = [
+      var.dynamodb_table_arns["order_fulfillments"],
+      "${var.dynamodb_table_arns["order_fulfillments"]}/index/*",
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "appsync_dynamodb" {

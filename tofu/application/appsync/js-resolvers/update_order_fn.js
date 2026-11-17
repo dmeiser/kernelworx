@@ -154,7 +154,18 @@ export function request(ctx) {
             util.error('Catalog not loaded for lineItems update', 'INTERNAL_ERROR');
         }
 
-        const { enrichedLineItems, totalAmountCents } = enrichLineItems(input.lineItems, catalog);
+        // §5.19 stable line identity: identity and the fulfilled count are
+        // inherited from the stored lines, never re-minted. Re-minting them on
+        // every edit would orphan any fulfillment already recorded against a
+        // line and let a later edit quietly reset `fulfilledQuantity`, which is
+        // exactly the accounting break the wave exists to prevent. An edit may
+        // reduce a line's quantity only down to what that line has already
+        // fulfilled (enforced inside enrichLineItems against this snapshot).
+        const { enrichedLineItems, totalAmountCents } = enrichLineItems(
+            input.lineItems,
+            catalog,
+            order && Array.isArray(order.lineItems) ? order.lineItems : []
+        );
 
         updates.push('lineItems = :lineItems');
         exprValues[':lineItems'] = enrichedLineItems;

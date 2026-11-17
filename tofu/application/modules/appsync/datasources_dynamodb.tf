@@ -78,6 +78,23 @@ resource "aws_appsync_datasource" "orders" {
   }
 }
 
+# Show & Sell wave 3 (data model §6.5): append-only OrderFulfillment rows, one
+# partition per Order. Only the Order.fulfillments field resolver reads this
+# source through AppSync; every fulfillment/reversal write lands in the
+# unit-operations transaction path, and the §2.4.5 admin audit query will join
+# it later on its own wiring.
+resource "aws_appsync_datasource" "order_fulfillments" {
+  api_id           = aws_appsync_graphql_api.main.id
+  name             = "OrderFulfillmentsDS"
+  type             = "AMAZON_DYNAMODB"
+  service_role_arn = var.appsync_service_role_arn
+
+  dynamodb_config {
+    table_name = var.dynamodb_table_names.order_fulfillments
+    region     = var.aws_region
+  }
+}
+
 resource "aws_appsync_datasource" "shares" {
   api_id           = aws_appsync_graphql_api.main.id
   name             = "SharesDS"

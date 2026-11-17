@@ -110,7 +110,14 @@ export function request(ctx) {
         lineItems: enrichedLineItems,
         totalAmount: totalAmount,
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        // §5.19: every fulfillment and reversal of this Order's lines increments
+        // this version, so a Kernel fulfilling two lines from two screens cannot
+        // double-spend one line's unfulfilled quantity. It is written as 0 at
+        // creation rather than left absent: an absent attribute would make the
+        // first fulfillment's version guard a different shape from every later
+        // one, and an absent read is indistinguishable from a corrupt row.
+        fulfillmentVersion: 0
     };
 
     // §1.4.3 (API-FIX-05): the joined scope is captured here and never derived

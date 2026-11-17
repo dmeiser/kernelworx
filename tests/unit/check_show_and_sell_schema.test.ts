@@ -619,3 +619,100 @@ describe("Show & Sell Stage 2 inventory SDL (schema.graphql)", () => {
     }
   });
 });
+
+// --- Stage 3 wave 3 (§5.19/§10.2): the Order fulfillment history ---------------
+
+/**
+ * DATA_MODEL §5.19 fulfillment taxonomy: closed sets, and only those values.
+ * The SDL prefixes the enum names with `Order` so they cannot collide with a
+ * later Show-and-Sell sale-level fulfillment concept.
+ */
+const SS3_ENUMS: Record<string, string[]> = {
+  OrderFulfillmentSource: ["KERNEL_STOCK", "SCOUT_CUSTODY", "EXTERNAL_COUNCIL"],
+  OrderFulfillmentRecordType: ["FULFILL", "REVERSAL"],
+};
+
+/**
+ * The two projections of one append-only row. `OrderFulfillment` is the full
+ * administrative audit (actor account + inventory movement id) reachable only
+ * through the §2.4.5 `orderFulfillments` Unit-Admin query;
+ * `ParticipantOrderFulfillment` is what `Order.fulfillments` answers to every
+ * caller and must never carry either audit field (§10.2).
+ */
+const SS3_TYPE_FIELDS: Record<string, string[]> = {
+  OrderFulfillment: [
+    "fulfillmentId",
+    "orderId",
+    "campaignId",
+    "profileId",
+    "unitId",
+    "unitCampaignId",
+    "lineItemId",
+    "productId",
+    "recordType",
+    "quantity",
+    "source",
+    "inventoryMovementId",
+    "reversalOfFulfillmentId",
+    "actorAccountId",
+    "createdAt",
+  ],
+  ParticipantOrderFulfillment: [
+    "fulfillmentId",
+    "lineItemId",
+    "productId",
+    "recordType",
+    "quantity",
+    "source",
+    "reversalOfFulfillmentId",
+    "createdAt",
+  ],
+};
+
+describe("Show & Sell Stage 3 order-fulfillment SDL (schema.graphql)", () => {
+  test("the two fulfillment enums carry exactly the DATA_MODEL §5.19 values", () => {
+    for (const [name, values] of Object.entries(SS3_ENUMS)) {
+      const def = definition(name);
+      expect(def.kind, `${name} must be an enum`).toBe("enum");
+      const found = def.body.split("\n").map((l) => l.trim()).filter((l) => /^[A-Z][A-Z0-9_]*$/.test(l));
+      expect(found, `${name} values`).toEqual(values);
+    }
+  });
+
+  test("OrderFulfillment is the full audit and ParticipantOrderFulfillment the projection", () => {
+    for (const [name, expected] of Object.entries(SS3_TYPE_FIELDS)) {
+      expect([...fieldNameSet(definition(name))], `${name} fields`).toEqual(expected);
+    }
+    // The audit fields exist exactly once: on the admin type.
+    for (const audit of ["actorAccountId", "inventoryMovementId"]) {
+      expect(fieldNameSet(definition("OrderFulfillment")).has(audit), `OrderFulfillment.${audit} is the audit`).toBe(true);
+    }
+  });
+
+  test("the participant projection never carries either administrative audit field (§10.2)", () => {
+    // INV-Q/output separation: a Scout reading `Order.fulfillments` sees the
+    // custody/quantity history of their own Order, never who recorded it or
+    // which inventory movement moved stock.
+    const participant = fieldNameSet(definition("ParticipantOrderFulfillment"));
+    for (const forbidden of ["actorAccountId", "inventoryMovementId"]) {
+      expect(participant.has(forbidden), `ParticipantOrderFulfillment.${forbidden} would leak the audit`).toBe(false);
+    }
+  });
+
+  test("Order.fulfillments answers the non-null participant list, not the audit type", () => {
+    const field = fieldsOf(definition("Order")).find((f) => f.name === "fulfillments");
+    expect(field, "Order.fulfillments is missing").toBeDefined();
+    expect(returnTypeName(field!.text), "Order.fulfillments element type").toBe("ParticipantOrderFulfillment");
+    // The list is non-null with non-null items: no history is [], never null,
+    // and the field resolver answers [] for an Order with no fulfillment rows.
+    expect(field!.text, "Order.fulfillments is [ParticipantOrderFulfillment!]!").toMatch(
+      /fulfillments\s*:\s*\[ParticipantOrderFulfillment!\]!/,
+    );
+  });
+
+  test("AUTH: no Stage 3 fulfillment type or enum carries an auth directive (Cognito-only)", () => {
+    for (const name of [...Object.keys(SS3_TYPE_FIELDS), ...Object.keys(SS3_ENUMS)]) {
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+    }
+  });
+});
