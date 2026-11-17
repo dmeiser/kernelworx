@@ -27,25 +27,29 @@ This conftest adds:
   ensure_owner_catalog (session scope)  – guarantee owner can access at least one catalog
   ensure_managed_catalog (session scope) – guarantee an ADMIN_MANAGED catalog exists
     global_cleanup     (session scope, autouse) – post-suite TypeScript cleanup
+    video_retention    (session scope, autouse) – keep/prune recordings of the
+                       hand-built contexts (see the video recording section)
 """
 
 import datetime
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 import urllib.parse
 import warnings
 from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 import boto3
 import pluggy
 import pytest
 from boto3.dynamodb.conditions import Attr, Key
 from dotenv import load_dotenv
-from playwright.sync_api import Browser, BrowserContext, Page, expect
+from playwright.sync_api import Browser, BrowserContext, Error, Page, expect
 
 from tests.e2e.pages.catalogs_page import CatalogsPage
 from tests.e2e.pages.dashboard_page import DashboardPage
@@ -99,6 +103,103 @@ def _dump_console_log_on_failure(request: pytest.FixtureRequest, sink: list[str]
         for line in sink[-100:]:
             print(line)
         print("--- end browser console ---")
+
+
+# ---------------------------------------------------------------------------
+# Video recording for hand-built contexts
+#
+# pytest-playwright applies --video only to the contexts it creates itself,
+# so a BrowserContext built by hand in this conftest records nothing unless
+# it opts into recording. These helpers give the hand-built contexts the same
+# behaviour as the plugin's: they record (1280x720) into test-results/video/
+# whenever --video is "on" or "retain-on-failure", and after the suite ends
+# the recordings are kept for --video=on (the QA evidence run) or for a run
+# that had failures, and pruned otherwise, so a green routine run leaves no
+# videos behind.
+# ---------------------------------------------------------------------------
+
+#: Directory every recording made by a hand-built context lands in.
+_VIDEO_DIR: Path = _REPO_ROOT / "test-results" / "video"
+
+#: Recording resolution for the hand-built contexts.
+_VIDEO_SIZE: dict[str, int] = {"width": 1280, "height": 720}
+
+#: Canonical paths of the recordings filed by this run, written as the
+#: owning fixtures close their contexts.
+_recorded_videos: list[Path] = []
+
+
+def _new_context_args(pytestconfig: pytest.Config) -> dict[str, Any]:
+    """Return the options for one hand-built context, video included.
+
+    Mirrors :mod:`pytest_playwright`'s --video handling, which never reaches
+    contexts created here by hand: record unless --video is off/absent.
+    """
+    args: dict[str, Any] = {"ignore_https_errors": True}
+    if pytestconfig.getoption("--video") in ("on", "retain-on-failure"):
+        _VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+        args["record_video_dir"] = str(_VIDEO_DIR)
+        args["record_video_size"] = dict(_VIDEO_SIZE)
+    return args
+
+
+def _close_recording(video_name: str, context: BrowserContext, page: Page) -> None:
+    """Close a hand-built *context* and file its recording as ``<video_name>.webm``.
+
+    Playwright names video files after the page title plus a GUID; renaming
+    here (once ``context.close()`` has flushed the recording) makes each
+    fixture flow identifiable in ``test-results/video/``.
+    """
+    context.close()
+    video = page.video
+    if video is None:
+        return
+    try:
+        source = Path(video.path())
+    except Error:
+        return
+    target = _VIDEO_DIR / f"{video_name}.webm"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source.replace(target)
+    _recorded_videos.append(target)
+
+
+def _collect_plugin_videos(pytestconfig: pytest.Config) -> None:
+    """Copy pytest-playwright's per-test recordings into :data:`_VIDEO_DIR`.
+
+    With ``--video=on`` the plugin saves each test's own recording as
+    ``<output>/<slugified node id>/video[-N].webm``. Copying those files next
+    to the hand-built-context recordings makes ``test-results/video/`` one
+    flat per-test video drop for a QA evidence run; the plugin's artifact
+    folders (trace, screenshots) are left untouched.
+    """
+    output_dir = Path(pytestconfig.getoption("--output")).absolute()
+    _VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    for folder in sorted(p for p in output_dir.iterdir() if p.is_dir()) if output_dir.is_dir() else []:
+        for source in sorted(folder.glob("video*.webm")):
+            suffix = "" if source.stem == "video" else f"-{source.stem.removeprefix('video-')}"
+            target = _VIDEO_DIR / f"{folder.name}{suffix}.webm"
+            shutil.copy2(source, target)
+            _recorded_videos.append(target)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def video_retention(pytestconfig: pytest.Config, request: pytest.FixtureRequest) -> Generator[None, None, None]:
+    """Keep or prune the hand-built recordings once the suite has finished.
+
+    Autouse and session-scoped, so it is set up before every test fixture and
+    finalizes after them — the recordings are already filed by then. The
+    retention rule matches pytest-playwright's for its own contexts: keep for
+    ``--video=on`` or for a failing run, prune a passing run's videos.
+    """
+    yield  # all tests run before this point
+
+    video_option = pytestconfig.getoption("--video")
+    if video_option == "on":
+        _collect_plugin_videos(pytestconfig)
+    elif video_option == "retain-on-failure" and request.session.testsfailed == 0:
+        for path in _recorded_videos:
+            path.unlink(missing_ok=True)
 
 
 #: Seller name used when ``ensure_owner_profile`` must create a profile from scratch.
@@ -244,7 +345,7 @@ def _cleanup_unconfirmed_smoke_users(user_pool_id: str) -> None:
 
 
 @pytest.fixture(scope="session")
-def ensure_owner_profile(browser: Browser) -> Generator[str, None, None]:
+def ensure_owner_profile(browser: Browser, pytestconfig: pytest.Config) -> Generator[str, None, None]:
     """Ensure the owner test user has at least one **owned** seller profile.
 
     Checks only the *Scouts I Own* section of the ``/scouts`` dashboard —
@@ -271,7 +372,7 @@ def ensure_owner_profile(browser: Browser) -> Generator[str, None, None]:
     Yields:
         The seller name of a verified-owned profile on the owner dashboard.
     """
-    context: BrowserContext = browser.new_context(ignore_https_errors=True)
+    context: BrowserContext = browser.new_context(**_new_context_args(pytestconfig))
     page: Page = context.new_page()
     try:
         login_as_owner(page)
@@ -306,7 +407,7 @@ def ensure_owner_profile(browser: Browser) -> Generator[str, None, None]:
 
         yield names[0]
     finally:
-        context.close()
+        _close_recording("ensure_owner_profile", context, page)
 
 
 #: Catalog name used when ``ensure_owner_catalog`` must create a catalog from scratch.
@@ -314,7 +415,7 @@ _OWNER_ENSURE_CATALOG_NAME: str = "Smoke Test Catalog"
 
 
 @pytest.fixture(scope="session")
-def ensure_owner_catalog(browser: Browser) -> Generator[None, None, None]:
+def ensure_owner_catalog(browser: Browser, pytestconfig: pytest.Config) -> Generator[None, None, None]:
     """Ensure at least one catalog is accessible to the owner test user.
 
     Navigates to ``/catalogs`` as the owner and checks both the *My Catalogs*
@@ -337,7 +438,7 @@ def ensure_owner_catalog(browser: Browser) -> Generator[None, None, None]:
     Yields:
         ``None``
     """
-    context: BrowserContext = browser.new_context(ignore_https_errors=True)
+    context: BrowserContext = browser.new_context(**_new_context_args(pytestconfig))
     page: Page = context.new_page()
     try:
         login_as_owner(page)
@@ -358,7 +459,7 @@ def ensure_owner_catalog(browser: Browser) -> Generator[None, None, None]:
 
         yield
     finally:
-        context.close()
+        _close_recording("ensure_owner_catalog", context, page)
 
 
 @pytest.fixture(scope="session")
@@ -462,7 +563,7 @@ def ensure_managed_catalog() -> Generator[None, None, None]:
 
 
 @pytest.fixture(scope="session")
-def ensure_readonly_share(browser: Browser) -> Generator[None, None, None]:
+def ensure_readonly_share(browser: Browser, pytestconfig: pytest.Config) -> Generator[None, None, None]:
     """Ensure the readonly user has a READ share to at least one owner profile.
 
     If the readonly user already has a share (detected via the share table on
@@ -485,8 +586,8 @@ def ensure_readonly_share(browser: Browser) -> Generator[None, None, None]:
     """
     readonly_email: str = os.getenv("TEST_READONLY_EMAIL", "")
 
-    owner_context: BrowserContext = browser.new_context(ignore_https_errors=True)
-    readonly_context: BrowserContext = browser.new_context(ignore_https_errors=True)
+    owner_context: BrowserContext = browser.new_context(**_new_context_args(pytestconfig))
+    readonly_context: BrowserContext = browser.new_context(**_new_context_args(pytestconfig))
     owner_page_: Page = owner_context.new_page()
     readonly_page_: Page = readonly_context.new_page()
 
@@ -530,8 +631,8 @@ def ensure_readonly_share(browser: Browser) -> Generator[None, None, None]:
                     share_page2.revoke_access(readonly_email)
             except Exception:  # noqa: BLE001
                 pass
-        owner_context.close()
-        readonly_context.close()
+        _close_recording("ensure_readonly_share_readonly", readonly_context, readonly_page_)
+        _close_recording("ensure_readonly_share_owner", owner_context, owner_page_)
 
 
 @pytest.fixture(scope="session")
