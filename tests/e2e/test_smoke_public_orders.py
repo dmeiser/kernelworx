@@ -60,7 +60,13 @@ from urllib.parse import parse_qsl, urljoin, urlparse
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page, expect
 
-from tests.e2e.conftest import _attach_console_log, _dump_console_log_on_failure
+from tests.e2e.conftest import (
+    _attach_console_log,
+    _close_recording,
+    _dump_console_log_on_failure,
+    _new_context_args,
+    _video_name_for,
+)
 from tests.e2e.pages.order_page import OrderPage
 from tests.e2e.pages.public_order_page import (
     ACK_DISCLOSURE_TEXT,
@@ -108,13 +114,20 @@ def _po_state(public_orders_setup: dict[str, str]) -> dict[str, str]:
 
 
 @pytest.fixture
-def buyer_page(browser: Browser, request: pytest.FixtureRequest) -> Generator[Page, None, None]:
+def buyer_page(
+    browser: Browser,
+    pytestconfig: pytest.Config,
+    request: pytest.FixtureRequest,
+) -> Generator[Page, None, None]:
     """Yield a Page in a fresh, never-authenticated browser context.
 
     A separate context (not the ``page`` fixture) is the point: the buyer must
-    hold no Cognito session, no cookies and no localStorage.
+    hold no Cognito session, no cookies and no localStorage. That also means
+    the plugin has no per-test context to record for these tests, so this one
+    records through the ``conftest`` helpers and files as
+    ``<test name>-<browser>.webm``.
     """
-    context: BrowserContext = browser.new_context(ignore_https_errors=True)
+    context: BrowserContext = browser.new_context(**_new_context_args(pytestconfig))
     console_log: list[str] = []
     try:
         page = context.new_page()
@@ -122,7 +135,7 @@ def buyer_page(browser: Browser, request: pytest.FixtureRequest) -> Generator[Pa
         yield page
     finally:
         _dump_console_log_on_failure(request, console_log)
-        context.close()
+        _close_recording(_video_name_for(request), context, page)
 
 
 # ---------------------------------------------------------------------------

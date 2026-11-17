@@ -14,6 +14,7 @@ import boto3
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page, expect
 
+from tests.e2e.conftest import _close_recording, _new_context_args, _video_name_for
 from tests.e2e.pages.dashboard_page import DashboardPage
 from tests.e2e.pages.user_settings_page import UserSettingsPage
 from tests.e2e.utils.auth import login
@@ -48,7 +49,11 @@ def test_account_deletion_ui_is_discoverable(owner_page: Page) -> None:
 
 
 @pytest.mark.smoke
-def test_account_deletion_happy_path(browser: Browser) -> None:
+def test_account_deletion_happy_path(
+    browser: Browser,
+    pytestconfig: pytest.Config,
+    request: pytest.FixtureRequest,
+) -> None:
     """End-to-end happy path test for stepped account deletion.
 
     Creates a disposable Cognito test user, logs in, creates a seller profile,
@@ -57,6 +62,9 @@ def test_account_deletion_happy_path(browser: Browser) -> None:
     - Deletion completes sequentially
     - User is signed out and redirected
     - Account is removed from Cognito
+
+    The flow runs in a context this test builds itself, so it records through
+    the ``conftest`` helpers: the plugin's per-test video would not exist here.
     """
     user_pool_id = os.environ.get("TEST_USER_POOL_ID")
     region = os.environ.get("TEST_REGION", "us-east-1")
@@ -85,7 +93,7 @@ def test_account_deletion_happy_path(browser: Browser) -> None:
     except Exception as exc:
         pytest.skip(f"Could not provision test user in Cognito: {exc}")
 
-    context: BrowserContext = browser.new_context(ignore_https_errors=True)
+    context: BrowserContext = browser.new_context(**_new_context_args(pytestconfig))
     page: Page = context.new_page()
 
     try:
@@ -138,7 +146,7 @@ def test_account_deletion_happy_path(browser: Browser) -> None:
             cognito.admin_get_user(UserPoolId=user_pool_id, Username=email)
 
     finally:
-        context.close()
+        _close_recording(_video_name_for(request), context, page)
         try:
             cognito.admin_delete_user(UserPoolId=user_pool_id, Username=email)
         except Exception:

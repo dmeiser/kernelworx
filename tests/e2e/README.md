@@ -128,6 +128,48 @@ uv run pytest tests/e2e/ --headed -v
 uv run pytest tests/e2e/ --headed --slowmo=500 -v
 ```
 
+### Record the flow a run exercised (QA evidence)
+
+```bash
+uv run pytest tests/e2e/ -m smoke --video=on -v
+```
+
+The CLI `--video=on` overrides the default from `tests/e2e/pytest.ini`
+(`--video=retain-on-failure`) and keeps every recording. After the session
+they are collected under `test-results/video/`:
+
+- each test's own context (provided by pytest-playwright) →
+  `test-results/video/<slugified test id>.webm`. The plugin also keeps a
+  per-test artifact folder `test-results/<test id>/`, which always holds
+  `video.webm`; the trace and screenshot in it belong to a *failed* test only,
+  because `--tracing` and `--screenshot` stay `retain-on-failure`;
+- the fixture flows that `conftest.py` runs in hand-built contexts →
+  `ensure_owner_profile.webm`, `ensure_owner_catalog.webm`,
+  `ensure_readonly_share_owner.webm`, `ensure_readonly_share_readonly.webm`.
+  Those fixtures are session-scoped, so each files one recording per run;
+- a test that drives a context of its own because it must not carry a session
+  (the buyer flows in `test_smoke_public_orders.py`, and the account-deletion
+  happy path) records through the same `conftest` helpers → `test_<name>-<browser>.webm`
+  (the `[chromium]` parametrization pytest-playwright adds to every test that
+  asks for `browser` is folded into the file name, exactly as it is in the
+  plugin's own per-test names).
+
+Two smoke tests make no browser calls (they assert on GraphQL responses), so
+they have no flow to record. Where a test opens a second context for another
+persona, the recording covers its main flow, not that extra context.
+
+The default retention (`make test-e2e`) keeps video only when the run fails —
+alongside screenshots and the trace — and prunes a passing run's recordings so
+routine runs leave nothing behind. Note that every new session wipes
+`test-results/` before running: copy the videos you want to keep before
+re-running.
+
+Playwright records webm; convert for review like this:
+
+```bash
+ffmpeg -i <in>.webm -c:v libx264 -pix_fmt yuv420p -movflags +faststart <out>.mp4
+```
+
 ---
 
 ## Test file overview
@@ -358,7 +400,7 @@ by name is not an option — see the deploy-smoke entry in `AGENTS.md`.
 
 ```
 tests/e2e/
-├── conftest.py               # Session fixtures; test-user loading; post-suite cleanup
+├── conftest.py               # Session fixtures; test-user loading; post-suite cleanup; recording retention
 ├── pytest.ini                # strict-markers, no-randomly, screenshot/video on failure
 ├── test_smoke_settings.py    # Smoke tests for settings flows
 ├── test_smoke_reports.py     # Smoke tests for reports flows
