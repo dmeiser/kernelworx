@@ -116,6 +116,9 @@ def _dump_console_log_on_failure(request: pytest.FixtureRequest, sink: list[str]
 # the recordings are kept for --video=on (the QA evidence run) or for a run
 # that had failures, and pruned otherwise, so a green routine run leaves no
 # videos behind.
+#
+# A test module that drives its own context (no plugin ``page``, so no plugin
+# per-test video either) uses the same three helpers; see _video_name_for.
 # ---------------------------------------------------------------------------
 
 #: Directory every recording made by a hand-built context lands in.
@@ -162,6 +165,17 @@ def _close_recording(video_name: str, context: BrowserContext, page: Page) -> No
     target.parent.mkdir(parents=True, exist_ok=True)
     source.replace(target)
     _recorded_videos.append(target)
+
+
+def _video_name_for(request: pytest.FixtureRequest) -> str:
+    """Per-test file name for a recording made in a test module's own context.
+
+    A test module that builds its own context instead of taking ``page`` from
+    the plugin passes this to :func:`_close_recording`, so its recording is
+    named after the test it shows — ``<test name>-<browser>.webm`` — and the
+    retention rule below can prune it with the rest.
+    """
+    return re.sub(r"[^0-9A-Za-z_-]+", "-", request.node.name).strip("-") or "context"
 
 
 def _collect_plugin_videos(pytestconfig: pytest.Config) -> None:
