@@ -69,7 +69,12 @@ describe('get_membership_guard_for_order_fn request: CONSUME_SCOUT_CUSTODY read'
         const stash = {
             campaignId: 'CAMPAIGN#c1',
             profileId: 'PROFILE#p1',
-            campaign: { profileId: 'PROFILE#p1', unitId: 'UNIT#pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' }
+            // `unitId` is stored bare on both the Campaign row and the guard row; the
+            // `UNIT#` spelling is the units table's partition key, not this attribute.
+            campaign: { profileId: 'PROFILE#p1', unitId: 'pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' },
+            // What the share step ahead of this one concluded. The Profile path is the
+            // usual answer; the Unit Admin path is the case that needs the grant read.
+            profileWriteAuthorized: opts.noProfileWrite !== true
         };
         if (opts.unlinked === true) {
             delete stash.campaign.unitCampaignId;
@@ -187,4 +192,130 @@ describe('get_membership_guard_for_order_fn response: batched answer', () => {
         ctx.error = { message: 'throttled', type: 'THROTTLED' };
         return response(ctx);
     }
+});
+
+// A BatchGetItem that did not look at some keys is not an answer about them, and this read
+// decides three things at once: whether the campaign is joined, what the Scout is holding,
+// and whether this key already exists. Reading a non-answer as absence would let a sale
+// stamp a null scope or under-consume custody, then preserve that answer in the COMPLETED
+// marker for every retry. So a partial batch fails in the read step, before any write.
+describe('get_membership_guard_for_order_fn response: an partly served batch is not an answer', () => {
+    const UNIT_CAMPAIGNS_TABLE = '${unit_campaigns_table_name}';
+    const INVENTORY_TABLE = '${inventory_table_name}';
+    const FULFILLMENTS_TABLE = '${order_fulfillments_table_name}';
+
+    function partial(unprocessedKeys) {
+        const ctx = {
+            stash: { custodySaleRead: { unitCampaignId: 'uc-1', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1' } },
+            result: {
+                data: {
+                    [UNIT_CAMPAIGNS_TABLE]: [{ pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-1' }]
+                },
+                unprocessedKeys: unprocessedKeys
+            }
+        };
+        return () => response(ctx);
+    }
+
+    it('refuses when the custody keys were not looked at', () => {
+        assert.throws(partial({ [INVENTORY_TABLE]: { keys: [{ pk: 'UNIT_CAMPAIGN#uc-1', sk: 'PRODUCT#P1#CUSTODY#PROFILE#p1' }] } }), /RESOURCE_BUSY: The sale reads were only partly served; no order was written/);
+    });
+
+    it('refuses when the guard row was not looked at, which would otherwise read as independent', () => {
+        assert.throws(partial({ [UNIT_CAMPAIGNS_TABLE]: { keys: [{ pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD' }] } }), /RESOURCE_BUSY/);
+    });
+
+    it('refuses when the marker was not looked at, which would otherwise consume custody twice', () => {
+        assert.throws(partial({ [FULFILLMENTS_TABLE]: { keys: [{ pk: 'IDEM#a#createOrder#CAMPAIGN%23c1', sk: 'IDEM#sale-1' }] } }), /RESOURCE_BUSY/);
+    });
+
+    it('accepts a fully served batch, and an empty unprocessedKeys entry', () => {
+        const ctx = {
+            stash: { custodySaleRead: { unitCampaignId: 'uc-1', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1' } },
+            result: { data: {}, unprocessedKeys: { [INVENTORY_TABLE]: { keys: [] } } }
+        };
+        assert.strictEqual(response(ctx), null);
+    });
+});
+
+// SEC-1 (§2.4.2): a Unit Admin with no share on the Profile is still allowed to record
+// the sale of her own Unit's custody. The share step hands its verdict down instead of
+// ending the pipeline, and this step -- the only one with a datastore call left on a sale
+// -- pays for the grant read that answers the other half.
+describe('get_membership_guard_for_order_fn: the Unit Admin grant rides the sale batch', () => {
+    const ACCOUNT = '11111111-1111-4111-8111-111111111111';
+    const UNIT_CAMPAIGNS_TABLE = '${unit_campaigns_table_name}';
+    const INVENTORY_TABLE = '${inventory_table_name}';
+    const FULFILLMENTS_TABLE = '${order_fulfillments_table_name}';
+    const UNITS_TABLE = '${units_table_name}';
+
+    function ctx(noProfileWrite) {
+        return {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    campaignId: 'CAMPAIGN#c1',
+                    fulfillmentMode: 'CONSUME_SCOUT_CUSTODY',
+                    idempotencyKey: 'sale-1',
+                    lineItems: [{ productId: 'PROD#1', quantity: 4 }]
+                }
+            },
+            identity: { claims: { sub: ACCOUNT } },
+            stash: {
+                campaignId: 'CAMPAIGN#c1',
+                profileId: 'PROFILE#p1',
+                campaign: { profileId: 'PROFILE#p1', unitId: 'pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' },
+                profileWriteAuthorized: noProfileWrite !== true
+            }
+        };
+    }
+
+    it('adds the grant key when the Profile half failed', () => {
+        const result = request(ctx(true));
+
+        assert.deepStrictEqual(result.tables[UNITS_TABLE], {
+            keys: [{ pk: 'UNIT#pack-3149', sk: 'GRANT#' + ACCOUNT }],
+            consistentRead: true
+        });
+    });
+
+    it('reads no grant at all when the Profile half already authorized the sale', () => {
+        const result = request(ctx(false));
+
+        assert.ok(!Object.hasOwn(result.tables, UNITS_TABLE), 'a Profile WRITE is the whole answer; the units table is not part of the call');
+    });
+
+    it('reads no grant for a campaign that names no Unit, because there is no Unit Admin to ask', () => {
+        const unlinked = ctx(true);
+        delete unlinked.stash.campaign.unitId;
+
+        assert.ok(!Object.hasOwn(request(unlinked).tables, UNITS_TABLE));
+    });
+
+    it('stashes the grant row so the write step can check it against the guard', () => {
+        const grant = { pk: 'UNIT#pack-3149', sk: 'GRANT#' + ACCOUNT, role: 'UNIT_ADMIN' };
+        const stashed = ctx(true);
+        request(stashed);
+        const answered = response({
+            stash: stashed.stash,
+            result: {
+                data: {
+                    [UNIT_CAMPAIGNS_TABLE]: [{ pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-pack-3149-fall-2026', unitId: 'pack-3149' }],
+                    [INVENTORY_TABLE]: [{ productId: 'PROD#1', withScoutQty: 9, version: 2 }],
+                    [UNITS_TABLE]: [grant]
+                }
+            }
+        });
+
+        assert.strictEqual(answered, 'uc-pack-3149-fall-2026');
+        assert.deepStrictEqual(stashed.stash.unitAdminGrant, grant);
+    });
+
+    it('stashes a missing grant as null, so a revoked admin reads as absent rather than unknown', () => {
+        const stashed = ctx(true);
+        request(stashed);
+        response({ stash: stashed.stash, result: { data: {} } });
+
+        assert.strictEqual(stashed.stash.unitAdminGrant, null);
+    });
 });

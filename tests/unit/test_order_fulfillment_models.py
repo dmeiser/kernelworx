@@ -357,25 +357,34 @@ def test_apply_line_fulfillment_copies_lines_so_nothing_shared_is_writable() -> 
 # --- the fulfillmentVersion condition (§5.19) --------------------------------------
 
 
-def test_the_version_condition_carries_the_pre_wave_3_disjunction() -> None:
-    """A pre-Wave-3 row has no attribute at all, and equality against absence fails.
+def test_the_version_condition_carries_the_pre_wave_3_disjunction_and_the_order_key() -> None:
+    """Two absences have to be told apart, and the expression is the only place that can.
 
-    Version 0 must therefore match "attribute_not_exists OR attribute = 0" — both
+    A pre-Wave-3 row has no ``fulfillmentVersion`` attribute at all, and equality against
+    absence fails, so version 0 must match "attribute_not_exists OR attribute = 0" — both
     spellings of "nobody has fulfilled this yet" — or an unfulfilled legacy Order is
     unfulfillable without a backfill.
+
+    But ``attribute_not_exists`` is equally satisfied by an item that is not there at all,
+    and a condition against a missing item SUCCEEDS. Delete the Order between the caller's
+    read and this transaction and a version-0 guard alone would let ``UpdateItem`` write a
+    partial Order back. So every spelling of the guard also requires the Order's own key
+    attribute, and the disjunction is parenthesized because DynamoDB documents no precedence
+    for mixing AND with OR.
     """
     zero = ofm.fulfillment_version_condition(0)
     assert zero == {
         "ConditionExpression": (
-            "attribute_not_exists(#fulfillmentVersion) OR #fulfillmentVersion = :expectedFulfillmentVersion"
+            "(attribute_not_exists(#fulfillmentVersion) OR #fulfillmentVersion = :expectedFulfillmentVersion)"
+            " AND attribute_exists(#orderId)"
         ),
-        "ExpressionAttributeNames": {"#fulfillmentVersion": "fulfillmentVersion"},
+        "ExpressionAttributeNames": {"#fulfillmentVersion": "fulfillmentVersion", "#orderId": "orderId"},
         "ExpressionAttributeValues": {":expectedFulfillmentVersion": {"N": "0"}},
     }
     seventh = ofm.fulfillment_version_condition(7)
     assert seventh == {
-        "ConditionExpression": "#fulfillmentVersion = :expectedFulfillmentVersion",
-        "ExpressionAttributeNames": {"#fulfillmentVersion": "fulfillmentVersion"},
+        "ConditionExpression": "#fulfillmentVersion = :expectedFulfillmentVersion AND attribute_exists(#orderId)",
+        "ExpressionAttributeNames": {"#fulfillmentVersion": "fulfillmentVersion", "#orderId": "orderId"},
         "ExpressionAttributeValues": {":expectedFulfillmentVersion": {"N": "7"}},
     }
 

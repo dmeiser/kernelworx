@@ -65,6 +65,21 @@ resource "aws_appsync_function" "lookup_order_for_delete" {
   code = file("${local.js_resolvers_dir}/lookup_order_for_delete_fn.js")
 }
 
+# ARCH-1: the delete takes the Order's fulfillment rows with it, and a cross-table
+# TransactWriteItems names every table it writes.
+resource "aws_appsync_function" "get_order_fulfillments_for_delete" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.order_fulfillments.name
+  name        = "GetOrderFulfillmentsForDeleteFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_order_fulfillments_for_delete_fn.js")
+}
+
 resource "aws_appsync_function" "delete_order" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.orders.name
@@ -75,7 +90,11 @@ resource "aws_appsync_function" "delete_order" {
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/delete_order_fn.js")
+  # templatefile() because ARCH-1 made this an Order-plus-fulfillment-children delete,
+  # and a cross-table TransactWriteItems names every table it writes.
+  code = templatefile("${local.js_resolvers_dir}/delete_order_fn.js", {
+    order_fulfillments_table_name = var.dynamodb_table_names.order_fulfillments
+  })
 }
 
 resource "aws_appsync_function" "verify_order_delete_propagation" {
@@ -139,6 +158,7 @@ resource "aws_appsync_function" "get_membership_guard_for_order" {
     unit_campaigns_table_name     = var.dynamodb_table_names.unit_campaigns
     inventory_table_name          = var.dynamodb_table_names.inventory
     order_fulfillments_table_name = var.dynamodb_table_names.order_fulfillments
+    units_table_name              = var.dynamodb_table_names.units
   })
 }
 
@@ -183,6 +203,7 @@ resource "aws_appsync_function" "create_order" {
   # item's `table` literally, so all four names must be real.
   code = templatefile("${local.js_resolvers_dir}/create_order_fn.js", {
     orders_table_name             = var.dynamodb_table_names.orders
+    campaigns_table_name          = var.dynamodb_table_names.campaigns
     unit_campaigns_table_name     = var.dynamodb_table_names.unit_campaigns
     inventory_table_name          = var.dynamodb_table_names.inventory
     order_fulfillments_table_name = var.dynamodb_table_names.order_fulfillments

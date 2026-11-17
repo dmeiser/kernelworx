@@ -29,13 +29,16 @@ from src.utils.ids import build_unit_campaign_key as _build_unit_campaign_key
 PROFILE_TABLE = "kernelworx-profiles-v2-ue1-dev"
 CAMPAIGNS_TABLE = "kernelworx-campaigns-v2-ue1-dev"
 ORDERS_TABLE = "kernelworx-orders-v2-ue1-dev"
+ORDER_FULFILLMENTS_TABLE = "kernelworx-order-fulfillments-ue1-dev"
 SHARES_TABLE = "kernelworx-shares-ue1-dev"
 
-# Tables the #351 campaign role grants read access to.
-DOMAIN_TABLES = {PROFILE_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE, SHARES_TABLE}
+# Tables the #351 campaign role grants read access to. `order_fulfillments` joins the
+# scope because deleting a Campaign's Orders takes their fulfillment history with them
+# (ARCH-1, children-first).
+DOMAIN_TABLES = {PROFILE_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE, SHARES_TABLE, ORDER_FULFILLMENTS_TABLE}
 
 # Actions the #351 campaign role grants (BatchWriteItem additionally
-# restricted to ORDERS_TABLE only).
+# restricted to the orders table and the fulfillment history those orders own).
 ALLOWED_ACTIONS = {"GetItem", "Query", "BatchGetItem", "BatchWriteItem"}
 
 OWNER_SUB = "owner-sub-001"
@@ -90,7 +93,9 @@ def assert_within_campaign_role_scope(calls: List[Tuple[str, str]]) -> None:
     assert operations <= ALLOWED_ACTIONS, f"unexpected DynamoDB actions: {operations - ALLOWED_ACTIONS}"
     assert tables <= DOMAIN_TABLES, f"handler touched tables outside the campaign role scope: {tables - DOMAIN_TABLES}"
     batch_write_tables = {table for op, table in calls if op == "BatchWriteItem"}
-    assert batch_write_tables <= {ORDERS_TABLE}, f"BatchWriteItem outside orders table: {batch_write_tables}"
+    assert batch_write_tables <= {ORDERS_TABLE, ORDER_FULFILLMENTS_TABLE}, (
+        f"BatchWriteItem outside the orders and order-fulfillments tables: {batch_write_tables}"
+    )
 
 
 def seed_campaign_with_orders(
@@ -148,10 +153,23 @@ class TestDeleteCampaignOrdersScope:
         profiles_table: Any,
         campaigns_table: Any,
         orders_table: Any,
+        order_fulfillments_table: Any,
         lambda_context: Any,
         dynamodb_calls: DynamoDbCallRecorder,
     ) -> None:
         seed_campaign_with_orders(profiles_table, campaigns_table, orders_table)
+        order_fulfillments_table.put_item(
+            Item={
+                "pk": "ORDER#1",
+                "sk": "FULFILLMENT#2024-10-02T00:00:00+00:00#ful-1",
+                "entityType": "OrderFulfillment",
+                "orderId": "ORDER#1",
+                "campaignId": CAMPAIGN_ID,
+                "fulfillmentId": "ful-1",
+                "quantity": 2,
+                "createdAt": "2024-10-02T00:00:00+00:00",
+            }
+        )
         dynamodb_calls.attach()
 
         result = delete_campaign_orders(
@@ -162,11 +180,26 @@ class TestDeleteCampaignOrdersScope:
         assert ("BatchWriteItem", ORDERS_TABLE) in dynamodb_calls.calls
         assert_within_campaign_role_scope(dynamodb_calls.calls)
 
+        # ARCH-1: the Campaign delete takes the fulfillment history with the Orders, and
+        # takes it first. A record that outlives its Order can be neither reversed nor read
+        # (both surfaces re-load the Order to authorize themselves), while the inventory
+        # movement it names has already moved stock.
+        assert order_fulfillments_table.scan()["Items"] == [], "the campaign delete orphaned fulfillment history"
+        calls = dynamodb_calls.calls
+        sweep = next(
+            (i for i, (op, table) in enumerate(calls) if table == ORDER_FULFILLMENTS_TABLE and op == "Query"),
+            -1,
+        )
+        order_delete = next((i for i, (op, table) in enumerate(calls) if table == ORDERS_TABLE and op == "BatchWriteItem"), -1)
+        assert sweep >= 0, "the campaign delete never read the fulfillment history it was about to orphan"
+        assert sweep < order_delete, "the campaign deleted its Orders before their fulfillment history"
+
     def test_shared_writer_delete(
         self,
         profiles_table: Any,
         campaigns_table: Any,
         orders_table: Any,
+        order_fulfillments_table: Any,
         shares_table: Any,
         lambda_context: Any,
         dynamodb_calls: DynamoDbCallRecorder,
@@ -182,6 +215,7 @@ class TestDeleteCampaignOrdersScope:
         assert result == {"deletedCount": 3}
         assert ("GetItem", SHARES_TABLE) in dynamodb_calls.calls
         assert_within_campaign_role_scope(dynamodb_calls.calls)
+        assert order_fulfillments_table.scan()["Items"] == []
 
 
 class TestGetUnitReportScope:

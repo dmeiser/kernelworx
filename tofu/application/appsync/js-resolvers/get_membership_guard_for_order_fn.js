@@ -6,7 +6,8 @@ import {
     parseFulfillmentMode,
     idempotencyKeyFor,
     markerKeysFor,
-    custodyReadKeys
+    custodyReadKeys,
+    unitAdminGrantKey
 } from './lib/custody_sale.js';
 
 // The membership guard read (§5.6): the single strongly consistent read that says
@@ -35,6 +36,7 @@ import {
 const unitCampaignsTableName = '${unit_campaigns_table_name}';
 const inventoryTableName = '${inventory_table_name}';
 const orderFulfillmentsTableName = '${order_fulfillments_table_name}';
+const unitsTableName = '${units_table_name}';
 
 function guardKey(campaignId) {
     return util.dynamodb.toMapValues({
@@ -83,6 +85,24 @@ export function request(ctx) {
     }
     tables[orderFulfillmentsTableName] = { keys: [guardMarkerKeyFor(actorId, campaignId, idempotencyKey)], consistentRead: true };
 
+    // SEC-1 (§2.4.2: "Profile Owner/WRITE or Unit Admin"). The share step ahead of this
+    // one records its verdict rather than ending the pipeline for a custody sale, so a
+    // sale whose Profile half failed has to answer the Unit half, and this is the only
+    // step with a datastore call left. ConsistentRead for the same reason unit_auth reads
+    // strong: a revoked admin must not be authorized off a stale grant row.
+    //
+    // Keyed off the Campaign's retained `unitId` (the strong campaign read, one step
+    // earlier) because the guard's answer does not exist yet. create_order_fn then
+    // requires the grant to name the Unit the GUARD names, so a retained link that
+    // disagrees with the live join denies instead of authorizing -- it cannot be used to
+    // reach a different Unit's grant.
+    if (stash.profileWriteAuthorized !== true) {
+        const linkedUnitId = stash.campaign && stash.campaign.unitId != null ? stash.campaign.unitId + '' : null;
+        if (linkedUnitId !== null) {
+            tables[unitsTableName] = { keys: [util.dynamodb.toMapValues(unitAdminGrantKey(linkedUnitId, actorId))], consistentRead: true };
+        }
+    }
+
     ctx.stash.custodySaleRead = {
         unitCampaignId: linkedUnitCampaignId,
         profileId: profileId,
@@ -97,9 +117,34 @@ function guardMarkerKeyFor(actorId, campaignId, idempotencyKey) {
     return util.dynamodb.toMapValues({ pk: keys.pk, sk: keys.sk });
 }
 
-// A BatchGetItem answers `{ data: { <table>: [items] } }` and simply omits a row it did
-// not find, so "no guard row" and "no custody rows" are both empty lists rather than
-// errors -- which is exactly what an independent campaign and a Scout holding nothing are.
+// A BatchGetItem answers `{ data: { <table>: [items] }, unprocessedKeys: { ... } }` and
+// simply omits a row it did not find, so "no guard row" and "no custody rows" are both
+// empty lists rather than errors -- which is exactly what an independent campaign and a
+// Scout holding nothing are.
+//
+// `unprocessedKeys` is a different thing wearing the same shape: DynamoDB did not look at
+// those keys at all (throttling, capacity, a hot partition). Reading them as absent would
+// be reading a verdict out of a non-answer, and each table has a distinct way for that to
+// do damage -- an unprocessed guard row makes a joined Scout's Order look independent (so
+// it consumes no custody and stamps a null scope), and an unprocessed custody row makes a
+// sale under-consume, after which the COMPLETED marker preserves that wrong answer for
+// every retry of the key. So a partial batch fails here, in the read step, before the
+// write step exists: nothing was written and the caller retries.
+function unprocessedKeyCount(result) {
+    const unprocessed = result && result.unprocessedKeys ? result.unprocessedKeys : null;
+    if (unprocessed === null) {
+        return 0;
+    }
+    let count = 0;
+    for (const tableName of Object.keys(unprocessed)) {
+        const entry = unprocessed[tableName];
+        if (entry && entry.keys) {
+            count = count + entry.keys.length;
+        }
+    }
+    return count;
+}
+
 function rowsFor(result, tableName) {
     const data = result && result.data ? result.data : null;
     if (data === null) {
@@ -116,6 +161,9 @@ export function response(ctx) {
     // Absent guard row is not an error: an independent campaign has none, and the
     // origin it produces is two nulls, which is the recorded fact.
     const wasBatch = !!(ctx.stash && ctx.stash.custodySaleRead);
+    if (wasBatch && unprocessedKeyCount(ctx.result) > 0) {
+        util.error('The sale reads were only partly served; no order was written', 'RESOURCE_BUSY');
+    }
     const guardRows = wasBatch ? rowsFor(ctx.result, unitCampaignsTableName) : ctx.result ? [ctx.result] : [];
     const guard = guardRows.length > 0 ? guardRows[0] : null;
     ctx.stash.membershipGuard = guard;
@@ -124,6 +172,8 @@ export function response(ctx) {
         ctx.stash.custodyRows = rowsFor(ctx.result, inventoryTableName);
         const markers = rowsFor(ctx.result, orderFulfillmentsTableName);
         ctx.stash.idempotencyMarker = markers.length > 0 ? markers[0] : null;
+        const grants = rowsFor(ctx.result, unitsTableName);
+        ctx.stash.unitAdminGrant = grants.length > 0 ? grants[0] : null;
     }
     return ctx.stash.activeUnitCampaignId;
 }

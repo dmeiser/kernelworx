@@ -17,6 +17,12 @@ export const util = {
     },
   },
   autoId: () => 'auto-generated-id',
+  // util.appendError does NOT interrupt the handler in the real runtime: it records the
+  // error on the GraphQL response and resolution continues, so the field still returns
+  // its value. Tests read the recorded list through the exported helpers below.
+  appendError: (message, type, data, errorInfo) => {
+    appendedErrors.push({ message, type, data, errorInfo });
+  },
   error: (message, type, data, errorInfo) => {
     const error = new Error(`${type}: ${message}`);
     // #329: AppSync merges the 4th util.error arg into GraphQL extensions.
@@ -24,6 +30,16 @@ export const util = {
     throw error;
   },
 };
+
+const appendedErrors = [];
+
+export function appendedErrorsList() {
+  return appendedErrors.slice();
+}
+
+export function resetAppendedErrors() {
+  appendedErrors.length = 0;
+}
 
 export const runtime = {
   earlyReturn: (value) => value,

@@ -12,6 +12,7 @@ import {
     idempotencyKeyFor,
     markerKeysFor,
     requestFingerprint,
+    grantNamesUnit,
     replayDecision,
     canonicalMoment,
     planLineConsumption,
@@ -29,6 +30,7 @@ import {
 // (#570; tests/unit/check_templatefile_escaping.test.ts), so this file carries
 // no dollar-brace sequence outside the four constants below.
 const ordersTableName = '${orders_table_name}';
+const campaignsTableName = '${campaigns_table_name}';
 const unitCampaignsTableName = '${unit_campaigns_table_name}';
 const inventoryTableName = '${inventory_table_name}';
 const orderFulfillmentsTableName = '${order_fulfillments_table_name}';
@@ -140,6 +142,62 @@ function saleCustodyScope(ctx, unitCampaignId) {
     return read;
 }
 
+// SEC-1 (§2.4.2): a door-to-door custody sale moves the Unit's stock, and the Unit
+// that lent the Scout that stock -- not the Profile that owns the Campaign -- is the
+// tenant whose inventory moves. So §2.4.2 authorizes it two ways, and this is where the
+// two are weighed, because it is the first step that has both answers in hand:
+//
+//   * Profile Owner/WRITE: `check_share_permissions` stopped answering FORBIDDEN for this
+//     one field+mode and left its verdict on the stash, so an owner or a WRITE share takes
+//     the sale with no further check -- the same path every order write used before Wave 3.
+//   * Unit Admin: the `UNIT#<unitId> / GRANT#<accountId>` row data model §5.2 makes the
+//     only Unit credential, read strongly by the guard step. Its existence IS the grant
+//     (revocation deletes the row), matching `src/utils/unit_auth.py`.
+//
+// Fail-closed in every direction. Neither half is one FORBIDDEN, phrased the way the
+// share step phrases its own denial so the two paths are not distinguishable to the
+// caller. A sale whose Campaign names no Unit has no Unit Admin to authorize, so only the
+// Profile path can carry it. And the grant must name the Unit the *guard* names -- the
+// batch was keyed off the Campaign's retained link, so a link that disagrees with the
+// live join can never turn a grant for Unit A into authority over Unit B's custody (the
+// `saleCustodyScope` CONFLICT below catches the custody half of that disagreement).
+// `role` is deliberately not checked: `unit_auth` does not check it either, and a second
+// definition of "admin" is how two gates start disagreeing about the same person.
+function authorizeCustodySale(ctx, origin, actorAccountId) {
+    if (ctx.stash && ctx.stash.profileWriteAuthorized === true) {
+        return;
+    }
+    const denied = 'Forbidden: a custody sale needs the profile owner, an account with WRITE permission on the profile, or an admin of the campaign Unit';
+    if (origin === null || origin.unitId === null || actorAccountId === null) {
+        util.error(denied, 'FORBIDDEN');
+        return;
+    }
+    if (!grantNamesUnit(ctx.stash.unitAdminGrant, origin.unitId, actorAccountId)) {
+        util.error(denied, 'FORBIDDEN');
+    }
+}
+
+// One campaign counter ADD, the same shape sync_campaign_totals_fn issues for every other
+// authenticated order write: ADD, and `attribute_exists(campaignId)` so a campaign deleted
+// mid-mutation is a no-op rather than a recreated counter row. The revenue is already
+// cent-quantized by lib/line_items.js (it is cents divided by 100), so it needs no
+// re-rounding -- the trailing ADD would only re-round it for show.
+function campaignTotalsAction(profileId, campaignId, revenue) {
+    return {
+        operation: 'UpdateItem',
+        table: campaignsTableName,
+        key: util.dynamodb.toMapValues({ profileId: profileId, campaignId: campaignId }),
+        update: {
+            expression: 'ADD #totalOrders :count, #totalRevenue :revenue',
+            expressionNames: { '#totalOrders': 'totalOrders', '#totalRevenue': 'totalRevenue' },
+            expressionValues: util.dynamodb.toMapValues({ ':count': 1, ':revenue': revenue })
+        },
+        condition: {
+            expression: 'attribute_exists(campaignId)'
+        }
+    };
+}
+
 // The sale's custody, fulfillment and movement actions, or null when the sale consumes
 // nothing. The line objects are annotated in place by planLineConsumption, so the Order
 // row and the fulfillment records are built from one decision and cannot disagree about
@@ -206,23 +264,10 @@ export function request(ctx) {
 
     const mode = parseFulfillmentMode(input);
 
-    // Authorization posture (§2.4.2 says "Profile Owner/WRITE or Unit Admin"):
-    //
-    //   * Profile Owner/WRITE is enforced by the three steps ahead of this one --
-    //     `verify_profile_write_access` (strong base-table GetItem on the caller's own
-    //     shares), its step-2 GSI locator, and `check_share_permissions`, which answers
-    //     FORBIDDEN for a READ-only share. So ORD-API-02-03's denial half is the existing
-    //     write-path rule, and the mode adds no new door: a custody sale consumes a Scout's
-    //     custody only for a caller who could already write that Scout's Orders.
-    //   * The "or Unit Admin" half is deliberately NOT implemented here, and this comment is
-    //     where that gap is visible rather than in a review comment. createOrder's resolver
-    //     already carries all 10 pipeline functions AppSync allows, and a Unit Admin check
-    //     needs `unit_auth`'s grant + ACTIVE-roster lookups, which no APPSYNC_JS resolver in
-    //     this application reads (every Unit-Admin surface is a Lambda resolver). Folding it
-    //     in means relaxing the shared share check for one mode, which is a change to an
-    //     authorization step every order write path uses. A Kernel's own path for the same
-    //     demand is `fulfillIndividualOrderLine` (§2.4.3), which IS Unit-Admin authorized.
-    //     Wiring the admin half of this line is left as its own card.
+    // Authorization (§2.4.2: "Profile Owner/WRITE or Unit Admin") is decided by
+    // `authorizeCustodySale` below, before the sale's marker is replayed or its custody is
+    // planned. The Profile half is the three steps ahead of this one; the Unit half is the
+    // grant row the guard step fetched into the batch this sale already issues.
 
     const { customerPhone } = validateCustomer(input);
     validateOrderDate(input.orderDate);
@@ -266,16 +311,44 @@ export function request(ctx) {
         util.error('Catalog could not be loaded for this campaign', 'INVALID_INPUT');
     }
 
-    if (idempotencyKey !== null) {
-        const replayed = replayAnswer(ctx, requestFingerprint(input, mode, profileId, campaignId));
-        if (replayed !== null) {
-            // Answered from the marker: no write, and deliberately no `totalsDelta` for the
-            // totals step to add a second time.
-            return runtime.earlyReturn(replayed);
-        }
+    // Scope and authorization are settled before the idempotency replay, not after it: a
+    // COMPLETED marker holds the committed Order, and answering a caller who is not
+    // authorized with somebody else's stored Order would disclose it without writing
+    // anything -- a read is enough to leak.
+    const origin = orderOrigin(ctx.stash.membershipGuard);
+    if (mode === MODE_CONSUME_SCOUT_CUSTODY) {
+        authorizeCustodySale(ctx, origin, actorAccountId);
     }
 
     const { enrichedLineItems, totalAmountCents } = enrichLineItems(input.lineItems, catalog);
+
+    // The fingerprint is the identity of the REQUEST, so it has to cover what the request
+    // will actually write -- including the parts enrichment normalized. Computing it from
+    // the raw arguments and then writing normalized values would let the same Order
+    // fingerprint differently from the request that produced its marker, and a later
+    // attempt that changed only, say, the payment method would replay the first Order
+    // instead of being refused (API §3.1).
+    const fingerprint = requestFingerprint({
+        mode: mode,
+        profileId: profileId,
+        campaignId: campaignId,
+        customerName: input.customerName,
+        customerPhone: customerPhone,
+        customerAddress: input.customerAddress,
+        orderDate: input.orderDate,
+        paymentMethod: input.paymentMethod,
+        notes: input.notes,
+        lineItems: enrichedLineItems
+    });
+
+    if (idempotencyKey !== null) {
+        const replayed = replayAnswer(ctx, fingerprint);
+        if (replayed !== null) {
+            // Answered from the marker: no write at all. A sale's campaign counter rode
+            // that committed transaction, so there is nothing left to add here either.
+            return runtime.earlyReturn(replayed);
+        }
+    }
 
     const totalAmount = totalAmountCents / 100;
 
@@ -312,7 +385,6 @@ export function request(ctx) {
     // would follow them into another Unit. The membership guard is the current
     // answer: the join claim denormalized the parent Unit beside the pointer,
     // so the guard alone names both halves of the scope with one strong read.
-    const origin = orderOrigin(ctx.stash.membershipGuard);
     orderItem.unitId = origin.unitId;
     orderItem.unitCampaignId = origin.unitCampaignId;
 
@@ -366,17 +438,30 @@ export function request(ctx) {
     let markerAction = null;
     if (idempotencyKey !== null) {
         markerAction = saleMarkerAction(orderFulfillmentsTableName, markerKeysFor(actorAccountId, campaignId, idempotencyKey), {
-            fingerprint: requestFingerprint(input, mode, profileId, campaignId),
+            fingerprint: fingerprint,
             expiresAtEpoch: util.time.nowEpochSeconds() + MARKER_TTL_SECONDS,
             orderId: orderId,
             orderItem: orderItem
         });
     }
 
-    // #746: stash the denormalized-totals delta for sync_campaign_totals_fn
-    // (the step after this one). The order row's profileId/campaignId are the
-    // campaigns-table key, so no lookup is needed to address the counter.
-    ctx.stash.totalsDelta = { profileId: profileId, campaignId: campaignId, count: 1, revenue: totalAmount };
+    // #746: the denormalized campaign counters. For an ordinary (NONE) order this stays a
+    // delta stashed for sync_campaign_totals_fn, the step after this one -- the pre-Wave-3
+    // shape, unchanged. For a CUSTODY SALE the counter rides the transaction instead, and
+    // the reason is the marker: the sale's idempotent answer is the stored Order, so once
+    // the Order/marker transaction has committed, a retry returns that Order WITHOUT
+    // re-running the totals step. If the trailing counter ADD had failed the first time,
+    // no later attempt could repair it and the campaign's totalOrders/totalRevenue would
+    // be permanently one Order behind. Inside the transaction there is no window for that:
+    // either the counter moved with the Order, or nothing committed and the retry repeats
+    // the whole plan. (Same reasoning as publicCreateOrder, which already carries its ADD
+    // inside the transaction because its resolver is at the same function cap.)
+    let totalsAction = null;
+    if (mode === MODE_CONSUME_SCOUT_CUSTODY) {
+        totalsAction = campaignTotalsAction(profileId, campaignId, totalAmount);
+    } else {
+        ctx.stash.totalsDelta = { profileId: profileId, campaignId: campaignId, count: 1, revenue: totalAmount };
+    }
 
     // FUNC-3: when a membership guard row was read, the Order write commits
     // with a ConditionCheck pinning that guard. A removal, move, or rejoin
@@ -388,7 +473,7 @@ export function request(ctx) {
     // shape -- there is nothing to pin and the plain PutItem is kept.
     const guardPin = membershipGuardCurrencyCheck(unitCampaignsTableName, campaignId, ctx.stash.membershipGuard);
 
-    if (sale === null && markerAction === null && guardPin === null) {
+    if (sale === null && markerAction === null && guardPin === null && totalsAction === null) {
         return {
             operation: 'PutItem',
             key: util.dynamodb.toMapValues({ campaignId: campaignId, orderId: orderId }),
@@ -420,6 +505,10 @@ export function request(ctx) {
     if (guardPin !== null) {
         transactItems.push(guardPin);
     }
+    const totalsIndex = totalsAction === null ? -1 : transactItems.length;
+    if (totalsAction !== null) {
+        transactItems.push(totalsAction);
+    }
     const custodyOffset = transactItems.length;
     if (sale !== null) {
         for (const action of sale.actions) {
@@ -436,7 +525,7 @@ export function request(ctx) {
     // arrives as one error type, and "the Scout's custody moved", "this key is already in
     // flight" and "the join moved" need different answers. response() reads this back.
     const custodyIndexes = sale === null ? [] : sale.custodyOffsets.map(function (offset) { return custodyOffset + offset; });
-    ctx.stash.orderWriteIndexes = { marker: markerIndex, custody: custodyIndexes };
+    ctx.stash.orderWriteIndexes = { marker: markerIndex, custody: custodyIndexes, totals: totalsIndex };
 
     // TransactWriteItems returns only the written KEYS, not attributes, so
     // response() returns the stashed row -- the transaction is atomic, so it
@@ -452,12 +541,19 @@ export function response(ctx) {
     if (ctx.error) {
         if (ctx.error.type === 'DynamoDB:TransactionCanceledException') {
             const indexes = cancelledTransactIndexes(ctx.error);
-            const written = (ctx.stash && ctx.stash.orderWriteIndexes) || { marker: -1, custody: [] };
+            const written = (ctx.stash && ctx.stash.orderWriteIndexes) || { marker: -1, custody: [], totals: -1 };
             if (written.marker >= 0 && indexes.indexOf(written.marker) !== -1) {
                 // Another request holding the same idempotencyKey committed between this
                 // one's marker read and its write. Nothing committed here, so the retry is
                 // answered from the marker that now exists.
                 util.error('This sale is already being processed for that idempotencyKey', 'RESOURCE_BUSY');
+                return null;
+            }
+            if (written.totals >= 0 && indexes.indexOf(written.totals) !== -1) {
+                // attribute_exists(campaignId) failed: deleteCampaign removed the counter row
+                // between the campaign read and this commit. Nothing committed, and the retry
+                // finds no campaign to sell against.
+                util.error('The campaign was removed while this order was being placed; try again', 'CONFLICT');
                 return null;
             }
             for (const index of indexes) {

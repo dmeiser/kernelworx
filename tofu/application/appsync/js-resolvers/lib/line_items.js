@@ -29,6 +29,24 @@ function hasExistingId(existingLineItems, lineItemId) {
     return false;
 }
 
+// How many rows carry each product, on either side of the edit. A row with no
+// `lineItemId` is matched by product, which is a fact only when there is exactly one such
+// row and exactly one stored line for that product; two of either makes "which stored
+// line is this row" a guess (FUNC-2).
+function countByProduct(lines) {
+    const counts = {};
+    for (const line of lines || []) {
+        if (line && typeof line === 'object' && typeof line.productId === 'string') {
+            counts[line.productId] = (Object.hasOwn(counts, line.productId) ? counts[line.productId] : 0) + 1;
+        }
+    }
+    return counts;
+}
+
+function fulfilledQuantityOf(line) {
+    return typeof line.fulfilledQuantity === 'number' ? line.fulfilledQuantity : 0;
+}
+
 function matchExistingLine(lineItem, existingLineItems, consumed) {
     for (const existing of (existingLineItems || [])) {
         if (existing && typeof existing === 'object') {
@@ -46,10 +64,38 @@ function matchExistingLine(lineItem, existingLineItems, consumed) {
     return null;
 }
 
-function resolveLineIdentity(lineItem, existingLineItems, consumed) {
+function resolveLineIdentity(lineItem, existingLineItems, consumed, productCounts) {
     const existing = matchExistingLine(lineItem, existingLineItems, consumed);
     if (existing) {
-        const existingFulfilled = typeof existing.fulfilledQuantity === 'number' ? existing.fulfilledQuantity : 0;
+        const existingFulfilled = fulfilledQuantityOf(existing);
+        const hasHistory = existingFulfilled > 0;
+        const namedById = typeof lineItem.lineItemId === 'string' && lineItem.lineItemId !== '';
+
+        if (hasHistory) {
+            // A row that keeps a fulfilled line's identity but changes its product rewrites
+            // what that history sold: the fulfillment record still names this lineItemId, so
+            // "2 of product A moved out of the Scout's trunk" would start describing product
+            // B (FUNC-2). Add a second line for the new product instead.
+            if (namedById && existing.productId !== lineItem.productId) {
+                util.error(
+                    'lineItemId ' + lineItem.lineItemId + ' has already been fulfilled and cannot change product',
+                    'INVALID_INPUT'
+                );
+                return null;
+            }
+            // Matching a fulfilled line by product is only safe when the mapping is
+            // unambiguous on BOTH sides. Two input rows of the same product, or two stored
+            // lines of it, means the edit would attach one line's fulfilled quantity -- and
+            // the stock that moved for it -- to whichever line this loop happened to reach.
+            const ambiguous = (productCounts.input[lineItem.productId] || 0) > 1 || (productCounts.existing[existing.productId] || 0) > 1;
+            if (ambiguous && !namedById) {
+                util.error(
+                    'lineItemId is required to change product ' + lineItem.productId + ': this order has more than one line for that product, and one of them already has fulfillment history',
+                    'INVALID_INPUT'
+                );
+                return null;
+            }
+        }
         if (lineItem.quantity < existingFulfilled) {
             util.error(
                 'Quantity of ' + lineItem.quantity + ' is below the line\'s already-fulfilled amount of ' + existingFulfilled,
@@ -83,6 +129,10 @@ export function enrichLineItems(lineItems, catalog, existingLineItems) {
         }
     }
 
+    const productCounts = existingLineItems
+        ? { input: countByProduct(lineItems), existing: countByProduct(existingLineItems) }
+        : { input: {}, existing: {} };
+
     const enrichedLineItems = [];
     // Accumulate money in integer cents to avoid floating-point drift.
     let totalAmountCents = 0;
@@ -110,7 +160,7 @@ export function enrichLineItems(lineItems, catalog, existingLineItems) {
         totalAmountCents += subtotalCents;
         const subtotal = subtotalCents / 100;
 
-        const identity = resolveLineIdentity(lineItem, existingLineItems, consumed);
+        const identity = resolveLineIdentity(lineItem, existingLineItems, consumed, productCounts);
 
         enrichedLineItems.push({
             productId: productId,
@@ -121,6 +171,24 @@ export function enrichLineItems(lineItems, catalog, existingLineItems) {
             lineItemId: identity.lineItemId,
             fulfilledQuantity: identity.fulfilledQuantity
         });
+    }
+
+    // The third way an edit orphans history: dropping the row entirely. `lineItems`
+    // replaces the array, so an omitted stored line loses its identity while the
+    // fulfillment rows that name it stay, and the reversal path then has a record whose
+    // line no longer exists (its stock effect and its `fulfilledQuantity` become
+    // unreachable). A line with no history stays free to omit -- that part of the
+    // pre-Wave-3 edit contract is unchanged.
+    if (existingLineItems) {
+        for (const existing of existingLineItems) {
+            if (existing && typeof existing === 'object' && existing.lineItemId != null
+                && fulfilledQuantityOf(existing) > 0 && !Object.hasOwn(consumed, existing.lineItemId)) {
+                util.error(
+                    'lineItemId ' + existing.lineItemId + ' has ' + fulfilledQuantityOf(existing) + ' fulfilled item(s) and cannot be removed from the order; set its quantity instead',
+                    'INVALID_INPUT'
+                );
+            }
+        }
     }
 
     return { enrichedLineItems: enrichedLineItems, totalAmountCents: totalAmountCents };

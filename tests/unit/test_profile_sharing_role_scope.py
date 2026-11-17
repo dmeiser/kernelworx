@@ -36,13 +36,16 @@ SHARES_TABLE = "kernelworx-shares-ue1-dev"
 INVITES_TABLE = "kernelworx-invites-ue1-dev"
 CAMPAIGNS_TABLE = "kernelworx-campaigns-v2-ue1-dev"
 ORDERS_TABLE = "kernelworx-orders-v2-ue1-dev"
+ORDER_FULFILLMENTS_TABLE = "kernelworx-order-fulfillments-ue1-dev"
 EXPORTS_BUCKET = "kernelworx-exports-ue1-dev"
 
 # Tables the #352 profile/sharing role grants read access to.
-DOMAIN_TABLES = {PROFILES_TABLE, SHARES_TABLE, INVITES_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE}
+# `order_fulfillments` joins the scope because the cascade now deletes each Campaign's
+# fulfillment history before the Orders that own it (ARCH-1, children-first).
+DOMAIN_TABLES = {PROFILES_TABLE, SHARES_TABLE, INVITES_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE, ORDER_FULFILLMENTS_TABLE}
 
 # Tables the #352 role grants BatchWriteItem on (cascade batch_writer deletes).
-BATCH_WRITE_TABLES = {SHARES_TABLE, INVITES_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE}
+BATCH_WRITE_TABLES = {SHARES_TABLE, INVITES_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE, ORDER_FULFILLMENTS_TABLE}
 
 # DynamoDB actions the #352 profile/sharing role grants.
 ALLOWED_DYNAMODB_ACTIONS = {
@@ -187,6 +190,26 @@ def seed_share(shares_table: Any, target_sub: str, permissions: List[str]) -> No
     )
 
 
+def seed_fulfillment_for_order(order_fulfillments_table: Any, order_id: str = "ORDER#1") -> None:
+    """Seed one fulfillment record of that Order, the way the fulfillment path writes it."""
+    order_fulfillments_table.put_item(
+        Item={
+            "pk": order_id,
+            "sk": f"FULFILLMENT#2024-10-02T00:00:00+00:00#ful-{order_id}",
+            "entityType": "OrderFulfillment",
+            "orderId": order_id,
+            "campaignId": CAMPAIGN_ID,
+            "fulfillmentId": f"ful-{order_id}",
+            "lineItemId": "line-1",
+            "productId": "PROD#1",
+            "recordType": "FULFILL",
+            "quantity": 2,
+            "source": "KERNEL_STOCK",
+            "createdAt": "2024-10-02T00:00:00+00:00",
+        }
+    )
+
+
 def seed_campaign_with_order(campaigns_table: Any, orders_table: Any) -> None:
     """Seed a campaign on the profile and one order for it."""
     campaigns_table.put_item(
@@ -246,6 +269,7 @@ class TestDeleteProfileCascadeScope:
         invites_table: Any,
         campaigns_table: Any,
         orders_table: Any,
+        order_fulfillments_table: Any,
         exports_bucket: None,
         lambda_context: Any,
         api_calls: ApiCallRecorder,
@@ -285,6 +309,7 @@ class TestDeleteProfileCascadeScope:
         shares_table: Any,
         campaigns_table: Any,
         orders_table: Any,
+        order_fulfillments_table: Any,
         exports_bucket: None,
         lambda_context: Any,
         api_calls: ApiCallRecorder,
@@ -292,6 +317,7 @@ class TestDeleteProfileCascadeScope:
         seed_profile(profiles_table)
         seed_share(shares_table, FRIEND_SUB, ["READ"])
         seed_campaign_with_order(campaigns_table, orders_table)
+        seed_fulfillment_for_order(order_fulfillments_table)
         api_calls.attach()
 
         result = cascade_handler(
@@ -301,3 +327,18 @@ class TestDeleteProfileCascadeScope:
 
         assert result is True
         assert_within_profile_sharing_role_scope(api_calls)
+
+        # ARCH-1: the Order delete takes its fulfillment history with it. The record is
+        # append-only, keyed by the Order, and both the reversal path and the audit read
+        # re-load the Order to authorize themselves -- so an orphan is a record nobody can
+        # reverse, cannot reach, and whose inventory movement already moved stock.
+        remaining = order_fulfillments_table.scan()
+        assert remaining["Items"] == [], "the cascade left fulfillment history behind its Order"
+
+        # Children-first, in the recorded call order: the history sweep precedes the
+        # BatchWriteItem that removes the Order, so a failure partway through leaves an
+        # Order whose history is intact rather than one that lost part of its accounting.
+        calls = api_calls.dynamodb_calls
+        sweep = next(i for i, (op, table) in enumerate(calls) if table == ORDER_FULFILLMENTS_TABLE and op == "Query")
+        order_delete = next(i for i, (op, table) in enumerate(calls) if table == ORDERS_TABLE and op == "BatchWriteItem")
+        assert sweep < order_delete, "the cascade deleted the Order before its fulfillment history"

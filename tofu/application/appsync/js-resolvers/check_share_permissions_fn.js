@@ -1,5 +1,19 @@
 import { util } from '@aws-appsync/utils';
 import { normalizeIdOrPrefix } from './lib/ids.js';
+import { parseFulfillmentMode, MODE_CONSUME_SCOUT_CUSTODY } from './lib/custody_sale.js';
+
+// §2.4.2 authorizes a door-to-door custody sale two ways: the Profile Owner/WRITE path
+// this function enforces for every order write, OR an admin of the Unit whose Scout the
+// sale consumes. A Unit Admin may hold no share on the Profile at all, so for that one
+// request this step records its verdict on the stash instead of ending the pipeline:
+// create_order_fn then decides "Profile WRITE or Unit Admin" and denies with the same
+// FORBIDDEN if neither holds. Nothing else -- not a NONE-mode order, not a reservation,
+// not a campaign write -- can reach the non-fatal branch, because it is keyed on the
+// field AppSync names for this resolver AND on the sale mode.
+function isCustodySaleCreateOrder(ctx) {
+    return !!(ctx.info && ctx.info.fieldName === 'createOrder') &&
+        parseFulfillmentMode(ctx.args && ctx.args.input) === MODE_CONSUME_SCOUT_CUSTODY;
+}
 
 export function request(ctx) {
     // If already authorized (owner or skipAuth), skip this check
@@ -43,9 +57,20 @@ export function request(ctx) {
     };
 }
 
+// The denial this step has always issued, or the posture it hands downstream when the
+// request is the one request allowed to answer the question a second way.
+function denyOrDefer(ctx, message) {
+    if (isCustodySaleCreateOrder(ctx)) {
+        ctx.stash.profileWriteAuthorized = false;
+        return { authorized: false };
+    }
+    util.error(message, 'FORBIDDEN');
+}
+
 export function response(ctx) {
     // If already authorized, return success
     if (ctx.stash.isOwner || ctx.stash.skipAuth) {
+        ctx.stash.profileWriteAuthorized = true;
         return { authorized: true };
     }
     
@@ -57,12 +82,12 @@ export function response(ctx) {
     
     // No share found - access denied
     if (!share || !share.profileId) {
-        util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (no share found)', 'FORBIDDEN');
+        return denyOrDefer(ctx, 'Forbidden: Only profile owner or users with WRITE permission can perform this action (no share found)');
     }
     
     // Share exists but doesn't have permissions field - deny
     if (!share.permissions || !Array.isArray(share.permissions)) {
-        util.error('Forbidden: Share exists but permissions are invalid', 'FORBIDDEN');
+        return denyOrDefer(ctx, 'Forbidden: Share exists but permissions are invalid');
     }
     
     // Check if caller has WRITE permission via share
@@ -70,9 +95,10 @@ export function response(ctx) {
         const profile = ctx.stash.profile;
         const currentOwner = profile && profile.ownerAccountId;
         if (share.ownerAccountId && currentOwner && share.ownerAccountId !== currentOwner) {
-            util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share is no longer valid)', 'FORBIDDEN');
+            return denyOrDefer(ctx, 'Forbidden: Only profile owner or users with WRITE permission can perform this action (share is no longer valid)');
         }
         ctx.stash.share = share;
+        ctx.stash.profileWriteAuthorized = true;
         return { authorized: true };
     }
     
@@ -82,5 +108,5 @@ export function response(ctx) {
         'Share permission check failed (READ only): ' +
             JSON.stringify({ profileId: share.profileId, permissions: share.permissions })
     );
-    util.error('Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only)', 'FORBIDDEN');
+    return denyOrDefer(ctx, 'Forbidden: Only profile owner or users with WRITE permission can perform this action (share has READ only)');
 }

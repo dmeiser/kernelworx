@@ -123,17 +123,81 @@ describe('enrichLineItems', () => {
             { productId: 'PROD#1', lineItemId: 'LINE#B', fulfilledQuantity: 0, quantity: 1 },
         ];
         const { enrichedLineItems } = enrichLineItems(
-            [{ productId: 'PROD#1', quantity: 4 }, { productId: 'PROD#1', quantity: 1 }],
+            [
+                { productId: 'PROD#1', quantity: 4, lineItemId: 'LINE#A' },
+                { productId: 'PROD#1', quantity: 1, lineItemId: 'LINE#B' },
+            ],
             CATALOG,
             stored
         );
 
         assert.strictEqual(enrichedLineItems[0].lineItemId, 'LINE#A');
         assert.strictEqual(enrichedLineItems[0].fulfilledQuantity, 2);
-        // The second incoming line takes the only remaining unconsumed id: two
-        // lines of one product must not collapse onto the same identity.
+        // Two lines of one product must not collapse onto the same identity.
         assert.strictEqual(enrichedLineItems[1].lineItemId, 'LINE#B');
         assert.strictEqual(enrichedLineItems[1].fulfilledQuantity, 0);
+    });
+
+    // FUNC-2: matching a row to a stored line by PRODUCT is a guess whenever either side
+    // has more than one line for that product. For a line with no history the guess is the
+    // pre-Wave-3 contract and stays; for a line that already moved stock it decides which
+    // line inherits a fulfilled quantity -- and the fulfillment rows and stock effect
+    // attached to it -- so the caller has to say which line it means.
+    it('still matches by product when neither side has more than one line for it', () => {
+        const stored = [{ productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 0, quantity: 3 }];
+
+        const { enrichedLineItems } = enrichLineItems([{ productId: 'PROD#1', quantity: 4 }], CATALOG, stored);
+
+        assert.strictEqual(enrichedLineItems[0].lineItemId, 'LINE#A');
+    });
+
+    it('refuses an ambiguous product mapping when one of the lines already has history', () => {
+        const stored = [
+            { productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 2, quantity: 3 },
+            { productId: 'PROD#1', lineItemId: 'LINE#B', fulfilledQuantity: 0, quantity: 1 },
+        ];
+
+        assert.throws(
+            () => enrichLineItems(
+                [{ productId: 'PROD#1', quantity: 4 }, { productId: 'PROD#1', quantity: 1 }],
+                CATALOG,
+                stored
+            ),
+            /INVALID_INPUT: lineItemId is required to change product PROD#1/
+        );
+    });
+
+    it('refuses a line that keeps a fulfilled identity but changes product', () => {
+        const stored = [{ productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 1 }];
+
+        assert.throws(
+            () => enrichLineItems([{ productId: 'PROD#2', quantity: 2, lineItemId: 'LINE#A' }], CATALOG, stored),
+            /INVALID_INPUT: lineItemId LINE#A has already been fulfilled and cannot change product/
+        );
+    });
+
+    it('refuses dropping a line that has fulfillment history, because its history would outlive it', () => {
+        const stored = [
+            { productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 2, quantity: 3 },
+            { productId: 'PROD#2', lineItemId: 'LINE#B', fulfilledQuantity: 0, quantity: 1 },
+        ];
+
+        assert.throws(
+            () => enrichLineItems([{ productId: 'PROD#2', quantity: 1 }], CATALOG, stored),
+            /INVALID_INPUT: lineItemId LINE#A has 2 fulfilled item\(s\) and cannot be removed/
+        );
+    });
+
+    it('lets a line with no history be dropped, which is the edit contract before Wave 3', () => {
+        const stored = [
+            { productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 0, quantity: 3 },
+            { productId: 'PROD#2', lineItemId: 'LINE#B', fulfilledQuantity: 0, quantity: 1 },
+        ];
+
+        const { enrichedLineItems } = enrichLineItems([{ productId: 'PROD#2', quantity: 1 }], CATALOG, stored);
+
+        assert.strictEqual(enrichedLineItems.length, 1);
+        assert.strictEqual(enrichedLineItems[0].lineItemId, 'LINE#B');
     });
 
     it('keeps a caller-named lineItemId when it names a stored line', () => {

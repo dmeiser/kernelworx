@@ -122,6 +122,12 @@ locals {
     SHARES_TABLE_NAME           = var.table_names.shares
     INVITES_TABLE_NAME          = var.table_names.invites
     SHARED_CAMPAIGNS_TABLE_NAME = var.table_names.shared_campaigns
+    # Wave 3 §2.4: the fulfillment history an Order delete must take with it (ARCH-1).
+    # Every campaign and profile cascade reaches this table, so it is a common-env name
+    # rather than five per-function ones. A deployed function that reaches a table the
+    # environment never names dies in get_required_env and answers INTERNAL_ERROR, so the
+    # accessor and the env land in the same change.
+    ORDER_FULFILLMENTS_TABLE_NAME = var.table_names.order_fulfillments
     # The shared attempt-counter table (data model §6.6): the public-order
     # share-token window and the Unit-invite redemption window. Visibility here
     # is not authorization — the scoped execution role decides who may touch it
@@ -156,12 +162,6 @@ locals {
         UNITS_TABLE_NAME          = var.table_names.units
         UNIT_CAMPAIGNS_TABLE_NAME = var.table_names.unit_campaigns
         INVENTORY_TABLE_NAME      = var.table_names.inventory
-        # Wave 3 §2.4: fulfillIndividualOrderLine, reverseIndividualOrderFulfillment
-        # and the orderFulfillments audit query all write/read this table through the
-        # unit-operations handler. A deployed function that reaches a table the
-        # environment never names dies in get_required_env and answers
-        # INTERNAL_ERROR, so the accessor and the env land together.
-        ORDER_FULFILLMENTS_TABLE_NAME = var.table_names.order_fulfillments
       }
     }
     "delete-campaign-orders" = {

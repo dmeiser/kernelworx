@@ -31,6 +31,8 @@ from src.handlers.unit_operations import (
     REVERSE_FULFILLMENT_FIELD,
     handle_unit_operation,
 )
+from botocore.exceptions import ClientError
+
 from src.utils import order_fulfillment_models as ful
 from src.utils.dynamodb import get_dynamodb_client
 from tests.unit.show_sell_fixtures import (
@@ -992,3 +994,80 @@ def test_inv_q_03_07_an_argument_that_is_not_a_page_object_is_refused(
     """The shared page contract is validated, not guessed at."""
     assert_is_error(_audit(page="first"), "INVALID_INPUT")
     assert_is_error(_call(ORDER_FULFILLMENTS_FIELD, "Avery", arguments={}), "INVALID_INPUT")
+
+
+# --- FUNC-3: a fulfillment must never resurrect an Order that was deleted under it ---
+
+
+def _order_key() -> Dict[str, str]:
+    return {"campaignId": str(ORDER["campaignId"]), "orderId": ORDER_ID}
+
+
+def test_fulfilling_a_deleted_order_is_refused_and_writes_nothing(
+    world: Dict[str, Any], inventory_table: Any, orders_table: Any, order_fulfillments_table: Any
+) -> None:
+    """The first line of defense: the handler reads the Order strongly and says NOT_FOUND."""
+    _ok(_receipt(quantity=10))
+    orders_table.delete_item(Key=_order_key())
+
+    refused = assert_is_error(_fulfill(quantity=2), "NOT_FOUND")
+
+    assert refused["errorCode"] == "NOT_FOUND"
+    assert orders_table.get_item(Key=_order_key()).get("Item") is None
+    assert _fulfillment_rows(order_fulfillments_table) == []
+    # The receipt's own movement is expected; what must be absent is a movement that names
+    # the Order this fulfillment would have fulfilled.
+    assert [row for row in _movement_rows(inventory_table) if row.get("orderId") == ORDER_ID] == []
+
+
+def test_the_fulfillment_condition_refuses_a_deleted_order_rather_than_recreating_it(
+    world: Dict[str, Any], inventory_table: Any, orders_table: Any, order_fulfillments_table: Any
+) -> None:
+    """The second line, and the one that covers the race itself.
+
+    A condition is evaluated against the item the action addresses, and a MISSING item
+    satisfies ``attribute_not_exists(fulfillmentVersion)``. So a fulfill that read the Order
+    a moment before ``deleteCampaign`` (or ``deleteOrder``, or the profile cascade) removed
+    it would pass a version-0 guard, write back a partial Order row — line items and a
+    fulfillment version, none of the customer, scope, or totals that made it an Order — and
+    commit the fulfillment record and the inventory movement beside it. ``fulfillment_version_condition``
+    therefore requires the Order's key attribute as well, which is what this pins against
+    the real ``TransactWriteItems`` rather than against the expression string.
+    """
+    _ok(_receipt(quantity=10))
+    read = orders_table.get_item(Key=_order_key()).get("Item")
+    assert read is not None, "the fixture Order must exist before the race is staged"
+    orders_table.delete_item(Key=_order_key())
+
+    _, update_params = ful.order_fulfillment_update_action(
+        order=read,
+        line_items=list(read["lineItems"]),
+        expected_version=0,
+        occurred_at="2026-11-17T08:00:00+00:00",
+    )
+
+    with pytest.raises(ClientError) as caught:
+        get_dynamodb_client().transact_write_items(TransactItems=[{"Update": update_params}])
+
+    assert caught.value.response["Error"]["Code"] in ("TransactionCanceledException", "ConditionalCheckFailedException")
+    assert orders_table.get_item(Key=_order_key()).get("Item") is None, "a failed condition must not recreate the Order row"
+    assert _fulfillment_rows(order_fulfillments_table) == []
+    balance = _balance_row(inventory_table)
+    assert balance is not None and int(balance["kernelPhysicalQty"]) == 10, "the receipt stands; nothing else moved"
+
+
+def test_reversing_a_deleted_order_is_refused_and_writes_nothing(
+    world: Dict[str, Any], inventory_table: Any, orders_table: Any, order_fulfillments_table: Any
+) -> None:
+    """A reversal reads the Order too, so history cannot be appended to a gone Order."""
+    _ok(_receipt(quantity=10))
+    payload = _ok(_fulfill(quantity=2))
+    fulfillment_id = payload["fulfillment"]["fulfillmentId"]
+    before = len(_fulfillment_rows(order_fulfillments_table))
+
+    orders_table.delete_item(Key=_order_key())
+    refused = assert_is_error(_reverse(fulfillment_id=fulfillment_id), "NOT_FOUND")
+
+    assert refused["errorCode"] == "NOT_FOUND"
+    assert orders_table.get_item(Key=_order_key()).get("Item") is None
+    assert len(_fulfillment_rows(order_fulfillments_table)) == before, "a reversal of a gone Order adds no row"

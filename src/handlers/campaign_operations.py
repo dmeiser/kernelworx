@@ -208,6 +208,81 @@ def delete_order_keys(orders: List[Dict[str, Any]], *, logger: Any = None) -> in
     )
 
 
+# The fulfillment partition's key grammar and item shape live in
+# `src/utils/order_fulfillment_models.py`; this module reads only the KEY PAIRS of the
+# optional `campaignId-createdAt-index` (data model §6.5) for a delete sweep. The query is
+# spelled here rather than imported from that module on purpose: the closure gate
+# (`tests/unit/test_lambda_table_env_closure.py`) names an env var for every table a
+# deployed function's import graph can reach, and importing the fulfillment model would
+# put `inventory` and `units` in the closure of five Lambdas that never read them. A
+# delete sweep should cost the tables it touches.
+def fulfillment_keys_for_orders(order_ids: List[str]) -> List[Dict[str, str]]:
+    """Every fulfillment and reversal row keyed by these Orders.
+
+    Read from the base table, one strongly consistent partition Query per Order, and
+    deliberately NOT through the optional `campaignId-createdAt-index`: a global secondary
+    index cannot be read consistently (DynamoDB rejects the request outright), so an index
+    sweep can silently miss a fulfillment committed moments before the delete and leave
+    behind exactly the orphan this sweep exists to remove. The per-Order cost matches the
+    posture this module already takes for the Orders themselves, which are verified gone by
+    a strongly consistent read each.
+    """
+    keys: List[Dict[str, str]] = []
+    for order_id in order_ids:
+        items = query_all_items(
+            tables.order_fulfillments,
+            {
+                "KeyConditionExpression": "pk = :pk",
+                "ExpressionAttributeValues": {":pk": str(order_id)},
+                "ConsistentRead": True,
+            },
+        )
+        keys.extend(
+            {"pk": str(item["pk"]), "sk": str(item["sk"])}
+            for item in items
+            if isinstance(item, dict) and item.get("pk") is not None and item.get("sk") is not None
+        )
+    return keys
+
+
+def delete_fulfillments_for_orders(order_ids: List[str], *, logger: Any = None) -> int:
+    """Remove these Orders' fulfillment history, before the Orders go.
+
+    ARCH-1 (impact assessment, children-first deletion). `OrderFulfillment` rows are keyed
+    by the Order and append-only, and the reversal and audit surfaces both re-load the
+    Order to authorize themselves, so a campaign or profile cascade that deletes only the
+    Order rows strands records nobody can reverse or read — beside inventory movements
+    that already moved stock.
+
+    Children first, then verified, in the same style this module already verifies deleted
+    Orders: a sweep that silently left a record behind would be the same defect one level
+    down. Deleting the history first also means a failure partway through leaves an Order
+    whose accounting is intact and merely still present, rather than an Order that has lost
+    part of it.
+
+    Returns the number of fulfillment records deleted.
+    """
+    log = logger if logger is not None else _default_logger
+    keys = fulfillment_keys_for_orders(order_ids)
+    if not keys:
+        return 0
+
+    deleted = batch_delete_keys(tables.order_fulfillments, keys, ["pk", "sk"], logger=log)
+    _verify_fulfillment_keys_deleted(order_ids)
+    log.info("Deleted fulfillment history for orders", order_ids=len(order_ids), count=deleted)
+    return deleted
+
+
+def _verify_fulfillment_keys_deleted(order_ids: List[str]) -> None:
+    """Refuse to report success while any swept Order still has fulfillment rows."""
+    remaining = fulfillment_keys_for_orders(order_ids)
+    if remaining:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            f"{len(remaining)} fulfillment record(s) are still present; no further deletion was attempted",
+        )
+
+
 def _table_name(table: Any, env_var: str) -> str:
     """Return the table name from the table resource or environment variable."""
     name = getattr(table, "name", None)
@@ -298,6 +373,13 @@ def delete_orders_for_campaign(campaign_id: str, *, logger: Any = None) -> int:
         return 0
 
     log = logger if logger is not None else _default_logger
+    # ARCH-1: children first. The fulfillment records are keyed by the Order, and the
+    # reversal and audit surfaces re-load the Order to authorize themselves, so deleting
+    # the Order rows and leaving the history behind strands records that can be neither
+    # reversed nor read. Sweeping before the Orders go also means a failure partway
+    # through leaves an Order whose history is intact -- recoverable by re-running the
+    # delete -- rather than an Order that has lost part of its accounting.
+    delete_fulfillments_for_orders([str(order["orderId"]) for order in orders], logger=log)
     deleted_count = delete_order_keys(orders, logger=log)
     _verify_order_keys_deleted(orders)
 

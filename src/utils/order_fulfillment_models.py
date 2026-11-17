@@ -490,15 +490,30 @@ def fulfillment_version_condition(expected_version: int) -> Dict[str, Any]:
     a plain equality condition against a missing attribute fails against real
     DynamoDB: an unfulfilled pre-Wave-3 Order would then be unfulfillable without a
     backfill. So the guard for version 0 is the disjunction
-    ``attribute_not_exists(#fulfillmentVersion) OR #fulfillmentVersion = :zero``,
+    ``(attribute_not_exists(#fulfillmentVersion) OR #fulfillmentVersion = :zero)``,
     which reads "nobody has fulfilled this yet" for both spellings of zero.
+
+    That disjunction alone is not enough, because a condition is evaluated against the
+    item the action addresses and a MISSING item satisfies ``attribute_not_exists``.
+    Delete an unfulfilled Order between the caller's read and this transaction and the
+    version guard passes, ``UpdateItem`` recreates a partial Order row (line items and
+    a version, none of the rest of the Order), and the same transaction commits a
+    fulfillment row and an inventory movement for an Order that no longer exists. So
+    the Order's own key attribute is required alongside the version test: a deleted
+    Order fails the condition and nothing in the transaction is written. The
+    parentheses are required, not stylistic -- DynamoDB has no documented precedence
+    for mixing ``AND`` and ``OR`` in a condition expression.
     """
     placeholder = f"#{FULFILLMENT_VERSION_ATTRIBUTE}"
+    exists = f"attribute_exists(#{ORDER_ID_ATTRIBUTE})"
     equality = f"{placeholder} = :expectedFulfillmentVersion"
-    condition = f"attribute_not_exists({placeholder}) OR {equality}" if expected_version == 0 else equality
+    version_test = f"(attribute_not_exists({placeholder}) OR {equality})" if expected_version == 0 else equality
     return {
-        "ConditionExpression": condition,
-        "ExpressionAttributeNames": {placeholder: FULFILLMENT_VERSION_ATTRIBUTE},
+        "ConditionExpression": f"{version_test} AND {exists}",
+        "ExpressionAttributeNames": {
+            placeholder: FULFILLMENT_VERSION_ATTRIBUTE,
+            f"#{ORDER_ID_ATTRIBUTE}": ORDER_ID_ATTRIBUTE,
+        },
         "ExpressionAttributeValues": {":expectedFulfillmentVersion": wire_value(expected_version)},
     }
 

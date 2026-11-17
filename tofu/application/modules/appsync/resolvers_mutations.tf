@@ -313,6 +313,11 @@ resource "aws_appsync_resolver" "delete_order" {
       # query the GSI for the profile so the share check can run.
       aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
+      # ARCH-1: read the Order's fulfillment children so the delete step can take them in
+      # the same transaction. Children-first is the design rule
+      # (SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md), and one transaction is what keeps a
+      # half-cleaned history from existing at all.
+      aws_appsync_function.get_order_fulfillments_for_delete.function_id,
       aws_appsync_function.delete_order.function_id,
       # #746: decrement the denormalized campaign totals after the delete (a
       # no-op delete stashes no delta and this passes through).

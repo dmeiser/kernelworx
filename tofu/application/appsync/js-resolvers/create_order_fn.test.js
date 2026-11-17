@@ -320,6 +320,9 @@ describe('create_order_fn request: CONSUME_SCOUT_CUSTODY (ORD-API-02)', () => {
                 ]
             },
             custodySaleRead: { unitCampaignId: 'uc-pack-3149-fall-2026', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1' },
+            // What the share step concluded. Every sale below travels the Profile path;
+            // the SEC-1 block below exercises the Unit Admin path.
+            profileWriteAuthorized: true,
             custodyRows: opts.custodyRows || [],
             idempotencyMarker: opts.marker === undefined ? null : opts.marker
         });
@@ -336,6 +339,24 @@ describe('create_order_fn request: CONSUME_SCOUT_CUSTODY (ORD-API-02)', () => {
     // the table it writes rather than by position.
     function orderRow(result) {
         return itemsByTable(result, ORDERS_TABLE)[0].attributeValues;
+    }
+
+    // The fingerprint the resolver stores: mode + scope + every field the Order will carry.
+    function fingerprintOf(ctx) {
+        return requestFingerprint({
+            mode: 'CONSUME_SCOUT_CUSTODY',
+            profileId: 'PROFILE#p1',
+            campaignId: 'CAMPAIGN#c1',
+            customerName: ctx.args.input.customerName,
+            customerPhone: ctx.args.input.customerPhone,
+            customerAddress: ctx.args.input.customerAddress,
+            orderDate: ctx.args.input.orderDate,
+            paymentMethod: ctx.args.input.paymentMethod,
+            notes: ctx.args.input.notes,
+            lineItems: ctx.args.input.lineItems.map(function (line) {
+                return { productId: line.productId, quantity: line.quantity };
+            })
+        });
     }
 
     it('requires a key, because this is the one order mode that moves stock', () => {
@@ -411,7 +432,13 @@ describe('create_order_fn request: CONSUME_SCOUT_CUSTODY (ORD-API-02)', () => {
             return item.key && item.key.sk === 'PRODUCT#PROD#1#BALANCE';
         });
         assert.deepStrictEqual(balanceWrites, []);
-        assert.deepStrictEqual(ctx.stash.totalsDelta, { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#c1', count: 1, revenue: 9.95 });
+        // The campaign counter is part of this transaction (ARCH-2), so a retry of a
+        // committed sale cannot leave the counters behind, and the trailing totals step has
+        // nothing left to add.
+        const counter = itemsByTable(result, CAMPAIGNS_TABLE);
+        assert.strictEqual(counter.length, 1);
+        assert.deepStrictEqual(counter[0].update.expressionValues[':revenue'], 9.95);
+        assert.strictEqual(ctx.stash.totalsDelta, undefined);
     });
 
     it('consumes only what the Scout holds and leaves the remainder unfulfilled (ORD-API-02-02)', () => {
@@ -431,7 +458,8 @@ describe('create_order_fn request: CONSUME_SCOUT_CUSTODY (ORD-API-02)', () => {
         const ctx = saleCtx({ custodyRows: [] });
         const result = request(ctx);
         assert.strictEqual(result.operation, 'TransactWriteItems');
-        assert.strictEqual(result.transactItems.length, 3);
+        // marker + order + guard pin + campaign counter, and nothing on the inventory table.
+        assert.strictEqual(result.transactItems.length, 4);
         assert.deepStrictEqual(itemsByTable(result, INVENTORY_TABLE), []);
         assert.strictEqual(orderRow(result).lineItems[0].fulfilledQuantity, 0);
         // The marker still rides, so a retry of this same request is answered rather than
@@ -466,7 +494,7 @@ describe('create_order_fn request: CONSUME_SCOUT_CUSTODY (ORD-API-02)', () => {
             pk: 'IDEM#' + ACCOUNT + '#createOrder#CAMPAIGN%23c1',
             sk: 'IDEM#sale-1',
             status: 'COMPLETED',
-            fingerprint: requestFingerprint(ctx.args.input, 'CONSUME_SCOUT_CUSTODY', 'PROFILE#p1', 'CAMPAIGN#c1'),
+            fingerprint: fingerprintOf(ctx),
             resultPayload: JSON.stringify(stored)
         };
         const answered = request(ctx);
@@ -488,7 +516,8 @@ describe('create_order_fn request: CONSUME_SCOUT_CUSTODY (ORD-API-02)', () => {
     });
 
     it('calls a completed marker whose payload cannot be read an internal fault, not a caller error', () => {
-        const ctx = saleCtx({ marker: { status: 'COMPLETED', fingerprint: requestFingerprint({ args: null } && saleCtx({}).args.input, 'CONSUME_SCOUT_CUSTODY', 'PROFILE#p1', 'CAMPAIGN#c1') } });
+        const ctx = saleCtx();
+        ctx.stash.idempotencyMarker = { status: 'COMPLETED', fingerprint: fingerprintOf(ctx) };
         assert.throws(() => request(ctx), /INTERNAL_ERROR: The recorded result of this sale could not be read back/);
     });
 
@@ -512,7 +541,7 @@ describe('create_order_fn request: CONSUME_SCOUT_CUSTODY (ORD-API-02)', () => {
         }
         const ctx = saleCtx({ input: { lineItems: many }, custodyRows: rows });
         ctx.stash.catalog = { products };
-        assert.throws(() => request(ctx), /CONFLICT: This order needs 183 conditional writes; the limit is 90/);
+        assert.throws(() => request(ctx), /CONFLICT: This order needs 184 conditional writes; the limit is 90/);
     });
 });
 
@@ -534,7 +563,232 @@ describe('create_order_fn response: which conditional write cancelled', () => {
         assert.throws(cancelled('[None, None, None, ConditionalCheckFailedException, None]', { marker: 2, custody: [3, 4] }), /CONFLICT: Scout custody changed while this order was being placed; try again/);
     });
 
+    it('maps a cancelled campaign counter ADD to a retryable conflict naming the campaign', () => {
+        // ARCH-2: the counter rode this transaction, so a failed counter ADD cancels the
+        // sale too. Nothing committed, which is what lets a retry repeat the whole plan
+        // instead of returning a stored Order whose counter never moved.
+        assert.throws(
+            cancelled('[None, None, None, ConditionalCheckFailedException, None]', { marker: 2, custody: [4, 5], totals: 3 }),
+            /CONFLICT: The campaign was removed while this order was being placed; try again/
+        );
+    });
+
     it('falls back to the membership-pin message when only the guard condition failed', () => {
         assert.throws(cancelled('[None, ConditionalCheckFailedException, None]', { marker: 2, custody: [3] }), /CONFLICT: The campaign changed while this order was being placed; try again/);
+    });
+});
+
+// Table names are templatefile() placeholders, and these cases sit outside the block above.
+const CAMPAIGNS_TABLE = '${campaigns_table_name}';
+
+function itemsOnTable(result, table) {
+    return result.transactItems.filter(function (item) {
+        return item.table === table;
+    });
+}
+
+describe('create_order_fn request: the campaign counter rides the sale transaction (ARCH-2)', () => {
+    function saleCtx(custodyRows) {
+        return {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    campaignId: 'CAMPAIGN#c1',
+                    customerName: 'Alice',
+                    orderDate: '2024-01-01T00:00:00Z',
+                    paymentMethod: 'Cash',
+                    fulfillmentMode: 'CONSUME_SCOUT_CUSTODY',
+                    idempotencyKey: 'sale-1',
+                    lineItems: [{ productId: 'PROD#1', quantity: 2 }]
+                }
+            },
+            identity: { claims: { sub: '11111111-1111-4111-8111-111111111111' } },
+            stash: {
+                campaign: { profileId: 'PROFILE#p1', unitCampaignId: 'uc-1' },
+                membershipGuard: { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-1', unitId: 'UNIT#u1' },
+                catalog: { products: [{ productId: 'PROD#1', productName: 'Popcorn', price: 1 }] },
+                custodySaleRead: { unitCampaignId: 'uc-1', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1' },
+                profileWriteAuthorized: true,
+                custodyRows: custodyRows || []
+            }
+        };
+    }
+
+    it('adds the campaign ADD to the same transaction, and leaves nothing for the totals step', () => {
+        const ctx = saleCtx([{ productId: 'PROD#1', withScoutQty: 5, version: 1 }]);
+        const result = request(ctx);
+        const counter = itemsOnTable(result, CAMPAIGNS_TABLE);
+        assert.strictEqual(counter.length, 1);
+        assert.strictEqual(counter[0].operation, 'UpdateItem');
+        assert.deepStrictEqual(counter[0].key, { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#c1' });
+        assert.strictEqual(counter[0].update.expression, 'ADD #totalOrders :count, #totalRevenue :revenue');
+        assert.deepStrictEqual(counter[0].update.expressionValues[':count'], 1);
+        assert.deepStrictEqual(counter[0].update.expressionValues[':revenue'], 2);
+        // attribute_exists(campaignId) is the same vanished-campaign no-op the trailing
+        // totals step uses; here it cancels the sale instead.
+        assert.strictEqual(counter[0].condition.expression, 'attribute_exists(campaignId)');
+        // Nothing left for sync_campaign_totals_fn: a second ADD would count the sale twice.
+        assert.strictEqual(ctx.stash.totalsDelta, undefined);
+        // And the write step knows which action it was, so a cancelled counter ADD is
+        // reported as the campaign moving out from under the sale rather than as a mystery.
+        assert.ok(ctx.stash.orderWriteIndexes.totals >= 0);
+    });
+
+    it('leaves an ordinary order on the trailing totals step it used before', () => {
+        const ctx = saleCtx();
+        ctx.args.input.fulfillmentMode = null;
+        ctx.args.input.idempotencyKey = null;
+        const result = request(ctx);
+        assert.deepStrictEqual(itemsOnTable(result, CAMPAIGNS_TABLE), []);
+        assert.deepStrictEqual(ctx.stash.totalsDelta, { profileId: 'PROFILE#p1', campaignId: 'CAMPAIGN#c1', count: 1, revenue: 2 });
+    });
+});
+
+describe('create_order_fn request: the fingerprint covers every field the Order writes (FUNC-5)', () => {
+    const base = {
+        mode: 'CONSUME_SCOUT_CUSTODY',
+        profileId: 'PROFILE#p1',
+        campaignId: 'CAMPAIGN#c1',
+        customerName: 'Alice',
+        customerPhone: null,
+        customerAddress: null,
+        orderDate: '2024-01-01T00:00:00Z',
+        paymentMethod: 'Cash',
+        notes: null,
+        lineItems: [{ productId: 'PROD#1', quantity: 2 }]
+    };
+    const original = requestFingerprint(base);
+
+    it('refuses a key reused with a different payment method, date, contact, address or note', () => {
+        for (const change of [
+            { paymentMethod: 'Card' },
+            { orderDate: '2024-01-02T00:00:00Z' },
+            { customerPhone: '555-0100' },
+            { notes: 'leave at door' },
+            { customerAddress: { street: '1 Main', city: 'Springfield', state: 'IL', zipCode: '62701' } }
+        ]) {
+            assert.notStrictEqual(requestFingerprint({ ...base, ...change }), original, JSON.stringify(change) + ' must fingerprint differently');
+        }
+    });
+
+    it('is stable across padding, and across an omitted versus an explicit null address', () => {
+        assert.strictEqual(requestFingerprint({ ...base, customerName: '  Alice ' }), original);
+        assert.strictEqual(requestFingerprint({ ...base, customerAddress: undefined }), original);
+    });
+
+    it('treats the same address written twice as one request', () => {
+        assert.strictEqual(
+            requestFingerprint({ ...base, customerAddress: { street: '1 Main', city: 'Springfield', state: 'IL', zipCode: '62701' } }),
+            requestFingerprint({ ...base, customerAddress: { street: '1 Main', city: 'Springfield', state: 'IL', zipCode: '62701' } })
+        );
+    });
+});
+
+// SEC-1 (§2.4.2): "Profile Owner/WRITE or Unit Admin". A door-to-door sale moves the
+// Unit's stock, so the Unit that lent the Scout that stock is a tenant of the write, and
+// its admin may record the sale without holding any share on the Profile. The check lives
+// in the write step because that is the first step holding both answers: the share step
+// hands down `profileWriteAuthorized`, and the guard step fetched the grant row into the
+// batch the sale already issues.
+describe('create_order_fn request: a sale is authorized by Profile WRITE or the Unit Admin', () => {
+    const INVENTORY_TABLE = '${inventory_table_name}';
+    const ORDERS_TABLE = '${orders_table_name}';
+    const ADMIN = '22222222-2222-4222-8222-222222222222';
+    const UNIT = 'pack-3149';
+
+    function adminCtx(options) {
+        const opts = options || {};
+        const custodyRows = opts.custodyRows === undefined ? [{ productId: 'PROD#1', withScoutQty: 5, version: 1 }] : opts.custodyRows;
+        return {
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    campaignId: 'CAMPAIGN#c1',
+                    customerName: 'Alice',
+                    orderDate: '2024-01-01T00:00:00Z',
+                    paymentMethod: 'Cash',
+                    fulfillmentMode: 'CONSUME_SCOUT_CUSTODY',
+                    idempotencyKey: 'sale-1',
+                    lineItems: [{ productId: 'PROD#1', quantity: 2 }]
+                }
+            },
+            identity: { claims: { sub: ADMIN } },
+            stash: {
+                campaign: { profileId: 'PROFILE#p1', unitId: opts.unitId === null ? undefined : UNIT, unitCampaignId: 'uc-pack-3149-fall-2026' },
+                membershipGuard: opts.guard === null
+                    ? null
+                    : { pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-pack-3149-fall-2026', unitId: UNIT },
+                catalog: { products: [{ productId: 'PROD#1', productName: 'Popcorn', price: 1 }] },
+                custodySaleRead: { unitCampaignId: 'uc-pack-3149-fall-2026', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1' },
+                profileWriteAuthorized: opts.profileWrite === true,
+                unitAdminGrant: opts.grant === undefined ? null : opts.grant,
+                custodyRows,
+                idempotencyMarker: opts.marker === undefined ? null : opts.marker
+            }
+        };
+    }
+
+    function grantFor(unitId, accountId) {
+        return { pk: 'UNIT#' + unitId, sk: 'GRANT#' + accountId, role: 'UNIT_ADMIN' };
+    }
+
+    it('records the sale for an admin of the Unit whose custody it consumes', () => {
+        const ctx = adminCtx({ grant: grantFor(UNIT, ADMIN) });
+
+        const result = request(ctx);
+
+        // The custody really moves: the decrement is in the same transaction as the Order.
+        const custody = itemsOnTable(result, INVENTORY_TABLE).filter(function (item) {
+            return item.operation === 'UpdateItem';
+        });
+        assert.strictEqual(custody.length, 1);
+        assert.strictEqual(custody[0].table, INVENTORY_TABLE);
+        assert.strictEqual(itemsOnTable(result, ORDERS_TABLE).length, 1);
+    });
+
+    it('refuses a grant on a different Unit, because the guard names whose custody this is', () => {
+        const ctx = adminCtx({ grant: grantFor('other-unit', ADMIN) });
+
+        assert.throws(() => request(ctx), /FORBIDDEN: Forbidden: a custody sale needs the profile owner/);
+    });
+
+    it('refuses a grant belonging to another account, including a row planted at a guessable key', () => {
+        const ctx = adminCtx({ grant: grantFor(UNIT, 'someone-else') });
+
+        assert.throws(() => request(ctx), /FORBIDDEN/);
+    });
+
+    it('refuses a revoked admin: the grant row is deleted, and absence is the whole answer', () => {
+        const ctx = adminCtx({ grant: null });
+
+        assert.throws(() => request(ctx), /FORBIDDEN/);
+    });
+
+    it('refuses the READ-only share case with no grant, which is the denial the Profile path always gave', () => {
+        const ctx = adminCtx({ profileWrite: false, grant: null });
+
+        assert.throws(() => request(ctx), /FORBIDDEN/);
+    });
+
+    it('refuses an independent sale whose Profile half failed: no Unit means no Unit Admin to ask', () => {
+        const ctx = adminCtx({ guard: null, unitId: null, custodyRows: [] });
+
+        assert.throws(() => request(ctx), /FORBIDDEN/);
+    });
+
+    it('denies before replaying a completed marker, so a stored Order is not handed to a caller with no claim on it', () => {
+        // The replay path writes nothing, which is exactly why it needs the check: the
+        // marker holds somebody's Order, and reading it is already a disclosure.
+        const ctx = adminCtx({ grant: null, marker: { status: 'COMPLETED', fingerprint: 'anything', resultPayload: { orderId: 'ORDER#x' } } });
+
+        assert.throws(() => request(ctx), /FORBIDDEN/);
+    });
+
+    it('takes the Profile path without looking at the grant at all', () => {
+        const ctx = adminCtx({ profileWrite: true, grant: null });
+
+        const result = request(ctx);
+
+        assert.strictEqual(itemsOnTable(result, ORDERS_TABLE).length, 1);
     });
 });

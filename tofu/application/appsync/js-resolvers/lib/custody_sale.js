@@ -150,18 +150,83 @@ export function markerKeysFor(actorId, campaignId, idempotencyKey) {
 // Order would be a silent lie. The canonical form is short and fixed-order on purpose: it
 // is stored verbatim in the marker and compared verbatim on retry, so nothing has to be
 // re-derived the same way twice.
-export function requestFingerprint(input, mode, profileId, campaignId) {
+// Every meaningful field of the request, normalized the way the write normalizes it, and
+// deliberately NOT the idempotency key itself. A fingerprint that covers only some fields
+// turns a key reuse into a silent lie: if payment method, order date, phone, address or
+// notes are outside it, a caller who changes one of those and keeps the key gets the FIRST
+// Order back, complete with the payment method they did not ask for. The API contract
+// (API §3.1) requires `INVALID_INPUT` for exactly that case, so the fingerprint has to
+// cover everything the committed Order would carry.
+//
+// The values come from the caller already normalized (trimmed phone, validated address),
+// because fingerprinting raw arguments and writing normalized ones would let the same
+// request fingerprint differently from the request that produced the marker.
+export function requestFingerprint(values) {
     const lines = [];
-    for (const line of (input && input.lineItems) || []) {
+    for (const line of values.lineItems || []) {
         lines.push(line.productId + '|' + line.quantity);
     }
     return JSON.stringify({
-        mode: mode,
-        profileId: profileId,
-        campaignId: campaignId,
-        customerName: input && input.customerName != null ? input.customerName : null,
+        mode: values.mode,
+        profileId: values.profileId,
+        campaignId: values.campaignId,
+        customerName: cleanField(values.customerName),
+        customerPhone: cleanField(values.customerPhone),
+        customerAddress: canonicalAddress(values.customerAddress),
+        orderDate: cleanField(values.orderDate),
+        paymentMethod: cleanField(values.paymentMethod),
+        notes: cleanField(values.notes),
         lineItems: lines
     });
+}
+
+function cleanField(value) {
+    return value == null ? null : (value + '').trim();
+}
+
+// Fixed key order, and an absent address is null rather than {}: GraphQL makes an omitted
+// optional argument and an explicit null the same request, and they must not fingerprint
+// differently.
+function canonicalAddress(address) {
+    if (address == null) {
+        return null;
+    }
+    return {
+        street: cleanField(address.street),
+        city: cleanField(address.city),
+        state: cleanField(address.state),
+        zipCode: cleanField(address.zipCode)
+    };
+}
+
+// --- The Unit-Admin half of §2.4.2's authorization ------------------------------
+//
+// Checklist §2.4.2 authorizes a door-to-door custody sale to the Profile Owner/WRITE
+// *or* a Unit Admin. The Profile half is the shared write gate every order write already
+// runs; the Unit half is the row data model §5.2 makes the only Unit credential:
+// `UNIT#<unitId> / GRANT#<accountId>` on the units table. A grant row's existence IS the
+// grant -- revocation deletes the row -- which is why nothing here reads a `role` or a
+// status field: that is the same rule `src/utils/unit_auth.py` applies, and if the JS
+// gate and the authoritative Python gate disagreed about who counts as an admin, one of
+// them would be wrong about the same person.
+//
+// The read is addressed rather than queried, so it cannot match another account's grant
+// (the account id is in the sort key) or another Unit's (the Unit id is in the partition
+// key).
+export function unitAdminGrantKey(unitId, accountId) {
+    return { pk: 'UNIT#' + unitId, sk: 'GRANT#' + accountId };
+}
+
+// The batch that answers this question is keyed off the Campaign's retained link, because
+// the key has to exist before the guard answer arrives. So this check, and not the read,
+// is what makes the answer safe: the grant must name the Unit the *guard* says owns the
+// custody this sale consumes. A grant for another Unit, or for another account, is no
+// grant at all.
+export function grantNamesUnit(grant, unitId, accountId) {
+    if (grant == null || unitId == null || accountId == null) {
+        return false;
+    }
+    return grant.pk === 'UNIT#' + unitId && grant.sk === 'GRANT#' + accountId;
 }
 
 // What a marker read means. Returning a decision rather than raising keeps the caller's

@@ -83,14 +83,49 @@ describe('markerKeysFor', () => {
 });
 
 describe('requestFingerprint and replayDecision', () => {
-    const input = { customerName: 'Ada', lineItems: [{ productId: 'P1', quantity: 2 }, { productId: 'P2', quantity: 1 }] };
+    const values = () => ({
+        mode: MODE_CONSUME_SCOUT_CUSTODY,
+        profileId: 'PROFILE#a',
+        campaignId: 'CAMPAIGN#c',
+        customerName: 'Ada',
+        customerPhone: null,
+        customerAddress: null,
+        orderDate: '2026-11-17T08:00:00Z',
+        paymentMethod: 'Cash',
+        notes: null,
+        lineItems: [{ productId: 'P1', quantity: 2 }, { productId: 'P2', quantity: 1 }]
+    });
 
     it('is stable for one request and changes when the request changes', () => {
-        const one = requestFingerprint(input, MODE_CONSUME_SCOUT_CUSTODY, 'PROFILE#a', 'CAMPAIGN#c');
-        const same = requestFingerprint({ ...input }, MODE_CONSUME_SCOUT_CUSTODY, 'PROFILE#a', 'CAMPAIGN#c');
-        const more = requestFingerprint({ ...input, lineItems: [{ productId: 'P1', quantity: 3 }] }, MODE_CONSUME_SCOUT_CUSTODY, 'PROFILE#a', 'CAMPAIGN#c');
-        assert.strictEqual(one, same);
+        const one = requestFingerprint(values());
+        assert.strictEqual(requestFingerprint(values()), one);
+        const more = requestFingerprint({ ...values(), lineItems: [{ productId: 'P1', quantity: 3 }] });
         assert.notStrictEqual(one, more);
+    });
+
+    it('covers the fields an Order carries, not just its lines', () => {
+        // A key reused with a different payment method, date, phone, address or note is a
+        // different request, and answering it with the first Order would be a lie (API §3.1).
+        const one = requestFingerprint(values());
+        for (const change of [
+            { paymentMethod: 'Card' },
+            { orderDate: '2026-11-18T08:00:00Z' },
+            { customerPhone: '555-0100' },
+            { notes: 'gate code 4417' },
+            { customerAddress: { street: '1 Main', city: 'Springfield', state: 'IL', zipCode: '62701' } }
+        ]) {
+            assert.notStrictEqual(requestFingerprint({ ...values(), ...change }), one, JSON.stringify(change));
+        }
+    });
+
+    it('normalizes padding and treats an omitted address as no address', () => {
+        const one = requestFingerprint(values());
+        assert.strictEqual(requestFingerprint({ ...values(), customerName: '  Ada  ' }), one);
+        assert.strictEqual(requestFingerprint({ ...values(), customerAddress: undefined }), one);
+        assert.notStrictEqual(
+            requestFingerprint({ ...values(), customerAddress: { street: '1 Main', city: 'Springfield', state: 'IL', zipCode: '62701' } }),
+            requestFingerprint({ ...values(), customerAddress: { street: '2 Main', city: 'Springfield', state: 'IL', zipCode: '62701' } })
+        );
     });
 
     it('proceeds when no marker exists', () => {

@@ -277,7 +277,10 @@ resource "aws_iam_role_policy" "lambda_admin_cloudfront" {
 # role was retired in #355 (chunk 5), the final chunk of the #326 split.
 
 locals {
-  campaign_table_keys = ["campaigns", "orders", "profiles", "shares"]
+  # `order_fulfillments` is here because deleting a campaign's Orders takes their
+  # fulfillment history with it (ARCH-1, children-first): the sweep reads the campaignId
+  # index of that table and batch-deletes the rows it names.
+  campaign_table_keys = ["campaigns", "orders", "profiles", "shares", "order_fulfillments"]
   campaign_table_arns = [for k in local.campaign_table_keys : var.dynamodb_table_arns[k]]
   campaign_index_arns = [for arn in local.campaign_table_arns : "${arn}/index/*"]
 }
@@ -311,12 +314,17 @@ data "aws_iam_policy_document" "lambda_campaign_dynamodb" {
   }
 
   # Order cleanup (delete-campaign-orders) uses the resource-style
-  # batch_writer, which issues BatchWriteItem deletes. Scoped to the orders
-  # table only.
+  # batch_writer, which issues BatchWriteItem deletes. Scoped to the orders table plus the
+  # fulfillment history those Orders own: an Order deleted without its records strands
+  # append-only history that the reversal and audit surfaces can no longer reach, next to
+  # inventory movements that already moved stock (ARCH-1).
   statement {
-    effect    = "Allow"
-    actions   = ["dynamodb:BatchWriteItem"]
-    resources = [var.dynamodb_table_arns["orders"]]
+    effect  = "Allow"
+    actions = ["dynamodb:BatchWriteItem"]
+    resources = [
+      var.dynamodb_table_arns["orders"],
+      var.dynamodb_table_arns["order_fulfillments"],
+    ]
   }
 }
 
@@ -356,13 +364,15 @@ resource "aws_iam_role_policy" "lambda_campaign_dynamodb" {
 # the #326 split.
 
 locals {
-  profile_sharing_table_keys = ["profiles", "shares", "invites", "campaigns", "orders"]
+  # `order_fulfillments`: the cascade deletes each Campaign's fulfillment history before
+  # the Orders that own it (ARCH-1, children-first), reading the campaignId index first.
+  profile_sharing_table_keys = ["profiles", "shares", "invites", "campaigns", "orders", "order_fulfillments"]
   profile_sharing_table_arns = [for k in local.profile_sharing_table_keys : var.dynamodb_table_arns[k]]
   profile_sharing_index_arns = [for arn in local.profile_sharing_table_arns : "${arn}/index/*"]
 
   # Tables the cascade handler's batch_writer deletes from (BatchWriteItem).
   profile_sharing_batch_write_table_arns = [
-    for k in ["shares", "invites", "campaigns", "orders"] : var.dynamodb_table_arns[k]
+    for k in ["shares", "invites", "campaigns", "orders", "order_fulfillments"] : var.dynamodb_table_arns[k]
   ]
 }
 
@@ -1010,7 +1020,7 @@ data "aws_iam_policy_document" "lambda_public_orders_ses" {
   count = var.ses_order_emails_enabled ? 1 : 0
 
   statement {
-    effect = "Allow"
+    effect  = "Allow"
     actions = ["ses:SendTemplatedEmail"]
     # The module's own sending identity plus its two namespaced templates.
     resources = concat([var.ses_order_identity_arn], var.ses_order_template_arns)

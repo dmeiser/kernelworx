@@ -8,6 +8,7 @@ from .campaign_operations import (
     _verify_campaign_deleted,
     _verify_order_keys_deleted,
     batch_delete_keys,
+    delete_fulfillments_for_orders,
 )
 
 # Handle both Lambda (absolute) and unit test (relative) imports
@@ -242,6 +243,15 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
 
     order_keys = _collect_order_keys(campaigns)
 
+    # ARCH-1: the fulfillment history of those Orders goes first, and is verified to be
+    # gone, for the same reason the campaign cascade does it: an orphaned fulfillment
+    # record cannot be reversed or read once its Order is gone, and the inventory movement
+    # it names has already moved stock.
+    fulfillments_deleted = delete_fulfillments_for_orders(
+        [str(key["orderId"]) for key in order_keys if key.get("orderId")],
+        logger=logger,
+    )
+
     orders_deleted = _delete_orders(order_keys)
     if order_keys:
         _verify_order_keys_deleted(order_keys)
@@ -260,7 +270,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
 
     logger.info(
         f"Cascade delete complete for profile {db_profile_id}: "
-        f"orders={orders_deleted}, campaigns={campaigns_deleted}, "
+        f"fulfillments={fulfillments_deleted}, orders={orders_deleted}, campaigns={campaigns_deleted}, "
         f"shares={shares_deleted}, invites={invites_deleted}, "
         f"reports={reports_deleted}"
     )

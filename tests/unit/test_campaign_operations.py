@@ -61,6 +61,7 @@ class TestDeleteCampaignOrders:
         orders_table: Any,
         campaigns_table: Any,
         profiles_table: Any,
+        order_fulfillments_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test deleting all orders for a campaign owned by the caller."""
@@ -91,6 +92,7 @@ class TestDeleteCampaignOrders:
         orders_table: Any,
         campaigns_table: Any,
         profiles_table: Any,
+        order_fulfillments_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test deleting more than 25 orders chunks deletes into batches."""
@@ -136,6 +138,7 @@ class TestDeleteCampaignOrders:
         orders_table: Any,
         campaigns_table: Any,
         profiles_table: Any,
+        order_fulfillments_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test that an unprefixed campaignId is normalized."""
@@ -213,6 +216,7 @@ class TestDeleteCampaignOrders:
         orders_table: Any,
         campaigns_table: Any,
         profiles_table: Any,
+        order_fulfillments_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test that a non-owner caller without a WRITE share is denied."""
@@ -243,6 +247,7 @@ class TestDeleteCampaignOrders:
         orders_table: Any,
         campaigns_table: Any,
         profiles_table: Any,
+        order_fulfillments_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test that orders for other campaigns are not deleted."""
@@ -302,6 +307,7 @@ class TestDeleteCampaignOrders:
         orders_table: Any,
         campaigns_table: Any,
         profiles_table: Any,
+        order_fulfillments_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test that throttling during delete_campaign_orders returns RESOURCE_BUSY."""
@@ -333,6 +339,7 @@ class TestDeleteCampaignOrders:
         orders_table: Any,
         campaigns_table: Any,
         profiles_table: Any,
+        order_fulfillments_table: Any,
         lambda_context: Any,
     ) -> None:
         """Test that deleted orders are no longer visible in the orderId-index GSI."""
@@ -752,9 +759,14 @@ class TestDeleteOrdersForCampaign:
             patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=orders),
             patch("src.handlers.campaign_operations.batch_delete_keys", return_value=1) as mock_delete,
             patch("src.handlers.campaign_operations._verify_order_keys_deleted") as mock_verify,
+            patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", return_value=0) as mock_fulfil,
         ):
             count = delete_orders_for_campaign("CAMPAIGN#c1", logger=mock_logger)
             assert count == 1
+            # ARCH-1: the fulfillment history of those Orders goes with them (the moto
+            # scope test pins the call ORDER; this pins that the sweep is wired to the
+            # Orders this delete is about to remove).
+            mock_fulfil.assert_called_once_with(["ORDER#1"], logger=mock_logger)
             mock_delete.assert_called_once()
             mock_verify.assert_called_once_with(orders)
             mock_logger.info.assert_called_once()
