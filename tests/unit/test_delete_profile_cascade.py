@@ -636,8 +636,8 @@ class TestDeleteProfileCascade:
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
             # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
-            # stub is required, not cosmetic: an unstubbed MagicMock answers every page
-            # with a truthy LastEvaluatedKey, so the sweep would page forever.
+            # stub is required, not cosmetic: a mock table that never answers this Query
+            # returns a truthy LastEvaluatedKey on every page, so the sweep pages forever.
             mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
             mock_tables.profiles.get_item.return_value = {
