@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import pytest
+from botocore.exceptions import ClientError
 
 from src.handlers.unit_operations import (
     FULFILL_LINE_FIELD,
@@ -31,8 +32,6 @@ from src.handlers.unit_operations import (
     REVERSE_FULFILLMENT_FIELD,
     handle_unit_operation,
 )
-from botocore.exceptions import ClientError
-
 from src.utils import order_fulfillment_models as ful
 from src.utils.dynamodb import get_dynamodb_client
 from tests.unit.show_sell_fixtures import (

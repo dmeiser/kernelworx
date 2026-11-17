@@ -666,6 +666,8 @@ export type GqlLineItem = {
 
 /** Input for a product line within an order; the price is looked up from the catalog. */
 export type GqlLineItemInput = {
+  /** On an update, the `lineItemId` of the stored line this row stands for, so the edit changes that line without re-minting its identity (§5.19). A value that names no stored line is refused. Omitted, the row is matched by product - only sound when at most one line carries that product on both sides; otherwise the row must name its `lineItemId`. A line whose `fulfilledQuantity` is greater than zero may not be omitted, may not change product, and may not be reduced below what it has already fulfilled. Lines with no fulfillment history follow the previous rules unchanged. */
+  lineItemId?: InputMaybe<Scalars['ID']['input']>;
   /** The ID of the product to order. */
   productId: Scalars['ID']['input'];
   /** The quantity to order (at least 1). */
@@ -2412,7 +2414,7 @@ export type GqlUpdateOrderInput = {
   customerName?: InputMaybe<Scalars['String']['input']>;
   /** New customer phone number. */
   customerPhone?: InputMaybe<Scalars['String']['input']>;
-  /** New line items; replaces the existing ones and recomputes the total. */
+  /** New line items; replaces the existing ones and recomputes the total. A line that already has fulfillment must appear in the new list under its own `lineItemId`, with its product unchanged and a quantity at least what it has fulfilled. */
   lineItems?: InputMaybe<Array<GqlLineItemInput>>;
   /** New notes. */
   notes?: InputMaybe<Scalars['String']['input']>;
