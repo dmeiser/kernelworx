@@ -319,7 +319,7 @@ export type GqlCreateOrderInput = {
   customerPhone?: InputMaybe<Scalars['String']['input']>;
   /** How this order draws on Scout custody. Absent means NONE: an ordinary order that consumes no custody and writes no fulfillment record. CONSUME_SCOUT_CUSTODY is a door-to-door sale, and insufficient custody never blocks it (§10.1). */
   fulfillmentMode?: InputMaybe<GqlOrderFulfillmentMode>;
-  /** 1-128 character key that makes a retried request one request. Required when fulfillmentMode is CONSUME_SCOUT_CUSTODY, because that is the only mode that moves stock; recommended for every new order (§10.1). */
+  /** 1-128 character key that makes a retried request one request. Required when fulfillmentMode is CONSUME_SCOUT_CUSTODY, because that is the only mode that moves stock; a NONE order accepts the field and records nothing for it, because it has no stock effect to replay (§10.1). */
   idempotencyKey?: InputMaybe<Scalars['String']['input']>;
   /** The products and quantities to order; prices are looked up from the campaign's catalog. */
   lineItems: Array<GqlLineItemInput>;
