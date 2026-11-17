@@ -354,9 +354,7 @@ def participant_fulfillment_payload(item: Mapping[str, Any]) -> Dict[str, Any]:
     omission — see :data:`ADMIN_ONLY_FULFILLMENT_FIELDS`.
     """
     return {
-        name: value
-        for name, value in fulfillment_payload(item).items()
-        if name not in ADMIN_ONLY_FULFILLMENT_FIELDS
+        name: value for name, value in fulfillment_payload(item).items() if name not in ADMIN_ONLY_FULFILLMENT_FIELDS
     }
 
 
@@ -406,8 +404,8 @@ def line_quantity_violations(order: Mapping[str, Any], line_item_id: str, reques
 
     The three §5.19 line rules: the line must exist, the request must be positive,
     and the line's ordered quantity less what is already fulfilled is the ceiling.
-    ``fulfilledQuantity`` absent reads as 0, which is how a pre-Wave-3 Order becomes
-    fulfillable with no backfill.
+    ``fulfilledQuantity`` absent reads as 0, which is how a pre-Wave-3 Order can be
+    fulfilled with no backfill.
     """
     line = _find_line(order, line_item_id)
     if line is None:

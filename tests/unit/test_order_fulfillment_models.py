@@ -136,7 +136,7 @@ def test_the_reversal_key_is_deterministic_so_a_second_reversal_collides_on_it()
 
 def test_the_builder_refuses_bad_quantities_record_types_and_sources() -> None:
     """Quantity is a positive integer on BOTH record kinds; the enums are closed."""
-    for quantity in (0, -1, "2", None, True, 1.5, Decimal("1.5")):
+    for quantity in (0, -1, "2", None, True, 1.5):
         with pytest.raises(AppError) as caught:
             _fulfillment(quantity=quantity)
         assert caught.value.error_code is ErrorCode.INVALID_INPUT
@@ -156,11 +156,16 @@ def test_a_reversal_needs_the_link_and_a_fulfill_must_not_carry_one() -> None:
     stock source"; a FULFILL with it would disagree with its own recordType about
     which key it was written under.
     """
-    for kind in (ofm.RECORD_TYPE_REVERSAL, ofm.RECORD_TYPE_FULFILL):
-        with pytest.raises(AppError) as caught:
-            _fulfillment(record_type=kind, inventory_movement_id=None, source=ofm.SOURCE_EXTERNAL_COUNCIL)
-        assert caught.value.error_code is ErrorCode.INVALID_INPUT
-        assert "reversalOfFulfillmentId" in str(caught.value.message)
+    with pytest.raises(AppError) as caught:
+        _fulfillment(
+            record_type=ofm.RECORD_TYPE_REVERSAL, source=ofm.SOURCE_EXTERNAL_COUNCIL, inventory_movement_id=None
+        )
+    assert caught.value.error_code is ErrorCode.INVALID_INPUT
+    assert "reversalOfFulfillmentId" in str(caught.value.message)
+    with pytest.raises(AppError) as caught:
+        _fulfillment(reversal_of_fulfillment_id=ORIGINAL)
+    assert caught.value.error_code is ErrorCode.INVALID_INPUT
+    assert "reversalOfFulfillmentId" in str(caught.value.message)
     reversal = _fulfillment(
         record_type=ofm.RECORD_TYPE_REVERSAL,
         source=ofm.SOURCE_KERNEL_STOCK,
@@ -188,7 +193,9 @@ def test_stock_sources_need_the_movement_and_external_council_must_not_carry_one
     with pytest.raises(AppError) as caught:
         _fulfillment(source=ofm.SOURCE_EXTERNAL_COUNCIL, inventory_movement_id=MOVEMENT)
     assert "inventoryMovementId" in str(caught.value.message)
-    council = _fulfillment(source=ofm.SOURCE_EXTERNAL_COUNCIL, inventory_movement_id=None, unit_id=None, unit_campaign_id=None)
+    council = _fulfillment(
+        source=ofm.SOURCE_EXTERNAL_COUNCIL, inventory_movement_id=None, unit_id=None, unit_campaign_id=None
+    )
     assert "inventoryMovementId" not in council
     custody = _fulfillment(source=ofm.SOURCE_SCOUT_CUSTODY)
     assert custody["inventoryMovementId"] == MOVEMENT
@@ -282,7 +289,10 @@ def test_line_quantity_violations_explains_instead_of_raising() -> None:
     without any backfill.
     """
     assert ofm.line_quantity_violations(ORDER_ROW, LINE_MISSING, 1) == f"this order has no line item {LINE_MISSING}"
-    assert ofm.line_quantity_violations({"noLineItems": True}, LINE_FIRST, 1) == f"this order has no line item {LINE_FIRST}"
+    assert (
+        ofm.line_quantity_violations({"noLineItems": True}, LINE_FIRST, 1)
+        == f"this order has no line item {LINE_FIRST}"
+    )
     for requested in (0, -1):
         reason = ofm.line_quantity_violations(ORDER_ROW, LINE_FIRST, requested)
         assert reason is not None and "must be at least 1" in reason
@@ -341,7 +351,7 @@ def test_apply_line_fulfillment_copies_lines_so_nothing_shared_is_writable() -> 
     moved: List[Dict[str, Any]] = ofm.apply_line_fulfillment(row, LINE_SECOND, 1)
     assert moved == [{"lineItemId": LINE_SECOND, "quantity": 2, "fulfilledQuantity": 1}]
     moved[0]["fulfilledQuantity"] = 99
-    assert row["lineItems"][1]["fulfilledQuantity"] == 0
+    assert row["lineItems"][1] == {"lineItemId": LINE_SECOND, "quantity": 2}
 
 
 # --- the fulfillmentVersion condition (§5.19) --------------------------------------

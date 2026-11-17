@@ -617,6 +617,10 @@ export type GqlJoinUnitCampaignInput = {
 /** A single product line within an order. */
 export type GqlLineItem = {
   __typename?: 'LineItem';
+  /** How much of this line has been fulfilled, from Kernel stock, Scout custody, or an external Council. It never exceeds quantity; rows written before Wave 3 carry no value, which reads as 0. */
+  fulfilledQuantity?: Maybe<Scalars['Int']['output']>;
+  /** Stable identity of this line inside its Order. Wave 3 mints it when the Order is written and never rewrites it, so a fulfillment can name the line it belongs to even after a later edit re-orders the list (§5.19). Rows written before Wave 3 carry none. */
+  lineItemId?: Maybe<Scalars['ID']['output']>;
   /** The product's unit price captured from the catalog at order time. */
   pricePerUnit: Scalars['Float']['output'];
   /** The ID of the product. */
@@ -1060,6 +1064,10 @@ export type GqlOrder = {
   customerName: Scalars['String']['output'];
   /** The customer's phone number, if provided. */
   customerPhone?: Maybe<Scalars['String']['output']>;
+  /** Serialization version for fulfillment and reversal of this order's lines (§5.19). Every fulfillment and every reversal increments it, including an external-Council change that touches no inventory version. Rows written before Wave 3 carry no value, which reads as 0. */
+  fulfillmentVersion?: Maybe<Scalars['Int']['output']>;
+  /** The fulfillment and reversal history of this order's lines, in the participant-safe projection: no actor account, no inventory movement id, no other administrative audit (§10.2). A Unit Admin reads the full audit through `orderFulfillments`. */
+  fulfillments: Array<GqlParticipantOrderFulfillment>;
   /** The ordered products and quantities, with prices captured from the catalog at order time. */
   lineItems: Array<GqlLineItem>;
   /** Free-text notes about the order. */
@@ -1093,6 +1101,57 @@ export type GqlOrderConnection = {
   orders: Array<GqlOrder>;
 };
 
+/** One append-only fulfillment or reversal record for an Order's lines (§5.19). This is the full administrative audit - actor account and inventory movement id included - reachable only through the Unit-Admin `orderFulfillments` query, never through `Order.fulfillments` (§10.2). */
+export type GqlOrderFulfillment = {
+  __typename?: 'OrderFulfillment';
+  /** The account that recorded the fulfillment or reversal. Administrative audit: never on the participant projection. */
+  actorAccountId: Scalars['ID']['output'];
+  /** The Scout Campaign the Order belongs to. */
+  campaignId: Scalars['ID']['output'];
+  /** When the record was written; also its position in the Order's sort-key history. */
+  createdAt: Scalars['AWSDateTime']['output'];
+  /** Unique fulfillment/reversal identity. */
+  fulfillmentId: Scalars['ID']['output'];
+  /** Inventory movement this record moved stock or custody for; required for KERNEL_STOCK and SCOUT_CUSTODY sources, null for EXTERNAL_COUNCIL. */
+  inventoryMovementId?: Maybe<Scalars['ID']['output']>;
+  /** The fulfilled line inside the Order (§5.19). */
+  lineItemId: Scalars['ID']['output'];
+  /** The Order this record belongs to. */
+  orderId: Scalars['ID']['output'];
+  /** The product of the fulfilled line. */
+  productId: Scalars['ID']['output'];
+  /** The Scout Profile that owns the Order. */
+  profileId: Scalars['ID']['output'];
+  /** Amount fulfilled or reversed; always a positive integer. */
+  quantity: Scalars['Int']['output'];
+  /** FULFILL or REVERSAL. */
+  recordType: GqlOrderFulfillmentRecordType;
+  /** The fulfillment this record reverses; required on REVERSAL rows. */
+  reversalOfFulfillmentId?: Maybe<Scalars['ID']['output']>;
+  /** Which stock source the record consumed or restored. */
+  source: GqlOrderFulfillmentSource;
+  /** Originating Unit Campaign scope copied immutably from the Order; null for an independent campaign. */
+  unitCampaignId?: Maybe<Scalars['ID']['output']>;
+  /** Originating Unit scope copied immutably from the Order; null for an independent campaign. */
+  unitId?: Maybe<Scalars['ID']['output']>;
+};
+
+/** Direction of an OrderFulfillment record: a fulfillment or its reversal (§5.19). Quantity is always positive; this field carries the direction. */
+export type GqlOrderFulfillmentRecordType =
+  /** Positive fulfillment of an Order line. */
+  | 'FULFILL'
+  /** Reversal of an earlier fulfillment: restores demand and only the original stock source. */
+  | 'REVERSAL';
+
+/** Where the stock consumed by an Order line fulfillment came from (§5.19). */
+export type GqlOrderFulfillmentSource =
+  /** Council demand consumed without moving Unit stock. */
+  | 'EXTERNAL_COUNCIL'
+  /** Physical stock held by the Unit Campaign (the Kernel). */
+  | 'KERNEL_STOCK'
+  /** Stock a Scout carries on the Unit's behalf. */
+  | 'SCOUT_CUSTODY';
+
 /** The payment-verification state of an order. Authenticated orders leave this absent; the public path always writes NEW. */
 export type GqlOrderStatus =
   /** The seller confirmed the buyer paid. */
@@ -1115,6 +1174,27 @@ export type GqlPageInput = {
   cursor?: InputMaybe<Scalars['String']['input']>;
   /** Maximum number of items to return in the page (1-100). Defaults to 50. */
   limit?: InputMaybe<Scalars['Int']['input']>;
+};
+
+/** The participant-safe projection of an OrderFulfillment (§10.2): the custody/quantity history of the caller's own Order lines, with no actor account, no inventory movement id, and no other administrative audit. The full audit is served only by the Unit-Admin `orderFulfillments` query. */
+export type GqlParticipantOrderFulfillment = {
+  __typename?: 'ParticipantOrderFulfillment';
+  /** When the record was written. */
+  createdAt: Scalars['AWSDateTime']['output'];
+  /** Unique fulfillment/reversal identity. */
+  fulfillmentId: Scalars['ID']['output'];
+  /** The line inside the Order this record belongs to. */
+  lineItemId: Scalars['ID']['output'];
+  /** The product of the fulfilled line. */
+  productId: Scalars['ID']['output'];
+  /** Amount fulfilled or reversed; always a positive integer. */
+  quantity: Scalars['Int']['output'];
+  /** FULFILL or REVERSAL. */
+  recordType: GqlOrderFulfillmentRecordType;
+  /** The fulfillment this record reverses, when it is a reversal. */
+  reversalOfFulfillmentId?: Maybe<Scalars['ID']['output']>;
+  /** Which stock source the record consumed or restored. */
+  source: GqlOrderFulfillmentSource;
 };
 
 /**
