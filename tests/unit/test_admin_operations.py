@@ -3101,6 +3101,10 @@ class TestAdminDeleteUserOrders:
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
+            # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
+            # stub is required, not cosmetic: an unstubbed MagicMock answers every page
+            # with a truthy LastEvaluatedKey, so the sweep would page forever.
+            mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
             # Mock profiles query
             mock_tables.profiles.query.return_value = {
@@ -3169,6 +3173,10 @@ class TestAdminDeleteUserOrders:
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
+            # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
+            # stub is required, not cosmetic: an unstubbed MagicMock answers every page
+            # with a truthy LastEvaluatedKey, so the sweep would page forever.
+            mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
             # Mock profiles query
             mock_tables.profiles.query.return_value = {
@@ -3233,6 +3241,10 @@ class TestAdminDeleteUserOrders:
             patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
+            # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
+            # stub is required, not cosmetic: an unstubbed MagicMock answers every page
+            # with a truthy LastEvaluatedKey, so the sweep would page forever.
+            mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_tables.profiles.query.return_value = {
                 "Items": [{"profileId": "profile-1", "ownerAccountId": db_account_id}]
             }
@@ -3475,6 +3487,10 @@ class TestAdminDeleteUserCampaigns:
             patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
+            # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
+            # stub is required, not cosmetic: an unstubbed MagicMock answers every page
+            # with a truthy LastEvaluatedKey, so the sweep would page forever.
+            mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_tables.profiles.query.return_value = {
                 "Items": [{"profileId": "profile-1", "ownerAccountId": "ACCOUNT#target-user-123"}]
             }

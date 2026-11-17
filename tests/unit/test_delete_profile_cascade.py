@@ -300,7 +300,9 @@ class TestDeleteProfileCascade:
         )
         assert len(response.get("Items", [])) == 0
 
-    def test_delete_profile_with_orders(self, profiles_table: Any, campaigns_table: Any, orders_table: Any) -> None:
+    def test_delete_profile_with_orders(
+        self, profiles_table: Any, campaigns_table: Any, orders_table: Any, order_fulfillments_table: Any
+    ) -> None:
         """Test deleting a profile with campaigns and orders."""
         owner_id = "owner-123"
         profile_id = "PROFILE#with-orders"
@@ -338,6 +340,7 @@ class TestDeleteProfileCascade:
         invites_table: Any,
         campaigns_table: Any,
         orders_table: Any,
+        order_fulfillments_table: Any,
     ) -> None:
         """Test deleting a profile with shares, invites, campaigns, and orders."""
         owner_id = "owner-123"
@@ -404,7 +407,9 @@ class TestDeleteProfileCascade:
         )
         assert len(response.get("Items", [])) == 0
 
-    def test_delete_with_many_orders(self, profiles_table: Any, campaigns_table: Any, orders_table: Any) -> None:
+    def test_delete_with_many_orders(
+        self, profiles_table: Any, campaigns_table: Any, orders_table: Any, order_fulfillments_table: Any
+    ) -> None:
         """Test deleting more than 25 orders for a single campaign."""
         owner_id = "owner-123"
         profile_id = "PROFILE#many-orders"
@@ -541,7 +546,9 @@ class TestDeleteProfileCascade:
         response = profiles_table.get_item(Key={"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id})
         assert "Item" not in response
 
-    def test_multiple_campaigns_with_orders(self, profiles_table: Any, campaigns_table: Any, orders_table: Any) -> None:
+    def test_multiple_campaigns_with_orders(
+        self, profiles_table: Any, campaigns_table: Any, orders_table: Any, order_fulfillments_table: Any
+    ) -> None:
         """Test deleting orders across multiple campaigns."""
         owner_id = "owner-123"
         profile_id = "PROFILE#multi-campaign"
@@ -628,6 +635,10 @@ class TestDeleteProfileCascade:
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
+            # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
+            # stub is required, not cosmetic: an unstubbed MagicMock answers every page
+            # with a truthy LastEvaluatedKey, so the sweep would page forever.
+            mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
             mock_tables.profiles.get_item.return_value = {
                 "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
