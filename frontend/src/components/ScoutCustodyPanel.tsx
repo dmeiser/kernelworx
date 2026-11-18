@@ -48,7 +48,14 @@ import {
   LIST_UNIT_CAMPAIGN_ROSTER,
   RETURN_STOCK_FROM_SCOUT,
 } from '../lib/graphql';
-import { describeInventoryFailure, page, parseQuantity, productLabel } from '../lib/inventory';
+import {
+  campaignLabel,
+  describeInventoryFailure,
+  page,
+  parseQuantity,
+  productLabel,
+  scoutLabel,
+} from '../lib/inventory';
 import { UNIT_PAGE_SIZE, createWriteIntent } from '../lib/units';
 import { ConnectionRestNotice } from './ConnectionRestNotice';
 import { ErrorAlert } from './ErrorAlert';
@@ -74,6 +81,16 @@ type ProductNames = ReadonlyMap<string, string>;
 interface EligibleScout {
   profileId: string;
   campaignId: string;
+  scoutName: string;
+  campaignName: string;
+}
+
+/** Anything a custody row names a Scout by, so one labelling rule serves both tables. */
+type ScoutKey = { profileId: string; campaignId: string };
+
+/** A custody row's place in the roster: the pair the stock was issued under, not the Scout alone. */
+function rosterKey(key: ScoutKey): string {
+  return `${key.profileId}#${key.campaignId}`;
 }
 
 /**
@@ -156,7 +173,19 @@ export const ScoutCustodyPanel: React.FC<{ unitCampaignId: string }> = ({ unitCa
     () =>
       completeRoster.items
         .filter((member) => member.status === 'ACTIVE')
-        .map((member) => ({ profileId: member.profileId, campaignId: member.campaignId })),
+        .map((member) => ({
+          profileId: member.profileId,
+          campaignId: member.campaignId,
+          scoutName: member.scoutName,
+          campaignName: member.campaignName,
+        })),
+    [completeRoster.items],
+  );
+  // The custody rows carry ids; the roster is what knows who they belong to. Keyed by
+  // the pair the stock was issued under, so a Scout holding under two Scout Campaigns is
+  // named by the right one, and one map serves both tables and the return dialog.
+  const scouts = useMemo<Map<string, GqlUnitCampaignMembershipFieldsFragment>>(
+    () => new Map(completeRoster.items.map((member) => [rosterKey(member), member])),
     [completeRoster.items],
   );
   const lines = completeBalances.items;
@@ -179,13 +208,19 @@ export const ScoutCustodyPanel: React.FC<{ unitCampaignId: string }> = ({ unitCa
         failure={<ErrorAlert message="Could not load the stock held by Scouts." />}
       >
         <CustodyTotal total={totalWithScout} groups={groups.length} />
-        <ScoutSummary groups={groups} names={names} onAsk={(group) => setPending({ kind: 'return', group })} />
-        <CustodyLines lines={lines} names={names} />
+        <ScoutSummary
+          scouts={scouts}
+          groups={groups}
+          names={names}
+          onAsk={(group) => setPending({ kind: 'return', group })}
+        />
+        <CustodyLines scouts={scouts} lines={lines} names={names} />
         <ConnectionRestNotice loading={completeBalances.loadingRest} failed={completeBalances.failedRest} />
       </QueryGate>
       <CustodyDialogs
         pending={pending}
         eligible={eligible}
+        scouts={scouts}
         products={products}
         names={names}
         unassigned={unassigned}
@@ -225,12 +260,13 @@ const IssueButton: React.FC<{ eligible: number; products: number; onAsk: () => v
 const CustodyDialogs: React.FC<{
   pending: PendingAction;
   eligible: readonly EligibleScout[];
+  scouts: ReadonlyMap<string, GqlUnitCampaignMembershipFieldsFragment>;
   products: readonly CatalogProduct[];
   names: ProductNames;
   unassigned: ReadonlyMap<string, number>;
   writes: ReturnType<typeof useCustodyWrites>;
   onClose: () => void;
-}> = ({ pending, eligible, products, names, unassigned, writes, onClose }) => {
+}> = ({ pending, eligible, scouts, products, names, unassigned, writes, onClose }) => {
   if (pending?.kind === 'issue') {
     return (
       <IssueDialog
@@ -244,7 +280,7 @@ const CustodyDialogs: React.FC<{
     );
   }
   if (pending?.kind === 'return') {
-    return <ReturnDialog group={pending.group} names={names} writes={writes} onClose={onClose} />;
+    return <ReturnDialog group={pending.group} scouts={scouts} names={names} writes={writes} onClose={onClose} />;
   }
   return null;
 };
@@ -256,11 +292,31 @@ const CustodyTotal: React.FC<{ total: number; groups: number }> = ({ total, grou
   </Typography>
 );
 
+/**
+ * What a custody row's Scout is called: the roster's own words, ids when it has none.
+ *
+ * The custody read answers ids and the roster read answers people, and the two arrive
+ * independently. A Scout whose roster entry cannot be read keeps their ids here, which
+ * is what still matches the audit trail, rather than disappearing from a table whose
+ * whole job is showing stock that has to come back.
+ */
+function scoutNames(
+  scouts: ReadonlyMap<string, GqlUnitCampaignMembershipFieldsFragment>,
+  key: ScoutKey,
+): { scoutName: string; campaignName: string } {
+  const member = scouts.get(rosterKey(key));
+  return {
+    scoutName: scoutLabel(member ?? { profileId: key.profileId, scoutName: '' }),
+    campaignName: campaignLabel(member ?? { campaignId: key.campaignId, campaignName: '' }),
+  };
+}
+
 const ScoutSummary: React.FC<{
+  scouts: ReadonlyMap<string, GqlUnitCampaignMembershipFieldsFragment>;
   groups: readonly CustodyGroup[];
   names: ProductNames;
   onAsk: (group: CustodyGroup) => void;
-}> = ({ groups, names, onAsk }) => (
+}> = ({ scouts, groups, names, onAsk }) => (
   <Card variant="outlined" sx={{ mb: 3 }}>
     <CardContent>
       <Typography variant="h6" gutterBottom>
@@ -279,7 +335,7 @@ const ScoutSummary: React.FC<{
           </TableHead>
           <TableBody>
             {groups.map((group) => (
-              <ScoutRow key={groupKey(group)} group={group} names={names} onAsk={onAsk} />
+              <ScoutRow key={groupKey(group)} scouts={scouts} group={group} names={names} onAsk={onAsk} />
             ))}
             {groups.length === 0 ? <NoCustodyRow /> : null}
           </TableBody>
@@ -289,16 +345,18 @@ const ScoutSummary: React.FC<{
   </Card>
 );
 
-const ScoutRow: React.FC<{ group: CustodyGroup; names: ProductNames; onAsk: (group: CustodyGroup) => void }> = ({
-  group,
-  names,
-  onAsk,
-}) => {
+const ScoutRow: React.FC<{
+  scouts: ReadonlyMap<string, GqlUnitCampaignMembershipFieldsFragment>;
+  group: CustodyGroup;
+  names: ProductNames;
+  onAsk: (group: CustodyGroup) => void;
+}> = ({ scouts, group, names, onAsk }) => {
   const key = groupKey(group);
+  const shown = scoutNames(scouts, group);
   return (
     <TableRow data-testid={`custody-scout-row-${key}`}>
-      <TableCell>{group.profileId}</TableCell>
-      <TableCell data-testid={`custody-scout-campaign-${key}`}>{group.campaignId}</TableCell>
+      <TableCell data-testid={`custody-scout-name-${key}`}>{shown.scoutName}</TableCell>
+      <TableCell data-testid={`custody-scout-campaign-${key}`}>{shown.campaignName}</TableCell>
       <TableCell>{group.lines.map((line) => productLabel(names, line.productId)).join(', ')}</TableCell>
       <TableCell align="right" data-testid={`custody-scout-held-${key}`}>
         {group.held}
@@ -312,7 +370,11 @@ const ScoutRow: React.FC<{ group: CustodyGroup; names: ProductNames; onAsk: (gro
   );
 };
 
-const CustodyLines: React.FC<{ lines: readonly Balance[]; names: ProductNames }> = ({ lines, names }) => (
+const CustodyLines: React.FC<{
+  scouts: ReadonlyMap<string, GqlUnitCampaignMembershipFieldsFragment>;
+  lines: readonly Balance[];
+  names: ProductNames;
+}> = ({ scouts, lines, names }) => (
   <Card variant="outlined">
     <CardContent>
       <Typography variant="h6" gutterBottom>
@@ -331,18 +393,7 @@ const CustodyLines: React.FC<{ lines: readonly Balance[]; names: ProductNames }>
           </TableHead>
           <TableBody>
             {lines.map((line) => (
-              <TableRow
-                key={`${line.profileId}#${line.productId}`}
-                data-testid={`custody-line-${line.profileId}-${line.productId}`}
-              >
-                <TableCell>{line.profileId}</TableCell>
-                <TableCell>{productLabel(names, line.productId)}</TableCell>
-                <TableCell align="right" data-testid={`custody-line-qty-${line.profileId}-${line.productId}`}>
-                  {line.withScoutQty}
-                </TableCell>
-                <TableCell align="right">{line.campaignId}</TableCell>
-                <TableCell align="right">{`v${line.version}`}</TableCell>
-              </TableRow>
+              <CustodyLineRow key={`${line.profileId}#${line.productId}`} scouts={scouts} line={line} names={names} />
             ))}
           </TableBody>
         </Table>
@@ -353,6 +404,26 @@ const CustodyLines: React.FC<{ lines: readonly Balance[]; names: ProductNames }>
     </CardContent>
   </Card>
 );
+
+/** One custody line: the held quantity, and the Scout and Campaign it belongs to. */
+const CustodyLineRow: React.FC<{
+  scouts: ReadonlyMap<string, GqlUnitCampaignMembershipFieldsFragment>;
+  line: Balance;
+  names: ProductNames;
+}> = ({ scouts, line, names }) => {
+  const shown = scoutNames(scouts, line);
+  return (
+    <TableRow data-testid={`custody-line-${line.profileId}-${line.productId}`}>
+      <TableCell data-testid={`custody-line-scout-${line.profileId}-${line.productId}`}>{shown.scoutName}</TableCell>
+      <TableCell>{productLabel(names, line.productId)}</TableCell>
+      <TableCell align="right" data-testid={`custody-line-qty-${line.profileId}-${line.productId}`}>
+        {line.withScoutQty}
+      </TableCell>
+      <TableCell align="right">{shown.campaignName}</TableCell>
+      <TableCell align="right">{`v${line.version}`}</TableCell>
+    </TableRow>
+  );
+};
 
 const NoCustodyRow: React.FC = () => (
   <TableRow>
@@ -520,7 +591,7 @@ const IssueDialog: React.FC<{
         >
           {eligible.map((candidate) => (
             <MenuItem key={candidate.profileId} value={candidate.profileId}>
-              {`${candidate.profileId} · ${candidate.campaignId}`}
+              {`${scoutLabel(candidate)} · ${campaignLabel(candidate)}`}
             </MenuItem>
           ))}
         </TextField>
@@ -562,12 +633,13 @@ const IssueDialog: React.FC<{
  */
 const ReturnDialog: React.FC<{
   group: CustodyGroup;
+  scouts: ReadonlyMap<string, GqlUnitCampaignMembershipFieldsFragment>;
   names: ProductNames;
   writes: ReturnType<typeof useCustodyWrites>;
   onClose: () => void;
-}> = ({ group, names, writes, onClose }) => (
+}> = ({ group, scouts, names, writes, onClose }) => (
   <FormDialog
-    title={`Return ${group.profileId}'s stock`}
+    title={`Return ${scoutNames(scouts, group).scoutName}'s stock`}
     confirmLabel="Return all stock"
     confirmColor="primary"
     onCancel={onClose}

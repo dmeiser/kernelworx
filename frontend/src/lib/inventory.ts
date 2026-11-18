@@ -270,6 +270,25 @@ export function productLabel(nameById: ReadonlyMap<string, string>, productId: s
   return nameById.get(productId) ?? productId;
 }
 
+/**
+ * A Scout, by name.
+ *
+ * The roster answers `scoutName` so the person a write names can be recognized: a
+ * custody issue, a return, and a door-to-door sale are each chosen from a roster, and two
+ * `PROFILE#…` ids on one screen cannot be told apart by anyone but the person who wrote
+ * them. The id is the fallback for the one case where the profile row could not be read —
+ * the membership stays on the roster because it is the history the custody and credit
+ * belong to, so something still has to name the row.
+ */
+export function scoutLabel(scout: { profileId: string; scoutName?: string | null }): string {
+  return scout.scoutName || scout.profileId;
+}
+
+/** The same rule for a Scout Campaign: its name, or its id when its row was unreadable. */
+export function campaignLabel(campaign: { campaignId: string; campaignName?: string | null }): string {
+  return campaign.campaignName || campaign.campaignId;
+}
+
 /** The page every Show & Sell connection read asks for. */
 export function page(limit: number = INVENTORY_PAGE_SIZE): GqlPageInput {
   return { limit };

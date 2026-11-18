@@ -36,6 +36,7 @@ import { LoadingState } from './LoadingState';
 import { QueryGate } from './QueryGate';
 import { ConnectionRestNotice } from './ConnectionRestNotice';
 import { useCompleteConnection } from '../hooks/useCompleteConnection';
+import { campaignLabel, scoutLabel } from '../lib/inventory';
 import { UNIT_PAGE_SIZE, newIdempotencyKey, refreshQuery } from '../lib/units';
 import type {
   GqlListUnitCampaignRosterQuery,
@@ -49,7 +50,6 @@ function toStatusFilter(status: StatusFilter): GqlMembershipStatus | undefined {
   if (status === 'all') return undefined;
   return status === 'active' ? 'ACTIVE' : 'REMOVED';
 }
-
 
 function rosterCount(rows: GqlUnitCampaignMembership[]): string {
   return `${rows.length} roster ${rows.length === 1 ? 'entry' : 'entries'}`;
@@ -170,7 +170,8 @@ const RosterBody: React.FC<{
       <Table size="small">
         <TableHead>
           <TableRow>
-            <TableCell>Scout profile</TableCell>
+            <TableCell>Scout</TableCell>
+            <TableCell>Scout Campaign</TableCell>
             <TableCell>Status</TableCell>
             <TableCell>Joined</TableCell>
             <TableCell>Removed</TableCell>
@@ -205,7 +206,8 @@ const RosterRow: React.FC<{
   onAskRemove: (pending: PendingRemoval) => void;
 }> = ({ membership, onAskRemove }) => (
   <TableRow data-testid={`roster-row-${membership.profileId}`}>
-    <TableCell>{membership.profileId}</TableCell>
+    <TableCell data-testid={`roster-scout-${membership.profileId}`}>{scoutLabel(membership)}</TableCell>
+    <TableCell data-testid={`roster-campaign-${membership.profileId}`}>{campaignLabel(membership)}</TableCell>
     <TableCell data-testid={`roster-status-${membership.profileId}`}>
       <MembershipStatusChip status={membership.status} />
     </TableCell>
@@ -260,7 +262,7 @@ const RosterAction: React.FC<{
 
 const EmptyRosterRow: React.FC = () => (
   <TableRow>
-    <TableCell colSpan={5}>
+    <TableCell colSpan={6}>
       <Box sx={{ p: 2 }}>
         <Typography color="text.secondary">No roster entries match this filter.</Typography>
       </Box>
