@@ -140,12 +140,16 @@ export function response(ctx) {
         // swept window is already committed; the caller re-issues and the next pass finds
         // the rest. The rest of the pipeline (totals, propagation check) is skipped by
         // the error, which is correct while the Order is still present.
-        // ASCII only in a resolver's string literals: esbuild escapes every non-ASCII
-        // character in a string, and the escaped form is what AppSync is handed and refuses
-        // to load (deploy run 44250080549). See the APPSYNC_JS entry in AGENTS.md.
+        // The em dash in this message is a hyphen because bundling renders that character as
+        // a Unicode escape, and no other bundle in the fleet carries one: of the code the
+        // rejected deploy run 44250080549 refused, it is the only construct with no accepted
+        // precedent. That run named no token, so the change is one-variable by design - no
+        // other code line of this bundle differs. Green names the escape; red on this same
+        // function rules it out and leaves the array-literal `[...].concat(childDeletes)`
+        // receiver. The cause is not established here; see the APPSYNC_JS entry in AGENTS.md.
         util.error(
             'This order has more fulfillment history than one delete can remove; ' +
-                (ctx.stash.sweptRecords || 0) + ' record(s) were just removed and the order is still present. Delete the order again to remove the rest',
+                (ctx.stash.sweptRecords || 0) + ' record(s) were just removed and the order is still present - delete it again to continue',
             'RESOURCE_BUSY'
         );
         return null;
