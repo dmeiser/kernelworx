@@ -4,8 +4,10 @@ The campaign-domain Lambda functions (``delete-campaign-orders`` and
 ``unit-reporting``) run under the scoped per-domain role added in #351 (chunk 1
 of the #326 IAM role split). That role grants DynamoDB read actions
 (GetItem/Query/BatchGetItem) on exactly the tables the handlers touch
-(campaigns, orders, profiles, shares) plus BatchWriteItem on the orders table
-only. See ``tofu/application/modules/iam/main.tf``.
+(campaigns, orders, profiles, shares, order_fulfillments), BatchWriteItem on the
+fulfillment table, and DeleteItem on the orders table -- each Order goes by a
+conditional delete pinned to its ``fulfillmentVersion``, which a batch write
+cannot express. See ``tofu/application/modules/iam/main.tf``.
 
 These tests invoke the real handlers against moto DynamoDB while recording
 every DynamoDB API call at the botocore layer, then assert the recorded
@@ -37,9 +39,10 @@ SHARES_TABLE = "kernelworx-shares-ue1-dev"
 # (ARCH-1, children-first).
 DOMAIN_TABLES = {PROFILE_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE, SHARES_TABLE, ORDER_FULFILLMENTS_TABLE}
 
-# Actions the #351 campaign role grants (BatchWriteItem additionally
-# restricted to the orders table and the fulfillment history those orders own).
-ALLOWED_ACTIONS = {"GetItem", "Query", "BatchGetItem", "BatchWriteItem"}
+# Actions the #351 campaign role grants (BatchWriteItem additionally restricted
+# to the fulfillment history those Orders own, and DeleteItem to the orders table,
+# where the delete must carry the fulfillmentVersion condition a batch cannot).
+ALLOWED_ACTIONS = {"GetItem", "Query", "BatchGetItem", "BatchWriteItem", "DeleteItem"}
 
 OWNER_SUB = "owner-sub-001"
 FRIEND_SUB = "friend-sub-002"
@@ -93,8 +96,12 @@ def assert_within_campaign_role_scope(calls: List[Tuple[str, str]]) -> None:
     assert operations <= ALLOWED_ACTIONS, f"unexpected DynamoDB actions: {operations - ALLOWED_ACTIONS}"
     assert tables <= DOMAIN_TABLES, f"handler touched tables outside the campaign role scope: {tables - DOMAIN_TABLES}"
     batch_write_tables = {table for op, table in calls if op == "BatchWriteItem"}
-    assert batch_write_tables <= {ORDERS_TABLE, ORDER_FULFILLMENTS_TABLE}, (
-        f"BatchWriteItem outside the orders and order-fulfillments tables: {batch_write_tables}"
+    assert batch_write_tables <= {ORDER_FULFILLMENTS_TABLE}, (
+        f"BatchWriteItem outside the order-fulfillments table (Orders go by pinned DeleteItem now): {batch_write_tables}"
+    )
+    delete_item_tables = {table for op, table in calls if op == "DeleteItem"}
+    assert delete_item_tables <= {ORDERS_TABLE}, (
+        f"DeleteItem outside the orders table (the fulfillmentVersion-pinned parent delete): {delete_item_tables}"
     )
 
 
@@ -177,7 +184,7 @@ class TestDeleteCampaignOrdersScope:
         )
 
         assert result == {"deletedCount": 3}
-        assert ("BatchWriteItem", ORDERS_TABLE) in dynamodb_calls.calls
+        assert ("DeleteItem", ORDERS_TABLE) in dynamodb_calls.calls
         assert_within_campaign_role_scope(dynamodb_calls.calls)
 
         # ARCH-1: the Campaign delete takes the fulfillment history with the Orders, and
@@ -190,7 +197,12 @@ class TestDeleteCampaignOrdersScope:
             (i for i, (op, table) in enumerate(calls) if table == ORDER_FULFILLMENTS_TABLE and op == "Query"),
             -1,
         )
-        order_delete = next((i for i, (op, table) in enumerate(calls) if table == ORDERS_TABLE and op == "BatchWriteItem"), -1)
+        # The parent goes by a conditional DeleteItem, never by the batch writer: the
+        # condition is what leaves an Order readable when a fulfillment lands during its
+        # sweep, which is what makes the next run able to finish the cleanup.
+        order_delete = next(
+            (i for i, (op, table) in enumerate(calls) if table == ORDERS_TABLE and op == "DeleteItem"), -1
+        )
         assert sweep >= 0, "the campaign delete never read the fulfillment history it was about to orphan"
         assert sweep < order_delete, "the campaign deleted its Orders before their fulfillment history"
 

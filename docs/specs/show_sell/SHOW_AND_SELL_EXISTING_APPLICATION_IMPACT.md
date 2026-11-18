@@ -260,6 +260,8 @@ Update every hard-delete path:
 
 Append-only `OrderFulfillment` and reversal children must be deleted before the Order, with strongly consistent verification where current code uses it. IAM for `delete-campaign-orders` and `delete-profile-cascade` must include the new table access actually used.
 
+Children-first alone is not sufficient, because a cascade enumerates its work by reading Orders: if the Orders go first by an unconditioned batch delete and the cleanup after them fails, no later run can tell which partitions still need sweeping. So the parent delete carries a guard. Each Order is removed by a single conditional `DeleteItem` pinned to the `fulfillmentVersion` the cascade read for it, and the whole history sweep for that Order happens in the same step, immediately before that delete. A fulfillment that commits in the window moves the version in its own transaction, so the pin fails, nothing is removed for that Order, and the surviving Order row is the durable record of unfinished cleanup. Only `DeleteItem` can carry the condition, which is why the parent row goes one at a time while its children stay batched.
+
 ### 7.2 Joined Scout Campaign deletion
 
 The ordinary `deleteCampaign` pipeline in `tofu/application/modules/appsync/resolvers_mutations.tf` currently deletes Orders and the Campaign, then updates legacy latest-campaign state. It has no knowledge of UnitCampaignMembership, ScoutCampaignMembershipGuard, commitments/signups/work, custody, credit projections, or Unit Campaign roster status. Deleting a joined Campaign would otherwise leave an ACTIVE membership/guard pointing at a nonexistent Campaign and could block future joins.

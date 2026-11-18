@@ -1,23 +1,26 @@
 """Unit tests for delete_campaign_orders Lambda handler and deletion helpers."""
 
 from decimal import Decimal
-from typing import Any, Dict
-from unittest.mock import MagicMock, patch
+from typing import Any, Dict, List
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
 from src.handlers.campaign_operations import (
+    _fulfillment_version_delete_condition,
+    _order_fulfillment_version,
     _query_order_keys_for_campaign,
     _verify_campaign_deleted,
     _verify_order_keys_deleted,
     batch_delete_keys,
     delete_campaign_orders,
     delete_fulfillments_for_orders,
-    delete_order_keys,
+    delete_order_and_fulfillments,
     delete_orders_for_campaign,
     fulfillment_keys_for_orders,
 )
 from src.utils.errors import AppError, ErrorCode
+from src.utils.order_fulfillment_models import fulfillment_version_condition
 from tests.unit.fixtures import batch_delete_table, unprocessed_batches
 
 
@@ -89,7 +92,7 @@ class TestDeleteCampaignOrders:
         )
         assert len(remaining.get("Items", [])) == 0
 
-    def test_fulfillment_written_after_the_sweep_is_gone_when_the_delete_returns(
+    def test_a_fulfillment_landing_mid_delete_leaves_the_order_for_the_retry(
         self,
         orders_table: Any,
         campaigns_table: Any,
@@ -97,17 +100,23 @@ class TestDeleteCampaignOrders:
         order_fulfillments_table: Any,
         lambda_context: Any,
     ) -> None:
-        """ARCH-1 (re-review): the window between sweeping the children and deleting the Orders.
+        """ARCH-1 (round-3 review): the sweep/delete window cannot orphan, and cannot strand.
 
-        The sweep and the Order delete are two operations, so a fulfillment that commits
-        in between would be an orphan with no Order under it — unreachable by both the
-        reversal and the audit surface, next to a movement that already moved stock. The
-        second sweep closes it: once the Orders are verified absent, the fulfillment write
-        cannot succeed at all (its Order update requires `attribute_exists(orderId)`), so
-        everything that landed is visible to a consistent read and nothing more can land.
+        The batch form deleted every Order first and swept their history afterwards. If
+        that second sweep failed, the retry read no Orders, returned `deletedCount: 0`,
+        and the records that survived the failure were orphaned for good — the cascade had
+        no durable record of which partitions still needed cleaning, because it enumerated
+        work by reading Orders.
+
+        Each Order is now deleted by a write pinned to the ``fulfillmentVersion`` the
+        cascade read. A real fulfillment commits its row and moves that version in one
+        transaction, so a fulfillment landing during the sweep fails the pin: the record
+        stays attached to an Order that is still present, the cascade stops, and the next
+        run finds the same Order and finishes the job.
         """
         campaign_id = "CAMPAIGN#campaign-race"
         profile_id = "PROFILE#profile-race"
+        order_key = {"campaignId": campaign_id, "orderId": "ORDER#1"}
         self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
         orders_table.put_item(
             Item={
@@ -118,28 +127,111 @@ class TestDeleteCampaignOrders:
             }
         )
 
-        def delete_then_arrive(*args: Any, **kwargs: Any) -> int:
-            """The real Order delete, then the fulfillment that committed in the gap."""
-            deleted = delete_order_keys(*args, **kwargs)
-            order_fulfillments_table.put_item(
-                Item={
-                    "pk": "ORDER#1",
-                    "sk": "FULFILLMENT#2024-10-02T00:00:00+00:00#late",
-                    "entityType": "OrderFulfillment",
-                    "orderId": "ORDER#1",
-                    "campaignId": campaign_id,
-                    "fulfillmentId": "late",
-                    "quantity": 1,
-                    "createdAt": "2024-10-02T00:00:00+00:00",
-                }
-            )
+        real_sweep = delete_fulfillments_for_orders
+        injections = {"count": 0}
+
+        def sweep_then_fulfill(order_ids: List[str], *, logger: Any = None) -> int:
+            """The real sweep, then the fulfillment that commits in the window behind it."""
+            deleted = real_sweep(order_ids, logger=logger)
+            if injections["count"] == 0:
+                injections["count"] = 1
+                order_fulfillments_table.put_item(
+                    Item={
+                        "pk": "ORDER#1",
+                        "sk": "FULFILLMENT#2024-10-02T00:00:00+00:00#late",
+                        "entityType": "OrderFulfillment",
+                        "orderId": "ORDER#1",
+                        "campaignId": campaign_id,
+                        "fulfillmentId": "late",
+                        "quantity": 1,
+                        "createdAt": "2024-10-02T00:00:00+00:00",
+                    }
+                )
+                # A fulfillment is one transaction: the row above AND the Order's version.
+                orders_table.update_item(
+                    Key=order_key,
+                    UpdateExpression="SET fulfillmentVersion = :v",
+                    ExpressionAttributeValues={":v": 1},
+                )
             return deleted
 
-        with patch("src.handlers.campaign_operations.delete_order_keys", side_effect=delete_then_arrive):
-            result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+        with patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", side_effect=sweep_then_fulfill):
+            first = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
 
-        assert result == {"deletedCount": 1}
-        assert order_fulfillments_table.scan()["Items"] == [], "the arriving record was left orphaned"
+        assert first["__isError"] is True, f"the pinned delete must fail: {first!r}"
+        assert first["errorCode"] == "CONFLICT"
+        # The Order survived, and that row is the durable record of unfinished cleanup —
+        # the thing the batch form could not offer once the Orders were gone.
+        assert orders_table.get_item(Key=order_key).get("Item") is not None, "the pinned delete removed a changed Order"
+        assert len(order_fulfillments_table.scan()["Items"]) == 1, "the arriving record was deleted or orphaned"
+
+        # The retry reads the same Order, sweeps its history, and completes.
+        second = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+
+        assert second == {"deletedCount": 1}
+        assert orders_table.scan()["Items"] == [], "the retry left the Order behind"
+        assert order_fulfillments_table.scan()["Items"] == [], "the retry left fulfillment history orphaned"
+
+    def test_a_sweep_that_cannot_finish_leaves_the_order_and_its_history_in_place(
+        self,
+        orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
+        order_fulfillments_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """A failed history sweep is not a license to delete the parent.
+
+        `_verify_fulfillment_keys_deleted` refuses while swept records survive the batch,
+        and the refusal happens before the Order's delete, so the whole partition is still
+        there for the next run — no Order is ever removed on top of records the cascade
+        could not reach.
+        """
+        campaign_id = "CAMPAIGN#campaign-sweep-fails"
+        profile_id = "PROFILE#profile-sweep-fails"
+        order_key = {"campaignId": campaign_id, "orderId": "ORDER#1"}
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
+        orders_table.put_item(
+            Item={
+                "campaignId": campaign_id,
+                "orderId": "ORDER#1",
+                "customerName": "Customer 1",
+                "totalAmount": Decimal("4.0"),
+            }
+        )
+        order_fulfillments_table.put_item(
+            Item={
+                "pk": "ORDER#1",
+                "sk": "FULFILLMENT#2024-10-02T00:00:00+00:00#ful-1",
+                "entityType": "OrderFulfillment",
+                "orderId": "ORDER#1",
+                "campaignId": campaign_id,
+                "fulfillmentId": "ful-1",
+                "quantity": 2,
+                "createdAt": "2024-10-02T00:00:00+00:00",
+            }
+        )
+
+        real_sweep = delete_fulfillments_for_orders
+        attempts = {"count": 0}
+
+        def fail_the_first_sweep(order_ids: List[str], *, logger: Any = None) -> int:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise AppError(ErrorCode.RESOURCE_BUSY, "Temporarily unable to delete data. Please retry.")
+            return real_sweep(order_ids, logger=logger)
+
+        with patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", side_effect=fail_the_first_sweep):
+            first = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+            assert first["errorCode"] == "RESOURCE_BUSY"
+            assert orders_table.get_item(Key=order_key).get("Item") is not None
+            assert len(order_fulfillments_table.scan()["Items"]) == 1
+
+            second = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+
+        assert second == {"deletedCount": 1}
+        assert orders_table.scan()["Items"] == []
+        assert order_fulfillments_table.scan()["Items"] == []
 
     def test_delete_campaign_orders_chunks_batches(
         self,
@@ -379,14 +471,18 @@ class TestDeleteCampaignOrders:
             }
         )
 
-        with patch("src.handlers.campaign_operations.tables.orders.meta.client.batch_write_item") as mock_bw:
+        with patch("src.handlers.campaign_operations.tables.orders.meta.client.delete_item") as mock_delete:
             error_response = {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}}
-            mock_bw.side_effect = ClientError(error_response, "BatchWriteItem")
+            mock_delete.side_effect = ClientError(error_response, "DeleteItem")
 
             result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
 
             assert result["__isError"] is True
             assert result["errorCode"] == ErrorCode.RESOURCE_BUSY
+            # A throttled parent delete leaves the Order where the next run can find it.
+            assert (
+                orders_table.get_item(Key={"campaignId": campaign_id, "orderId": "ORDER#1"}).get("Item") is not None
+            ), "a failed delete removed the Order it could not clean"
 
     def test_delete_campaign_orders_verifies_order_id_gsi(
         self,
@@ -675,25 +771,159 @@ class TestQueryOrderKeysForCampaign:
         assert call_args[1]["ExpressionAttributeValues"] == {":cid": "CAMPAIGN#q"}
 
 
-class TestDeleteOrderKeys:
-    """Tests for the shared order batch delete helper."""
+class TestDeleteOrderAndFulfillments:
+    """The per-Order lifecycle: strong read, history sweep, version-pinned parent delete."""
 
-    def test_deletes_orders_in_batches(self) -> None:
-        """Test that delete_order_keys issues one BatchWriteItem per batch."""
-        mock_table = batch_delete_table("orders-table")
+    @staticmethod
+    def _tables(order_item: Dict[str, Any] | None) -> MagicMock:
+        mock_tables = MagicMock()
+        mock_tables.orders.get_item.return_value = {"Item": order_item} if order_item is not None else {}
+        mock_tables.orders.name = "kernelworx-orders-v2-ue1-dev"
+        return mock_tables
 
-        orders = [{"campaignId": "CAMPAIGN#batch", "orderId": f"ORDER#{i}"} for i in range(3)]
+    def test_reads_the_order_strongly_and_pins_the_delete_to_the_version_it_read(self) -> None:
+        order_item = {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1", "fulfillmentVersion": Decimal("3")}
+        mock_tables = self._tables(order_item)
+        with (
+            patch("src.handlers.campaign_operations.tables", mock_tables),
+            patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", return_value=2) as mock_sweep,
+        ):
+            deleted, records = delete_order_and_fulfillments("CAMPAIGN#c1", "ORDER#1")
 
-        with patch("src.handlers.campaign_operations.tables") as mock_tables:
-            mock_tables.orders = mock_table
-            count = delete_order_keys(orders)
+        assert (deleted, records) == (True, 2)
+        # The version read must precede the sweep: a version read afterwards would already
+        # count a fulfillment the sweep never saw, and the delete would orphan its row.
+        mock_tables.orders.get_item.assert_called_once_with(
+            Key={"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"}, ConsistentRead=True
+        )
+        mock_sweep.assert_called_once_with(["ORDER#1"], logger=ANY)
+        kwargs = mock_tables.orders.delete_item.call_args.kwargs
+        assert kwargs["Key"] == {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"}
+        assert (
+            kwargs["ConditionExpression"]
+            == "#fulfillmentVersion = :expectedFulfillmentVersion AND attribute_exists(#orderId)"
+        )
+        assert kwargs["ExpressionAttributeValues"] == {":expectedFulfillmentVersion": 3}
 
-        assert count == 3
-        sent = mock_table.meta.client.batch_write_item.call_args.kwargs["RequestItems"]
-        assert len(sent["orders-table"]) == 3
-        assert sent["orders-table"][0] == {
-            "DeleteRequest": {"Key": {"campaignId": "CAMPAIGN#batch", "orderId": "ORDER#0"}}
-        }
+    def test_a_pre_wave_3_order_that_carries_no_version_is_pinned_at_zero(self) -> None:
+        order_item = {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"}
+        mock_tables = self._tables(order_item)
+        with (
+            patch("src.handlers.campaign_operations.tables", mock_tables),
+            patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", return_value=0),
+        ):
+            assert delete_order_and_fulfillments("CAMPAIGN#c1", "ORDER#1") == (True, 0)
+
+        condition = mock_tables.orders.delete_item.call_args.kwargs["ConditionExpression"]
+        assert condition == (
+            "(attribute_not_exists(#fulfillmentVersion) OR #fulfillmentVersion = :expectedFulfillmentVersion) "
+            "AND attribute_exists(#orderId)"
+        )
+
+    def test_an_order_that_is_already_gone_issues_no_sweep_and_no_write(self) -> None:
+        # Whoever removed it was pinned too, so its history went with it: a second sweep
+        # would be a read of an empty partition for nothing.
+        mock_tables = self._tables(None)
+        with patch("src.handlers.campaign_operations.tables", mock_tables) as mock_tables_arg:
+            with patch("src.handlers.campaign_operations.delete_fulfillments_for_orders") as mock_sweep:
+                assert delete_order_and_fulfillments("CAMPAIGN#c1", "ORDER#1") == (False, 0)
+
+        assert mock_tables_arg is mock_tables
+        mock_sweep.assert_not_called()
+        mock_tables.orders.delete_item.assert_not_called()
+
+    def test_a_sweep_that_refuses_stops_before_the_parent_delete(self) -> None:
+        order_item = {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1", "fulfillmentVersion": Decimal("1")}
+        mock_tables = self._tables(order_item)
+        with (
+            patch("src.handlers.campaign_operations.tables", mock_tables),
+            patch(
+                "src.handlers.campaign_operations.delete_fulfillments_for_orders",
+                side_effect=AppError(ErrorCode.CONFLICT, "1 fulfillment record(s) are still present"),
+            ),
+        ):
+            with pytest.raises(AppError) as excinfo:
+                delete_order_and_fulfillments("CAMPAIGN#c1", "ORDER#1")
+
+        assert excinfo.value.error_code == ErrorCode.CONFLICT
+        mock_tables.orders.delete_item.assert_not_called()
+
+    def test_a_failed_pin_is_a_retryable_conflict_that_names_the_unfinished_order(self) -> None:
+        from botocore.exceptions import ClientError
+
+        order_item = {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1", "fulfillmentVersion": Decimal("2")}
+        mock_tables = self._tables(order_item)
+        mock_tables.orders.delete_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "The conditional check failed."}},
+            "DeleteItem",
+        )
+        mock_logger = MagicMock()
+        with (
+            patch("src.handlers.campaign_operations.tables", mock_tables),
+            patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", return_value=0),
+            pytest.raises(AppError) as excinfo,
+        ):
+            delete_order_and_fulfillments("CAMPAIGN#c1", "ORDER#1", logger=mock_logger)
+
+        assert excinfo.value.error_code == ErrorCode.CONFLICT
+        assert "ORDER#1 was fulfilled while its delete was in flight" in excinfo.value.message
+        mock_logger.warning.assert_called_once()
+
+    def test_a_throttled_order_delete_keeps_the_shared_transient_verdict(self) -> None:
+        from botocore.exceptions import ClientError
+
+        order_item = {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1", "fulfillmentVersion": Decimal("2")}
+        mock_tables = self._tables(order_item)
+        mock_tables.orders.delete_item.side_effect = ClientError(
+            {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}},
+            "DeleteItem",
+        )
+        with (
+            patch("src.handlers.campaign_operations.tables", mock_tables),
+            patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", return_value=0),
+            pytest.raises(AppError) as excinfo,
+        ):
+            delete_order_and_fulfillments("CAMPAIGN#c1", "ORDER#1")
+
+        assert excinfo.value.error_code == ErrorCode.RESOURCE_BUSY
+
+    def test_the_version_the_delete_pins_is_the_version_the_row_carries(self) -> None:
+        assert _order_fulfillment_version({"fulfillmentVersion": Decimal("7")}) == 7
+        assert _order_fulfillment_version({}) == 0
+
+
+class TestDeleteConditionMatchesTheFulfillmentWriteOwner:
+    """The delete pin and the fulfillment write must be the same guard.
+
+    `campaign_operations` spells the guard locally rather than importing
+    `order_fulfillment_models`, because that module drags `inventory` and `units` into the
+    import closure of Lambdas that never read them -- a cost the closure gate
+    (`test_lambda_table_env_closure.py`) would force the deployments to pay. Duplication
+    is only safe if it is checked, so this compares the two spellings attribute for
+    attribute. The one intended difference is encoding: the owner feeds the low-level
+    client and returns `wire_value` form, this one feeds the resource client.
+    """
+
+    @staticmethod
+    def _wire_to_python(values: Dict[str, Any]) -> Dict[str, int]:
+        return {name: int(value["N"]) for name, value in values.items()}
+
+    def test_every_version_spells_the_same_guard(self) -> None:
+        for version in (0, 1, 2, 99):
+            owner = fulfillment_version_condition(version)
+            cascade = _fulfillment_version_delete_condition(version)
+
+            assert cascade["ConditionExpression"] == owner["ConditionExpression"], f"version {version}"
+            assert cascade["ExpressionAttributeNames"] == owner["ExpressionAttributeNames"], f"version {version}"
+            assert self._wire_to_python(owner["ExpressionAttributeValues"]) == cascade["ExpressionAttributeValues"], (
+                f"version {version}"
+            )
+
+    def test_the_guard_still_requires_the_row_itself(self) -> None:
+        # The parenthesised version test alone would pass against a MISSING item, which is
+        # how an unfulfilled Order deleted mid-flight gets recreated as a partial row.
+        for version in (0, 3):
+            assert "attribute_exists(#orderId)" in _fulfillment_version_delete_condition(version)["ConditionExpression"]
 
 
 class TestBatchDeleteKeys:
@@ -799,83 +1029,91 @@ class TestBatchDeleteKeys:
 class TestDeleteOrdersForCampaign:
     """Tests for delete_orders_for_campaign helper."""
 
-    def test_empty_orders_returns_zero(self) -> None:
-        """Test that a campaign with no orders returns 0."""
-        with patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=[]):
-            count = delete_orders_for_campaign("CAMPAIGN#empty")
-            assert count == 0
-
-    def test_deletes_and_verifies_orders(self) -> None:
-        """Test that orders are queried, batch-deleted, and verified."""
-        orders = [{"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"}]
+    def test_each_order_is_swept_then_deleted_pinned_and_the_set_is_verified(self) -> None:
+        """One lifecycle per Order, and the campaign verifies the whole set afterwards."""
+        orders = [
+            {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"},
+            {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#2"},
+        ]
         mock_logger = MagicMock()
         with (
             patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=orders),
-            patch("src.handlers.campaign_operations.batch_delete_keys", return_value=1) as mock_delete,
-            patch("src.handlers.campaign_operations._verify_order_keys_deleted") as mock_verify,
-            patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", return_value=0) as mock_fulfil,
-        ):
-            count = delete_orders_for_campaign("CAMPAIGN#c1", logger=mock_logger)
-            assert count == 1
-            # ARCH-1: the fulfillment history of those Orders goes with them, and the
-            # sweep runs a second time once the Orders are verified gone -- a fulfillment
-            # that lands in the gap between the two would otherwise be orphaned. (The
-            # moto scope test pins the call ORDER; this pins that the sweep is wired to
-            # the Orders this delete is about to remove.)
-            assert mock_fulfil.call_count == 2
-            for call in mock_fulfil.call_args_list:
-                assert call.args == (["ORDER#1"],)
-                assert call.kwargs == {"logger": mock_logger}
-            mock_delete.assert_called_once()
-            mock_verify.assert_called_once_with(orders)
-            mock_logger.info.assert_called_once()
-
-    def test_fulfillment_arriving_after_the_sweep_is_swept_by_the_second_pass(self) -> None:
-        """ARCH-1 (re-review): the window between sweeping children and deleting Orders."""
-        orders = [{"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"}]
-        mock_logger = MagicMock()
-        with (
-            patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=orders),
-            patch("src.handlers.campaign_operations.batch_delete_keys", return_value=1),
-            patch("src.handlers.campaign_operations._verify_order_keys_deleted"),
-            patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", side_effect=[0, 3]) as mock_fulfil,
-        ):
-            count = delete_orders_for_campaign("CAMPAIGN#c1", logger=mock_logger)
-
-        assert count == 1
-        assert mock_fulfil.call_count == 2
-        mock_logger.warning.assert_called_once()
-        assert "arrived between the sweep and the order delete" in mock_logger.warning.call_args.args[0]
-        assert mock_logger.warning.call_args.kwargs["count"] == 3
-        assert mock_logger.warning.call_args.kwargs["campaign_id"] == "CAMPAIGN#c1"
-
-    def test_second_sweep_that_cannot_finish_stops_before_the_campaign_reports_success(self) -> None:
-        """ARCH-1 (re-review): a failing second pass is a CONFLICT, not a completed delete.
-
-        The Orders are already gone at this point, so the cascade must not answer
-        `deletedCount` over history it could not remove: the caller has to know records
-        are still keyed to Orders that no longer exist.
-        """
-        orders = [{"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"}]
-        with (
-            patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=orders),
-            patch("src.handlers.campaign_operations.batch_delete_keys", return_value=1),
-            patch("src.handlers.campaign_operations._verify_order_keys_deleted"),
             patch(
-                "src.handlers.campaign_operations.delete_fulfillments_for_orders",
-                side_effect=[
-                    0,
-                    AppError(
-                        ErrorCode.CONFLICT,
-                        "1 fulfillment record(s) are still present; no further deletion was attempted",
-                    ),
-                ],
+                "src.handlers.campaign_operations.delete_order_and_fulfillments",
+                return_value=(True, 3),
+            ) as mock_delete,
+            patch("src.handlers.campaign_operations._verify_order_keys_deleted") as mock_verify,
+        ):
+            count = delete_orders_for_campaign("CAMPAIGN#c1", logger=mock_logger)
+
+        assert count == 2
+        assert [call.args for call in mock_delete.call_args_list] == [
+            ("CAMPAIGN#c1", "ORDER#1"),
+            ("CAMPAIGN#c1", "ORDER#2"),
+        ]
+        for call in mock_delete.call_args_list:
+            assert call.kwargs == {"logger": mock_logger}
+        mock_verify.assert_called_once_with(orders)
+        mock_logger.info.assert_called_once()
+
+    def test_an_order_another_path_already_removed_is_not_counted_as_deleted(self) -> None:
+        orders = [
+            {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"},
+            {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#2"},
+        ]
+        with (
+            patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=orders),
+            patch(
+                "src.handlers.campaign_operations.delete_order_and_fulfillments", side_effect=[(False, 0), (True, 0)]
             ),
+            patch("src.handlers.campaign_operations._verify_order_keys_deleted"),
+        ):
+            assert delete_orders_for_campaign("CAMPAIGN#c1") == 1
+
+    def test_a_pinned_delete_that_fails_stops_the_campaign_delete(self) -> None:
+        """ARCH-1 (round-3 review): a failed lifecycle is a stop, not a completed delete.
+
+        The cascade enumerates its work by reading Orders, so it must not walk past an
+        Order whose cleanup failed: the surviving Order is the only record that its
+        partition still needs sweeping.
+        """
+        orders = [
+            {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"},
+            {"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#2"},
+        ]
+        with (
+            patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=orders),
+            patch(
+                "src.handlers.campaign_operations.delete_order_and_fulfillments",
+                side_effect=AppError(
+                    ErrorCode.CONFLICT,
+                    "ORDER#1 was fulfilled while its delete was in flight; nothing was deleted for it, re-read and retry",
+                ),
+            ) as mock_delete,
+            patch("src.handlers.campaign_operations._verify_order_keys_deleted") as mock_verify,
         ):
             with pytest.raises(AppError) as excinfo:
                 delete_orders_for_campaign("CAMPAIGN#c1")
 
         assert excinfo.value.error_code == ErrorCode.CONFLICT
+        assert mock_delete.call_count == 1, "the cascade stops at the Order it could not clean up"
+        mock_verify.assert_not_called()
+
+    def test_no_orders_means_no_partitions_left_to_sweep(self) -> None:
+        """The empty answer is evidence now, not a guess.
+
+        Every path that removes an Order row (this cascade, the profile cascade, the
+        AppSync deleteOrder step) pins the delete to the Order's fulfillmentVersion and
+        sweeps the partition in the same step, so an absent Order row cannot have
+        surviving history under it.
+        """
+        with (
+            patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=[]),
+            patch("src.handlers.campaign_operations.delete_order_and_fulfillments") as mock_delete,
+        ):
+            assert delete_orders_for_campaign("CAMPAIGN#empty") == 0
+
+        mock_delete.assert_not_called()
 
 
 class TestFulfillmentKeysForOrders:

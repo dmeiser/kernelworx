@@ -1,7 +1,9 @@
 """Lambda resolver for campaign order operations and deletion verification helpers."""
 
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, NoReturn, Optional, Tuple
+
+import botocore.exceptions
 
 # Handle both Lambda (absolute) and unit test (relative) imports
 try:  # pragma: no cover
@@ -193,19 +195,131 @@ def batch_delete_keys(
     return deleted_count
 
 
-def delete_order_keys(orders: List[Dict[str, Any]], *, logger: Any = None) -> int:
-    """Delete the given order items by primary key, returning the count deleted.
+# The Order row's fulfillment version attribute. Its owner is
+# `src/utils/order_fulfillment_models.py`; the name is repeated here for the same
+# reason the fulfillment partition Query below is spelled locally -- see
+# `_fulfillment_version_delete_condition`.
+ORDER_FULFILLMENT_VERSION_ATTRIBUTE = "fulfillmentVersion"
 
-    The single shared path for deleting orders by key: every caller builds keys
-    through this so the key shape (and its string coercion) lives in one place.
+
+def _fulfillment_version_delete_condition(expected_version: int) -> Dict[str, Any]:
+    """The guard that makes deleting an Order safe against a concurrent fulfillment.
+
+    The condition is the one `order_fulfillment_models.fulfillment_version_condition`
+    owns, spelled locally because this module must not import that one: it drags
+    `inventory` and `units` into the import closure of Lambdas that never read them, and
+    the closure gate (`tests/unit/test_lambda_table_env_closure.py`) would then demand
+    env vars those functions have no use for. The only difference is encoding: the owner
+    feeds the low-level client and returns `wire_value` form, while this delete goes
+    through the resource client, which marshals a Python number itself.
+    `tests/unit/test_order_fulfillment_operations.py` fails if the two expressions
+    disagree, so the duplication is checked rather than trusted.
+
+    Why a DELETE needs a version guard at all: a fulfillment or a reversal is one
+    transaction that moves the Order row's `fulfillmentVersion` and writes its
+    `OrderFulfillment` row together, and that UpdateItem requires
+    `attribute_exists(#orderId)`. So an Order whose version still equals what this
+    cascade read cannot have gained a fulfillment row since that read, and deleting it
+    cannot orphan anything; an Order whose version moved fails this condition and STAYS
+    in the table, where the next cascade run still sees it. That is what makes a
+    deletion retryable instead of terminal: the parent row, not the cascade's memory,
+    records which partition still needs cleanup.
     """
-    order_keys = [{"campaignId": str(order["campaignId"]), "orderId": str(order["orderId"])} for order in orders]
-    return batch_delete_keys(
-        tables.orders,
-        order_keys,
-        primary_keys=["campaignId", "orderId"],
-        logger=logger,
+    placeholder = f"#{ORDER_FULFILLMENT_VERSION_ATTRIBUTE}"
+    equality = f"{placeholder} = :expectedFulfillmentVersion"
+    version_test = f"(attribute_not_exists({placeholder}) OR {equality})" if expected_version == 0 else equality
+    return {
+        "ConditionExpression": f"{version_test} AND attribute_exists(#orderId)",
+        "ExpressionAttributeNames": {
+            placeholder: ORDER_FULFILLMENT_VERSION_ATTRIBUTE,
+            "#orderId": "orderId",
+        },
+        "ExpressionAttributeValues": {":expectedFulfillmentVersion": expected_version},
+    }
+
+
+def _order_fulfillment_version(order: Dict[str, Any]) -> int:
+    """The version to pin a delete to: the stored value, or 0 for a pre-Wave-3 row."""
+    raw = order.get(ORDER_FULFILLMENT_VERSION_ATTRIBUTE)
+    return 0 if raw is None else int(raw)
+
+
+def _read_order_for_delete(campaign_id: str, order_id: str) -> Optional[Dict[str, Any]]:
+    """One strongly consistent read of the Order this cascade is about to delete.
+
+    Consistent, and BEFORE the history sweep, on purpose. The version this read returns
+    is the pin the delete carries; a version read after the sweep would already include
+    a fulfillment that landed during the sweep -- a row the sweep never saw, and that the
+    delete would then orphan.
+    """
+    response = tables.orders.get_item(
+        Key={"campaignId": campaign_id, "orderId": order_id},
+        ConsistentRead=True,
     )
+    item = response.get("Item")
+    return item if isinstance(item, dict) else None
+
+
+def _delete_order_pinned(campaign_id: str, order_id: str, observed_version: int, log: Any) -> None:
+    """Delete one Order, or leave it and its history in place for the next run.
+
+    A failed condition is the retryable case, not a lost delete: something fulfilled
+    this Order after this cascade read it, so nothing was removed, and re-reading the
+    Order and sweeping it again is the whole remedy.
+    """
+    try:
+        tables.orders.delete_item(
+            Key={"campaignId": campaign_id, "orderId": order_id},
+            **_fulfillment_version_delete_condition(observed_version),
+        )
+    except botocore.exceptions.ClientError as error:
+        if error.response.get("Error", {}).get("Code", "") == "ConditionalCheckFailedException":
+            log.warning(
+                "Order changed while its delete was in flight; the order and its history stay for the retry",
+                campaign_id=campaign_id,
+                order_id=order_id,
+                observed_version=observed_version,
+            )
+            raise AppError(
+                ErrorCode.CONFLICT,
+                f"Order {order_id} was fulfilled while its delete was in flight; "
+                "nothing was deleted for it, re-read and retry",
+            ) from error
+        _raise_delete_error(_table_name(tables.orders, "ORDERS_TABLE_NAME"), error, log)
+
+
+def delete_order_and_fulfillments(campaign_id: str, order_id: str, *, logger: Any = None) -> Tuple[bool, int]:
+    """Delete one Order together with its fulfillment history.
+
+    Returns `(order_deleted, fulfillment_records_deleted)`.
+
+    Three steps, and their order is the whole design:
+
+    1. Read the Order strongly and take its `fulfillmentVersion`.
+    2. Sweep every fulfillment and reversal row it owns (consistently, paged, batched)
+       and refuse to continue while any swept record survives the batch.
+    3. Delete the Order conditioned on the version read in step 1.
+
+    That ordering is what closes the gap the reviewer found in the batch form. Deleting
+    all Orders first and sweeping their history afterwards leaves a window in which a
+    fulfillment can commit; if the cleanup after that window fails, the Orders are
+    already gone and the next run has no record of which partitions still need sweeping,
+    so the surviving rows are orphaned forever. Here an Order can only disappear through
+    a write that proves nothing fulfilled it after step 1, so "the Orders are gone" is
+    evidence that its history is gone too -- and any failure instead leaves the Order
+    readable, which is what a retry needs.
+
+    An Order that is already absent is not an error: whoever removed it was itself
+    pinned, so it took this Order's history with it.
+    """
+    log = logger if logger is not None else _default_logger
+    order = _read_order_for_delete(campaign_id, order_id)
+    if order is None:
+        return False, 0
+
+    fulfillment_records = delete_fulfillments_for_orders([order_id], logger=log)
+    _delete_order_pinned(campaign_id, order_id, _order_fulfillment_version(order), log)
+    return True, fulfillment_records
 
 
 # The fulfillment partition's key grammar and item shape live in
@@ -246,7 +360,7 @@ def fulfillment_keys_for_orders(order_ids: List[str]) -> List[Dict[str, str]]:
 
 
 def delete_fulfillments_for_orders(order_ids: List[str], *, logger: Any = None) -> int:
-    """Remove these Orders' fulfillment history, before the Orders go.
+    """Remove these Orders' fulfillment history.
 
     ARCH-1 (impact assessment, children-first deletion). `OrderFulfillment` rows are keyed
     by the Order and append-only, and the reversal and audit surfaces both re-load the
@@ -254,14 +368,16 @@ def delete_fulfillments_for_orders(order_ids: List[str], *, logger: Any = None) 
     Order rows strands records nobody can reverse or read — beside inventory movements
     that already moved stock.
 
-    Children first, then verified. What the verification guarantees is precise, and the
-    earlier wording overstated it: a batch write that silently left a record behind raises
-    here (`_verify_fulfillment_keys_deleted`) BEFORE any Order is touched, so the cascade
-    never deletes an Order that still has history under it. A failure partway through a
+    Callers reach this per Order, from `delete_order_and_fulfillments`, immediately before
+    that Order's version-pinned delete: the sweep empties the partition, and the pin then
+    proves nothing landed in it afterwards.
+
+    What the verification guarantees is precise. A batch write that silently left a record
+    behind raises here (`_verify_fulfillment_keys_deleted`) BEFORE the Order can be
+    deleted, so an Order never goes under surviving history. A failure partway through a
     sweep can still leave an Order that lost some records and kept the rest; what makes
-    that survivable is that the sweep is resumable — the next run reads what remains and
-    takes it — and that no Order is deleted until a consistent read of the same Orders
-    answers empty.
+    that survivable is that the Order row is still there, so the next run reads the
+    partition again and takes what remains.
 
     There is no size window here, unlike the AppSync `deleteOrder` path: a Lambda can loop,
     so `query_all_items` pages a history of any length and `batch_delete_keys` drains the
@@ -365,6 +481,12 @@ def _verify_campaign_deleted(profile_id: str, campaign_id: str) -> None:
 def delete_orders_for_campaign(campaign_id: str, *, logger: Any = None) -> int:
     """Delete all orders for a campaign and verify they are gone.
 
+    Every Order goes through `delete_order_and_fulfillments`: its whole fulfillment
+    partition is swept first, then the Order itself is deleted conditioned on the
+    ``fulfillmentVersion`` this cascade read. A fulfillment that lands in between fails
+    that condition, so the Order and its new record both stay in the table and the next
+    run finds the work still marked by the Order row.
+
     Args:
         campaign_id: The campaign ID (with CAMPAIGN# prefix).
         logger: Optional logger instance.
@@ -373,40 +495,28 @@ def delete_orders_for_campaign(campaign_id: str, *, logger: Any = None) -> int:
         Number of orders deleted.
 
     Raises:
-        AppError: If a deleted order is still present afterwards or deletion fails.
+        AppError: CONFLICT if a fulfillment moved an Order while its delete was in
+            flight (nothing was deleted for it) or if swept fulfillment records remain;
+            INTERNAL_ERROR if a deleted order is still present afterwards.
     """
     orders = _query_order_keys_for_campaign(campaign_id)
     if not orders:
+        # An honest answer, not a hopeful one. An Order row leaves this table only
+        # through a write pinned to its fulfillmentVersion -- this cascade, the profile
+        # cascade, and the AppSync deleteOrder step all pin -- and every pinned delete
+        # takes the Order's whole fulfillment partition with it. So "no Orders" really
+        # does mean "no partitions left to sweep", which is what the batch form of this
+        # function could not claim after it deleted the Orders before the history.
         return 0
 
     log = logger if logger is not None else _default_logger
-    order_ids = [str(order["orderId"]) for order in orders]
-    # ARCH-1: children first. The fulfillment records are keyed by the Order, and the
-    # reversal and audit surfaces re-load the Order to authorize themselves, so deleting
-    # the Order rows and leaving the history behind strands records that can be neither
-    # reversed nor read.
-    delete_fulfillments_for_orders(order_ids, logger=log)
-    deleted_count = delete_order_keys(orders, logger=log)
+    deleted_count = 0
+    for order in orders:
+        order_deleted, _ = delete_order_and_fulfillments(str(order["campaignId"]), str(order["orderId"]), logger=log)
+        if order_deleted:
+            deleted_count += 1
+
     _verify_order_keys_deleted(orders)
-
-    # ARCH-1 (re-review): the sweep above and the Order delete above are two operations,
-    # and a fulfillment committed in the gap would be an orphan with no Order under it.
-    # The Orders being gone is what closes that gap. A fulfillment write is an UpdateItem
-    # on the Order row conditioned by
-    # `order_fulfillment_models.fulfillment_version_condition`, which requires
-    # `attribute_exists(#orderId)`, so once these rows are verified absent no fulfillment
-    # can ever be written for them again: everything that committed before this second
-    # pass is visible to its consistent read, and nothing can commit after it. One pass,
-    # not a loop -- and if it finds records, they are swept and verified the same way, so
-    # a second failure is a CONFLICT rather than a silent orphan.
-    arrived = delete_fulfillments_for_orders(order_ids, logger=log)
-    if arrived:
-        log.warning(
-            "Fulfillment records arrived between the sweep and the order delete; removed in the second pass",
-            campaign_id=campaign_id,
-            count=arrived,
-        )
-
     log.info("Deleted orders for campaign", campaign_id=campaign_id, count=deleted_count)
     return deleted_count
 
