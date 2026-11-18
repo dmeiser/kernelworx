@@ -82,14 +82,21 @@ export function request(ctx) {
         // is allowed alongside them, and it fails the pass if the history moved since
         // this pipeline read it.
         ctx.stash.sweptRecords = childDeletes.length;
+        // Item array in a variable, items pushed, variable named in the payload: the
+        // shape create_order_fn and create_public_order_fn use, and the shape every
+        // AppSync-accepted artifact in this fleet uses for `transactItems`.
+        const transactItems = [{
+            table: ordersTableName,
+            operation: 'ConditionCheck',
+            key: orderKey,
+            condition: guard
+        }];
+        for (const item of childDeletes) {
+            transactItems.push(item);
+        }
         return {
             operation: 'TransactWriteItems',
-            transactItems: [{
-                table: ordersTableName,
-                operation: 'ConditionCheck',
-                key: orderKey,
-                condition: guard
-            }].concat(childDeletes)
+            transactItems: transactItems
         };
     }
 
@@ -106,14 +113,16 @@ export function request(ctx) {
 
     // Children and Order in one commit, children first in the action list: there is no
     // instant at which the history is gone and the Order is not, or the reverse.
+    // Same builder shape as the sweep branch: push, then name the array in the payload.
+    childDeletes.push({
+        table: ordersTableName,
+        operation: 'DeleteItem',
+        key: orderKey,
+        condition: guard
+    });
     return {
         operation: 'TransactWriteItems',
-        transactItems: childDeletes.concat([{
-            table: ordersTableName,
-            operation: 'DeleteItem',
-            key: orderKey,
-            condition: guard
-        }])
+        transactItems: childDeletes
     };
 }
 
@@ -140,16 +149,16 @@ export function response(ctx) {
         // swept window is already committed; the caller re-issues and the next pass finds
         // the rest. The rest of the pipeline (totals, propagation check) is skipped by
         // the error, which is correct while the Order is still present.
-        // The em dash in this message is a hyphen because bundling renders that character as
-        // a Unicode escape, and no other bundle in the fleet carries one: of the code the
-        // rejected deploy run 44250080549 refused, it is the only construct with no accepted
-        // precedent. That run named no token, so the change is one-variable by design - no
-        // other code line of this bundle differs. Green names the escape; red on this same
-        // function rules it out and leaves the array-literal `[...].concat(childDeletes)`
-        // receiver. The cause is not established here; see the APPSYNC_JS entry in AGENTS.md.
+        // Deploy run 44263282600 refused this function's code and named no token, so the
+        // fleet is the evidence: of everything in this bundle, only two things appear in no
+        // artifact AppSync accepted - a loop-control keyword written inside this message,
+        // and a payload that names an inline array or a chained call as its item list.
+        // Neither is proven to be the cause. Both are gone, and this comment avoids naming
+        // the keyword because a resolver's comments are not reliably stripped from the
+        // bundle. See the APPSYNC_JS entry in AGENTS.md.
         util.error(
             'This order has more fulfillment history than one delete can remove; ' +
-                (ctx.stash.sweptRecords || 0) + ' record(s) were just removed and the order is still present - delete it again to continue',
+                (ctx.stash.sweptRecords || 0) + ' record(s) were just removed and the order is still present. Delete the order again to remove the rest',
             'RESOURCE_BUSY'
         );
         return null;
