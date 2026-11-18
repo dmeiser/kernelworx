@@ -107,6 +107,29 @@ class CampaignPage(BasePage):
             profile_id: Optional profile ID to select in the create-campaign
                 page. When omitted, the first enabled profile is selected.
         """
+        self._create_campaign(name, profile_id=profile_id, catalog_name=None)
+
+    def create_campaign_on_catalog(self, name: str, profile_id: str, catalog_name: str) -> None:
+        """Create a campaign with *profile_id* on the catalog named *catalog_name*.
+
+        Why a by-name variant exists: ``createOrder`` prices its lines in the catalog of the
+        Scout Campaign named in the input, while Unit Campaign inventory, custody and event
+        product identity are keyed to the **Unit** Campaign's own immutable ``catalogId``, and no
+        product id crosses catalogs (AGENTS.md, "A joined Scout Campaign and its Unit Campaign can
+        sell from different catalogs").  A Stage 2 lane whose Scout Campaign sits on a different
+        catalog therefore has its door-to-door sale refused with no Order written, so the lane has
+        to put both Campaigns on one catalog — and "the first catalog in the list" cannot promise
+        that, because a fixture persona accumulates a catalog per acceptance run.
+
+        Args:
+            name: Human-readable campaign name.
+            profile_id: The profile that must own the campaign.
+            catalog_name: The catalog the campaign must be created on.
+        """
+        self._create_campaign(name, profile_id=profile_id, catalog_name=catalog_name)
+
+    def _create_campaign(self, name: str, *, profile_id: str | None, catalog_name: str | None) -> None:
+        """The create-campaign flow, with the catalog chosen by position or by name."""
         # Save campaigns URL to return after the page-based creation flow.
         campaigns_url = self.page.url
         self._new_campaign_button().click()
@@ -159,20 +182,7 @@ class CampaignPage(BasePage):
         listbox = self.page.get_by_role("listbox")
         expect(listbox).to_be_visible(timeout=5_000)
 
-        # Wait for the catalog list to finish loading before matching.
-        catalog_loading_option = listbox.locator('[role="option"]', has_text="Loading catalogs...")
-        catalog_enabled_options = listbox.locator('[role="option"]:not([aria-disabled="true"])')
-        try:
-            if catalog_loading_option.count() > 0:
-                expect(catalog_loading_option).to_have_count(0, timeout=5_000)
-            expect(catalog_enabled_options.first).to_be_visible(timeout=5_000)
-        except AssertionError as exc:
-            raise AssertionError(
-                "No enabled catalog options found in dev environment. "
-                "An admin must create at least one catalog before running e2e tests. "
-                "See tests/e2e/README.md for prerequisites."
-            ) from exc
-        catalog_enabled_options.first.click()
+        self._select_catalog_option(listbox, catalog_name)
         self._create_button().click()
         # After success the app navigates to the campaign detail page.
         self.page.wait_for_url("**/campaigns/**", timeout=15_000)
@@ -191,6 +201,43 @@ class CampaignPage(BasePage):
             self.page.reload()
             self.wait_for_loading()
             time.sleep(1)
+
+    def _select_catalog_option(self, listbox: Locator, catalog_name: str | None) -> None:
+        """Choose the campaign's catalog: the first enabled one, or the one named *catalog_name*.
+
+        The wait is on the *loading* option rather than a count of options: the catalog list
+        arrives asynchronously, and counting it mid-flight reports an empty picker as a fixture
+        problem it is not.
+
+        Args:
+            listbox: the open catalog combobox's listbox.
+            catalog_name: the catalog to choose, or ``None`` for the first enabled option.
+        """
+        loading_option = listbox.locator('[role="option"]', has_text="Loading catalogs...")
+        enabled_options = listbox.locator('[role="option"]:not([aria-disabled="true"])')
+        try:
+            if loading_option.count() > 0:
+                expect(loading_option).to_have_count(0, timeout=5_000)
+            expect(enabled_options.first).to_be_visible(timeout=5_000)
+        except AssertionError as exc:
+            raise AssertionError(
+                "No enabled catalog options found in dev environment. "
+                "An admin must create at least one catalog before running e2e tests. "
+                "See tests/e2e/README.md for prerequisites."
+            ) from exc
+        if catalog_name is None:
+            enabled_options.first.click()
+            return
+        wanted = listbox.locator('[role="option"]:not([aria-disabled="true"])', has_text=catalog_name)
+        try:
+            expect(wanted.first).to_be_visible(timeout=5_000)
+        except AssertionError as exc:
+            available = [option.inner_text() for option in enabled_options.all()]
+            raise AssertionError(
+                f"Catalog option for {catalog_name!r} not found in the create-campaign dropdown; "
+                f"available catalogs: {available}"
+            ) from exc
+        wanted.first.click()
 
     def click_campaign(self, name: str) -> None:
         """Click on the campaign card whose heading contains *name*.

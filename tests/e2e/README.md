@@ -187,6 +187,7 @@ ffmpeg -i <in>.webm -c:v libx264 -pix_fmt yuv420p -movflags +faststart <out>.mp4
 | `test_smoke_reports.py` | Reports page smoke: load and request/download report |
 | `test_smoke_account_deletion.py` | Account deletion flow (gated by RUN_ACCOUNT_DELETION; runs disposable-user test in CI) |
 | `test_smoke_show_sell.py` | Show & Sell Stage 1 acceptance journey (own lane identities; not a `smoke` test) |
+| `test_smoke_show_sell_stage2.py` | Show & Sell Stage 2 acceptance journey — stock, Scout custody, Order fulfillment (same fixture identities; not a `smoke` test) |
 
 ---
 
@@ -393,6 +394,49 @@ by name is not an option — see the deploy-smoke entry in `AGENTS.md`.
   on dev. The roster membership and the second admin grant *are* removed, and both
   removals are asserted. Re-runs with a fresh `DATA_ID` add rows; pin `SS_DATA_ID`
   to reuse them. `qa_fixture.py down --yes` is what sweeps the pool side.
+
+### Stage 2 lane: `test_smoke_show_sell_stage2.py`
+
+`test_smoke_show_sell_stage2.py` is checklist §2.8.5: the Stage 2 journey — inventory receipt and
+stock-only adjustments, issue into Scout custody, a door-to-door sale that consumes custody,
+fulfillment from Kernel stock and from the Council, a reversal, a custody return — asserted against
+the deployed GraphQL reads and the three §2.6 screens, with the movement trail read back after the
+writes. It writes what the stack answered into `evidence.md`, and it stops with words rather than a
+pass when the stack cannot carry it. Same fixture identities as Stage 1, same loader above, same
+`slow` marker, and no CI workflow runs it or holds its passwords:
+
+```bash
+SS_DATA_ID=stage2-1118013 uv run pytest tests/e2e/test_smoke_show_sell_stage2.py -v
+```
+
+| Variable | Meaning |
+| --- | --- |
+| `SS_DATA_ID` | the lane's `DATA_ID`. The Unit number, campaign name, seller name and every idempotency key are derived from it. Unset, the run generates one — which is what a run meant as fresh evidence needs, because the keys mean a pinned re-run *replays* the writes (the idempotency layer answers the original payload) instead of performing them |
+| `SS_SHARED_CATALOG` | the admin-managed catalog both Campaigns are created on, by name. Unset, the run takes the first `ADMIN_MANAGED` catalog that carries products |
+| `SS_ACCEPTANCE_EVIDENCE_DIR` | where `evidence.json`, `evidence.md`, the traces and the masked screenshots go (default `test-results/show-sell-stage2-<SS_DATA_ID>`) |
+
+**One catalog has to serve both Campaigns, and only an app admin can create it.** Unit Campaign
+balances key on the Unit Campaign's own `catalogId` while `createOrder` prices the sale in the Scout
+Campaign's catalog, so a lane whose two Campaigns sit on different catalogs gets its custody sale
+refused with no Order written (AGENTS.md, "A joined Scout Campaign and its Unit Campaign can sell
+from different catalogs"). The create-campaign picker offers a caller their own catalogs plus
+`listManagedCatalogs`, and that query filters `catalogType = ADMIN_MANAGED`: a `createCatalog`
+catalog is `USER_CREATED` and the other identity never sees it, measured on dev on 2026-11-18, and
+`createManagedCatalog` answers the fixture Unit admin `FORBIDDEN` ("Admin access required"). So the
+lane uses the managed catalog the stack already carries — on dev, `E2E Test Catalog`
+(`CATALOG#e2e-test-catalog`) — and skips with those words when the stack carries none.
+
+**Line identities belong to the write.** `createOrder` mints each line's `lineItemId` (§5.19) and
+dev answers the sale with one; every fulfillment, reversal and screen row keys on that value, so the
+lane reads it out of the answer instead of naming its own. The same is true of the door-to-door
+sale's place in the trail: the custody it consumed is traced by an `INDIVIDUAL_FULFILL` movement
+naming the Order and its `SCOUT_CUSTODY` fulfillment, because the `SCOUT_SALE_CONSUME` type requires
+a Show & Sell event `saleId` the door-to-door path does not have.
+
+**Not every clause of §2.8.5 is executable yet.** The raw-data half names
+`unitCampaignOrderLines` / `scoutCampaignOrderLines` (§2.5) and the §6 reporting reads, which the
+shipped SDL does not carry. The run reads `__schema` before it builds anything and reports the
+Stage 2 fields the deployed API answers, so a build that is missing them cannot read as a pass.
 
 ---
 
