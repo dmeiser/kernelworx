@@ -222,7 +222,11 @@ export function request(ctx) {
     // fails its own guard when the edit advanced N to N+1 first.
     const observedVersion = currentFulfillmentVersion(order);
     updates.push('fulfillmentVersion = :nextFulfillmentVersion');
-    exprValues[':nextFulfillmentVersion'] = nextFulfillmentVersion(order);
+    // The NEXT version, computed from the number the guard pins -- not from the row. The
+    // helper takes a number; handing it the Order object reads as "no version yet" and
+    // writes 1, so an edit at version 3 would move the Order BACKWARDS, and a fulfillment
+    // holding version 3 would still pass its own guard against a row that now says 1.
+    exprValues[':nextFulfillmentVersion'] = nextFulfillmentVersion(observedVersion);
     const versionGuard = fulfillmentVersionGuard(observedVersion);
 
     const updateExpression = 'SET ' + updates.join(', ');

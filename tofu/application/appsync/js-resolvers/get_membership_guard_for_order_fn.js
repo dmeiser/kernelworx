@@ -130,6 +130,14 @@ function guardMarkerKeyFor(actorId, campaignId, idempotencyKey) {
 // sale under-consume, after which the COMPLETED marker preserves that wrong answer for
 // every retry of the key. So a partial batch fails here, in the read step, before the
 // write step exists: nothing was written and the caller retries.
+// The value under each table name is the list of keys themselves. This is the AppSync JS
+// BatchGetItem result contract, not the raw DynamoDB wire shape, which wraps the same list
+// in `{ keys: [...] }`: the documented result is `{ data: { <table>: [items] },
+// unprocessedKeys: { <table>: [key] } }`, and `batch_get_catalogs_fn.js` in this directory
+// reads it the same way. Reading `.keys.length` off the real response yields `undefined`
+// for every table, so a genuinely partial batch counts as zero unprocessed keys and the
+// guard below never fires -- the exact wrong-verdict-from-a-non-answer this step exists to
+// refuse. Anything present but not a list is still a non-answer, so it counts as one.
 function unprocessedKeyCount(result) {
     const unprocessed = result && result.unprocessedKeys ? result.unprocessedKeys : null;
     if (unprocessed === null) {
@@ -138,8 +146,10 @@ function unprocessedKeyCount(result) {
     let count = 0;
     for (const tableName of Object.keys(unprocessed)) {
         const entry = unprocessed[tableName];
-        if (entry && entry.keys) {
-            count = count + entry.keys.length;
+        if (Array.isArray(entry)) {
+            count = count + entry.length;
+        } else if (entry) {
+            count = count + 1;
         }
     }
     return count;

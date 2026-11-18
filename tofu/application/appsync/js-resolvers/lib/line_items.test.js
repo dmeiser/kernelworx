@@ -237,4 +237,69 @@ describe('enrichLineItems', () => {
             /INVALID_INPUT: Quantity of 1 is below the line's already-fulfilled amount of 2/
         );
     });
+
+    it('refuses two rows that name the same stored line, when that line has history', () => {
+        // Both rows inherit LINE#A's identity and its fulfilled quantity, so the Order
+        // carries two lines claiming one line's history -- and fulfill or reverse, which
+        // address a line by id, move it for only the first of them.
+        assert.throws(
+            () =>
+                enrichLineItems(
+                    [
+                        { productId: 'PROD#1', quantity: 2, lineItemId: 'LINE#A' },
+                        { productId: 'PROD#1', quantity: 1, lineItemId: 'LINE#A' },
+                    ],
+                    CATALOG,
+                    [{ productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 2, quantity: 3 }]
+                ),
+            /INVALID_INPUT: lineItemId LINE#A appears more than once in this update; one row replaces one stored line/
+        );
+    });
+
+    it('refuses a repeated id on a line with no history too, because the second row would re-key the first', () => {
+        assert.throws(
+            () =>
+                enrichLineItems(
+                    [
+                        { productId: 'PROD#1', quantity: 2, lineItemId: 'LINE#A' },
+                        { productId: 'PROD#1', quantity: 1, lineItemId: 'LINE#A' },
+                    ],
+                    CATALOG,
+                    [{ productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 0, quantity: 3 }]
+                ),
+            /INVALID_INPUT: lineItemId LINE#A appears more than once/
+        );
+    });
+
+    it('refuses a repeated id even when the order has no stored lines to name', () => {
+        assert.throws(
+            () =>
+                enrichLineItems(
+                    [
+                        { productId: 'PROD#1', quantity: 1, lineItemId: 'LINE#A' },
+                        { productId: 'PROD#2', quantity: 1, lineItemId: 'LINE#A' },
+                    ],
+                    CATALOG
+                ),
+            /INVALID_INPUT: lineItemId LINE#A appears more than once/
+        );
+    });
+
+    it('binds each named identity to exactly one row when the ids differ', () => {
+        const { enrichedLineItems } = enrichLineItems(
+            [
+                { productId: 'PROD#1', quantity: 2, lineItemId: 'LINE#A' },
+                { productId: 'PROD#1', quantity: 1, lineItemId: 'LINE#B' },
+            ],
+            CATALOG,
+            [
+                { productId: 'PROD#1', lineItemId: 'LINE#A', fulfilledQuantity: 2, quantity: 3 },
+                { productId: 'PROD#1', lineItemId: 'LINE#B', fulfilledQuantity: 1, quantity: 2 },
+            ]
+        );
+        assert.deepStrictEqual(
+            enrichedLineItems.map(function (line) { return [line.lineItemId, line.fulfilledQuantity, line.quantity]; }),
+            [['LINE#A', 2, 2], ['LINE#B', 1, 1]]
+        );
+    });
 });

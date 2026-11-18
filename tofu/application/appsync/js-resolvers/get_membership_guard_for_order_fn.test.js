@@ -218,21 +218,35 @@ describe('get_membership_guard_for_order_fn response: an partly served batch is 
     }
 
     it('refuses when the custody keys were not looked at', () => {
-        assert.throws(partial({ [INVENTORY_TABLE]: { keys: [{ pk: 'UNIT_CAMPAIGN#uc-1', sk: 'PRODUCT#P1#CUSTODY#PROFILE#p1' }] } }), /RESOURCE_BUSY: The sale reads were only partly served; no order was written/);
+        assert.throws(partial({ [INVENTORY_TABLE]: [{ pk: 'UNIT_CAMPAIGN#uc-1', sk: 'PRODUCT#P1#CUSTODY#PROFILE#p1' }] }), /RESOURCE_BUSY: The sale reads were only partly served; no order was written/);
     });
 
     it('refuses when the guard row was not looked at, which would otherwise read as independent', () => {
-        assert.throws(partial({ [UNIT_CAMPAIGNS_TABLE]: { keys: [{ pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD' }] } }), /RESOURCE_BUSY/);
+        assert.throws(partial({ [UNIT_CAMPAIGNS_TABLE]: [{ pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD' }] }), /RESOURCE_BUSY/);
     });
 
     it('refuses when the marker was not looked at, which would otherwise consume custody twice', () => {
-        assert.throws(partial({ [FULFILLMENTS_TABLE]: { keys: [{ pk: 'IDEM#a#createOrder#CAMPAIGN%23c1', sk: 'IDEM#sale-1' }] } }), /RESOURCE_BUSY/);
+        assert.throws(partial({ [FULFILLMENTS_TABLE]: [{ pk: 'IDEM#a#createOrder#CAMPAIGN%23c1', sk: 'IDEM#sale-1' }] }), /RESOURCE_BUSY/);
+    });
+
+    it('refuses when several tables were partly served', () => {
+        assert.throws(partial({
+            [INVENTORY_TABLE]: [{ pk: 'UNIT_CAMPAIGN#uc-1', sk: 'PRODUCT#P1#CUSTODY#PROFILE#p1' }, { pk: 'UNIT_CAMPAIGN#uc-1', sk: 'PRODUCT#P2#CUSTODY#PROFILE#p1' }],
+            [UNIT_CAMPAIGNS_TABLE]: [{ pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD' }]
+        }), /RESOURCE_BUSY/);
+    });
+
+    it('refuses on an entry that is not the documented key list, rather than reading it as zero', () => {
+        // The raw DynamoDB wire shape wraps the list in `{ keys: [...] }`. Nothing in this
+        // pipeline produces that shape, but an entry this code cannot count must never
+        // read as "nothing was left unprocessed".
+        assert.throws(partial({ [INVENTORY_TABLE]: { keys: [{ pk: 'UNIT_CAMPAIGN#uc-1', sk: 'PRODUCT#P1#CUSTODY#PROFILE#p1' }] } }), /RESOURCE_BUSY/);
     });
 
     it('accepts a fully served batch, and an empty unprocessedKeys entry', () => {
         const ctx = {
             stash: { custodySaleRead: { unitCampaignId: 'uc-1', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1' } },
-            result: { data: {}, unprocessedKeys: { [INVENTORY_TABLE]: { keys: [] } } }
+            result: { data: {}, unprocessedKeys: { [INVENTORY_TABLE]: [] } }
         };
         assert.strictEqual(response(ctx), null);
     });

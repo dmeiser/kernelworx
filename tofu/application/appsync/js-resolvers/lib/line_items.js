@@ -51,7 +51,12 @@ function matchExistingLine(lineItem, existingLineItems, consumed) {
     for (const existing of (existingLineItems || [])) {
         if (existing && typeof existing === 'object') {
             if (typeof lineItem.lineItemId === 'string' && lineItem.lineItemId !== '') {
-                if (existing.lineItemId === lineItem.lineItemId) {
+                // A named identity binds to one input row and no more. `consumed` is what
+                // enforces it here too, not only in the pre-check in `enrichLineItems`:
+                // a second row naming the same id must not bind to the same stored line,
+                // because the two rows would then carry that line's fulfilled quantity --
+                // and the stock that moved for it -- twice.
+                if (existing.lineItemId === lineItem.lineItemId && !Object.hasOwn(consumed, existing.lineItemId)) {
                     return existing;
                 }
             } else if (existing.lineItemId !== undefined && existing.lineItemId !== null
@@ -126,6 +131,25 @@ export function enrichLineItems(lineItems, catalog, existingLineItems) {
                 && !hasExistingId(existingLineItems, lineItem.lineItemId)) {
                 util.error('Unknown lineItemId ' + lineItem.lineItemId + ' for this order', 'INVALID_INPUT');
             }
+        }
+    }
+
+    // And a lineId may be named by exactly one input row. Two rows naming the same stored
+    // line both inherit its identity and its `fulfilledQuantity`, so the Order would carry
+    // two lines claiming one line's history -- while the fulfill and reverse paths address
+    // a line BY id and would move that history for only the first of them. Refusing by name
+    // is also the honest answer: the alternative, letting the second row mint a fresh id,
+    // re-keys a line the fulfillment records already name.
+    const namedById = {};
+    for (const lineItem of lineItems) {
+        if (typeof lineItem.lineItemId === 'string' && lineItem.lineItemId !== '') {
+            if (Object.hasOwn(namedById, lineItem.lineItemId)) {
+                util.error(
+                    'lineItemId ' + lineItem.lineItemId + ' appears more than once in this update; one row replaces one stored line',
+                    'INVALID_INPUT'
+                );
+            }
+            namedById[lineItem.lineItemId] = true;
         }
     }
 

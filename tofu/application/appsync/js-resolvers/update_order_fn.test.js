@@ -343,4 +343,108 @@ describe('update_order_fn response', () => {
       /DynamoDB: Update failed/
     );
   });
+
+  it('answers a failed version condition as a retryable CONFLICT, not as a caller error', () => {
+    assert.throws(
+      () => response({ error: { message: 'The conditional check failed.', type: 'DynamoDB:ConditionalCheckFailedException' } }),
+      /CONFLICT: This order changed while the edit was being saved; re-read it and try again/
+    );
+  });
+
+  it('passes any other datasource error through unchanged', () => {
+    assert.throws(
+      () => response({ error: { message: 'Throttling', type: 'DynamoDB:ProvisionedThroughputExceededException' } }),
+      /DynamoDB:ProvisionedThroughputExceededException: Throttling/
+    );
+  });
+});
+
+describe('update_order_fn version guard: the edit advances the version it pinned', () => {
+  function editAt(fulfillmentVersion) {
+    const order = {
+      campaignId: 'CAMPAIGN#c1',
+      orderId: 'ORDER#o1',
+      lineItems: [{ productId: 'PROD1', quantity: 2, lineItemId: 'LINE#1', fulfilledQuantity: 0 }]
+    };
+    if (fulfillmentVersion !== undefined) {
+      order.fulfillmentVersion = fulfillmentVersion;
+    }
+    return {
+      stash: {
+        order: order,
+        catalog: { products: [{ productId: 'PROD1', productName: 'Popcorn', price: 1 }] }
+      },
+      args: { input: { lineItems: [{ productId: 'PROD1', quantity: 3 }] } }
+    };
+  }
+
+  it('pins the version of a pre-Wave-3 row and stamps 1', () => {
+    const result = request(editAt(undefined));
+    assert.strictEqual(result.condition.expressionValues[':expectedFulfillmentVersion'], 0);
+    assert.match(result.condition.expression, /attribute_not_exists\(#fulfillmentVersion\) OR #fulfillmentVersion = :expectedFulfillmentVersion/);
+    assert.match(result.condition.expression, /AND attribute_exists\(#orderId\)/);
+    assert.strictEqual(result.update.expressionValues[':nextFulfillmentVersion'], 1);
+  });
+
+  it('stamps one more than the version it pins, for a row part-way through its history', () => {
+    const result = request(editAt(7));
+    assert.strictEqual(result.condition.expressionValues[':expectedFulfillmentVersion'], 7);
+    assert.strictEqual(result.condition.expressionValues[':expectedFulfillmentVersion'], 7);
+    // A non-zero version has no `attribute_not_exists` escape: the row must say 7.
+    assert.doesNotMatch(result.condition.expression, /attribute_not_exists/);
+    assert.strictEqual(result.update.expressionValues[':nextFulfillmentVersion'], 8);
+  });
+
+  it('walks successive edits 0 -> 1 -> 2 -> 3 without ever moving the version backwards', () => {
+    let version = undefined;
+    const stamped = [];
+    for (let edit = 0; edit < 3; edit = edit + 1) {
+      const result = request(editAt(version));
+      const pinned = result.condition.expressionValues[':expectedFulfillmentVersion'];
+      const next = result.update.expressionValues[':nextFulfillmentVersion'];
+      assert.strictEqual(next, pinned + 1, 'edit ' + edit + ' must advance the version it pinned');
+      stamped.push(next);
+      version = next;
+    }
+    assert.deepStrictEqual(stamped, [1, 2, 3]);
+  });
+
+  it('gives an edit and a fulfillment the same serialization point, in either race order', () => {
+    // Both writers pin the version they read and stamp the next one, so whichever lands
+    // first makes the other's condition fail. The edit half is this resolver; the
+    // fulfillment half is `fulfillment_version_condition` on the Python side, and
+    // lib/fulfillment_version.test.js pins the shared spelling.
+    const result = request(editAt(2));
+    assert.strictEqual(result.update.expressionValues[':nextFulfillmentVersion'], 3);
+    assert.strictEqual(result.condition.expression, '#fulfillmentVersion = :expectedFulfillmentVersion AND attribute_exists(#orderId)');
+    assert.deepStrictEqual(result.condition.expressionNames, {
+      '#fulfillmentVersion': 'fulfillmentVersion',
+      '#orderId': 'orderId'
+    });
+  });
+
+  it('refuses an update in which two rows name the same stored line', () => {
+    // Through the mutation, not just the helper: the duplicate would otherwise reach the
+    // row with one line's fulfilled quantity on two lines.
+    const ctx = {
+      stash: {
+        order: {
+          campaignId: 'CAMPAIGN#c1',
+          orderId: 'ORDER#o1',
+          fulfillmentVersion: 1,
+          lineItems: [{ productId: 'PROD1', quantity: 2, lineItemId: 'LINE#1', fulfilledQuantity: 2 }]
+        },
+        catalog: { products: [{ productId: 'PROD1', productName: 'Popcorn', price: 1 }] }
+      },
+      args: {
+        input: {
+          lineItems: [
+            { productId: 'PROD1', quantity: 2, lineItemId: 'LINE#1' },
+            { productId: 'PROD1', quantity: 1, lineItemId: 'LINE#1' }
+          ]
+        }
+      }
+    };
+    assert.throws(() => request(ctx), /INVALID_INPUT: lineItemId LINE#1 appears more than once in this update/);
+  });
 });

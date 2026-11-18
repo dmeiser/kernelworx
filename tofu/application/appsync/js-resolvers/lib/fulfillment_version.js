@@ -1,3 +1,5 @@
+import { util } from '@aws-appsync/utils';
+
 // The `fulfillmentVersion` guard, spelled the same on both write paths.
 //
 // Data model §5.19 makes one integer the serialization point for everything that touches
@@ -39,7 +41,15 @@ export function fulfillmentVersionGuard(expectedVersion) {
 // is already pinned by the condition above: the write cannot land on a row that moved, so
 // `expected + 1` is provably the next version when it lands -- and a row that carries no
 // attribute at all becomes version 1, which is the number every later read answers.
+//
+// A number, or nothing. Handing this helper the ROW is the defect class the whole guard
+// exists for: the row is not a number, so it reads as "no version yet", and an edit at
+// version 7 writes 1 -- moving the serialization point backwards and letting a fulfillment
+// that read 7 land afterwards. That mistake has to be loud, not a default.
 export function nextFulfillmentVersion(current) {
+    if (current !== null && current !== undefined && typeof current !== 'number') {
+        util.error('fulfillmentVersion must be a number: pass currentFulfillmentVersion(row), not the row', 'INTERNAL_ERROR');
+    }
     const observed = typeof current === 'number' && Number.isFinite(current) ? current : 0;
     return observed + 1;
 }
