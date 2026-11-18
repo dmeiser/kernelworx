@@ -928,7 +928,6 @@ export const UPDATE_CAMPAIGN_PUBLIC_ORDER_SETTINGS = gql`
   }
 `;
 
-
 // ============================================================================
 // Units and Unit Campaigns (Show & Sell Stage 1)
 //
@@ -1225,6 +1224,381 @@ export const REMOVE_UNIT_CAMPAIGN_MEMBERSHIP = gql`
   mutation RemoveUnitCampaignMembership($input: RemoveUnitCampaignMembershipInput!) {
     removeUnitCampaignMembership(input: $input) {
       ...UnitCampaignMembershipFields
+    }
+  }
+`;
+
+// ============================================================================
+// Show & Sell — Stage 2: inventory, Scout custody, individual Order fulfillment
+// (§2.6). Same posture as Stage 1: a read selects only the fields a screen
+// renders, so an SDL addition cannot silently widen what the browser holds.
+//
+// The derived quantities (sellable, assigned, unassigned, overage, With Scout,
+// total unit-owned) are computed server-side and never typed in here: a screen
+// that added them up itself would be able to disagree with the balance it is
+// auditing (§7).
+// ============================================================================
+
+export const INVENTORY_POSITION_FRAGMENT = gql`
+  fragment InventoryPositionFields on InventoryPosition {
+    unitCampaignId
+    productId
+    kernelPhysicalQty
+    soldInPossessionQty
+    councilOnOrderQty
+    version
+    createdAt
+    updatedAt
+    sellableKernelQty
+    assignedOpenQty
+    unassignedKernelQty
+    assignmentOverageQty
+    withScoutQty
+    totalUnitOwnedUndeliveredQty
+  }
+`;
+
+export const INVENTORY_MOVEMENT_FRAGMENT = gql`
+  fragment InventoryMovementFields on InventoryMovement {
+    movementId
+    unitCampaignId
+    productId
+    movementType
+    kernelPhysicalDelta
+    soldPossessionDelta
+    withScoutDelta
+    assignedDelta
+    councilOnOrderDelta
+    profileId
+    showAndSellId
+    orderId
+    fulfillmentId
+    reason
+    actorAccountId
+    occurredAt
+    idempotencyKey
+    inventoryVersion
+  }
+`;
+
+export const SCOUT_CUSTODY_BALANCE_FRAGMENT = gql`
+  fragment ScoutCustodyBalanceFields on ScoutCustodyBalance {
+    unitCampaignId
+    productId
+    profileId
+    campaignId
+    withScoutQty
+    version
+    createdAt
+    updatedAt
+  }
+`;
+
+/**
+ * The administrative fulfillment audit: actor account and inventory movement id
+ * included. This projection is only ever fetched by the Unit-Admin
+ * `orderFulfillments` query, never by the participant one (§10.2) — the split is
+ * in the documents as well as the server, so a screen cannot ask for the audit
+ * fields by accident.
+ */
+export const ORDER_FULFILLMENT_FRAGMENT = gql`
+  fragment OrderFulfillmentFields on OrderFulfillment {
+    fulfillmentId
+    orderId
+    campaignId
+    profileId
+    unitId
+    unitCampaignId
+    lineItemId
+    productId
+    recordType
+    quantity
+    source
+    inventoryMovementId
+    reversalOfFulfillmentId
+    actorAccountId
+    createdAt
+  }
+`;
+
+/** The participant projection: no actor account, no movement id, no audit (§10.2). */
+export const PARTICIPANT_ORDER_FULFILLMENT_FRAGMENT = gql`
+  fragment ParticipantOrderFulfillmentFields on ParticipantOrderFulfillment {
+    fulfillmentId
+    lineItemId
+    productId
+    recordType
+    quantity
+    source
+    reversalOfFulfillmentId
+    createdAt
+  }
+`;
+
+/**
+ * One individual Order as the fulfillment screens read it: the Wave 3 additions
+ * (origin scope, `fulfillmentVersion`, the stable line identity and its fulfilled
+ * quantity) on top of the fields the screen lists. Deliberately not the legacy
+ * `OrderFields` fragment — that one carries customer contact details this
+ * admin-only surface has no use for.
+ */
+export const UNIT_ORDER_FRAGMENT = gql`
+  fragment UnitOrderFields on Order {
+    orderId
+    profileId
+    campaignId
+    customerName
+    orderDate
+    paymentMethod
+    totalAmount
+    status
+    createdAt
+    lineItems {
+      productId
+      productName
+      quantity
+      pricePerUnit
+      subtotal
+      lineItemId
+      fulfilledQuantity
+    }
+    unitId
+    unitCampaignId
+    fulfillmentVersion
+  }
+`;
+
+export const GET_INVENTORY_POSITIONS = gql`
+  ${INVENTORY_POSITION_FRAGMENT}
+  query GetInventoryPositions($unitCampaignId: ID!, $productIds: [ID!], $page: PageInput) {
+    inventoryPositions(unitCampaignId: $unitCampaignId, productIds: $productIds, page: $page) {
+      items {
+        ...InventoryPositionFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+/**
+ * The movement audit with every filter the server offers. Filters are separate
+ * variables rather than one input object because the screen turns them on and
+ * off independently, and a filter the screen did not send must be absent from
+ * the request rather than null-with-a-meaning.
+ */
+export const GET_INVENTORY_MOVEMENTS = gql`
+  ${INVENTORY_MOVEMENT_FRAGMENT}
+  query GetInventoryMovements(
+    $unitCampaignId: ID!
+    $productId: ID
+    $movementType: InventoryMovementType
+    $showAndSellId: ID
+    $profileId: ID
+    $dateRange: DateRangeFilter
+    $page: PageInput
+  ) {
+    inventoryMovements(
+      unitCampaignId: $unitCampaignId
+      productId: $productId
+      movementType: $movementType
+      showAndSellId: $showAndSellId
+      profileId: $profileId
+      dateRange: $dateRange
+      page: $page
+    ) {
+      items {
+        ...InventoryMovementFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+/**
+ * `totalWithScoutQty` is the aggregate the server computed across the whole
+ * filtered set, not the sum of the page: the panel shows both, and a locally
+ * summed aggregate would be a number that changes with page size.
+ */
+export const GET_SCOUT_CUSTODY_BALANCES = gql`
+  ${SCOUT_CUSTODY_BALANCE_FRAGMENT}
+  query GetScoutCustodyBalances($unitCampaignId: ID!, $profileId: ID, $productId: ID, $page: PageInput) {
+    scoutCustodyBalances(unitCampaignId: $unitCampaignId, profileId: $profileId, productId: $productId, page: $page) {
+      items {
+        ...ScoutCustodyBalanceFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+      totalWithScoutQty
+    }
+  }
+`;
+
+export const GET_ORDER_FULFILLMENTS = gql`
+  ${ORDER_FULFILLMENT_FRAGMENT}
+  query GetOrderFulfillments($orderId: ID!, $page: PageInput) {
+    orderFulfillments(orderId: $orderId, page: $page) {
+      items {
+        ...OrderFulfillmentFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const GET_PARTICIPANT_ORDER_FULFILLMENTS = gql`
+  ${PARTICIPANT_ORDER_FULFILLMENT_FRAGMENT}
+  query GetParticipantOrderFulfillments($orderId: ID!, $page: PageInput) {
+    getOrder(orderId: $orderId) {
+      orderId
+      fulfillments(page: $page) {
+        items {
+          ...ParticipantOrderFulfillmentFields
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * One page of a joined Scout Campaign's individual Orders, in the fulfillment
+ * projection. This is the legacy `nextToken` connection shape, not the Show &
+ * Sell `page`/`pageInfo` shape: it is the existing Order API, and the Wave 3
+ * fields ride on it (§10.2).
+ */
+export const LIST_UNIT_SCOUT_ORDERS = gql`
+  ${UNIT_ORDER_FRAGMENT}
+  query ListUnitScoutOrders($campaignId: ID!, $limit: Int, $nextToken: String) {
+    listOrdersByCampaign(campaignId: $campaignId, limit: $limit, nextToken: $nextToken) {
+      orders {
+        ...UnitOrderFields
+      }
+      nextToken
+    }
+  }
+`;
+
+export const RECORD_INVENTORY_RECEIPT = gql`
+  ${INVENTORY_POSITION_FRAGMENT}
+  mutation RecordInventoryReceipt($input: RecordInventoryReceiptInput!) {
+    recordInventoryReceipt(input: $input) {
+      ...InventoryPositionFields
+    }
+  }
+`;
+
+export const ADJUST_INVENTORY = gql`
+  ${INVENTORY_POSITION_FRAGMENT}
+  mutation AdjustInventory($input: AdjustInventoryInput!) {
+    adjustInventory(input: $input) {
+      ...InventoryPositionFields
+    }
+  }
+`;
+
+export const ADJUST_COUNCIL_ON_ORDER = gql`
+  ${INVENTORY_POSITION_FRAGMENT}
+  mutation AdjustCouncilOnOrder($input: AdjustCouncilOnOrderInput!) {
+    adjustCouncilOnOrder(input: $input) {
+      ...InventoryPositionFields
+    }
+  }
+`;
+
+export const ISSUE_STOCK_TO_SCOUT = gql`
+  ${INVENTORY_POSITION_FRAGMENT}
+  ${SCOUT_CUSTODY_BALANCE_FRAGMENT}
+  mutation IssueStockToScout($input: IssueStockToScoutInput!) {
+    issueStockToScout(input: $input) {
+      inventoryPosition {
+        ...InventoryPositionFields
+      }
+      custodyBalance {
+        ...ScoutCustodyBalanceFields
+      }
+    }
+  }
+`;
+
+/** One atomic batch: the server refuses the whole request when one product would over-return. */
+export const RETURN_STOCK_FROM_SCOUT = gql`
+  ${INVENTORY_POSITION_FRAGMENT}
+  ${SCOUT_CUSTODY_BALANCE_FRAGMENT}
+  mutation ReturnStockFromScout($input: ReturnStockFromScoutInput!) {
+    returnStockFromScout(input: $input) {
+      inventoryPositions {
+        ...InventoryPositionFields
+      }
+      custodyBalances {
+        ...ScoutCustodyBalanceFields
+      }
+    }
+  }
+`;
+
+/**
+ * A door-to-door sale: the existing `createOrder` mutation with
+ * `fulfillmentMode: CONSUME_SCOUT_CUSTODY` and its required idempotency key
+ * (§10.1). Insufficient custody is never an error, so this write succeeds and
+ * reports what was consumed through the Order's own fulfillment records.
+ */
+export const RECORD_CUSTODY_SALE = gql`
+  ${UNIT_ORDER_FRAGMENT}
+  mutation RecordCustodySale($input: CreateOrderInput!) {
+    createOrder(input: $input) {
+      ...UnitOrderFields
+    }
+  }
+`;
+
+export const FULFILL_INDIVIDUAL_ORDER_LINE = gql`
+  ${UNIT_ORDER_FRAGMENT}
+  ${INVENTORY_POSITION_FRAGMENT}
+  ${ORDER_FULFILLMENT_FRAGMENT}
+  mutation FulfillIndividualOrderLine($input: FulfillIndividualOrderLineInput!) {
+    fulfillIndividualOrderLine(input: $input) {
+      order {
+        ...UnitOrderFields
+      }
+      fulfillment {
+        ...OrderFulfillmentFields
+      }
+      inventoryPosition {
+        ...InventoryPositionFields
+      }
+    }
+  }
+`;
+
+export const REVERSE_INDIVIDUAL_ORDER_FULFILLMENT = gql`
+  ${UNIT_ORDER_FRAGMENT}
+  ${INVENTORY_POSITION_FRAGMENT}
+  ${ORDER_FULFILLMENT_FRAGMENT}
+  mutation ReverseIndividualOrderFulfillment($input: ReverseIndividualOrderFulfillmentInput!) {
+    reverseIndividualOrderFulfillment(input: $input) {
+      order {
+        ...UnitOrderFields
+      }
+      reversal {
+        ...OrderFulfillmentFields
+      }
+      inventoryPosition {
+        ...InventoryPositionFields
+      }
     }
   }
 `;
