@@ -89,6 +89,58 @@ class TestDeleteCampaignOrders:
         )
         assert len(remaining.get("Items", [])) == 0
 
+    def test_fulfillment_written_after_the_sweep_is_gone_when_the_delete_returns(
+        self,
+        orders_table: Any,
+        campaigns_table: Any,
+        profiles_table: Any,
+        order_fulfillments_table: Any,
+        lambda_context: Any,
+    ) -> None:
+        """ARCH-1 (re-review): the window between sweeping the children and deleting the Orders.
+
+        The sweep and the Order delete are two operations, so a fulfillment that commits
+        in between would be an orphan with no Order under it — unreachable by both the
+        reversal and the audit surface, next to a movement that already moved stock. The
+        second sweep closes it: once the Orders are verified absent, the fulfillment write
+        cannot succeed at all (its Order update requires `attribute_exists(orderId)`), so
+        everything that landed is visible to a consistent read and nothing more can land.
+        """
+        campaign_id = "CAMPAIGN#campaign-race"
+        profile_id = "PROFILE#profile-race"
+        self._seed_owned_campaign(profiles_table, campaigns_table, profile_id, campaign_id, self._OWNER_SUB)
+        orders_table.put_item(
+            Item={
+                "campaignId": campaign_id,
+                "orderId": "ORDER#1",
+                "customerName": "Customer 1",
+                "totalAmount": Decimal("4.0"),
+            }
+        )
+
+        def delete_then_arrive(*args: Any, **kwargs: Any) -> int:
+            """The real Order delete, then the fulfillment that committed in the gap."""
+            deleted = delete_order_keys(*args, **kwargs)
+            order_fulfillments_table.put_item(
+                Item={
+                    "pk": "ORDER#1",
+                    "sk": "FULFILLMENT#2024-10-02T00:00:00+00:00#late",
+                    "entityType": "OrderFulfillment",
+                    "orderId": "ORDER#1",
+                    "campaignId": campaign_id,
+                    "fulfillmentId": "late",
+                    "quantity": 1,
+                    "createdAt": "2024-10-02T00:00:00+00:00",
+                }
+            )
+            return deleted
+
+        with patch("src.handlers.campaign_operations.delete_order_keys", side_effect=delete_then_arrive):
+            result = delete_campaign_orders(self._event(campaign_id, self._OWNER_SUB), lambda_context)
+
+        assert result == {"deletedCount": 1}
+        assert order_fulfillments_table.scan()["Items"] == [], "the arriving record was left orphaned"
+
     def test_delete_campaign_orders_chunks_batches(
         self,
         orders_table: Any,
@@ -765,13 +817,65 @@ class TestDeleteOrdersForCampaign:
         ):
             count = delete_orders_for_campaign("CAMPAIGN#c1", logger=mock_logger)
             assert count == 1
-            # ARCH-1: the fulfillment history of those Orders goes with them (the moto
-            # scope test pins the call ORDER; this pins that the sweep is wired to the
-            # Orders this delete is about to remove).
-            mock_fulfil.assert_called_once_with(["ORDER#1"], logger=mock_logger)
+            # ARCH-1: the fulfillment history of those Orders goes with them, and the
+            # sweep runs a second time once the Orders are verified gone -- a fulfillment
+            # that lands in the gap between the two would otherwise be orphaned. (The
+            # moto scope test pins the call ORDER; this pins that the sweep is wired to
+            # the Orders this delete is about to remove.)
+            assert mock_fulfil.call_count == 2
+            for call in mock_fulfil.call_args_list:
+                assert call.args == (["ORDER#1"],)
+                assert call.kwargs == {"logger": mock_logger}
             mock_delete.assert_called_once()
             mock_verify.assert_called_once_with(orders)
             mock_logger.info.assert_called_once()
+
+    def test_fulfillment_arriving_after_the_sweep_is_swept_by_the_second_pass(self) -> None:
+        """ARCH-1 (re-review): the window between sweeping children and deleting Orders."""
+        orders = [{"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"}]
+        mock_logger = MagicMock()
+        with (
+            patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=orders),
+            patch("src.handlers.campaign_operations.batch_delete_keys", return_value=1),
+            patch("src.handlers.campaign_operations._verify_order_keys_deleted"),
+            patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", side_effect=[0, 3]) as mock_fulfil,
+        ):
+            count = delete_orders_for_campaign("CAMPAIGN#c1", logger=mock_logger)
+
+        assert count == 1
+        assert mock_fulfil.call_count == 2
+        mock_logger.warning.assert_called_once()
+        assert "arrived between the sweep and the order delete" in mock_logger.warning.call_args.args[0]
+        assert mock_logger.warning.call_args.kwargs["count"] == 3
+        assert mock_logger.warning.call_args.kwargs["campaign_id"] == "CAMPAIGN#c1"
+
+    def test_second_sweep_that_cannot_finish_stops_before_the_campaign_reports_success(self) -> None:
+        """ARCH-1 (re-review): a failing second pass is a CONFLICT, not a completed delete.
+
+        The Orders are already gone at this point, so the cascade must not answer
+        `deletedCount` over history it could not remove: the caller has to know records
+        are still keyed to Orders that no longer exist.
+        """
+        orders = [{"campaignId": "CAMPAIGN#c1", "orderId": "ORDER#1"}]
+        with (
+            patch("src.handlers.campaign_operations._query_order_keys_for_campaign", return_value=orders),
+            patch("src.handlers.campaign_operations.batch_delete_keys", return_value=1),
+            patch("src.handlers.campaign_operations._verify_order_keys_deleted"),
+            patch(
+                "src.handlers.campaign_operations.delete_fulfillments_for_orders",
+                side_effect=[
+                    0,
+                    AppError(
+                        ErrorCode.CONFLICT,
+                        "1 fulfillment record(s) are still present; no further deletion was attempted",
+                    ),
+                ],
+            ),
+        ):
+            with pytest.raises(AppError) as excinfo:
+                delete_orders_for_campaign("CAMPAIGN#c1")
+
+        assert excinfo.value.error_code == ErrorCode.CONFLICT
 
 
 class TestFulfillmentKeysForOrders:

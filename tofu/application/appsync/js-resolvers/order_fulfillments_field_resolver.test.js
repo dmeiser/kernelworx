@@ -1,7 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { request, response } from './order_fulfillments_field_resolver.js';
-import { appendedErrorsList, resetAppendedErrors } from '@aws-appsync/utils';
 
 describe('order_fulfillments_field_resolver request', () => {
     it('keys the Query on the already-prefixed orderId with exactly one ORDER# (#10.2)', () => {
@@ -36,15 +35,41 @@ describe('order_fulfillments_field_resolver request', () => {
         // FUNC-4: the record follows the mutation. A participant who just had a line
         // fulfilled must see it, so this read is consistent with the write.
         assert.strictEqual(result.consistentRead, true);
-        // The sort key groups record TYPES (`FULFILLMENT#...` then `REVERSAL#...`), so an
-        // ascending page is exactly the page that can hold N fulfillments and hide every
-        // reversal. Descending means a truncated window drops old fulfillments instead.
-        assert.strictEqual(result.scanForward, false);
-        assert.ok(result.limit >= 100, 'a 25-record history is a routine Order, not a truncation case');
-        // No page token: §2.4.5's orderFulfillments admin query is the paginated
-        // surface; this field is the bounded participant projection, and a truncated page
-        // is announced in the response errors instead.
+        // The AppSync Query request field is `scanIndexForward`. A `scanForward` key is
+        // unknown to the runtime and silently keeps the ascending default, which is
+        // exactly the page that can hold N fulfillments and hide every reversal (the sort
+        // key groups record TYPES: `FULFILLMENT#...` then `REVERSAL#...`).
+        assert.strictEqual(result.scanIndexForward, false);
+        assert.strictEqual(result.scanForward, undefined, 'the wrong field name would be ignored by AppSync');
+        // PageInput documents 1-100 with a default of 50.
+        assert.strictEqual(result.limit, 50);
         assert.strictEqual(result.nextToken, undefined);
+    });
+
+    it('honours a caller page size and clamps it to the PageInput contract', () => {
+        assert.strictEqual(request({ source: { orderId: 'ORDER#c#u' }, args: { page: { limit: 10 } } }).limit, 10);
+        assert.strictEqual(request({ source: { orderId: 'ORDER#c#u' }, args: { page: { limit: 5000 } } }).limit, 100);
+        assert.strictEqual(request({ source: { orderId: 'ORDER#c#u' }, args: { page: { limit: 0 } } }).limit, 50);
+        assert.strictEqual(request({ source: { orderId: 'ORDER#c#u' }, args: { page: { limit: -3 } } }).limit, 50);
+    });
+
+    it('continues from the caller cursor, so the whole history is reachable by this field', () => {
+        // FUNC-5 (re-review): a participant pages her own Order's history. Without a
+        // cursor the field can only ever show one page, and the omitted tail would be
+        // reachable only through the Unit-Admin `orderFulfillments` audit she cannot query.
+        const cursor = '{"pk":"ORDER#c#u","sk":"REVERSAL#f9"}';
+        const result = request({ source: { orderId: 'ORDER#c#u' }, args: { page: { limit: 25, cursor: cursor } } });
+
+        assert.strictEqual(result.nextToken, cursor);
+        assert.strictEqual(result.limit, 25);
+        assert.strictEqual(result.consistentRead, true);
+        assert.strictEqual(result.scanIndexForward, false);
+    });
+
+    it('starts from the first page for an absent or empty cursor', () => {
+        assert.strictEqual(request({ source: { orderId: 'ORDER#c#u' }, args: { page: {} } }).nextToken, undefined);
+        assert.strictEqual(request({ source: { orderId: 'ORDER#c#u' }, args: { page: { cursor: '' } } }).nextToken, undefined);
+        assert.strictEqual(request({ source: { orderId: 'ORDER#c#u' }, args: {} }).nextToken, undefined);
     });
 });
 
@@ -69,14 +94,18 @@ describe('order_fulfillments_field_resolver response', () => {
         createdAt: '2026-11-01T10:00:00Z',
     };
 
+    function itemsOf(ctx) {
+        return response(ctx).items;
+    }
+
     it('drops actorAccountId, inventoryMovementId, and the pk/sk/entityType keys (#10.2)', () => {
-        const result = response({ result: { items: [adminRow] } });
-        assert.strictEqual(result.length, 1);
+        const items = itemsOf({ result: { items: [adminRow] } });
+        assert.strictEqual(items.length, 1);
         for (const forbidden of ['actorAccountId', 'inventoryMovementId', 'pk', 'sk', 'entityType']) {
-            assert.ok(!(forbidden in result[0]), `${forbidden} must not reach the participant type`);
+            assert.ok(!Object.hasOwn(items[0], forbidden), `${forbidden} must not reach the participant type`);
         }
         assert.deepStrictEqual(
-            Object.keys(result[0]).sort(),
+            Object.keys(items[0]).sort(),
             [
                 'campaignId',
                 'createdAt',
@@ -93,16 +122,20 @@ describe('order_fulfillments_field_resolver response', () => {
             ],
         );
         // The participant-visible facts survive the projection unchanged.
-        assert.strictEqual(result[0].quantity, 2);
-        assert.strictEqual(result[0].source, 'SCOUT_CUSTODY');
-        assert.strictEqual(result[0].createdAt, '2026-11-01T10:00:00Z');
+        assert.strictEqual(items[0].quantity, 2);
+        assert.strictEqual(items[0].source, 'SCOUT_CUSTODY');
+        assert.strictEqual(items[0].createdAt, '2026-11-01T10:00:00Z');
     });
 
-    it('answers the empty list for an Order with no fulfillment rows', () => {
-        // The SDL list is [ParticipantOrderFulfillment!]!: no history is [],
-        // never null.
-        assert.deepStrictEqual(response({ result: { items: [], scannedCount: 0 } }), []);
-        assert.deepStrictEqual(response({}), []);
+    it('answers the empty page for an Order with no fulfillment rows', () => {
+        // `items` is [ParticipantOrderFulfillment!]!: no history is [], never null,
+        // and an empty page carries no cursor.
+        assert.deepStrictEqual(response({ result: { items: [], scannedCount: 0 } }), {
+            items: [],
+            pageInfo: { endCursor: null, hasNextPage: false },
+        });
+        assert.deepStrictEqual(response({}).items, []);
+        assert.strictEqual(response({}).pageInfo.endCursor, null);
     });
 
     it('propagates a data source error', () => {
@@ -113,11 +146,12 @@ describe('order_fulfillments_field_resolver response', () => {
     });
 });
 
-// FUNC-4: the participant history must be the history, in the order it happened, and
-// must never be a silently shortened one. Storage order is sort-key order, which groups
-// record types rather than moments: the reversal of the FIRST fulfillment sorts after
-// the TENTH fulfillment. So the resolver owns the temporal order.
-describe('order_fulfillments_field_resolver response: chronological and complete-or-announced', () => {
+// FUNC-4 / FUNC-5: the participant history must be the history, in the order it happened,
+// and must be reachable in full by the participant herself. Storage order is sort-key
+// order, which groups record types rather than moments: the reversal of the FIRST
+// fulfillment sorts after the TENTH fulfillment. So the resolver owns the temporal order
+// within a page, and the cursor owns the rest of it.
+describe('order_fulfillments_field_resolver response: chronological within the page, cursor beyond it', () => {
     function record(fulfillmentId, createdAt, recordType) {
         return { fulfillmentId: fulfillmentId, createdAt: createdAt, recordType: recordType, quantity: 1 };
     }
@@ -131,7 +165,7 @@ describe('order_fulfillments_field_resolver response: chronological and complete
 
         const history = response({ result: { items: [fulfillOld, fulfillNew, reversal] } });
 
-        assert.deepStrictEqual(history.map(function (row) { return row.fulfillmentId; }), ['ful-1', 'rev-1', 'ful-2']);
+        assert.deepStrictEqual(history.items.map(function (row) { return row.fulfillmentId; }), ['ful-1', 'rev-1', 'ful-2']);
     });
 
     it('breaks a same-moment tie deterministically on fulfillmentId', () => {
@@ -140,7 +174,7 @@ describe('order_fulfillments_field_resolver response: chronological and complete
 
         const history = response({ result: { items: [b, a] } });
 
-        assert.deepStrictEqual(history.map(function (row) { return row.fulfillmentId; }), ['ful-a', 'ful-b']);
+        assert.deepStrictEqual(history.items.map(function (row) { return row.fulfillmentId; }), ['ful-a', 'ful-b']);
     });
 
     it('orders moments written with different fractional widths consistently', () => {
@@ -152,32 +186,48 @@ describe('order_fulfillments_field_resolver response: chronological and complete
 
         const history = response({ result: { items: [micros, ms] } });
 
-        assert.deepStrictEqual(history.map(function (row) { return row.fulfillmentId; }), ['ful-ms', 'ful-us']);
+        assert.deepStrictEqual(history.items.map(function (row) { return row.fulfillmentId; }), ['ful-ms', 'ful-us']);
     });
 
-    it('announces a truncated page instead of passing it off as the whole history', () => {
-        resetAppendedErrors();
-        const items = [record('ful-1', '2026-11-01T10:00:00+00:00', 'FULFILL')];
+    it('carries the continuation the AppSync Query result reports, as this field own cursor', () => {
+        // FUNC-5: the AppSync JS Query result names the continuation `nextToken`.
+        // `lastEvaluatedKey` is the raw DynamoDB spelling and is never delivered here,
+        // so a resolver that reads it reports every truncated page as a complete one.
+        const token = { pk: 'ORDER#camp-1#uuid-1', sk: 'FULFILLMENT#2026-10-01T09:00:00+00:00#ful-old' };
+        const history = response({ result: { items: [record('ful-1', '2026-11-01T10:00:00+00:00', 'FULFILL')], nextToken: token } });
 
+        assert.strictEqual(history.items.length, 1);
+        assert.deepStrictEqual(history.pageInfo.endCursor, token);
+        assert.strictEqual(history.pageInfo.hasNextPage, true);
+    });
+
+    it('reports no further page when the read finished', () => {
+        const history = response({ result: { items: [record('ful-1', '2026-11-01T10:00:00+00:00', 'FULFILL')] } });
+
+        assert.strictEqual(history.pageInfo.endCursor, null);
+        assert.strictEqual(history.pageInfo.hasNextPage, false);
+    });
+
+    it('ignores a raw lastEvaluatedKey, which is not the contract, rather than inventing a cursor', () => {
         const history = response({
-            result: { items: items, lastEvaluatedKey: { pk: 'ORDER#camp-1#uuid-1', sk: 'FULFILLMENT#x' } }
+            result: { items: [record('ful-1', '2026-11-01T10:00:00+00:00', 'FULFILL')], lastEvaluatedKey: { pk: 'ORDER#c#u' } }
         });
 
-        // The value survives: appendError does not interrupt the handler, which is the
-        // only way a plain-list field can report a partial page.
-        assert.strictEqual(history.length, 1);
-        const appended = appendedErrorsList();
-        assert.strictEqual(appended.length, 1);
-        assert.match(appended[0].message, /longer than one page/);
-        assert.deepStrictEqual(appended[0].errorInfo, { truncated: true, returned: 1 });
-        resetAppendedErrors();
+        assert.strictEqual(history.pageInfo.endCursor, null);
+        assert.strictEqual(history.pageInfo.hasNextPage, false);
     });
 
-    it('stays silent when the page is the whole partition', () => {
-        resetAppendedErrors();
+    it('round-trips the cursor: a second page continues from the first', () => {
+        // The whole history is reachable without any administrative surface: page one
+        // hands back a cursor, and the same field reads the rest from it.
+        const first = response({ result: { items: [record('ful-2', '2026-11-01T12:00:00+00:00', 'FULFILL')], nextToken: 'PAGE-2' } });
+        assert.strictEqual(first.pageInfo.endCursor, 'PAGE-2');
 
-        response({ result: { items: [record('ful-1', '2026-11-01T10:00:00+00:00', 'FULFILL')] } });
+        const secondRequest = request({ source: { orderId: 'ORDER#camp-1#uuid-1' }, args: { page: { cursor: first.pageInfo.endCursor } } });
+        assert.strictEqual(secondRequest.nextToken, 'PAGE-2');
 
-        assert.deepStrictEqual(appendedErrorsList(), []);
+        const second = response({ result: { items: [record('ful-1', '2026-11-01T10:00:00+00:00', 'FULFILL')] } });
+        assert.deepStrictEqual(second.items.map(function (row) { return row.fulfillmentId; }), ['ful-1']);
+        assert.strictEqual(second.pageInfo.hasNextPage, false);
     });
 });

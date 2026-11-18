@@ -19,33 +19,43 @@ import { normalizeIdOrPrefix } from './lib/ids.js';
 // src/utils/order_fulfillment_models.py, spelled identically here via the
 // single normalization owner, lib/ids.js.
 //
-// The read contract (FUNC-4): a participant gets this Order's history, in the
-// order the history happened, and never a silently shortened one.
+// The read contract (FUNC-4, re-review): a participant gets this Order's history
+// completely, in the order it happened, and never a shortened one she is not told
+// about.
 //
 // * Strongly consistent. A Scout who just had a line fulfilled opens the Order and
 //   must see the record; an eventually consistent read answers "no history" to a
 //   mutation she can see the effect of. §5.19's history is the record a participant
 //   disputes against, so it is read the way it was written.
-// * One page, and the page starts at the NEWEST sort key. The sort key groups the
-//   two record types (`FULFILLMENT#...` then `REVERSAL#...`), so an ascending page is
-//   precisely the page that can hold 25 fulfillments and hide every reversal. Reading
-//   descending means a truncated window drops the oldest fulfillments, which is the
-//   half a participant can reconstruct from the Order's own line quantities; a missing
-//   reversal is invisible to her.
-// * Chronological within the result. Sort-key order is type-grouped, not temporal:
-//   the reversal of the first fulfillment sorts after the tenth fulfillment. The
+// * Paginated, on the caller's own field. The field returns a page plus
+//   `pageInfo`, and `page.cursor` continues it — so the complete history is
+//   reachable by the participant herself, and an omitted tail is never a reason to
+//   send her to the Unit-Admin `orderFulfillments` audit (§2.4.5), which is a
+//   different, privileged projection she cannot query.
+// * The page starts at the NEWEST sort key. `scanIndexForward` is the field the
+//   AppSync Query request object documents; a `scanForward` key is simply unknown
+//   to the runtime, so the read silently keeps the ascending default. The sort key
+//   groups the two record types (`FULFILLMENT#...` then `REVERSAL#...`), so an
+//   ascending first page is precisely the page that can hold 25 fulfillments and
+//   hide every reversal. Reading descending puts the newest activity — including
+//   reversals — on the page a participant reads first.
+// * Chronological within a page. Sort-key order is type-grouped, not temporal: the
+//   reversal of the first fulfillment sorts after the tenth fulfillment. The
 //   participant contract is (createdAt, fulfillmentId), and createdAt is a canonical
 //   UTC moment (same formatter on both write paths, `+00:00` offset, so a
-//   lexicographic compare is a temporal one), so the page is sorted by the composite
+//   lexicographic compare is a temporal one), so each page is sorted by the composite
 //   `createdAt|fulfillmentId` before it is returned. `Array.prototype.sort` with no
 //   comparator is the only sort the APPSYNC_JS runtime allows, and a string array is
 //   exactly that.
-// * Truncation is announced, not swallowed. The field type is a plain list with no
-//   nextToken (§10.2), and the paginated surface is §2.4.5's `orderFulfillments`
-//   admin query -- so when DynamoDB reports a last-evaluated key, this resolver says
-//   so in the response's `errors` channel (`util.appendError` keeps the field value)
-//   instead of answering a partial history as if it were the whole one.
-const HISTORY_PAGE_LIMIT = 500;
+// * Continuation is read from `nextToken`, the field the AppSync Query result
+//   contract actually delivers — not the raw DynamoDB `lastEvaluatedKey`, which is
+//   never present here and would make every truncated read look complete.
+//
+// Page size follows the shared `PageInput` contract (1-100, default 50); the limit
+// is clamped rather than trusted. §5.19 keeps one Order's history small in practice,
+// so one page normally is the whole history.
+const MAX_PAGE_LIMIT = 100;
+const DEFAULT_PAGE_LIMIT = 50;
 
 // Fields that must never leave this resolver: the two §10.2 admin-audit
 // attributes plus the DynamoDB key/entity plumbing. Delete-by-denylist, not
@@ -61,18 +71,23 @@ export function request(ctx) {
     // bare `ORDER#` placeholder, which matches no fulfillment partition and
     // answers [] rather than emitting a null key attribute).
     const pk = normalizeIdOrPrefix(ctx.source.orderId, 'ORDER#');
+    const page = ctx.args && ctx.args.page ? ctx.args.page : null;
 
-    return {
+    const queryRequest = {
         operation: 'Query',
         index: null, // base table: the fulfillment partition is addressed by its own key
         consistentRead: true, // read-your-own-write: the record follows the mutation the caller just saw
-        scanForward: false, // newest sort keys first, so a truncated page drops old fulfillments, not reversals
-        limit: HISTORY_PAGE_LIMIT,
+        scanIndexForward: false, // newest sort keys first; see the read contract above
+        limit: pageLimit(page),
         query: {
             expression: 'pk = :pk',
             expressionValues: util.dynamodb.toMapValues({ ':pk': pk }),
         },
     };
+    if (page && typeof page.cursor === 'string' && page.cursor !== '') {
+        queryRequest.nextToken = page.cursor;
+    }
+    return queryRequest;
 }
 
 export function response(ctx) {
@@ -80,20 +95,28 @@ export function response(ctx) {
         util.error(ctx.error.message, ctx.error.type);
     }
 
-    const items = ctx.result && Array.isArray(ctx.result.items) ? ctx.result.items : [];
-    if (ctx.result && ctx.result.lastEvaluatedKey) {
-        // Never a silent partial history: the list type has no cursor to carry the fact,
-        // so the response says it. `appendError` adds to the response `errors` channel
-        // WITHOUT discarding the field value, which is the only way a plain-list field
-        // can tell the caller the page ended.
-        util.appendError(
-            'This fulfillment history is longer than one page, so the oldest records are not included. A Unit Admin reads the paginated orderFulfillments audit for the complete history.',
-            'TRUNCATED',
-            null,
-            { truncated: true, returned: items.length }
-        );
+    const result = ctx.result || {};
+    const items = Array.isArray(result.items) ? result.items : [];
+    // The AppSync JS Query result delivers continuation as `nextToken`. Carrying it out
+    // as `pageInfo.endCursor` is what makes the rest of the history reachable by this
+    // same field: a caller who sees a cursor asks for the next page instead of being
+    // told some of her own Order's records exist somewhere she cannot read.
+    const endCursor = result.nextToken ? result.nextToken : null;
+
+    return {
+        items: chronological(items).map(toParticipantRow),
+        pageInfo: {
+            endCursor: endCursor,
+            hasNextPage: endCursor !== null,
+        },
+    };
+}
+
+function pageLimit(page) {
+    if (page && typeof page.limit === 'number' && page.limit > 0) {
+        return Math.min(page.limit, MAX_PAGE_LIMIT);
     }
-    return chronological(items).map(toParticipantRow);
+    return DEFAULT_PAGE_LIMIT;
 }
 
 // (createdAt, fulfillmentId), oldest first. Built as sortable strings because the

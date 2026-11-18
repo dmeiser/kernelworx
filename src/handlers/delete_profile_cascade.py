@@ -242,19 +242,26 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
     )
 
     order_keys = _collect_order_keys(campaigns)
+    order_ids = [str(key["orderId"]) for key in order_keys if key.get("orderId")]
 
     # ARCH-1: the fulfillment history of those Orders goes first, and is verified to be
     # gone, for the same reason the campaign cascade does it: an orphaned fulfillment
     # record cannot be reversed or read once its Order is gone, and the inventory movement
     # it names has already moved stock.
-    fulfillments_deleted = delete_fulfillments_for_orders(
-        [str(key["orderId"]) for key in order_keys if key.get("orderId")],
-        logger=logger,
-    )
+    fulfillments_deleted = delete_fulfillments_for_orders(order_ids, logger=logger)
 
     orders_deleted = _delete_orders(order_keys)
     if order_keys:
         _verify_order_keys_deleted(order_keys)
+        # ARCH-1 (re-review): a fulfillment committed between the sweep and this delete
+        # would outlive its Order. Verifying the Orders gone first is what closes that
+        # gap: a fulfillment write is an UpdateItem on the Order row conditioned by
+        # `order_fulfillment_models.fulfillment_version_condition`, which requires
+        # `attribute_exists(#orderId)`, so with these rows verified absent no fulfillment
+        # can be written for them again. The re-read is therefore race-free, and it is
+        # one pass rather than a loop -- anything it finds is swept and verified, and a
+        # second failure is a CONFLICT that stops the cascade.
+        fulfillments_deleted += delete_fulfillments_for_orders(order_ids, logger=logger)
 
     reports_deleted = _delete_s3_reports(db_profile_id)
     campaigns_deleted = _delete_campaigns(db_profile_id, campaigns)

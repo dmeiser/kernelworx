@@ -91,9 +91,11 @@ resource "aws_appsync_function" "delete_order" {
   }
 
   # templatefile() because ARCH-1 made this an Order-plus-fulfillment-children delete,
-  # and a cross-table TransactWriteItems names every table it writes.
+  # and a cross-table TransactWriteItems names every table it writes: the children are on
+  # the fulfillment table, the Order and its version pin are on the orders table.
   code = templatefile("${local.js_resolvers_dir}/delete_order_fn.js", {
-    order_fulfillments_table_name = var.dynamodb_table_names.order_fulfillments
+    orders_table_name              = var.dynamodb_table_names.orders
+    order_fulfillments_table_name  = var.dynamodb_table_names.order_fulfillments
   })
 }
 

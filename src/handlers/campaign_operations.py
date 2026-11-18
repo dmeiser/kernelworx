@@ -254,11 +254,18 @@ def delete_fulfillments_for_orders(order_ids: List[str], *, logger: Any = None) 
     Order rows strands records nobody can reverse or read — beside inventory movements
     that already moved stock.
 
-    Children first, then verified, in the same style this module already verifies deleted
-    Orders: a sweep that silently left a record behind would be the same defect one level
-    down. Deleting the history first also means a failure partway through leaves an Order
-    whose accounting is intact and merely still present, rather than an Order that has lost
-    part of it.
+    Children first, then verified. What the verification guarantees is precise, and the
+    earlier wording overstated it: a batch write that silently left a record behind raises
+    here (`_verify_fulfillment_keys_deleted`) BEFORE any Order is touched, so the cascade
+    never deletes an Order that still has history under it. A failure partway through a
+    sweep can still leave an Order that lost some records and kept the rest; what makes
+    that survivable is that the sweep is resumable — the next run reads what remains and
+    takes it — and that no Order is deleted until a consistent read of the same Orders
+    answers empty.
+
+    There is no size window here, unlike the AppSync `deleteOrder` path: a Lambda can loop,
+    so `query_all_items` pages a history of any length and `batch_delete_keys` drains the
+    keys in batches. An Order with 5,000 fulfillment rows is swept by this path in one run.
 
     Returns the number of fulfillment records deleted.
     """
@@ -373,15 +380,32 @@ def delete_orders_for_campaign(campaign_id: str, *, logger: Any = None) -> int:
         return 0
 
     log = logger if logger is not None else _default_logger
+    order_ids = [str(order["orderId"]) for order in orders]
     # ARCH-1: children first. The fulfillment records are keyed by the Order, and the
     # reversal and audit surfaces re-load the Order to authorize themselves, so deleting
     # the Order rows and leaving the history behind strands records that can be neither
-    # reversed nor read. Sweeping before the Orders go also means a failure partway
-    # through leaves an Order whose history is intact -- recoverable by re-running the
-    # delete -- rather than an Order that has lost part of its accounting.
-    delete_fulfillments_for_orders([str(order["orderId"]) for order in orders], logger=log)
+    # reversed nor read.
+    delete_fulfillments_for_orders(order_ids, logger=log)
     deleted_count = delete_order_keys(orders, logger=log)
     _verify_order_keys_deleted(orders)
+
+    # ARCH-1 (re-review): the sweep above and the Order delete above are two operations,
+    # and a fulfillment committed in the gap would be an orphan with no Order under it.
+    # The Orders being gone is what closes that gap. A fulfillment write is an UpdateItem
+    # on the Order row conditioned by
+    # `order_fulfillment_models.fulfillment_version_condition`, which requires
+    # `attribute_exists(#orderId)`, so once these rows are verified absent no fulfillment
+    # can ever be written for them again: everything that committed before this second
+    # pass is visible to its consistent read, and nothing can commit after it. One pass,
+    # not a loop -- and if it finds records, they are swept and verified the same way, so
+    # a second failure is a CONFLICT rather than a silent orphan.
+    arrived = delete_fulfillments_for_orders(order_ids, logger=log)
+    if arrived:
+        log.warning(
+            "Fulfillment records arrived between the sweep and the order delete; removed in the second pass",
+            campaign_id=campaign_id,
+            count=arrived,
+        )
 
     log.info("Deleted orders for campaign", campaign_id=campaign_id, count=deleted_count)
     return deleted_count

@@ -114,7 +114,11 @@ describe('get_membership_guard_for_order_fn request: CONSUME_SCOUT_CUSTODY read'
         assert.deepStrictEqual(ctx.stash.custodySaleRead, {
             unitCampaignId: 'uc-pack-3149-fall-2026',
             profileId: 'PROFILE#p1',
-            idempotencyKey: 'sale-1'
+            idempotencyKey: 'sale-1',
+            // The caller this batch read the Unit grant for. The authorization decision
+            // this step makes has to be about that account, not about whatever the write
+            // step later re-derives.
+            actorAccountId: ACCOUNT
         });
     });
 
@@ -147,7 +151,15 @@ describe('get_membership_guard_for_order_fn response: batched answer', () => {
     const FULFILLMENTS_TABLE = '${order_fulfillments_table_name}';
 
     function batchCtx(data) {
-        return { stash: { custodySaleRead: { unitCampaignId: 'uc-1', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1' } }, result: { data } };
+        return {
+            stash: {
+                custodySaleRead: { unitCampaignId: 'uc-1', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1', actorAccountId: 'ACCOUNT#a-1' },
+                // These fixtures are an authorized sale: the Profile half is the usual
+                // answer. The Unit-Admin half has its own block below.
+                profileWriteAuthorized: true
+            },
+            result: { data }
+        };
     }
 
     it('splits the batch into guard, custody rows and marker', () => {
@@ -245,7 +257,10 @@ describe('get_membership_guard_for_order_fn response: an partly served batch is 
 
     it('accepts a fully served batch, and an empty unprocessedKeys entry', () => {
         const ctx = {
-            stash: { custodySaleRead: { unitCampaignId: 'uc-1', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1' } },
+            stash: {
+                custodySaleRead: { unitCampaignId: 'uc-1', profileId: 'PROFILE#p1', idempotencyKey: 'sale-1', actorAccountId: 'ACCOUNT#a-1' },
+                profileWriteAuthorized: true
+            },
             result: { data: {}, unprocessedKeys: { [INVENTORY_TABLE]: [] } }
         };
         assert.strictEqual(response(ctx), null);
@@ -325,11 +340,129 @@ describe('get_membership_guard_for_order_fn: the Unit Admin grant rides the sale
         assert.deepStrictEqual(stashed.stash.unitAdminGrant, grant);
     });
 
-    it('stashes a missing grant as null, so a revoked admin reads as absent rather than unknown', () => {
+    it('stashes a missing grant as null, and refuses the sale it found nothing for', () => {
+        // The stash is set before the decision, so the read still records what it saw
+        // even though the answer is a denial: a revoked admin reads as absent rather
+        // than unknown, and the caller is refused.
         const stashed = ctx(true);
         request(stashed);
-        response({ stash: stashed.stash, result: { data: {} } });
+        assert.throws(
+            () => response({ stash: stashed.stash, result: { data: {} } }),
+            /FORBIDDEN: Forbidden: a custody sale needs the profile owner, an account with WRITE permission on the profile, or an admin of the campaign Unit/
+        );
 
         assert.strictEqual(stashed.stash.unitAdminGrant, null);
+    });
+});
+
+// SEC-1 (re-review): the composite answer is not only correct, it arrives EARLY. The share
+// step defers its FORBIDDEN for a custody sale, so if the composite waited for the write
+// step, `validate_payment_method` would run first and answer whether a named payment
+// method exists on the Profile owner's account -- a yes/no oracle over another account for
+// a caller who was never authorized. The read step is where the answer lands, so the
+// pipeline puts payment validation behind it (pinned in Python by
+// `test_custody_sale_authorization_precedes_payment_validation`).
+describe('get_membership_guard_for_order_fn response: the sale is authorized at the read step', () => {
+    const ACCOUNT = '11111111-1111-4111-8111-111111111111';
+    const UNIT_CAMPAIGNS_TABLE = '${unit_campaigns_table_name}';
+    const UNITS_TABLE = '${units_table_name}';
+    const DENIED = /FORBIDDEN: Forbidden: a custody sale needs the profile owner, an account with WRITE permission on the profile, or an admin of the campaign Unit/;
+
+    function answered(options) {
+        const opts = options || {};
+        const ctx = {
+            stash: {
+                campaignId: 'CAMPAIGN#c1',
+                profileId: 'PROFILE#p1',
+                campaign: { profileId: 'PROFILE#p1', unitId: 'pack-3149', unitCampaignId: 'uc-pack-3149-fall-2026' },
+                profileWriteAuthorized: opts.profileWrite === true
+            },
+            identity: { claims: { sub: ACCOUNT } },
+            args: {
+                input: {
+                    profileId: 'PROFILE#p1',
+                    campaignId: 'CAMPAIGN#c1',
+                    fulfillmentMode: 'CONSUME_SCOUT_CUSTODY',
+                    idempotencyKey: 'sale-1',
+                    lineItems: [{ productId: 'PROD#1', quantity: 4 }]
+                }
+            }
+        };
+        request(ctx);
+        const data = {};
+        if (opts.joined !== false) {
+            data[UNIT_CAMPAIGNS_TABLE] = [{ pk: 'SCOUT_CAMPAIGN#CAMPAIGN#c1', sk: 'MEMBERSHIP_GUARD', activeUnitCampaignId: 'uc-pack-3149-fall-2026', unitId: 'pack-3149' }];
+        }
+        if (opts.grant) {
+            data[UNITS_TABLE] = [opts.grant];
+        }
+        ctx.result = { data: data };
+        return ctx;
+    }
+
+    it('refuses an account with neither half, before any payment-method verdict can run', () => {
+        const ctx = answered({ profileWrite: false });
+
+        assert.throws(() => response(ctx), DENIED);
+    });
+
+    it('refuses a caller whose grant is for a different Unit than the guard names', () => {
+        const ctx = answered({
+            profileWrite: false,
+            grant: { pk: 'UNIT#pack-OTHER', sk: 'GRANT#' + ACCOUNT, role: 'UNIT_ADMIN' }
+        });
+
+        assert.throws(() => response(ctx), DENIED);
+    });
+
+    it('refuses a caller whose grant belongs to another account', () => {
+        const ctx = answered({
+            profileWrite: false,
+            grant: { pk: 'UNIT#pack-3149', sk: 'GRANT#22222222-2222-4222-8222-222222222222', role: 'UNIT_ADMIN' }
+        });
+
+        assert.throws(() => response(ctx), DENIED);
+    });
+
+    it('refuses a sale whose campaign names no Unit, because there is no Unit Admin to ask', () => {
+        const ctx = answered({ profileWrite: false, joined: false });
+
+        assert.throws(() => response(ctx), DENIED);
+    });
+
+    it('admits the Profile owner or a WRITE share with no grant read at all', () => {
+        const ctx = answered({ profileWrite: true });
+
+        assert.strictEqual(response(ctx), 'uc-pack-3149-fall-2026');
+        assert.strictEqual(ctx.stash.unitAdminGrant, null);
+    });
+
+    it('admits an admin of the Unit the guard names', () => {
+        const ctx = answered({
+            profileWrite: false,
+            grant: { pk: 'UNIT#pack-3149', sk: 'GRANT#' + ACCOUNT, role: 'UNIT_ADMIN' }
+        });
+
+        assert.strictEqual(response(ctx), 'uc-pack-3149-fall-2026');
+        assert.strictEqual(ctx.stash.unitAdminGrant.pk, 'UNIT#pack-3149');
+    });
+
+    it('refuses on the same wording whichever half failed, so the denial is not a probe', () => {
+        const noGrant = answered({ profileWrite: false });
+        const wrongUnit = answered({ profileWrite: false, grant: { pk: 'UNIT#nope', sk: 'GRANT#' + ACCOUNT } });
+
+        let first = '';
+        try {
+            response(noGrant);
+        } catch (error) {
+            first = error.message;
+        }
+        let second = '';
+        try {
+            response(wrongUnit);
+        } catch (error) {
+            second = error.message;
+        }
+        assert.ok(first !== '' && first === second, 'one denial for both failures: ' + first);
     });
 });

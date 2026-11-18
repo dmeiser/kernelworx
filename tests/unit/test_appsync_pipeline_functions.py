@@ -199,6 +199,69 @@ def test_order_write_pipelines_sync_campaign_totals() -> None:
     assert delete_pipeline.index(sync) < delete_pipeline.index(verify)
 
 
+def test_custody_sale_authorization_precedes_payment_validation() -> None:
+    """SEC-1: a custody sale's authorization is settled before any payment-method verdict.
+
+    `check_share_permissions` defers its FORBIDDEN for
+    `createOrder(fulfillmentMode = CONSUME_SCOUT_CUSTODY)` so a Unit Admin with no share
+    on the Profile can still be authorized (§2.4.2). That deferral is only safe while the
+    composite answer arrives before any step that can report a fact about someone else's
+    account: `validate_payment_method` reads the Profile owner's stored methods and answers
+    "Payment method 'X' does not exist for this account", so running it first turns the
+    refusal into a yes/no oracle over another account's payment methods. The membership
+    guard step is where the composite is answered (it holds the share verdict and the
+    Unit grant row), so payment validation must sit behind it.
+
+    This is a pipeline-order property, which no resolver unit test can see: the JS tests
+    prove the denial exists, only this test proves it arrives early enough.
+    """
+    resolvers = _resolver_pipelines("resolvers_mutations.tf")
+    pipeline = resolvers["create_order"]
+    share = "${aws_appsync_function.check_share_permissions.function_id}"
+    guard = "${aws_appsync_function.get_membership_guard_for_order.function_id}"
+    payment = "${aws_appsync_function.validate_payment_method_appsync.function_id}"
+    write = "${aws_appsync_function.create_order.function_id}"
+
+    assert pipeline.count(guard) == 1 and pipeline.count(payment) == 1
+    assert pipeline.index(share) < pipeline.index(guard), (
+        "the deferred share verdict must be closed by the guard step, not left open"
+    )
+    assert pipeline.index(guard) < pipeline.index(payment), (
+        "createOrder must settle the custody sale's authorization before validating the "
+        "profile owner's payment methods (SEC-1 payment-method enumeration oracle)"
+    )
+    assert pipeline.index(guard) < pipeline.index(write)
+    # AppSync's hard cap on a pipeline resolver: 10 functions. The reordering is not
+    # allowed to answer SEC-1 by adding an eleventh step.
+    assert len(pipeline) <= 10, f"createOrder carries {len(pipeline)} functions"
+
+
+def test_delete_order_pipeline_sweeps_fulfillment_children_first() -> None:
+    """ARCH-1: `deleteOrder` reads the Order's fulfillment children before it writes.
+
+    The children-first rule of SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md §7.1 is a
+    pipeline property: `delete_order` can only take the children it was given, so the read
+    step has to run first, and the totals sync and the propagation check have to run after
+    the write (both read what the write stashed).
+    """
+    resolvers = _resolver_pipelines("resolvers_mutations.tf")
+    pipeline = resolvers["delete_order"]
+    lookup = "${aws_appsync_function.lookup_order_for_delete.function_id}"
+    children = "${aws_appsync_function.get_order_fulfillments_for_delete.function_id}"
+    write = "${aws_appsync_function.delete_order.function_id}"
+    verify = "${aws_appsync_function.verify_order_delete_propagation.function_id}"
+
+    assert pipeline.count(children) == 1
+    assert pipeline.index(lookup) < pipeline.index(children), (
+        "the children read is keyed off the Order row the lookup stashes"
+    )
+    assert pipeline.index(children) < pipeline.index(write), (
+        "deleteOrder must read the fulfillment children before deleting the Order"
+    )
+    assert pipeline.index(write) < pipeline.index(verify)
+    assert len(pipeline) <= 10, f"deleteOrder carries {len(pipeline)} functions"
+
+
 def test_two_phase_fetch_profile_check_uses_distinct_functions() -> None:
     functions: set[str] = set()
     for path in sorted(APPSYNC_DIR.glob("functions_*.tf")):

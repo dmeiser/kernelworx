@@ -229,6 +229,43 @@ export function grantNamesUnit(grant, unitId, accountId) {
     return grant.pk === 'UNIT#' + unitId && grant.sk === 'GRANT#' + accountId;
 }
 
+// The composite decision, in one place, because the same question is asked twice in the
+// createOrder pipeline and the two answers must be indistinguishable.
+//
+// SEC-1 (re-review): the question has to be ANSWERED BEFORE any step that can report a
+// fact about someone else's account. `validate_payment_method` reads the Profile owner's
+// stored payment methods and answers "Payment method 'X' does not exist for this account"
+// for a name it cannot find, so a caller who reaches that step and is refused later would
+// be handed a yes/no oracle over another account's payment methods. `check_share_permissions`
+// defers its denial for a custody sale precisely so this composite can be answered, and
+// the guard step is the first step that holds both halves — so the guard step asks it, and
+// the pipeline puts payment validation after that step (see the createOrder pipeline in
+// `resolvers_mutations.tf`, pinned by `test_appsync_pipeline_functions.py`).
+//
+// `create_order_fn` still calls this as defense in depth: the rule is a property of the
+// write, not of the step order. One phrasing, identical to the share step's own denial, so
+// the two authorized paths are not distinguishable to the caller and no denial order tells
+// a caller which half failed.
+//
+// Fail-closed in every direction. A sale whose guard names no Unit has no Unit Admin to
+// authorize, so only the Profile path can carry it. And the grant must name the Unit the
+// *guard* names — the batch was keyed off the Campaign's retained link, so a link that
+// disagrees with the live join can never turn a grant for Unit A into authority over Unit
+// B's custody. `role` is deliberately not checked: `unit_auth` does not check it either.
+export function authorizeCustodySale(stash, origin, actorAccountId) {
+    if (stash && stash.profileWriteAuthorized === true) {
+        return;
+    }
+    const denied = 'Forbidden: a custody sale needs the profile owner, an account with WRITE permission on the profile, or an admin of the campaign Unit';
+    if (origin === null || origin.unitId === null || actorAccountId === null) {
+        util.error(denied, 'FORBIDDEN');
+        return;
+    }
+    if (!grantNamesUnit(stash ? stash.unitAdminGrant : null, origin.unitId, actorAccountId)) {
+        util.error(denied, 'FORBIDDEN');
+    }
+}
+
 // What a marker read means. Returning a decision rather than raising keeps the caller's
 // error vocabulary its own (`RESOURCE_BUSY` for the in-flight race, `INVALID_INPUT` for
 // the reused key, `INTERNAL_ERROR` for a marker it cannot answer from) and keeps this

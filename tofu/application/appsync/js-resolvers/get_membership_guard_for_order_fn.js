@@ -1,13 +1,14 @@
 import { util } from '@aws-appsync/utils';
 import { normalizeId } from './lib/ids.js';
-import { currentUnitCampaignId } from './lib/order_origin.js';
+import { currentUnitCampaignId, orderOrigin } from './lib/order_origin.js';
 import {
     MODE_CONSUME_SCOUT_CUSTODY,
     parseFulfillmentMode,
     idempotencyKeyFor,
     markerKeysFor,
     custodyReadKeys,
-    unitAdminGrantKey
+    unitAdminGrantKey,
+    authorizeCustodySale
 } from './lib/custody_sale.js';
 
 // The membership guard read (§5.6): the single strongly consistent read that says
@@ -106,7 +107,10 @@ export function request(ctx) {
     ctx.stash.custodySaleRead = {
         unitCampaignId: linkedUnitCampaignId,
         profileId: profileId,
-        idempotencyKey: idempotencyKey
+        idempotencyKey: idempotencyKey,
+        // The composite authorization below is answered here, so the caller it
+        // authorizes has to be the caller this request read the grant for.
+        actorAccountId: actorId
     };
 
     return { operation: 'BatchGetItem', tables: tables };
@@ -184,6 +188,20 @@ export function response(ctx) {
         ctx.stash.idempotencyMarker = markers.length > 0 ? markers[0] : null;
         const grants = rowsFor(ctx.result, unitsTableName);
         ctx.stash.unitAdminGrant = grants.length > 0 ? grants[0] : null;
+
+        // SEC-1: the sale's authorization is DECIDED here, at the read step, and the
+        // pipeline runs payment-method validation after this step. `check_share_permissions`
+        // defers its denial for a custody sale so that a Unit Admin can still be authorized;
+        // if the composite answer waited for the write step, the caller would first be told
+        // whether a named payment method exists on the Profile owner's account, which is a
+        // yes/no oracle over another account. This is the first step that holds both halves
+        // of the answer (the share verdict on the stash, the grant row in this batch), and
+        // the Order write asks the same helper again as defense in depth.
+        //
+        // It runs after the unprocessed-keys refusal above deliberately: a partly served
+        // batch has no grant answer at all, and refusing an authorized Unit Admin with
+        // FORBIDDEN because DynamoDB throttled would be a wrong verdict, not a safe one.
+        authorizeCustodySale(ctx.stash, orderOrigin(guard), ctx.stash.custodySaleRead.actorAccountId);
     }
     return ctx.stash.activeUnitCampaignId;
 }

@@ -1113,8 +1113,8 @@ export type GqlOrder = {
   customerPhone?: Maybe<Scalars['String']['output']>;
   /** Serialization version for fulfillment and reversal of this order's lines (§5.19). Every fulfillment and every reversal increments it, including an external-Council change that touches no inventory version. Rows written before Wave 3 carry no value, which reads as 0. */
   fulfillmentVersion?: Maybe<Scalars['Int']['output']>;
-  /** The fulfillment and reversal history of this order's lines, in the participant-safe projection: no actor account, no inventory movement id, no other administrative audit (§10.2). A Unit Admin reads the full audit through `orderFulfillments`. */
-  fulfillments: Array<GqlParticipantOrderFulfillment>;
+  /** The fulfillment and reversal history of this order's lines, in the participant-safe projection: no actor account, no inventory movement id, no other administrative audit (§10.2). Paginated so a participant can reach her own whole history herself - no admin-only surface is needed to see what was omitted. A Unit Admin reads the full audit through `orderFulfillments`. */
+  fulfillments: GqlParticipantOrderFulfillmentConnection;
   /** The ordered products and quantities, with prices captured from the catalog at order time. */
   lineItems: Array<GqlLineItem>;
   /** Free-text notes about the order. */
@@ -1137,6 +1137,11 @@ export type GqlOrder = {
   unitId?: Maybe<Scalars['ID']['output']>;
   /** When the order was last updated. */
   updatedAt: Scalars['AWSDateTime']['output'];
+};
+
+/** A customer order placed in a campaign. */
+export type GqlOrder_FulfillmentsArgs = {
+  page?: InputMaybe<GqlPageInput>;
 };
 
 /** A page of Order results from listOrdersByCampaign, with a token for fetching the next page. */
@@ -1258,6 +1263,15 @@ export type GqlParticipantOrderFulfillment = {
   reversalOfFulfillmentId?: Maybe<Scalars['ID']['output']>;
   /** Which stock source the record consumed or restored. */
   source: GqlOrderFulfillmentSource;
+};
+
+/** A page of one Order's participant-safe fulfillment history (§10.2). Newest records first, each page oldest-first within itself; `pageInfo.endCursor` is null once the history is exhausted, so a participant pages through the whole of it without any administrative surface. */
+export type GqlParticipantOrderFulfillmentConnection = {
+  __typename?: 'ParticipantOrderFulfillmentConnection';
+  /** The records on this page, oldest first within the page. */
+  items: Array<GqlParticipantOrderFulfillment>;
+  /** Cursor state for this read: `endCursor` is null and `hasNextPage` false when no records remain. */
+  pageInfo: GqlPageInfo;
 };
 
 /**

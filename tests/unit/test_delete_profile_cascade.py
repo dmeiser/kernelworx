@@ -333,6 +333,48 @@ class TestDeleteProfileCascade:
         )
         assert len(campaigns_response.get("Items", [])) == 0
 
+    def test_fulfillment_written_after_the_sweep_is_gone_when_the_cascade_returns(
+        self, profiles_table: Any, campaigns_table: Any, orders_table: Any, order_fulfillments_table: Any
+    ) -> None:
+        """ARCH-1 (re-review): the profile cascade closes the same sweep/delete gap.
+
+        The cascade sweeps the fulfillment history and then deletes the Orders as separate
+        operations, so a fulfillment committing in between would outlive its Order. The
+        second sweep after the Orders are verified gone takes it: the fulfillment write
+        requires its Order row to exist, so once the Orders are gone nothing further can
+        arrive.
+        """
+        owner_id = "owner-race"
+        profile_id = "PROFILE#race"
+        campaign_id = "CAMPAIGN#race"
+        _create_profile(profiles_table, owner_id, profile_id)
+        _create_campaign(campaigns_table, profile_id, campaign_id)
+        _create_order(orders_table, profile_id, campaign_id, "ORDER#1")
+
+        real_delete = delete_profile_cascade._delete_orders
+
+        def delete_then_arrive(order_keys: List[Dict[str, str]]) -> int:
+            deleted = real_delete(order_keys)
+            order_fulfillments_table.put_item(
+                Item={
+                    "pk": "ORDER#1",
+                    "sk": "FULFILLMENT#2024-10-02T00:00:00+00:00#late",
+                    "entityType": "OrderFulfillment",
+                    "orderId": "ORDER#1",
+                    "campaignId": campaign_id,
+                    "fulfillmentId": "late",
+                    "quantity": 1,
+                    "createdAt": "2024-10-02T00:00:00+00:00",
+                }
+            )
+            return deleted
+
+        event = {"arguments": {"profileId": profile_id}, "identity": {"sub": owner_id}}
+        with patch.object(delete_profile_cascade, "_delete_orders", side_effect=delete_then_arrive):
+            assert lambda_handler(event, None) is True
+
+        assert order_fulfillments_table.scan()["Items"] == [], "the cascade orphaned a fulfillment record"
+
     def test_delete_profile_with_all_related_data(
         self,
         profiles_table: Any,

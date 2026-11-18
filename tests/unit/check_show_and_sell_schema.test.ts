@@ -670,6 +670,9 @@ const SS3_TYPE_FIELDS: Record<string, string[]> = {
   FulfillIndividualOrderLinePayload: ["order", "fulfillment", "inventoryPosition"],
   ReverseIndividualOrderFulfillmentPayload: ["order", "reversal", "inventoryPosition"],
   OrderFulfillmentConnection: ["items", "pageInfo"],
+  // FUNC-5: the participant's own history is paginated on the participant's own field,
+  // so a long history is reachable in full without the Unit-Admin audit.
+  ParticipantOrderFulfillmentConnection: ["items", "pageInfo"],
 };
 
 /**
@@ -723,15 +726,28 @@ describe("Show & Sell Stage 3 order-fulfillment SDL (schema.graphql)", () => {
     }
   });
 
-  test("Order.fulfillments answers the non-null participant list, not the audit type", () => {
+  test("Order.fulfillments answers a paginated page of the participant projection, not the audit type", () => {
     const field = fieldsOf(definition("Order")).find((f) => f.name === "fulfillments");
     expect(field, "Order.fulfillments is missing").toBeDefined();
-    expect(returnTypeName(field!.text), "Order.fulfillments element type").toBe("ParticipantOrderFulfillment");
-    // The list is non-null with non-null items: no history is [], never null,
-    // and the field resolver answers [] for an Order with no fulfillment rows.
-    expect(field!.text, "Order.fulfillments is [ParticipantOrderFulfillment!]!").toMatch(
-      /fulfillments\s*:\s*\[ParticipantOrderFulfillment!\]!/,
-    );
+    expect(returnTypeName(field!.text), "Order.fulfillments page type").toBe("ParticipantOrderFulfillmentConnection");
+    // FUNC-5 (re-review): the field takes the shared PageInput and returns a page with a
+    // cursor. A plain list can only ever show one page, and the only way to see the
+    // omitted tail would then be the Unit-Admin `orderFulfillments` audit — a surface a
+    // participant cannot query, so her own Order's history would be partly unreachable
+    // to her.
+    expect(field!.text, "Order.fulfillments takes the shared PageInput").toMatch(/page\s*:\s*PageInput/);
+    expect(field!.text, "Order.fulfillments is a non-null connection").toMatch(/\)\s*:\s*ParticipantOrderFulfillmentConnection!/);
+
+    const connection = definition("ParticipantOrderFulfillmentConnection");
+    expect(connection.kind, "the page is a type").toBe("type");
+    const items = fieldsOf(connection).find((f) => f.name === "items");
+    expect(items, "the page carries items").toBeDefined();
+    // The item type is still the projection: pagination must not widen what a participant
+    // may read, so the audit fields stay behind the admin query (§10.2).
+    expect(returnTypeName(items!.text), "ParticipantOrderFulfillmentConnection.items element type").toBe("ParticipantOrderFulfillment");
+    expect(items!.text, "items is [ParticipantOrderFulfillment!]!").toMatch(/items\s*:\s*\[ParticipantOrderFulfillment!\]!/);
+    expect(fieldNameSet(connection).has("pageInfo"), "the page carries a cursor for the next page").toBe(true);
+    expect(connection.body, "pageInfo is the shared PageInfo type").toMatch(/pageInfo\s*:\s*PageInfo!/);
   });
 
   test("§2.4.3/§2.4.4: the inputs carry exactly the fields a caller may choose", () => {

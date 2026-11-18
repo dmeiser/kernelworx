@@ -12,7 +12,7 @@ import {
     idempotencyKeyFor,
     markerKeysFor,
     requestFingerprint,
-    grantNamesUnit,
+    authorizeCustodySale,
     replayDecision,
     canonicalMoment,
     planLineConsumption,
@@ -144,38 +144,20 @@ function saleCustodyScope(ctx, unitCampaignId) {
 
 // SEC-1 (§2.4.2): a door-to-door custody sale moves the Unit's stock, and the Unit
 // that lent the Scout that stock -- not the Profile that owns the Campaign -- is the
-// tenant whose inventory moves. So §2.4.2 authorizes it two ways, and this is where the
-// two are weighed, because it is the first step that has both answers in hand:
+// tenant whose inventory moves. So §2.4.2 authorizes it two ways: the Profile
+// Owner/WRITE path every order write used before Wave 3, or an admin of the Unit whose
+// custody this sale consumes. The rule itself, its phrasing, and why it has to be
+// answered before any step that can report a fact about someone else's account, all
+// live in one place: `authorizeCustodySale` in lib/custody_sale.js.
 //
-//   * Profile Owner/WRITE: `check_share_permissions` stopped answering FORBIDDEN for this
-//     one field+mode and left its verdict on the stash, so an owner or a WRITE share takes
-//     the sale with no further check -- the same path every order write used before Wave 3.
-//   * Unit Admin: the `UNIT#<unitId> / GRANT#<accountId>` row data model §5.2 makes the
-//     only Unit credential, read strongly by the guard step. Its existence IS the grant
-//     (revocation deletes the row), matching `src/utils/unit_auth.py`.
-//
-// Fail-closed in every direction. Neither half is one FORBIDDEN, phrased the way the
-// share step phrases its own denial so the two paths are not distinguishable to the
-// caller. A sale whose Campaign names no Unit has no Unit Admin to authorize, so only the
-// Profile path can carry it. And the grant must name the Unit the *guard* names -- the
-// batch was keyed off the Campaign's retained link, so a link that disagrees with the
-// live join can never turn a grant for Unit A into authority over Unit B's custody (the
-// `saleCustodyScope` CONFLICT below catches the custody half of that disagreement).
-// `role` is deliberately not checked: `unit_auth` does not check it either, and a second
-// definition of "admin" is how two gates start disagreeing about the same person.
-function authorizeCustodySale(ctx, origin, actorAccountId) {
-    if (ctx.stash && ctx.stash.profileWriteAuthorized === true) {
-        return;
-    }
-    const denied = 'Forbidden: a custody sale needs the profile owner, an account with WRITE permission on the profile, or an admin of the campaign Unit';
-    if (origin === null || origin.unitId === null || actorAccountId === null) {
-        util.error(denied, 'FORBIDDEN');
-        return;
-    }
-    if (!grantNamesUnit(ctx.stash.unitAdminGrant, origin.unitId, actorAccountId)) {
-        util.error(denied, 'FORBIDDEN');
-    }
-}
+// The guard step asks it first, because that is the first step holding both answers,
+// and the pipeline puts payment-method validation behind it (SEC-1 re-review: validating
+// a Profile's stored payment methods before the caller is authorized makes the
+// validation verdict a yes/no oracle over another account). It is asked again HERE,
+// before the marker is replayed and before custody is planned, because the rule is a
+// property of the write rather than of the step order: a COMPLETED marker holds a
+// committed Order, and answering an unauthorized caller with it would disclose the
+// sale without writing anything.
 
 // One campaign counter ADD, the same shape sync_campaign_totals_fn issues for every other
 // authenticated order write: ADD, and `attribute_exists(campaignId)` so a campaign deleted
@@ -317,7 +299,7 @@ export function request(ctx) {
     // anything -- a read is enough to leak.
     const origin = orderOrigin(ctx.stash.membershipGuard);
     if (mode === MODE_CONSUME_SCOUT_CUSTODY) {
-        authorizeCustodySale(ctx, origin, actorAccountId);
+        authorizeCustodySale(ctx.stash, origin, actorAccountId);
     }
 
     const { enrichedLineItems, totalAmountCents } = enrichLineItems(input.lineItems, catalog);

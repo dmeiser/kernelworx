@@ -1,4 +1,4 @@
-import { util } from '@aws-appsync/utils';
+import { util, runtime } from '@aws-appsync/utils';
 import { normalizeIdOrPrefix } from './lib/ids.js';
 
 // The fulfillment children an Order delete must take with it (ARCH-1).
@@ -7,35 +7,36 @@ import { normalizeIdOrPrefix } from './lib/ids.js';
 // `ORDER#<orderId>`), and both the reversal path and the audit read reload the Order to
 // authorize themselves — so an orphaned history is not merely untidy. A deleted Order
 // leaves records nobody can reverse and nobody can reach, and the inventory movements
-// they name have already moved stock. The impact assessment requires children-first
-// cleanup on every hard-delete path; this step is the `deleteOrder` half of that, and
-// `delete_order_fn` commits the children and the Order in one transaction so a partial
-// cleanup is not reachable.
+// they name have already moved stock. The impact assessment (§7.1) requires the children
+// to go before the Order on every hard-delete path; this step is the read half of the
+// `deleteOrder` path, and `delete_order_fn` commits each batch it supplies.
 //
-// The read is bounded because the delete it feeds is a conditional transaction, and
-// `TransactWriteItems` accepts at most 100 item operations. 98 leaves room for the Order
-// itself plus the campaign-counter write that rides the same delete. An Order past that
-// window is refused rather than half-deleted: the caller reverses the fulfillments first,
-// which is also the only sequence that undoes the stock movement correctly. (§5.19 keeps
-// one Order's history small in practice — a line is fulfilled and reversed a handful of
-// times — so this is a budget guard, not a user-facing limit.)
+// ARCH-1 (re-review): the read is one window of a lifecycle, not the whole answer.
+// `TransactWriteItems` accepts at most 100 item operations, and the delete spends that
+// window on children plus the Order row itself, so 98 children is what one COMMITTED
+// pass can carry. A history larger than that is not refused as unreachable: reversal
+// cannot shrink it (a reversal appends a row), so the delete instead takes this window,
+// leaves the Order standing, and asks the caller to re-issue — the same mutation,
+// repeated, converges and never orphans a record, because the Order is only ever deleted
+// in the pass that found no continuation. The Order's `fulfillmentVersion` is pinned in
+// every pass (see `delete_order_fn`), so a fulfillment that lands between this read and
+// that write fails the transaction instead of slipping into the gap.
+//
+// The window is read from the base table, not the `campaignId-createdAt-index` GSI: this
+// table declares no other index, a GSI read is eventually consistent (a record written
+// moments ago can be missing from the sweep), and a consistent read is not even allowed
+// on an index.
 const CHILD_WINDOW = 98;
 
 export function request(ctx) {
     const order = ctx.stash.order;
     if (!order) {
-        // The delete is idempotent: an Order that is already gone has nothing to sweep,
-        // and `delete_order_fn` answers the no-op. Issue no read.
+        // The delete is idempotent: an Order that is already gone has nothing to sweep.
+        // `runtime.earlyReturn` skips the datastore call AND this file's response
+        // handler, so the stash is set here and the next step answers the no-op.
         ctx.stash.fulfillmentKeys = null;
-        return {
-            operation: 'Query',
-            index: 'orderId-index',
-            query: {
-                expression: 'orderId = :orderId',
-                expressionValues: util.dynamodb.toMapValues({ ':orderId': 'NOOP' })
-            },
-            limit: 1
-        };
+        ctx.stash.fulfillmentSweepIncomplete = false;
+        return runtime.earlyReturn(null);
     }
 
     // Exactly one `ORDER#` prefix, the same rule the fulfillment write and read paths
@@ -57,20 +58,12 @@ export function response(ctx) {
     if (ctx.error) {
         util.error(ctx.error.message, ctx.error.type);
     }
-    if (ctx.stash && ctx.stash.fulfillmentKeys === null) {
-        return null;
-    }
     const result = ctx.result || {};
     const items = Array.isArray(result.items) ? result.items : [];
-    if (result.lastEvaluatedKey) {
-        // Never a partial cleanup: deleting some of an Order's history and then the Order
-        // would strand the rest, which is the defect this step exists to close.
-        util.error(
-            'This order has more fulfillment history than one delete can remove; reverse its fulfillments first',
-            'CONFLICT'
-        );
-        return null;
-    }
+    // `nextToken` is the AppSync JS Query continuation field — the raw DynamoDB
+    // `lastEvaluatedKey` is not what the response handler receives, and reading a field
+    // that is never there reads every truncated read as a complete one.
+    const continuation = result.nextToken ? result.nextToken : null;
 
     const keys = [];
     for (const item of items) {
@@ -79,5 +72,7 @@ export function response(ctx) {
         }
     }
     ctx.stash.fulfillmentKeys = keys;
+    ctx.stash.fulfillmentSweepIncomplete = continuation !== null;
+    ctx.stash.fulfillmentContinuation = continuation;
     return keys;
 }
