@@ -23,7 +23,7 @@
  * privacy rule lives in the document as well as the server.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApolloClient, useMutation, useQuery } from '@apollo/client/react';
 import {
   Alert,
@@ -122,7 +122,7 @@ export const OrderFulfillmentPanel: React.FC<{ unitCampaignId: string }> = ({ un
     () => new Map(products.map((product) => [product.productId, product.productName])),
     [products],
   );
-  const writes = useFulfillmentWrites(orders.reload);
+  const writes = useFulfillmentWrites(orders.refresh);
   const [pending, setPending] = useState<PendingAction | null>(null);
 
   return (
@@ -140,6 +140,7 @@ export const OrderFulfillmentPanel: React.FC<{ unitCampaignId: string }> = ({ un
       <PendingDialog
         pending={pending}
         orders={orders.orders}
+        ordersLoading={orders.loading}
         campaign={campaignOf(campaigns, campaignId)}
         products={products}
         names={names}
@@ -204,12 +205,13 @@ const OrdersArea: React.FC<{
 const PendingDialog: React.FC<{
   pending: PendingAction | null;
   orders: readonly UnitOrderRow[];
+  ordersLoading: boolean;
   campaign: ScoutCampaign;
   products: readonly CatalogProduct[];
   names: ProductNames;
   writes: ReturnType<typeof useFulfillmentWrites>;
   onClose: () => void;
-}> = ({ pending, orders, campaign, products, names, writes, onClose }) => {
+}> = ({ pending, orders, ordersLoading, campaign, products, names, writes, onClose }) => {
   if (pending === null) return null;
   if (pending.kind === 'sale')
     return <SaleDialog campaign={campaign} products={products} names={names} writes={writes} onClose={onClose} />;
@@ -228,6 +230,7 @@ const PendingDialog: React.FC<{
   return (
     <HistoryDialog
       order={currentOrder(orders, pending.orderId, pending.order)}
+      refreshing={ordersLoading}
       names={names}
       writes={writes}
       onClose={onClose}
@@ -242,13 +245,10 @@ const PendingDialog: React.FC<{
  * version, and the next reversal has to carry the number the write produced rather than
  * the one the admin opened the dialog with. The list is re-read after every write, so it
  * is the source; the Order the admin clicked is only the fallback for the moment a read is
- * in flight.
+ * in flight. A fallback is the retired version, which is why the dialog disables reversal
+ * while that read is in flight rather than letting it be written with it.
  */
-function currentOrder(
-  orders: readonly UnitOrderRow[],
-  orderId: string,
-  fallback: UnitOrderRow,
-): UnitOrderRow {
+function currentOrder(orders: readonly UnitOrderRow[], orderId: string, fallback: UnitOrderRow): UnitOrderRow {
   return orders.find((order) => order.orderId === orderId) ?? fallback;
 }
 
@@ -269,6 +269,13 @@ type PendingAction =
  * READ shares only, so this screen's own caller — the admin who has to fulfill these
  * lines — reads nothing through them. A panel that stopped at the first page would hide
  * Orders whose lines still owe stock.
+ *
+ * `refresh` is the read itself, not a request for one. A fulfillment write answers with the
+ * version it produced, and the next write against that Order has to carry that number, so
+ * whoever just wrote awaits this Promise and knows the version on screen is the version the
+ * server holds. Each call starts a fresh read — a read that began before the write answered
+ * would answer the wrong question — and the last one started is the only one whose result
+ * is applied, so two reads racing cannot leave the older list on screen.
  */
 function useScoutOrders(unitCampaignId: string, campaignId: string) {
   const client = useApolloClient();
@@ -277,28 +284,30 @@ function useScoutOrders(unitCampaignId: string, campaignId: string) {
     loading: false,
     failed: false,
   });
-  const [attempt, setAttempt] = useState(0);
+  const live = useRef<{ done: Promise<void> } | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback((): Promise<void> => {
     if (!campaignId) {
       setState({ orders: [], loading: false, failed: false });
-      return undefined;
+      return Promise.resolve();
     }
-    let active = true;
     setState((previous) => ({ orders: previous.orders, loading: true, failed: false }));
-    void fetchUnitScoutCampaignOrders(client, unitCampaignId, campaignId)
+    const done = fetchUnitScoutCampaignOrders(client, unitCampaignId, campaignId)
       .then((orders) => {
-        if (active) setState({ orders, loading: false, failed: false });
+        if (live.current?.done === done) setState({ orders, loading: false, failed: false });
       })
       .catch(() => {
-        if (active) setState({ orders: [], loading: false, failed: true });
+        if (live.current?.done === done) setState({ orders: [], loading: false, failed: true });
       });
-    return () => {
-      active = false;
-    };
-  }, [client, unitCampaignId, campaignId, attempt]);
+    live.current = { done };
+    return done;
+  }, [client, unitCampaignId, campaignId]);
 
-  return { ...state, reload: () => setAttempt((previous) => previous + 1) };
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  return { ...state, refresh };
 }
 
 const OrderTable: React.FC<{
@@ -440,8 +449,15 @@ function formatOrderDate(orderDate: string): string {
   return Number.isNaN(parsed.getTime()) ? orderDate : parsed.toLocaleDateString();
 }
 
-/** The three Order writes, each followed by the Order read it changed. */
-function useFulfillmentWrites(refreshOrders: () => unknown) {
+/**
+ * The three Order writes, each followed by the Order read it changed.
+ *
+ * That follow-up is awaited rather than fired, because the read is where the next write's
+ * `expectedFulfillmentVersion` comes from: a write that resolved while its own read was
+ * still in flight would hand the screen back a version it had just retired, and the next
+ * click would be refused for it.
+ */
+function useFulfillmentWrites(refreshOrders: () => Promise<void>) {
   const [createSale] = useMutation(RECORD_CUSTODY_SALE);
   const [fulfillLine] = useMutation(FULFILL_INDIVIDUAL_ORDER_LINE);
   const [reverseFulfillment] = useMutation(REVERSE_INDIVIDUAL_ORDER_FULFILLMENT);
@@ -508,7 +524,7 @@ function useFulfillmentWrites(refreshOrders: () => unknown) {
   };
 }
 
-async function refreshQuietly(refresh: () => unknown): Promise<void> {
+async function refreshQuietly(refresh: () => Promise<void>): Promise<void> {
   try {
     await refresh();
   } catch {
@@ -765,10 +781,11 @@ const FulfillDialog: React.FC<{
  */
 const HistoryDialog: React.FC<{
   order: UnitOrderRow;
+  refreshing: boolean;
   names: ProductNames;
   writes: ReturnType<typeof useFulfillmentWrites>;
   onClose: () => void;
-}> = ({ order, names, writes, onClose }) => {
+}> = ({ order, refreshing, names, writes, onClose }) => {
   const admin = useQuery<GqlGetOrderFulfillmentsQuery>(GET_ORDER_FULFILLMENTS, {
     variables: { orderId: order.orderId, page: page() },
   });
@@ -801,6 +818,7 @@ const HistoryDialog: React.FC<{
             names={names}
             reversed={reversed}
             version={version}
+            refreshing={refreshing}
             onAskReverse={setPendingReversal}
           />
         </QueryGate>
@@ -887,10 +905,41 @@ function participantRowLabel(names: ProductNames, record: ParticipantFulfillment
  * already in the history is spent; a REVERSAL record is never reversible; and an Order
  * with no `fulfillmentVersion` cannot be written against at all.
  */
+/**
+ * Why a reversal control is missing while the Orders are being re-read.
+ *
+ * The write that just landed retired the Order's fulfillment version, and until this read
+ * answers, the Order the dialog is describing is still the one the admin opened it with.
+ * A reversal sent in that window would carry the retired version and be refused, so the
+ * control waits for the number the write produced instead of offering a write that cannot
+ * land.
+ */
+const READING_ORDER_LABEL = 'Reading the Order again before the next reversal';
+
 function reversalLabel(record: Pick<GqlOrderFulfillmentFieldsFragment, 'recordType'>, version: number | null): string {
   if (record.recordType === 'REVERSAL') return 'Reversal record';
   if (version === null) return 'This Order carries no fulfillment version';
   return 'Already reversed';
+}
+
+/**
+ * Whether this record's reversal can be armed right now, and what to say when it cannot.
+ *
+ * Two different reasons hold the same button back — the record is spent, or the Order's
+ * fulfillment version is being re-read after a write — and the admin needs the one that is
+ * actually true, because waiting fixes one of them and never fixes the other.
+ */
+function reversalControl(
+  record: GqlOrderFulfillmentFieldsFragment,
+  reversed: ReadonlySet<string>,
+  version: number | null,
+  refreshing: boolean,
+): { reversible: boolean; stateLabel: string } {
+  if (!canReverse(record, reversed) || version === null) {
+    return { reversible: false, stateLabel: reversalLabel(record, version) };
+  }
+  if (refreshing) return { reversible: false, stateLabel: READING_ORDER_LABEL };
+  return { reversible: true, stateLabel: '' };
 }
 
 /** The audit rows, or the words that say nothing has been fulfilled yet. */
@@ -899,24 +948,28 @@ const AdminRecords: React.FC<{
   names: ProductNames;
   reversed: ReadonlySet<string>;
   version: number | null;
+  refreshing: boolean;
   onAskReverse: (fulfillmentId: string) => void;
-}> = ({ records, names, reversed, version, onAskReverse }) => (
+}> = ({ records, names, reversed, version, refreshing, onAskReverse }) => (
   <Box>
     {isCustodySale(records) ? (
       <Typography variant="body2" color="text.secondary" data-testid="custody-sale-note">
         This Order drew on the Scout's held stock first.
       </Typography>
     ) : null}
-    {records.map((record) => (
-      <HistoryRow
-        key={record.fulfillmentId}
-        record={record}
-        names={names}
-        reversible={canReverse(record, reversed) && version !== null}
-        stateLabel={reversalLabel(record, version)}
-        onAskReverse={onAskReverse}
-      />
-    ))}
+    {records.map((record) => {
+      const control = reversalControl(record, reversed, version, refreshing);
+      return (
+        <HistoryRow
+          key={record.fulfillmentId}
+          record={record}
+          names={names}
+          reversible={control.reversible}
+          stateLabel={control.stateLabel}
+          onAskReverse={onAskReverse}
+        />
+      );
+    })}
     {records.length === 0 ? (
       <Typography variant="body2" color="text.secondary" data-testid="no-fulfillments-note">
         Nothing has been fulfilled on this Order yet.

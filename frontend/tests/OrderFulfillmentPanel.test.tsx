@@ -53,8 +53,22 @@ const CATALOG_QUERY = {
         catalogId: 'CATALOG#fall',
         catalogName: 'Fall catalog',
         products: [
-          { __typename: 'CatalogProduct', productId: CARAMEL, productName: 'Caramel Corn', description: null, price: 6, sortOrder: 1 },
-          { __typename: 'CatalogProduct', productId: BUTTER, productName: 'Butter Popcorn', description: null, price: 6, sortOrder: 2 },
+          {
+            __typename: 'CatalogProduct',
+            productId: CARAMEL,
+            productName: 'Caramel Corn',
+            description: null,
+            price: 6,
+            sortOrder: 1,
+          },
+          {
+            __typename: 'CatalogProduct',
+            productId: BUTTER,
+            productName: 'Butter Popcorn',
+            description: null,
+            price: 6,
+            sortOrder: 2,
+          },
         ],
       },
     },
@@ -131,7 +145,7 @@ function orderFixture(overrides: Record<string, unknown> = {}) {
  * authorizes on: the legacy `listOrdersByCampaign` answers Profile owners and READ shares,
  * and this screen's caller is neither.
  */
-function ordersQuery(items: unknown[], endCursor: string | null = null, cursor: string | null = null) {
+function ordersQuery(items: unknown[], endCursor: string | null = null, cursor: string | null = null, delay?: number) {
   return {
     request: {
       query: LIST_UNIT_SCOUT_CAMPAIGN_ORDERS,
@@ -150,6 +164,7 @@ function ordersQuery(items: unknown[], endCursor: string | null = null, cursor: 
         },
       },
     },
+    ...(delay === undefined ? {} : { delay }),
   };
 }
 
@@ -235,7 +250,16 @@ describe('OrderFulfillmentPanel', () => {
       CATALOG_QUERY,
       ROSTER_QUERY,
       ordersQuery([orderFixture()], 'PAGE#2'),
-      ordersQuery([orderFixture({ orderId: 'ORDER#door-2', lineItems: [lineFixture({ lineItemId: 'LINE#caramel-2', fulfilledQuantity: null })] })], null, 'PAGE#2'),
+      ordersQuery(
+        [
+          orderFixture({
+            orderId: 'ORDER#door-2',
+            lineItems: [lineFixture({ lineItemId: 'LINE#caramel-2', fulfilledQuantity: null })],
+          }),
+        ],
+        null,
+        'PAGE#2',
+      ),
     ]);
 
     await openOrders(user);
@@ -252,7 +276,10 @@ describe('OrderFulfillmentPanel', () => {
     renderPanel([
       CATALOG_QUERY,
       {
-        request: { query: LIST_UNIT_CAMPAIGN_ROSTER, variables: { unitCampaignId: UC, page: { limit: UNIT_PAGE_SIZE } } },
+        request: {
+          query: LIST_UNIT_CAMPAIGN_ROSTER,
+          variables: { unitCampaignId: UC, page: { limit: UNIT_PAGE_SIZE } },
+        },
         result: {
           data: {
             unitCampaignRoster: {
@@ -265,9 +292,13 @@ describe('OrderFulfillmentPanel', () => {
       },
     ]);
 
-    expect(await screen.findByTestId('no-campaign-note')).toHaveTextContent('No Scout Campaign is joined to this Unit Campaign');
+    expect(await screen.findByTestId('no-campaign-note')).toHaveTextContent(
+      'No Scout Campaign is joined to this Unit Campaign',
+    );
     expect(screen.getByTestId('record-custody-sale')).toBeDisabled();
-    expect(screen.getByTestId('no-order-selected-note')).toHaveTextContent('Choose a Scout to see the individual Orders');
+    expect(screen.getByTestId('no-order-selected-note')).toHaveTextContent(
+      'Choose a Scout to see the individual Orders',
+    );
   });
 
   it('SS-SM-04: a door-to-door sale consumes the held stock it can and leaves the rest owed on the line', async () => {
@@ -388,13 +419,24 @@ describe('OrderFulfillmentPanel', () => {
             fulfillIndividualOrderLine: {
               __typename: 'FulfillIndividualOrderLinePayload',
               order: orderFixture({ fulfillmentVersion: 4, lineItems: [lineFixture({ fulfilledQuantity: 3 })] }),
-              fulfillment: fulfillmentFixture({ fulfillmentId: 'FUL#kernel-1', quantity: 2, source: 'KERNEL_STOCK', inventoryMovementId: 'MOVE#kernel-1' }),
+              fulfillment: fulfillmentFixture({
+                fulfillmentId: 'FUL#kernel-1',
+                quantity: 2,
+                source: 'KERNEL_STOCK',
+                inventoryMovementId: 'MOVE#kernel-1',
+              }),
               inventoryPosition: { __typename: 'InventoryPosition', unitCampaignId: UC, productId: CARAMEL },
             },
           },
         },
       },
-      ordersQuery([orderFixture({ customerName: 'Reloaded', fulfillmentVersion: 4, lineItems: [lineFixture({ fulfilledQuantity: 3 })] })]),
+      ordersQuery([
+        orderFixture({
+          customerName: 'Reloaded',
+          fulfillmentVersion: 4,
+          lineItems: [lineFixture({ fulfilledQuantity: 3 })],
+        }),
+      ]),
     ]);
 
     await openOrders(user);
@@ -437,7 +479,12 @@ describe('OrderFulfillmentPanel', () => {
             fulfillIndividualOrderLine: {
               __typename: 'FulfillIndividualOrderLinePayload',
               order: orderFixture({ fulfillmentVersion: 4, lineItems: [lineFixture({ fulfilledQuantity: 2 })] }),
-              fulfillment: fulfillmentFixture({ fulfillmentId: 'FUL#ext-1', quantity: 1, source: 'EXTERNAL_COUNCIL', inventoryMovementId: null }),
+              fulfillment: fulfillmentFixture({
+                fulfillmentId: 'FUL#ext-1',
+                quantity: 1,
+                source: 'EXTERNAL_COUNCIL',
+                inventoryMovementId: null,
+              }),
               inventoryPosition: null,
             },
           },
@@ -466,7 +513,10 @@ describe('OrderFulfillmentPanel', () => {
       ROSTER_QUERY,
       ordersQuery([
         orderFixture(),
-        orderFixture({ orderId: 'ORDER#door-2', lineItems: [lineFixture({ productId: BUTTER, lineItemId: 'LINE#butter-1', fulfilledQuantity: 2 })] }),
+        orderFixture({
+          orderId: 'ORDER#door-2',
+          lineItems: [lineFixture({ productId: BUTTER, lineItemId: 'LINE#butter-1', fulfilledQuantity: 2 })],
+        }),
       ]),
     ]);
 
@@ -507,7 +557,14 @@ describe('OrderFulfillmentPanel', () => {
         request: {
           query: FULFILL_INDIVIDUAL_ORDER_LINE,
           variables: {
-            input: { orderId: ORDER, lineItemId: LINE, quantity: 2, source: 'KERNEL_STOCK', expectedFulfillmentVersion: 3, idempotency: { idempotencyKey: 'test-idem-1' } },
+            input: {
+              orderId: ORDER,
+              lineItemId: LINE,
+              quantity: 2,
+              source: 'KERNEL_STOCK',
+              expectedFulfillmentVersion: 3,
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
           },
         },
         error: new GraphQLError('The fulfillment version has moved.', { extensions: { code: 'CONFLICT' } }),
@@ -519,7 +576,14 @@ describe('OrderFulfillmentPanel', () => {
         request: {
           query: FULFILL_INDIVIDUAL_ORDER_LINE,
           variables: {
-            input: { orderId: ORDER, lineItemId: LINE, quantity: 1, source: 'KERNEL_STOCK', expectedFulfillmentVersion: 4, idempotency: { idempotencyKey: 'test-idem-2' } },
+            input: {
+              orderId: ORDER,
+              lineItemId: LINE,
+              quantity: 1,
+              source: 'KERNEL_STOCK',
+              expectedFulfillmentVersion: 4,
+              idempotency: { idempotencyKey: 'test-idem-2' },
+            },
           },
         },
         result: {
@@ -527,7 +591,12 @@ describe('OrderFulfillmentPanel', () => {
             fulfillIndividualOrderLine: {
               __typename: 'FulfillIndividualOrderLinePayload',
               order: orderFixture({ fulfillmentVersion: 5, lineItems: [lineFixture({ fulfilledQuantity: 3 })] }),
-              fulfillment: fulfillmentFixture({ fulfillmentId: 'FUL#kernel-2', quantity: 1, source: 'KERNEL_STOCK', inventoryMovementId: 'MOVE#kernel-2' }),
+              fulfillment: fulfillmentFixture({
+                fulfillmentId: 'FUL#kernel-2',
+                quantity: 1,
+                source: 'KERNEL_STOCK',
+                inventoryMovementId: 'MOVE#kernel-2',
+              }),
               inventoryPosition: { __typename: 'InventoryPosition', unitCampaignId: UC, productId: CARAMEL },
             },
           },
@@ -677,11 +746,17 @@ describe('OrderFulfillmentPanel', () => {
     const custodyConfirm = screen.getByRole('dialog', { name: 'Reverse this fulfillment' });
     // The copy names the source the stock goes back to, which is the source the
     // fulfillment took — and no other.
-    expect(within(custodyConfirm).getByTestId('reversal-copy')).toHaveTextContent(`Reversing returns 1 Kernel to ${fulfillmentSourceLabel('SCOUT_CUSTODY')}`);
+    expect(within(custodyConfirm).getByTestId('reversal-copy')).toHaveTextContent(
+      `Reversing returns 1 Kernel to ${fulfillmentSourceLabel('SCOUT_CUSTODY')}`,
+    );
     await user.click(within(custodyConfirm).getByRole('button', { name: 'Reverse' }));
 
-    expect(await screen.findByTestId('reversal-state-FUL#custody-1')).toHaveTextContent('Already reversed');
-    expect(screen.getByTestId('fulfillment-source-REV#custody-1')).toHaveTextContent("Scout's custody · Kernel stock moved");
+    await waitFor(() =>
+      expect(screen.getByTestId('reversal-state-FUL#custody-1')).toHaveTextContent('Already reversed'),
+    );
+    expect(screen.getByTestId('fulfillment-source-REV#custody-1')).toHaveTextContent(
+      "Scout's custody · Kernel stock moved",
+    );
 
     // The dialog keeps describing the Order as the re-read answered it: v4 is the number
     // the next reversal has to carry, and the screen says so out loud.
@@ -692,10 +767,120 @@ describe('OrderFulfillmentPanel', () => {
     // The Kernel fulfillment reverses back into Kernel stock, in its own words.
     await user.click(await screen.findByTestId('reverse-FUL#kernel-1'));
     const kernelConfirm = screen.getByRole('dialog', { name: 'Reverse this fulfillment' });
-    expect(within(kernelConfirm).getByTestId('reversal-copy')).toHaveTextContent('Reversing returns 2 Kernels to Kernel stock');
+    expect(within(kernelConfirm).getByTestId('reversal-copy')).toHaveTextContent(
+      'Reversing returns 2 Kernels to Kernel stock',
+    );
     await user.click(within(kernelConfirm).getByRole('button', { name: 'Reverse' }));
 
-    await waitFor(() => expect(screen.getByTestId('reversal-state-FUL#kernel-1')).toHaveTextContent('Already reversed'));
+    await waitFor(() =>
+      expect(screen.getByTestId('reversal-state-FUL#kernel-1')).toHaveTextContent('Already reversed'),
+    );
+  });
+
+  /**
+   * The read that follows a write belongs to the write, and reversal waits for it.
+   *
+   * A reversal answers with the fulfillment version it produced, and the next reversal has
+   * to carry that number. If the screen armed the second reversal while the Order read it
+   * starts was still in flight, the Order being described would still be the retired one
+   * and the write would be refused for a version the server already spent. So the control
+   * is withheld while that read runs, and the number it arms when it returns is the number
+   * the first reversal produced.
+   */
+  it('withholds the second reversal until the read that follows the first one has landed', async () => {
+    const user = userEvent.setup();
+    const kernelFulfillment = fulfillmentFixture({
+      fulfillmentId: 'FUL#kernel-1',
+      quantity: 2,
+      source: 'KERNEL_STOCK',
+      inventoryMovementId: 'MOVE#kernel-1',
+      createdAt: '2026-02-06T16:00:00Z',
+    });
+    const custodyReversal = fulfillmentFixture({
+      fulfillmentId: 'REV#custody-1',
+      recordType: 'REVERSAL',
+      reversalOfFulfillmentId: 'FUL#custody-1',
+      inventoryMovementId: 'MOVE#reversal-1',
+      createdAt: '2026-02-07T15:00:00Z',
+    });
+    const reversedOrder = (version: number) =>
+      orderFixture({ fulfillmentVersion: version, lineItems: [lineFixture({ fulfilledQuantity: 0 })] });
+    const kernelReversal = fulfillmentFixture({
+      fulfillmentId: 'REV#kernel-1',
+      quantity: 2,
+      recordType: 'REVERSAL',
+      source: 'KERNEL_STOCK',
+      reversalOfFulfillmentId: 'FUL#kernel-1',
+      inventoryMovementId: 'MOVE#reversal-2',
+      createdAt: '2026-02-07T16:00:00Z',
+    });
+    const reversal = (fulfillmentId: string, version: number, key: string, answer: number, record: unknown) => ({
+      request: {
+        query: REVERSE_INDIVIDUAL_ORDER_FULFILLMENT,
+        variables: {
+          input: {
+            orderId: ORDER,
+            fulfillmentId,
+            expectedFulfillmentVersion: version,
+            idempotency: { idempotencyKey: key },
+          },
+        },
+      },
+      result: {
+        data: {
+          reverseIndividualOrderFulfillment: {
+            __typename: 'ReverseIndividualOrderFulfillmentPayload',
+            order: reversedOrder(answer),
+            reversal: record,
+            inventoryPosition: null,
+          },
+        },
+      },
+    });
+
+    renderPanel([
+      CATALOG_QUERY,
+      ROSTER_QUERY,
+      ordersQuery([orderFixture()]),
+      adminHistoryQuery([fulfillmentFixture(), kernelFulfillment]),
+      reversal('FUL#custody-1', 3, 'test-idem-1', 4, custodyReversal),
+      adminHistoryQuery([fulfillmentFixture(), kernelFulfillment, custodyReversal]),
+      // The Orders read the write starts is deliberately slow: this is the window the
+      // screen has to close, with the write spent and the version on screen still retired.
+      ordersQuery([reversedOrder(4)], null, null, 1200),
+      reversal('FUL#kernel-1', 4, 'test-idem-2', 5, kernelReversal),
+      adminHistoryQuery([fulfillmentFixture(), kernelFulfillment, custodyReversal, kernelReversal]),
+      ordersQuery([reversedOrder(5)]),
+    ]);
+
+    await openOrders(user);
+    await openHistory(user);
+    await user.click(await screen.findByTestId('reverse-FUL#custody-1'));
+    const first = screen.getByRole('dialog', { name: 'Reverse this fulfillment' });
+    await user.click(within(first).getByRole('button', { name: 'Reverse' }));
+
+    // The write has landed and its own read has not. The Kernel line's reversal is real and
+    // unspent, and still the screen offers no way to arm it against the version it opened with.
+    expect(await screen.findByTestId('reversal-state-FUL#kernel-1', undefined, { timeout: 2000 })).toHaveTextContent(
+      'Reading the Order again before the next reversal',
+    );
+    expect(screen.queryByTestId('reverse-FUL#kernel-1')).toBeNull();
+
+    // The read answers with v4 — the number the first reversal produced — and only now can
+    // the second reversal be sent, carrying that number and no other.
+    await waitFor(
+      () => expect(screen.getByTestId(`order-version-${ORDER}`)).toHaveTextContent('fulfillment record v4'),
+      {
+        timeout: 4000,
+      },
+    );
+    await user.click(await screen.findByTestId('reverse-FUL#kernel-1', undefined, { timeout: 4000 }));
+    const second = await screen.findByRole('dialog', { name: 'Reverse this fulfillment' });
+    await user.click(within(second).getByRole('button', { name: 'Reverse' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('reversal-state-FUL#kernel-1')).toHaveTextContent('Already reversed'),
+    );
   });
 
   it('privacy: what the Scout sees is the participant projection, with no actor account and no movement', async () => {
@@ -729,15 +914,25 @@ describe('OrderFulfillmentPanel', () => {
     await openOrders(user);
     await openHistory(user);
 
-    expect(await screen.findByTestId(`fulfillment-actor-${'FUL#custody-1'}`)).toHaveTextContent('ACCOUNT#avery · MOVE#custody-sale-1');
+    expect(await screen.findByTestId(`fulfillment-actor-${'FUL#custody-1'}`)).toHaveTextContent(
+      'ACCOUNT#avery · MOVE#custody-sale-1',
+    );
 
     await user.click(screen.getByTestId('participant-view-toggle'));
     const view = await screen.findByTestId('participant-view');
-    expect(within(view).getByTestId('participant-note')).toHaveTextContent('without the admin account or the inventory movement');
-    expect(within(view).getByTestId('participant-row-FUL#custody-1')).toHaveTextContent("Fulfilled · Caramel Corn · 1 · Scout's custody");
-    expect(within(view).getByTestId('participant-row-FUL#kernel-1')).toHaveTextContent('Fulfilled · Caramel Corn · 2 · Kernel stock');
+    expect(within(view).getByTestId('participant-note')).toHaveTextContent(
+      'without the admin account or the inventory movement',
+    );
+    expect(within(view).getByTestId('participant-row-FUL#custody-1')).toHaveTextContent(
+      "Fulfilled · Caramel Corn · 1 · Scout's custody",
+    );
+    expect(within(view).getByTestId('participant-row-FUL#kernel-1')).toHaveTextContent(
+      'Fulfilled · Caramel Corn · 2 · Kernel stock',
+    );
     // The Scout sees the reversal too — it is her history — and nothing else.
-    expect(within(view).getByTestId('participant-row-REV#custody-1')).toHaveTextContent("Reversal · Caramel Corn · 1 · Scout's custody");
+    expect(within(view).getByTestId('participant-row-REV#custody-1')).toHaveTextContent(
+      "Reversal · Caramel Corn · 1 · Scout's custody",
+    );
     expect(within(view).queryByText(/ACCOUNT#/)).not.toBeInTheDocument();
     expect(within(view).queryByText(/MOVE#/)).not.toBeInTheDocument();
   });
@@ -768,22 +963,33 @@ describe('OrderFulfillmentPanel', () => {
 
     await openOrders(user);
     await user.click(await screen.findByTestId('order-history-ORDER#door-1'));
-    expect(await screen.findByTestId('no-fulfillments-note')).toHaveTextContent('Nothing has been fulfilled on this Order yet.');
+    expect(await screen.findByTestId('no-fulfillments-note')).toHaveTextContent(
+      'Nothing has been fulfilled on this Order yet.',
+    );
     expect(screen.queryByTestId('custody-sale-note')).not.toBeInTheDocument();
     await user.click(screen.getByTestId('participant-view-toggle'));
-    expect(await screen.findByTestId('no-participant-fulfillments-note')).toHaveTextContent('No records to show the Scout.');
+    expect(await screen.findByTestId('no-participant-fulfillments-note')).toHaveTextContent(
+      'No records to show the Scout.',
+    );
     await user.click(screen.getByRole('button', { name: 'Done' }));
 
     await user.click(await screen.findByTestId('order-history-ORDER#legacy-9'));
     // An external Council supply never moved Kernel stock, and the audit says so
     // instead of leaving a movement id out and looking broken.
     expect(await screen.findByTestId('fulfillment-actor-FUL#ext-1')).toHaveTextContent('ACCOUNT#avery · no movement');
-    expect(screen.getByTestId('fulfillment-source-FUL#ext-1')).toHaveTextContent('Direct from Council · No Kernel stock changed');
+    expect(screen.getByTestId('fulfillment-source-FUL#ext-1')).toHaveTextContent(
+      'Direct from Council · No Kernel stock changed',
+    );
   });
 
   it("the Scout's view asks for nothing beyond the audit this screen already holds", async () => {
     const user = userEvent.setup();
-    renderPanel([CATALOG_QUERY, ROSTER_QUERY, ordersQuery([orderFixture()]), adminHistoryQuery([fulfillmentFixture()])]);
+    renderPanel([
+      CATALOG_QUERY,
+      ROSTER_QUERY,
+      ordersQuery([orderFixture()]),
+      adminHistoryQuery([fulfillmentFixture()]),
+    ]);
 
     await openOrders(user);
     await openHistory(user);
@@ -801,7 +1007,13 @@ describe('OrderFulfillmentPanel', () => {
     renderPanel([
       CATALOG_QUERY,
       ROSTER_QUERY,
-      ordersQuery([orderFixture({ orderId: 'ORDER#legacy-9', fulfillmentVersion: null, lineItems: [lineFixture({ lineItemId: 'LINE#legacy-1' })] })]),
+      ordersQuery([
+        orderFixture({
+          orderId: 'ORDER#legacy-9',
+          fulfillmentVersion: null,
+          lineItems: [lineFixture({ lineItemId: 'LINE#legacy-1' })],
+        }),
+      ]),
       adminHistoryQuery([fulfillmentFixture({ lineItemId: 'LINE#legacy-1' })], 'ORDER#legacy-9'),
     ]);
 
@@ -810,7 +1022,9 @@ describe('OrderFulfillmentPanel', () => {
     await user.click(await screen.findByTestId('order-history-ORDER#legacy-9'));
     await screen.findByTestId('audit-note');
 
-    expect(await screen.findByTestId('reversal-state-FUL#custody-1')).toHaveTextContent('This Order carries no fulfillment version');
+    expect(await screen.findByTestId('reversal-state-FUL#custody-1')).toHaveTextContent(
+      'This Order carries no fulfillment version',
+    );
     expect(screen.queryByTestId('reverse-FUL#custody-1')).not.toBeInTheDocument();
   });
 
@@ -826,16 +1040,24 @@ describe('OrderFulfillmentPanel', () => {
             lineFixture({ productId: CARAMEL, fulfilledQuantity: 3 }),
           ],
         }),
-        orderFixture({ orderId: 'ORDER#legacy-9', fulfillmentVersion: null, lineItems: [lineFixture({ lineItemId: 'LINE#legacy-1' })] }),
+        orderFixture({
+          orderId: 'ORDER#legacy-9',
+          fulfillmentVersion: null,
+          lineItems: [lineFixture({ lineItemId: 'LINE#legacy-1' })],
+        }),
       ]),
     ]);
 
     await openOrders(user);
     expect(await screen.findByTestId('line-row-ORDER#door-1#PROD#butter')).toBeInTheDocument();
-    expect(screen.getByTestId('no-fulfill-ORDER#door-1#PROD#butter')).toHaveTextContent('Written before stable line ids, so nothing can name it');
+    expect(screen.getByTestId('no-fulfill-ORDER#door-1#PROD#butter')).toHaveTextContent(
+      'Written before stable line ids, so nothing can name it',
+    );
     expect(screen.getByTestId(`no-fulfill-${LINE}`)).toHaveTextContent('Nothing owed');
     expect(screen.getByTestId('order-version-ORDER#legacy-9')).toHaveTextContent('no fulfillment version yet');
-    expect(screen.getByTestId('no-fulfill-LINE#legacy-1')).toHaveTextContent('This Order carries no fulfillment version');
+    expect(screen.getByTestId('no-fulfill-LINE#legacy-1')).toHaveTextContent(
+      'This Order carries no fulfillment version',
+    );
   });
 
   it('an Order list that failed to read is not shown as an empty one', async () => {
@@ -862,7 +1084,9 @@ describe('OrderFulfillmentPanel', () => {
     renderPanel([CATALOG_QUERY, ROSTER_QUERY, ordersQuery([])]);
 
     await chooseCampaign(user);
-    expect(await screen.findByTestId('no-orders-note')).toHaveTextContent('This Scout has no individual Orders in this campaign.');
+    expect(await screen.findByTestId('no-orders-note')).toHaveTextContent(
+      'This Scout has no individual Orders in this campaign.',
+    );
   });
 
   it('an Orders read that lands after the screen has gone writes nothing', async () => {

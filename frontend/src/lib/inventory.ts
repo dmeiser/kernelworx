@@ -505,9 +505,10 @@ export async function fetchUnitScoutCampaignOrders(
  * is what is LEFT when the audit fields go, so a future audit column cannot reach a Scout
  * because someone forgot to add it to an allow-list.
  */
-const ADMIN_ONLY_FULFILLMENT_FIELDS = ['actorAccountId', 'inventoryMovementId'] as const satisfies readonly (
-  | keyof GqlOrderFulfillmentFieldsFragment
-)[];
+const ADMIN_ONLY_FULFILLMENT_FIELDS = [
+  'actorAccountId',
+  'inventoryMovementId',
+] as const satisfies readonly (keyof GqlOrderFulfillmentFieldsFragment)[];
 
 /** The audit records in the projection a Scout is shown: the same rows, minus the audit. */
 export type ParticipantFulfillmentRow = Omit<
