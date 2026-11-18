@@ -37,14 +37,23 @@ import { LoadingState } from '../components/LoadingState';
 import { PageHeader } from '../components/PageHeader';
 import { QueryGate } from '../components/QueryGate';
 import { UnitRosterPanel } from '../components/UnitRosterPanel';
-import { SHOW_SELL_BASE, createWriteIntent, newIdempotencyKey, refreshQuery, unitCampaignStatusLabel } from '../lib/units';
+import { InventoryPanel } from '../components/InventoryPanel';
+import { ScoutCustodyPanel } from '../components/ScoutCustodyPanel';
+import { OrderFulfillmentPanel } from '../components/OrderFulfillmentPanel';
+import {
+  SHOW_SELL_BASE,
+  createWriteIntent,
+  newIdempotencyKey,
+  refreshQuery,
+  unitCampaignStatusLabel,
+} from '../lib/units';
 import type {
   GqlGetUnitCampaignCatalogQuery,
   GqlGetUnitCampaignQuery,
   GqlUnitCampaignAdmin,
 } from '../types/graphql-generated';
 
-type CampaignTab = 'roster' | 'catalog';
+type CampaignTab = 'roster' | 'catalog' | 'inventory' | 'custody' | 'orders';
 type Campaign = GqlUnitCampaignAdmin;
 
 interface PendingToggle {
@@ -94,6 +103,9 @@ const CampaignWorkspaceBody: React.FC<{
         <Tabs value={tab} onChange={(_event, value: CampaignTab) => onTabChange(value)} aria-label="Campaign sections">
           <Tab label="Roster" value="roster" data-testid="tab-roster" />
           <Tab label="Catalog" value="catalog" data-testid="tab-catalog" />
+          <Tab label="Stock" value="inventory" data-testid="tab-inventory" />
+          <Tab label="Scout custody" value="custody" data-testid="tab-custody" />
+          <Tab label="Order fulfillment" value="orders" data-testid="tab-orders" />
         </Tabs>
       </Box>
       <CampaignTabPanel tab={tab} unitCampaignId={unitCampaignId} />
@@ -125,6 +137,12 @@ const CampaignHeader: React.FC<{ campaign: Campaign }> = ({ campaign }) => {
 
 const CampaignTabPanel: React.FC<{ tab: CampaignTab; unitCampaignId: string }> = ({ tab, unitCampaignId }) => {
   if (tab === 'catalog') return <CampaignCatalogCard unitCampaignId={unitCampaignId} />;
+  // The stock, custody, and fulfillment surfaces are separate because they answer
+  // different questions — what the Unit owns, what a Scout is holding, and what an
+  // Order still owes — and each one writes a different pair of rows.
+  if (tab === 'inventory') return <InventoryPanel unitCampaignId={unitCampaignId} />;
+  if (tab === 'custody') return <ScoutCustodyPanel unitCampaignId={unitCampaignId} />;
+  if (tab === 'orders') return <OrderFulfillmentPanel unitCampaignId={unitCampaignId} />;
   return <UnitRosterPanel unitCampaignId={unitCampaignId} />;
 };
 
@@ -280,12 +298,7 @@ const SaveSettingsButton: React.FC<{ loading: boolean; disabled: boolean; onSave
   disabled,
   onSave,
 }) => (
-  <Button
-    variant="contained"
-    onClick={() => void onSave()}
-    disabled={loading || disabled}
-    data-testid="save-campaign"
-  >
+  <Button variant="contained" onClick={() => void onSave()} disabled={loading || disabled} data-testid="save-campaign">
     {loading ? 'Saving…' : 'Save settings'}
   </Button>
 );
@@ -356,7 +369,9 @@ function toggleWordings(pending: PendingToggle | null): ToggleWording {
 }
 
 const CampaignCatalogCard: React.FC<{ unitCampaignId: string }> = ({ unitCampaignId }) => {
-  const catalog = useQuery<GqlGetUnitCampaignCatalogQuery>(GET_UNIT_CAMPAIGN_CATALOG, { variables: { unitCampaignId } });
+  const catalog = useQuery<GqlGetUnitCampaignCatalogQuery>(GET_UNIT_CAMPAIGN_CATALOG, {
+    variables: { unitCampaignId },
+  });
   const view = catalog.data?.unitCampaignCatalog ?? null;
   return (
     <QueryGate
