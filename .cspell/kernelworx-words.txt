@@ -137,6 +137,7 @@ jank
 metas
 mockqr
 neighbour
+neighbours
 prin
 rasterizing
 resends
