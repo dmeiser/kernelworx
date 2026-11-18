@@ -1128,7 +1128,44 @@ def test_a_line_written_before_stable_ids_answers_no_identity_and_zero_fulfilled
 
     assert order["lineItems"][0]["lineItemId"] is None
     assert order["lineItems"][0]["fulfilledQuantity"] == 0
-    assert order["fulfillmentVersion"] is None
+    # Absence is answered as 0, not null: that is the number `currentFulfillmentVersion`
+    # pins for the write guard and what the legacy `Order` projection answers, so the
+    # version the admin is shown is the version the fulfill call is conditioned on.
+    assert order["fulfillmentVersion"] == 0
+
+
+def test_newest_first_compares_the_instant_and_not_the_text_of_the_timestamp(
+    world: Dict[str, Any], orders_table: Any
+) -> None:
+    """PAGE-01 again, for the Orders whose timestamp spells the moment the other way round.
+
+    The Order writers store the caller's AWSDateTime verbatim, so the same instant reaches
+    the table as ``…Z`` and ``…+00:00`` and two Orders an hour apart can carry offsets that
+    make the older one look newer as text. Sorted by string, the offset decides the order and
+    the newest Order slides off page one; sorted by instant, the page boundary falls where the
+    business moment does. A row whose stamp cannot be parsed at all sorts as the oldest thing
+    in the list, so it stays reachable at the end instead of sitting at the top of page one.
+    """
+    behind = sold_order_item("Devon", suffix="order-offset", unit_id=PACK_3149, unit_campaign_id=CAMPAIGN)
+    behind[ORDER_DATE_ATTRIBUTE] = "2026-12-09T09:00:00+01:00"  # 08:00 UTC — the larger string, the earlier moment
+    ahead = sold_order_item("Devon", suffix="order-zulu", unit_id=PACK_3149, unit_campaign_id=CAMPAIGN)
+    ahead[ORDER_DATE_ATTRIBUTE] = "2026-12-09T08:30:00Z"  # 08:30 UTC — the smaller string, the newer moment
+    unreadable = sold_order_item("Devon", suffix="order-unreadable", unit_id=PACK_3149, unit_campaign_id=CAMPAIGN)
+    unreadable[ORDER_DATE_ATTRIBUTE] = "the ninth of December, roughly"
+    for item in (behind, ahead, unreadable):
+        orders_table.put_item(Item=item)
+
+    first = _ok(_orders(page={"limit": 2}))
+
+    assert [order["orderId"] for order in first["items"]] == [str(ahead["orderId"]), str(behind["orderId"])]
+    assert first["pageInfo"]["hasNextPage"] is True
+
+    second = _ok(_orders(page={"limit": 2, "cursor": first["pageInfo"]["endCursor"]}))
+
+    assert first["items"][0]["orderDate"] == "2026-12-09T08:30:00Z"
+    assert second["items"][-1]["orderId"] == str(unreadable["orderId"])
+    assert second["items"][-1]["orderDate"] == "the ninth of December, roughly"
+    assert str(ahead["orderId"]) not in [order["orderId"] for order in second["items"]]
 
 
 def test_orders_are_paged_newest_first_and_the_cursor_belongs_to_one_campaign_pair(

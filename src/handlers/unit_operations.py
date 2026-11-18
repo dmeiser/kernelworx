@@ -3628,6 +3628,23 @@ def _order_quantity(line: Mapping[str, Any], attribute: str) -> int:
     return int(line.get(attribute) or 0)
 
 
+def _order_sort_instant(value: str) -> datetime:
+    """The instant an Order's business moment names, as the list's sort key (§10.4).
+
+    ``orderDate`` is whatever the caller supplied and the Order writers store it
+    verbatim, so one instant can arrive as ``…Z`` and another as ``…+00:00``, and two
+    Orders taken minutes apart can arrive with different offsets. Compared as text the
+    offset decides the order, so a page boundary falls in the wrong place and the newest
+    Order can land on page two. :func:`src.utils.inventory_models.normalize_moment`
+    documents this hazard for the timestamps this service writes itself; these rows are
+    the legacy ones, written before that rule existed, so the parse happens here instead.
+    An instant that cannot be parsed sorts as the oldest thing in the list, which keeps it
+    reachable at the end rather than parked in the middle of page one.
+    """
+    parsed = unit_models.parse_timestamp(value)
+    return parsed if parsed is not None else datetime.min.replace(tzinfo=timezone.utc)
+
+
 def _unit_order_line_payload(line: Mapping[str, Any]) -> Dict[str, Any]:
     """One Order line in the fulfillment projection: identity, product, and both quantities.
 
@@ -3652,8 +3669,15 @@ def _unit_order_payload(order: Mapping[str, Any]) -> Dict[str, Any]:
     payment method, no notes. Administering stock needs the Order's identity, its Unit
     scope, and its lines; a projection that carries nothing cannot disclose anything, and
     the fulfillment path never reads the difference.
+
+    ``fulfillmentVersion`` is the field the next fulfillment conditions on, so absence is
+    answered as ``0`` exactly as the legacy ``Order`` projection answers it and as
+    ``currentFulfillmentVersion`` pins it for the write guard: the number the admin was
+    shown and the number the guard checks are the same number, or a legacy Order could
+    never be fulfilled at all. The field stays nullable in the SDL for the same reason the
+    legacy one is — the attribute itself is optional in the row — but this read never
+    answers null.
     """
-    version = order.get(order_fulfillment_models.FULFILLMENT_VERSION_ATTRIBUTE)
     return {
         "orderId": str(order[order_fulfillment_models.ORDER_ID_ATTRIBUTE]),
         "profileId": str(order.get(order_fulfillment_models.PROFILE_ID_ATTRIBUTE) or ""),
@@ -3662,7 +3686,7 @@ def _unit_order_payload(order: Mapping[str, Any]) -> Dict[str, Any]:
         "unitCampaignId": str(order.get(order_fulfillment_models.UNIT_CAMPAIGN_ID_ATTRIBUTE) or ""),
         "customerName": str(order.get(ORDER_CUSTOMER_NAME_ATTRIBUTE) or ""),
         "orderDate": str(order.get(ORDER_DATE_ATTRIBUTE) or order.get(ORDER_CREATED_AT_ATTRIBUTE) or ""),
-        "fulfillmentVersion": None if version is None else int(version),
+        "fulfillmentVersion": _number(order.get(order_fulfillment_models.FULFILLMENT_VERSION_ATTRIBUTE) or 0),
         "lineItems": [_unit_order_line_payload(line) for line in order_fulfillment_models.order_line_items(order)],
     }
 
@@ -3685,10 +3709,11 @@ def _unit_scout_campaign_orders(event: Dict[str, Any], caller_id: str) -> Dict[s
     - The projection is what a fulfillment needs and nothing else (see
       :func:`_unit_order_payload`), so the same read serves the list and the fulfillment
       dialog without a second, wider Order read.
-    - Newest first by the Order's own business moment, with ``orderId`` breaking a tie so
-      two pages of one list cannot disagree about where the cut falls. The cursor's scope
-      is this Unit Campaign and Scout Campaign pair, so a page of one campaign's Orders
-      cannot walk another's (PAGE-01).
+    - Newest first by the Order's own business moment, compared as an instant rather than
+      as the text the caller wrote, with ``orderId`` breaking a tie so two pages of one
+      list cannot disagree about where the cut falls. The cursor's scope is this Unit
+      Campaign and Scout Campaign pair, so a page of one campaign's Orders cannot walk
+      another's (PAGE-01).
     """
     campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
     unit_campaign_id = str(campaign["unitCampaignId"])
@@ -3699,7 +3724,10 @@ def _unit_scout_campaign_orders(event: Dict[str, Any], caller_id: str) -> Dict[s
         if str(row.get(order_fulfillment_models.UNIT_CAMPAIGN_ID_ATTRIBUTE) or "") == unit_campaign_id
     ]
     orders = [_unit_order_payload(row) for row in rows]
-    orders.sort(key=lambda order: (order["orderDate"], order["orderId"]), reverse=True)
+    orders.sort(
+        key=lambda order: (_order_sort_instant(order["orderDate"]), order["orderId"]),
+        reverse=True,
+    )
     scope = f"{UNIT_SCOUT_ORDERS_FIELD}#{unit_campaign_id}#{scout_campaign_id}"
     return dict(paginate_page(orders, scope, _page_argument(event)))
 
