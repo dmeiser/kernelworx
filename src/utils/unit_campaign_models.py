@@ -39,11 +39,11 @@ import secrets
 import uuid
 from decimal import Decimal
 from string import ascii_uppercase, digits
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from boto3.dynamodb.conditions import Key
 
-from .dynamodb import tables
+from .dynamodb import batch_get_chunked, tables
 from .errors import AppError, ErrorCode
 from .ids import ensure_account_id
 from .mutations import wire_key, wire_value
@@ -505,6 +505,75 @@ def read_scout_campaign(campaign_id: str) -> Optional[Dict[str, Any]]:
         )
     )
     return dict(rows[0]) if rows else None
+
+
+def seller_display_name(profile_id: str) -> str:
+    """The Scout's display name, or the empty string when the profile row cannot be read.
+
+    The profiles table is keyed by owner account (data model §6.1) and a roster row
+    carries only the profile id, so the profile's own GSI is the only way to name a
+    profile from that id — the same read ``utils.auth._profile_exists`` makes. The
+    answer is display text, so an eventually consistent projection is enough: a rename
+    shows on the next read, and the id the caller already holds is never wrong. A
+    profile that is gone answers empty rather than dropping the roster row, because the
+    membership is the history the roster exists to keep (§5.6).
+    """
+    rows = list(
+        query_all_items(
+            tables.profiles,
+            {
+                "IndexName": "profileId-index",
+                "KeyConditionExpression": "profileId = :profile_id",
+                "ExpressionAttributeValues": {":profile_id": profile_id},
+            },
+            max_items=1,
+        )
+    )
+    return str(rows[0].get("sellerName", "")) if rows else ""
+
+
+def roster_display(rows: Iterable[Mapping[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Display text for roster rows, keyed by the profile id that identifies the row.
+
+    A roster is acted on by a person, so an id cannot tell two Scouts apart. One
+    BatchGetItem answers the joined Scout Campaign rows, and the profile names take one
+    GSI read each for the reason :func:`seller_display_name` gives.
+
+    ``scoutCampaignCatalogId`` is not decoration either. An individual Order is priced
+    in the catalog of the Scout Campaign named in the write, while this Unit Campaign's
+    stock is keyed to its own catalog and product ids are catalog-scoped (``UNIT-06``,
+    ``CYCLE-01``), so a caller can offer a custody sale only when the two catalogs are
+    the same one. The roster answers both sides of that comparison rather than leaving
+    the screen to assume it.
+    """
+    pairs = [{"profileId": str(row["profileId"]), "campaignId": str(row["campaignId"])} for row in rows]
+    campaigns: Dict[str, Mapping[str, Any]] = {}
+
+    def _remember_campaign(item: Dict[str, Any]) -> None:
+        campaigns[str(item["profileId"])] = item
+
+    if pairs:
+        batch_get_chunked(tables.campaigns.table_name, pairs, _remember_campaign)
+    displays: Dict[str, Dict[str, Any]] = {}
+    for pair in pairs:
+        campaign = campaigns.get(pair["profileId"], {})
+        catalog_id = campaign.get("catalogId")
+        displays[pair["profileId"]] = {
+            "scoutName": seller_display_name(pair["profileId"]),
+            "campaignName": str(campaign.get("campaignName", "")),
+            "scoutCampaignCatalogId": None if catalog_id is None else str(catalog_id),
+        }
+    return displays
+
+
+def membership_display(profile_id: Any, campaign_id: Any) -> Dict[str, Any]:
+    """One membership's display text — the roster rule applied to a single row.
+
+    The join and removal results are membership payloads too, so they name the Scout by
+    the same rule the roster uses rather than answering empty for a field the type
+    declares non-null.
+    """
+    return roster_display([{"profileId": profile_id, "campaignId": campaign_id}]).get(str(profile_id), {})
 
 
 def read_catalog(catalog_id: str) -> Optional[Dict[str, Any]]:

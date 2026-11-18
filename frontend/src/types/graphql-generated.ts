@@ -2247,6 +2247,8 @@ export type GqlUnitCampaignMembership = {
   __typename?: 'UnitCampaignMembership';
   /** The existing Scout Campaign (immutable). */
   campaignId: Scalars['ID']['output'];
+  /** The joined Scout Campaign's display name, read at read time; empty when its row cannot be read. */
+  campaignName: Scalars['String']['output'];
   /**
    * The Scout Campaign's membership-guard version that `removeUnitCampaignMembership`
    * must match. Returned here because removal moves two rows and both versions come
@@ -2265,6 +2267,20 @@ export type GqlUnitCampaignMembership = {
   removedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   /** The Unit Admin who removed the Scout, or null when not removed. */
   removedByAccountId?: Maybe<Scalars['ID']['output']>;
+  /**
+   * The catalog the joined Scout Campaign sells from, or null when its row cannot be read. An
+   * individual Order is priced in this catalog while this Unit Campaign's stock is keyed to
+   * this campaign's own catalog, and product identity is catalog-scoped (`UNIT-06`, `CYCLE-01`),
+   * so a door-to-door sale that consumes this campaign's stock is only possible when the two
+   * catalogs are the same one.
+   */
+  scoutCampaignCatalogId?: Maybe<Scalars['ID']['output']>;
+  /**
+   * The Scout's display name, read from the profile row at read time. A roster is acted on by
+   * a person, so an id alone cannot tell two Scouts apart; the empty string means the profile
+   * row cannot be read, which is when the caller shows the id it already has.
+   */
+  scoutName: Scalars['String']['output'];
   /** ACTIVE allows new signups; REMOVED blocks them. */
   status: GqlMembershipStatus;
   /** The joined Unit Campaign. */
@@ -4086,6 +4102,9 @@ export type GqlUnitCampaignMembershipFieldsFragment = {
   unitId: string;
   campaignId: string;
   profileId: string;
+  scoutName: string;
+  campaignName: string;
+  scoutCampaignCatalogId?: string | null | undefined;
   status: GqlMembershipStatus;
   joinedByAccountId: string;
   joinedAt: string;
@@ -4291,6 +4310,9 @@ export type GqlListUnitCampaignRosterQuery = {
       unitId: string;
       campaignId: string;
       profileId: string;
+      scoutName: string;
+      campaignName: string;
+      scoutCampaignCatalogId?: string | null | undefined;
       status: GqlMembershipStatus;
       joinedByAccountId: string;
       joinedAt: string;
@@ -4508,6 +4530,9 @@ export type GqlJoinUnitCampaignMutation = {
     unitId: string;
     campaignId: string;
     profileId: string;
+    scoutName: string;
+    campaignName: string;
+    scoutCampaignCatalogId?: string | null | undefined;
     status: GqlMembershipStatus;
     joinedByAccountId: string;
     joinedAt: string;
@@ -4530,6 +4555,9 @@ export type GqlRemoveUnitCampaignMembershipMutation = {
     unitId: string;
     campaignId: string;
     profileId: string;
+    scoutName: string;
+    campaignName: string;
+    scoutCampaignCatalogId?: string | null | undefined;
     status: GqlMembershipStatus;
     joinedByAccountId: string;
     joinedAt: string;

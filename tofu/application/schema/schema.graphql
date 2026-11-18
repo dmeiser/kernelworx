@@ -1247,6 +1247,22 @@ type UnitCampaignMembership {
   campaignId: ID!
   """The Scout's profile identity."""
   profileId: ID!
+  """
+  The Scout's display name, read from the profile row at read time. A roster is acted on by
+  a person, so an id alone cannot tell two Scouts apart; the empty string means the profile
+  row cannot be read, which is when the caller shows the id it already has.
+  """
+  scoutName: String!
+  """The joined Scout Campaign's display name, read at read time; empty when its row cannot be read."""
+  campaignName: String!
+  """
+  The catalog the joined Scout Campaign sells from, or null when its row cannot be read. An
+  individual Order is priced in this catalog while this Unit Campaign's stock is keyed to
+  this campaign's own catalog, and product identity is catalog-scoped (`UNIT-06`, `CYCLE-01`),
+  so a door-to-door sale that consumes this campaign's stock is only possible when the two
+  catalogs are the same one.
+  """
+  scoutCampaignCatalogId: ID
   """ACTIVE allows new signups; REMOVED blocks them."""
   status: MembershipStatus!
   """The account that redeemed the join code."""

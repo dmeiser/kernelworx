@@ -1097,7 +1097,9 @@ def campaign_payload(campaign: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-def membership_payload(membership: Mapping[str, Any], *, guard_version: Optional[int] = None) -> Dict[str, Any]:
+def membership_payload(
+    membership: Mapping[str, Any], *, display: Mapping[str, Any], guard_version: Optional[int] = None
+) -> Dict[str, Any]:
     """Project a membership item onto ``UnitCampaignMembership``.
 
     Removal audit is returned as null rather than omitted: a REMOVED roster entry
@@ -1108,12 +1110,21 @@ def membership_payload(membership: Mapping[str, Any], *, guard_version: Optional
     the sake of a removal the admin can actually perform from it. Removal requires
     both row versions, so a roster that answered only the membership version would
     leave the second half of the pair unknowable.
+
+    ``display`` comes from :func:`unit_campaign_models.roster_display`: the Scout's
+    name, their Campaign's name, and the catalog that Campaign sells from. It is read
+    text rather than a stored copy, so a Scout who changes their name is shown by the
+    name they have now, and a profile or Campaign row that cannot be read answers
+    empty/null instead of making the roster row disappear.
     """
     return {
         "unitCampaignId": membership["unitCampaignId"],
         "unitId": membership["unitId"],
         "campaignId": membership["campaignId"],
         "profileId": membership["profileId"],
+        "scoutName": str(display.get("scoutName", "")),
+        "campaignName": str(display.get("campaignName", "")),
+        "scoutCampaignCatalogId": display.get("scoutCampaignCatalogId"),
         "status": membership["status"],
         "joinedByAccountId": membership["joinedByAccountId"],
         "joinedAt": membership["joinedAt"],
@@ -1502,7 +1513,10 @@ def _joined_membership_payload(unit_campaign_id: str, campaign_id: str) -> Dict[
     """
     scout = unit_campaign_models.read_scout_campaign(campaign_id)
     membership = unit_campaign_models.read_membership(unit_campaign_id, str(scout["profileId"])) if scout else None
-    return membership_payload(_loaded_or_internal(membership, "joined membership could not be loaded"))
+    member = _loaded_or_internal(membership, "joined membership could not be loaded")
+    return membership_payload(
+        member, display=unit_campaign_models.membership_display(str(member["profileId"]), campaign_id)
+    )
 
 
 def _join_scout_profile(caller_id: str, campaign_id: str) -> str:
@@ -1904,8 +1918,10 @@ def _list_roster(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     raw_status = arguments.get("status") if isinstance(arguments, Mapping) else None
     status = None if raw_status is None else unit_campaign_models.normalize_membership_status(raw_status)
     unit_campaign_id = str(campaign["unitCampaignId"])
+    members = unit_campaign_models.list_memberships(unit_campaign_id, status=status)
+    displays = unit_campaign_models.roster_display(members)
     items = []
-    for membership in unit_campaign_models.list_memberships(unit_campaign_id, status=status):
+    for membership in members:
         # Only an ACTIVE row can be removed, so only an ACTIVE row needs its guard
         # version read back. A REMOVED row's slot is already free, and answering
         # null says so without inventing a version for a row no mutation accepts.
@@ -1914,7 +1930,13 @@ def _list_roster(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
             guard = unit_campaign_models.read_membership_guard(str(membership["campaignId"]))
             if guard is not None:
                 guard_version = _number(guard["membershipVersion"])
-        items.append(membership_payload(membership, guard_version=guard_version))
+        items.append(
+            membership_payload(
+                membership,
+                display=displays[str(membership["profileId"])],
+                guard_version=guard_version,
+            )
+        )
     return dict(
         paginate_page(
             items, f"{UNIT_CAMPAIGN_ROSTER_FIELD}#{unit_campaign_id}#{status or 'ALL'}", _page_argument(event)

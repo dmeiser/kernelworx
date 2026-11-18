@@ -1002,6 +1002,9 @@ export const UNIT_CAMPAIGN_MEMBERSHIP_FRAGMENT = gql`
     unitId
     campaignId
     profileId
+    scoutName
+    campaignName
+    scoutCampaignCatalogId
     status
     joinedByAccountId
     joinedAt

@@ -174,7 +174,7 @@ Any mutation attempted outside this matrix returns `CONFLICT`, except a cross-te
 | `unitCampaign` | `unitCampaignId: ID!` | `UnitCampaignAdmin` including joinCode and settings | Unit Admin; member-safe preview uses `unitCampaignJoinInfo` |
 | `unitCampaignCatalog` | `unitCampaignId` | `{ catalogId, catalogName, products[{productId, productName, description, price, sortOrder}] }` | Unit Admin; current catalog/product inputs for browser sales sheets, including events with no sales |
 | `unitCampaigns` | `unitId`, `isActive`, `page` | `UnitCampaignConnection` | Unit Admin for the parent Unit |
-| `unitCampaignRoster` | `unitCampaignId`, `status`, `page` | `UnitCampaignMembershipConnection` | Unit Admin; includes removed history |
+| `unitCampaignRoster` | `unitCampaignId`, `status`, `page` | `UnitCampaignMembershipConnection` | Unit Admin; includes removed history. Every row also answers `scoutName`, `campaignName`, and `scoutCampaignCatalogId` (§10.4): a roster is chosen from by a person, so an id alone cannot name the Scout a write issues stock to |
 
 ### 4.2 Unit mutations
 
@@ -415,6 +415,16 @@ unitScoutCampaignOrders(
 | `LineItem.fulfilledQuantity` | `Int!` | Kernels already fulfilled; an absent attribute answers `0`. |
 
 Fulfillment history itself stays on the existing reads: `orderFulfillments` is the administrative audit read (it names the actor account and the inventory movement), and `Order.fulfillments` stays the participant projection with those fields removed. This operation answers neither.
+
+### 10.4 Which catalog a door-to-door sale is priced in
+
+A door-to-door sale is an ordinary individual Order, so its products and prices come from **the catalog of the Scout Campaign named in the input** — the existing `get_campaign_for_order` → `get_catalog` path, unchanged by Wave 3. The stock it may consume belongs to a Unit Campaign, whose balance and custody rows are keyed to **that campaign's** catalog, and product identity is catalog-scoped: a product id belongs to one catalog and nothing maps it into another (`UNIT-06`, `CYCLE-01`).
+
+| Fact | Contract |
+| --- | --- |
+| A custody sale can consume this campaign's stock only across one catalog | A line consumes a With Scout row only when its `productId` is a product of this Unit Campaign's catalog, which for a given Scout Campaign means the same `catalogId`. Two different catalogs share no product id, so no line of such an Order can consume or fulfil this campaign's stock, and the Order write refuses the product (`INVALID_INPUT`). |
+| What the roster answers | `unitCampaignRoster` carries `scoutCampaignCatalogId` — the joined Scout Campaign's own catalog, read from its row at read time, null when that row cannot be read — so a caller compares both sides instead of offering a write the server must refuse. `scoutName` and `campaignName` come from the same rows, empty when a row is gone: `PROFILE#…` is not a name an admin can choose between. |
+| Enforcement today | Nothing refuses a join whose Scout Campaign sells from a different catalog, and a joined Campaign can still change its `catalogId`. `SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md` §3.2–3.3 own that enforcement (identity at join time, plus the post-join drift guard, and they say explicitly not to leave it to a frontend assumption). Until that lands, a caller reads both ids and does not offer the write; the screens name the mismatch rather than sending a sale the server refuses. |
 
 ## 11. Resolver coverage summary
 
