@@ -178,7 +178,7 @@ describe('delete_order_fn request: the fulfillment children ride the delete', ()
     it('reports a swept-but-unfinished delete as a retryable RESOURCE_BUSY, not as success', () => {
         assert.throws(
             () => response({ stash: { sweepBatchOnly: true, sweptRecords: 98 } }),
-            /RESOURCE_BUSY: This order has more fulfillment history than one delete can remove; 98 record\(s\) were just removed and the order is still present — delete it again to continue/
+            /RESOURCE_BUSY: This order has more fulfillment history than one delete can remove; 98 record\(s\) were just removed and the order is still present - delete it again to continue/
         );
     });
 
