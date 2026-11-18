@@ -33,6 +33,21 @@ interface FormDialogProps {
   confirmColor?: React.ComponentProps<typeof Button>['color'];
 }
 
+/**
+ * The close control on the note, when the caller has an error of its own to clear.
+ *
+ * Both copies are cleared together: the host caught a refusal from the failed confirm,
+ * and the caller holds the field error that made the confirm fail. Clearing one would
+ * leave the same words on screen.
+ */
+function dismissHandler(setRefusal: (message: null) => void, onDismissError?: () => void): (() => void) | undefined {
+  if (!onDismissError) return undefined;
+  return () => {
+    setRefusal(null);
+    onDismissError();
+  };
+}
+
 export const FormDialog: React.FC<FormDialogProps> = (props) => {
   const { title, confirmLabel, onCancel, onConfirm, children, confirmColor } = props;
   const [pending, setPending] = useState(false);
@@ -54,12 +69,14 @@ export const FormDialog: React.FC<FormDialogProps> = (props) => {
   };
 
   const problem = props.error ?? refusal;
+  const dismiss = dismissHandler(setRefusal, props.onDismissError);
+
   return (
     <Dialog open onClose={pending ? undefined : onCancel} maxWidth="sm" fullWidth>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent>
         {children}
-        <ErrorNote message={problem} onDismiss={props.onDismissError} sx={{ mt: 2 }} />
+        <ErrorNote message={problem} onDismiss={dismiss} sx={{ mt: 2 }} />
       </DialogContent>
       <DialogActions>
         <Button onClick={onCancel} disabled={pending}>
