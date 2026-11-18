@@ -119,6 +119,7 @@ MY_SCOUT_CUSTODY_FIELD = "myScoutCustody"
 FULFILL_LINE_FIELD = "fulfillIndividualOrderLine"
 REVERSE_FULFILLMENT_FIELD = "reverseIndividualOrderFulfillment"
 ORDER_FULFILLMENTS_FIELD = "orderFulfillments"
+UNIT_SCOUT_ORDERS_FIELD = "unitScoutCampaignOrders"
 
 MAX_ACTIVE_UNIT_INVITES = 20
 INVITE_FAILURES_PER_HOUR = 10
@@ -3609,6 +3610,100 @@ def _order_fulfillments(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]
     return dict(paginate_page(items, f"{ORDER_FULFILLMENTS_FIELD}#{stored_order_id}", _page_argument(event)))
 
 
+# --- unitScoutCampaignOrders (§2.4.1, §2.6.3) -------------------------------------
+
+#: The two Order-row attributes the fulfillment projection names that
+#: :mod:`src.utils.order_fulfillment_models` has no constant for, because its own
+#: arithmetic never reads them: the customer the Scout wrote the Order for, and the
+#: product name as the Order recorded it.
+ORDER_CUSTOMER_NAME_ATTRIBUTE = "customerName"
+ORDER_PRODUCT_NAME_ATTRIBUTE = "productName"
+#: The legacy Order row's own timestamps, either of which answers `orderDate`.
+ORDER_DATE_ATTRIBUTE = "orderDate"
+ORDER_CREATED_AT_ATTRIBUTE = "createdAt"
+
+
+def _order_quantity(line: Mapping[str, Any], attribute: str) -> int:
+    """One line's quantity attribute as an integer, with the pre-Wave-3 absence read as 0."""
+    return int(line.get(attribute) or 0)
+
+
+def _unit_order_line_payload(line: Mapping[str, Any]) -> Dict[str, Any]:
+    """One Order line in the fulfillment projection: identity, product, and both quantities.
+
+    ``lineItemId`` is passed through as it is stored, so a line written before Wave 3
+    answers with none. That is the answer the screen needs: §5.19 lets a fulfillment name
+    a line only by its stable id, so a line without one cannot be fulfilled and the
+    control is withheld rather than guessed at from the line's position.
+    """
+    return {
+        "lineItemId": line.get(order_fulfillment_models.LINE_ITEM_ID_ATTRIBUTE),
+        "productId": str(line.get(order_fulfillment_models.PRODUCT_ID_ATTRIBUTE) or ""),
+        "productName": str(line.get(ORDER_PRODUCT_NAME_ATTRIBUTE) or ""),
+        "quantity": _order_quantity(line, order_fulfillment_models.QUANTITY_ATTRIBUTE),
+        "fulfilledQuantity": _order_quantity(line, order_fulfillment_models.FULFILLED_QUANTITY_ATTRIBUTE),
+    }
+
+
+def _unit_order_payload(order: Mapping[str, Any]) -> Dict[str, Any]:
+    """One Order row in the projection a Unit Admin fulfills from (§2.6.3).
+
+    Narrower than the legacy ``Order`` type on purpose: no customer phone, no address, no
+    payment method, no notes. Administering stock needs the Order's identity, its Unit
+    scope, and its lines; a projection that carries nothing cannot disclose anything, and
+    the fulfillment path never reads the difference.
+    """
+    version = order.get(order_fulfillment_models.FULFILLMENT_VERSION_ATTRIBUTE)
+    return {
+        "orderId": str(order[order_fulfillment_models.ORDER_ID_ATTRIBUTE]),
+        "profileId": str(order.get(order_fulfillment_models.PROFILE_ID_ATTRIBUTE) or ""),
+        "campaignId": str(order.get(order_fulfillment_models.CAMPAIGN_ID_ATTRIBUTE) or ""),
+        "unitId": str(order.get(order_fulfillment_models.UNIT_ID_ATTRIBUTE) or ""),
+        "unitCampaignId": str(order.get(order_fulfillment_models.UNIT_CAMPAIGN_ID_ATTRIBUTE) or ""),
+        "customerName": str(order.get(ORDER_CUSTOMER_NAME_ATTRIBUTE) or ""),
+        "orderDate": str(order.get(ORDER_DATE_ATTRIBUTE) or order.get(ORDER_CREATED_AT_ATTRIBUTE) or ""),
+        "fulfillmentVersion": None if version is None else int(version),
+        "lineItems": [_unit_order_line_payload(line) for line in order_fulfillment_models.order_line_items(order)],
+    }
+
+
+def _unit_scout_campaign_orders(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The individual Orders one Scout Campaign holds for this Unit Campaign.
+
+    Why this read exists: the legacy ``listOrdersByCampaign`` and ``getOrder`` pipelines
+    authorize Profile ownership and READ shares only. The Unit Admin who fulfills these
+    Orders (§2.4.3, §2.4.4) is neither, so through those reads the screen they are built
+    for is empty. Here the authorization is the Order's own origin instead: the caller
+    must admin the Unit Campaign the sale was taken under.
+
+    Three rules the answer follows:
+
+    - Tenancy is each row's immutable ``unitCampaignId``, never a scope the caller claims.
+      Rows whose origin is another Unit Campaign, and independent sales that carry no Unit
+      scope at all, sit in the same partition and are not answered: naming a Scout
+      Campaign is not an access path (AUTH-U).
+    - The projection is what a fulfillment needs and nothing else (see
+      :func:`_unit_order_payload`), so the same read serves the list and the fulfillment
+      dialog without a second, wider Order read.
+    - Newest first by the Order's own business moment, with ``orderId`` breaking a tie so
+      two pages of one list cannot disagree about where the cut falls. The cursor's scope
+      is this Unit Campaign and Scout Campaign pair, so a page of one campaign's Orders
+      cannot walk another's (PAGE-01).
+    """
+    campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    scout_campaign_id = inventory_models.normalize_inventory_id(_query_argument(event, "campaignId"), "campaignId")
+    rows = [
+        row
+        for row in order_fulfillment_models.scout_campaign_order_rows(scout_campaign_id)
+        if str(row.get(order_fulfillment_models.UNIT_CAMPAIGN_ID_ATTRIBUTE) or "") == unit_campaign_id
+    ]
+    orders = [_unit_order_payload(row) for row in rows]
+    orders.sort(key=lambda order: (order["orderDate"], order["orderId"]), reverse=True)
+    scope = f"{UNIT_SCOUT_ORDERS_FIELD}#{unit_campaign_id}#{scout_campaign_id}"
+    return dict(paginate_page(orders, scope, _page_argument(event)))
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -3644,6 +3739,7 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     FULFILL_LINE_FIELD: _fulfill_line,
     REVERSE_FULFILLMENT_FIELD: _reverse_fulfillment,
     ORDER_FULFILLMENTS_FIELD: _order_fulfillments,
+    UNIT_SCOUT_ORDERS_FIELD: _unit_scout_campaign_orders,
 }
 
 

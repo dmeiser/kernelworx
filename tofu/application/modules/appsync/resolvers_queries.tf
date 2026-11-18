@@ -850,3 +850,23 @@ resource "aws_appsync_resolver" "order_fulfillments_query" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Stage 3 §2.6.3: the individual Orders a Unit Admin fulfills, read by the Order's
+# immutable origin instead of by Profile ownership. The legacy listOrdersByCampaign and
+# getOrder pipelines authorize Profile ownership and READ shares only, so the admin who
+# owes the stock those Orders sold sees an empty list through them. Same unit resolver and
+# same data source as every other Unit field: the tenant check lives in the one handler
+# that enforces it, so a new read only adds a field name to its router.
+resource "aws_appsync_resolver" "unit_scout_campaign_orders_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitScoutCampaignOrders"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

@@ -59,6 +59,7 @@ from src.handlers.unit_operations import (
     UNIT_CAMPAIGNS_FIELD,
     UNIT_FIELD,
     UNIT_INVITES_FIELD,
+    UNIT_SCOUT_ORDERS_FIELD,
     UPDATE_UNIT_CAMPAIGN_FIELD,
     UPDATE_UNIT_FIELD,
     handle_unit_operation,
@@ -826,5 +827,34 @@ def test_the_fulfillment_audit_read_stays_inside_the_shipped_role(
     )
     assert ("Query", _physical_table("order_fulfillments")) in dynamodb_calls.calls, (
         "the audit no longer reads the Order's own partition"
+    )
+    assert_within_role_scope(dynamodb_calls.calls)
+
+
+def test_the_unit_order_list_read_stays_inside_the_shipped_role(
+    on_the_books: Dict[str, Any], dynamodb_calls: DynamoDbCallRecorder
+) -> None:
+    """§2.6.3: the Order list a Unit Admin fulfills from is a base-table read, and only a read.
+
+    The orders table is hash-keyed on the Scout Campaign, so this read needs no index and
+    no new grant — and it must not grow one: the same role's Order grant is UpdateItem on
+    the base table only, because the Order row's create and delete owners stay elsewhere.
+    """
+    dynamodb_calls.attach()
+
+    page = _ok(
+        _call(
+            UNIT_SCOUT_ORDERS_FIELD,
+            "Avery",
+            arguments={"unitCampaignId": PACK_3149_FALL, "campaignId": _campaign_of("Devon")},
+        )
+    )
+    assert page["items"], "the Order written under Devon's Scout Campaign answered nothing"
+
+    assert not [pair for pair in dynamodb_calls.calls if pair[0] in WRITE_ACTIONS], (
+        "an Order list read wrote something: reading what a Unit owes never changes what it owes"
+    )
+    assert ("Query", _physical_table("orders")) in dynamodb_calls.calls, (
+        "the Order list no longer reads the Scout Campaign's own partition on the base table"
     )
     assert_within_role_scope(dynamodb_calls.calls)
