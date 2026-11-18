@@ -968,7 +968,11 @@ def arrange_custody_sale(
     ends with With Scout at zero, Kernel physical untouched, and one unit still owed.
 
     Every row comes from the production builders this pipeline calls, so an arranged sale
-    cannot drift from a real one without the builder changing first. What the arrangement
+    cannot drift from a real one without the builder changing first. The Order row is built
+    from the caller's own lane, and that matters: ``unitId`` and every id come from the lane,
+    and the fulfillment history copies the Order's ``unitId``, so a lane left behind here
+    attributes one attempt's sale to another attempt's Unit.
+    What the arrangement
     leaves out is the campaign's ``totalOrders`` counter: it is the sale's own bookkeeping
     rather than a stock quantity, and it is tested through the pipeline in
     ``create_order_fn.test.js``. The replay marker is arranged, because leaving it out is how a
@@ -982,6 +986,7 @@ def arrange_custody_sale(
         unit_campaign_id=unit_campaign_id,
         customer_name=f"{customer_name} {lane.data_id}",
         order_date=occurred_at,
+        lane=lane,
     )
     _write_sale_history(
         inventory_table, fulfillments_table, order, line_item_id, product_id, taken, occurred_at, actor, idempotency_key

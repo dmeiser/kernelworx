@@ -766,6 +766,11 @@ def test_a_second_attempt_runs_the_same_scenario_beside_the_first_and_is_cleaned
     assert len(surviving) == 2
     assert all(second.attempt_key in str(row["orderId"]) for row in surviving), "the suffix names its attempt"
     assert all(second.attempt_key in str(line["lineItemId"]) for row in surviving for line in row["lineItems"])
+    assert all(str(row["unitId"]) == second.pack for row in surviving), "the sale names this attempt's Unit"
+    surviving_ids = {str(row["orderId"]) for row in surviving}
+    records = [row for row in order_fulfillments_table.scan()["Items"] if str(row.get("orderId")) in surviving_ids]
+    assert records, "the second attempt's sale wrote fulfillment history"
+    assert all(str(row["unitId"]) == second.pack for row in records), "so does the history that copies it"
     survivors = [
         str(row["pk"]) for row in order_fulfillments_table.scan()["Items"] if str(row["pk"]).startswith("IDEM#")
     ]
