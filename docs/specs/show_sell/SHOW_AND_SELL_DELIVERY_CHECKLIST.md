@@ -82,13 +82,13 @@
     - [ ] 2.7.1. Add `inventory` and `order_fulfillments` OpenTofu tables with documented keys/indexes, PITR, least-privilege transactional IAM, and recovery imports. Add tofu, IAM, reversal-key, and recovery-coverage validation.
     - [ ] 2.7.2. Add deterministic inventory/custody/Order fixtures and helpers for exactly 4 Caramel/10 Butter, issue/sale/return sequences, Council demand, both fulfillment sources, versions, movement reconciliation, and last-unit races. Add reusable `SS-SM-03/04/10` setup and lane cleanup tests.
   - [ ] 2.8. Testing and validation — required to complete Stage 2
-    - [ ] 2.8.1. Run table-driven tests for every inventory/custody formula and every receipt, adjustment, issue, return, Order, fulfillment, and reversal path.
-    - [ ] 2.8.2. Integration-test stock-only adjustments and prove they create no Order, Show & Sell sale, payment, trade, fulfillment, obligation, or Scout-credit effect.
-    - [ ] 2.8.3. Prove the exact issue 4 → sale 3 → sale 2 with one fulfilled → issue 2 → return 1 sequence, ending Kernel 5, With Scout 1, total owned 6, and no double stock decrement.
-    - [ ] 2.8.4. Concurrency-test issue/receipt/adjustment/fulfillment/custody-return/duplicate-reversal/idempotent-retry races and assert zero partial effects on every failure.
+    - [x] 2.8.1. Run table-driven tests for every inventory/custody formula and every receipt, adjustment, issue, return, Order, fulfillment, and reversal path.
+    - [x] 2.8.2. Integration-test stock-only adjustments and prove they create no Order, Show & Sell sale, payment, trade, fulfillment, obligation, or Scout-credit effect.
+    - [x] 2.8.3. Prove the exact issue 4 → sale 3 → sale 2 with one fulfilled → issue 2 → return 1 sequence, ending Kernel 5, With Scout 1, total owned 6, and no double stock decrement.
+    - [x] 2.8.4. Concurrency-test issue/receipt/adjustment/fulfillment/custody-return/duplicate-reversal/idempotent-retry races and assert zero partial effects on every failure.
     - [ ] 2.8.5. Run `SS-SM-03`, `SS-SM-04`, `INV-Q`, `INV-M`, `ORD-API`, and raw-data endpoint descriptions against `dev` after the merge SHA's `Deploy Dev` run is green, with persisted balance/audit assertions.
-    - [ ] 2.8.6. Verify removed Unit Admin, cross-Unit `NOT_FOUND`, READ-only denial, non-owner WRITE success/revocation, global ADMIN isolation, anonymous/API-key denial, and participant/admin output separation.
-    - [ ] 2.8.7. Run backend/frontend coverage, lint/type checks, infrastructure validation, 90/91-action tests, and movement-to-balance reconciliation; then clean all Stage 2 records without touching another lane.
+    - [x] 2.8.6. Verify removed Unit Admin, cross-Unit `NOT_FOUND`, READ-only denial, non-owner WRITE success/revocation, global ADMIN isolation, anonymous/API-key denial, and participant/admin output separation.
+    - [x] 2.8.7. Run backend/frontend coverage, lint/type checks, infrastructure validation, 90/91-action tests, and movement-to-balance reconciliation; then clean all Stage 2 records without touching another lane.
 
 - [ ] 3. Stage: Show & Sell events, slots, and signups
   - [ ] 3.1. Implement event persistence and lifecycle resolvers.
