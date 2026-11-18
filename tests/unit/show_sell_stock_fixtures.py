@@ -50,6 +50,10 @@ Stage 1 persona rows survive it.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -71,8 +75,8 @@ from src.handlers.unit_operations import (
 )
 from src.utils import inventory_models as inv
 from src.utils import order_fulfillment_models as ful
-from src.utils.dynamodb import get_dynamodb_client
-from src.utils.mutations import WritePlan
+from src.utils.dynamodb import get_dynamodb_client, tables
+from src.utils.mutations import MarkerKeys, WritePlan, marker_keys
 from tests.unit.show_sell_fixtures import (
     PROFILES,
     account_id,
@@ -88,51 +92,232 @@ from tests.unit.show_sell_fixtures import (
 )
 
 # ---------------------------------------------------------------------------
-# The lane's identity (smoke plan §3.3). ``DATA_ID`` is the plan's ``<DATA_ID>``: fixed, so
-# a lane is reproducible run to run, and one string that separates this lane's rows from
-# another lane's inside a shared table.
+# The lane's identity (smoke plan §3.1, FIX-AC-03).
+#
+# ``DATA_ID`` is the plan's ``<RUN_ID>-<SCENARIO_ID>-<LANE_ID>-<ATTEMPT_ID>``, and every
+# entity id, idempotency key and stamp in a lane is derived from it. A lane is therefore a
+# value, not a set of module constants: two attempts of one scenario, run at the same time
+# or one after a failure, hold different ids, so they cannot replay each other's writes
+# through a shared idempotency key or delete each other's rows during cleanup.
+#
+# :data:`DEFAULT_LANE` keeps the plan's numbers reproducible for the fidelity tests in
+# ``test_show_sell_stock_fixtures.py``; :meth:`SmokeLane.new` is what a scenario run uses,
+# and it is what :func:`clean_stage2_lane` can address without touching another attempt.
 # ---------------------------------------------------------------------------
 
-DATA_ID = "smoke3149"
 
-SMOKE_PACK = f"unit-{DATA_ID}-pack-3149"
+def _new_run_id() -> str:
+    """``RUN_ID`` as the plan spells it: UTC epoch seconds plus a short uuid4 tail."""
+    return f"{int(datetime.now(timezone.utc).timestamp())}-{uuid.uuid4().hex[:6]}"
 
-SMOKE_CATALOG_ID = f"CATALOG#smoke-popcorn-{DATA_ID}"
-CARAMEL = f"{SMOKE_CATALOG_ID}#caramel-popcorn"
-BUTTER = f"{SMOKE_CATALOG_ID}#butter-popcorn"
-CHOCOLATE = f"{SMOKE_CATALOG_ID}#chocolate-popcorn"
 
-#: ``productId -> (productName, price per ONE inventory unit)`` — §3.3's table verbatim,
-#: and one unit is one sale unit: this catalog carries no case quantities or conversions.
-SMOKE_PRODUCTS: Dict[str, Tuple[str, Decimal]] = {
-    CARAMEL: (f"Caramel Popcorn {DATA_ID}", Decimal("30.00")),
-    BUTTER: (f"Butter Popcorn {DATA_ID}", Decimal("20.00")),
-    CHOCOLATE: (f"Chocolate Popcorn {DATA_ID}", Decimal("25.00")),
-}
+def _new_attempt_id() -> str:
+    """``ATTEMPT_ID``: fresh for every attempt, including every retry of a failed one."""
+    return uuid.uuid4().hex[:6]
 
-FOUR_BOX = f"uc-{DATA_ID}-fall-popcorn"
-STOCK_ADMIN = f"uc-{DATA_ID}-stock-admin"
-DOOR_TO_DOOR = f"uc-{DATA_ID}-door-to-door"
-COUNCIL_PLANNING = f"uc-{DATA_ID}-council-planning"
+
+@dataclass(frozen=True)
+class SmokeLane:
+    """One scenario attempt's identity, and everything derived from it.
+
+    Nothing in here is a calendar date or a fixed suffix. The Unit, Unit Campaigns, catalog,
+    products, Show & Sell, Order suffixes, line identities and idempotency keys all carry
+    ``data_id``, which is what makes a lane's rows addressable as one set — by the cleanup
+    sweep, by the demand and sales readers, and by a second attempt that has to be able to
+    sit beside the first.
+    """
+
+    data_id: str
+    t0: datetime
+    run_id: str = ""
+    lane_id: str = "L01"
+    scenario_id: str = ""
+    attempt_id: str = ""
+
+    @classmethod
+    def new(
+        cls,
+        scenario_id: str,
+        *,
+        run_id: Optional[str] = None,
+        lane_id: str = "L01",
+        attempt_id: Optional[str] = None,
+        t0: Optional[datetime] = None,
+    ) -> "SmokeLane":
+        """A lane for one fresh attempt: nothing in it collides with an earlier attempt."""
+        run = run_id or _new_run_id()
+        attempt = attempt_id or _new_attempt_id()
+        return cls(
+            data_id=f"{run}-{scenario_id}-{lane_id}-{attempt}",
+            t0=t0 or datetime.now(timezone.utc).replace(microsecond=0),
+            run_id=run,
+            lane_id=lane_id,
+            scenario_id=scenario_id,
+            attempt_id=attempt,
+        )
+
+    # --- ids ------------------------------------------------------------------
+
+    @property
+    def pack(self) -> str:
+        """The lane's own Pack 3149 (``SMOKE_PACK``)."""
+        return f"unit-{self.data_id}-pack-3149"
+
+    @property
+    def catalog_id(self) -> str:
+        return f"CATALOG#smoke-popcorn-{self.data_id}"
+
+    @property
+    def caramel(self) -> str:
+        return f"{self.catalog_id}#caramel-popcorn"
+
+    @property
+    def butter(self) -> str:
+        return f"{self.catalog_id}#butter-popcorn"
+
+    @property
+    def chocolate(self) -> str:
+        return f"{self.catalog_id}#chocolate-popcorn"
+
+    @property
+    def products(self) -> Dict[str, Tuple[str, Decimal]]:
+        """``productId -> (productName, price per ONE inventory unit)`` — §3.3 verbatim.
+
+        One unit is one sale unit: this catalog carries no case quantities or conversions.
+        """
+        return {
+            self.caramel: (f"Caramel Popcorn {self.data_id}", Decimal("30.00")),
+            self.butter: (f"Butter Popcorn {self.data_id}", Decimal("20.00")),
+            self.chocolate: (f"Chocolate Popcorn {self.data_id}", Decimal("25.00")),
+        }
+
+    @property
+    def four_box(self) -> str:
+        return f"uc-{self.data_id}-fall-popcorn"
+
+    @property
+    def stock_admin(self) -> str:
+        return f"uc-{self.data_id}-stock-admin"
+
+    @property
+    def door_to_door(self) -> str:
+        return f"uc-{self.data_id}-door-to-door"
+
+    @property
+    def council_planning(self) -> str:
+        return f"uc-{self.data_id}-council-planning"
+
+    @property
+    def canary_campaign(self) -> str:
+        """A campaign on the same Unit this lane never writes to: the cleanup survivor."""
+        return f"uc-{self.data_id}-split-math"
+
+    @property
+    def unit_campaigns(self) -> Dict[str, str]:
+        """Every campaign this lane seeds, including the canary it never writes to."""
+        suffixes = {
+            self.four_box: "Fall Popcorn 2026",
+            self.stock_admin: "Stock Admin",
+            self.door_to_door: "Door to Door",
+            self.council_planning: "Council Planning",
+            self.canary_campaign: "Split Math",
+        }
+        return {campaign_id: f"{name} {self.data_id}" for campaign_id, name in suffixes.items()}
+
+    @property
+    def stock_campaign_ids(self) -> List[str]:
+        """The four campaigns the scenarios write to; the canary is deliberately absent.
+
+        Cleanup and the demand/sales readers address a lane through this list, so a canary
+        that shares the Unit and the Scout Campaigns is not swept with them.
+        """
+        return [self.four_box, self.stock_admin, self.door_to_door, self.council_planning]
+
+    @property
+    def council_booth(self) -> str:
+        """The isolated future Show & Sell SS-SM-10 step 2 assigns four Kernels to."""
+        return f"SSE#{self.data_id}-council-future-booth"
+
+    @property
+    def council_line_id(self) -> str:
+        """The one line on Council Customer's ten-unit Order.
+
+        Named because §2.4.3 addresses a fulfillment by ``lineItemId``, and a scenario that
+        fulfills the same line twice has to name the same id rather than hope a builder
+        regenerates it. It is attempt-scoped for the same reason the Order suffix is: two
+        attempts' Orders sit in one Scout Campaign partition.
+        """
+        return f"line-{self.attempt_key}-council-10"
+
+    # --- time and keys --------------------------------------------------------
+
+    def moment(self, step: int) -> str:
+        """One lane stamp: ``t0`` plus ``step`` minutes, in the ``+00:00`` spelling.
+
+        ``occurredAt`` is part of a movement's sort key, so a scenario that asserts the order
+        of a history needs stamps tied to when its own setup ran.
+        """
+        return (self.t0 + timedelta(minutes=step)).isoformat()
+
+    def key(self, label: str) -> str:
+        """An idempotency key that belongs to this attempt and to this one write.
+
+        A fixed key is the collision FIX-AC-03 exists to prevent: a retried attempt would
+        answer the earlier attempt's stored result instead of performing the write, and a
+        lane's cleanup could not tell its own markers from another attempt's.
+        """
+        return f"{self.data_id}-{label}"[:_IDEMPOTENCY_KEY_LIMIT]
+
+    def order_suffix(self, tag: str) -> str:
+        """An Order id suffix unique to this attempt.
+
+        An Order id is ``ORDER#<bare Scout Campaign>#<suffix>``, and the Scout Campaigns are
+        the shared Stage 1 personas, so the suffix is the only part a lane can make its own.
+        """
+        return f"{self.attempt_key}-{tag}"
+
+    def line_id(self, tag: str) -> str:
+        """A line identity unique to this attempt (§5.19 addresses a line by this id)."""
+        return f"line-{self.attempt_key}-{tag}"
+
+    @property
+    def attempt_key(self) -> str:
+        """The short tail every id inside a shared partition carries."""
+        return self.attempt_id or self.data_id
+
+#: The reproducible lane the plan-fidelity tests assert against: the same ids every run, so a
+#: number that disagrees with §3.3 is a fixture bug rather than a different attempt.
+DEFAULT_LANE = SmokeLane(data_id="smoke3149", t0=datetime(2026, 11, 7, 8, 0, tzinfo=timezone.utc))
+
+#: The reference lane's ``DATA_ID``, kept for the fidelity tests that name the plan's row.
+DATA_ID = DEFAULT_LANE.data_id
+
+SMOKE_PACK = DEFAULT_LANE.pack
+
+SMOKE_CATALOG_ID = DEFAULT_LANE.catalog_id
+CARAMEL = DEFAULT_LANE.caramel
+BUTTER = DEFAULT_LANE.butter
+CHOCOLATE = DEFAULT_LANE.chocolate
+
+#: ``productId -> (productName, price per ONE inventory unit)``, as the reference lane spells
+#: them. ``SmokeLane.products`` is the same table for any lane.
+SMOKE_PRODUCTS: Dict[str, Tuple[str, Decimal]] = DEFAULT_LANE.products
+
+FOUR_BOX = DEFAULT_LANE.four_box
+STOCK_ADMIN = DEFAULT_LANE.stock_admin
+DOOR_TO_DOOR = DEFAULT_LANE.door_to_door
+COUNCIL_PLANNING = DEFAULT_LANE.council_planning
 #: A campaign on the same Unit that this lane never writes to: the survivor of the cleanup
 #: canary, named after one of the smoke plan's other isolated Unit Campaigns.
-CANARY_CAMPAIGN = f"uc-{DATA_ID}-split-math"
+CANARY_CAMPAIGN = DEFAULT_LANE.canary_campaign
 
 #: The isolated future Show & Sell that SS-SM-10 step 2 assigns four Kernels to.
-COUNCIL_BOOTH = f"SSE#{DATA_ID}-council-future-booth"
+COUNCIL_BOOTH = DEFAULT_LANE.council_booth
 
-#: The one line on Council Customer's ten-unit Order. Named because §2.4.3 addresses a
-#: fulfillment by ``lineItemId``, and a scenario that fulfills the same line twice has to
-#: name the same id rather than hope a builder regenerates it.
-COUNCIL_LINE_ID = "line-council-10"
+#: The one line on Council Customer's ten-unit Order on the reference lane.
+COUNCIL_LINE_ID = DEFAULT_LANE.council_line_id
 
-SMOKE_UNIT_CAMPAIGNS: Dict[str, str] = {
-    FOUR_BOX: f"Fall Popcorn 2026 {DATA_ID}",
-    STOCK_ADMIN: f"Stock Admin {DATA_ID}",
-    DOOR_TO_DOOR: f"Door to Door {DATA_ID}",
-    COUNCIL_PLANNING: f"Council Planning {DATA_ID}",
-    CANARY_CAMPAIGN: f"Split Math {DATA_ID}",
-}
+SMOKE_UNIT_CAMPAIGNS: Dict[str, str] = DEFAULT_LANE.unit_campaigns
 
 ADMIN = "Avery"
 SECOND_ADMIN = "Devon"
@@ -146,19 +331,28 @@ SMOKE_SCOUTS: Tuple[str, ...] = (ADMIN, SECOND_ADMIN)
 BUTTER_START_QTY = 10
 CARAMEL_FOUR_BOX_QTY = 4
 
-#: Deterministic moments. ``occurredAt`` is part of a movement's sort key, so a scenario
-#: that asserts the order of a history needs stamps that do not move between runs.
-LANE_T0 = datetime(2026, 11, 7, 8, 0, tzinfo=timezone.utc)
+#: Deterministic moments for :data:`DEFAULT_LANE`. ``SmokeLane.moment`` is the same rule for
+#: any lane, computed from that lane's own ``t0``.
+LANE_T0 = DEFAULT_LANE.t0
 
 
 def moment(step: int) -> str:
-    """One lane stamp: ``LANE_T0`` plus ``step`` minutes, in the ``+00:00`` spelling."""
-    return (LANE_T0 + timedelta(minutes=step)).isoformat()
+    """One ``DEFAULT_LANE`` stamp; see :meth:`SmokeLane.moment`."""
+    return DEFAULT_LANE.moment(step)
 
 
-def _join_code(tag: str) -> str:
-    """A 16-character Unit Campaign join code from a short tag (data model §6.6)."""
-    return f"JOIN{tag}".ljust(16, "0")[:16]
+def _join_code(tag: str, scope: str) -> str:
+    """A 16-character Unit Campaign join code, unique to this lane's campaign.
+
+    The tag says which campaign it is; the digest tail carries the lane's ``DATA_ID``, so two
+    attempts of one scenario hold different codes and a join-code pointer row from attempt one
+    is never in attempt two's way (data model §6.6 fixes the length at 16).
+    """
+    tail = hashlib.sha256(scope.encode("utf-8")).hexdigest()[:6].upper()
+    return f"JN{tag.upper()[:7]}{tail}".ljust(16, "0")[:16]
+
+
+_IDEMPOTENCY_KEY_LIMIT = 128
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +360,7 @@ def _join_code(tag: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def smoke_catalog_item() -> Dict[str, Any]:
+def smoke_catalog_item(lane: SmokeLane = DEFAULT_LANE) -> Dict[str, Any]:
     """The smoke catalog row: three products, three prices, one sale unit each (§3.3)."""
     products = [
         {
@@ -176,33 +370,39 @@ def smoke_catalog_item() -> Dict[str, Any]:
             "price": price,
             "sortOrder": index,
         }
-        for index, (product_id, (name, price)) in enumerate(SMOKE_PRODUCTS.items(), start=1)
+        for index, (product_id, (name, price)) in enumerate(lane.products.items(), start=1)
     ]
-    return catalog_item(SMOKE_CATALOG_ID, f"Smoke Popcorn Catalog {DATA_ID}", owner=ADMIN, products=products)
+    return catalog_item(lane.catalog_id, f"Smoke Popcorn Catalog {lane.data_id}", owner=ADMIN, products=products)
 
 
-def smoke_join_codes() -> Dict[str, str]:
-    """Each smoke Unit Campaign's join code, so a test can name one without rebuilding it."""
-    return {campaign_id: _join_code(campaign_id.split("-")[-1].upper()) for campaign_id in SMOKE_UNIT_CAMPAIGNS}
+def smoke_join_codes(lane: SmokeLane = DEFAULT_LANE) -> Dict[str, str]:
+    """Each of this lane's Unit Campaigns' join codes, so a test can name one without rebuilding it."""
+    return {campaign_id: _join_code(campaign_id.split("-")[-1], f"{lane.data_id}|{campaign_id}") for campaign_id in lane.unit_campaigns}
 
 
-def smoke_unit_metadata_item() -> Dict[str, Any]:
+def smoke_unit_metadata_item(lane: SmokeLane = DEFAULT_LANE) -> Dict[str, Any]:
     """This lane's Unit row at ``UNIT#<unitId> / METADATA``."""
     return unit_item(
-        SMOKE_PACK,
+        lane.pack,
         "Pack",
         3149,
         "Aurora",
         "CO",
         split_default="TIME_WORKED",
         council_need_basis="PHYSICAL_STOCK",
-        display_name=f"Pack 3149 {DATA_ID}",
+        display_name=f"Pack 3149 {lane.data_id}",
         created_by=account_id(ADMIN),
         admin_count=2,
     )
 
 
-def seed_smoke_lane(units_table: Any, unit_campaigns_table: Any, catalogs_table: Any) -> Dict[str, Any]:
+def seed_smoke_lane(
+    units_table: Any,
+    unit_campaigns_table: Any,
+    catalogs_table: Any,
+    *,
+    lane: SmokeLane = DEFAULT_LANE,
+) -> Dict[str, Any]:
     """Write this lane's Unit, Unit Campaigns, rosters and catalog, and return what landed.
 
     The Unit carries two admins because SS-SM-03 step 8 is a permission claim: Casey's
@@ -216,37 +416,37 @@ def seed_smoke_lane(units_table: Any, unit_campaigns_table: Any, catalogs_table:
     alone. A guard naming one campaign active would also contradict the other smoke
     campaigns this lane keeps the same Scout on.
     """
-    written_units = _seed_smoke_unit(units_table)
-    written_campaigns = _seed_smoke_campaigns(unit_campaigns_table)
-    catalog = smoke_catalog_item()
+    written_units = _seed_smoke_unit(units_table, lane)
+    written_campaigns = _seed_smoke_campaigns(unit_campaigns_table, lane)
+    catalog = smoke_catalog_item(lane)
     catalogs_table.put_item(Item=catalog)
     return {"units": written_units, "unit_campaigns": written_campaigns, "catalogs": [catalog]}
 
 
-def _seed_smoke_unit(units_table: Any) -> List[Dict[str, Any]]:
+def _seed_smoke_unit(units_table: Any, lane: SmokeLane = DEFAULT_LANE) -> List[Dict[str, Any]]:
     """Pack 3149 ``<DATA_ID>`` with Alex and Casey as its two Unit Admins."""
     written: List[Dict[str, Any]] = []
-    metadata = smoke_unit_metadata_item()
+    metadata = smoke_unit_metadata_item(lane)
     units_table.put_item(Item=metadata)
     written.append(metadata)
     for admin in (ADMIN, SECOND_ADMIN):
-        grant = grant_item(SMOKE_PACK, admin, created_by=ADMIN)
+        grant = grant_item(lane.pack, admin, created_by=ADMIN)
         units_table.put_item(Item=grant)
         written.append(grant)
     return written
 
 
-def _seed_smoke_campaigns(unit_campaigns_table: Any) -> List[Dict[str, Any]]:
+def _seed_smoke_campaigns(unit_campaigns_table: Any, lane: SmokeLane = DEFAULT_LANE) -> List[Dict[str, Any]]:
     """The lane's five Unit Campaigns, their join-code pointers, and their rosters."""
     written: List[Dict[str, Any]] = []
-    codes = smoke_join_codes()
-    for campaign_id, campaign_name in SMOKE_UNIT_CAMPAIGNS.items():
+    codes = smoke_join_codes(lane)
+    for campaign_id, campaign_name in lane.unit_campaigns.items():
         item = unit_campaign_item(
             campaign_id,
-            unit_id=SMOKE_PACK,
+            unit_id=lane.pack,
             campaign_name=campaign_name,
             campaign_year=2026,
-            catalog_id=SMOKE_CATALOG_ID,
+            catalog_id=lane.catalog_id,
             join_code=codes[campaign_id],
             created_by=ADMIN,
         )
@@ -255,17 +455,19 @@ def _seed_smoke_campaigns(unit_campaigns_table: Any) -> List[Dict[str, Any]]:
         pointer = join_code_pointer_item(codes[campaign_id], campaign_id)
         unit_campaigns_table.put_item(Item=pointer)
         written.append(pointer)
-        written.extend(_seed_smoke_roster(unit_campaigns_table, campaign_id))
+        written.extend(_seed_smoke_roster(unit_campaigns_table, campaign_id, lane))
     return written
 
 
-def _seed_smoke_roster(unit_campaigns_table: Any, campaign_id: str) -> List[Dict[str, Any]]:
+def _seed_smoke_roster(
+    unit_campaigns_table: Any, campaign_id: str, lane: SmokeLane = DEFAULT_LANE
+) -> List[Dict[str, Any]]:
     """This campaign's ACTIVE roster rows — Alex and Casey, each also a Scout."""
     written: List[Dict[str, Any]] = []
     for scout in SMOKE_SCOUTS:
         membership = unit_campaign_membership_item(
             campaign_id,
-            SMOKE_PACK,
+            lane.pack,
             str(PROFILES[scout]["campaignId"]),
             str(PROFILES[scout]["profileId"]),
             joined_by=scout,
@@ -584,44 +786,86 @@ def movement_trail_violations(inventory_table: Any, unit_campaign_id: str, produ
     return violations
 
 
+def _paged(table: Any, **kwargs: Any) -> List[Dict[str, Any]]:
+    """Every item a Query or Scan answers, following ``LastEvaluatedKey`` to the end.
+
+    One DynamoDB page is capped at 1 MB, and the Scout Campaign partition is shared by every
+    lane that sells through it, so a single call answers a prefix of the rows. A fixture that
+    reads a prefix and calls it the whole list reports a lane's demand, its sales, and its
+    own leftover Orders as short, and the cleanup sweep would leave the rest behind.
+    """
+    items: List[Dict[str, Any]] = []
+    while True:
+        page = table.query(**kwargs) if "KeyConditionExpression" in kwargs else table.scan(**kwargs)
+        items.extend(page.get("Items", []))
+        token = page.get("LastEvaluatedKey")
+        if token is None:
+            return items
+        kwargs["ExclusiveStartKey"] = token
+
+
 def order_rows(orders_table: Any, campaign_id: str) -> List[Dict[str, Any]]:
-    """One Scout Campaign's Orders — the individual demand this lane owes against."""
-    page = orders_table.query(
+    """Every Order of one Scout Campaign — which is every lane's, not just this one's.
+
+    The orders table is hash-keyed on the Scout Campaign, and Scout Campaigns are the shared
+    Stage 1 personas, so this read answers other lanes' Orders too. Anything that counts a
+    lane's demand or sales goes through :func:`lane_orders` instead.
+    """
+    return _paged(
+        orders_table,
         KeyConditionExpression="campaignId = :c",
         ExpressionAttributeValues={":c": campaign_id},
     )
-    return list(page.get("Items", []))
 
 
-def demand_counts(orders_table: Any, campaign_ids: Sequence[str], product_id: str) -> Dict[str, int]:
-    """Ordered / fulfilled / unfulfilled units of one product across Scout Campaigns.
+def lane_orders(orders_table: Any, unit_campaign_ids: Sequence[str]) -> List[Dict[str, Any]]:
+    """The Orders whose immutable originating scope is one of this lane's campaigns.
+
+    Origin scope is what makes a read, and the sweep that follows it, lane-scoped: an Order is
+    addressed by the Scout Campaign that sold it, and Scout Campaigns are shared between
+    lanes, while ``unitCampaignId`` is only ever the campaign that stood behind that sale.
+    Fixture tables are small, so the filter runs after the read, as ``cascade_delete_unit``
+    does it.
+    """
+    wanted = set(unit_campaign_ids)
+    return [row for row in _paged(orders_table) if str(row.get("unitCampaignId")) in wanted]
+
+
+def demand_counts(orders_table: Any, unit_campaign_ids: Sequence[str], product_id: str) -> Dict[str, int]:
+    """Ordered / fulfilled / unfulfilled units of one product across this lane's campaigns.
 
     Unfulfilled individual demand is what Council Needs subtracts stock from, and it is a
-    per-line number: a line of four with one fulfilled still asks for three.
+    per-line number: a line of four with one fulfilled still asks for three. The orders table
+    is keyed on the Scout Campaign, which every lane sharing this Scout also writes to, so the
+    read is scoped by originating Unit Campaign — otherwise another lane's Order, or this
+    lane's own canary campaign, joins the count and the promised ten units stop being ten.
     """
     ordered = fulfilled = 0
-    for campaign_id in campaign_ids:
-        for order in order_rows(orders_table, campaign_id):
-            for line in order.get(ful.LINE_ITEMS_ATTRIBUTE, []):
-                if str(line.get(ful.PRODUCT_ID_ATTRIBUTE)) != product_id:
-                    continue
-                ordered += _qty(line, "quantity")
-                fulfilled += _qty(line, ful.FULFILLED_QUANTITY_ATTRIBUTE)
+    for order in lane_orders(orders_table, unit_campaign_ids):
+        for line in order.get(ful.LINE_ITEMS_ATTRIBUTE, []):
+            if str(line.get(ful.PRODUCT_ID_ATTRIBUTE)) != product_id:
+                continue
+            ordered += _qty(line, "quantity")
+            fulfilled += _qty(line, ful.FULFILLED_QUANTITY_ATTRIBUTE)
     return {"orderedQty": ordered, "fulfilledQty": fulfilled, "unfulfilledQty": ordered - fulfilled}
 
 
-def sale_totals(orders_table: Any, campaign_ids: Sequence[str]) -> Dict[str, Any]:
-    """Dollars and units across one Scout Campaign's individual sales (SS-SM-04 step 4)."""
+def sale_totals(orders_table: Any, unit_campaign_ids: Sequence[str]) -> Dict[str, Any]:
+    """Dollars and units across this lane's individual sales (SS-SM-04 step 4).
+
+    Scoped by originating Unit Campaign, not by Scout Campaign: the same Scout sells for
+    several campaigns and several lanes, and the plan's five sold units are the ones this
+    campaign owes stock for.
+    """
     money = Decimal("0")
     orders = 0
     units = fulfilled = 0
-    for campaign_id in campaign_ids:
-        for order in order_rows(orders_table, campaign_id):
-            orders += 1
-            money += Decimal(str(order.get("totalAmount", 0)))
-            for line in order.get(ful.LINE_ITEMS_ATTRIBUTE, []):
-                units += _qty(line, "quantity")
-                fulfilled += _qty(line, ful.FULFILLED_QUANTITY_ATTRIBUTE)
+    for order in lane_orders(orders_table, unit_campaign_ids):
+        orders += 1
+        money += Decimal(str(order.get("totalAmount", 0)))
+        for line in order.get(ful.LINE_ITEMS_ATTRIBUTE, []):
+            units += _qty(line, "quantity")
+            fulfilled += _qty(line, ful.FULFILLED_QUANTITY_ATTRIBUTE)
     return {"orderCount": orders, "money": money, "units": units, "fulfilledQty": fulfilled}
 
 
@@ -645,9 +889,16 @@ def council_needs(demand_qty: int, picture: Mapping[str, Any]) -> Dict[str, int]
 # ---------------------------------------------------------------------------
 
 
-def smoke_line(product_id: str, quantity: int, line_item_id: str, *, fulfilled_quantity: int = 0) -> Dict[str, Any]:
+def smoke_line(
+    product_id: str,
+    quantity: int,
+    line_item_id: str,
+    *,
+    fulfilled_quantity: int = 0,
+    lane: SmokeLane = DEFAULT_LANE,
+) -> Dict[str, Any]:
     """One catalog-priced line: the price always comes from §3.3, never from the caller."""
-    name, price = SMOKE_PRODUCTS[product_id]
+    name, price = lane.products[product_id]
     line = order_line_item(
         product_id=product_id,
         quantity=quantity,
@@ -667,6 +918,7 @@ def smoke_order(
     unit_campaign_id: str,
     customer_name: str,
     order_date: str,
+    lane: SmokeLane = DEFAULT_LANE,
 ) -> Dict[str, Any]:
     """An individual Order row carrying this lane as its immutable originating scope.
 
@@ -680,7 +932,7 @@ def smoke_order(
     order = sold_order_item(
         scout,
         suffix=suffix,
-        unit_id=SMOKE_PACK,
+        unit_id=lane.pack,
         unit_campaign_id=unit_campaign_id,
         lines=list(lines),
     )
@@ -704,6 +956,7 @@ def arrange_custody_sale(
     idempotency_key: str,
     customer_name: str = "Taylor Door",
     actor: str = RECORDER,
+    lane: SmokeLane = DEFAULT_LANE,
 ) -> Dict[str, Any]:
     """The row-level effect of a ``CONSUME_SCOUT_CUSTODY`` sale (SS-SM-04 steps 2 and 3).
 
@@ -716,24 +969,62 @@ def arrange_custody_sale(
 
     Every row comes from the production builders this pipeline calls, so an arranged sale
     cannot drift from a real one without the builder changing first. What the arrangement
-    leaves out is the Order idempotency marker and the campaign's ``totalOrders`` counter:
-    both are the sale's own contract rather than a stock quantity, and both are tested
-    through the pipeline in ``create_order_fn.test.js``.
+    leaves out is the campaign's ``totalOrders`` counter: it is the sale's own bookkeeping
+    rather than a stock quantity, and it is tested through the pipeline in
+    ``create_order_fn.test.js``. The replay marker is arranged, because leaving it out is how a
+    cleanup sweep comes to report a lane it did not actually finish.
     """
     taken = _consume_custody(inventory_table, unit_campaign_id, scout, product_id, quantity, occurred_at)
     order = smoke_order(
         scout,
         suffix,
-        [smoke_line(product_id, quantity, line_item_id, fulfilled_quantity=taken)],
+        [smoke_line(product_id, quantity, line_item_id, fulfilled_quantity=taken, lane=lane)],
         unit_campaign_id=unit_campaign_id,
-        customer_name=f"{customer_name} {DATA_ID}",
+        customer_name=f"{customer_name} {lane.data_id}",
         order_date=occurred_at,
     )
     _write_sale_history(
         inventory_table, fulfillments_table, order, line_item_id, product_id, taken, occurred_at, actor, idempotency_key
     )
     orders_table.put_item(Item=order)
-    return {"order": order, "consumedQty": taken, "unfulfilledQty": quantity - taken}
+    marker = _write_sale_marker(fulfillments_table, order, actor, idempotency_key)
+    return {"order": order, "consumedQty": taken, "unfulfilledQty": quantity - taken, "marker": marker}
+
+
+#: The operation segment of a custody sale's marker, spelled as the pipeline spells it.
+CREATE_ORDER_OPERATION = "createOrder"
+
+
+def _write_sale_marker(fulfillments_table: Any, order: Mapping[str, Any], actor: str, idempotency_key: str) -> MarkerKeys:
+    """The ``createOrder`` replay marker at the address the pipeline would have written it.
+
+    The key is actor + operation + Scout Campaign (``lib/custody_sale.js:markerKeysFor``), and
+    an Order id appears nowhere in that key — only in the ``resultId`` attribute. So the marker
+    of a custody sale survives any sweep that searches for Order ids, replays the caller's key
+    for the next attempt that reuses it, and outlives a lane cleanup that does not name it.
+    Arranging it here is what lets cleanup prove it removed one.
+    """
+    keys = marker_keys(
+        table_key="order_fulfillments",
+        table_name=tables.order_fulfillments.table_name,
+        actor_id=account_id(actor),
+        operation=CREATE_ORDER_OPERATION,
+        scope=str(order["campaignId"]),
+        idempotency_key=idempotency_key,
+    )
+    body = json.dumps({key: str(order[key]) for key in ("orderId", "campaignId", "totalAmount") if key in order})
+    fulfillments_table.put_item(
+        Item={
+            "pk": keys.pk,
+            "sk": keys.sk,
+            "fingerprint": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+            "status": "COMPLETED",
+            "expiresAtEpoch": int(datetime.now(timezone.utc).timestamp()) + 86_400,
+            "resultId": str(order["orderId"]),
+            "resultPayload": body,
+        }
+    )
+    return keys
 
 
 def _consume_custody(
@@ -840,7 +1131,8 @@ def arrange_event_assignment(
     quantity: int,
     start_at: str,
     end_at: str,
-    show_and_sell_id: str = COUNCIL_BOOTH,
+    show_and_sell_id: Optional[str] = None,
+    lane: SmokeLane = DEFAULT_LANE,
 ) -> Dict[str, Any]:
     """Put stock under a future Show & Sell (SS-SM-10 step 2's assignment of four Butter).
 
@@ -852,8 +1144,8 @@ def arrange_event_assignment(
     """
     item = inv.build_event_inventory_allocation_item(
         unit_campaign_id=campaign,
+        show_and_sell_id=show_and_sell_id or lane.council_booth,
         product_id=product_id,
-        show_and_sell_id=show_and_sell_id,
         start_at=start_at,
         end_at=end_at,
         allocated_qty=quantity,
@@ -868,7 +1160,7 @@ def arrange_event_assignment(
 # ---------------------------------------------------------------------------
 
 
-def setup_ss_sm_03(inventory_table: Any) -> List[Dict[str, Any]]:
+def setup_ss_sm_03(inventory_table: Any, *, lane: SmokeLane = DEFAULT_LANE) -> List[Dict[str, Any]]:
     """``Stock Admin``: receipt 2, ``+2`` trade, ``-1`` gift, then Casey's receipt (steps 4-8).
 
     The trail is the evidence: each step's resulting position, and the actor and reason
@@ -876,17 +1168,32 @@ def setup_ss_sm_03(inventory_table: Any) -> List[Dict[str, Any]]:
     reason the screen can only reach by shortening it is not the reason the Kernel typed.
     """
     steps = [
-        ("receipt", ADMIN, 2, None, "sm03-receipt", 1),
-        ("adjustment", ADMIN, 2, "Trade with Troop 7150; money settled outside app", "sm03-trade", 2),
-        ("adjustment", ADMIN, -1, "Gift to outgoing volunteer", "sm03-gift", 3),
-        ("receipt", SECOND_ADMIN, 1, None, "sm03-casey", 4),
+        ("receipt", ADMIN, 2, None, "receipt", 1),
+        ("adjustment", ADMIN, 2, "Trade with Troop 7150; money settled outside app", "trade", 2),
+        ("adjustment", ADMIN, -1, "Gift to outgoing volunteer", "gift", 3),
+        ("receipt", SECOND_ADMIN, 1, None, "casey", 4),
     ]
     evidence: List[Dict[str, Any]] = []
     for action, actor, quantity, reason, key, stamp in steps:
         if action == "receipt":
-            record_receipt(STOCK_ADMIN, BUTTER, quantity, caller=actor, key=key, occurred_at=moment(stamp))
+            record_receipt(
+                lane.stock_admin,
+                lane.butter,
+                quantity,
+                caller=actor,
+                key=lane.key(key),
+                occurred_at=lane.moment(stamp),
+            )
         else:
-            stock_adjust(STOCK_ADMIN, BUTTER, quantity, str(reason), caller=actor, key=key, occurred_at=moment(stamp))
+            stock_adjust(
+                lane.stock_admin,
+                lane.butter,
+                quantity,
+                str(reason),
+                caller=actor,
+                key=lane.key(key),
+                occurred_at=lane.moment(stamp),
+            )
         evidence.append(
             {
                 "step": stamp,
@@ -894,13 +1201,15 @@ def setup_ss_sm_03(inventory_table: Any) -> List[Dict[str, Any]]:
                 "actor": actor,
                 "quantity": quantity,
                 "reason": reason,
-                "after": stock_picture(inventory_table, STOCK_ADMIN, BUTTER),
+                "after": stock_picture(inventory_table, lane.stock_admin, lane.butter),
             }
         )
     return evidence
 
 
-def setup_ss_sm_04(inventory_table: Any, orders_table: Any, fulfillments_table: Any) -> List[Dict[str, Any]]:
+def setup_ss_sm_04(
+    inventory_table: Any, orders_table: Any, fulfillments_table: Any, *, lane: SmokeLane = DEFAULT_LANE
+) -> List[Dict[str, Any]]:
     """``Door to Door``: 10 received, issue 4, sale 3, sale 2, issue 2, return 1.
 
     The plan's numbers, step by step, because the whole point of the sequence is that a
@@ -919,8 +1228,8 @@ def setup_ss_sm_04(inventory_table: Any, orders_table: Any, fulfillments_table: 
     ]
     evidence: List[Dict[str, Any]] = []
     for stamp, (action, quantity) in enumerate(steps, start=1):
-        _run_ss_sm_04_step(action, quantity, stamp, inventory_table, orders_table, fulfillments_table)
-        evidence.append(_ss_sm_04_evidence(stamp, action, quantity, inventory_table, orders_table))
+        _run_ss_sm_04_step(action, quantity, stamp, inventory_table, orders_table, fulfillments_table, lane)
+        evidence.append(_ss_sm_04_evidence(stamp, action, quantity, inventory_table, orders_table, lane))
     return evidence
 
 
@@ -931,47 +1240,64 @@ def _run_ss_sm_04_step(
     inventory_table: Any,
     orders_table: Any,
     fulfillments_table: Any,
+    lane: SmokeLane = DEFAULT_LANE,
 ) -> None:
-    """One step of the SS-SM-04 sequence, driven by the operation the plan names."""
-    when = moment(stamp)
+    """One step of the SS-SM-04 sequence, driven by the operation the plan names.
+
+    Every identity in it — campaign, product, idempotency key, Order suffix, line identity and
+    stamp — comes from the lane, which is what lets a second attempt run the same sequence
+    beside the first without replaying any of its writes.
+    """
+    when = lane.moment(stamp)
     if action == "receipt":
-        record_receipt(DOOR_TO_DOOR, BUTTER, quantity, key="sm04-receipt", occurred_at=when)
+        record_receipt(lane.door_to_door, lane.butter, quantity, key=lane.key("receipt"), occurred_at=when)
     elif action == "issue":
-        issue_to_scout(DOOR_TO_DOOR, ADMIN, BUTTER, quantity, key=f"sm04-issue-{stamp}", occurred_at=when)
+        issue_to_scout(lane.door_to_door, ADMIN, lane.butter, quantity, key=lane.key(f"issue-{stamp}"), occurred_at=when)
     elif action == "sale":
         arrange_custody_sale(
             orders_table,
             inventory_table,
             fulfillments_table,
             scout=ADMIN,
-            unit_campaign_id=DOOR_TO_DOOR,
-            suffix=f"door-{stamp}",
-            product_id=BUTTER,
+            unit_campaign_id=lane.door_to_door,
+            suffix=lane.order_suffix(f"door-{stamp}"),
+            product_id=lane.butter,
             quantity=quantity,
-            line_item_id=f"line-door-{stamp}",
+            line_item_id=lane.line_id(f"door-{stamp}"),
             occurred_at=when,
-            idempotency_key=f"sm04-sale-{stamp}",
+            idempotency_key=lane.key(f"sale-{stamp}"),
+            lane=lane,
         )
     else:
-        return_from_scout(DOOR_TO_DOOR, ADMIN, [(BUTTER, quantity)], key="sm04-return", occurred_at=when)
+        return_from_scout(lane.door_to_door, ADMIN, [(lane.butter, quantity)], key=lane.key("return"), occurred_at=when)
 
 
 def _ss_sm_04_evidence(
-    stamp: int, action: str, quantity: int, inventory_table: Any, orders_table: Any
+    stamp: int,
+    action: str,
+    quantity: int,
+    inventory_table: Any,
+    orders_table: Any,
+    lane: SmokeLane = DEFAULT_LANE,
 ) -> Dict[str, Any]:
-    """A step's balances next to the sale bookkeeping the plan asserts at the same step."""
-    campaign_id = str(PROFILES[ADMIN]["campaignId"])
+    """A step's balances next to the sale bookkeeping the plan asserts at the same step.
+
+    The demand and sales are read through this campaign's originating scope, not through the
+    Scout's Campaign: the Scout Campaign is shared with every other lane and with the canary
+    campaign this lane seeds to prove cleanup is lane-scoped, and the plan's numbers are this
+    campaign's alone.
+    """
     return {
         "step": stamp,
         "action": action,
         "quantity": quantity,
-        "after": stock_picture(inventory_table, DOOR_TO_DOOR, BUTTER),
-        "demand": demand_counts(orders_table, [campaign_id], BUTTER),
-        "sales": sale_totals(orders_table, [campaign_id]),
+        "after": stock_picture(inventory_table, lane.door_to_door, lane.butter),
+        "demand": demand_counts(orders_table, [lane.door_to_door], lane.butter),
+        "sales": sale_totals(orders_table, [lane.door_to_door]),
     }
 
 
-def setup_ss_sm_10(inventory_table: Any, orders_table: Any) -> Dict[str, Any]:
+def setup_ss_sm_10(inventory_table: Any, orders_table: Any, *, lane: SmokeLane = DEFAULT_LANE) -> Dict[str, Any]:
     """``Council Planning``'s starting state: demand 10, receipt 8, issue 2, assign 4, on order 3.
 
     Returns the Order and line the scenario then fulfills from each source, so a test can
@@ -979,33 +1305,39 @@ def setup_ss_sm_10(inventory_table: Any, orders_table: Any) -> Dict[str, Any]:
     exists before the stock that answers it, and the plan's starting balances are stated
     against a demand that is already on the books.
     """
-    order = _council_demand_order(orders_table)
-    record_receipt(COUNCIL_PLANNING, BUTTER, 8, key="sm10-receipt", occurred_at=moment(10))
-    issue_to_scout(COUNCIL_PLANNING, ADMIN, BUTTER, 2, key="sm10-issue", occurred_at=moment(11))
+    order = _council_demand_order(orders_table, lane)
+    record_receipt(lane.council_planning, lane.butter, 8, key=lane.key("receipt"), occurred_at=lane.moment(10))
+    issue_to_scout(lane.council_planning, ADMIN, lane.butter, 2, key=lane.key("issue"), occurred_at=lane.moment(11))
     arrange_event_assignment(
         inventory_table,
-        campaign=COUNCIL_PLANNING,
-        product_id=BUTTER,
+        campaign=lane.council_planning,
+        product_id=lane.butter,
         quantity=4,
-        start_at=moment(12),
-        end_at=moment(240),
+        start_at=lane.moment(12),
+        end_at=lane.moment(240),
+        lane=lane,
     )
-    council_on_order(COUNCIL_PLANNING, BUTTER, 3, "Council promised a case", key="sm10-council", occurred_at=moment(13))
-    return {"orderId": str(order["orderId"]), "lineItemId": COUNCIL_LINE_ID, "order": order}
+    council_on_order(
+        lane.council_planning,
+        lane.butter,
+        3,
+        "Council promised a case",
+        key=lane.key("council"),
+        occurred_at=lane.moment(13),
+    )
+    return {"orderId": str(order["orderId"]), "lineItemId": lane.council_line_id, "order": order}
 
 
-COUNCIL_LINE_ID = "line-council-10"
-
-
-def _council_demand_order(orders_table: Any) -> Dict[str, Any]:
+def _council_demand_order(orders_table: Any, lane: SmokeLane = DEFAULT_LANE) -> Dict[str, Any]:
     """Council Customer's ten-unit Order, entirely unfulfilled (SS-SM-10's fixture state)."""
     order = smoke_order(
         SECOND_ADMIN,
-        "council-10",
-        [smoke_line(BUTTER, 10, COUNCIL_LINE_ID)],
-        unit_campaign_id=COUNCIL_PLANNING,
-        customer_name=f"Council Customer {DATA_ID}",
-        order_date=moment(9),
+        lane.order_suffix("council-10"),
+        [smoke_line(lane.butter, 10, lane.council_line_id, lane=lane)],
+        unit_campaign_id=lane.council_planning,
+        customer_name=f"Council Customer {lane.data_id}",
+        order_date=lane.moment(9),
+        lane=lane,
     )
     orders_table.put_item(Item=order)
     return order
@@ -1204,8 +1536,9 @@ def race_two_plans(plans: Sequence[WritePlan]) -> Dict[str, Any]:
 def race_issue_last_kernel(
     inventory_table: Any,
     *,
-    campaign: str = DOOR_TO_DOOR,
-    product_id: str = BUTTER,
+    lane: SmokeLane = DEFAULT_LANE,
+    campaign: Optional[str] = None,
+    product_id: Optional[str] = None,
     scout: str = ADMIN,
     quantity: int = 1,
     occurred_at: Optional[str] = None,
@@ -1217,20 +1550,28 @@ def race_issue_last_kernel(
     but that the Kernels moved once, the custody moved once, and exactly one movement row
     exists.
     """
-    when = occurred_at or moment(40)
+    campaign, product_id, when = _race_arguments(lane, campaign, product_id, occurred_at, 40)
     snapshot = inv.inventory_position_rows(campaign, product_id)
     plans = [
-        _issue_plan(campaign, product_id, scout, quantity, snapshot, when, f"race-issue-{attempt}")
+        _issue_plan(campaign, product_id, scout, quantity, snapshot, when, lane.key(f"race-issue-{attempt}"))
         for attempt in range(2)
     ]
     return race_two_plans(plans)
 
 
+def _race_arguments(
+    lane: SmokeLane, campaign: Optional[str], product_id: Optional[str], occurred_at: Optional[str], step: int
+) -> Tuple[str, str, str]:
+    """One race's campaign, product and stamp, defaulting to this lane's Door to Door Butter."""
+    return campaign or lane.door_to_door, product_id or lane.butter, occurred_at or lane.moment(step)
+
+
 def race_return_last_kernel(
     inventory_table: Any,
     *,
-    campaign: str = DOOR_TO_DOOR,
-    product_id: str = BUTTER,
+    lane: SmokeLane = DEFAULT_LANE,
+    campaign: Optional[str] = None,
+    product_id: Optional[str] = None,
     scout: str = ADMIN,
     quantity: int = 1,
     occurred_at: Optional[str] = None,
@@ -1240,10 +1581,10 @@ def race_return_last_kernel(
     The other side of the same question: With Scout can never go negative, and a Unit cannot
     be handed the same returned Kernel twice.
     """
-    when = occurred_at or moment(41)
+    campaign, product_id, when = _race_arguments(lane, campaign, product_id, occurred_at, 41)
     snapshot = inv.inventory_position_rows(campaign, product_id)
     plans = [
-        _return_plan(campaign, product_id, scout, quantity, snapshot, when, f"race-return-{attempt}")
+        _return_plan(campaign, product_id, scout, quantity, snapshot, when, lane.key(f"race-return-{attempt}"))
         for attempt in range(2)
     ]
     return race_two_plans(plans)
@@ -1265,57 +1606,81 @@ def _marker_needle(order_id: str) -> str:
 
 
 def _delete_markers(table: Any, needle: str) -> int:
-    """Delete every idempotency marker whose partition key names this lane's scope."""
-    rows = table.scan(
+    """Delete every idempotency marker whose partition key names this lane's scope.
+
+    This finds the markers a Unit-tenant mutation wrote with the lane's own Unit Campaign as
+    its resource scope, and the §2.4 fulfillment markers scoped to one Order. It cannot find a
+    marker scoped by something else — which is why :func:`clean_stage2_lane` also deletes the
+    custody-sale markers this lane recorded, by their exact address.
+    """
+    items = _paged(
+        table,
         FilterExpression="begins_with(pk, :prefix) AND contains(pk, :needle)",
         ExpressionAttributeValues={":prefix": "IDEM#", ":needle": needle},
     )
-    items = list(rows.get("Items", []))
     for item in items:
         table.delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
     return len(items)
 
 
-def lane_orders(orders_table: Any, unit_campaign_ids: Sequence[str]) -> List[Dict[str, Any]]:
-    """The Orders whose immutable originating scope is one of this lane's campaigns.
+RESULT_ID_ATTRIBUTE = "resultId"
 
-    Origin scope is what makes the sweep lane-scoped: an Order is addressed by the Scout
-    Campaign that sold it, and Scout Campaigns are shared between lanes, while
-    ``unitCampaignId`` is only ever the campaign that stood behind that sale. Fixture tables
-    are small, so the filter runs after the read, as ``cascade_delete_unit`` does it.
+
+def _delete_order_markers(fulfillments_table: Any, order_id: str) -> int:
+    """Delete every replay marker that belongs to one Order, whichever key shape it uses.
+
+    Two shapes reach this table. A §2.4 fulfillment marker carries the Order id in its own
+    partition key, escaped, because the Order is the resource the mutation addresses. A custody
+    sale's ``createOrder`` marker does not: its key is actor + operation + Scout Campaign, and
+    the Order appears only in its ``resultId`` attribute (``lib/custody_sale.js:markerKeysFor``
+    and ``saleMarkerAction``). Searching for the Order id alone therefore leaves a sale's marker
+    behind, where it replays the next attempt's key, and a lane's Scout Campaign is shared with
+    every other lane's sales, so a prefix sweep cannot be the answer either. The one fact both
+    shapes agree on is which Order the marker answers, so the sweep asks that.
     """
-    wanted = set(unit_campaign_ids)
-    return [row for row in orders_table.scan().get("Items", []) if str(row.get("unitCampaignId")) in wanted]
+    items = _paged(
+        fulfillments_table,
+        FilterExpression="contains(pk, :needle) OR #resultId = :order",
+        ExpressionAttributeNames={"#resultId": RESULT_ID_ATTRIBUTE},
+        ExpressionAttributeValues={":needle": _marker_needle(order_id), ":order": order_id},
+    )
+    for item in items:
+        fulfillments_table.delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
+    return len(items)
 
 
 def clean_stage2_lane(
-    inventory_table: Any, orders_table: Any, fulfillments_table: Any, unit_campaign_ids: Sequence[str]
+    inventory_table: Any, orders_table: Any, fulfillments_table: Any, lane: SmokeLane
 ) -> Dict[str, int]:
     """Remove one lane's Stage 2 records and nothing else; report what was removed.
 
-    Three sweeps, each keyed on the lane's own Unit Campaign ids: the inventory partition
+    Four sweeps, each keyed on the lane itself: the inventory partitions of its Unit Campaigns
     (balance, custody rows, allocations, and the whole movement trail), the fulfillment
-    partitions of the Orders this lane sold, and those Orders — plus the idempotency markers
-    on both tables, which live under their own ``IDEM#`` partition and would otherwise
-    survive every partition sweep.
+    partitions of the Orders this lane sold, those Orders, and the idempotency markers on both
+    tables. Markers live under their own ``IDEM#`` partition, so they survive every partition
+    sweep that does not name them, and a custody sale's marker is keyed on actor, operation and
+    Scout Campaign rather than on anything lane-scoped — hence the recorded addresses. Every
+    read here pages to the end: DynamoDB answers at most 1 MB per call, and a sweep that stops
+    at the first page reports a lane it left half behind.
 
     It deletes rows rather than undoing them: a Stage 2 history row is append-only by
     design, so a lane that wanted its audit trail gone through the product's own path would
     have to reverse every movement, and that is a correction, not cleanup.
     """
     removed = {"inventory": 0, "markers": 0, "orders": 0, "fulfillments": 0}
-    for campaign_id in unit_campaign_ids:
+    campaign_ids = lane.stock_campaign_ids
+    for campaign_id in campaign_ids:
         for row in lane_inventory_rows(inventory_table, campaign_id):
             inventory_table.delete_item(Key={"pk": row["pk"], "sk": row["sk"]})
             removed["inventory"] += 1
         removed["markers"] += _delete_markers(inventory_table, campaign_id)
 
-    for order in lane_orders(orders_table, unit_campaign_ids):
+    for order in lane_orders(orders_table, campaign_ids):
         order_id = str(order["orderId"])
         for row in ful.fulfillment_rows(order_id):
             fulfillments_table.delete_item(Key={"pk": row["pk"], "sk": row["sk"]})
             removed["fulfillments"] += 1
-        removed["markers"] += _delete_markers(fulfillments_table, _marker_needle(order_id))
+        removed["markers"] += _delete_order_markers(fulfillments_table, order_id)
         orders_table.delete_item(Key={"campaignId": order["campaignId"], "orderId": order["orderId"]})
         removed["orders"] += 1
     return removed

@@ -39,6 +39,7 @@ from tests.unit.show_sell_stock_fixtures import (
     COUNCIL_LINE_ID,
     COUNCIL_PLANNING,
     DATA_ID,
+    DEFAULT_LANE,
     DOOR_TO_DOOR,
     FOUR_BOX,
     SECOND_ADMIN,
@@ -47,6 +48,7 @@ from tests.unit.show_sell_stock_fixtures import (
     SMOKE_PRODUCTS,
     SMOKE_UNIT_CAMPAIGNS,
     STOCK_ADMIN,
+    SmokeLane,
     arrange_custody_sale,
     arrange_event_assignment,
     clean_stage2_lane,
@@ -354,7 +356,6 @@ def test_ss_sm_04_the_two_sales_leave_one_unit_still_owed(
 ) -> None:
     """Steps 2-4: three fulfilled, then one fulfilled and one unfulfilled, ``$100`` and five units."""
     steps = setup_ss_sm_04(inventory_table, orders_table, order_fulfillments_table)
-    scout_campaign = str(PROFILES[ADMIN]["campaignId"])
 
     assert steps[2]["demand"] == {"orderedQty": 3, "fulfilledQty": 3, "unfulfilledQty": 0}
     assert steps[3]["demand"] == {"orderedQty": 5, "fulfilledQty": 4, "unfulfilledQty": 1}
@@ -365,8 +366,8 @@ def test_ss_sm_04_the_two_sales_leave_one_unit_still_owed(
         "units": 5,
         "fulfilledQty": 4,
     }
-    assert demand_counts(orders_table, [scout_campaign], BUTTER)["unfulfilledQty"] == 1
-    assert sale_totals(orders_table, [scout_campaign])["money"] == Decimal("100")
+    assert demand_counts(orders_table, [DOOR_TO_DOOR], BUTTER)["unfulfilledQty"] == 1
+    assert sale_totals(orders_table, [DOOR_TO_DOOR])["money"] == Decimal("100")
 
 
 def test_ss_sm_04_a_sale_consuming_no_custody_writes_no_stock_history(
@@ -481,7 +482,7 @@ def test_ss_sm_10_the_starting_balances_are_the_plan_s_six_two_four_two_and_thre
     assert picture["totalUnitOwnedUndeliveredQty"] == 8
     assert picture["councilOnOrderQty"] == 3
     assert picture["allocations"] == [{"showAndSellId": COUNCIL_BOOTH, "remainingQty": 4}]
-    assert demand_counts(orders_table, [str(PROFILES[SECOND_ADMIN]["campaignId"])], BUTTER) == {
+    assert demand_counts(orders_table, [COUNCIL_PLANNING], BUTTER) == {
         "orderedQty": 10,
         "fulfilledQty": 0,
         "unfulfilledQty": 10,
@@ -512,7 +513,7 @@ def test_ss_sm_10_both_needs_survive_a_kernel_fulfillment_and_move_on_an_externa
 
     kernel = _ok(fulfill_line(order_id, COUNCIL_LINE_ID, 1, "KERNEL_STOCK", version=0, key="sm10-kernel"))
     assert kernel["inventoryPosition"]["unassignedKernelQty"] == 1
-    demand = demand_counts(orders_table, [str(PROFILES[SECOND_ADMIN]["campaignId"])], BUTTER)["unfulfilledQty"]
+    demand = demand_counts(orders_table, [COUNCIL_PLANNING], BUTTER)["unfulfilledQty"]
     picture = stock_picture(inventory_table, COUNCIL_PLANNING, BUTTER)
     assert demand == 9
     assert (picture["kernelPhysicalQty"], picture["sellableKernelQty"], picture["unassignedKernelQty"]) == (5, 5, 1)
@@ -520,7 +521,7 @@ def test_ss_sm_10_both_needs_survive_a_kernel_fulfillment_and_move_on_an_externa
 
     external = _ok(fulfill_line(order_id, COUNCIL_LINE_ID, 1, "EXTERNAL_COUNCIL", version=1, key="sm10-external"))
     assert "inventoryPosition" not in external, "no Kernel moved, so no position may be reported"
-    demand = demand_counts(orders_table, [str(PROFILES[SECOND_ADMIN]["campaignId"])], BUTTER)["unfulfilledQty"]
+    demand = demand_counts(orders_table, [COUNCIL_PLANNING], BUTTER)["unfulfilledQty"]
     picture = stock_picture(inventory_table, COUNCIL_PLANNING, BUTTER)
     assert demand == 8
     assert (picture["kernelPhysicalQty"], picture["councilOnOrderQty"]) == (5, 3), "on order moves only when named"
@@ -574,7 +575,7 @@ def test_ss_sm_10_a_reversal_restores_the_source_it_came_from_once(
 
     picture = stock_picture(inventory_table, COUNCIL_PLANNING, BUTTER)
     assert (picture["kernelPhysicalQty"], picture["unassignedKernelQty"]) == (6, 2)
-    assert demand_counts(orders_table, [str(PROFILES[SECOND_ADMIN]["campaignId"])], BUTTER)["unfulfilledQty"] == 10
+    assert demand_counts(orders_table, [COUNCIL_PLANNING], BUTTER)["unfulfilledQty"] == 10
     assert movement_trail_violations(inventory_table, COUNCIL_PLANNING, BUTTER) == []
 
     assert_is_error(reverse_fulfillment(order_id, fulfillment_id, version=2, key="rev-twice"), "CONFLICT")
@@ -651,7 +652,7 @@ def test_cleaning_one_lane_leaves_the_canary_lane_and_the_personas_alone(
     expected_inventory = sum(len(lane_inventory_rows(inventory_table, campaign_id)) for campaign_id in LANE_CAMPAIGNS)
     assert expected_inventory > 0
 
-    removed = clean_stage2_lane(inventory_table, orders_table, order_fulfillments_table, LANE_CAMPAIGNS)
+    removed = clean_stage2_lane(inventory_table, orders_table, order_fulfillments_table, DEFAULT_LANE)
 
     assert removed["orders"] == 3, "two door-to-door sales and the Council Order"
     assert removed["fulfillments"] == 3, "two custody fills and one Kernel fill, the canary's aside"
@@ -692,13 +693,202 @@ def test_cleanup_takes_the_idempotency_markers_a_lane_s_writes_left_behind(
     assert any(COUNCIL_PLANNING in pk for pk in inventory_markers)
     assert fulfillment_markers != [], "the fulfillment's marker sits on the fulfillments table, not the Order"
 
-    removed = clean_stage2_lane(inventory_table, orders_table, order_fulfillments_table, (STOCK_ADMIN, COUNCIL_PLANNING))
+    removed = clean_stage2_lane(inventory_table, orders_table, order_fulfillments_table, DEFAULT_LANE)
 
     assert removed["markers"] == len(inventory_markers) + len(fulfillment_markers)
     assert markers(inventory_table) == []
     assert markers(order_fulfillments_table) == []
-    again = clean_stage2_lane(inventory_table, orders_table, order_fulfillments_table, (STOCK_ADMIN, COUNCIL_PLANNING))
+    again = clean_stage2_lane(inventory_table, orders_table, order_fulfillments_table, DEFAULT_LANE)
     assert again == {"inventory": 0, "markers": 0, "orders": 0, "fulfillments": 0}, "cleanup is idempotent"
+
+
+# --- lane identity: one scenario, two attempts (leaf 2.7.2, smoke plan §3.1) ------
+
+
+def test_a_second_attempt_runs_the_same_scenario_beside_the_first_and_is_cleaned_alone(
+    lane: Dict[str, Any],
+    units_table: Any,
+    unit_campaigns_table: Any,
+    catalogs_table: Any,
+    inventory_table: Any,
+    orders_table: Any,
+    order_fulfillments_table: Any,
+) -> None:
+    """FIX-AC-03: a retry does not inherit, replay, or delete the attempt it is retrying.
+
+    The smoke plan makes the lane's identity ``<RUN_ID>-<SCENARIO_ID>-<LANE_ID>-<ATTEMPT_ID>``
+    and its stamps setup-relative for a reason: two attempts of one scenario sit in the same
+    Stage 1 personas and the same Scout Campaigns, so the only thing separating their rows,
+    idempotency keys and markers is the identity each one derives its ids from. A fixed
+    ``DATA_ID`` makes a retried attempt answer the earlier attempt's stored result and makes one
+    lane's cleanup able to eat the other's evidence.
+    """
+    first = DEFAULT_LANE
+    second = SmokeLane.new("SS-SM-04", run_id="1763600000-aaaaaa", attempt_id="bbbbbb")
+    seed_smoke_lane(units_table, unit_campaigns_table, catalogs_table, lane=second)
+
+    setup_ss_sm_04(inventory_table, orders_table, order_fulfillments_table, lane=first)
+    setup_ss_sm_04(inventory_table, orders_table, order_fulfillments_table, lane=second)
+
+    assert second.pack != SMOKE_PACK
+    assert second.door_to_door != DOOR_TO_DOOR
+    assert second.butter != BUTTER
+    assert second.key("receipt") != first.key("receipt"), "one label, two writes, no replayed result"
+    assert second.moment(1) != first.moment(1), "stamps are setup-relative, not a calendar date"
+    assert smoke_join_codes(second)[second.door_to_door] != smoke_join_codes(first)[first.door_to_door]
+
+    assert lane_inventory_rows(inventory_table, first.door_to_door) != []
+    assert lane_inventory_rows(inventory_table, second.door_to_door) != []
+
+    first_markers = [
+        str(row["pk"]) for row in order_fulfillments_table.scan()["Items"] if str(row["pk"]).startswith("IDEM#")
+    ]
+    assert len(first_markers) == 4, "two sale markers per attempt, in two attempts"
+
+    removed = clean_stage2_lane(inventory_table, orders_table, order_fulfillments_table, first)
+
+    assert removed["orders"] == 2, "only the first attempt's two sales"
+    for campaign_id in first.stock_campaign_ids:
+        assert lane_inventory_rows(inventory_table, campaign_id) == []
+    assert lane_orders(orders_table, first.stock_campaign_ids) == []
+
+    assert stock_picture(inventory_table, second.door_to_door, second.butter)["kernelPhysicalQty"] == 5
+    assert stock_picture(inventory_table, second.door_to_door, second.butter)["withScoutQty"] == 1
+    assert demand_counts(orders_table, [second.door_to_door], second.butter) == {
+        "orderedQty": 5,
+        "fulfilledQty": 4,
+        "unfulfilledQty": 1,
+    }
+    assert sale_totals(orders_table, [second.door_to_door])["money"] == Decimal("100")
+    assert movement_trail_violations(inventory_table, second.door_to_door, second.butter) == []
+    assert sale_totals(orders_table, [second.door_to_door])["orderCount"] == 2
+    surviving = lane_orders(orders_table, [second.door_to_door])
+    assert len(surviving) == 2
+    assert all(second.attempt_key in str(row["orderId"]) for row in surviving), "the suffix names its attempt"
+    assert all(second.attempt_key in str(line["lineItemId"]) for row in surviving for line in row["lineItems"])
+    survivors = [
+        str(row["pk"]) for row in order_fulfillments_table.scan()["Items"] if str(row["pk"]).startswith("IDEM#")
+    ]
+    assert len(survivors) == 2, "the second attempt's replay markers are its own"
+    assert catalogs_table.get_item(Key={"catalogId": second.catalog_id}).get("Item") is not None
+    assert unit_campaigns_table.get_item(Key={"pk": f"UNIT_CAMPAIGN#{second.door_to_door}", "sk": "METADATA"}).get(
+        "Item"
+    ) is not None
+
+
+# --- origin scope: a Scout Campaign is shared, a lane's demand is not -------------
+
+
+def test_council_demand_and_sale_totals_ignore_another_campaign_s_orders_in_the_same_scout_campaign(
+    lane: Dict[str, Any], inventory_table: Any, orders_table: Any, order_fulfillments_table: Any
+) -> None:
+    """FUNC-6: the plan's ten units are this campaign's ten, with another lane's Order present.
+
+    Orders are keyed by Scout Campaign, and the personas' Scout Campaigns are shared by every
+    lane and every campaign in this suite. Counted by that key, Council demand would carry the
+    canary's two units too, and the scenario would be asserting a number no campaign owes.
+    """
+    setup_ss_sm_04(inventory_table, orders_table, order_fulfillments_table)
+    council = setup_ss_sm_10(inventory_table, orders_table)
+    setup_order_id = council["orderId"]
+    canary = _arrange_canary(inventory_table, orders_table, order_fulfillments_table)
+    devon_campaign = str(PROFILES[SECOND_ADMIN]["campaignId"])
+
+    assert demand_counts(orders_table, [COUNCIL_PLANNING], BUTTER) == {
+        "orderedQty": 10,
+        "fulfilledQty": 0,
+        "unfulfilledQty": 10,
+    }
+    assert sale_totals(orders_table, [COUNCIL_PLANNING]) == {
+        "orderCount": 1,
+        "money": Decimal("200"),
+        "units": 10,
+        "fulfilledQty": 0,
+    }
+    assert sale_totals(orders_table, [DOOR_TO_DOOR, COUNCIL_PLANNING])["orderCount"] == 3
+
+    shared = order_rows(orders_table, devon_campaign)
+    assert {str(row["orderId"]) for row in shared} == {canary["orderId"], str(setup_order_id)}
+    assert len(shared) == 2, "the canary sells through Devon's Scout Campaign too"
+    assert sum(len(row["lineItems"]) for row in shared) == 2
+    assert demand_counts(orders_table, [CANARY_CAMPAIGN], BUTTER) == {
+        "orderedQty": 2,
+        "fulfilledQty": 1,
+        "unfulfilledQty": 1,
+    }, "the canary's demand is the canary's own"
+
+
+# --- markers: the sweep reaches the one a sale wrote, not only the ones it can grep --
+
+
+def test_a_custody_sale_s_replay_marker_is_removed_by_the_order_it_answers(
+    lane: Dict[str, Any], inventory_table: Any, orders_table: Any, order_fulfillments_table: Any
+) -> None:
+    """FUNC-7: a ``createOrder`` marker names no campaign and no Order id in its key.
+
+    The arrangement writes the marker at the address the pipeline would use — actor, operation,
+    Scout Campaign — so the cleanup is proven against the shape that actually survives a
+    partition sweep, rather than against the shape the sweep was already able to find.
+    """
+    setup_ss_sm_04(inventory_table, orders_table, order_fulfillments_table)
+    sold = [str(row["orderId"]) for row in lane_orders(orders_table, [DOOR_TO_DOOR])]
+    assert len(sold) == 2
+
+    sale_markers = [
+        row
+        for row in order_fulfillments_table.scan()["Items"]
+        if "#createOrder#" in str(row.get("pk", ""))
+    ]
+    assert len(sale_markers) == 2, "one marker per arranged sale"
+    assert all(mk["resultId"] in sold for mk in sale_markers)
+    assert all(mk["status"] == "COMPLETED" for mk in sale_markers)
+    for marker in sale_markers:
+        assert DOOR_TO_DOOR not in str(marker["pk"]), "the key names the Scout Campaign, not the Unit Campaign"
+        assert not any(order_id.replace("#", "%23") in str(marker["pk"]) for order_id in sold), (
+            "no search for an Order id reaches this marker"
+        )
+
+    def marker_count(table: Any) -> int:
+        return len([row for row in table.scan()["Items"] if str(row["pk"]).startswith("IDEM#")])
+
+    inventory_before = marker_count(inventory_table)
+    fulfillment_before = marker_count(order_fulfillments_table)
+    assert inventory_before == 4, "receipt, two issues and one return leave their markers on the stock table"
+    assert fulfillment_before == 2, "each sale leaves one createOrder marker"
+
+    removed = clean_stage2_lane(inventory_table, orders_table, order_fulfillments_table, DEFAULT_LANE)
+
+    assert removed["markers"] == inventory_before + fulfillment_before
+    assert [row for row in order_fulfillments_table.scan()["Items"] if str(row["pk"]).startswith("IDEM#")] == []
+    assert [row for row in inventory_table.scan()["Items"] if str(row["pk"]).startswith("IDEM#")] == []
+
+
+def test_the_lane_reads_walk_past_one_dynamodb_page() -> None:
+    """One Scout Campaign holds more Orders than one 1 MB page, and the sweep counts them all.
+
+    ``LastEvaluatedKey`` is a cursor, not a footnote: a reader that stops at the first page
+    reports a lane's demand as short and its cleanup as complete while rows of both are still
+    in the table.
+    """
+    pages = [
+        {"Items": [{"orderId": "ORDER#1", "unitCampaignId": DOOR_TO_DOOR}], "LastEvaluatedKey": {"orderId": "ORDER#1"}},
+        {"Items": [{"orderId": "ORDER#2", "unitCampaignId": DOOR_TO_DOOR}]},
+    ]
+    calls: List[Dict[str, Any]] = []
+
+    class TwoPageScan:
+        """A stand-in for the orders table that answers exactly two Scan pages."""
+
+        def scan(self, **kwargs: Any) -> Dict[str, Any]:
+            calls.append(kwargs)
+            return pages[len(calls) - 1]
+
+    rows = lane_orders(TwoPageScan(), [DOOR_TO_DOOR])
+
+    assert [str(row["orderId"]) for row in rows] == ["ORDER#1", "ORDER#2"]
+    assert len(calls) == 2, "the walk stopped at the first page"
+    assert calls[1]["ExclusiveStartKey"] == {"orderId": "ORDER#1"}
+    assert "ExclusiveStartKey" not in calls[0]
 
 
 def test_an_assignment_arranged_for_the_scenario_stays_out_of_the_trail_check(
