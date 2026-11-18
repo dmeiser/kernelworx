@@ -318,6 +318,13 @@ type Order {
   unitId: ID
   """The Unit Campaign the campaign was joined to when this order was created; null for an independent campaign. Captured immutably at order creation (API-FIX-05)."""
   unitCampaignId: ID
+  """Serialization version for fulfillment and reversal of this order's lines (§5.19). Every fulfillment and every reversal increments it, including an external-Council change that touches no inventory version. Rows written before Wave 3 carry no value, which reads as 0."""
+  fulfillmentVersion: Int
+  """The fulfillment and reversal history of this order's lines, in the participant-safe projection: no actor account, no inventory movement id, no other administrative audit (§10.2). Paginated so a participant can reach her own whole history herself - no admin-only surface is needed to see what was omitted. A Unit Admin reads the full audit through `orderFulfillments`."""
+  fulfillments(
+    """Pagination parameters. The newest records are on the first page."""
+    page: PageInput
+  ): ParticipantOrderFulfillmentConnection!
 }
 
 """A page of Order results from listOrdersByCampaign, with a token for fetching the next page."""
@@ -348,6 +355,98 @@ type LineItem {
   pricePerUnit: Float!
   """quantity times pricePerUnit."""
   subtotal: Float!
+  """Stable identity of this line inside its Order. Wave 3 mints it when the Order is written and never rewrites it, so a fulfillment can name the line it belongs to even after a later edit re-orders the list (§5.19). Rows written before Wave 3 carry none."""
+  lineItemId: ID
+  """How much of this line has been fulfilled, from Kernel stock, Scout custody, or an external Council. It never exceeds quantity; rows written before Wave 3 carry no value, which reads as 0."""
+  fulfilledQuantity: Int
+}
+
+"""Where the stock consumed by an Order line fulfillment came from (§5.19)."""
+enum OrderFulfillmentSource {
+  """Physical stock held by the Unit Campaign (the Kernel)."""
+  KERNEL_STOCK
+  """Stock a Scout carries on the Unit's behalf."""
+  SCOUT_CUSTODY
+  """Council demand consumed without moving Unit stock."""
+  EXTERNAL_COUNCIL
+}
+
+"""How a new individual Order draws on Scout custody at creation (§10.1). Absent means NONE, which is every order written before Wave 3."""
+enum OrderFulfillmentMode {
+  """An ordinary order: no custody is consumed and no fulfillment record is written."""
+  NONE
+  """A door-to-door sale: consume min(orderedQty, availableWithScoutQty) per line out of the Scout's custody, never blocking for insufficient custody and never decrementing Kernel stock (§10.2)."""
+  CONSUME_SCOUT_CUSTODY
+}
+
+"""Direction of an OrderFulfillment record: a fulfillment or its reversal (§5.19). Quantity is always positive; this field carries the direction."""
+enum OrderFulfillmentRecordType {
+  """Positive fulfillment of an Order line."""
+  FULFILL
+  """Reversal of an earlier fulfillment: restores demand and only the original stock source."""
+  REVERSAL
+}
+
+"""One append-only fulfillment or reversal record for an Order's lines (§5.19). This is the full administrative audit - actor account and inventory movement id included - reachable only through the Unit-Admin `orderFulfillments` query, never through `Order.fulfillments` (§10.2)."""
+type OrderFulfillment {
+  """Unique fulfillment/reversal identity."""
+  fulfillmentId: ID!
+  """The Order this record belongs to."""
+  orderId: ID!
+  """The Scout Campaign the Order belongs to."""
+  campaignId: ID!
+  """The Scout Profile that owns the Order."""
+  profileId: ID!
+  """Originating Unit scope copied immutably from the Order; null for an independent campaign."""
+  unitId: ID
+  """Originating Unit Campaign scope copied immutably from the Order; null for an independent campaign."""
+  unitCampaignId: ID
+  """The fulfilled line inside the Order (§5.19)."""
+  lineItemId: ID!
+  """The product of the fulfilled line."""
+  productId: ID!
+  """FULFILL or REVERSAL."""
+  recordType: OrderFulfillmentRecordType!
+  """Amount fulfilled or reversed; always a positive integer."""
+  quantity: Int!
+  """Which stock source the record consumed or restored."""
+  source: OrderFulfillmentSource!
+  """Inventory movement this record moved stock or custody for; required for KERNEL_STOCK and SCOUT_CUSTODY sources, null for EXTERNAL_COUNCIL."""
+  inventoryMovementId: ID
+  """The fulfillment this record reverses; required on REVERSAL rows."""
+  reversalOfFulfillmentId: ID
+  """The account that recorded the fulfillment or reversal. Administrative audit: never on the participant projection."""
+  actorAccountId: ID!
+  """When the record was written; also its position in the Order's sort-key history."""
+  createdAt: AWSDateTime!
+}
+
+"""The participant-safe projection of an OrderFulfillment (§10.2): the custody/quantity history of the caller's own Order lines, with no actor account, no inventory movement id, and no other administrative audit. The full audit is served only by the Unit-Admin `orderFulfillments` query."""
+type ParticipantOrderFulfillment {
+  """Unique fulfillment/reversal identity."""
+  fulfillmentId: ID!
+  """The line inside the Order this record belongs to."""
+  lineItemId: ID!
+  """The product of the fulfilled line."""
+  productId: ID!
+  """FULFILL or REVERSAL."""
+  recordType: OrderFulfillmentRecordType!
+  """Amount fulfilled or reversed; always a positive integer."""
+  quantity: Int!
+  """Which stock source the record consumed or restored."""
+  source: OrderFulfillmentSource!
+  """The fulfillment this record reverses, when it is a reversal."""
+  reversalOfFulfillmentId: ID
+  """When the record was written."""
+  createdAt: AWSDateTime!
+}
+
+"""A page of one Order's participant-safe fulfillment history (§10.2). Newest records first, each page oldest-first within itself; `pageInfo.endCursor` is null once the history is exhausted, so a participant pages through the whole of it without any administrative surface."""
+type ParticipantOrderFulfillmentConnection {
+  """The records on this page, oldest first within the page."""
+  items: [ParticipantOrderFulfillment!]!
+  """Cursor state for this read: `endCursor` is null and `hasNextPage` false when no records remain."""
+  pageInfo: PageInfo!
 }
 
 """A physical mailing address."""
@@ -734,6 +833,10 @@ input CreateOrderInput {
   lineItems: [LineItemInput!]!
   """Free-text notes about the order."""
   notes: String
+  """How this order draws on Scout custody. Absent means NONE: an ordinary order that consumes no custody and writes no fulfillment record. CONSUME_SCOUT_CUSTODY is a door-to-door sale, and insufficient custody never blocks it (§10.1)."""
+  fulfillmentMode: OrderFulfillmentMode
+  """1-128 character key that makes a retried request one request. Required when fulfillmentMode is CONSUME_SCOUT_CUSTODY, because that is the only mode that moves stock; a NONE order accepts the field and records nothing for it, because it has no stock effect to replay (§10.1)."""
+  idempotencyKey: String
 }
 
 """Input for updateOrder. Only the provided fields are changed; providing lineItems replaces all existing line items."""
@@ -750,7 +853,7 @@ input UpdateOrderInput {
   orderDate: AWSDateTime
   """New payment method name. Omit to keep the current value; an explicit null is rejected with INVALID_INPUT."""
   paymentMethod: String
-  """New line items; replaces the existing ones and recomputes the total."""
+  """New line items; replaces the existing ones and recomputes the total. A line that already has fulfillment must appear in the new list under its own `lineItemId`, with its product unchanged and a quantity at least what it has fulfilled."""
   lineItems: [LineItemInput!]
   """New notes."""
   notes: String
@@ -764,6 +867,8 @@ input LineItemInput {
   productId: ID!
   """The quantity to order (at least 1)."""
   quantity: Int!
+  """On an update, the `lineItemId` of the stored line this row stands for, so the edit changes that line without re-minting its identity (§5.19). A value that names no stored line is refused. Omitted, the row is matched by product - only sound when at most one line carries that product on both sides; otherwise the row must name its `lineItemId`. A line whose `fulfilledQuantity` is greater than zero may not be omitted, may not change product, and may not be reduced below what it has already fulfilled. Lines with no fulfillment history follow the previous rules unchanged."""
+  lineItemId: ID
 }
 
 """Input for a physical mailing address."""
@@ -1620,6 +1725,68 @@ type ReturnStockFromScoutPayload {
   custodyBalances: [ScoutCustodyBalance!]!
 }
 
+# === Show & Sell — individual Order fulfillment (delivery checklist §2.4, data model §5.19) ===
+# Authorization lives in the resolver: Unit Admin for the Order's IMMUTABLE
+# originating Unit, read off the Order row itself, never off a Unit id the caller
+# supplies (AUTH-U). The Order's `fulfillmentVersion` is the serialization point
+# for fulfill, reverse, and a line edit against one Order.
+
+"""Input for fulfillIndividualOrderLine. Fills part or all of one individual Order line from a Kernel-chosen source."""
+input FulfillIndividualOrderLineInput {
+  """The Order whose line is fulfilled. Its own immutable Unit scope decides whose admin may act."""
+  orderId: ID!
+  """The stable line identity (§5.19). A pre-Wave-3 line carries no identity, so nothing can name it."""
+  lineItemId: ID!
+  """Kernels fulfilled on this line; cannot exceed the line's still-unfulfilled quantity."""
+  quantity: Int!
+  """KERNEL_STOCK consumes unassigned Kernel stock; EXTERNAL_COUNCIL consumes no Kernel stock at all. SCOUT_CUSTODY is consumed by the sale itself, so it is not a choice here."""
+  source: OrderFulfillmentSource!
+  """The Order.fulfillmentVersion this caller read. A stale value conflicts instead of double-fulfilling one line."""
+  expectedFulfillmentVersion: Int!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for reverseIndividualOrderFulfillment. Undoes one fulfillment and returns only the stock source it took."""
+input ReverseIndividualOrderFulfillmentInput {
+  """The Order the fulfillment belongs to."""
+  orderId: ID!
+  """The FULFILL record to reverse. A REVERSAL cannot be reversed."""
+  fulfillmentId: ID!
+  """The Order.fulfillmentVersion this caller read."""
+  expectedFulfillmentVersion: Int!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""What one fulfillment produced. `inventoryPosition` is absent exactly when the source moved no Kernel stock."""
+type FulfillIndividualOrderLinePayload {
+  """The Order after the fulfillment, with the line's fulfilledQuantity and fulfillmentVersion moved."""
+  order: Order!
+  """The append-only FULFILL record this request wrote."""
+  fulfillment: OrderFulfillment!
+  """The product's stock position, present only for a KERNEL_STOCK fulfillment."""
+  inventoryPosition: InventoryPosition
+}
+
+"""What one reversal produced. `inventoryPosition` is absent exactly when the reversed source moved no Kernel stock."""
+type ReverseIndividualOrderFulfillmentPayload {
+  """The Order after the reversal, with the line's fulfilledQuantity back down and fulfillmentVersion moved."""
+  order: Order!
+  """The append-only REVERSAL record this request wrote, linked to the fulfillment it undoes."""
+  reversal: OrderFulfillment!
+  """The product's stock position, present only when the reversed source was KERNEL_STOCK."""
+  inventoryPosition: InventoryPosition
+}
+
+"""One Order's full fulfillment and reversal audit history, oldest first."""
+type OrderFulfillmentConnection {
+  """The fulfillment and reversal records, with the administrative audit fields."""
+  items: [OrderFulfillment!]!
+  """Pagination state for this read."""
+  pageInfo: PageInfo!
+}
+
 # ============================================================================
 # Query Root
 # ============================================================================
@@ -1730,6 +1897,13 @@ type Query {
     """The Unit Campaign ID."""
     unitCampaignId: ID!
   ): [ScoutCustodyBalance!]!
+  """One Order's full fulfillment and reversal audit, oldest first, including who recorded each record and which inventory movement moved the stock. Unit Admin for the Order's immutable originating Unit; a participant reads the audit-free `Order.fulfillments` instead (§10.2)."""
+  orderFulfillments(
+    """The Order ID."""
+    orderId: ID!
+    """Pagination parameters."""
+    page: PageInput
+  ): OrderFulfillmentConnection!
 
   # Account queries
   """The authenticated caller's account. The row is created automatically on first read if it does not yet exist."""
@@ -2006,6 +2180,16 @@ type Mutation {
     """The return batch."""
     input: ReturnStockFromScoutInput!
   ): ReturnStockFromScoutPayload!
+  """Fulfill part or all of one individual Order line from Kernel stock or an external Council supply. Unit Admin for the Order's immutable originating Unit. Kernel stock is taken only for KERNEL_STOCK, and never more than the line still owes (§5.19)."""
+  fulfillIndividualOrderLine(
+    """The fulfillment."""
+    input: FulfillIndividualOrderLineInput!
+  ): FulfillIndividualOrderLinePayload!
+  """Undo one fulfillment, restoring the line's unfulfilled quantity and only the stock source that fulfillment took. Unit Admin for the Order's immutable originating Unit. At most one reversal exists per fulfillment, and the deterministic key is what enforces it."""
+  reverseIndividualOrderFulfillment(
+    """The reversal."""
+    input: ReverseIndividualOrderFulfillmentInput!
+  ): ReverseIndividualOrderFulfillmentPayload!
 
   # Account mutations
   """Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account."""

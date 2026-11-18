@@ -35,6 +35,7 @@ from src.handlers.unit_operations import (
     CREATE_INVITE_FIELD,
     CREATE_UNIT_CAMPAIGN_FIELD,
     CREATE_UNIT_FIELD,
+    FULFILL_LINE_FIELD,
     INVENTORY_MOVEMENTS_FIELD,
     INVENTORY_POSITIONS_FIELD,
     ISSUE_STOCK_FIELD,
@@ -42,10 +43,12 @@ from src.handlers.unit_operations import (
     JOIN_UNIT_CAMPAIGN_FIELD,
     MY_SCOUT_CUSTODY_FIELD,
     MY_UNITS_FIELD,
+    ORDER_FULFILLMENTS_FIELD,
     RECORD_RECEIPT_FIELD,
     REDEEM_INVITE_FIELD,
     REMOVE_MEMBERSHIP_FIELD,
     RETURN_STOCK_FIELD,
+    REVERSE_FULFILLMENT_FIELD,
     REVOKE_GRANT_FIELD,
     REVOKE_INVITE_FIELD,
     SCOUT_CUSTODY_FIELD,
@@ -61,6 +64,7 @@ from src.handlers.unit_operations import (
     handle_unit_operation,
 )
 from tests.unit.show_sell_fixtures import (
+    FIXTURE_PRODUCT_ID,
     PACK_3149,
     PACK_3149_FALL,
     PROFILES,
@@ -68,6 +72,7 @@ from tests.unit.show_sell_fixtures import (
     account_id,
     grant_item,
     seed_show_sell_fixtures,
+    sold_order_item,
     unit_operation_event,
 )
 from tests.unit.test_edge_security import TF_APP, block, load_hcl
@@ -144,7 +149,8 @@ def _physical_table(key: str) -> str:
 
 
 def _table_key(physical: str) -> str:
-    for key in {"units", "unit_campaigns", "public_order_throttles", "inventory"} | LEGACY_TABLE_KEYS:
+    stage_tables = {"units", "unit_campaigns", "public_order_throttles", "inventory", "orders", "order_fulfillments"}
+    for key in stage_tables | LEGACY_TABLE_KEYS:
         if _physical_table(key) == physical:
             return key
     return physical
@@ -672,5 +678,153 @@ def test_every_stage_two_query_stays_inside_the_shipped_role(
 
     assert not [pair for pair in dynamodb_calls.calls if pair[0] in WRITE_ACTIONS], (
         "a Stage 2 query wrote something: the audit trail stops being a record of mutations"
+    )
+    assert_within_role_scope(dynamodb_calls.calls)
+
+
+# --- Stage 3 §2.4: individual Order fulfillment writes and the audit read ---------
+
+FULFILL_ORDER = sold_order_item("Devon", unit_id=PACK_3149, unit_campaign_id=PACK_3149_FALL)
+
+
+@pytest.fixture
+def on_the_books(
+    units_table: Any,
+    unit_campaigns_table: Any,
+    catalogs_table: Any,
+    profiles_table: Any,
+    campaigns_table: Any,
+    shares_table: Any,
+    inventory_table: Any,
+    orders_table: Any,
+    order_fulfillments_table: Any,
+) -> Dict[str, Any]:
+    """The stocked Stage 2 world plus the one Order §2.4 fulfills.
+
+    The Order row is a legacy row written by ``createOrder`` — the §2.4 mutations are the
+    first Unit-tenant writes that Order has ever had, which is exactly why the grant on
+    that table is UpdateItem on the base table only.
+    """
+    world = seed_show_sell_fixtures(
+        units_table,
+        unit_campaigns_table=unit_campaigns_table,
+        catalogs_table=catalogs_table,
+        profiles_table=profiles_table,
+        campaigns_table=campaigns_table,
+        shares_table=shares_table,
+    )
+    _ok(
+        _call(
+            RECORD_RECEIPT_FIELD,
+            "Avery",
+            mutation={
+                "unitCampaignId": PACK_3149_FALL,
+                "productId": FIXTURE_PRODUCT_ID,
+                "quantity": 10,
+                **_idem("scope-3-seed"),
+            },
+        )
+    )
+    orders_table.put_item(Item=FULFILL_ORDER)
+    return world
+
+
+def test_the_fulfillment_writes_touch_exactly_the_order_fulfillment_and_inventory_tables(
+    on_the_books: Dict[str, Any], dynamodb_calls: DynamoDbCallRecorder
+) -> None:
+    """§2.4.3/§2.4.4: marker + Order + fulfillment + balance + movement, and nothing else.
+
+    This is the one Unit-tenant mutation that writes a legacy table it did not create, so
+    the shape of that grant is the whole risk: the fulfillment updates ``lineItems``,
+    ``fulfillmentVersion`` and ``updatedAt`` on a row that already exists, and a PutItem
+    would put a second whole-row writer on the Order the ``createOrder`` pipeline owns.
+    moto never evaluates IAM, so the grant shape is pinned here as well as in the wiring
+    test, and ``assert_within_role_scope`` is what fails when the handler asks for an
+    action the shipped policy omits.
+    """
+    dynamodb_calls.attach()
+
+    fulfilled = _ok(
+        _call(
+            FULFILL_LINE_FIELD,
+            "Avery",
+            mutation={
+                "orderId": FULFILL_ORDER["orderId"],
+                "lineItemId": "line-fixture-1",
+                "quantity": 2,
+                "source": "KERNEL_STOCK",
+                "expectedFulfillmentVersion": 0,
+                **_idem("scope-3-fulfill"),
+            },
+        )
+    )
+    _ok(
+        _call(
+            REVERSE_FULFILLMENT_FIELD,
+            "Avery",
+            mutation={
+                "orderId": FULFILL_ORDER["orderId"],
+                "fulfillmentId": fulfilled["fulfillment"]["fulfillmentId"],
+                "expectedFulfillmentVersion": 1,
+                **_idem("scope-3-reverse"),
+            },
+        )
+    )
+
+    orders = _physical_table("orders")
+    fulfillments = _physical_table("order_fulfillments")
+    inventory = _physical_table("inventory")
+    writes = {pair for pair in dynamodb_calls.calls if pair[0] in WRITE_ACTIONS}
+    assert writes, "a fulfillment issued no write at all"
+    assert {table for _, table in writes} == {orders, fulfillments, inventory}, (
+        f"a fulfillment wrote outside the Order, its fulfillment history, and stock: {sorted(writes)}"
+    )
+    order_writes = {action for action, table in writes if table == orders}
+    assert order_writes == {"UpdateItem"}, (
+        f"the Order grant is UpdateItem on the base table only, got {sorted(order_writes)}"
+    )
+    assert ("GetItem", orders) in dynamodb_calls.calls, (
+        "the Order and its line are read strongly consistently by the id's own key"
+    )
+    for table in (orders, fulfillments, inventory):
+        assert ("TransactWriteItems", table) in dynamodb_calls.calls, (
+            f"the {table} write no longer rides one conditional transaction"
+        )
+    assert not [
+        pair
+        for pair in dynamodb_calls.calls
+        if pair[1] in {_physical_table(k) for k in LEGACY_TABLE_KEYS} and pair[0] in WRITE_ACTIONS
+    ], "§2.4 writes no legacy row beyond the Order itself — the join link is not its to write"
+    assert_within_role_scope(dynamodb_calls.calls)
+
+
+def test_the_fulfillment_audit_read_stays_inside_the_shipped_role(
+    on_the_books: Dict[str, Any], dynamodb_calls: DynamoDbCallRecorder
+) -> None:
+    """§2.4.5: the admin audit is a consistent read of the Order and its own partition."""
+    _ok(
+        _call(
+            FULFILL_LINE_FIELD,
+            "Avery",
+            mutation={
+                "orderId": FULFILL_ORDER["orderId"],
+                "lineItemId": "line-fixture-1",
+                "quantity": 1,
+                "source": "EXTERNAL_COUNCIL",
+                "expectedFulfillmentVersion": 0,
+                **_idem("scope-3-audit-seed"),
+            },
+        )
+    )
+    dynamodb_calls.attach()
+
+    page = _ok(_call(ORDER_FULFILLMENTS_FIELD, "Avery", arguments={"orderId": FULFILL_ORDER["orderId"]}))
+    assert page["items"], "an audit read of a written history answered nothing"
+
+    assert not [pair for pair in dynamodb_calls.calls if pair[0] in WRITE_ACTIONS], (
+        "an audit query wrote something: the fulfillment history stops being append-only"
+    )
+    assert ("Query", _physical_table("order_fulfillments")) in dynamodb_calls.calls, (
+        "the audit no longer reads the Order's own partition"
     )
     assert_within_role_scope(dynamodb_calls.calls)

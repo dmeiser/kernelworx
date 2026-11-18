@@ -16,7 +16,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 from unittest.mock import MagicMock, call, patch
 
 import boto3
@@ -51,6 +51,28 @@ def _assert_delete_requests(table: Any, expected_count: int) -> None:
         requests.extend(request for batch in sent.values() for request in batch)
     assert all("DeleteRequest" in request for request in requests)
     assert len(requests) == expected_count
+
+
+def _answer_order_reads(versions: Dict[Tuple[str, str], int]) -> Any:
+    """A ``get_item`` stand-in that answers the ARCH-1 lifecycle's strong read.
+
+    The read is what the pinned delete is built on, so a mock that returns no item makes
+    the whole lifecycle report "already gone" and the counts below stop meaning anything.
+    A version of 0 is spelled as the attribute being absent, the way a pre-Wave-3 Order
+    row really looks.
+    """
+
+    def _read(*, Key: Dict[str, str], ConsistentRead: bool) -> Dict[str, Any]:
+        assert ConsistentRead is True, "the delete's version read must be strongly consistent"
+        version = versions.get((Key["campaignId"], Key["orderId"]))
+        if version is None:
+            return {}
+        item: Dict[str, Any] = {"campaignId": Key["campaignId"], "orderId": Key["orderId"]}
+        if version:
+            item["fulfillmentVersion"] = version
+        return {"Item": item}
+
+    return _read
 
 
 def get_accounts_table() -> Any:
@@ -3101,6 +3123,10 @@ class TestAdminDeleteUserOrders:
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
+            # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
+            # stub is required, not cosmetic: a mock table that never answers this Query
+            # returns a truthy LastEvaluatedKey on every page, so the sweep pages forever.
+            mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
             # Mock profiles query
             mock_tables.profiles.query.return_value = {
@@ -3129,18 +3155,39 @@ class TestAdminDeleteUserOrders:
             mock_campaign_tables.orders.query.side_effect = orders_side_effect
             mock_tables.orders.query.side_effect = orders_side_effect
 
-            # BatchWriteItem on campaign_operations.tables.orders
-            accept_batch_deletes(mock_campaign_tables.orders)
+            # ARCH-1 lifecycle: each Order is read strongly (that read's version is the
+            # pin its delete carries) and then removed by a conditional DeleteItem, never
+            # by the batch writer.
+            mock_campaign_tables.orders.get_item.side_effect = _answer_order_reads(
+                {
+                    ("campaign-1", "order-1"): 2,
+                    ("campaign-2", "order-2"): 0,
+                    ("campaign-2", "order-3"): 1,
+                }
+            )
 
             # Delete verification helpers use campaign_operations.tables
-            mock_campaign_tables.orders.get_item.return_value = {}
             mock_campaign_tables.campaigns.get_item.return_value = {}
 
             result = admin_delete_user_orders(event, lambda_context)
 
             assert result == 3  # 3 orders deleted
-            assert mock_campaign_tables.orders.meta.client.batch_write_item.call_count == 2
-            _assert_delete_requests(mock_campaign_tables.orders, 3)
+            deletes = mock_campaign_tables.orders.delete_item.call_args_list
+            assert [call.kwargs["Key"] for call in deletes] == [
+                {"campaignId": "campaign-1", "orderId": "order-1"},
+                {"campaignId": "campaign-2", "orderId": "order-2"},
+                {"campaignId": "campaign-2", "orderId": "order-3"},
+            ]
+            # Every delete carries the version guard, and each version is the one its own
+            # read answered -- pre-Wave-3 Order rows are pinned at zero.
+            assert [call.kwargs["ExpressionAttributeValues"] for call in deletes] == [
+                {":expectedFulfillmentVersion": 2},
+                {":expectedFulfillmentVersion": 0},
+                {":expectedFulfillmentVersion": 1},
+            ]
+            assert all("ConditionExpression" in call.kwargs for call in deletes)
+            # One history sweep per Order, ahead of that Order's delete.
+            assert mock_campaign_tables.order_fulfillments.query.call_count == 3
 
     def test_success_with_campaign_having_no_orders(
         self,
@@ -3169,6 +3216,10 @@ class TestAdminDeleteUserOrders:
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
+            # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
+            # stub is required, not cosmetic: a mock table that never answers this Query
+            # returns a truthy LastEvaluatedKey on every page, so the sweep pages forever.
+            mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
             # Mock profiles query
             mock_tables.profiles.query.return_value = {
@@ -3193,17 +3244,21 @@ class TestAdminDeleteUserOrders:
             mock_campaign_tables.orders.query.side_effect = orders_side_effect
             mock_tables.orders.query.side_effect = orders_side_effect
 
-            accept_batch_deletes(mock_campaign_tables.orders)
+            mock_campaign_tables.orders.get_item.side_effect = _answer_order_reads({("campaign-1", "order-1"): 4})
 
             # Delete verification helpers use campaign_operations.tables
-            mock_campaign_tables.orders.get_item.return_value = {}
             mock_campaign_tables.campaigns.get_item.return_value = {}
 
             result = admin_delete_user_orders(event, lambda_context)
 
             assert result == 1  # Only 1 order deleted
-            assert mock_campaign_tables.orders.meta.client.batch_write_item.call_count == 1
-            _assert_delete_requests(mock_campaign_tables.orders, 1)
+            delete = mock_campaign_tables.orders.delete_item.call_args
+            assert delete.kwargs["Key"] == {"campaignId": "campaign-1", "orderId": "order-1"}
+            assert delete.kwargs["ExpressionAttributeValues"] == {":expectedFulfillmentVersion": 4}
+            # The campaign with no Orders answers 0 without sweeping anything: every path
+            # that removes an Order row pins the delete and takes the history with it, so
+            # "no Orders" really does mean "no partitions left to sweep".
+            assert mock_campaign_tables.order_fulfillments.query.call_count == 1
 
     def test_throttled_returns_resource_busy(
         self,
@@ -3233,6 +3288,10 @@ class TestAdminDeleteUserOrders:
             patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
+            # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
+            # stub is required, not cosmetic: a mock table that never answers this Query
+            # returns a truthy LastEvaluatedKey on every page, so the sweep pages forever.
+            mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_tables.profiles.query.return_value = {
                 "Items": [{"profileId": "profile-1", "ownerAccountId": db_account_id}]
             }
@@ -3242,10 +3301,9 @@ class TestAdminDeleteUserOrders:
             mock_campaign_tables.orders.query.return_value = {
                 "Items": [{"orderId": "order-1", "campaignId": "campaign-1"}]
             }
+            mock_campaign_tables.orders.get_item.side_effect = _answer_order_reads({("campaign-1", "order-1"): 1})
             error_response = {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "Throttled"}}
-            mock_campaign_tables.orders.meta.client.batch_write_item.side_effect = ClientError(
-                error_response, "BatchWriteItem"
-            )
+            mock_campaign_tables.orders.delete_item.side_effect = ClientError(error_response, "DeleteItem")
 
             result = admin_delete_user_orders(event, lambda_context)
 
@@ -3475,6 +3533,10 @@ class TestAdminDeleteUserCampaigns:
             patch("src.handlers.deletion_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
         ):
+            # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
+            # stub is required, not cosmetic: a mock table that never answers this Query
+            # returns a truthy LastEvaluatedKey on every page, so the sweep pages forever.
+            mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_tables.profiles.query.return_value = {
                 "Items": [{"profileId": "profile-1", "ownerAccountId": "ACCOUNT#target-user-123"}]
             }

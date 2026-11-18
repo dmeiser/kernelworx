@@ -161,7 +161,7 @@ class TestDeleteAllUserDataProfileSweep:
     """The cascade must sweep the profiles table once, not once per sub-cascade."""
 
     def test_delete_all_user_data_queries_profiles_once(
-        self, dynamodb_table: Any, recorder: DynamoDbCallRecorder
+        self, dynamodb_table: Any, order_fulfillments_table: Any, recorder: DynamoDbCallRecorder
     ) -> None:
         """Two profiles with orders, shares, and invites still delete, from one profiles Query."""
         from src.handlers.deletion_cascade import delete_all_user_data
@@ -178,7 +178,9 @@ class TestDeleteAllUserDataProfileSweep:
         )
         _assert_everything_deleted()
 
-    def test_delete_all_user_data_preserves_catalogs(self, dynamodb_table: Any, recorder: DynamoDbCallRecorder) -> None:
+    def test_delete_all_user_data_preserves_catalogs(
+        self, dynamodb_table: Any, order_fulfillments_table: Any, recorder: DynamoDbCallRecorder
+    ) -> None:
         """Catalogs are preserved per product design and are not swept or deleted."""
         from src.handlers.deletion_cascade import delete_all_user_data
 
@@ -192,7 +194,7 @@ class TestDeleteAllUserDataProfileSweep:
         assert _table(CATALOGS_TABLE).scan()["Count"] == 1
 
     def test_delete_all_user_data_removes_s3_reports_and_qr_codes(
-        self, dynamodb_table: Any, recorder: DynamoDbCallRecorder
+        self, dynamodb_table: Any, order_fulfillments_table: Any, recorder: DynamoDbCallRecorder
     ) -> None:
         """S3 report objects and payment QR codes are purged for every owned profile."""
         from src.handlers.deletion_cascade import delete_all_user_data

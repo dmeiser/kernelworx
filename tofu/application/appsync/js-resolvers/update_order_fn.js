@@ -1,6 +1,7 @@
 import { util } from '@aws-appsync/utils';
 import { validatePhone, validateAddress } from './lib/validation.js';
 import { enrichLineItems } from './lib/line_items.js';
+import { fulfillmentVersionGuard, currentFulfillmentVersion, nextFulfillmentVersion } from './lib/fulfillment_version.js';
 import { normalizeIdOrPrefix } from './lib/ids.js';
 
 // The order lifecycle slice: the seller's "payment confirmed" transition.
@@ -154,7 +155,18 @@ export function request(ctx) {
             util.error('Catalog not loaded for lineItems update', 'INTERNAL_ERROR');
         }
 
-        const { enrichedLineItems, totalAmountCents } = enrichLineItems(input.lineItems, catalog);
+        // §5.19 stable line identity: identity and the fulfilled count are
+        // inherited from the stored lines, never re-minted. Re-minting them on
+        // every edit would orphan any fulfillment already recorded against a
+        // line and let a later edit quietly reset `fulfilledQuantity`, which is
+        // exactly the accounting break the wave exists to prevent. An edit may
+        // reduce a line's quantity only down to what that line has already
+        // fulfilled (enforced inside enrichLineItems against this snapshot).
+        const { enrichedLineItems, totalAmountCents } = enrichLineItems(
+            input.lineItems,
+            catalog,
+            order && Array.isArray(order.lineItems) ? order.lineItems : []
+        );
 
         updates.push('lineItems = :lineItems');
         exprValues[':lineItems'] = enrichedLineItems;
@@ -196,6 +208,27 @@ export function request(ctx) {
         return order;
     }
 
+    // FUNC-2: a line edit moves the Order's fulfillment facts too -- `fulfilledQuantity`
+    // rides inside the line list, and a fulfillment may have been recorded between the read
+    // that produced this edit and the write that saves it. Data model §5.19 already makes
+    // `fulfillmentVersion` the serialization point for fulfill, reverse and edit, so the
+    // edit takes the same guard the Python fulfillment path takes: the write lands only on
+    // the version this pipeline read, and it advances that version by one.
+    //
+    // Without it, an edit that began before a fulfillment commits afterwards and writes the
+    // OLD line list over the new one -- `fulfilledQuantity` says 0 while stock has already
+    // moved, and the Order now under-states a quantity a fulfillment record contradicts.
+    // The same guard answers the other order of the race: a fulfill that read version N
+    // fails its own guard when the edit advanced N to N+1 first.
+    const observedVersion = currentFulfillmentVersion(order);
+    updates.push('fulfillmentVersion = :nextFulfillmentVersion');
+    // The NEXT version, computed from the number the guard pins -- not from the row. The
+    // helper takes a number; handing it the Order object reads as "no version yet" and
+    // writes 1, so an edit at version 3 would move the Order BACKWARDS, and a fulfillment
+    // holding version 3 would still pass its own guard against a row that now says 1.
+    exprValues[':nextFulfillmentVersion'] = nextFulfillmentVersion(observedVersion);
+    const versionGuard = fulfillmentVersionGuard(observedVersion);
+
     const updateExpression = 'SET ' + updates.join(', ');
 
     const update = {
@@ -209,12 +242,29 @@ export function request(ctx) {
     return {
         operation: 'UpdateItem',
         key: util.dynamodb.toMapValues({ campaignId: order.campaignId, orderId: order.orderId }),
-        update: update
+        update: update,
+        condition: {
+            expression: versionGuard.expression,
+            expressionNames: versionGuard.expressionNames,
+            expressionValues: util.dynamodb.toMapValues(versionGuard.expressionValues)
+        }
     };
 }
 
 export function response(ctx) {
     if (ctx.error) {
+        if (ctx.error.type === 'DynamoDB:ConditionalCheckFailedException') {
+            // This resolver writes exactly one condition, so a failed condition has exactly
+            // one cause: something else moved this Order's fulfillment state (or deleted the
+            // Order) between the read and the write. Nothing was written, and re-reading the
+            // Order is the whole remedy, which is what makes this retryable rather than a
+            // caller error.
+            util.error(
+                'This order changed while the edit was being saved; re-read it and try again',
+                'CONFLICT'
+            );
+            return null;
+        }
         util.error(ctx.error.message, ctx.error.type);
     }
     const order = ctx.result;

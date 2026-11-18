@@ -7,8 +7,10 @@ per-domain role added in #352 (chunk 2 of the #326 IAM role split, reusing the
 wiring pattern #351 established). That role grants DynamoDB read actions
 (GetItem/Query/BatchGetItem) on exactly the tables the handlers touch
 (profiles, shares, invites, campaigns, orders), item-level writes on
-profiles/shares (including TransactWriteItems for the ownership transfer), and
-BatchWriteItem deletes on the four cascade tables only. It also grants S3
+profiles/shares (including TransactWriteItems for the ownership transfer),
+BatchWriteItem deletes on the cascade tables, and a conditioned DeleteItem on the
+orders table -- each Order goes by a delete pinned to its ``fulfillmentVersion``,
+the retry mechanism of the ARCH-1 deletion lifecycle. It also grants S3
 ListBucketVersions/DeleteObject/DeleteObjectVersion scoped to the
 ``reports/*`` prefix of the exports bucket for cascade report cleanup. See
 ``tofu/application/modules/iam/main.tf``.
@@ -36,13 +38,22 @@ SHARES_TABLE = "kernelworx-shares-ue1-dev"
 INVITES_TABLE = "kernelworx-invites-ue1-dev"
 CAMPAIGNS_TABLE = "kernelworx-campaigns-v2-ue1-dev"
 ORDERS_TABLE = "kernelworx-orders-v2-ue1-dev"
+ORDER_FULFILLMENTS_TABLE = "kernelworx-order-fulfillments-ue1-dev"
 EXPORTS_BUCKET = "kernelworx-exports-ue1-dev"
 
 # Tables the #352 profile/sharing role grants read access to.
-DOMAIN_TABLES = {PROFILES_TABLE, SHARES_TABLE, INVITES_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE}
+# `order_fulfillments` joins the scope because the cascade now deletes each Campaign's
+# fulfillment history before the Orders that own it (ARCH-1, children-first).
+DOMAIN_TABLES = {PROFILES_TABLE, SHARES_TABLE, INVITES_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE, ORDER_FULFILLMENTS_TABLE}
 
 # Tables the #352 role grants BatchWriteItem on (cascade batch_writer deletes).
-BATCH_WRITE_TABLES = {SHARES_TABLE, INVITES_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE}
+# Orders are not among them: each Order goes by a conditioned DeleteItem pinned to its
+# fulfillmentVersion, which is the retry mechanism of the ARCH-1 lifecycle.
+BATCH_WRITE_TABLES = {SHARES_TABLE, INVITES_TABLE, CAMPAIGNS_TABLE, ORDER_FULFILLMENTS_TABLE}
+
+# Tables the #352 role grants item-level DeleteItem on. The orders entry is the
+# fulfillmentVersion-pinned parent delete of the cascade.
+DELETE_ITEM_TABLES = {PROFILES_TABLE, SHARES_TABLE, ORDERS_TABLE}
 
 # DynamoDB actions the #352 profile/sharing role grants.
 ALLOWED_DYNAMODB_ACTIONS = {
@@ -154,6 +165,10 @@ def assert_within_profile_sharing_role_scope(recorder: ApiCallRecorder) -> None:
     )
     batch_write_tables = {table for op, table in recorder.dynamodb_calls if op == "BatchWriteItem"}
     assert batch_write_tables <= BATCH_WRITE_TABLES, f"BatchWriteItem outside cascade tables: {batch_write_tables}"
+    delete_item_tables = {table for op, table in recorder.dynamodb_calls if op == "DeleteItem"}
+    assert delete_item_tables <= DELETE_ITEM_TABLES, (
+        f"DeleteItem outside the item-level tables of the #352 role: {delete_item_tables}"
+    )
     transact_tables = {table for op, table in recorder.dynamodb_calls if op == "TransactWriteItems"}
     assert transact_tables <= {PROFILES_TABLE}, f"TransactWriteItems outside profiles table: {transact_tables}"
     for op, subject in recorder.s3_calls:
@@ -183,6 +198,26 @@ def seed_share(shares_table: Any, target_sub: str, permissions: List[str]) -> No
             "ownerAccountId": f"ACCOUNT#{OWNER_SUB}",
             "permissions": permissions,
             "createdAt": "2024-01-01T00:00:00Z",
+        }
+    )
+
+
+def seed_fulfillment_for_order(order_fulfillments_table: Any, order_id: str = "ORDER#1") -> None:
+    """Seed one fulfillment record of that Order, the way the fulfillment path writes it."""
+    order_fulfillments_table.put_item(
+        Item={
+            "pk": order_id,
+            "sk": f"FULFILLMENT#2024-10-02T00:00:00+00:00#ful-{order_id}",
+            "entityType": "OrderFulfillment",
+            "orderId": order_id,
+            "campaignId": CAMPAIGN_ID,
+            "fulfillmentId": f"ful-{order_id}",
+            "lineItemId": "line-1",
+            "productId": "PROD#1",
+            "recordType": "FULFILL",
+            "quantity": 2,
+            "source": "KERNEL_STOCK",
+            "createdAt": "2024-10-02T00:00:00+00:00",
         }
     )
 
@@ -246,6 +281,7 @@ class TestDeleteProfileCascadeScope:
         invites_table: Any,
         campaigns_table: Any,
         orders_table: Any,
+        order_fulfillments_table: Any,
         exports_bucket: None,
         lambda_context: Any,
         api_calls: ApiCallRecorder,
@@ -270,9 +306,11 @@ class TestDeleteProfileCascadeScope:
         )
 
         assert result is True
-        # BatchWriter deletes hit exactly the four cascade tables.
+        # BatchWriter deletes hit the three batched cascade tables. Orders are not among
+        # them: each one goes by a DeleteItem carrying its fulfillmentVersion condition.
         batch_write_tables = {table for op, table in api_calls.dynamodb_calls if op == "BatchWriteItem"}
-        assert batch_write_tables == {SHARES_TABLE, INVITES_TABLE, CAMPAIGNS_TABLE, ORDERS_TABLE}
+        assert batch_write_tables == {SHARES_TABLE, INVITES_TABLE, CAMPAIGNS_TABLE}
+        assert ("DeleteItem", ORDERS_TABLE) in api_calls.dynamodb_calls
         # Report purge used the versioned-listing + delete path.
         assert ("ListObjectVersions", f"reports/{PROFILE_ID}/") in api_calls.s3_calls
         assert_within_profile_sharing_role_scope(api_calls)
@@ -285,6 +323,7 @@ class TestDeleteProfileCascadeScope:
         shares_table: Any,
         campaigns_table: Any,
         orders_table: Any,
+        order_fulfillments_table: Any,
         exports_bucket: None,
         lambda_context: Any,
         api_calls: ApiCallRecorder,
@@ -292,6 +331,7 @@ class TestDeleteProfileCascadeScope:
         seed_profile(profiles_table)
         seed_share(shares_table, FRIEND_SUB, ["READ"])
         seed_campaign_with_order(campaigns_table, orders_table)
+        seed_fulfillment_for_order(order_fulfillments_table)
         api_calls.attach()
 
         result = cascade_handler(
@@ -301,3 +341,19 @@ class TestDeleteProfileCascadeScope:
 
         assert result is True
         assert_within_profile_sharing_role_scope(api_calls)
+
+        # ARCH-1: the Order delete takes its fulfillment history with it. The record is
+        # append-only, keyed by the Order, and both the reversal path and the audit read
+        # re-load the Order to authorize themselves -- so an orphan is a record nobody can
+        # reverse, cannot reach, and whose inventory movement already moved stock.
+        remaining = order_fulfillments_table.scan()
+        assert remaining["Items"] == [], "the cascade left fulfillment history behind its Order"
+
+        # Children-first, in the recorded call order: the history sweep precedes the
+        # conditioned DeleteItem that removes the Order, so a failure partway through
+        # leaves an Order whose history is intact rather than one that lost part of its
+        # accounting -- and an Order that is still readable is what a retry needs.
+        calls = api_calls.dynamodb_calls
+        sweep = next(i for i, (op, table) in enumerate(calls) if table == ORDER_FULFILLMENTS_TABLE and op == "Query")
+        order_delete = next(i for i, (op, table) in enumerate(calls) if table == ORDERS_TABLE and op == "DeleteItem")
+        assert sweep < order_delete, "the cascade deleted the Order before its fulfillment history"

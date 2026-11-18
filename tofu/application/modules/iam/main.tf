@@ -265,19 +265,27 @@ resource "aws_iam_role_policy" "lambda_admin_cloudfront" {
 # DynamoDB scope was verified against the handler source (including the shared
 # auth helpers in src/utils/auth.py):
 #   - campaigns: Query on campaignId-index / unitCampaignKey-index, GetItem
-#   - orders:    Query, GetItem, and BatchWriteItem deletes (order cleanup)
+#   - orders:    Query, GetItem, and one conditional DeleteItem per Order (the
+#                fulfillmentVersion-pinned parent delete of the ARCH-1 lifecycle)
+#   - order_fulfillments: Query + BatchWriteItem deletes (the children-first sweep of
+#                each deleted Order's history)
 #   - profiles:  Query / BatchGetItem via auth helpers (owner/share checks)
 #   - shares:    GetItem / BatchGetItem via auth helpers
 #
-# Read-only actions where the handlers only read; the single write action is
-# BatchWriteItem scoped to the orders table (the boto3 resource-style
-# batch_writer issues BatchWriteItem, which cannot be restricted to
-# delete-only at the IAM action level). No S3, CloudFront, or Cognito
-# permissions: neither handler touches those services. The monolithic shared
-# role was retired in #355 (chunk 5), the final chunk of the #326 split.
+# Read-only actions where the handlers only read; the writes are BatchWriteItem scoped to
+# the fulfillment table (the boto3 resource-style batch_writer issues BatchWriteItem,
+# which cannot be restricted to delete-only at the IAM action level) plus DeleteItem on
+# the orders table, where the delete must carry a condition a batch cannot express. No
+# S3, CloudFront, or Cognito permissions: neither handler touches those services. The
+# monolithic shared role was retired in #355 (chunk 5), the final chunk of the #326 split.
 
 locals {
-  campaign_table_keys = ["campaigns", "orders", "profiles", "shares"]
+  # `order_fulfillments` is here because deleting a campaign's Orders takes their
+  # fulfillment history with it (ARCH-1, children-first): the sweep reads each Order's
+  # partition on the BASE table -- an index read cannot be strongly consistent, and a
+  # stale index can miss a fulfillment committed moments before the delete -- and
+  # batch-deletes the rows that read names.
+  campaign_table_keys = ["campaigns", "orders", "profiles", "shares", "order_fulfillments"]
   campaign_table_arns = [for k in local.campaign_table_keys : var.dynamodb_table_arns[k]]
   campaign_index_arns = [for arn in local.campaign_table_arns : "${arn}/index/*"]
 }
@@ -310,12 +318,27 @@ data "aws_iam_policy_document" "lambda_campaign_dynamodb" {
     resources = concat(local.campaign_table_arns, local.campaign_index_arns)
   }
 
-  # Order cleanup (delete-campaign-orders) uses the resource-style
-  # batch_writer, which issues BatchWriteItem deletes. Scoped to the orders
-  # table only.
+  # The fulfillment-history sweep (delete-campaign-orders) uses the resource-style
+  # batch_writer, which issues BatchWriteItem deletes. Scoped to the fulfillment history
+  # the Orders own: an Order deleted without its records strands append-only history
+  # that the reversal and audit surfaces can no longer reach, next to inventory
+  # movements that already moved stock (ARCH-1). The Orders themselves are NOT in this
+  # statement: they go one at a time by conditional DeleteItem, below.
   statement {
     effect    = "Allow"
     actions   = ["dynamodb:BatchWriteItem"]
+    resources = [var.dynamodb_table_arns["order_fulfillments"]]
+  }
+
+  # The Order row itself goes one at a time, by a conditional DeleteItem pinned to the
+  # Order's fulfillmentVersion (ARCH-1 recovery): the pin is what makes a delete unsafe
+  # when a fulfillment lands during the history sweep, and a failed pin leaves the Order
+  # readable so the next cascade run still knows that partition needs cleanup. A batch
+  # delete cannot carry that condition, so the parent row is deleted with it and the
+  # children stay batched.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:DeleteItem"]
     resources = [var.dynamodb_table_arns["orders"]]
   }
 }
@@ -344,7 +367,9 @@ resource "aws_iam_role_policy" "lambda_campaign_dynamodb" {
 #     is_admin() reads only the JWT claims, not DynamoDB.
 #   - delete-profile-cascade: GetItem (ConsistentRead) on profiles plus
 #     DeleteItem; Query + batch_writer deletes on shares, invites
-#     (profileId-index), campaigns, and orders; strongly consistent GetItem
+#     (profileId-index) and campaigns; one conditioned DeleteItem per Order (the
+#     fulfillmentVersion pin of the ARCH-1 lifecycle) plus batch_writer deletes of
+#     that Order's fulfillment history; strongly consistent GetItem
 #     verification reads on campaigns/orders (shared helpers imported from
 #     campaign_operations). It does NOT touch catalogs.
 #
@@ -356,13 +381,19 @@ resource "aws_iam_role_policy" "lambda_campaign_dynamodb" {
 # the #326 split.
 
 locals {
-  profile_sharing_table_keys = ["profiles", "shares", "invites", "campaigns", "orders"]
+  # `order_fulfillments`: the cascade deletes each Order's fulfillment history in the
+  # same step that deletes the Order itself (ARCH-1, children-first), reading the Order's
+  # partition on the base table because an index read cannot be strongly consistent.
+  profile_sharing_table_keys = ["profiles", "shares", "invites", "campaigns", "orders", "order_fulfillments"]
   profile_sharing_table_arns = [for k in local.profile_sharing_table_keys : var.dynamodb_table_arns[k]]
   profile_sharing_index_arns = [for arn in local.profile_sharing_table_arns : "${arn}/index/*"]
 
-  # Tables the cascade handler's batch_writer deletes from (BatchWriteItem).
+  # Tables the cascade handler's batch_writer deletes from (BatchWriteItem). Orders are
+  # NOT among them: each Order goes by a conditional DeleteItem pinned to its
+  # fulfillmentVersion, below, because the delete has to carry a condition the batch
+  # cannot express.
   profile_sharing_batch_write_table_arns = [
-    for k in ["shares", "invites", "campaigns", "orders"] : var.dynamodb_table_arns[k]
+    for k in ["shares", "invites", "campaigns", "order_fulfillments"] : var.dynamodb_table_arns[k]
   ]
 }
 
@@ -415,6 +446,18 @@ data "aws_iam_policy_document" "lambda_profile_sharing_dynamodb" {
       "dynamodb:DeleteItem",
     ]
     resources = [var.dynamodb_table_arns["shares"]]
+  }
+
+  # delete-profile-cascade removes each Order of each of the profile's campaigns one at
+  # a time, by a DeleteItem conditioned on the Order's fulfillmentVersion (ARCH-1
+  # recovery). The condition is the retry mechanism: a fulfillment that lands while the
+  # cascade is sweeping that Order's history fails the pin, the Order stays readable, and
+  # the next run still knows the partition needs cleanup. Its history rows themselves stay
+  # on the batch_writer below.
+  statement {
+    effect    = "Allow"
+    actions   = ["dynamodb:DeleteItem"]
+    resources = [var.dynamodb_table_arns["orders"]]
   }
 
   # Cascade deletes via the resource-style batch_writer, which issues
@@ -884,6 +927,50 @@ data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
     ]
   }
 
+  # Wave 3 §2.4 individual-Order fulfillment: the append-only OrderFulfillment
+  # rows of data model §6.5. The fulfillment and reversal mutations commit
+  # marker + Order + fulfillment row (+ balance/movement rows on the inventory
+  # table) in one TransactWriteItems, and the row write is conditional
+  # (attribute_not_exists on pk/sk — that condition IS the "at most one reversal
+  # per fulfillment" rule, because the reversal's sort key is derived from the
+  # id it reverses). Read side: the per-Order audit is a partition Query, and the
+  # campaignId GSI answers Campaign-wide history. No DeleteItem — the history is
+  # append-only and a cleanup sweep that deletes audit rows is a data-loss
+  # incident, not maintenance.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [
+      var.dynamodb_table_arns["order_fulfillments"],
+      "${var.dynamodb_table_arns["order_fulfillments"]}/index/*",
+    ]
+  }
+
+  # Wave 3 §2.4: the Order row a fulfillment moves. UpdateItem only, and base
+  # table only — a fulfillment changes exactly lineItems, fulfillmentVersion and
+  # updatedAt on a row that already exists, never creates or deletes one. The
+  # orders table's create and delete owners stay createOrder/publicCreateOrder
+  # and the delete cascades; granting PutItem or DeleteItem here would put a
+  # second writer on the whole Order shape.
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+      "dynamodb:UpdateItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [var.dynamodb_table_arns["orders"]]
+  }
+
   # The redemption throttle counter reuses the shared throttle table: one
   # atomic UpdateItem increment per failed invite redemption, TTL-expired.
   statement {
@@ -966,7 +1053,7 @@ data "aws_iam_policy_document" "lambda_public_orders_ses" {
   count = var.ses_order_emails_enabled ? 1 : 0
 
   statement {
-    effect = "Allow"
+    effect  = "Allow"
     actions = ["ses:SendTemplatedEmail"]
     # The module's own sending identity plus its two namespaced templates.
     resources = concat([var.ses_order_identity_arn], var.ses_order_template_arns)

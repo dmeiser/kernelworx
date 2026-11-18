@@ -65,6 +65,21 @@ resource "aws_appsync_function" "lookup_order_for_delete" {
   code = file("${local.js_resolvers_dir}/lookup_order_for_delete_fn.js")
 }
 
+# ARCH-1: the delete takes the Order's fulfillment rows with it, and a cross-table
+# TransactWriteItems names every table it writes.
+resource "aws_appsync_function" "get_order_fulfillments_for_delete" {
+  api_id      = aws_appsync_graphql_api.main.id
+  data_source = aws_appsync_datasource.order_fulfillments.name
+  name        = "GetOrderFulfillmentsForDeleteFn${local.env_suffix}"
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/get_order_fulfillments_for_delete_fn.js")
+}
+
 resource "aws_appsync_function" "delete_order" {
   api_id      = aws_appsync_graphql_api.main.id
   data_source = aws_appsync_datasource.orders.name
@@ -75,7 +90,13 @@ resource "aws_appsync_function" "delete_order" {
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/delete_order_fn.js")
+  # templatefile() because ARCH-1 made this an Order-plus-fulfillment-children delete,
+  # and a cross-table TransactWriteItems names every table it writes: the children are on
+  # the fulfillment table, the Order and its version pin are on the orders table.
+  code = templatefile("${local.js_resolvers_dir}/delete_order_fn.js", {
+    orders_table_name             = var.dynamodb_table_names.orders
+    order_fulfillments_table_name = var.dynamodb_table_names.order_fulfillments
+  })
 }
 
 resource "aws_appsync_function" "verify_order_delete_propagation" {
@@ -133,7 +154,14 @@ resource "aws_appsync_function" "get_membership_guard_for_order" {
     runtime_version = "1.0.0"
   }
 
-  code = file("${local.js_resolvers_dir}/get_membership_guard_for_order_fn.js")
+  # templatefile() because §2.4.2 turned this single GetItem into a cross-table
+  # BatchGetItem for a custody sale, and BatchGetItem names every table it reads.
+  code = templatefile("${local.js_resolvers_dir}/get_membership_guard_for_order_fn.js", {
+    unit_campaigns_table_name     = var.dynamodb_table_names.unit_campaigns
+    inventory_table_name          = var.dynamodb_table_names.inventory
+    order_fulfillments_table_name = var.dynamodb_table_names.order_fulfillments
+    units_table_name              = var.dynamodb_table_names.units
+  })
 }
 
 # Retired by the ARCH-1 fold: the guard row carries the parent Unit beside the
@@ -171,9 +199,16 @@ resource "aws_appsync_function" "create_order" {
   # field must be the REAL AWS table name (AppSync takes it literally rather
   # than defaulting to the datasource's table - same lesson as
   # create_public_order_fn.js above).
+  # §2.4.2 adds two more: a door-to-door sale's custody decrement and its movement are
+  # TransactWriteItems actions on the inventory table, and its fulfillment records and
+  # idempotency marker are actions on the order_fulfillments table. AppSync takes each
+  # item's `table` literally, so all four names must be real.
   code = templatefile("${local.js_resolvers_dir}/create_order_fn.js", {
-    orders_table_name         = var.dynamodb_table_names.orders
-    unit_campaigns_table_name = var.dynamodb_table_names.unit_campaigns
+    orders_table_name             = var.dynamodb_table_names.orders
+    campaigns_table_name          = var.dynamodb_table_names.campaigns
+    unit_campaigns_table_name     = var.dynamodb_table_names.unit_campaigns
+    inventory_table_name          = var.dynamodb_table_names.inventory
+    order_fulfillments_table_name = var.dynamodb_table_names.order_fulfillments
   })
 }
 

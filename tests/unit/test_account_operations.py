@@ -22,6 +22,7 @@ class TestDeleteMyAccount:
     def test_delete_account_deletes_everything(
         self,
         dynamodb_table: Any,
+        order_fulfillments_table: Any,
         sample_account_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,
@@ -321,6 +322,7 @@ class TestDeleteMyAccount:
     def test_delete_account_with_multiple_profiles(
         self,
         dynamodb_table: Any,
+        order_fulfillments_table: Any,
         sample_account_id: str,
         appsync_event: Dict[str, Any],
         lambda_context: Any,

@@ -8,6 +8,7 @@ from .campaign_operations import (
     _verify_campaign_deleted,
     _verify_order_keys_deleted,
     batch_delete_keys,
+    delete_order_and_fulfillments,
 )
 
 # Handle both Lambda (absolute) and unit test (relative) imports
@@ -104,11 +105,6 @@ def _collect_order_keys(campaigns: List[Dict[str, Any]]) -> List[Dict[str, str]]
                 }
             )
     return order_keys
-
-
-def _delete_orders(order_keys: List[Dict[str, str]]) -> int:
-    """Delete all orders for a profile."""
-    return batch_delete_keys(tables.orders, order_keys, ["campaignId", "orderId"], logger=logger)
 
 
 def _delete_campaigns(profile_id: str, campaigns: List[Dict[str, Any]]) -> int:
@@ -242,7 +238,25 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
 
     order_keys = _collect_order_keys(campaigns)
 
-    orders_deleted = _delete_orders(order_keys)
+    # ARCH-1: one Order at a time, and each one's history goes with it in the same
+    # step -- `delete_order_and_fulfillments` sweeps the Order's whole fulfillment
+    # partition and then deletes the Order conditioned on the fulfillmentVersion that
+    # read saw. Deleting every Order in one batch and sweeping afterwards cannot be
+    # retried: a fulfillment that lands in the window is orphaned the moment the Orders
+    # are gone, and a cleanup failure then leaves records no later run can find, because
+    # the cascade enumerates work by reading Orders. Pinning each parent delete keeps
+    # the parent row as the record of unfinished cleanup -- a fulfilled Order fails its
+    # delete here, so this cascade stops before touching the campaigns, the shares, or
+    # the profile, and the next run sees the same Order and takes it.
+    fulfillments_deleted = 0
+    orders_deleted = 0
+    for key in order_keys:
+        order_deleted, fulfillment_records = delete_order_and_fulfillments(
+            str(key["campaignId"]), str(key["orderId"]), logger=logger
+        )
+        fulfillments_deleted += fulfillment_records
+        if order_deleted:
+            orders_deleted += 1
     if order_keys:
         _verify_order_keys_deleted(order_keys)
 
@@ -260,7 +274,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> bool:
 
     logger.info(
         f"Cascade delete complete for profile {db_profile_id}: "
-        f"orders={orders_deleted}, campaigns={campaigns_deleted}, "
+        f"fulfillments={fulfillments_deleted}, orders={orders_deleted}, campaigns={campaigns_deleted}, "
         f"shares={shares_deleted}, invites={invites_deleted}, "
         f"reports={reports_deleted}"
     )

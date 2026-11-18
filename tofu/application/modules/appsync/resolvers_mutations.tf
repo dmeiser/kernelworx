@@ -313,6 +313,11 @@ resource "aws_appsync_resolver" "delete_order" {
       # query the GSI for the profile so the share check can run.
       aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
+      # ARCH-1: read the Order's fulfillment children so the delete step can take them in
+      # the same transaction. Children-first is the design rule
+      # (SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md), and one transaction is what keeps a
+      # half-cleaned history from existing at all.
+      aws_appsync_function.get_order_fulfillments_for_delete.function_id,
       aws_appsync_function.delete_order.function_id,
       # #746: decrement the denormalized campaign totals after the delete (a
       # no-op delete stashes no delta and this passes through).
@@ -343,7 +348,6 @@ resource "aws_appsync_resolver" "create_order" {
       # query the GSI for the profile so the share check can run.
       aws_appsync_function.verify_profile_write_access_step2.function_id,
       aws_appsync_function.check_share_permissions.function_id,
-      aws_appsync_function.validate_payment_method_appsync.function_id,
       aws_appsync_function.get_campaign_for_order.function_id,
       # The step above is a GSI locator only: it can name the campaign's key, not
       # the campaign. Everything downstream trusts this strong read instead.
@@ -353,7 +357,19 @@ resource "aws_appsync_resolver" "create_order" {
       # row carries the parent Unit beside the pointer (denormalized by the join
       # claim), so this one strong read names both halves of the scope and the
       # minter needs no second lookup (ARCH-1: 10 functions, the AppSync cap).
+      # §2.4.2 gives the same step the custody sale's reads AND its authorization
+      # decision, and SEC-1 makes that ordering load-bearing: payment-method
+      # validation must not run before it.
       aws_appsync_function.get_membership_guard_for_order.function_id,
+      # SEC-1 (re-review): validation answers "Payment method 'X' does not exist for
+      # this account" by reading the PROFILE OWNER's stored methods, so for a custody
+      # sale — the one write where `check_share_permissions` defers its denial so a
+      # Unit Admin can still be authorized — running this step before the composite
+      # authorization is settled turns that answer into a yes/no oracle over another
+      # account's payment methods. It now runs after the step that decides the sale's
+      # authorization, so an unauthorized caller never receives a validation verdict.
+      # `test_custody_sale_authorization_precedes_payment_validation` pins the order.
+      aws_appsync_function.validate_payment_method_appsync.function_id,
       aws_appsync_function.get_catalog.function_id,
       aws_appsync_function.create_order.function_id,
       # #746: increment the denormalized campaign totals after the write.
@@ -1163,6 +1179,41 @@ resource "aws_appsync_resolver" "return_stock_from_scout" {
   api_id      = aws_appsync_graphql_api.main.id
   type        = "Mutation"
   field       = "returnStockFromScout"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+# Stage 3 §2.4 individual-Order fulfillment writes. Each is one conditional
+# TransactWriteItems inside the UnitOperationsDS handler — idempotency marker +
+# the conditioned Order row (lineItems, fulfillmentVersion, updatedAt) + the
+# append-only OrderFulfillment row, plus the balance delta and InventoryMovement
+# when the source moved Kernel stock — so the resolver stays a thin unit invoke.
+# The authorization is in the handler too: Unit Admin of the Order's immutable
+# originating unitId, read off the Order row, never off a Unit id the caller sends.
+resource "aws_appsync_resolver" "fulfill_individual_order_line" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "fulfillIndividualOrderLine"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "reverse_individual_order_fulfillment" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "reverseIndividualOrderFulfillment"
   data_source = aws_appsync_datasource.unit_operations.name
 
   runtime {

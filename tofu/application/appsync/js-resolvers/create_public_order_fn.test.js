@@ -97,7 +97,22 @@ describe('create_public_order request', () => {
         assert.strictEqual(item.sellerName, 'My Shop');
         assert.strictEqual(item.totalAmount, 10);
         assert.strictEqual(item.receiptToken, 'auto-generated-id');
-        assert.deepStrictEqual(item.lineItems, [{ productId: 'p1', productName: 'P1', quantity: 1, pricePerUnit: 10, subtotal: 10 }]);
+        // §5.19 line identity lands on public lines too: createOrder and
+        // publicCreateOrder share one money/identity owner (lib/line_items.js,
+        // #535), and a public line with an absent identity is a line nothing
+        // can later name. The buyer-facing receipt projection is untouched --
+        // it maps named fields, so an extra stored attribute cannot surface.
+        assert.deepStrictEqual(item.lineItems, [
+            {
+                productId: 'p1',
+                productName: 'P1',
+                quantity: 1,
+                pricePerUnit: 10,
+                subtotal: 10,
+                lineItemId: 'auto-generated-id',
+                fulfilledQuantity: 0,
+            },
+        ]);
 
     });
 

@@ -225,3 +225,74 @@ describe('check_share_permissions_fn response', () => {
         );
     });
 });
+
+// §2.4.2 (SEC-1): "Profile Owner/WRITE or Unit Admin". For a door-to-door custody sale
+// this step's denial is a verdict it hands to the write step rather than the end of the
+// pipeline, because the other half of the authorization lives there. Every other field,
+// and every other mode of createOrder, keeps the FORBIDDEN above exactly as it was -- a
+// pre-Wave-3 client must not find its authorization path changed by a mode it never sends.
+describe('check_share_permissions_fn response: a custody sale defers the Profile verdict instead of denying', () => {
+    const SALE = { info: { fieldName: 'createOrder' }, args: { input: { fulfillmentMode: 'CONSUME_SCOUT_CUSTODY' } } };
+
+    function silent(fn) {
+        const original = console.error;
+        console.error = () => {};
+        try {
+            return fn();
+        } finally {
+            console.error = original;
+        }
+    }
+
+    it('records the denial for a sale with no share, and writes no error', () => {
+        const ctx = { ...SALE, stash: {}, result: null };
+
+        assert.deepStrictEqual(response(ctx), { authorized: false });
+        assert.strictEqual(ctx.stash.profileWriteAuthorized, false);
+    });
+
+    it('records the denial for a sale whose share is READ only', () => {
+        const ctx = { ...SALE, stash: {}, result: { profileId: 'PROFILE#p1', ownerAccountId: 'ACCOUNT#owner-1', permissions: ['READ'] } };
+
+        assert.deepStrictEqual(silent(() => response(ctx)), { authorized: false });
+        assert.strictEqual(ctx.stash.profileWriteAuthorized, false);
+    });
+
+    it("records the denial when a sale share went stale with the owner change", () => {
+        const ctx = {
+            ...SALE,
+            stash: { profile: { ownerAccountId: 'ACCOUNT#new-owner' } },
+            result: { profileId: 'PROFILE#p1', ownerAccountId: 'ACCOUNT#old-owner', permissions: ['WRITE'] }
+        };
+
+        assert.deepStrictEqual(response(ctx), { authorized: false });
+        assert.strictEqual(ctx.stash.profileWriteAuthorized, false);
+    });
+
+    it('records authorization for the profile owner, so the Unit read never happens', () => {
+        const ctx = { ...SALE, stash: { isOwner: true }, result: { ownerAccountId: 'ACCOUNT#me' } };
+
+        assert.deepStrictEqual(response(ctx), { authorized: true });
+        assert.strictEqual(ctx.stash.profileWriteAuthorized, true);
+    });
+
+    it('records authorization for a WRITE share on a sale', () => {
+        const share = { profileId: 'PROFILE#p1', ownerAccountId: 'ACCOUNT#owner-1', permissions: ['WRITE'] };
+        const ctx = { ...SALE, stash: { profile: { ownerAccountId: 'ACCOUNT#owner-1' } }, result: share };
+
+        assert.deepStrictEqual(response(ctx), { authorized: true });
+        assert.strictEqual(ctx.stash.profileWriteAuthorized, true);
+    });
+
+    for (const [label, info] of [['a NONE-mode createOrder', { fieldName: 'createOrder' }], ['another field', { fieldName: 'updateOrder' }]]) {
+        it(`keeps the FORBIDDEN for ${label}`, () => {
+            const ctx = { info, args: { input: { fulfillmentMode: label === 'another field' ? 'CONSUME_SCOUT_CUSTODY' : null } }, stash: {}, result: null };
+
+            assert.throws(
+                () => response(ctx),
+                /FORBIDDEN: Forbidden: Only profile owner or users with WRITE permission can perform this action \(no share found\)/
+            );
+            assert.strictEqual(ctx.stash.profileWriteAuthorized, undefined);
+        });
+    }
+});

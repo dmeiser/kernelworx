@@ -300,7 +300,9 @@ class TestDeleteProfileCascade:
         )
         assert len(response.get("Items", [])) == 0
 
-    def test_delete_profile_with_orders(self, profiles_table: Any, campaigns_table: Any, orders_table: Any) -> None:
+    def test_delete_profile_with_orders(
+        self, profiles_table: Any, campaigns_table: Any, orders_table: Any, order_fulfillments_table: Any
+    ) -> None:
         """Test deleting a profile with campaigns and orders."""
         owner_id = "owner-123"
         profile_id = "PROFILE#with-orders"
@@ -331,6 +333,132 @@ class TestDeleteProfileCascade:
         )
         assert len(campaigns_response.get("Items", [])) == 0
 
+    def test_a_fulfillment_landing_mid_cascade_leaves_the_order_and_profile_for_the_retry(
+        self, profiles_table: Any, campaigns_table: Any, orders_table: Any, order_fulfillments_table: Any
+    ) -> None:
+        """ARCH-1 (round-3 review): the profile cascade's cleanup is retryable, not terminal.
+
+        Each Order is swept and then deleted by a write pinned to its `fulfillmentVersion`,
+        so a fulfillment committing inside that window fails the pin: the cascade stops
+        with the Order, its campaign, the profile and the surviving record all still in
+        place, and the next run finds the same Order and finishes the cleanup. The old
+        order of operations deleted the Orders first, so a cleanup failure behind them
+        left records no later run could find.
+        """
+        from src.handlers.campaign_operations import delete_fulfillments_for_orders
+
+        owner_id = "owner-race"
+        profile_id = "PROFILE#race"
+        campaign_id = "CAMPAIGN#race"
+        order_key = {"campaignId": campaign_id, "orderId": "ORDER#1"}
+        _create_profile(profiles_table, owner_id, profile_id)
+        _create_campaign(campaigns_table, profile_id, campaign_id)
+        _create_order(orders_table, profile_id, campaign_id, "ORDER#1")
+
+        real_sweep = delete_fulfillments_for_orders
+        injections = {"count": 0}
+
+        def sweep_then_fulfill(order_ids: List[str], *, logger: Any = None) -> int:
+            """The real sweep, then the fulfillment that commits in the window behind it."""
+            deleted = real_sweep(order_ids, logger=logger)
+            if injections["count"] == 0:
+                injections["count"] = 1
+                order_fulfillments_table.put_item(
+                    Item={
+                        "pk": "ORDER#1",
+                        "sk": "FULFILLMENT#2024-10-02T00:00:00+00:00#late",
+                        "entityType": "OrderFulfillment",
+                        "orderId": "ORDER#1",
+                        "campaignId": campaign_id,
+                        "fulfillmentId": "late",
+                        "quantity": 1,
+                        "createdAt": "2024-10-02T00:00:00+00:00",
+                    }
+                )
+                orders_table.update_item(
+                    Key=order_key,
+                    UpdateExpression="SET fulfillmentVersion = :v",
+                    ExpressionAttributeValues={":v": 1},
+                )
+            return deleted
+
+        event = {"arguments": {"profileId": profile_id}, "identity": {"sub": owner_id}}
+        with patch("src.handlers.campaign_operations.delete_fulfillments_for_orders", side_effect=sweep_then_fulfill):
+            first = lambda_handler(event, None)
+
+        assert isinstance(first, dict) and first.get("__isError") is True, f"expected a CONFLICT payload: {first!r}"
+        assert first["errorCode"] == ErrorCode.CONFLICT
+        # The unfinished cleanup is still marked by the rows it belongs to.
+        assert orders_table.get_item(Key=order_key).get("Item") is not None
+        assert (
+            campaigns_table.get_item(Key={"profileId": profile_id, "campaignId": campaign_id}).get("Item") is not None
+        )
+        assert (
+            profiles_table.get_item(Key={"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}).get("Item")
+            is not None
+        )
+        assert len(order_fulfillments_table.scan()["Items"]) == 1
+
+        second = lambda_handler(event, None)
+
+        assert second is True
+        assert orders_table.scan()["Items"] == []
+        assert order_fulfillments_table.scan()["Items"] == [], "the retry left fulfillment history orphaned"
+
+    def test_an_order_a_concurrent_path_removed_first_is_not_counted_and_does_not_abort(
+        self, profiles_table: Any, campaigns_table: Any, orders_table: Any, order_fulfillments_table: Any
+    ) -> None:
+        """A concurrent delete is normal, and its work is already finished.
+
+        The cascade's collection query can name an Order a concurrent path removes before
+        this cascade's strong read of it. That Order row left the table through a pinned
+        delete that took its history with it, so there is nothing here to clean: it is not
+        counted as this cascade's deletion, and it must not stop the cascade from removing
+        the profile's remaining rows -- unlike a pin that FAILS, which means cleanup for
+        that Order is unfinished and aborts the run (the test above).
+        """
+        from src.handlers.campaign_operations import delete_order_and_fulfillments as delete_order_and_history
+
+        owner_id = "owner-concurrent"
+        profile_id = "PROFILE#concurrent"
+        campaign_id = "CAMPAIGN#concurrent"
+        _create_profile(profiles_table, owner_id, profile_id)
+        _create_campaign(campaigns_table, profile_id, campaign_id)
+        _create_order(orders_table, profile_id, campaign_id, "ORDER#1")
+        _create_order(orders_table, profile_id, campaign_id, "ORDER#2")
+        for order_id, fulfillment_id in (("ORDER#1", "ful-1"), ("ORDER#2", "ful-2")):
+            order_fulfillments_table.put_item(
+                Item={
+                    "pk": order_id,
+                    "sk": f"FULFILLMENT#2024-10-02T00:00:00+00:00#{fulfillment_id}",
+                    "entityType": "OrderFulfillment",
+                    "orderId": order_id,
+                    "campaignId": campaign_id,
+                    "fulfillmentId": fulfillment_id,
+                    "quantity": 2,
+                    "createdAt": "2024-10-02T00:00:00+00:00",
+                }
+            )
+
+        wins = {"count": 0}
+
+        def delete_one_order_first(campaign_id_arg: str, order_id: str, *, logger: Any = None) -> Any:
+            """The concurrent path finishes ORDER#2 while this cascade works on ORDER#1."""
+            if wins["count"] == 0 and order_id == "ORDER#1":
+                wins["count"] = 1
+                delete_order_and_history(campaign_id_arg, "ORDER#2", logger=logger)
+            return delete_order_and_history(campaign_id_arg, order_id, logger=logger)
+
+        event = {"arguments": {"profileId": profile_id}, "identity": {"sub": owner_id}}
+        with patch(
+            "src.handlers.delete_profile_cascade.delete_order_and_fulfillments",
+            side_effect=delete_one_order_first,
+        ):
+            assert lambda_handler(event, None) is True
+
+        assert orders_table.scan()["Items"] == []
+        assert order_fulfillments_table.scan()["Items"] == [], "the concurrent delete orphaned the history it owned"
+
     def test_delete_profile_with_all_related_data(
         self,
         profiles_table: Any,
@@ -338,6 +466,7 @@ class TestDeleteProfileCascade:
         invites_table: Any,
         campaigns_table: Any,
         orders_table: Any,
+        order_fulfillments_table: Any,
     ) -> None:
         """Test deleting a profile with shares, invites, campaigns, and orders."""
         owner_id = "owner-123"
@@ -404,7 +533,9 @@ class TestDeleteProfileCascade:
         )
         assert len(response.get("Items", [])) == 0
 
-    def test_delete_with_many_orders(self, profiles_table: Any, campaigns_table: Any, orders_table: Any) -> None:
+    def test_delete_with_many_orders(
+        self, profiles_table: Any, campaigns_table: Any, orders_table: Any, order_fulfillments_table: Any
+    ) -> None:
         """Test deleting more than 25 orders for a single campaign."""
         owner_id = "owner-123"
         profile_id = "PROFILE#many-orders"
@@ -541,7 +672,9 @@ class TestDeleteProfileCascade:
         response = profiles_table.get_item(Key={"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id})
         assert "Item" not in response
 
-    def test_multiple_campaigns_with_orders(self, profiles_table: Any, campaigns_table: Any, orders_table: Any) -> None:
+    def test_multiple_campaigns_with_orders(
+        self, profiles_table: Any, campaigns_table: Any, orders_table: Any, order_fulfillments_table: Any
+    ) -> None:
         """Test deleting orders across multiple campaigns."""
         owner_id = "owner-123"
         profile_id = "PROFILE#multi-campaign"
@@ -621,13 +754,15 @@ class TestDeleteProfileCascade:
                 ]
             },
         ]
-        accept_batch_deletes(mock_table)
-
         with (
             patch("src.handlers.delete_profile_cascade.tables") as mock_tables,
             patch("src.handlers.campaign_operations.tables") as mock_campaign_tables,
             patch("src.utils.dynamodb.get_dynamodb_resource") as mock_dynamo_resource,
         ):
+            # ARCH-1 sweep: these Orders have no fulfillment history in this fixture. The
+            # stub is required, not cosmetic: a mock table that never answers this Query
+            # returns a truthy LastEvaluatedKey on every page, so the sweep pages forever.
+            mock_campaign_tables.order_fulfillments.query.return_value = {"Items": []}
             mock_dynamo_resource.return_value.batch_get_item.return_value = {"Responses": {}}
             mock_tables.profiles.get_item.return_value = {
                 "Item": {"ownerAccountId": f"ACCOUNT#{owner_id}", "profileId": profile_id}
@@ -645,7 +780,16 @@ class TestDeleteProfileCascade:
             )
 
             # Delete verification helpers use batch_get_chunked
-            accept_batch_deletes(mock_campaign_tables.orders, mock_campaign_tables.campaigns)
+            mock_campaign_tables.campaigns.get_item.return_value = {}
+
+            # The lifecycle's strongly consistent read answers each Order the collection
+            # query found, so each one really does get its own pinned delete instead of
+            # being skipped as already absent.
+            def read_order(*, Key: Dict[str, str], ConsistentRead: bool) -> Dict[str, Any]:
+                assert ConsistentRead is True
+                return {"Item": {"campaignId": Key["campaignId"], "orderId": Key["orderId"]}}
+
+            mock_campaign_tables.orders.get_item.side_effect = read_order
 
             event = {
                 "arguments": {"profileId": profile_id},
@@ -658,6 +802,11 @@ class TestDeleteProfileCascade:
         assert mock_table.query.call_count == 2
         second_call_kwargs = mock_table.query.call_args_list[1][1]
         assert "ExclusiveStartKey" in second_call_kwargs
+        # Every Order the pagination found is deleted on its own, by a write carrying the
+        # fulfillmentVersion pin: three pages-worth of Orders, three conditioned deletes.
+        deletes = mock_campaign_tables.orders.delete_item.call_args_list
+        assert [call.kwargs["Key"]["orderId"] for call in deletes] == ["ORDER#0", "ORDER#1", "ORDER#2"]
+        assert all("ConditionExpression" in call.kwargs for call in deletes)
 
     def test_batch_write_error_raises_before_deleting_profile(
         self,

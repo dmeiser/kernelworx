@@ -43,10 +43,10 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, 
 from botocore.exceptions import ClientError
 
 try:  # pragma: no cover
-    from utils import inventory_models, unit_auth, unit_campaign_models, unit_models
+    from utils import inventory_models, order_fulfillment_models, unit_auth, unit_campaign_models, unit_models
     from utils.import_fallback import import_from_utils
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils import inventory_models, unit_auth, unit_campaign_models, unit_models
+    from ..utils import inventory_models, order_fulfillment_models, unit_auth, unit_campaign_models, unit_models
     from ..utils.import_fallback import import_from_utils
 
 
@@ -116,6 +116,9 @@ ISSUE_STOCK_FIELD = "issueStockToScout"
 RETURN_STOCK_FIELD = "returnStockFromScout"
 SCOUT_CUSTODY_FIELD = "scoutCustodyBalances"
 MY_SCOUT_CUSTODY_FIELD = "myScoutCustody"
+FULFILL_LINE_FIELD = "fulfillIndividualOrderLine"
+REVERSE_FULFILLMENT_FIELD = "reverseIndividualOrderFulfillment"
+ORDER_FULFILLMENTS_FIELD = "orderFulfillments"
 
 MAX_ACTIVE_UNIT_INVITES = 20
 INVITE_FAILURES_PER_HOUR = 10
@@ -1136,8 +1139,14 @@ def _campaign_marker(*, caller_id: str, operation: str, scope: str, idempotency_
     )
 
 
-def _positive_int(payload: Mapping[str, Any], field: str) -> int:
-    """Read a required version field at the top level of the input."""
+def _positive_int(payload: Mapping[str, Any], field: str, *, minimum: int = 1) -> int:
+    """Read a required version field at the top level of the input.
+
+    ``minimum`` is 1 for the Stage 1 versions, which start at 1 on the row that created
+    them. §5.19's ``fulfillmentVersion`` is the exception the parameter exists for: an
+    unfulfilled Order — including every row written before Wave 3 — sits at version 0, and
+    a caller has to be able to name that zero to fill the first line.
+    """
     value = payload.get(field)
     if value is None:
         raise AppError(ErrorCode.INVALID_INPUT, f"{field} is required")
@@ -1147,8 +1156,8 @@ def _positive_int(payload: Mapping[str, Any], field: str) -> int:
         number = int(value)
     except ValueError, ArithmeticError:
         raise AppError(ErrorCode.INVALID_INPUT, f"{field} must be an integer") from None
-    if number < 1:
-        raise AppError(ErrorCode.INVALID_INPUT, f"{field} must be a positive integer")
+    if number < minimum:
+        raise AppError(ErrorCode.INVALID_INPUT, f"{field} must not be below {minimum}")
     return number
 
 
@@ -2926,6 +2935,680 @@ def _my_scout_custody(event: Dict[str, Any], caller_id: str) -> List[Dict[str, A
     return [_custody_payload(row) for row in rows]
 
 
+# --- Individual Order fulfillment (§2.4) ------------------------------------------
+
+# All three §2.4 surfaces authorize with the same read and the same rule: the Order's
+# own immutable ``unitId`` (§5.19, API-FIX-05) decides whose admin may act, and a Unit id
+# in the request is never consulted (AUTH-U). That is also why fulfillment is a Unit
+# surface at all: its stock source is Unit stock, and an Order with no originating Unit
+# has no Unit Admin to ask and no balance to draw from.
+
+
+def _order_fulfillment_marker(*, caller_id: str, operation: str, order_id: str, idempotency_key: str) -> Any:
+    """Resolve this request's marker address on the order_fulfillments table.
+
+    The marker lives on the table whose rows the mutation appends (§8.9), so one Order's
+    fulfillment history and the record of the request that wrote it sit under one
+    partition prefix. The resource scope is the Order, which is what every §2.4 mutation
+    addresses — not the Unit Campaign, because an Order's originating scope is fixed at
+    sale time while the campaign's current link is not.
+    """
+    return marker_keys(
+        table_key="order_fulfillments",
+        table_name=tables.order_fulfillments.table_name,
+        actor_id=caller_id,
+        operation=operation,
+        scope=order_id,
+        idempotency_key=idempotency_key,
+    )
+
+
+def _reload_order(key: Mapping[str, str]) -> Optional[Dict[str, Any]]:
+    """The stored Order row one key pair addresses, or ``None``.
+
+    The ``orders`` table is hash-keyed on ``campaignId``, and an Order id carries it —
+    ``ORDER#<bare campaign id>#<suffix>``, minted and parsed by
+    :mod:`src.utils.order_keys` — so the pair resolves to one strongly consistent
+    ``GetItem`` on the base table. No index is involved, and that matters because an
+    authorization decision follows this read: an eventually consistent GSI can still
+    project a stale row, which is not a proof of anything (§8.4).
+
+    Both callers hand over a pair they resolved rather than an id: an id that embeds no
+    campaign is a malformed request, and answering that here would hide the difference
+    between "you sent something this path cannot address" and "there is no such Order".
+    """
+    response = tables.orders.get_item(
+        Key={"campaignId": key["campaignId"], "orderId": key["orderId"]},
+        ConsistentRead=True,
+    )
+    item = response.get("Item")
+    return dict(item) if item else None
+
+
+def _order_key_or_refuse(order_id: str) -> Dict[str, str]:
+    """The base-table key an Order id addresses, or the refusal when it addresses none.
+
+    A legacy ``ORDER#<uuid>`` row embeds no campaign, and guessing one would let a
+    fulfillment write against whichever row the guess happened to hit.
+    """
+    key = order_fulfillment_models.order_row_key(order_id)
+    if key is None:
+        raise AppError(ErrorCode.INVALID_INPUT, "orderId must carry its campaign: ORDER#<campaignId>#<suffix>")
+    return {"campaignId": str(key["campaignId"]), "orderId": str(key["orderId"])}
+
+
+def _order_for_fulfillment(order_id: str, caller_id: str) -> Dict[str, Any]:
+    """The Order a §2.4 mutation acts on, with admin of its originating Unit required.
+
+    Three refusals, each the answer the caller can act on:
+
+    - an id that names no campaign is ``INVALID_INPUT``: the request itself is malformed,
+      and picking a campaign would let the write land on whichever row the pick hit;
+    - no row is ``NOT_FOUND``: there is nothing here to fulfill or reverse;
+    - no ``unitId`` is ``FORBIDDEN``, not ``NOT_FOUND``. The Order exists and the caller
+      may even own it, but §2.4 is a Unit surface and an independent sale has no Unit
+      scope to administer — and API-FIX-05 keeps that scope immutable precisely so a
+      later roster join cannot make this answer change.
+
+    ``require_unit_admin`` then answers any caller without a grant on that Unit, so
+    tenancy never comes from the request (AUTH-U).
+    """
+    order = _reload_order(_order_key_or_refuse(order_id))
+    if order is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Order not found")
+    unit_id = order.get(order_fulfillment_models.UNIT_ID_ATTRIBUTE)
+    if not unit_id:
+        raise AppError(
+            ErrorCode.FORBIDDEN,
+            "this Order has no originating Unit, so no Unit Admin may fulfill or reverse its lines",
+        )
+    unit_auth.require_unit_admin(caller_id, str(unit_id))
+    return order
+
+
+def _line_item_payload(line: Mapping[str, Any]) -> Dict[str, Any]:
+    """One stored Order line on the SDL ``LineItem`` shape, §5.19's additions included.
+
+    ``fulfilledQuantity`` absent reads as 0 and ``lineItemId`` absent reads as null, which
+    is what §10.2 requires of a pre-Wave-3 row: every line answers with the same shape,
+    and a legacy Order can be fulfilled without anything being backfilled first.
+    """
+    return {
+        "productId": line.get("productId"),
+        "productName": line.get("productName"),
+        "quantity": _number(line.get("quantity", 0)),
+        "pricePerUnit": float(line.get("pricePerUnit", 0)),
+        "subtotal": float(line.get("subtotal", 0)),
+        "lineItemId": line.get("lineItemId"),
+        "fulfilledQuantity": _number(line.get("fulfilledQuantity", 0)),
+    }
+
+
+def _order_payload(order: Mapping[str, Any]) -> Dict[str, Any]:
+    """A stored Order row on the SDL ``Order`` type, as a fulfillment result returns it.
+
+    The row's own attributes with the storage keys dropped: an Order row is written by
+    the ``createOrder``/``publicCreateOrder`` pipelines, so this handler returns what
+    those owners stored rather than a second copy of the shape that could drift from
+    them. ``fulfillments`` is deliberately absent — that field has its own resolver,
+    which answers the participant-safe projection to every caller (§10.2) — and
+    ``fulfillmentVersion`` absent reads as 0, the version every unfulfilled Order is at.
+    """
+    return {
+        "orderId": order.get(order_fulfillment_models.ORDER_ID_ATTRIBUTE),
+        "profileId": order.get(order_fulfillment_models.PROFILE_ID_ATTRIBUTE),
+        "campaignId": order.get(order_fulfillment_models.CAMPAIGN_ID_ATTRIBUTE),
+        "customerName": order.get("customerName"),
+        "customerPhone": order.get("customerPhone"),
+        "customerAddress": order.get("customerAddress"),
+        "orderDate": order.get("orderDate"),
+        "paymentMethod": order.get("paymentMethod"),
+        "lineItems": [_line_item_payload(line) for line in order_fulfillment_models.order_line_items(order)],
+        "totalAmount": float(order.get("totalAmount", 0)),
+        "notes": order.get("notes"),
+        "status": order.get("status"),
+        "confirmedBy": order.get("confirmedBy"),
+        "confirmedAt": order.get("confirmedAt"),
+        "createdAt": order.get("createdAt"),
+        "updatedAt": order.get("updatedAt"),
+        "unitId": order.get(order_fulfillment_models.UNIT_ID_ATTRIBUTE),
+        "unitCampaignId": order.get(order_fulfillment_models.UNIT_CAMPAIGN_ID_ATTRIBUTE),
+        "fulfillmentVersion": _number(order.get(order_fulfillment_models.FULFILLMENT_VERSION_ATTRIBUTE, 0)),
+    }
+
+
+def _fulfillment_answer(order: Mapping[str, Any], record_field: str) -> Callable[[str], Dict[str, Any]]:
+    """Build the answer one §2.4 mutation produced, from the rows it committed.
+
+    One builder serves the fresh write and the replay of a completed request, and both
+    read the stored rows instead of the values the request carried: the answer has to be
+    what the transaction committed, and a replay that re-derived it from the caller's own
+    payload would report an intent that a condition may have refused. ``record_field`` is
+    ``fulfillment`` or ``reversal`` — the SDL names the two payloads apart, and which
+    word the record sits under is the only difference between the answers.
+
+    The builder is handed the row authorization already read, and re-reads the Order by
+    that row's own stored key pair: the id the caller sent is the id the row carries
+    (``orders`` is got by that exact pair), so no second parse of caller input sits
+    between the check and the answer.
+
+    ``inventoryPosition`` is present exactly when Kernel stock moved. A Scout-custody or
+    external-Council change has no Kernel position to report, and answering with a
+    position that did not change would read as though it had.
+    """
+    stored_order_id = str(order[order_fulfillment_models.ORDER_ID_ATTRIBUTE])
+    key = {"campaignId": str(order[order_fulfillment_models.CAMPAIGN_ID_ATTRIBUTE]), "orderId": stored_order_id}
+
+    def answer(fulfillment_id: str) -> Dict[str, Any]:
+        row = order_fulfillment_models.find_fulfillment(stored_order_id, fulfillment_id)
+        row = _loaded_or_internal(row, "the fulfillment record this request wrote could not be loaded")
+        order_row = _loaded_or_internal(_reload_order(key), "the fulfilled Order could not be loaded")
+        payload: Dict[str, Any] = {
+            "order": _order_payload(order_row),
+            record_field: order_fulfillment_models.fulfillment_payload(row),
+        }
+        if str(row[order_fulfillment_models.SOURCE_ATTRIBUTE]) == order_fulfillment_models.SOURCE_KERNEL_STOCK:
+            payload["inventoryPosition"] = _written_position(
+                str(row[order_fulfillment_models.UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+                str(row[order_fulfillment_models.PRODUCT_ID_ATTRIBUTE]),
+            )
+        return payload
+
+    return answer
+
+
+def _require_fulfillment_scope(row: Mapping[str, Any]) -> str:
+    """The Unit Campaign whose stock a §2.4 mutation moves.
+
+    §5.19 captures the Order's originating scope immutably at sale time, so the balance
+    or custody the stock comes from is the one the Order names — never the one the caller
+    happens to be looking at now, which a later join could have changed. Called only for
+    a source that moves Unit stock: an external-Council change moves nothing and has no
+    scope to resolve, so requiring one there would refuse a request that touches no row.
+    """
+    scope = row.get(order_fulfillment_models.UNIT_CAMPAIGN_ID_ATTRIBUTE)
+    if not scope:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "this Order has no originating Unit Campaign, so Unit stock cannot be consumed for it",
+        )
+    return str(scope)
+
+
+def _stage_fulfillment_movement(
+    plan: Any,
+    *,
+    unit_campaign_id: str,
+    product_id: str,
+    movement_id: str,
+    movement_type: str,
+    caller_id: str,
+    occurred_at: str,
+    idempotency_key: str,
+    order_id: str,
+    fulfillment_id: str,
+    kernel_physical_delta: int,
+    with_scout_delta: int,
+    profile_id: Optional[str],
+    inventory_version: Optional[int],
+) -> None:
+    """Append the §5.8 movement one fulfillment or reversal caused.
+
+    The row carries both links — ``orderId`` and ``fulfillmentId`` — because that is how
+    an audit reader answers "which Kernels did this record move, against which record"
+    without a join; the builder enforces the link rule per movement type, so a movement
+    that lost a link cannot be written at all. ``profileId`` rides only the custody half:
+    a custody movement has to say whose trunk the stock came out of, and Kernel stock has
+    no Scout to name.
+
+    ``inventoryVersion`` is the balance version this transaction produced, and it is
+    ``None`` for a custody-only movement: no aggregate balance moved, and inventing a
+    version for a row that did not change would put a number in the audit trail that
+    nothing can check it against.
+    """
+    plan.add(
+        *inventory_models.put_inventory_movement_action(
+            inventory_models.build_inventory_movement_item(
+                movement_id=movement_id,
+                unit_campaign_id=unit_campaign_id,
+                product_id=product_id,
+                movement_type=movement_type,
+                actor_account_id=caller_id,
+                occurred_at=occurred_at,
+                idempotency_key=idempotency_key,
+                kernel_physical_delta=kernel_physical_delta,
+                with_scout_delta=with_scout_delta,
+                profile_id=profile_id,
+                order_id=order_id,
+                fulfillment_id=fulfillment_id,
+                inventory_version=inventory_version,
+            )
+        )
+    )
+
+
+# --- fulfillIndividualOrderLine (§2.4.3) ------------------------------------------
+
+
+def _fulfill_line(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Fill part or all of one individual Order line from a Kernel-chosen source.
+
+    The whole change is one ``TransactWriteItems``: the idempotency marker, the Order row
+    (its line list with ``fulfilledQuantity`` moved, ``fulfillmentVersion`` incremented
+    from the value the caller named, ``updatedAt``), and the append-only ``FULFILL``
+    record — plus the balance delta and its ``INDIVIDUAL_FULFILL`` movement, but only for
+    a ``KERNEL_STOCK`` source. That pairing is the point of AC-03/AC-05: stock that left
+    a balance without a movement row, or a record that claims stock nothing moved, is a
+    count no later report can reconcile (§8.5).
+
+    The source is the Kernel's choice and it is honest by construction. ``KERNEL_STOCK``
+    may only take *unassigned* stock, the same ceiling ``issueStockToScout`` applies
+    (CUST-01): a Kernel standing at a door is not entitled to the Kernels tomorrow's Show
+    & Sell is holding. ``EXTERNAL_COUNCIL`` records that the demand was met from outside
+    the Unit's stock and writes no inventory row at all — including no balance row for a
+    product the campaign has never received — while still incrementing the Order's
+    ``fulfillmentVersion``, because §5.19 requires a version move for every fulfillment
+    whether or not any inventory version moved. ``SCOUT_CUSTODY`` is refused here: that
+    stock is consumed by the sale itself (§2.4.2), so it is not a choice the fulfillment
+    screen gets to make twice.
+
+    The version guard is what makes two Kernels filling one line from two screens safe.
+    The pre-read of the line's unfulfilled quantity answers an impossible request with
+    ``INVALID_INPUT`` the caller can act on; a request that was possible when it was read
+    and is not now loses its condition and gets ``CONFLICT``, and nothing is written
+    either way (VER-01).
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    order_id = _resource_id(payload, "orderId")
+    line_item_id = _resource_id(payload, "lineItemId")
+    quantity = inventory_models.normalize_quantity(payload.get("quantity"), "quantity", minimum=1)
+    source = order_fulfillment_models.normalize_fulfillment_source(payload.get("source"))
+    expected_version = _positive_int(payload, "expectedFulfillmentVersion", minimum=0)
+    order = _order_for_fulfillment(order_id, caller_id)
+    if source == order_fulfillment_models.SOURCE_SCOUT_CUSTODY:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "SCOUT_CUSTODY is consumed by the sale itself; a fulfillment takes KERNEL_STOCK or EXTERNAL_COUNCIL",
+        )
+
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    runner = IdempotentMutationRunner()
+    keys = _order_fulfillment_marker(
+        caller_id=caller_id, operation=FULFILL_LINE_FIELD, order_id=order_id, idempotency_key=key
+    )
+    load_answer = _fulfillment_answer(order, "fulfillment")
+    replayed = _replay(runner, keys, fingerprint, FULFILL_LINE_FIELD, load_answer)
+    if replayed is not None:
+        return replayed
+
+    violation = order_fulfillment_models.line_quantity_violations(order, line_item_id, quantity)
+    if violation is not None:
+        raise AppError(ErrorCode.INVALID_INPUT, violation)
+    line = order_fulfillment_models.find_order_line(order, line_item_id)
+    product_id = line.get(order_fulfillment_models.PRODUCT_ID_ATTRIBUTE)
+    if not product_id:
+        raise AppError(ErrorCode.INVALID_INPUT, "that line item carries no productId to fulfill")
+    product_id = str(product_id)
+    moves_kernel_stock = source == order_fulfillment_models.SOURCE_KERNEL_STOCK
+    unit_campaign_id = _require_fulfillment_scope(order) if moves_kernel_stock else ""
+
+    balance: Optional[Dict[str, Any]] = None
+    if moves_kernel_stock:
+        sections = _position_sections(unit_campaign_id, product_id)
+        balance = sections["balance"][0] if sections["balance"] else None
+        _require_unassigned_stock(balance, sections["allocations"], quantity)
+
+    fulfillment_id = order_fulfillment_models.new_fulfillment_id()
+    movement_id = str(inventory_models.new_inventory_movement_id()) if moves_kernel_stock else None
+    now_iso = utc_now_iso()
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=fulfillment_id)
+    plan.add(
+        *order_fulfillment_models.order_fulfillment_update_action(
+            order=order,
+            line_items=order_fulfillment_models.apply_line_fulfillment(order, line_item_id, quantity),
+            expected_version=expected_version,
+            occurred_at=now_iso,
+        )
+    )
+    plan.add(
+        *order_fulfillment_models.put_fulfillment_action(
+            order_fulfillment_models.build_fulfillment_item(
+                fulfillment_id=fulfillment_id,
+                order_id=order_id,
+                campaign_id=str(order[order_fulfillment_models.CAMPAIGN_ID_ATTRIBUTE]),
+                profile_id=str(order[order_fulfillment_models.PROFILE_ID_ATTRIBUTE]),
+                unit_id=order.get(order_fulfillment_models.UNIT_ID_ATTRIBUTE),
+                unit_campaign_id=order.get(order_fulfillment_models.UNIT_CAMPAIGN_ID_ATTRIBUTE),
+                line_item_id=line_item_id,
+                product_id=product_id,
+                record_type=order_fulfillment_models.RECORD_TYPE_FULFILL,
+                quantity=quantity,
+                source=source,
+                actor_account_id=caller_id,
+                created_at=now_iso,
+                inventory_movement_id=movement_id,
+            )
+        )
+    )
+    if moves_kernel_stock:
+        version = _stage_balance_change(
+            plan,
+            unit_campaign_id,
+            product_id,
+            balance,
+            kernel_physical_delta=-quantity,
+            council_on_order_delta=0,
+            occurred_at=now_iso,
+        )
+        _stage_fulfillment_movement(
+            plan,
+            unit_campaign_id=unit_campaign_id,
+            product_id=product_id,
+            movement_id=str(movement_id),
+            movement_type=inventory_models.INDIVIDUAL_FULFILL,
+            caller_id=caller_id,
+            occurred_at=now_iso,
+            idempotency_key=key,
+            order_id=order_id,
+            fulfillment_id=fulfillment_id,
+            kernel_physical_delta=-quantity,
+            with_scout_delta=0,
+            profile_id=None,
+            inventory_version=version,
+        )
+
+    build_result = _once(lambda: load_answer(fulfillment_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=FULFILL_LINE_FIELD,
+        fingerprint=fingerprint,
+        result_id=fulfillment_id,
+        load_result=load_answer,
+        result_payload=build_result,
+    )
+    log.info(
+        "Individual Order line fulfilled",
+        order_id=order_id,
+        line_item_id=line_item_id,
+        product_id=product_id,
+        quantity=quantity,
+        source=source,
+        fulfillment_id=fulfillment_id,
+        caller_id=caller_id,
+    )
+    return build_result()
+
+
+# --- reverseIndividualOrderFulfillment (§2.4.4) ------------------------------------
+
+
+def _stage_reversal_stock_effect(
+    plan: Any,
+    *,
+    source: str,
+    original: Mapping[str, Any],
+    quantity: int,
+    product_id: str,
+    profile_id: str,
+    campaign_id: str,
+    movement_id: Optional[str],
+    caller_id: str,
+    occurred_at: str,
+    idempotency_key: str,
+    order_id: str,
+    fulfillment_id: str,
+) -> None:
+    """Stage the stock half of a reversal: back to exactly where it came from.
+
+    The source on the record being undone is the whole decision, and it is why this is
+    one helper rather than a branch in the caller: AC-06 fails if a reversal restores a
+    balance the fulfillment never drew from. ``KERNEL_STOCK`` goes back to the campaign
+    balance with its version guard, ``SCOUT_CUSTODY`` goes back to that Scout's custody
+    row and names the Profile it returned to, and ``EXTERNAL_COUNCIL`` writes no
+    inventory row at all — nothing Unit-owned moved for it, so a balance row here would
+    invent a stock history the fulfillment never had.
+
+    ``inventoryVersion`` rides only the Kernel half. A custody movement has no aggregate
+    version to point at, and a number nothing can check it against does not belong in an
+    audit trail.
+    """
+    if source not in order_fulfillment_models.SOURCE_MOVES_STOCK:
+        return
+    unit_campaign_id = _require_fulfillment_scope(original)
+    if source == order_fulfillment_models.SOURCE_KERNEL_STOCK:
+        balance = inventory_models.read_inventory_balance(unit_campaign_id, product_id)
+        version = _stage_balance_change(
+            plan,
+            unit_campaign_id,
+            product_id,
+            balance,
+            kernel_physical_delta=quantity,
+            council_on_order_delta=0,
+            occurred_at=occurred_at,
+        )
+        _stage_fulfillment_movement(
+            plan,
+            unit_campaign_id=unit_campaign_id,
+            product_id=product_id,
+            movement_id=str(movement_id),
+            movement_type=inventory_models.REVERSAL,
+            caller_id=caller_id,
+            occurred_at=occurred_at,
+            idempotency_key=idempotency_key,
+            order_id=order_id,
+            fulfillment_id=fulfillment_id,
+            kernel_physical_delta=quantity,
+            with_scout_delta=0,
+            profile_id=None,
+            inventory_version=version,
+        )
+        return
+    custody = inventory_models.read_scout_custody(unit_campaign_id, product_id, profile_id)
+    _stage_custody_change(
+        plan,
+        unit_campaign_id,
+        product_id,
+        profile_id,
+        campaign_id,
+        custody,
+        with_scout_delta=quantity,
+        occurred_at=occurred_at,
+    )
+    _stage_fulfillment_movement(
+        plan,
+        unit_campaign_id=unit_campaign_id,
+        product_id=product_id,
+        movement_id=str(movement_id),
+        movement_type=inventory_models.REVERSAL,
+        caller_id=caller_id,
+        occurred_at=occurred_at,
+        idempotency_key=idempotency_key,
+        order_id=order_id,
+        fulfillment_id=fulfillment_id,
+        kernel_physical_delta=0,
+        with_scout_delta=quantity,
+        profile_id=profile_id,
+        inventory_version=None,
+    )
+
+
+def _reverse_fulfillment(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Undo one fulfillment, restoring only the source that fulfillment took.
+
+    A reversal is a new append-only record, never an edit: §5.19 makes the fulfillment
+    history immutable and lets the ``REVERSAL`` row speak the correction, linked to what
+    it undoes. The line's ``fulfilledQuantity`` goes back down, the Order's
+    ``fulfillmentVersion`` moves again, and the stock effect is exactly the original
+    record's source — Kernel stock back into the balance, Scout custody back into that
+    Scout's row, external Council back into nothing, because nothing Unit-owned ever
+    moved for it (AC-06). A balance or custody row is written only for a source that
+    moved that row, so a reversal cannot create a stock history that the fulfillment did
+    not have.
+
+    "At most one reversal per fulfillment" is a key fact here, not a check. The reversal's
+    sort key is ``REVERSAL#<reversalOfFulfillmentId>`` — derived from the id it reverses —
+    so the second attempt at reversing one fulfillment collides with the first row's
+    ``attribute_not_exists`` condition and the whole transaction cancels with
+    ``CONFLICT``. Reading for an existing reversal and then deciding could not say that:
+    two readers would both see none. The lookup below is scoped to the Order's own
+    partition, so an id from another Order is ``NOT_FOUND`` rather than a reversal of
+    someone else's record (the wrong-parent case).
+
+    ``apply_line_fulfillment`` is both the arithmetic and the guard for the demand half:
+    a line re-written since the fulfillment may no longer carry that much fulfilled
+    stock, and a row that no longer permits the reversal moved underneath this request,
+    which is ``CONFLICT`` (§5.19).
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    order_id = _resource_id(payload, "orderId")
+    fulfillment_id = _resource_id(payload, "fulfillmentId")
+    expected_version = _positive_int(payload, "expectedFulfillmentVersion", minimum=0)
+    order = _order_for_fulfillment(order_id, caller_id)
+
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    runner = IdempotentMutationRunner()
+    keys = _order_fulfillment_marker(
+        caller_id=caller_id, operation=REVERSE_FULFILLMENT_FIELD, order_id=order_id, idempotency_key=key
+    )
+    load_answer = _fulfillment_answer(order, "reversal")
+    replayed = _replay(runner, keys, fingerprint, REVERSE_FULFILLMENT_FIELD, load_answer)
+    if replayed is not None:
+        return replayed
+
+    original = order_fulfillment_models.find_fulfillment(order_id, fulfillment_id)
+    if original is None:
+        raise AppError(ErrorCode.NOT_FOUND, "this Order has no fulfillment record with that fulfillmentId")
+    if str(original[order_fulfillment_models.RECORD_TYPE_ATTRIBUTE]) != order_fulfillment_models.RECORD_TYPE_FULFILL:
+        raise AppError(ErrorCode.INVALID_INPUT, "a REVERSAL record cannot itself be reversed")
+    source = str(original[order_fulfillment_models.SOURCE_ATTRIBUTE])
+    quantity = _number(original[order_fulfillment_models.QUANTITY_ATTRIBUTE])
+    line_item_id = str(original[order_fulfillment_models.LINE_ITEM_ID_ATTRIBUTE])
+    product_id = str(original[order_fulfillment_models.PRODUCT_ID_ATTRIBUTE])
+    profile_id = str(original[order_fulfillment_models.PROFILE_ID_ATTRIBUTE])
+    campaign_id = str(original[order_fulfillment_models.CAMPAIGN_ID_ATTRIBUTE])
+    line_items = order_fulfillment_models.apply_line_fulfillment(order, line_item_id, -quantity)
+
+    moves_stock = source in order_fulfillment_models.SOURCE_MOVES_STOCK
+    reversal_id = order_fulfillment_models.new_fulfillment_id()
+    movement_id = str(inventory_models.new_inventory_movement_id()) if moves_stock else None
+    now_iso = utc_now_iso()
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=reversal_id)
+    plan.add(
+        *order_fulfillment_models.order_fulfillment_update_action(
+            order=order,
+            line_items=line_items,
+            expected_version=expected_version,
+            occurred_at=now_iso,
+        )
+    )
+    plan.add(
+        *order_fulfillment_models.put_fulfillment_action(
+            order_fulfillment_models.build_fulfillment_item(
+                fulfillment_id=reversal_id,
+                order_id=order_id,
+                campaign_id=campaign_id,
+                profile_id=profile_id,
+                unit_id=original.get(order_fulfillment_models.UNIT_ID_ATTRIBUTE),
+                unit_campaign_id=original.get(order_fulfillment_models.UNIT_CAMPAIGN_ID_ATTRIBUTE),
+                line_item_id=line_item_id,
+                product_id=product_id,
+                record_type=order_fulfillment_models.RECORD_TYPE_REVERSAL,
+                quantity=quantity,
+                source=source,
+                actor_account_id=caller_id,
+                created_at=now_iso,
+                inventory_movement_id=movement_id,
+                reversal_of_fulfillment_id=fulfillment_id,
+            )
+        )
+    )
+    _stage_reversal_stock_effect(
+        plan,
+        source=source,
+        original=original,
+        quantity=quantity,
+        product_id=product_id,
+        profile_id=profile_id,
+        campaign_id=campaign_id,
+        movement_id=movement_id,
+        caller_id=caller_id,
+        occurred_at=now_iso,
+        idempotency_key=key,
+        order_id=order_id,
+        fulfillment_id=fulfillment_id,
+    )
+
+    build_result = _once(lambda: load_answer(reversal_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=REVERSE_FULFILLMENT_FIELD,
+        fingerprint=fingerprint,
+        result_id=reversal_id,
+        load_result=load_answer,
+        result_payload=build_result,
+    )
+    log.info(
+        "Individual Order fulfillment reversed",
+        order_id=order_id,
+        fulfillment_id=fulfillment_id,
+        reversal_id=reversal_id,
+        product_id=product_id,
+        quantity=quantity,
+        source=source,
+        caller_id=caller_id,
+    )
+    return build_result()
+
+
+# --- orderFulfillments (§2.4.5) ----------------------------------------------------
+
+
+def _order_fulfillments(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One Order's whole fulfillment and reversal audit, oldest first.
+
+    The full administrative projection — ``actorAccountId`` and ``inventoryMovementId``
+    included — is the point of this query, and it is why the query is Unit-Admin-only
+    while ``Order.fulfillments`` answers every caller from the participant-safe
+    projection (§10.2). The two answers are built apart on purpose: the only difference
+    between them is the audit fields, so the separation is one denylist in
+    :mod:`src.utils.order_fulfillment_models` that both projections share, and a future
+    audit column cannot leak from the participant side by being left out of a
+    hand-written allow-list.
+
+    Authorization is the read the mutations use: the Order's immutable ``unitId`` decides
+    whose admin may ask, so an admin of one Unit cannot pull another Unit's audit trail
+    by naming an Order id from it (AUTH-U).
+
+    Ordered by ``createdAt`` rather than by the partition's sort key. Fulfillment keys are
+    ``FULFILLMENT#<createdAt>#<fulfillmentId>`` while reversals carry the deterministic
+    ``REVERSAL#<reversalOfFulfillmentId>``, which would sort every reversal after every
+    fulfillment and say nothing about when each one happened; an audit screen reads what
+    occurred in the order it occurred, and those two spellings are storage detail. The
+    cursor's scope is the Order, so a page of one Order's history cannot walk another's
+    (PAGE-01).
+    """
+    order_id = _query_argument(event, "orderId")
+    order = _order_for_fulfillment(order_id, caller_id)
+    stored_order_id = str(order[order_fulfillment_models.ORDER_ID_ATTRIBUTE])
+    rows = order_fulfillment_models.fulfillment_rows(stored_order_id)
+    rows.sort(
+        key=lambda row: (
+            str(row.get(order_fulfillment_models.CREATED_AT_ATTRIBUTE, "")),
+            str(row.get(order_fulfillment_models.FULFILLMENT_ID_ATTRIBUTE, "")),
+        )
+    )
+    items = [order_fulfillment_models.fulfillment_payload(row) for row in rows]
+    return dict(paginate_page(items, f"{ORDER_FULFILLMENTS_FIELD}#{stored_order_id}", _page_argument(event)))
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -2958,6 +3641,9 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     RETURN_STOCK_FIELD: _return_stock,
     SCOUT_CUSTODY_FIELD: _scout_custody_balances,
     MY_SCOUT_CUSTODY_FIELD: _my_scout_custody,
+    FULFILL_LINE_FIELD: _fulfill_line,
+    REVERSE_FULFILLMENT_FIELD: _reverse_fulfillment,
+    ORDER_FULFILLMENTS_FIELD: _order_fulfillments,
 }
 
 

@@ -188,6 +188,36 @@ resource "aws_appsync_resolver" "shared_campaign_catalog" {
   code = file("${local.js_resolvers_dir}/shared_campaign_catalog_pipeline_resolver.js")
 }
 
+# === ORDER FIELD RESOLVERS ===
+
+# Order.fulfillments (JS, wave 3 API §10.2)
+# The participant-safe fulfillment/reversal history of one Order's lines. This
+# field is participant-safe NOT because the fulfillment rows carry any caller
+# check — they carry none — but because the Order row itself is authorized by
+# its parent pipeline (getOrder / listOrdersByCampaign verify profile access
+# before an Order item is ever handed to the resolution tree); this resolver
+# then only projects that one authorized Order's custody/quantity history. It
+# must never surface `actorAccountId` or `inventoryMovementId` (§10.2): the
+# full audit belongs to the Unit-Admin `orderFulfillments` query (§2.4.5), and
+# a Scout seeing who recorded a fulfillment or which inventory movement moved
+# stock is the disclosure that split forbids. One sentence on the #330 trap:
+# AppSync always executes an attached field resolver and its result OVERWRITES
+# pipeline-attached values, so no order pipeline may attach `fulfillments` to
+# an Order item — this field resolver owns the field.
+resource "aws_appsync_resolver" "order_fulfillments" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Order"
+  field       = "fulfillments"
+  data_source = aws_appsync_datasource.order_fulfillments.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/order_fulfillments_field_resolver.js")
+}
+
 # === SHARE FIELD RESOLVERS ===
 
 # Share.targetAccount (JS)

@@ -368,7 +368,7 @@ The server captures the Campaign's current joined `unitId`/`unitCampaignId` at O
 | `fulfillmentVersion` | Int | Optimistic concurrency version for fulfill/reverse operations |
 | `LineItem.lineItemId` | ID | Stable line identity |
 | `LineItem.fulfilledQuantity` | Int | 0 through ordered quantity |
-| `fulfillments` | `[ParticipantOrderFulfillment!]!` for every caller | Source/quantity/reversal history without actorAccountId, inventoryMovementId, or other administrative audit fields; Unit Admin uses `orderFulfillments` for full audit |
+| `fulfillments(page: PageInput)` | `ParticipantOrderFulfillmentConnection!` for every caller | Page of source/quantity/reversal history without actorAccountId, inventoryMovementId, or other administrative audit fields; newest page first, `pageInfo.endCursor` continues it, so the participant reaches her own whole history herself. Unit Admin uses `orderFulfillments` for full audit |
 
 `CONSUME_SCOUT_CUSTODY` behavior:
 

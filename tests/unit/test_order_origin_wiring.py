@@ -139,10 +139,23 @@ def test_minters_take_the_origin_from_the_guard_and_not_the_campaign_link() -> N
 def test_guard_resolvers_are_wired_to_their_own_source_files() -> None:
     """Each new step's Terraform ``code`` loads the bundle built from its own
     source file. A pipeline step whose ``code`` points elsewhere is a step whose
-    reviewed logic is not the logic that ships."""
+    reviewed logic is not the logic that ships.
+
+    ``get_membership_guard_for_order`` may load its own file through either
+    ``file()`` or ``templatefile()`` -- §2.4.2 turned its single GetItem into a
+    cross-table BatchGetItem, and BatchGetItem must name the tables it reads, so
+    the table names are injected placeholders (the placeholder discipline itself
+    is pinned by ``check_templatefile_escaping.test.ts``). Either form must still
+    point at the same-named source bundle: a step whose ``code`` names another
+    file ships reviewed logic that is not the logic that runs.
+    """
     tf = (APPSYNC_DIR / "functions_orders.tf").read_text()
     for step in GUARD_STEPS:
         name = step.split(".")[-1]
         block = tf.split(f'resource "aws_appsync_function" "{name}"', 1)[1].split("\n}", 1)[0]
-        assert f'code = file("${{local.js_resolvers_dir}}/{name}_fn.js")' in block, f"{step} loads the wrong bundle"
+        same_bundle_forms = [
+            f'code = file("${{local.js_resolvers_dir}}/{name}_fn.js")',
+            f'code = templatefile("${{local.js_resolvers_dir}}/{name}_fn.js"',
+        ]
+        assert any(form in block for form in same_bundle_forms), f"{step} loads the wrong bundle"
         assert (JS_DIR / f"{name}_fn.js").is_file(), f"{step} has no source file to bundle"
