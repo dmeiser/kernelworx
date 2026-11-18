@@ -140,9 +140,12 @@ export function response(ctx) {
         // swept window is already committed; the caller re-issues and the next pass finds
         // the rest. The rest of the pipeline (totals, propagation check) is skipped by
         // the error, which is correct while the Order is still present.
+        // ASCII only in a resolver's string literals: esbuild escapes every non-ASCII
+        // character in a string, and the escaped form is what AppSync is handed and refuses
+        // to load (deploy run 44250080549). See the APPSYNC_JS entry in AGENTS.md.
         util.error(
             'This order has more fulfillment history than one delete can remove; ' +
-                (ctx.stash.sweptRecords || 0) + ' record(s) were just removed and the order is still present — delete it again to continue',
+                (ctx.stash.sweptRecords || 0) + ' record(s) were just removed and the order is still present. Delete the order again to remove the rest',
             'RESOURCE_BUSY'
         );
         return null;

@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import * as esbuild from 'esbuild';
+import { renderArtifact } from '../../scripts/build-resolvers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = join(__dirname, '..', '..');
@@ -316,6 +319,83 @@ function offenders(file: string): string[] {
     return found;
 }
 
+/**
+ * Comment-free text with string and template-literal bodies kept — the opposite of
+ * `stripNonCode`, because the thing this looks for lives inside a string body.
+ */
+function stripCommentsOnly(content: string): string {
+    let out = '';
+    let i = 0;
+    const n = content.length;
+    while (i < n) {
+        const char = content[i];
+        const next = content[i + 1];
+        if (char === '/' && next === '/') {
+            while (i < n && content[i] !== '\n') {
+                i += 1;
+            }
+            continue;
+        }
+        if (char === '/' && next === '*') {
+            i += 2;
+            while (i < n && !(content[i] === '*' && content[i + 1] === '/')) {
+                i += 1;
+            }
+            i += 2;
+            continue;
+        }
+        if (char === '"' || char === "'" || char === '`') {
+            const quote = char;
+            out += char;
+            i += 1;
+            while (i < n && content[i] !== quote) {
+                if (content[i] === '\\') {
+                    out += content[i] + (content[i + 1] ?? '');
+                    i += 2;
+                    continue;
+                }
+                out += content[i];
+                i += 1;
+            }
+            out += content[i] ?? '';
+            i += 1;
+            continue;
+        }
+        out += char;
+        i += 1;
+    }
+    return out;
+}
+
+/**
+ * A non-ASCII character written into a resolver's string or template literal.
+ *
+ * esbuild escapes every non-ASCII code point it finds in a string, so an em dash typed
+ * into a client-facing message reaches AppSync as the six characters `\u2014`, and AppSync
+ * refuses the bundle: deploy run 44250080549 (the squash merge of PR #958) lost the dev
+ * deploy on `aws_appsync_function.delete_order` that way. Of every construct in that
+ * bundle, the escape was the only one that no already-accepted bundle contained — `for-of`,
+ * `Array.isArray`, `.concat`, `void 0`, object shorthand, aliased imports, and reserved
+ * words inside string literals (`"try again"`, `"while this order was being placed"`) are
+ * all shipped and loaded.
+ *
+ * The escape, not non-ASCII itself, is the hazard: `send_public_order_emails_fn.js` ships a
+ * raw `§` in a comment in its deployed bundle and loads, because bundling leaves comment
+ * text alone. Hence the comment-stripping below — a comment may still NAME an escape — and
+ * hence a check on the bundle rather than on the source, which is where the escaping happens.
+ */
+const NON_ASCII_ESCAPE = /\\u\{?[0-9a-fA-F]{4}\}?|\\x[0-9a-fA-F]{2}/g;
+
+function nonAsciiEscapes(code: string): string[] {
+    return [...stripCommentsOnly(code).matchAll(NON_ASCII_ESCAPE)].map((match) => match[0]);
+}
+
+/** One bundle, built exactly as `npm run build:resolvers` builds it. */
+async function renderBundle(entry: string): Promise<string> {
+    const built = await renderArtifact(esbuild, entry);
+    return built.code;
+}
+
 describe('the guard itself (#570-class miss)', () => {
     it('sees a regular-expression literal and not a division', () => {
         const flagged = [
@@ -414,4 +494,55 @@ describe('APPSYNC_JS resolver code avoids constructs the runtime rejects', () =>
             ).toEqual([]);
         });
     }
+});
+
+describe('an APPSYNC_JS bundle carries no escaped non-ASCII character (deploy run 44250080549)', () => {
+    it('renders every function and resolver bundle free of a non-ASCII escape', async () => {
+        const entries = resolverEntryFiles();
+        expect(entries.length, 'resolver entry files this check renders').toBeGreaterThan(0);
+
+        const breaches: string[] = [];
+        for (const entry of entries) {
+            const escapes = nonAsciiEscapes(await renderBundle(entry));
+            if (escapes.length > 0) {
+                breaches.push(
+                    `${relative(ROOT_DIR, entry)}: ${[...new Set(escapes)].join(', ')} — AppSync refuses the bundle. Write the ` +
+                        'message in ASCII; a comment may still hold the character itself, because bundling leaves comment text alone',
+                );
+            }
+        }
+        expect(
+            breaches,
+            'APPSYNC_JS 1.0.0 refused these bundles at CreateFunction/UpdateFunction time, which only a deploy shows — ' +
+                'the same failure lost dev deploy run 44250080549, on a `—` inside one RESOURCE_BUSY message',
+        ).toEqual([]);
+    }, 180000);
+
+    it('flags the escaped em dash that lost that deploy, and not the character in a comment', async () => {
+        // Non-vacuity, in both directions: the guard must fail on the code that shipped,
+        // and must not turn into a ban on non-ASCII, which the runtime accepts.
+        const scratch = join(tmpdir(), `appsync-js-compat-${process.pid}-${Date.now()}`);
+        mkdirSync(scratch, { recursive: true });
+        try {
+            const rejected = join(scratch, 'em_dash_fn.js');
+            writeFileSync(
+                rejected,
+                "export function request(ctx) { return { payload: 'the order is still present — delete it again' }; }\n" +
+                    'export function response(ctx) { return ctx.result; }\n',
+            );
+            const built = await renderBundle(rejected);
+            expect(built.includes('—'), 'esbuild escapes the character, so the source is the wrong place to look').toBe(false);
+            expect(nonAsciiEscapes(built), 'the escape this check exists to catch').toEqual(['\\u2014']);
+
+            const accepted = join(scratch, 'comment_fn.js');
+            writeFileSync(
+                accepted,
+                '// §5.3 keeps the mailer out of the orders table.\nexport function request(ctx) { return { payload: "ok" }; }\n' +
+                    'export function response(ctx) { return ctx.result; }\n',
+            );
+            expect(nonAsciiEscapes(await renderBundle(accepted)), 'a comment character is not a hazard').toEqual([]);
+        } finally {
+            rmSync(scratch, { recursive: true, force: true });
+        }
+    });
 });
