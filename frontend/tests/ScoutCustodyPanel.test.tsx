@@ -35,7 +35,7 @@ import {
 } from '../src/lib/graphql';
 import { page } from '../src/lib/inventory';
 import { UNIT_PAGE_SIZE } from '../src/lib/units';
-import { chooseOption, clearAndType, typeInto } from './helpers/unitUi';
+import { chooseOption, clearAndType, findOption, typeInto } from './helpers/unitUi';
 
 const UC = 'UNITCAMP#pack-3149-fall';
 const CARAMEL = 'PROD#caramel';
@@ -49,9 +49,9 @@ function held(profileId: string, campaignId: string = CAMP): string {
   return `${profileId}:${campaignId}`;
 }
 
-// The roster option names both ids the write needs, so its accessible name is longer
-// than the profile id alone.
-const SCOUT_AVERY = new RegExp(AVERY);
+// The roster option names the Scout and their Campaign, which are the two things the
+// write needs and the two a person can read.
+const SCOUT_AVERY = /Avery Scout/;
 
 let keySequence = 0;
 
@@ -107,6 +107,9 @@ function rosterRow(overrides: Record<string, unknown> = {}) {
     unitId: 'UNIT#pack-3149',
     campaignId: CAMP,
     profileId: AVERY,
+    scoutName: 'Avery Scout',
+    campaignName: 'Fall 2026 Campaign',
+    scoutCampaignCatalogId: 'CATALOG#fall',
     status: 'ACTIVE',
     joinedByAccountId: 'ACCOUNT#avery',
     joinedAt: '2026-01-20T15:00:00Z',
@@ -259,10 +262,36 @@ describe('ScoutCustodyPanel', () => {
     const beth = screen.getByTestId(`custody-scout-row-${held(BETH)}`);
     expect(within(beth).getByTestId(`custody-scout-held-${held(BETH)}`)).toHaveTextContent('1');
 
+    // A Scout is chosen by name, so both tables say who holds the stock.
+    expect(within(avery).getByTestId(`custody-scout-name-${held(AVERY)}`)).toHaveTextContent('Avery Scout');
+    expect(within(avery).getByTestId(`custody-scout-campaign-${held(AVERY)}`)).toHaveTextContent('Fall 2026 Campaign');
+    expect(screen.getByTestId(`custody-line-scout-${AVERY}-${CARAMEL}`)).toHaveTextContent('Avery Scout');
+    // Beth has no roster row in this fixture, so the id is what is left to name her by -
+    // and her line still shows, because that stock has to come back either way.
+    expect(within(beth).getByTestId(`custody-scout-name-${held(BETH)}`)).toHaveTextContent(BETH);
+
     expect(screen.getByTestId(`custody-line-${AVERY}-${CARAMEL}`)).toBeInTheDocument();
     expect(screen.getByTestId(`custody-line-qty-${AVERY}-${CARAMEL}`)).toHaveTextContent('4');
     expect(screen.getByTestId(`custody-line-${BETH}-${BUTTER}`)).toBeInTheDocument();
     expect(screen.getByTestId('custody-line-count')).toHaveTextContent('2 custody lines shown');
+  });
+
+  it('names the Scout in the issue picker, because an id is not a choice', async () => {
+    const user = userEvent.setup();
+    renderPanel(reads({ balances: [], total: 0 }));
+
+    await openIssue(user);
+    const option = await findOption('custody-scout', /Avery Scout/, user);
+    expect(option).toHaveTextContent('Fall 2026 Campaign');
+    expect(option.textContent).not.toContain(AVERY);
+  });
+
+  it('names the Scout in the return dialog, the one batch that has to come back', async () => {
+    const user = userEvent.setup();
+    renderPanel(reads({ balances: [custodyLine({ withScoutQty: 4, version: 2 })], total: 4 }));
+
+    await user.click(await screen.findByTestId(`return-stock-${held(AVERY)}`));
+    expect(await screen.findByText(/Return Avery Scout's stock/)).toBeInTheDocument();
   });
 
   it('issue-4: issues four Caramel to an eligible Scout and shows the custody the write created', async () => {
@@ -311,7 +340,7 @@ describe('ScoutCustodyPanel', () => {
     await waitFor(() => expect(screen.queryByTestId('form-dialog-confirm')).not.toBeInTheDocument());
   });
 
-  it('partial-sale: the held figure is the server\'s own, already fallen by what sold', async () => {
+  it("partial-sale: the held figure is the server's own, already fallen by what sold", async () => {
     renderPanel(
       reads({
         // Four were issued and three sold. The custody row says 1; the screen has no
@@ -495,6 +524,7 @@ describe('ScoutCustodyPanel', () => {
           custodyLine({ productId: BUTTER, campaignId: SPRING, withScoutQty: 3, version: 5 }),
         ],
         total: 5,
+        roster: [rosterRow(), rosterRow({ campaignId: SPRING, campaignName: 'Spring 2027 Campaign' })],
       }),
       {
         request: {
@@ -525,11 +555,15 @@ describe('ScoutCustodyPanel', () => {
       positionsQuery([positionFixture({ withScoutQty: 2 })]),
     ]);
 
-    // Two batches, not one row that cannot say which campaign it returns: the campaign is
-    // named on the row so the admin can tell them apart.
-    expect(await screen.findByTestId(`custody-scout-campaign-${held(AVERY, CAMP)}`)).toHaveTextContent(CAMP);
+    // Two batches, not one row that cannot say which campaign it returns: the Campaign is
+    // named on the row so the admin can tell them apart, and the name is what they read.
+    expect(await screen.findByTestId(`custody-scout-campaign-${held(AVERY, CAMP)}`)).toHaveTextContent(
+      'Fall 2026 Campaign',
+    );
     const springRow = await screen.findByTestId(`custody-scout-row-${held(AVERY, SPRING)}`);
-    expect(within(springRow).getByTestId(`custody-scout-campaign-${held(AVERY, SPRING)}`)).toHaveTextContent(SPRING);
+    expect(within(springRow).getByTestId(`custody-scout-campaign-${held(AVERY, SPRING)}`)).toHaveTextContent(
+      'Spring 2027 Campaign',
+    );
     expect(within(springRow).getByTestId(`custody-scout-held-${held(AVERY, SPRING)}`)).toHaveTextContent('3');
 
     await user.click(within(springRow).getByTestId(`return-stock-${held(AVERY, SPRING)}`));
@@ -636,7 +670,7 @@ describe('ScoutCustodyPanel', () => {
     await openIssue(user);
     await openScoutSelect(user);
     const options = await screen.findAllByRole('option');
-    expect(options.map((option) => option.textContent)).toEqual([`${AVERY} · CAMP#fall-2026`]);
+    expect(options.map((option) => option.textContent)).toEqual(['Avery Scout · Fall 2026 Campaign']);
     // The open menu is a modal of its own: it hides the rest of the page from the
     // accessibility tree, so it closes before anything else is reached.
     await user.keyboard('{Escape}');

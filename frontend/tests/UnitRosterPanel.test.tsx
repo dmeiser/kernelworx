@@ -34,6 +34,8 @@ const devon = membershipFixture();
 const blake = membershipFixture({
   profileId: 'PROFILE#blake',
   campaignId: 'CAMPAIGN#blake',
+  scoutName: 'Blake Scout',
+  campaignName: 'Blake Spring Campaign',
   status: 'REMOVED',
   joinedByAccountId: 'ACCOUNT#avery',
   removedByAccountId: 'ACCOUNT#avery',
@@ -71,6 +73,9 @@ describe('UnitRosterPanel', () => {
 
     const devonRow = await screen.findByTestId('roster-row-PROFILE#devon');
     const blakeRow = screen.getByTestId('roster-row-PROFILE#blake');
+    // The roster names the person, not the key: an admin removes someone they can read.
+    expect(within(devonRow).getByTestId('roster-scout-PROFILE#devon')).toHaveTextContent('Devon Scout');
+    expect(within(devonRow).getByTestId('roster-campaign-PROFILE#devon')).toHaveTextContent('Devon Fall Campaign');
     expect(within(devonRow).getByTestId('roster-status-PROFILE#devon')).toHaveTextContent('Joined');
     expect(within(blakeRow).getByTestId('roster-status-PROFILE#blake')).toHaveTextContent('Removed');
     expect(within(blakeRow).getByTestId('roster-removed-PROFILE#blake')).toHaveTextContent('ACCOUNT#avery');
@@ -119,7 +124,6 @@ describe('UnitRosterPanel', () => {
     expect(screen.queryAllByRole('alert')).toHaveLength(0);
     expect(screen.getByTestId('roster-count')).toHaveTextContent('2 roster entries');
   });
-
 
   it('re-reads the roster with the status the filter names', async () => {
     const mocks = [
@@ -206,7 +210,6 @@ describe('UnitRosterPanel', () => {
     expect(await screen.findByText("Could not load this campaign's roster.")).toBeInTheDocument();
   });
 
-
   it('shows what it has for a history row, even when the audit is thin', async () => {
     const noGuardRow = membershipFixture({ profileId: 'PROFILE#no-guard', campaignId: 'CAMPAIGN#no-guard', guardVersion: null });
     const thin = membershipFixture({
@@ -254,7 +257,6 @@ describe('UnitRosterPanel', () => {
 
     expect(await screen.findByText('That Scout could not be removed.')).toBeInTheDocument();
   });
-
 
   it('walks the roster cursor, so the list is the whole roster and not page one', async () => {
     const firstPage = {

@@ -50,6 +50,7 @@ import {
   REVERSE_INDIVIDUAL_ORDER_FULFILLMENT,
 } from '../lib/graphql';
 import {
+  campaignLabel,
   canReverse,
   describeInventoryFailure,
   fetchUnitScoutCampaignOrders,
@@ -62,6 +63,7 @@ import {
   participantProjection,
   productLabel,
   reversedFulfillmentIds,
+  scoutLabel,
   unfulfilledQuantity,
 } from '../lib/inventory';
 import type { ParticipantFulfillmentRow, UnitOrderRow } from '../lib/inventory';
@@ -89,10 +91,17 @@ type ProductNames = ReadonlyMap<string, string>;
 interface ScoutCampaign {
   campaignId: string;
   profileId: string;
+  scoutName: string;
+  campaignName: string;
+  scoutCampaignCatalogId?: string | null;
 }
 
 const ORDER_NOTE =
   'A door-to-door sale consumes the stock this Scout is holding first. What it cannot consume is not an error: it stays unfulfilled on the line until Kernel stock or a direct Council supply covers it.';
+
+/** Why a sale cannot be offered across two catalogs, in the words an admin can act on. */
+const CATALOG_MISMATCH_NOTE =
+  "This Scout Campaign sells from a different catalog than the stock this campaign holds. An individual sale is priced in the Scout Campaign's own catalog, and product identity belongs to one catalog - nothing maps it into another - so a sale recorded here could not draw on this campaign's stock. The Scout's campaign has to sell from this campaign's catalog.";
 
 export const OrderFulfillmentPanel: React.FC<{ unitCampaignId: string }> = ({ unitCampaignId }) => {
   const roster = useQuery<GqlListUnitCampaignRosterQuery>(LIST_UNIT_CAMPAIGN_ROSTER, {
@@ -111,13 +120,21 @@ export const OrderFulfillmentPanel: React.FC<{ unitCampaignId: string }> = ({ un
     },
   );
   const campaigns = useMemo<ScoutCampaign[]>(
-    () => completeRoster.items.map((member) => ({ campaignId: member.campaignId, profileId: member.profileId })),
+    () =>
+      completeRoster.items.map((member) => ({
+        campaignId: member.campaignId,
+        profileId: member.profileId,
+        scoutName: member.scoutName,
+        campaignName: member.campaignName,
+        scoutCampaignCatalogId: member.scoutCampaignCatalogId,
+      })),
     [completeRoster.items],
   );
 
   const [campaignId, setCampaignId] = useState('');
   const orders = useScoutOrders(unitCampaignId, campaignId);
   const products = useMemo(() => catalog.data?.unitCampaignCatalog?.products ?? [], [catalog.data]);
+  const catalogId = catalog.data?.unitCampaignCatalog?.catalogId;
   const names = useMemo<ProductNames>(
     () => new Map(products.map((product) => [product.productId, product.productName])),
     [products],
@@ -133,6 +150,7 @@ export const OrderFulfillmentPanel: React.FC<{ unitCampaignId: string }> = ({ un
       <CampaignPicker
         campaigns={campaigns}
         campaignId={campaignId}
+        catalogId={catalogId}
         onChange={setCampaignId}
         onAskSale={() => setPending({ kind: 'sale' })}
       />
@@ -151,37 +169,83 @@ export const OrderFulfillmentPanel: React.FC<{ unitCampaignId: string }> = ({ un
   );
 };
 
+/**
+ * Whether a door-to-door sale can be offered for the chosen Scout Campaign, and what to
+ * say when it cannot.
+ *
+ * The write prices its lines in the catalog of the Scout Campaign named in the input, and
+ * it consumes the With Scout rows of the Unit Campaign whose stock is keyed to *its* own
+ * catalog. Product identity is catalog-scoped (`UNIT-06`, `CYCLE-01`) and nothing maps a
+ * product into another catalog, so two catalogs share no product id: a sale across them
+ * could consume nothing, and the server refuses the product before any Order is written.
+ * Offering that sale is what produced a refusal the admin could not act on, so the
+ * affordance waits for the two catalog ids to agree and says why when they do not.
+ */
+/**
+ * Whether the Scout Campaign sells from a catalog of its own.
+ *
+ * A null means its row could not be read, which is not evidence of a mismatch: refusing
+ * on a failed read would repeat the mistake this replaced, and the server still decides
+ * the write.
+ */
+function catalogsDiffer(scoutCatalogId: string | null | undefined, unitCatalogId: string): boolean {
+  return scoutCatalogId !== null && scoutCatalogId !== undefined && scoutCatalogId !== unitCatalogId;
+}
+
+function saleOffer(
+  campaign: ScoutCampaign | undefined,
+  unitCatalogId: string | undefined,
+): { available: boolean; note: string } {
+  if (!campaign || unitCatalogId === undefined) return { available: false, note: '' };
+  if (catalogsDiffer(campaign.scoutCampaignCatalogId, unitCatalogId)) {
+    return { available: false, note: CATALOG_MISMATCH_NOTE };
+  }
+  return { available: true, note: '' };
+}
+
 const CampaignPicker: React.FC<{
   campaigns: readonly ScoutCampaign[];
   campaignId: string;
+  catalogId: string | undefined;
   onChange: (campaignId: string) => void;
   onAskSale: () => void;
-}> = ({ campaigns, campaignId, onChange, onAskSale }) => (
-  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems="flex-end">
-    <TextField
-      select
-      label="Scout"
-      value={campaignId}
-      onChange={(event) => onChange(event.target.value)}
-      helperText="A Scout Campaign joined to this Unit Campaign."
-      data-testid="fulfillment-campaign"
-    >
-      {campaigns.map((campaign) => (
-        <MenuItem key={campaign.campaignId} value={campaign.campaignId}>
-          {`${campaign.profileId} · ${campaign.campaignId}`}
-        </MenuItem>
-      ))}
-    </TextField>
-    <Button variant="contained" onClick={onAskSale} disabled={!campaignId} data-testid="record-custody-sale">
-      Record a door-to-door sale
-    </Button>
-    {campaigns.length === 0 ? (
-      <Typography variant="body2" color="text.secondary" data-testid="no-campaign-note">
-        No Scout Campaign is joined to this Unit Campaign, so there are no individual Orders to fulfill.
-      </Typography>
-    ) : null}
-  </Stack>
-);
+}> = ({ campaigns, campaignId, catalogId, onChange, onAskSale }) => {
+  const sale = saleOffer(
+    campaigns.find((campaign) => campaign.campaignId === campaignId),
+    catalogId,
+  );
+  return (
+    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems="flex-end">
+      <TextField
+        select
+        label="Scout"
+        value={campaignId}
+        onChange={(event) => onChange(event.target.value)}
+        helperText="A Scout Campaign joined to this Unit Campaign."
+        data-testid="fulfillment-campaign"
+      >
+        {campaigns.map((campaign) => (
+          <MenuItem key={campaign.campaignId} value={campaign.campaignId}>
+            {`${scoutLabel(campaign)} · ${campaignLabel(campaign)}`}
+          </MenuItem>
+        ))}
+      </TextField>
+      <Button variant="contained" onClick={onAskSale} disabled={!sale.available} data-testid="record-custody-sale">
+        Record a door-to-door sale
+      </Button>
+      {sale.note ? (
+        <Typography variant="body2" color="text.secondary" data-testid="catalog-mismatch-note">
+          {sale.note}
+        </Typography>
+      ) : null}
+      {campaigns.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" data-testid="no-campaign-note">
+          No Scout Campaign is joined to this Unit Campaign, so there are no individual Orders to fulfill.
+        </Typography>
+      ) : null}
+    </Stack>
+  );
+};
 
 /** The read state of the Order list, stated as the fact it is: loading, failed, or empty. */
 const OrdersArea: React.FC<{
@@ -615,7 +679,7 @@ const SaleDialog: React.FC<{
     >
       <Stack spacing={2}>
         <Typography variant="body2" color="text.secondary" data-testid="sale-mode-note">
-          {`${ORDER_NOTE} This sale is recorded as consuming ${campaign.profileId}'s held stock first.`}
+          {`${ORDER_NOTE} This sale is recorded as consuming ${scoutLabel(campaign)}'s held stock first.`}
         </Typography>
         <TextField
           label="Customer name"

@@ -33,10 +33,11 @@ import {
 } from '../src/lib/graphql';
 import { INVENTORY_PAGE_SIZE, fulfillmentSourceLabel, page } from '../src/lib/inventory';
 import { UNIT_PAGE_SIZE } from '../src/lib/units';
-import { chooseOption, clearAndType, clearField, typeInto } from './helpers/unitUi';
+import { chooseOption, clearAndType, clearField, findOption, typeInto } from './helpers/unitUi';
 
 const UC = 'UNITCAMP#pack-3149-fall';
 const CAMP = 'CAMP#fall-2026';
+const CATALOG_ID = 'CATALOG#fall';
 const CARAMEL = 'PROD#caramel';
 const BUTTER = 'PROD#butter';
 const AVERY = 'PROFILE#avery';
@@ -50,7 +51,7 @@ const CATALOG_QUERY = {
     data: {
       unitCampaignCatalog: {
         __typename: 'UnitCampaignCatalog',
-        catalogId: 'CATALOG#fall',
+        catalogId: CATALOG_ID,
         catalogName: 'Fall catalog',
         products: [
           {
@@ -75,33 +76,52 @@ const CATALOG_QUERY = {
   },
 };
 
-const ROSTER_QUERY = {
-  request: { query: LIST_UNIT_CAMPAIGN_ROSTER, variables: { unitCampaignId: UC, page: { limit: UNIT_PAGE_SIZE } } },
-  result: {
-    data: {
-      unitCampaignRoster: {
-        __typename: 'UnitCampaignMembershipConnection',
-        items: [
-          {
-            __typename: 'UnitCampaignMembership',
-            unitCampaignId: UC,
-            unitId: 'UNIT#pack-3149',
-            campaignId: CAMP,
-            profileId: AVERY,
-            status: 'ACTIVE',
-            joinedByAccountId: 'ACCOUNT#avery',
-            joinedAt: '2026-01-20T15:00:00Z',
-            removedByAccountId: null,
-            removedAt: null,
-            version: 1,
-            guardVersion: 2,
-          },
-        ],
-        pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+const ROSTER_QUERY = rosterFixture();
+
+/** A joined Scout. */
+function rosterFixture(...rows: Record<string, unknown>[]) {
+  return {
+    request: { query: LIST_UNIT_CAMPAIGN_ROSTER, variables: { unitCampaignId: UC, page: { limit: UNIT_PAGE_SIZE } } },
+    result: {
+      data: {
+        unitCampaignRoster: {
+          __typename: 'UnitCampaignMembershipConnection',
+          items: rows.length > 0 ? rows : [rosterRow()],
+          pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+        },
       },
     },
-  },
-};
+  };
+}
+
+/**
+ * A joined Scout.
+ *
+ * `scoutCampaignCatalogId` matches the Unit Campaign's catalog because that is the
+ * configuration a door-to-door sale can actually be recorded in: the Order is priced in
+ * the Scout Campaign's catalog and the stock it consumes is keyed to this campaign's, and
+ * a product id belongs to one catalog.
+ */
+function rosterRow(overrides: Record<string, unknown> = {}) {
+  return {
+    __typename: 'UnitCampaignMembership',
+    unitCampaignId: UC,
+    unitId: 'UNIT#pack-3149',
+    campaignId: CAMP,
+    profileId: AVERY,
+    scoutName: 'Avery Scout',
+    campaignName: 'Fall 2026 Campaign',
+    scoutCampaignCatalogId: CATALOG_ID,
+    status: 'ACTIVE',
+    joinedByAccountId: 'ACCOUNT#avery',
+    joinedAt: '2026-01-20T15:00:00Z',
+    removedByAccountId: null,
+    removedAt: null,
+    version: 1,
+    guardVersion: 2,
+    ...overrides,
+  };
+}
 
 /** Caramel, 3 ordered, 1 already consumed from custody: the `SS-SM-04` line. */
 function lineFixture(overrides: Record<string, unknown> = {}) {
@@ -222,7 +242,7 @@ function renderPanel(mocks: unknown[]) {
 
 /** Picks the Scout Campaign, which is what starts the Order read. */
 async function chooseCampaign(user: ReturnType<typeof userEvent.setup>) {
-  await chooseOption('fulfillment-campaign', new RegExp(AVERY), user);
+  await chooseOption('fulfillment-campaign', /Avery Scout/, user);
 }
 
 /** Chooses the Scout Campaign and waits for its Orders to be on screen. */
@@ -301,6 +321,49 @@ describe('OrderFulfillmentPanel', () => {
     );
   });
 
+  it('names the Scout and their Campaign in the picker, because an id is not a choice an admin can make', async () => {
+    const user = userEvent.setup();
+    renderPanel([CATALOG_QUERY, ROSTER_QUERY]);
+
+    const option = await findOption('fulfillment-campaign', /Avery Scout/, user);
+    expect(option).toHaveTextContent('Fall 2026 Campaign');
+    // The id is the fallback for a roster row whose profile cannot be read, never the
+    // label when the name is known: two `PROFILE#…` lines cannot be told apart.
+    expect(option.textContent).not.toContain(AVERY);
+  });
+
+  it('says whose stock the sale consumes, in the dialog that records it', async () => {
+    const user = userEvent.setup();
+    renderPanel([CATALOG_QUERY, ROSTER_QUERY, ordersQuery([])]);
+
+    await chooseCampaign(user);
+    await user.click(screen.getByTestId('record-custody-sale'));
+    expect(await screen.findByTestId('sale-mode-note')).toHaveTextContent("consuming Avery Scout's held stock");
+  });
+
+  it('withholds a sale the Scout Campaign cannot supply from its own catalog, and says why', async () => {
+    const user = userEvent.setup();
+    renderPanel([CATALOG_QUERY, rosterFixture(rosterRow({ scoutCampaignCatalogId: 'CATALOG#other' }))]);
+
+    await chooseCampaign(user);
+    // The Order would be priced in the Scout Campaign's catalog while the With Scout rows
+    // it would consume belong to this campaign's, and no product id crosses that line, so
+    // the write could only be refused. See API contract §10.4.
+    expect(screen.getByTestId('record-custody-sale')).toBeDisabled();
+    expect(screen.getByTestId('catalog-mismatch-note')).toHaveTextContent('different catalog');
+  });
+
+  it('offers the sale when the roster cannot answer the Scout Campaign catalog', async () => {
+    const user = userEvent.setup();
+    renderPanel([CATALOG_QUERY, rosterFixture(rosterRow({ scoutCampaignCatalogId: null }))]);
+
+    await chooseCampaign(user);
+    // An unreadable Campaign row is not evidence of a mismatch, and the server still
+    // decides the write. The screens only refuse what they can see is impossible.
+    expect(screen.getByTestId('record-custody-sale')).toBeEnabled();
+    expect(screen.queryByTestId('catalog-mismatch-note')).not.toBeInTheDocument();
+  });
+
   it('SS-SM-04: a door-to-door sale consumes the held stock it can and leaves the rest owed on the line', async () => {
     const user = userEvent.setup();
     renderPanel([
@@ -333,7 +396,7 @@ describe('OrderFulfillmentPanel', () => {
 
     await chooseCampaign(user);
     await user.click(screen.getByTestId('record-custody-sale'));
-    expect(await screen.findByTestId('sale-mode-note')).toHaveTextContent(`consuming ${AVERY}'s held stock first`);
+    expect(await screen.findByTestId('sale-mode-note')).toHaveTextContent("consuming Avery Scout's held stock first");
     await typeInto('sale-customer', 'Nina Ngo', user);
     await clearAndType('sale-date', SALE_DATE, user);
     await typeInto('sale-payment', 'Cash', user);

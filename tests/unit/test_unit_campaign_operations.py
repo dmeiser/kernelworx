@@ -1105,6 +1105,66 @@ def test_the_roster_answers_the_version_pair_removal_requires(seeded: Dict[str, 
     assert next(item for item in after["items"] if item["campaignId"] == _CAMPAIGN_OF["Blake"])["guardVersion"] is None
 
 
+def test_a_roster_row_names_the_scout_and_their_campaign(seeded: Dict[str, Any]) -> None:
+    """§2.6.2/§2.6.3: a roster is chosen from by a person, so an id is not an answer.
+
+    The custody and Order screens name the Scout a write issues stock to or records a
+    sale against, and two Scouts on one roster differ only by name. The Campaign's own
+    catalog travels with it because an individual Order is priced there while this
+    campaign's stock is keyed to this campaign's catalog, so a caller has to be able to
+    see that the two are not the same before it offers a sale (API contract §10.4).
+    """
+    _join("Blake", FALL_CODE, _CAMPAIGN_OF["Blake"])
+    roster = _call(
+        UNIT_CAMPAIGN_ROSTER_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL, "status": "ACTIVE"}
+    )
+    row = next(item for item in roster["items"] if item["campaignId"] == _CAMPAIGN_OF["Blake"])
+    assert row["scoutName"] == PROFILES["Blake"]["sellerName"]
+    assert row["campaignName"] == "Blake's Fixture Campaign"
+    assert row["scoutCampaignCatalogId"] == DEFAULT_CATALOG
+
+
+def test_a_join_and_a_removal_answer_the_display_the_roster_uses(seeded: Dict[str, Any]) -> None:
+    """One membership shape, whichever write returned it.
+
+    ``scoutName`` is non-null in the type, so a join answering empty would put a blank
+    Scout in the caller's cache under the key the roster reads back.
+    """
+    joined = _join("Blake", FALL_CODE, _CAMPAIGN_OF["Blake"])
+    assert joined["scoutName"] == PROFILES["Blake"]["sellerName"]
+    assert joined["campaignName"] == "Blake's Fixture Campaign"
+    assert joined["scoutCampaignCatalogId"] == DEFAULT_CATALOG
+
+    roster = _call(
+        UNIT_CAMPAIGN_ROSTER_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL, "status": "ACTIVE"}
+    )
+    row = next(item for item in roster["items"] if item["campaignId"] == _CAMPAIGN_OF["Blake"])
+    removed = _remove("Avery", PACK_3149_FALL, _CAMPAIGN_OF["Blake"], row["version"], row["guardVersion"])
+    assert removed["status"] == "REMOVED"
+    assert removed["scoutName"] == PROFILES["Blake"]["sellerName"]
+    assert removed["scoutCampaignCatalogId"] == DEFAULT_CATALOG
+
+
+def test_a_roster_row_outlives_the_rows_its_display_came_from(
+    seeded: Dict[str, Any], profiles_table: Any, campaigns_table: Any
+) -> None:
+    """Empty display text, never a missing row.
+
+    The membership is the history the roster exists to keep (§5.6): a Scout whose
+    profile row is gone still holds stock and still owes credit, so the row stays and
+    answers empty names and a null catalog. Dropping it would hide the custody that has
+    to come back, and a null in a non-null field would fail the read whole.
+    """
+    _join("Blake", FALL_CODE, _CAMPAIGN_OF["Blake"])
+    profiles_table.delete_item(Key={"ownerAccountId": f"ACCOUNT#{BLAKE}", "profileId": _PROFILE_OF["Blake"]})
+    campaigns_table.delete_item(Key={"profileId": _PROFILE_OF["Blake"], "campaignId": _CAMPAIGN_OF["Blake"]})
+    roster = _call(UNIT_CAMPAIGN_ROSTER_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL})
+    row = next(item for item in roster["items"] if item["profileId"] == _PROFILE_OF["Blake"])
+    assert row["scoutName"] == ""
+    assert row["campaignName"] == ""
+    assert row["scoutCampaignCatalogId"] is None
+
+
 def test_roster_is_admin_only_and_refuses_an_unknown_status(seeded: Dict[str, Any]) -> None:
     """AUTH-U on the roster too, including for the Scout named on it."""
     assert_is_error(

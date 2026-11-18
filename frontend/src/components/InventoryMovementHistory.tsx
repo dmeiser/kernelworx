@@ -15,7 +15,7 @@
  * presented as complete.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@apollo/client/react';
 import {
   Box,
@@ -81,16 +81,19 @@ function filterVariables(unitCampaignId: string, filters: MovementFilters) {
   };
 }
 
-export const InventoryMovementHistory: React.FC<{ unitCampaignId: string; products: readonly CatalogProduct[] }> = ({
-  unitCampaignId,
-  products,
-}) => {
+export const InventoryMovementHistory: React.FC<{
+  unitCampaignId: string;
+  products: readonly CatalogProduct[];
+  /** Bumped by the screen whenever it records a movement, so the trail re-reads. */
+  refreshToken: number;
+}> = ({ unitCampaignId, products, refreshToken }) => {
   const [draft, setDraft] = useState<MovementFilters>(EMPTY_FILTERS);
   const [applied, setApplied] = useState<MovementFilters>(EMPTY_FILTERS);
   const [filterError, setFilterError] = useState<string | null>(null);
 
   const variables = filterVariables(unitCampaignId, applied);
   const movements = useQuery<GqlGetInventoryMovementsQuery>(GET_INVENTORY_MOVEMENTS, { variables });
+  useTrailRefresh(movements, refreshToken);
   const complete = useCompleteConnection<GqlInventoryMovementFieldsFragment>(movements.data?.inventoryMovements, {
     query: GET_INVENTORY_MOVEMENTS,
     field: 'inventoryMovements',
@@ -131,6 +134,26 @@ export const InventoryMovementHistory: React.FC<{ unitCampaignId: string; produc
     </Card>
   );
 };
+
+/**
+ * Re-read the trail when the screen records a movement.
+ *
+ * The trail's own query answers from the cache, so a receipt written on the stock board
+ * above would leave this list at its mount-time answer: the admin would see the same
+ * `N movements` with no trace of the one they just made, until changing a filter forced a
+ * new request. The token is that force, and nothing else — it re-runs the request the
+ * screen already made, with the filters the admin applied still applied, because a cursor
+ * belongs to the filter set that issued it. Token 0 is the mount, which the query itself
+ * already answers.
+ */
+function useTrailRefresh(movements: { refetch: () => unknown }, refreshToken: number): void {
+  const seen = useRef(0);
+  useEffect(() => {
+    if (refreshToken === seen.current) return;
+    seen.current = refreshToken;
+    void movements.refetch();
+  }, [movements, refreshToken]);
+}
 
 const FilterRow: React.FC<{
   draft: MovementFilters;

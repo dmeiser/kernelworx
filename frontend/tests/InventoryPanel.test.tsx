@@ -274,6 +274,55 @@ describe('InventoryPanel', () => {
     await expectNoRefusal();
   });
 
+  it('moves the movement trail with the stock it just changed', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      catalogQuery,
+      positionsQuery([
+        positionFixture({
+          kernelPhysicalQty: 0,
+          sellableKernelQty: 0,
+          unassignedKernelQty: 0,
+          withScoutQty: 0,
+          totalUnitOwnedUndeliveredQty: 0,
+          version: 0,
+        }),
+      ]),
+      // The trail answers empty at mount, and the second read is the one the write has
+      // to earn: without it the list keeps its mount-time answer and the receipt the
+      // admin just recorded is nowhere in the audit trail they are looking at.
+      movementsQuery([]),
+      {
+        request: {
+          query: RECORD_INVENTORY_RECEIPT,
+          variables: {
+            input: {
+              unitCampaignId: UC,
+              productId: CARAMEL,
+              quantity: 14,
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        result: { data: { recordInventoryReceipt: positionFixture({ kernelPhysicalQty: 14, version: 1 }) } },
+      },
+      positionsQuery([caramel()]),
+      movementsQuery([movementFixture()]),
+    ]);
+
+    expect(await screen.findByTestId('movement-count')).toHaveTextContent('0 movements');
+
+    await openAction('record-receipt', user);
+    await fillStock(CARAMEL, '14', user);
+    await user.click(screen.getByTestId('form-dialog-confirm'));
+
+    await waitFor(() => expect(screen.getByTestId(`position-kernel-${CARAMEL}`)).toHaveTextContent('14'));
+    // The filters the admin applied stay applied: the re-read is the same request, so the
+    // cursor it issued still belongs to it.
+    expect(await screen.findByTestId('movement-row-MOVE#receipt-1', undefined, { timeout: 2000 })).toBeInTheDocument();
+    expect(screen.getByTestId('movement-count')).toHaveTextContent('1 movement');
+  });
+
   it('refuses the shapes an unsigned quantity field will not take, before any write is sent', async () => {
     const user = userEvent.setup();
     // No write mock in either of these two tests: nothing here may reach the server.

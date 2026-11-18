@@ -45,11 +45,21 @@ export async function clearField(testId: string, user: User) {
   await user.clear(editableInside(field));
 }
 
-/** Open a MUI Select by its wrapper test id and choose an option by name. */
-export async function chooseOption(testId: string, optionName: string | RegExp, user: User) {
+/**
+ * Open a MUI Select by its wrapper test id and return the matching option.
+ *
+ * The option only exists once the display node has been clicked, and a test that wants
+ * to read what an option says has to stop there rather than choose it.
+ */
+export async function findOption(testId: string, optionName: string | RegExp, user: User): Promise<HTMLElement> {
   const field = await screen.findByTestId(testId);
   await user.click(field.querySelector('.MuiSelect-select') as HTMLElement);
-  await user.click(await screen.findByRole('option', { name: optionName }));
+  return screen.findByRole('option', { name: optionName });
+}
+
+/** Open a MUI Select by its wrapper test id and choose an option by name. */
+export async function chooseOption(testId: string, optionName: string | RegExp, user: User) {
+  await user.click(await findOption(testId, optionName, user));
 }
 
 /** Choose an option in a Select found by its accessible name (label). */

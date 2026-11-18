@@ -105,7 +105,12 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ unitCampaignId }
   const board = usePositionBoard(client, unitCampaignId, productIds, catalog.data !== undefined);
   const rows = board.rows ?? [];
 
-  const writes = useStockWrites(unitCampaignId, board.reload);
+  // A stock write moves two things the admin can see: the board's numbers and the
+  // movement row that records them. The board reloads through its own hook; the trail
+  // reloads on this token, because its query would otherwise keep answering the state
+  // from before the write and hide the movement that just happened.
+  const [trailToken, setTrailToken] = useState(0);
+  const writes = useStockWrites(unitCampaignId, board.reload, () => setTrailToken((previous) => previous + 1));
   const [pending, setPending] = useState<StockActionState | null>(null);
 
   return (
@@ -122,7 +127,7 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ unitCampaignId }
       >
         <PositionTable rows={rows} names={names} />
       </QueryGate>
-      <InventoryMovementHistory unitCampaignId={unitCampaignId} products={products} />
+      <InventoryMovementHistory unitCampaignId={unitCampaignId} products={products} refreshToken={trailToken} />
       {pending ? (
         <StockActionDialog
           state={pending}
@@ -186,8 +191,8 @@ function usePositionBoard(
   return { rows: state.rows, loading, reload: () => setAttempt((previous) => previous + 1) };
 }
 
-/** The three stock writes, each with the read it must refresh afterwards. */
-function useStockWrites(unitCampaignId: string, refresh: () => unknown) {
+/** The three stock writes, each with the reads it must refresh afterwards. */
+function useStockWrites(unitCampaignId: string, refresh: () => unknown, refreshTrail: () => void) {
   const [recordReceipt] = useMutation(RECORD_INVENTORY_RECEIPT);
   const [adjustStock] = useMutation(ADJUST_INVENTORY);
   const [adjustOnOrder] = useMutation(ADJUST_COUNCIL_ON_ORDER);
@@ -201,6 +206,10 @@ function useStockWrites(unitCampaignId: string, refresh: () => unknown) {
     } catch (failure) {
       throw new Error(describeInventoryFailure(failure, fallback), { cause: failure });
     }
+    // The movement row the write just appended belongs to the trail, not the board, so
+    // the trail is told to re-read rather than left answering its mount-time answer.
+    // A refusal reaches neither: it wrote nothing.
+    refreshTrail();
     await refreshWith(refresh);
   };
 
