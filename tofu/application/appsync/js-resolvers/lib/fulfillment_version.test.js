@@ -79,7 +79,7 @@ describe('fulfillmentVersionGuard', () => {
         assert.ok(rowSatisfies(guard, { orderId: 'ORDER#o1' }), 'a pre-Wave-3 row is version 0');
         assert.ok(rowSatisfies(guard, { orderId: 'ORDER#o1', fulfillmentVersion: 0 }));
         assert.ok(!rowSatisfies(guard, { orderId: 'ORDER#o1', fulfillmentVersion: 1 }));
-        assert.ok(!rowSatisfies(guard, null), 'a deleted Order must not be recreatable by a version-0 write');
+        assert.ok(!rowSatisfies(guard, null), 'a deleted Order must not be written back by a version-0 write');
     });
 
     it('refuses a missing version once the caller claims a non-zero one', () => {
