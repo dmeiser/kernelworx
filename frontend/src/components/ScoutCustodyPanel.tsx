@@ -76,12 +76,25 @@ interface EligibleScout {
   campaignId: string;
 }
 
-/** One Scout's custody, grouped from the server's per-product lines. */
+/**
+ * One return batch: one Scout's held stock under one Scout Campaign.
+ *
+ * The pair is the write's identity, not the Scout alone. Each custody row answers only
+ * for the campaign it was written under (`unit_operations.py` refuses a return whose
+ * `campaignId` is not the row's own), and every return item has to be at least one
+ * Kernel, so a batch is exactly the rows that still hold something, under the campaign
+ * they hold it under.
+ */
 interface CustodyGroup {
   profileId: string;
   campaignId: string;
   lines: Balance[];
   held: number;
+}
+
+/** The test id of one group, unique even when one Scout holds under two campaigns. */
+function groupKey(group: CustodyGroup): string {
+  return `${group.profileId}:${group.campaignId}`;
 }
 
 /** What the admin asked for: an issue, or one Scout's whole batch back. */
@@ -258,6 +271,7 @@ const ScoutSummary: React.FC<{
           <TableHead>
             <TableRow>
               <TableCell>Scout</TableCell>
+              <TableCell>Scout Campaign</TableCell>
               <TableCell>Products held</TableCell>
               <TableCell align="right">Kernels held</TableCell>
               <TableCell align="right">Return</TableCell>
@@ -265,7 +279,7 @@ const ScoutSummary: React.FC<{
           </TableHead>
           <TableBody>
             {groups.map((group) => (
-              <ScoutRow key={group.profileId} group={group} names={names} onAsk={onAsk} />
+              <ScoutRow key={groupKey(group)} group={group} names={names} onAsk={onAsk} />
             ))}
             {groups.length === 0 ? <NoCustodyRow /> : null}
           </TableBody>
@@ -279,25 +293,24 @@ const ScoutRow: React.FC<{ group: CustodyGroup; names: ProductNames; onAsk: (gro
   group,
   names,
   onAsk,
-}) => (
-  <TableRow data-testid={`custody-scout-row-${group.profileId}`}>
-    <TableCell>{group.profileId}</TableCell>
-    <TableCell>{group.lines.map((line) => productLabel(names, line.productId)).join(', ')}</TableCell>
-    <TableCell align="right" data-testid={`custody-scout-held-${group.profileId}`}>
-      {group.held}
-    </TableCell>
-    <TableCell align="right">
-      <Button
-        variant="outlined"
-        size="small"
-        onClick={() => onAsk(group)}
-        data-testid={`return-stock-${group.profileId}`}
-      >
-        Return all stock
-      </Button>
-    </TableCell>
-  </TableRow>
-);
+}) => {
+  const key = groupKey(group);
+  return (
+    <TableRow data-testid={`custody-scout-row-${key}`}>
+      <TableCell>{group.profileId}</TableCell>
+      <TableCell data-testid={`custody-scout-campaign-${key}`}>{group.campaignId}</TableCell>
+      <TableCell>{group.lines.map((line) => productLabel(names, line.productId)).join(', ')}</TableCell>
+      <TableCell align="right" data-testid={`custody-scout-held-${key}`}>
+        {group.held}
+      </TableCell>
+      <TableCell align="right">
+        <Button variant="outlined" size="small" onClick={() => onAsk(group)} data-testid={`return-stock-${key}`}>
+          Return all stock
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+};
 
 const CustodyLines: React.FC<{ lines: readonly Balance[]; names: ProductNames }> = ({ lines, names }) => (
   <Card variant="outlined">
@@ -412,10 +425,22 @@ async function refreshAfter(refreshBalances: () => unknown, refreshPositions: ()
   }
 }
 
+/**
+ * The return batches: one per Scout and Scout Campaign, holding only what is still held.
+ *
+ * A product a Scout has already sold out of or returned keeps its custody row — a return
+ * drives it to zero and leaves it, which is what makes a replayable return answer the same
+ * list — so the balance read hands back zero rows on purpose. They stay out of the batch,
+ * because the server requires every return item to be at least one Kernel and would refuse
+ * the whole batch for one of them. A Scout who holds nothing anywhere is not offered a
+ * return: the write could only fail, and a button that cannot work is not an offer.
+ */
 function groupByScout(lines: readonly Balance[]): CustodyGroup[] {
   const groups = new Map<string, CustodyGroup>();
   for (const line of lines) {
-    const group = groups.get(line.profileId) ?? {
+    if (line.withScoutQty <= 0) continue;
+    const key = `${line.campaignId}::${line.profileId}`;
+    const group = groups.get(key) ?? {
       profileId: line.profileId,
       campaignId: line.campaignId,
       lines: [],
@@ -423,7 +448,7 @@ function groupByScout(lines: readonly Balance[]): CustodyGroup[] {
     };
     group.lines.push(line);
     group.held += line.withScoutQty;
-    groups.set(line.profileId, group);
+    groups.set(key, group);
   }
   return [...groups.values()];
 }

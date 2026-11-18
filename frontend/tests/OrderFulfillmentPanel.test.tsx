@@ -25,14 +25,13 @@ import { OrderFulfillmentPanel } from '../src/components/OrderFulfillmentPanel';
 import {
   FULFILL_INDIVIDUAL_ORDER_LINE,
   GET_ORDER_FULFILLMENTS,
-  GET_PARTICIPANT_ORDER_FULFILLMENTS,
   GET_UNIT_CAMPAIGN_CATALOG,
   LIST_UNIT_CAMPAIGN_ROSTER,
-  LIST_UNIT_SCOUT_ORDERS,
+  LIST_UNIT_SCOUT_CAMPAIGN_ORDERS,
   RECORD_CUSTODY_SALE,
   REVERSE_INDIVIDUAL_ORDER_FULFILLMENT,
 } from '../src/lib/graphql';
-import { ORDER_PAGE_SIZE, fulfillmentSourceLabel, page } from '../src/lib/inventory';
+import { INVENTORY_PAGE_SIZE, fulfillmentSourceLabel, page } from '../src/lib/inventory';
 import { UNIT_PAGE_SIZE } from '../src/lib/units';
 import { chooseOption, clearAndType, clearField, typeInto } from './helpers/unitUi';
 
@@ -125,15 +124,29 @@ function orderFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function ordersQuery(orders: unknown[], nextToken: string | null = null, token: string | null = null) {
+/**
+ * One page of the Unit-Admin Order read (§2.6.3).
+ *
+ * The request names the Unit Campaign whose admin is asking, which is the scope the read
+ * authorizes on: the legacy `listOrdersByCampaign` answers Profile owners and READ shares,
+ * and this screen's caller is neither.
+ */
+function ordersQuery(items: unknown[], endCursor: string | null = null, cursor: string | null = null) {
   return {
-    request: { query: LIST_UNIT_SCOUT_ORDERS, variables: { campaignId: CAMP, limit: ORDER_PAGE_SIZE, nextToken: token } },
+    request: {
+      query: LIST_UNIT_SCOUT_CAMPAIGN_ORDERS,
+      variables: {
+        unitCampaignId: UC,
+        campaignId: CAMP,
+        page: cursor ? { limit: INVENTORY_PAGE_SIZE, cursor } : { limit: INVENTORY_PAGE_SIZE },
+      },
+    },
     result: {
       data: {
-        listOrdersByCampaign: {
-          __typename: 'OrderConnection',
-          orders,
-          nextToken,
+        unitScoutCampaignOrders: {
+          __typename: 'UnitOrderConnection',
+          items: (items as Record<string, unknown>[]).map((order) => ({ ...order, __typename: 'UnitOrder' })),
+          pageInfo: { __typename: 'PageInfo', endCursor, hasNextPage: endCursor !== null },
         },
       },
     },
@@ -162,21 +175,6 @@ function fulfillmentFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function participantFixture(overrides: Record<string, unknown> = {}) {
-  return {
-    __typename: 'ParticipantOrderFulfillment',
-    fulfillmentId: 'FUL#custody-1',
-    lineItemId: LINE,
-    productId: CARAMEL,
-    recordType: 'FULFILL',
-    quantity: 1,
-    source: 'SCOUT_CUSTODY',
-    reversalOfFulfillmentId: null,
-    createdAt: '2026-02-06T15:10:00Z',
-    ...overrides,
-  };
-}
-
 function adminHistoryQuery(records: unknown[], orderId: string = ORDER) {
   return {
     request: { query: GET_ORDER_FULFILLMENTS, variables: { orderId, page: page() } },
@@ -186,25 +184,6 @@ function adminHistoryQuery(records: unknown[], orderId: string = ORDER) {
           __typename: 'OrderFulfillmentConnection',
           items: records,
           pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
-        },
-      },
-    },
-  };
-}
-
-function participantHistoryQuery(records: unknown[]) {
-  return {
-    request: { query: GET_PARTICIPANT_ORDER_FULFILLMENTS, variables: { orderId: ORDER, page: { limit: ORDER_PAGE_SIZE, cursor: null } } },
-    result: {
-      data: {
-        getOrder: {
-          __typename: 'Order',
-          orderId: ORDER,
-          fulfillments: {
-            __typename: 'ParticipantOrderFulfillmentConnection',
-            items: records,
-            pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
-          },
         },
       },
     },
@@ -605,7 +584,7 @@ describe('OrderFulfillmentPanel', () => {
     expect(screen.queryByTestId('reverse-REV#custody-1')).not.toBeInTheDocument();
   });
 
-  it('a reversal is a new record linked to the one it undoes, and it carries the version this screen read', async () => {
+  it('a second reversal in the open history carries the version the first reversal produced', async () => {
     const user = userEvent.setup();
     const kernelFulfillment = fulfillmentFixture({
       fulfillmentId: 'FUL#kernel-1',
@@ -669,7 +648,9 @@ describe('OrderFulfillmentPanel', () => {
             input: {
               orderId: ORDER,
               fulfillmentId: 'FUL#kernel-1',
-              expectedFulfillmentVersion: 3,
+              // The first reversal incremented the Order and the list was re-read, so the
+              // dialog arms the number that read brought back — not the one it opened with.
+              expectedFulfillmentVersion: 4,
               idempotency: { idempotencyKey: 'test-idem-2' },
             },
           },
@@ -678,7 +659,7 @@ describe('OrderFulfillmentPanel', () => {
           data: {
             reverseIndividualOrderFulfillment: {
               __typename: 'ReverseIndividualOrderFulfillmentPayload',
-              order: orderFixture({ fulfillmentVersion: 4 }),
+              order: orderFixture({ fulfillmentVersion: 5 }),
               reversal: kernelReversal,
               inventoryPosition: { __typename: 'InventoryPosition', unitCampaignId: UC, productId: CARAMEL },
             },
@@ -686,7 +667,7 @@ describe('OrderFulfillmentPanel', () => {
         },
       },
       adminHistoryQuery([fulfillmentFixture(), kernelFulfillment, custodyReversal, kernelReversal]),
-      ordersQuery([orderFixture({ fulfillmentVersion: 4, lineItems: [lineFixture({ fulfilledQuantity: 0 })] })]),
+      ordersQuery([orderFixture({ fulfillmentVersion: 5, lineItems: [lineFixture({ fulfilledQuantity: 0 })] })]),
     ]);
 
     await openOrders(user);
@@ -701,6 +682,12 @@ describe('OrderFulfillmentPanel', () => {
 
     expect(await screen.findByTestId('reversal-state-FUL#custody-1')).toHaveTextContent('Already reversed');
     expect(screen.getByTestId('fulfillment-source-REV#custody-1')).toHaveTextContent("Scout's custody · Kernel stock moved");
+
+    // The dialog keeps describing the Order as the re-read answered it: v4 is the number
+    // the next reversal has to carry, and the screen says so out loud.
+    await waitFor(() =>
+      expect(screen.getByTestId(`order-version-${ORDER}`)).toHaveTextContent('fulfillment record v4'),
+    );
 
     // The Kernel fulfillment reverses back into Kernel stock, in its own words.
     await user.click(await screen.findByTestId('reverse-FUL#kernel-1'));
@@ -734,13 +721,9 @@ describe('OrderFulfillmentPanel', () => {
           createdAt: '2026-02-07T15:00:00Z',
         }),
       ]),
-      // The only fulfillment read this block is allowed to make is the participant
-      // document, which asks for neither field.
-      participantHistoryQuery([
-        participantFixture(),
-        participantFixture({ fulfillmentId: 'FUL#kernel-1', quantity: 2, source: 'KERNEL_STOCK' }),
-        participantFixture({ fulfillmentId: 'REV#custody-1', recordType: 'REVERSAL', reversalOfFulfillmentId: 'FUL#custody-1' }),
-      ]),
+      // There is no second fulfillment read to mock. The Scout's preview is built from the
+      // audit rows above, with the two administrative fields removed, which is the same
+      // rule the server applies when it answers Order.fulfillments (§10.2).
     ]);
 
     await openOrders(user);
@@ -781,7 +764,6 @@ describe('OrderFulfillmentPanel', () => {
         ],
         'ORDER#legacy-9',
       ),
-      participantHistoryQuery([]),
     ]);
 
     await openOrders(user);
@@ -799,25 +781,19 @@ describe('OrderFulfillmentPanel', () => {
     expect(screen.getByTestId('fulfillment-source-FUL#ext-1')).toHaveTextContent('Direct from Council · No Kernel stock changed');
   });
 
-  it("says when the Scout's own view could not be read, instead of showing the Scout no history", async () => {
+  it("the Scout's view asks for nothing beyond the audit this screen already holds", async () => {
     const user = userEvent.setup();
-    renderPanel([
-      CATALOG_QUERY,
-      ROSTER_QUERY,
-      ordersQuery([orderFixture()]),
-      adminHistoryQuery([fulfillmentFixture()]),
-      {
-        request: { query: GET_PARTICIPANT_ORDER_FULFILLMENTS, variables: { orderId: ORDER, page: { limit: ORDER_PAGE_SIZE, cursor: null } } },
-        error: new GraphQLError('Service unavailable.'),
-      },
-    ]);
+    renderPanel([CATALOG_QUERY, ROSTER_QUERY, ordersQuery([orderFixture()]), adminHistoryQuery([fulfillmentFixture()])]);
 
     await openOrders(user);
     await openHistory(user);
     await user.click(screen.getByTestId('participant-view-toggle'));
 
-    expect(await screen.findByText("The Scout's own view of these records could not be loaded.")).toBeInTheDocument();
-    expect(screen.queryByTestId('participant-view')).not.toBeInTheDocument();
+    // FUNC-1: the participant projection hangs off the Order's own reader, which this
+    // caller is not authorized to call. The preview is derived from the audit rows, so it
+    // appears without a second read — and a record the audit does not have cannot appear.
+    expect(await screen.findByTestId('participant-row-FUL#custody-1')).toBeInTheDocument();
+    expect(screen.queryByText("The Scout's own view of these records could not be loaded.")).not.toBeInTheDocument();
   });
 
   it('a version-less Order shows its audit but offers no reversal against nothing', async () => {
@@ -868,7 +844,10 @@ describe('OrderFulfillmentPanel', () => {
       CATALOG_QUERY,
       ROSTER_QUERY,
       {
-        request: { query: LIST_UNIT_SCOUT_ORDERS, variables: { campaignId: CAMP, limit: ORDER_PAGE_SIZE, nextToken: null } },
+        request: {
+          query: LIST_UNIT_SCOUT_CAMPAIGN_ORDERS,
+          variables: { unitCampaignId: UC, campaignId: CAMP, page: { limit: INVENTORY_PAGE_SIZE } },
+        },
         error: new GraphQLError('Service unavailable.'),
       },
     ]);

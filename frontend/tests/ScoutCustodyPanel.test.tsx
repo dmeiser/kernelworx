@@ -42,6 +42,12 @@ const CARAMEL = 'PROD#caramel';
 const BUTTER = 'PROD#butter';
 const AVERY = 'PROFILE#avery';
 const BETH = 'PROFILE#beth';
+const CAMP = 'CAMP#fall-2026';
+
+// A return batch is one Scout under one Scout Campaign, so the row's identity is the pair.
+function held(profileId: string, campaignId: string = CAMP): string {
+  return `${profileId}:${campaignId}`;
+}
 
 // The roster option names both ids the write needs, so its accessible name is longer
 // than the profile id alone.
@@ -85,7 +91,7 @@ function custodyLine(overrides: Record<string, unknown> = {}) {
     unitCampaignId: UC,
     productId: CARAMEL,
     profileId: AVERY,
-    campaignId: 'CAMP#fall-2026',
+    campaignId: CAMP,
     withScoutQty: 1,
     version: 4,
     createdAt: '2026-02-05T15:00:00Z',
@@ -99,7 +105,7 @@ function rosterRow(overrides: Record<string, unknown> = {}) {
     __typename: 'UnitCampaignMembership',
     unitCampaignId: UC,
     unitId: 'UNIT#pack-3149',
-    campaignId: 'CAMP#fall-2026',
+    campaignId: CAMP,
     profileId: AVERY,
     status: 'ACTIVE',
     joinedByAccountId: 'ACCOUNT#avery',
@@ -247,11 +253,11 @@ describe('ScoutCustodyPanel', () => {
 
     expect(await screen.findByTestId('custody-total')).toHaveTextContent('9 Kernels are held by 2 Scouts in this campaign.');
 
-    const avery = screen.getByTestId(`custody-scout-row-${AVERY}`);
-    expect(within(avery).getByTestId(`custody-scout-held-${AVERY}`)).toHaveTextContent('4');
+    const avery = screen.getByTestId(`custody-scout-row-${held(AVERY)}`);
+    expect(within(avery).getByTestId(`custody-scout-held-${held(AVERY)}`)).toHaveTextContent('4');
     expect(within(avery).getByText('Caramel Corn')).toBeInTheDocument();
-    const beth = screen.getByTestId(`custody-scout-row-${BETH}`);
-    expect(within(beth).getByTestId(`custody-scout-held-${BETH}`)).toHaveTextContent('1');
+    const beth = screen.getByTestId(`custody-scout-row-${held(BETH)}`);
+    expect(within(beth).getByTestId(`custody-scout-held-${held(BETH)}`)).toHaveTextContent('1');
 
     expect(screen.getByTestId(`custody-line-${AVERY}-${CARAMEL}`)).toBeInTheDocument();
     expect(screen.getByTestId(`custody-line-qty-${AVERY}-${CARAMEL}`)).toHaveTextContent('4');
@@ -269,7 +275,7 @@ describe('ScoutCustodyPanel', () => {
           variables: {
             input: {
               unitCampaignId: UC,
-              campaignId: 'CAMP#fall-2026',
+              campaignId: CAMP,
               profileId: AVERY,
               productId: CARAMEL,
               quantity: 4,
@@ -317,7 +323,7 @@ describe('ScoutCustodyPanel', () => {
     );
 
     expect(await screen.findByTestId(`custody-line-qty-${AVERY}-${CARAMEL}`)).toHaveTextContent('1');
-    expect(screen.getByTestId(`custody-scout-held-${AVERY}`)).toHaveTextContent('1');
+    expect(screen.getByTestId(`custody-scout-held-${held(AVERY)}`)).toHaveTextContent('1');
     expect(screen.getByTestId('custody-total')).toHaveTextContent('1 Kernel is held by 1 Scout in this campaign.');
     expect(screen.getByTestId('custody-note')).toHaveTextContent('still owes whatever they hold');
   });
@@ -332,7 +338,7 @@ describe('ScoutCustodyPanel', () => {
           variables: {
             input: {
               unitCampaignId: UC,
-              campaignId: 'CAMP#fall-2026',
+              campaignId: CAMP,
               profileId: AVERY,
               productId: BUTTER,
               quantity: 2,
@@ -363,7 +369,7 @@ describe('ScoutCustodyPanel', () => {
 
     expect(await screen.findByTestId(`custody-line-qty-${AVERY}-${BUTTER}`)).toHaveTextContent('2');
     expect(screen.getByTestId(`custody-line-qty-${AVERY}-${CARAMEL}`)).toHaveTextContent('1');
-    expect(screen.getByTestId(`custody-scout-held-${AVERY}`)).toHaveTextContent('3');
+    expect(screen.getByTestId(`custody-scout-held-${held(AVERY)}`)).toHaveTextContent('3');
     expect(screen.getByTestId('custody-total')).toHaveTextContent('3 Kernels are held by 1 Scout in this campaign.');
   });
 
@@ -377,7 +383,7 @@ describe('ScoutCustodyPanel', () => {
           variables: {
             input: {
               unitCampaignId: UC,
-              campaignId: 'CAMP#fall-2026',
+              campaignId: CAMP,
               profileId: AVERY,
               // The batch is the custody lines on screen, quantities and all: the
               // admin confirmed exactly this.
@@ -400,7 +406,7 @@ describe('ScoutCustodyPanel', () => {
       positionsQuery([positionFixture({ withScoutQty: 0 })]),
     ]);
 
-    await user.click(await screen.findByTestId(`return-stock-${AVERY}`));
+    await user.click(await screen.findByTestId(`return-stock-${held(AVERY)}`));
     expect(await screen.findByTestId(`return-batch-line-${CARAMEL}`)).toHaveTextContent('Caramel Corn: 1');
     await user.click(screen.getByTestId('form-dialog-confirm'));
 
@@ -418,7 +424,7 @@ describe('ScoutCustodyPanel', () => {
       }),
     );
 
-    await user.click(await screen.findByTestId(`return-stock-${AVERY}`));
+    await user.click(await screen.findByTestId(`return-stock-${held(AVERY)}`));
     const dialog = await screen.findByRole('dialog');
     expect(screen.getByTestId('return-batch-note')).toHaveTextContent('the whole batch is refused and no stock moves');
     expect(within(dialog).getByTestId(`return-batch-line-${CARAMEL}`)).toHaveTextContent('Caramel Corn: 4');
@@ -426,6 +432,112 @@ describe('ScoutCustodyPanel', () => {
     // The dialog offers one confirmation, not one per line: the batch is the unit
     // of the write, which is what makes the all-or-nothing refusal meaningful.
     expect(within(dialog).getAllByRole('button').map((button) => button.textContent)).toEqual(['Cancel', 'Return all stock']);
+  });
+
+  it('a product the Scout has already sold out of is left out of the return batch', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      ...reads({
+        balances: [
+          custodyLine({ withScoutQty: 4 }),
+          // The row a sale or an earlier return leaves behind: a return drives it to
+          // zero and keeps it, which is what lets a replayed return answer the same list.
+          custodyLine({ productId: BUTTER, withScoutQty: 0, version: 7 }),
+        ],
+        total: 4,
+      }),
+      {
+        request: {
+          query: RETURN_STOCK_FROM_SCOUT,
+          variables: {
+            input: {
+              unitCampaignId: UC,
+              campaignId: CAMP,
+              profileId: AVERY,
+              // The empty line is not in the batch. The server requires every return item
+              // to be at least one Kernel, so one zero row would refuse the whole write.
+              items: [{ productId: CARAMEL, quantity: 4 }],
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        result: {
+          data: {
+            returnStockFromScout: {
+              __typename: 'ReturnStockFromScoutPayload',
+              inventoryPositions: [positionFixture({ withScoutQty: 0 })],
+              custodyBalances: [custodyLine({ withScoutQty: 0, version: 8 })],
+            },
+          },
+        },
+      },
+      balancesQuery([custodyLine({ productId: BUTTER, withScoutQty: 0, version: 7 })], 0),
+      positionsQuery([positionFixture({ withScoutQty: 0 })]),
+    ]);
+
+    await user.click(await screen.findByTestId(`return-stock-${held(AVERY)}`));
+    // The batch names only what is still held, and the Scout's total counts only it too.
+    expect(await screen.findByTestId(`return-batch-line-${CARAMEL}`)).toHaveTextContent('Caramel Corn: 4');
+    expect(screen.queryByTestId(`return-batch-line-${BUTTER}`)).not.toBeInTheDocument();
+    expect(screen.getByTestId(`custody-scout-held-${held(AVERY)}`)).toHaveTextContent('4');
+
+    await user.click(screen.getByTestId('form-dialog-confirm'));
+    expect(await screen.findByText('0 Kernels are held by 0 Scouts in this campaign.')).toBeInTheDocument();
+  });
+
+  it('one Scout holding under two Scout Campaigns gets one return batch per campaign', async () => {
+    const SPRING = 'CAMP#spring-2027';
+    const user = userEvent.setup();
+    renderPanel([
+      ...reads({
+        balances: [
+          custodyLine({ withScoutQty: 2 }),
+          custodyLine({ productId: BUTTER, campaignId: SPRING, withScoutQty: 3, version: 5 }),
+        ],
+        total: 5,
+      }),
+      {
+        request: {
+          query: RETURN_STOCK_FROM_SCOUT,
+          variables: {
+            input: {
+              unitCampaignId: UC,
+              // Each custody row answers for the Scout Campaign it was written under, and
+              // the server refuses a return whose campaignId is not the row's own.
+              campaignId: SPRING,
+              profileId: AVERY,
+              items: [{ productId: BUTTER, quantity: 3 }],
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        result: {
+          data: {
+            returnStockFromScout: {
+              __typename: 'ReturnStockFromScoutPayload',
+              inventoryPositions: [positionFixture({ productId: BUTTER, withScoutQty: 0 })],
+              custodyBalances: [custodyLine({ productId: BUTTER, campaignId: SPRING, withScoutQty: 0, version: 6 })],
+            },
+          },
+        },
+      },
+      balancesQuery([custodyLine({ withScoutQty: 2 })], 2),
+      positionsQuery([positionFixture({ withScoutQty: 2 })]),
+    ]);
+
+    // Two batches, not one row that cannot say which campaign it returns: the campaign is
+    // named on the row so the admin can tell them apart.
+    expect(await screen.findByTestId(`custody-scout-campaign-${held(AVERY, CAMP)}`)).toHaveTextContent(CAMP);
+    const springRow = await screen.findByTestId(`custody-scout-row-${held(AVERY, SPRING)}`);
+    expect(within(springRow).getByTestId(`custody-scout-campaign-${held(AVERY, SPRING)}`)).toHaveTextContent(SPRING);
+    expect(within(springRow).getByTestId(`custody-scout-held-${held(AVERY, SPRING)}`)).toHaveTextContent('3');
+
+    await user.click(within(springRow).getByTestId(`return-stock-${held(AVERY, SPRING)}`));
+    expect(await screen.findByTestId(`return-batch-line-${BUTTER}`)).toHaveTextContent('Butter Popcorn: 3');
+    expect(screen.queryByTestId(`return-batch-line-${CARAMEL}`)).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('form-dialog-confirm'));
+    expect(await screen.findByText('2 Kernels are held by 1 Scout in this campaign.')).toBeInTheDocument();
   });
 
   it('over-return rollback: a refused line refuses the whole batch, and the stock on screen has not moved', async () => {
@@ -439,7 +551,7 @@ describe('ScoutCustodyPanel', () => {
           variables: {
             input: {
               unitCampaignId: UC,
-              campaignId: 'CAMP#fall-2026',
+              campaignId: CAMP,
               profileId: AVERY,
               items: [
                 { productId: CARAMEL, quantity: 4 },
@@ -459,7 +571,7 @@ describe('ScoutCustodyPanel', () => {
       positionsQuery([positionFixture(), positionFixture({ productId: BUTTER })]),
     ]);
 
-    await user.click(await screen.findByTestId(`return-stock-${AVERY}`));
+    await user.click(await screen.findByTestId(`return-stock-${held(AVERY)}`));
     await user.click(screen.getByTestId('form-dialog-confirm'));
 
     expect(await screen.findByText(/stock or a version has already moved/)).toBeInTheDocument();
@@ -474,7 +586,7 @@ describe('ScoutCustodyPanel', () => {
     const balances = [custodyLine({ withScoutQty: 4 })];
     const body = {
       unitCampaignId: UC,
-      campaignId: 'CAMP#fall-2026',
+      campaignId: CAMP,
       profileId: AVERY,
       items: [{ productId: CARAMEL, quantity: 4 }],
       idempotency: { idempotencyKey: 'test-idem-1' },
@@ -503,7 +615,7 @@ describe('ScoutCustodyPanel', () => {
       positionsQuery([positionFixture({ withScoutQty: 0 })]),
     ]);
 
-    await user.click(await screen.findByTestId(`return-stock-${AVERY}`));
+    await user.click(await screen.findByTestId(`return-stock-${held(AVERY)}`));
     await user.click(screen.getByTestId('form-dialog-confirm'));
     expect(await screen.findByText('The server was busy and nothing was changed. Try again.')).toBeInTheDocument();
 
@@ -532,7 +644,7 @@ describe('ScoutCustodyPanel', () => {
 
     // Removed from the roster, still holding stock: the return side is driven by the
     // custody rows, because that stock has to come back either way.
-    expect(await screen.findByTestId(`return-stock-${BETH}`)).toBeEnabled();
+    expect(await screen.findByTestId(`return-stock-${held(BETH)}`)).toBeEnabled();
     expect(screen.getByTestId('custody-total')).toHaveTextContent('2 Kernels are held by 1 Scout in this campaign.');
   });
 
@@ -577,7 +689,7 @@ describe('ScoutCustodyPanel', () => {
           variables: {
             input: {
               unitCampaignId: UC,
-              campaignId: 'CAMP#fall-2026',
+              campaignId: CAMP,
               profileId: AVERY,
               items: [{ productId: CARAMEL, quantity: 1 }],
               idempotency: { idempotencyKey: 'test-idem-1' },
@@ -598,7 +710,7 @@ describe('ScoutCustodyPanel', () => {
       positionsQuery([positionFixture({ withScoutQty: 0 })]),
     ]);
 
-    const returnButton = await screen.findByTestId(`return-stock-${AVERY}`);
+    const returnButton = await screen.findByTestId(`return-stock-${held(AVERY)}`);
     returnButton.focus();
     await user.keyboard('{Enter}');
 
@@ -630,7 +742,7 @@ describe('ScoutCustodyPanel', () => {
     }
     // Every row keeps its own return control: nothing on this screen is revealed by
     // hovering, which a touch screen never does.
-    expect(await screen.findByTestId(`return-stock-${AVERY}`)).toBeVisible();
+    expect(await screen.findByTestId(`return-stock-${held(AVERY)}`)).toBeVisible();
   });
 
   it('a custody read that failed is not shown as an empty one', async () => {

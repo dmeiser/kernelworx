@@ -37,7 +37,7 @@ const UC = 'UNITCAMP#pack-3149-fall';
 const CARAMEL = 'PROD#caramel';
 const BUTTER = 'PROD#butter';
 
-const POSITION_VARIABLES = { unitCampaignId: UC, page: { limit: INVENTORY_PAGE_SIZE } };
+const POSITION_VARIABLES = { unitCampaignId: UC, productIds: [CARAMEL, BUTTER], page: { limit: INVENTORY_PAGE_SIZE } };
 const MOVEMENT_VARIABLES = {
   unitCampaignId: UC,
   productId: undefined,
@@ -545,7 +545,11 @@ describe('InventoryPanel', () => {
       {
         request: {
           query: GET_INVENTORY_POSITIONS,
-          variables: { unitCampaignId: UC, page: { limit: INVENTORY_PAGE_SIZE, cursor: 'position-cursor-2' } },
+          variables: {
+            unitCampaignId: UC,
+            productIds: [CARAMEL, BUTTER],
+            page: { limit: INVENTORY_PAGE_SIZE, cursor: 'position-cursor-2' },
+          },
         },
         result: {
           data: {
@@ -570,7 +574,9 @@ describe('InventoryPanel', () => {
       { request: { query: GET_INVENTORY_POSITIONS, variables: POSITION_VARIABLES }, error: new GraphQLError('offline') },
     ]);
 
-    expect(await screen.findByText("Could not load this campaign's stock.")).toBeInTheDocument();
+    // The board read starts only once the catalog has answered, so its failure lands a
+    // round trip after mount: the wait is stated rather than assumed.
+    expect(await screen.findByText("Could not load this campaign's stock.", undefined, { timeout: 2000 })).toBeInTheDocument();
   });
 
   it('has nothing to receive when the campaign has no catalog', async () => {
@@ -585,5 +591,84 @@ describe('InventoryPanel', () => {
     expect(await screen.findByTestId('position-count')).toHaveTextContent('0 products in this campaign');
   });
 
+  it('refuses a Council on-order change of zero before anything is written', async () => {
+    const user = userEvent.setup();
+    renderPanel([catalogQuery, movementsQuery([]), positionsQuery([caramel(), butter()])]);
 
+    await openAction('adjust-on-order', user);
+    await fillStock(BUTTER, '0', user);
+    await user.click(screen.getByTestId('form-dialog-confirm'));
+
+    // The server requires a non-zero delta, so the field refuses zero in its own words and
+    // no mutation is sent: a zero movement would sit in the trail explaining nothing. The
+    // dialog stays open with what it got, because the admin has a number to change.
+    expect(await screen.findByText('Enter a change other than zero.')).toBeInTheDocument();
+    expect(screen.getByTestId('form-dialog-confirm')).toBeInTheDocument();
+  });
+
+  it('names every catalog product to the position read, in chunks the read accepts', async () => {
+    // The read answers a product with no balance row at zeros only when it is named, and
+    // it names at most 15 per call, so a 16-product catalog is read as 15 plus 1: a board
+    // that stopped at the first chunk would hide the last product entirely.
+    const wide = Array.from({ length: 16 }, (_, index) => ({
+      __typename: 'CatalogProduct',
+      productId: `PROD#p${index}`,
+      productName: `Product ${index}`,
+      description: null,
+      price: 6,
+      sortOrder: index,
+    }));
+    const firstFifteen = wide.slice(0, 15).map((product) => product.productId);
+    renderPanel([
+      {
+        request: { query: GET_UNIT_CAMPAIGN_CATALOG, variables: { unitCampaignId: UC } },
+        result: {
+          data: {
+            unitCampaignCatalog: {
+              __typename: 'UnitCampaignCatalog',
+              catalogId: 'CATALOG#wide',
+              catalogName: 'Wide catalog',
+              products: wide,
+            },
+          },
+        },
+      },
+      movementsQuery([]),
+      {
+        request: {
+          query: GET_INVENTORY_POSITIONS,
+          variables: { unitCampaignId: UC, productIds: firstFifteen, page: { limit: INVENTORY_PAGE_SIZE } },
+        },
+        result: {
+          data: {
+            inventoryPositions: {
+              __typename: 'InventoryPositionConnection',
+              items: firstFifteen.map((productId) => positionFixture({ productId })),
+              pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+            },
+          },
+        },
+      },
+      // The product nothing has ever been received for: the server answered it because the
+      // read named it, and the board shows it at zeros rather than hiding it.
+      {
+        request: {
+          query: GET_INVENTORY_POSITIONS,
+          variables: { unitCampaignId: UC, productIds: ['PROD#p15'], page: { limit: INVENTORY_PAGE_SIZE } },
+        },
+        result: {
+          data: {
+            inventoryPositions: {
+              __typename: 'InventoryPositionConnection',
+              items: [positionFixture({ productId: 'PROD#p15', kernelPhysicalQty: 0, sellableKernelQty: 0, unassignedKernelQty: 0, withScoutQty: 0, totalUnitOwnedUndeliveredQty: 0, version: 0 })],
+              pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+            },
+          },
+        },
+      },
+    ]);
+
+    expect(await screen.findByTestId('position-count')).toHaveTextContent('16 products in this campaign');
+    expect(await screen.findByTestId('position-row-PROD#p15')).toBeInTheDocument();
+  });
 });

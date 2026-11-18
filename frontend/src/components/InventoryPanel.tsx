@@ -9,8 +9,9 @@
  * server-side from the balance row plus the open event allocations and the
  * custody rows (spec §7). Every column below is a field the server computed; the
  * screen has no arithmetic that could disagree with the audit trail it is
- * showing. A product with no balance row yet answers as zeros at version 0, so
- * the catalog — not the balance table — decides which rows exist.
+ * showing. The read names every catalog product, because a product with no
+ * balance row yet answers as zeros at version 0 only when it is named: the
+ * catalog, not the balance table, decides which rows exist.
  *
  * **A stock change is stock only.** `INV-03` and checklist §2.2.2: a receipt or
  * an adjustment creates no Order, sale, payment, trade record, fulfillment, or
@@ -25,8 +26,9 @@
  * the stock twice.
  */
 
-import React, { useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery } from '@apollo/client/react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useApolloClient, useMutation, useQuery } from '@apollo/client/react';
+import type { ApolloClient } from '@apollo/client';
 import {
   Alert,
   Box,
@@ -46,7 +48,6 @@ import {
 import {
   ADJUST_COUNCIL_ON_ORDER,
   ADJUST_INVENTORY,
-  GET_INVENTORY_POSITIONS,
   GET_UNIT_CAMPAIGN_CATALOG,
   RECORD_INVENTORY_RECEIPT,
 } from '../lib/graphql';
@@ -54,23 +55,18 @@ import {
   MAX_QUANTITY,
   STOCK_ONLY_NOTE,
   describeInventoryFailure,
-  page,
+  fetchInventoryPositions,
   parseQuantity,
   parseReason,
   productLabel,
 } from '../lib/inventory';
-import { ConnectionRestNotice } from './ConnectionRestNotice';
+import type { InventoryPositionRow } from '../lib/inventory';
 import { ErrorAlert } from './ErrorAlert';
 import { FormDialog } from './FormDialog';
 import { LoadingState } from './LoadingState';
 import { QueryGate } from './QueryGate';
-import { useCompleteConnection } from '../hooks/useCompleteConnection';
 import { createWriteIntent } from '../lib/units';
-import type {
-  GqlGetInventoryPositionsQuery,
-  GqlGetUnitCampaignCatalogQuery,
-  GqlInventoryPosition,
-} from '../types/graphql-generated';
+import type { GqlGetUnitCampaignCatalogQuery } from '../types/graphql-generated';
 import { InventoryMovementHistory } from './InventoryMovementHistory';
 
 type CatalogProduct = NonNullable<GqlGetUnitCampaignCatalogQuery['unitCampaignCatalog']>['products'][number];
@@ -92,28 +88,24 @@ interface InventoryPanelProps {
 }
 
 export const InventoryPanel: React.FC<InventoryPanelProps> = ({ unitCampaignId }) => {
+  const client = useApolloClient();
   const catalog = useQuery<GqlGetUnitCampaignCatalogQuery>(GET_UNIT_CAMPAIGN_CATALOG, {
     variables: { unitCampaignId },
-  });
-  const positions = useQuery<GqlGetInventoryPositionsQuery>(GET_INVENTORY_POSITIONS, {
-    variables: { unitCampaignId, page: page() },
   });
   const products = useMemo(() => catalog.data?.unitCampaignCatalog?.products ?? [], [catalog.data]);
   const names = useMemo<ProductNames>(
     () => new Map(products.map((product) => [product.productId, product.productName])),
     [products],
   );
-  // The cursor, not a second page size: an inventory board that stopped at page
-  // one would hide stock that exists.
-  const completePositions = useCompleteConnection<GqlInventoryPosition>(positions.data?.inventoryPositions, {
-    query: GET_INVENTORY_POSITIONS,
-    field: 'inventoryPositions',
-    limit: page().limit as number,
-    variables: { unitCampaignId },
-  });
-  const rows = completePositions.items;
+  // The catalog decides which rows exist, so its product ids go into the read: the
+  // server answers a catalog product with no balance row yet at zeros only when the
+  // read names it, and a board that listed only the balance rows would hide the product
+  // nothing has been received for.
+  const productIds = useMemo(() => products.map((product) => product.productId), [products]);
+  const board = usePositionBoard(client, unitCampaignId, productIds, catalog.data !== undefined);
+  const rows = board.rows ?? [];
 
-  const writes = useStockWrites(unitCampaignId, positions.refetch);
+  const writes = useStockWrites(unitCampaignId, board.reload);
   const [pending, setPending] = useState<StockActionState | null>(null);
 
   return (
@@ -124,12 +116,11 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ unitCampaignId }
         onAsk={(action) => setPending({ action, productId: '', quantity: '', reason: '', fieldError: null })}
       />
       <QueryGate
-        query={positions}
+        query={{ loading: catalog.loading || board.loading, data: board.rows ?? undefined }}
         loading={<LoadingState minHeight="200px" />}
         failure={<ErrorAlert message="Could not load this campaign's stock." />}
       >
         <PositionTable rows={rows} names={names} />
-        <ConnectionRestNotice loading={completePositions.loadingRest} failed={completePositions.failedRest} />
       </QueryGate>
       <InventoryMovementHistory unitCampaignId={unitCampaignId} products={products} />
       {pending ? (
@@ -146,6 +137,54 @@ export const InventoryPanel: React.FC<InventoryPanelProps> = ({ unitCampaignId }
     </Box>
   );
 };
+
+interface PositionBoardState {
+  /** null until the read has answered, so a failed read is never an empty board. */
+  rows: InventoryPositionRow[] | null;
+  failed: boolean;
+}
+
+/**
+ * The whole position board: every catalog product, every page of the read.
+ *
+ * The read is capped at 15 named products per call — the server's own bound, because it
+ * answers one balance read per name — so a wider catalog is read chunk by chunk, each
+ * chunk walked to its end. A chunk that fails fails the board: half a stock board with no
+ * warning is how stock goes missing.
+ */
+function usePositionBoard(
+  client: ApolloClient,
+  unitCampaignId: string,
+  productIds: readonly string[],
+  catalogAnswered: boolean,
+) {
+  const [state, setState] = useState<PositionBoardState>({ rows: null, failed: false });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!catalogAnswered) return undefined;
+    if (productIds.length === 0) {
+      setState({ rows: [], failed: false });
+      return undefined;
+    }
+    let active = true;
+    void fetchInventoryPositions(client, unitCampaignId, productIds)
+      .then((rows) => {
+        if (active) setState({ rows, failed: false });
+      })
+      .catch(() => {
+        if (active) setState({ rows: null, failed: true });
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, unitCampaignId, productIds, catalogAnswered, attempt]);
+
+  // Asked for and not answered yet: the moment between the catalog landing and the read
+  // starting belongs here too, or the board would flash a failure it never got.
+  const loading = catalogAnswered && productIds.length > 0 && state.rows === null && !state.failed;
+  return { rows: state.rows, loading, reload: () => setAttempt((previous) => previous + 1) };
+}
 
 /** The three stock writes, each with the read it must refresh afterwards. */
 function useStockWrites(unitCampaignId: string, refresh: () => unknown) {
@@ -217,7 +256,7 @@ const ActionRow: React.FC<{ products: boolean; onAsk: (action: StockAction) => v
   </Stack>
 );
 
-const PositionTable: React.FC<{ rows: GqlInventoryPosition[]; names: ProductNames }> = ({ rows, names }) => (
+const PositionTable: React.FC<{ rows: InventoryPositionRow[]; names: ProductNames }> = ({ rows, names }) => (
   <Card variant="outlined" sx={{ mb: 3 }}>
     <CardContent>
       <Typography variant="h6" gutterBottom>
@@ -255,7 +294,7 @@ const PositionTable: React.FC<{ rows: GqlInventoryPosition[]; names: ProductName
   </Card>
 );
 
-const PositionRow: React.FC<{ position: GqlInventoryPosition; names: ProductNames }> = ({ position, names }) => {
+const PositionRow: React.FC<{ position: InventoryPositionRow; names: ProductNames }> = ({ position, names }) => {
   const id = position.productId;
   return (
     <TableRow data-testid={`position-row-${id}`}>
@@ -339,9 +378,10 @@ function actionWordings(action: StockAction): ActionWordings {
     confirm: 'Save on-order change',
     quantityLabel: 'Change (use a minus to reduce)',
     helper:
-      'Council on order is shown beside stock and is never subtracted from what is needed. It cannot go below zero.',
+      'Council on order is shown beside stock and is never subtracted from what is needed. It cannot go below zero, ' +
+      'and the change itself cannot be zero: a zero would write a movement that moves nothing.',
     signed: true,
-    zeroAllowed: true,
+    zeroAllowed: false,
     reasonRequired: false,
   };
 }

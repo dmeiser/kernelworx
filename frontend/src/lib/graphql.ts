@@ -1322,49 +1322,31 @@ export const ORDER_FULFILLMENT_FRAGMENT = gql`
 `;
 
 /** The participant projection: no actor account, no movement id, no audit (§10.2). */
-export const PARTICIPANT_ORDER_FULFILLMENT_FRAGMENT = gql`
-  fragment ParticipantOrderFulfillmentFields on ParticipantOrderFulfillment {
-    fulfillmentId
-    lineItemId
-    productId
-    recordType
-    quantity
-    source
-    reversalOfFulfillmentId
-    createdAt
-  }
-`;
-
 /**
  * One individual Order as the fulfillment screens read it: the Wave 3 additions
  * (origin scope, `fulfillmentVersion`, the stable line identity and its fulfilled
- * quantity) on top of the fields the screen lists. Deliberately not the legacy
- * `OrderFields` fragment — that one carries customer contact details this
- * admin-only surface has no use for.
+ * quantity) and nothing else. This is the Unit-scoped projection, not the legacy
+ * `Order` type: an admin fulfilling stock has no use for the customer's phone,
+ * address, payment method, or notes, and a read that carries none cannot disclose
+ * them from this screen.
  */
 export const UNIT_ORDER_FRAGMENT = gql`
-  fragment UnitOrderFields on Order {
+  fragment UnitOrderFields on UnitOrder {
     orderId
     profileId
     campaignId
+    unitId
+    unitCampaignId
     customerName
     orderDate
-    paymentMethod
-    totalAmount
-    status
-    createdAt
+    fulfillmentVersion
     lineItems {
       productId
       productName
       quantity
-      pricePerUnit
-      subtotal
       lineItemId
       fulfilledQuantity
     }
-    unitId
-    unitCampaignId
-    fulfillmentVersion
   }
 `;
 
@@ -1456,38 +1438,27 @@ export const GET_ORDER_FULFILLMENTS = gql`
   }
 `;
 
-export const GET_PARTICIPANT_ORDER_FULFILLMENTS = gql`
-  ${PARTICIPANT_ORDER_FULFILLMENT_FRAGMENT}
-  query GetParticipantOrderFulfillments($orderId: ID!, $page: PageInput) {
-    getOrder(orderId: $orderId) {
-      orderId
-      fulfillments(page: $page) {
-        items {
-          ...ParticipantOrderFulfillmentFields
-        }
-        pageInfo {
-          endCursor
-          hasNextPage
-        }
-      }
-    }
-  }
-`;
-
 /**
- * One page of a joined Scout Campaign's individual Orders, in the fulfillment
- * projection. This is the legacy `nextToken` connection shape, not the Show &
- * Sell `page`/`pageInfo` shape: it is the existing Order API, and the Wave 3
- * fields ride on it (§10.2).
+ * The individual Orders one Scout Campaign holds for this Unit Campaign, in the
+ * fulfillment projection.
+ *
+ * This is the Unit-Admin Order read (§2.6.3), not the legacy `listOrdersByCampaign`:
+ * those pipelines authorize Profile ownership and READ shares only, so the admin who
+ * owes the stock these Orders sold — and who therefore has to fulfill them — reads an
+ * empty list through them. Here the read's authorization is the Order's immutable
+ * Unit origin, which is the same scope the fulfillment writes demand.
  */
-export const LIST_UNIT_SCOUT_ORDERS = gql`
+export const LIST_UNIT_SCOUT_CAMPAIGN_ORDERS = gql`
   ${UNIT_ORDER_FRAGMENT}
-  query ListUnitScoutOrders($campaignId: ID!, $limit: Int, $nextToken: String) {
-    listOrdersByCampaign(campaignId: $campaignId, limit: $limit, nextToken: $nextToken) {
-      orders {
+  query ListUnitScoutCampaignOrders($unitCampaignId: ID!, $campaignId: ID!, $page: PageInput) {
+    unitScoutCampaignOrders(unitCampaignId: $unitCampaignId, campaignId: $campaignId, page: $page) {
+      items {
         ...UnitOrderFields
       }
-      nextToken
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
     }
   }
 `;
@@ -1556,23 +1527,45 @@ export const RETURN_STOCK_FROM_SCOUT = gql`
  * (§10.1). Insufficient custody is never an error, so this write succeeds and
  * reports what was consumed through the Order's own fulfillment records.
  */
+/**
+ * What a fulfillment write echoes back about the Order it changed (§2.4.3, §2.4.4): the
+ * version the next write conditions on, and the line the write named. The screens do not
+ * render this — a write is followed by the Order read, because the number the next write
+ * carries has to be the one the write produced — so the selection is the smallest one that
+ * shows the write landed on the line it named. It is a separate fragment from
+ * `UnitOrderFields` because the §2.4 payloads answer with the existing `Order` type, and
+ * this admin surface never reads the contact fields that type can carry.
+ */
+export const ORDER_WRITE_STATE_FRAGMENT = gql`
+  fragment OrderWriteState on Order {
+    orderId
+    fulfillmentVersion
+    lineItems {
+      lineItemId
+      productId
+      quantity
+      fulfilledQuantity
+    }
+  }
+`;
+
 export const RECORD_CUSTODY_SALE = gql`
-  ${UNIT_ORDER_FRAGMENT}
+  ${ORDER_WRITE_STATE_FRAGMENT}
   mutation RecordCustodySale($input: CreateOrderInput!) {
     createOrder(input: $input) {
-      ...UnitOrderFields
+      ...OrderWriteState
     }
   }
 `;
 
 export const FULFILL_INDIVIDUAL_ORDER_LINE = gql`
-  ${UNIT_ORDER_FRAGMENT}
+  ${ORDER_WRITE_STATE_FRAGMENT}
   ${INVENTORY_POSITION_FRAGMENT}
   ${ORDER_FULFILLMENT_FRAGMENT}
   mutation FulfillIndividualOrderLine($input: FulfillIndividualOrderLineInput!) {
     fulfillIndividualOrderLine(input: $input) {
       order {
-        ...UnitOrderFields
+        ...OrderWriteState
       }
       fulfillment {
         ...OrderFulfillmentFields
@@ -1585,13 +1578,13 @@ export const FULFILL_INDIVIDUAL_ORDER_LINE = gql`
 `;
 
 export const REVERSE_INDIVIDUAL_ORDER_FULFILLMENT = gql`
-  ${UNIT_ORDER_FRAGMENT}
+  ${ORDER_WRITE_STATE_FRAGMENT}
   ${INVENTORY_POSITION_FRAGMENT}
   ${ORDER_FULFILLMENT_FRAGMENT}
   mutation ReverseIndividualOrderFulfillment($input: ReverseIndividualOrderFulfillmentInput!) {
     reverseIndividualOrderFulfillment(input: $input) {
       order {
-        ...UnitOrderFields
+        ...OrderWriteState
       }
       reversal {
         ...OrderFulfillmentFields

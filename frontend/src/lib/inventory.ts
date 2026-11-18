@@ -16,18 +16,17 @@
  */
 
 import type { ApolloClient } from '@apollo/client';
-import { GET_PARTICIPANT_ORDER_FULFILLMENTS, LIST_UNIT_SCOUT_ORDERS } from './graphql';
+import { GET_INVENTORY_POSITIONS, LIST_UNIT_SCOUT_CAMPAIGN_ORDERS } from './graphql';
 import { graphQLErrorCode } from './units';
 import type {
   GqlDateRangeFilter,
-  GqlGetParticipantOrderFulfillmentsQuery,
-  GqlListUnitScoutOrdersQuery,
+  GqlGetInventoryPositionsQuery,
+  GqlListUnitScoutCampaignOrdersQuery,
   GqlInventoryMovement,
   GqlInventoryMovementType,
   GqlOrderFulfillment,
+  GqlOrderFulfillmentFieldsFragment,
   GqlPageInput,
-  GqlParticipantOrderFulfillmentFieldsFragment,
-  GqlUnitOrderFieldsFragment,
 } from '../types/graphql-generated';
 
 /** Largest quantity the API accepts in one line (API contract §3.4). */
@@ -346,111 +345,191 @@ export function fulfillmentStockNote(record: Pick<GqlOrderFulfillment, 'source'>
   return record.source === 'EXTERNAL_COUNCIL' ? 'No Kernel stock changed' : 'Kernel stock moved';
 }
 
-/** How many Orders one legacy list page asks for. */
-export const ORDER_PAGE_SIZE = 50;
-
 /** Where a walk through paged reads stops, whatever the server keeps answering. */
 const MAX_PAGES_PER_WALK = 50;
 
-interface OrderPage {
-  orders: GqlUnitOrderFieldsFragment[];
-  nextToken: string | null;
+/**
+ * The next cursor of a Show & Sell connection, or null when this page is the end.
+ *
+ * A page that claims more without naming a cursor, or a cursor that does not move,
+ * throws instead of handing back a prefix that would read as the whole list.
+ */
+function nextConnectionCursor(
+  connection: { pageInfo?: { endCursor?: string | null; hasNextPage?: boolean } | null },
+  readCursor: string | null,
+  label: string,
+): string | null {
+  const info = connection.pageInfo;
+  if (!info || !info.hasNextPage) return null;
+  const next = info.endCursor;
+  if (!next) throw new Error(`${label} reports a next page with no cursor`);
+  if (next === readCursor) throw new Error(`${label} cursor did not advance`);
+  return next;
 }
 
-async function readOrderPage(
-  client: ApolloClient,
-  campaignId: string,
-  limit: number,
-  token: string | null,
-): Promise<OrderPage> {
-  const { data, error } = await client.query<GqlListUnitScoutOrdersQuery>({
-    query: LIST_UNIT_SCOUT_ORDERS,
-    variables: { campaignId, limit, nextToken: token },
-    fetchPolicy: 'network-only',
-  });
-  if (error) throw error;
-  const page = data?.listOrdersByCampaign;
-  if (!page) throw new Error('the Order list returned no payload');
-  return { orders: page.orders, nextToken: page.nextToken ?? null };
+/** One page of a connection, with the fields a walk needs. */
+interface PageLike<T> {
+  items?: readonly T[] | null;
+  pageInfo?: { endCursor?: string | null; hasNextPage?: boolean } | null;
+}
+
+/** Walk one connection from `readPage`'s first page to its end, in order. */
+async function drainEveryPage<T>(
+  readPage: (cursor: string | null) => Promise<PageLike<T>>,
+  label: string,
+): Promise<T[]> {
+  const items: T[] = [];
+  let cursor: string | null = null;
+  for (let pages = 0; pages < MAX_PAGES_PER_WALK; pages += 1) {
+    const page = await readPage(cursor);
+    items.push(...(page.items ?? []));
+    cursor = nextConnectionCursor(page, cursor, label);
+    if (!cursor) return items;
+  }
+  throw new Error(`${label} did not finish within the page limit`);
 }
 
 /**
- * Every individual Order of one Scout Campaign, in the fulfillment projection.
+ * The largest product set one `inventoryPositions` read may name.
  *
- * This is the legacy `nextToken` shape, not the Show & Sell cursor shape, so it is
- * walked by its own token. Stopping at the first page would hide Orders whose lines
- * still owe stock, which is the whole reason the screen exists.
+ * The server caps it because it answers one balance read per named product (API
+ * contract §4.1 `INV-Q-01-02`), so a wider catalog is read in chunks rather than asked
+ * for in one call the server would refuse.
  */
-export async function fetchAllCampaignOrders(
-  client: ApolloClient,
-  campaignId: string,
-  limit: number = ORDER_PAGE_SIZE,
-): Promise<GqlUnitOrderFieldsFragment[]> {
-  const orders: GqlUnitOrderFieldsFragment[] = [];
-  let token: string | null = null;
-  for (let pages = 0; pages < MAX_PAGES_PER_WALK; pages += 1) {
-    const page = await readOrderPage(client, campaignId, limit, token);
-    orders.push(...page.orders);
-    token = page.nextToken;
-    if (!token) return orders;
+export const MAX_POSITION_PRODUCT_IDS = 15;
+
+/** The catalog's products, split into the sets one position read may name. */
+export function positionProductChunks(productIds: readonly string[]): string[][] {
+  const chunks: string[][] = [];
+  for (let start = 0; start < productIds.length; start += MAX_POSITION_PRODUCT_IDS) {
+    chunks.push(productIds.slice(start, start + MAX_POSITION_PRODUCT_IDS));
   }
-  throw new Error('the Order list did not finish within the page limit');
+  return chunks;
 }
 
-type ParticipantConnection = NonNullable<
-  NonNullable<GqlGetParticipantOrderFulfillmentsQuery['getOrder']>['fulfillments']
->;
+type PositionConnection = NonNullable<GqlGetInventoryPositionsQuery['inventoryPositions']>;
 
-async function readFulfillmentPage(
+/** One position row, as the board's own document answers it. */
+export type InventoryPositionRow = PositionConnection['items'][number];
+
+async function readPositionPage(
   client: ApolloClient,
-  orderId: string,
+  unitCampaignId: string,
+  productIds: readonly string[],
   limit: number,
   cursor: string | null,
-): Promise<ParticipantConnection> {
-  const { data, error } = await client.query<GqlGetParticipantOrderFulfillmentsQuery>({
-    query: GET_PARTICIPANT_ORDER_FULFILLMENTS,
-    variables: { orderId, page: { limit, cursor } },
+): Promise<PositionConnection> {
+  const { data, error } = await client.query<GqlGetInventoryPositionsQuery>({
+    query: GET_INVENTORY_POSITIONS,
+    variables: { unitCampaignId, productIds, page: cursor ? { limit, cursor } : { limit } },
     fetchPolicy: 'network-only',
   });
   if (error) throw error;
-  const connection = data?.getOrder?.fulfillments;
-  if (!connection) throw new Error('the Order answered no fulfillment history');
+  const connection = data?.inventoryPositions;
+  if (!connection) throw new Error('the position board answered no payload');
   return connection;
 }
 
 /**
- * The next cursor of one fulfillment page.
+ * Every position of one Unit Campaign, one catalog product at a time.
  *
- * A page that claims more without naming a cursor, or a cursor that does not move,
- * throws instead of handing back a prefix that would read as the whole history.
+ * Naming the products is what makes the board complete: the resolver answers a catalog
+ * product that has no balance row yet with zeros only when the read names it, so a board
+ * built from the balance rows alone hides the product nothing has been received for —
+ * the one product an admin most needs to see, because it is the one that looks like it
+ * was never ordered. The chunks are the read's own cap, and each chunk is walked to its
+ * end for the same reason a board that stopped at page one is wrong.
  */
-function nextFulfillmentCursor(connection: ParticipantConnection, readCursor: string | null): string | null {
-  const info = connection.pageInfo;
-  if (!info || !info.hasNextPage) return null;
-  const next = info.endCursor;
-  if (!next) throw new Error('the fulfillment history reports a next page with no cursor');
-  if (next === readCursor) throw new Error('the fulfillment cursor did not advance');
-  return next;
+export async function fetchInventoryPositions(
+  client: ApolloClient,
+  unitCampaignId: string,
+  productIds: readonly string[],
+  limit: number = INVENTORY_PAGE_SIZE,
+): Promise<InventoryPositionRow[]> {
+  const positions: InventoryPositionRow[] = [];
+  for (const chunk of positionProductChunks(productIds)) {
+    const readChunk = (cursor: string | null) => readPositionPage(client, unitCampaignId, chunk, limit, cursor);
+    positions.push(...(await drainEveryPage(readChunk, 'the position board')));
+  }
+  return positions;
+}
+
+type OrderConnection = NonNullable<GqlListUnitScoutCampaignOrdersQuery['unitScoutCampaignOrders']>;
+
+/** One Order, as the fulfillment screens' own document answers it. */
+export type UnitOrderRow = OrderConnection['items'][number];
+
+async function readOrderPage(
+  client: ApolloClient,
+  unitCampaignId: string,
+  campaignId: string,
+  limit: number,
+  cursor: string | null,
+): Promise<OrderConnection> {
+  const { data, error } = await client.query<GqlListUnitScoutCampaignOrdersQuery>({
+    query: LIST_UNIT_SCOUT_CAMPAIGN_ORDERS,
+    variables: { unitCampaignId, campaignId, page: cursor ? { limit, cursor } : { limit } },
+    fetchPolicy: 'network-only',
+  });
+  if (error) throw error;
+  const connection = data?.unitScoutCampaignOrders;
+  if (!connection) throw new Error('the Order list answered no payload');
+  return connection;
 }
 
 /**
- * The fulfillment history in the projection a Scout is allowed to read.
+ * Every individual Order one Scout Campaign holds for this Unit Campaign.
  *
- * The participant connection hangs off `getOrder`, not off a top-level connection
- * field, so the shared cursor walker — which reads one field — cannot walk it.
+ * This is the Order read whose authorization is the Order's own Unit origin (§2.6.3).
+ * The legacy `listOrdersByCampaign` and `getOrder` pipelines authorize Profile ownership
+ * and READ shares only, so the Unit Admin who owes the stock these Orders sold — and who
+ * therefore has to fulfill them — reads an empty list through them. The server narrows
+ * the answer to this Unit's Orders; the cursor is walked to the end here because an Order
+ * whose line still owes stock is the whole reason the screen exists, and a list that
+ * stopped at page one would hide it.
  */
-export async function fetchParticipantFulfillments(
+export async function fetchUnitScoutCampaignOrders(
   client: ApolloClient,
-  orderId: string,
+  unitCampaignId: string,
+  campaignId: string,
   limit: number = INVENTORY_PAGE_SIZE,
-): Promise<GqlParticipantOrderFulfillmentFieldsFragment[]> {
-  const items: GqlParticipantOrderFulfillmentFieldsFragment[] = [];
-  let cursor: string | null = null;
-  for (let pages = 0; pages < MAX_PAGES_PER_WALK; pages += 1) {
-    const connection = await readFulfillmentPage(client, orderId, limit, cursor);
-    items.push(...connection.items);
-    cursor = nextFulfillmentCursor(connection, cursor);
-    if (!cursor) return items;
-  }
-  throw new Error('the fulfillment history did not finish within the page limit');
+): Promise<UnitOrderRow[]> {
+  const readPage = (cursor: string | null) => readOrderPage(client, unitCampaignId, campaignId, limit, cursor);
+  return drainEveryPage(readPage, 'the Order list');
+}
+
+/**
+ * The two fields that separate the admin's audit record from what a Scout may see
+ * (§10.2). This is the same denylist the server uses to build `ParticipantOrderFulfillment`
+ * from `OrderFulfillment`, and it is a denylist for the same reason: the participant view
+ * is what is LEFT when the audit fields go, so a future audit column cannot reach a Scout
+ * because someone forgot to add it to an allow-list.
+ */
+const ADMIN_ONLY_FULFILLMENT_FIELDS = ['actorAccountId', 'inventoryMovementId'] as const satisfies readonly (
+  | keyof GqlOrderFulfillmentFieldsFragment
+)[];
+
+/** The audit records in the projection a Scout is shown: the same rows, minus the audit. */
+export type ParticipantFulfillmentRow = Omit<
+  GqlOrderFulfillmentFieldsFragment,
+  (typeof ADMIN_ONLY_FULFILLMENT_FIELDS)[number]
+>;
+
+/**
+ * The participant projection of the records this screen already holds.
+ *
+ * The Scout's own history is a read the Unit Admin is not authorized to make — the
+ * participant projection hangs off the Order's own reader — so the admin's preview of it
+ * is built here, from the audit rows, by subtracting the two audit fields. That keeps the
+ * preview honest: it shows exactly the fields the Scout's read answers, and it cannot
+ * disclose an actor account or a movement id because those keys are gone from the row.
+ */
+export function participantProjection(
+  records: readonly GqlOrderFulfillmentFieldsFragment[],
+): ParticipantFulfillmentRow[] {
+  return records.map((record) => {
+    const row: Record<string, unknown> = { ...record };
+    for (const field of ADMIN_ONLY_FULFILLMENT_FIELDS) delete row[field];
+    return row as ParticipantFulfillmentRow;
+  });
 }

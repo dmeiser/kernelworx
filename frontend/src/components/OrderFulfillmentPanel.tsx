@@ -52,21 +52,22 @@ import {
 import {
   canReverse,
   describeInventoryFailure,
-  fetchAllCampaignOrders,
-  fetchParticipantFulfillments,
+  fetchUnitScoutCampaignOrders,
   fulfillmentSourceLabel,
   fulfillmentStockNote,
   fulfillmentVersionOf,
   isCustodySale,
   page,
   parseQuantity,
+  participantProjection,
   productLabel,
   reversedFulfillmentIds,
   unfulfilledQuantity,
 } from '../lib/inventory';
+import type { ParticipantFulfillmentRow, UnitOrderRow } from '../lib/inventory';
 import { UNIT_PAGE_SIZE, createWriteIntent } from '../lib/units';
 import { ConfirmDialog } from './ConfirmDialog';
-import { ErrorAlert, ErrorNote } from './ErrorAlert';
+import { ErrorAlert } from './ErrorAlert';
 import { FormDialog } from './FormDialog';
 import { LoadingState } from './LoadingState';
 import { QueryGate } from './QueryGate';
@@ -77,13 +78,11 @@ import type {
   GqlListUnitCampaignRosterQuery,
   GqlOrderFulfillmentFieldsFragment,
   GqlOrderFulfillmentSource,
-  GqlParticipantOrderFulfillmentFieldsFragment,
   GqlUnitCampaignMembershipFieldsFragment,
-  GqlUnitOrderFieldsFragment,
 } from '../types/graphql-generated';
 
 type CatalogProduct = NonNullable<GqlGetUnitCampaignCatalogQuery['unitCampaignCatalog']>['products'][number];
-type OrderLine = GqlUnitOrderFieldsFragment['lineItems'][number];
+type OrderLine = UnitOrderRow['lineItems'][number];
 type ProductNames = ReadonlyMap<string, string>;
 
 /** A joined Scout Campaign: the roster row names both ids an Order write needs. */
@@ -117,7 +116,7 @@ export const OrderFulfillmentPanel: React.FC<{ unitCampaignId: string }> = ({ un
   );
 
   const [campaignId, setCampaignId] = useState('');
-  const orders = useScoutOrders(campaignId);
+  const orders = useScoutOrders(unitCampaignId, campaignId);
   const products = useMemo(() => catalog.data?.unitCampaignCatalog?.products ?? [], [catalog.data]);
   const names = useMemo<ProductNames>(
     () => new Map(products.map((product) => [product.productId, product.productName])),
@@ -140,6 +139,7 @@ export const OrderFulfillmentPanel: React.FC<{ unitCampaignId: string }> = ({ un
       <OrdersArea campaignId={campaignId} state={orders} names={names} onAsk={setPending} />
       <PendingDialog
         pending={pending}
+        orders={orders.orders}
         campaign={campaignOf(campaigns, campaignId)}
         products={products}
         names={names}
@@ -185,7 +185,7 @@ const CampaignPicker: React.FC<{
 /** The read state of the Order list, stated as the fact it is: loading, failed, or empty. */
 const OrdersArea: React.FC<{
   campaignId: string;
-  state: { orders: readonly GqlUnitOrderFieldsFragment[]; loading: boolean; failed: boolean };
+  state: { orders: readonly UnitOrderRow[]; loading: boolean; failed: boolean };
   names: ProductNames;
   onAsk: (action: PendingAction) => void;
 }> = ({ campaignId, state, names, onAsk }) => {
@@ -203,12 +203,13 @@ const OrdersArea: React.FC<{
 
 const PendingDialog: React.FC<{
   pending: PendingAction | null;
+  orders: readonly UnitOrderRow[];
   campaign: ScoutCampaign;
   products: readonly CatalogProduct[];
   names: ProductNames;
   writes: ReturnType<typeof useFulfillmentWrites>;
   onClose: () => void;
-}> = ({ pending, campaign, products, names, writes, onClose }) => {
+}> = ({ pending, orders, campaign, products, names, writes, onClose }) => {
   if (pending === null) return null;
   if (pending.kind === 'sale')
     return <SaleDialog campaign={campaign} products={products} names={names} writes={writes} onClose={onClose} />;
@@ -224,8 +225,32 @@ const PendingDialog: React.FC<{
       />
     );
   }
-  return <HistoryDialog order={pending.order} names={names} writes={writes} onClose={onClose} />;
+  return (
+    <HistoryDialog
+      order={currentOrder(orders, pending.orderId, pending.order)}
+      names={names}
+      writes={writes}
+      onClose={onClose}
+    />
+  );
 };
+
+/**
+ * The Order an open dialog is describing, from the freshest read of it.
+ *
+ * The dialog outlives the write it starts: a reversal increments the Order's fulfillment
+ * version, and the next reversal has to carry the number the write produced rather than
+ * the one the admin opened the dialog with. The list is re-read after every write, so it
+ * is the source; the Order the admin clicked is only the fallback for the moment a read is
+ * in flight.
+ */
+function currentOrder(
+  orders: readonly UnitOrderRow[],
+  orderId: string,
+  fallback: UnitOrderRow,
+): UnitOrderRow {
+  return orders.find((order) => order.orderId === orderId) ?? fallback;
+}
 
 function campaignOf(campaigns: readonly ScoutCampaign[], campaignId: string): ScoutCampaign {
   return campaigns.find((campaign) => campaign.campaignId === campaignId) as ScoutCampaign;
@@ -234,19 +259,20 @@ function campaignOf(campaigns: readonly ScoutCampaign[], campaignId: string): Sc
 /** What the admin asked to do. */
 type PendingAction =
   | { kind: 'sale' }
-  | { kind: 'fulfill'; order: GqlUnitOrderFieldsFragment; line: OrderLine; version: number }
-  | { kind: 'history'; order: GqlUnitOrderFieldsFragment };
+  | { kind: 'fulfill'; order: UnitOrderRow; line: OrderLine; version: number }
+  | { kind: 'history'; orderId: string; order: UnitOrderRow };
 
 /**
- * The Orders of one Scout Campaign, every page of them.
+ * The individual Orders of one Scout Campaign that belong to this Unit, every page of them.
  *
- * This is the legacy `nextToken` shape rather than the Show & Sell cursor shape, so it
- * is walked by its own token. A panel that stopped at the first page would hide Orders
- * whose lines still owe stock.
+ * The read is the Unit-Admin one: the legacy Order lists authorize Profile ownership and
+ * READ shares only, so this screen's own caller — the admin who has to fulfill these
+ * lines — reads nothing through them. A panel that stopped at the first page would hide
+ * Orders whose lines still owe stock.
  */
-function useScoutOrders(campaignId: string) {
+function useScoutOrders(unitCampaignId: string, campaignId: string) {
   const client = useApolloClient();
-  const [state, setState] = useState<{ orders: GqlUnitOrderFieldsFragment[]; loading: boolean; failed: boolean }>({
+  const [state, setState] = useState<{ orders: UnitOrderRow[]; loading: boolean; failed: boolean }>({
     orders: [],
     loading: false,
     failed: false,
@@ -260,7 +286,7 @@ function useScoutOrders(campaignId: string) {
     }
     let active = true;
     setState((previous) => ({ orders: previous.orders, loading: true, failed: false }));
-    void fetchAllCampaignOrders(client, campaignId)
+    void fetchUnitScoutCampaignOrders(client, unitCampaignId, campaignId)
       .then((orders) => {
         if (active) setState({ orders, loading: false, failed: false });
       })
@@ -270,13 +296,13 @@ function useScoutOrders(campaignId: string) {
     return () => {
       active = false;
     };
-  }, [client, campaignId, attempt]);
+  }, [client, unitCampaignId, campaignId, attempt]);
 
   return { ...state, reload: () => setAttempt((previous) => previous + 1) };
 }
 
 const OrderTable: React.FC<{
-  orders: readonly GqlUnitOrderFieldsFragment[];
+  orders: readonly UnitOrderRow[];
   names: ProductNames;
   onAsk: (action: PendingAction) => void;
 }> = ({ orders, names, onAsk }) => (
@@ -298,7 +324,7 @@ const OrderTable: React.FC<{
 );
 
 const OrderBlock: React.FC<{
-  order: GqlUnitOrderFieldsFragment;
+  order: UnitOrderRow;
   names: ProductNames;
   onAsk: (action: PendingAction) => void;
 }> = ({ order, names, onAsk }) => (
@@ -313,7 +339,7 @@ const OrderBlock: React.FC<{
       <Button
         size="small"
         variant="text"
-        onClick={() => onAsk({ kind: 'history', order })}
+        onClick={() => onAsk({ kind: 'history', orderId: order.orderId, order })}
         data-testid={`order-history-${order.orderId}`}
       >
         Fulfillment history
@@ -346,12 +372,12 @@ const OrderBlock: React.FC<{
  * Rows written before Wave 3 carry no `lineItemId`, so nothing can name them stably
  * across an edit — the server refuses to fulfill one, and the screen does not offer to.
  */
-function lineIdentity(order: GqlUnitOrderFieldsFragment, line: OrderLine): string {
+function lineIdentity(order: UnitOrderRow, line: OrderLine): string {
   return line.lineItemId ?? `${order.orderId}#${line.productId}`;
 }
 
 const LineRow: React.FC<{
-  order: GqlUnitOrderFieldsFragment;
+  order: UnitOrderRow;
   line: OrderLine;
   names: ProductNames;
   onAsk: (action: PendingAction) => void;
@@ -403,7 +429,7 @@ function noFulfillLabel(line: OrderLine, version: number | null): string {
  * the lines have no Fulfill button — printing `v` with no number after it would say
  * nothing either way.
  */
-function orderVersionLabel(order: GqlUnitOrderFieldsFragment): string {
+function orderVersionLabel(order: UnitOrderRow): string {
   const version = fulfillmentVersionOf(order);
   return version === null ? 'no fulfillment version yet' : `fulfillment record v${version}`;
 }
@@ -456,7 +482,7 @@ function useFulfillmentWrites(refreshOrders: () => unknown) {
         'The sale could not be recorded.',
       ),
     fulfill: (
-      order: GqlUnitOrderFieldsFragment,
+      order: UnitOrderRow,
       line: OrderLine,
       version: number,
       quantity: number,
@@ -473,7 +499,7 @@ function useFulfillmentWrites(refreshOrders: () => unknown) {
         },
         'The line could not be fulfilled.',
       ),
-    reverse: (order: GqlUnitOrderFieldsFragment, fulfillmentId: string, version: number) =>
+    reverse: (order: UnitOrderRow, fulfillmentId: string, version: number) =>
       send(
         reverseFulfillment,
         { orderId: order.orderId, fulfillmentId, expectedFulfillmentVersion: version },
@@ -659,7 +685,7 @@ function saleError(state: SaleFormState): string | null {
  * Order cannot both fill the same last Kernel.
  */
 const FulfillDialog: React.FC<{
-  order: GqlUnitOrderFieldsFragment;
+  order: UnitOrderRow;
   line: OrderLine;
   version: number;
   names: ProductNames;
@@ -738,7 +764,7 @@ const FulfillDialog: React.FC<{
  * and the toggle is this screen's own proof of that split.
  */
 const HistoryDialog: React.FC<{
-  order: GqlUnitOrderFieldsFragment;
+  order: UnitOrderRow;
   names: ProductNames;
   writes: ReturnType<typeof useFulfillmentWrites>;
   onClose: () => void;
@@ -778,7 +804,7 @@ const HistoryDialog: React.FC<{
             onAskReverse={setPendingReversal}
           />
         </QueryGate>
-        <ParticipantBlock order={order} names={names} />
+        <ParticipantBlock records={records} names={names} />
         {reversing ? (
           <ConfirmDialog
             open
@@ -804,59 +830,42 @@ const HistoryDialog: React.FC<{
   );
 };
 
-interface ParticipantState {
-  rows: readonly GqlParticipantOrderFulfillmentFieldsFragment[];
-  loading: boolean;
-  failed: boolean;
-  asked: boolean;
-}
-
 /**
  * The Scout's own view of the same history.
  *
- * This is the half of the privacy rule the screen can prove: it asks for the
- * participant document, which carries no actor account and no inventory movement id,
- * so the audit fields cannot reach this table even by accident.
+ * A Unit Admin is not authorized to read another person's participant projection — that
+ * read belongs to the Order's own reader — so the preview is built from the audit rows
+ * this screen already holds, by subtracting the two audit fields. That is the same rule
+ * the server applies when it answers `Order.fulfillments`, and it is what makes this
+ * block the screen's own proof of the split: the actor account and the inventory movement
+ * id are not hidden by CSS, they are not in the rows it renders.
  */
-const ParticipantBlock: React.FC<{ order: GqlUnitOrderFieldsFragment; names: ProductNames }> = ({ order, names }) => {
-  const client = useApolloClient();
-  const [state, setState] = useState<ParticipantState>({ rows: [], loading: false, failed: false, asked: false });
+const ParticipantBlock: React.FC<{
+  records: readonly GqlOrderFulfillmentFieldsFragment[];
+  names: ProductNames;
+}> = ({ records, names }) => {
+  const [asked, setAsked] = useState(false);
 
-  const show = async () => {
-    setState({ rows: [], loading: true, failed: false, asked: true });
-    try {
-      setState({
-        rows: await fetchParticipantFulfillments(client, order.orderId),
-        loading: false,
-        failed: false,
-        asked: true,
-      });
-    } catch {
-      setState({ rows: [], loading: false, failed: true, asked: true });
-    }
-  };
-
-  if (!state.asked) {
+  if (!asked) {
     return (
-      <Button variant="text" onClick={() => void show()} data-testid="participant-view-toggle">
+      <Button variant="text" onClick={() => setAsked(true)} data-testid="participant-view-toggle">
         What the Scout sees
       </Button>
     );
   }
-  if (state.loading) return <LoadingState minHeight="80px" />;
-  if (state.failed) return <ErrorNote message="The Scout's own view of these records could not be loaded." />;
+  const rows = participantProjection(records);
   return (
     <Box data-testid="participant-view">
       <Typography variant="body2" color="text.secondary" data-testid="participant-note">
         This is the participant projection: the same records without the admin account or the inventory movement behind
         them.
       </Typography>
-      {state.rows.map((record) => (
+      {rows.map((record) => (
         <Typography key={record.fulfillmentId} variant="body2" data-testid={`participant-row-${record.fulfillmentId}`}>
           {participantRowLabel(names, record)}
         </Typography>
       ))}
-      {state.rows.length === 0 ? (
+      {rows.length === 0 ? (
         <Typography variant="body2" color="text.secondary" data-testid="no-participant-fulfillments-note">
           No records to show the Scout.
         </Typography>
@@ -866,7 +875,7 @@ const ParticipantBlock: React.FC<{ order: GqlUnitOrderFieldsFragment; names: Pro
 };
 
 /** One participant row: what moved, how much, and from which source. Nothing else. */
-function participantRowLabel(names: ProductNames, record: GqlParticipantOrderFulfillmentFieldsFragment): string {
+function participantRowLabel(names: ProductNames, record: ParticipantFulfillmentRow): string {
   const kind = record.recordType === 'REVERSAL' ? 'Reversal' : 'Fulfilled';
   return `${kind} · ${productLabel(names, record.productId)} · ${record.quantity} · ${fulfillmentSourceLabel(record.source)}`;
 }
