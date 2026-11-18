@@ -27,9 +27,11 @@ from botocore.exceptions import ClientError
 
 from src.handlers.unit_operations import (
     FULFILL_LINE_FIELD,
+    ORDER_DATE_ATTRIBUTE,
     ORDER_FULFILLMENTS_FIELD,
     RECORD_RECEIPT_FIELD,
     REVERSE_FULFILLMENT_FIELD,
+    UNIT_SCOUT_ORDERS_FIELD,
     handle_unit_operation,
 )
 from src.utils import order_fulfillment_models as ful
@@ -993,6 +995,253 @@ def test_inv_q_03_07_an_argument_that_is_not_a_page_object_is_refused(
     """The shared page contract is validated, not guessed at."""
     assert_is_error(_audit(page="first"), "INVALID_INPUT")
     assert_is_error(_call(ORDER_FULFILLMENTS_FIELD, "Avery", arguments={}), "INVALID_INPUT")
+
+
+# --- FUNC-1 (§2.6.3): the Order list the Unit Admin fulfills from ------------------
+
+DEVON_CAMPAIGN = str(PROFILES["Devon"]["campaignId"])
+EMERY_CAMPAIGN = str(PROFILES["Emery"]["campaignId"])
+
+
+def _orders(
+    caller: Optional[str] = "Avery",
+    *,
+    unit_campaign_id: Any = CAMPAIGN,
+    campaign_id: Any = DEVON_CAMPAIGN,
+    page: Any = None,
+) -> Any:
+    """One turn of the Unit-Admin Order list read."""
+    arguments: Dict[str, Any] = {"unitCampaignId": unit_campaign_id, "campaignId": campaign_id}
+    if page is not None:
+        arguments["page"] = page
+    return _call(UNIT_SCOUT_ORDERS_FIELD, caller, arguments=arguments)
+
+
+def test_the_unit_admin_reads_the_orders_taken_under_her_own_campaign(world: Dict[str, Any], orders_table: Any) -> None:
+    """FUNC-1: the caller who owes the stock is the caller the read answers.
+
+    ``listOrdersByCampaign`` and ``getOrder`` authorize Profile ownership and READ shares,
+    so Avery — the admin who has to fulfill Devon's line — reads nothing through them.
+    This read authorizes the same scope the fulfillment writes demand, so the screen and
+    the write agree about whose Orders they are.
+    """
+    page = _ok(_orders())
+
+    assert [order["orderId"] for order in page["items"]] == [ORDER_ID]
+    order = page["items"][0]
+    assert order["profileId"] == DEVON_PROFILE
+    assert order["campaignId"] == DEVON_CAMPAIGN
+    assert order["unitId"] == PACK_3149
+    assert order["unitCampaignId"] == CAMPAIGN
+    assert order["fulfillmentVersion"] == 0
+    assert order["lineItems"] == [
+        {
+            "lineItemId": LINE,
+            "productId": PRODUCT,
+            "productName": "Fixture Trail Mix",
+            "quantity": 4,
+            "fulfilledQuantity": 0,
+        }
+    ]
+    assert page["pageInfo"] == {"endCursor": None, "hasNextPage": False}
+
+
+def test_a_foreign_origin_and_an_independent_sale_sit_in_the_partition_and_are_not_answered(
+    world: Dict[str, Any], orders_table: Any
+) -> None:
+    """AUTH-U: naming a Scout Campaign is not an access path.
+
+    The orders table is hash-keyed on the Scout Campaign, so Orders taken for another Unit
+    Campaign — and independent sales with no Unit scope at all — are read off the same
+    partition. Tenancy is each row's immutable ``unitCampaignId``, and only the caller's own
+    Unit Campaign is answered.
+    """
+    # Emery's Order was taken while her campaign was linked to the spring Unit Campaign. It
+    # is read off the same Scout Campaign partition, and the fall admin is not answered it.
+    assert _ok(_orders(campaign_id=EMERY_CAMPAIGN))["items"] == []
+
+    # Riley's sale was never taken under a Unit: no Unit Admin exists for it, so nothing is
+    # answered for it here either.
+    assert _ok(_orders(campaign_id=str(PROFILES["Riley"]["campaignId"])))["items"] == []
+
+    # Asking as the admin of the spring campaign answers the spring Order and not the fall
+    # one, even though both Orders sit in their own Scout's campaign partition.
+    spring = _ok(_orders(unit_campaign_id=ORIGIN_OTHER, campaign_id=EMERY_CAMPAIGN))
+    assert [order["orderId"] for order in spring["items"]] == [PAST_ORDER_ID]
+    assert spring["items"][0]["unitCampaignId"] == ORIGIN_OTHER
+    assert _ok(_orders(unit_campaign_id=ORIGIN_OTHER, campaign_id=DEVON_CAMPAIGN))["items"] == []
+
+
+def test_a_caller_who_does_not_admin_the_origin_scope_is_refused(world: Dict[str, Any]) -> None:
+    """The Scout who took the Order and an admin of another Unit are both turned away.
+
+    A non-admin reads ``NOT_FOUND`` rather than ``FORBIDDEN`` for the same reason every
+    other Unit read answers it: an answer that distinguishes "no such Unit Campaign" from
+    "there is one, and you are not allowed" discloses the existence of another Unit's
+    campaign to a caller who has no business knowing it.
+    """
+    assert_is_error(_orders(caller="Devon"), "NOT_FOUND")
+    assert_is_error(_orders(caller="Riley"), "NOT_FOUND")
+    assert_is_error(_orders(caller=None), "UNAUTHORIZED")
+
+
+def test_the_projection_carries_no_customer_contact_detail(world: Dict[str, Any]) -> None:
+    """§2.6.3: administering stock needs the Order's identity and its lines, nothing else.
+
+    The legacy ``Order`` type can carry the customer's phone, address, payment method and
+    notes. This projection selects none of them, so the fulfillment screen cannot disclose
+    what the fulfillment path never reads.
+    """
+    order = _ok(_orders())["items"][0]
+
+    assert set(order) == {
+        "orderId",
+        "profileId",
+        "campaignId",
+        "unitId",
+        "unitCampaignId",
+        "customerName",
+        "orderDate",
+        "fulfillmentVersion",
+        "lineItems",
+    }
+    assert set(order["lineItems"][0]) == {"lineItemId", "productId", "productName", "quantity", "fulfilledQuantity"}
+    for leaked in ("customerPhone", "phone", "address", "notes", "paymentMethod", "totalAmount", "status"):
+        assert leaked not in order
+
+
+def test_a_line_written_before_stable_ids_answers_no_identity_and_zero_fulfilled(
+    world: Dict[str, Any], orders_table: Any
+) -> None:
+    """A legacy line cannot be fulfilled by name, and the read says so instead of guessing."""
+    legacy = dict(ORDER)
+    legacy_line = {
+        k: v
+        for k, v in ORDER["lineItems"][0].items()
+        if k not in (ful.LINE_ITEM_ID_ATTRIBUTE, ful.FULFILLED_QUANTITY_ATTRIBUTE)
+    }
+    legacy[ful.LINE_ITEMS_ATTRIBUTE] = [legacy_line]
+    legacy.pop(ful.FULFILLMENT_VERSION_ATTRIBUTE, None)
+    orders_table.put_item(Item=legacy)
+
+    order = _ok(_orders())["items"][0]
+
+    assert order["lineItems"][0]["lineItemId"] is None
+    assert order["lineItems"][0]["fulfilledQuantity"] == 0
+    # Absence is answered as 0, not null: that is the number `currentFulfillmentVersion`
+    # pins for the write guard and what the legacy `Order` projection answers, so the
+    # version the admin is shown is the version the fulfill call is conditioned on.
+    assert order["fulfillmentVersion"] == 0
+
+
+def test_newest_first_compares_the_instant_and_not_the_text_of_the_timestamp(
+    world: Dict[str, Any], orders_table: Any
+) -> None:
+    """PAGE-01 again, for the Orders whose timestamp spells the moment the other way round.
+
+    The Order writers store the caller's AWSDateTime verbatim, so the same instant reaches
+    the table as ``…Z`` and ``…+00:00`` and two Orders an hour apart can carry offsets that
+    make the older one look newer as text. Sorted by string, the offset decides the order and
+    the newest Order slides off page one; sorted by instant, the page boundary falls where the
+    business moment does. A row whose stamp cannot be parsed at all sorts as the oldest thing
+    in the list, so it stays reachable at the end instead of sitting at the top of page one.
+    """
+    behind = sold_order_item("Devon", suffix="order-offset", unit_id=PACK_3149, unit_campaign_id=CAMPAIGN)
+    behind[ORDER_DATE_ATTRIBUTE] = "2026-12-09T09:00:00+01:00"  # 08:00 UTC — the larger string, the earlier moment
+    ahead = sold_order_item("Devon", suffix="order-zulu", unit_id=PACK_3149, unit_campaign_id=CAMPAIGN)
+    ahead[ORDER_DATE_ATTRIBUTE] = "2026-12-09T08:30:00Z"  # 08:30 UTC — the smaller string, the newer moment
+    unreadable = sold_order_item("Devon", suffix="order-unreadable", unit_id=PACK_3149, unit_campaign_id=CAMPAIGN)
+    unreadable[ORDER_DATE_ATTRIBUTE] = "the ninth of December, roughly"
+    for item in (behind, ahead, unreadable):
+        orders_table.put_item(Item=item)
+
+    first = _ok(_orders(page={"limit": 2}))
+
+    assert [order["orderId"] for order in first["items"]] == [str(ahead["orderId"]), str(behind["orderId"])]
+    assert first["pageInfo"]["hasNextPage"] is True
+
+    second = _ok(_orders(page={"limit": 2, "cursor": first["pageInfo"]["endCursor"]}))
+
+    assert first["items"][0]["orderDate"] == "2026-12-09T08:30:00Z"
+    assert second["items"][-1]["orderId"] == str(unreadable["orderId"])
+    assert second["items"][-1]["orderDate"] == "the ninth of December, roughly"
+    assert str(ahead["orderId"]) not in [order["orderId"] for order in second["items"]]
+
+
+def test_orders_are_paged_newest_first_and_the_cursor_belongs_to_one_campaign_pair(
+    world: Dict[str, Any], orders_table: Any
+) -> None:
+    """PAGE-01: a stable order, and a cursor that cannot walk another campaign's Orders."""
+    older = sold_order_item("Devon", suffix="order-old", unit_id=PACK_3149, unit_campaign_id=CAMPAIGN)
+    older[ORDER_DATE_ATTRIBUTE] = "2026-11-01T08:00:00+00:00"
+    newest = sold_order_item("Devon", suffix="order-new", unit_id=PACK_3149, unit_campaign_id=CAMPAIGN)
+    newest[ORDER_DATE_ATTRIBUTE] = "2026-11-09T08:00:00+00:00"
+    orders_table.put_item(Item=older)
+    orders_table.put_item(Item=newest)
+
+    first = _ok(_orders(page={"limit": 2}))
+    assert [order["orderId"] for order in first["items"]] == [
+        str(newest["orderId"]),
+        str(older["orderId"]),
+    ]
+    assert first["pageInfo"]["hasNextPage"] is True
+
+    second = _ok(_orders(page={"limit": 2, "cursor": first["pageInfo"]["endCursor"]}))
+    assert [order["orderId"] for order in second["items"]] == [ORDER_ID]
+    assert second["pageInfo"]["hasNextPage"] is False
+
+    # The cursor is a positional claim inside one Unit Campaign and Scout Campaign pair.
+    assert_is_error(
+        _orders(campaign_id=EMERY_CAMPAIGN, page={"limit": 1, "cursor": first["pageInfo"]["endCursor"]}),
+        "INVALID_INPUT",
+    )
+    assert_is_error(
+        _orders(unit_campaign_id=ORIGIN_OTHER, page={"limit": 1, "cursor": first["pageInfo"]["endCursor"]}),
+        "INVALID_INPUT",
+    )
+
+
+def test_arguments_that_are_not_an_order_list_request_are_refused(world: Dict[str, Any]) -> None:
+    """A missing or unusable argument is the caller's to fix, before anything is read."""
+    assert_is_error(_call(UNIT_SCOUT_ORDERS_FIELD, "Avery", arguments={"campaignId": DEVON_CAMPAIGN}), "INVALID_INPUT")
+    assert_is_error(_call(UNIT_SCOUT_ORDERS_FIELD, "Avery", arguments={"unitCampaignId": CAMPAIGN}), "INVALID_INPUT")
+    assert_is_error(_orders(campaign_id=""), "INVALID_INPUT")
+    assert_is_error(_orders(campaign_id="x" * 300), "INVALID_INPUT")
+    assert_is_error(_orders(page="first"), "INVALID_INPUT")
+
+
+def test_the_order_partition_is_read_wholly_and_consistently(
+    world: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Scout Campaign's Orders are followed to the end of the partition, consistently.
+
+    A campaign can hold more Orders than one 1 MB DynamoDB page. Answering the first page as
+    though it were the whole list would hide the Order whose line still owes stock, which is
+    the only reason the screen exists. The read is also strongly consistent, because the
+    caller's own tenancy filter is applied to what comes back.
+    """
+    pages = [
+        {"Items": [dict(ORDER)], "LastEvaluatedKey": {"campaignId": DEVON_CAMPAIGN, "orderId": ORDER_ID}},
+        {"Items": [dict(PAST_ORDER)]},
+    ]
+    calls: List[Dict[str, Any]] = []
+
+    class TwoPageOrders:
+        """A stand-in for the orders table that answers exactly two Query pages."""
+
+        def query(self, **kwargs: Any) -> Dict[str, Any]:
+            calls.append(kwargs)
+            return pages[len(calls) - 1]
+
+    monkeypatch.setattr(type(ful.tables), "orders", property(lambda self: TwoPageOrders()))
+
+    rows = ful.scout_campaign_order_rows(DEVON_CAMPAIGN)
+
+    assert [str(row[ful.ORDER_ID_ATTRIBUTE]) for row in rows] == [ORDER_ID, PAST_ORDER_ID]
+    assert len(calls) == 2, "the walk stopped at the first page"
+    assert calls[1].get("ExclusiveStartKey") == {"campaignId": DEVON_CAMPAIGN, "orderId": ORDER_ID}
+    assert all(call["ConsistentRead"] is True for call in calls)
+    assert all("IndexName" not in call for call in calls), "the base table carries the campaignId hash key"
 
 
 # --- FUNC-3: a fulfillment must never resurrect an Order that was deleted under it ---

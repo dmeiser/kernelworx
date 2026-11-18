@@ -593,6 +593,33 @@ def find_fulfillment(order_id: Any, fulfillment_id: Any) -> Optional[Dict[str, A
     return None
 
 
+# --- Order row reads (the existing ``orders`` table) ------------------------------
+
+
+def scout_campaign_order_rows(campaign_id: str) -> List[Dict[str, Any]]:
+    """Every Order row stored under one Scout Campaign, in the table's own order.
+
+    The orders table is hash-keyed on ``campaignId``, so this is one base-table Query
+    with no index involved. It is read consistently for the same reason the fulfillment
+    partition is: an authorization decision follows it — the caller is answered only for
+    the Orders whose immutable ``unitCampaignId`` names their own Unit Campaign (§2.4,
+    API-FIX-05) — and the walk follows ``LastEvaluatedKey`` to the end, because a
+    campaign with more Orders than one 1 MB page must not answer a short list as though
+    it were the whole of it.
+    """
+    return list(
+        query_all_items(
+            tables.orders,
+            {
+                "KeyConditionExpression": "#campaignId = :campaignId",
+                "ExpressionAttributeNames": {"#campaignId": CAMPAIGN_ID_ATTRIBUTE},
+                "ExpressionAttributeValues": {":campaignId": campaign_id},
+                "ConsistentRead": True,
+            },
+        )
+    )
+
+
 # --- Transaction actions ----------------------------------------------------------
 
 

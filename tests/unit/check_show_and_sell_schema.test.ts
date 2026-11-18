@@ -673,6 +673,23 @@ const SS3_TYPE_FIELDS: Record<string, string[]> = {
   // FUNC-5: the participant's own history is paginated on the participant's own field,
   // so a long history is reachable in full without the Unit-Admin audit.
   ParticipantOrderFulfillmentConnection: ["items", "pageInfo"],
+  // §2.6.3: the Order projection a Unit Admin fulfills from. It is deliberately narrower
+  // than the legacy `Order` type — no phone, address, notes, payment method, or amount —
+  // because administering stock needs the Order's identity, its origin scope, and its
+  // lines, and a projection that carries nothing cannot disclose the difference.
+  UnitOrder: [
+    "orderId",
+    "profileId",
+    "campaignId",
+    "unitId",
+    "unitCampaignId",
+    "customerName",
+    "orderDate",
+    "fulfillmentVersion",
+    "lineItems",
+  ],
+  UnitOrderLine: ["lineItemId", "productId", "productName", "quantity", "fulfilledQuantity"],
+  UnitOrderConnection: ["items", "pageInfo"],
 };
 
 /**
@@ -851,11 +868,55 @@ describe("Show & Sell Stage 3 order-fulfillment SDL (schema.graphql)", () => {
     expect(returnTypeName(mutation.text), "createOrder still answers the Order it wrote").toBe("Order");
   });
 
+  test("§2.6.3: the Order list a Unit Admin fulfills from is its own read, and a narrow one", () => {
+    // FUNC-1: the legacy `listOrdersByCampaign`/`getOrder` pipelines authorize Profile
+    // ownership and READ shares, so the admin who owes the stock those Orders sold reads
+    // nothing through them. The fulfillment screen reads Orders whose authorization is the
+    // Order's immutable Unit origin — the same scope §2.4.3 and §2.4.4 demand.
+    const field = rootFieldByName("Query", "unitScoutCampaignOrders");
+    expect(field, "Query.unitScoutCampaignOrders is missing").toBeDefined();
+    expect(field!.text, "the read names the Unit Campaign whose admin is asking").toMatch(/unitCampaignId\s*:\s*ID!/);
+    expect(field!.text, "the read names the Scout Campaign the Orders were placed under").toMatch(/campaignId\s*:\s*ID!/);
+    expect(field!.text, "the read takes the shared PageInput").toMatch(/page\s*:\s*PageInput/);
+    expect(returnTypeName(field!.text), "the read answers a page of Orders").toBe("UnitOrderConnection");
+    expect(field!.text, "the read returns a non-null connection").toMatch(/\)\s*:\s*UnitOrderConnection!/);
+
+    const connection = definition("UnitOrderConnection");
+    const items = fieldsOf(connection).find((f) => f.name === "items");
+    expect(returnTypeName(items!.text), "UnitOrderConnection.items element type").toBe("UnitOrder");
+    expect(connection.body, "pageInfo is the shared PageInfo type").toMatch(/pageInfo\s*:\s*PageInfo!/);
+
+    // The projection is what a fulfillment write needs and nothing else. The legacy `Order`
+    // type can carry the customer's contact details; this one cannot, so the fulfillment
+    // screen has nothing to disclose from them.
+    const order = fieldNameSet(definition("UnitOrder"));
+    for (const forbidden of ["customerPhone", "phone", "address", "notes", "paymentMethod", "totalAmount", "status", "createdAt"]) {
+      expect(order.has(forbidden), `UnitOrder.${forbidden} is not part of administering stock`).toBe(false);
+    }
+    for (const needed of ["orderId", "unitId", "unitCampaignId", "fulfillmentVersion", "lineItems"]) {
+      expect(order.has(needed), `UnitOrder.${needed} is what the next fulfillment carries`).toBe(true);
+    }
+    const line = fieldNameSet(definition("UnitOrderLine"));
+    for (const needed of ["lineItemId", "productId", "quantity", "fulfilledQuantity"]) {
+      expect(line.has(needed), `UnitOrderLine.${needed} is what a fulfillment names`).toBe(true);
+    }
+    for (const forbidden of ["pricePerUnit", "subtotal"]) {
+      expect(line.has(forbidden), `UnitOrderLine.${forbidden} is money this wave does not touch`).toBe(false);
+    }
+
+    // `lineItemId` and `fulfilledQuantity` are nullable in exactly one direction: a line
+    // written before Wave 3 has no identity to name, and the screen withholds the control
+    // rather than guessing the line from its position.
+    const lineItemId = fieldsOf(definition("UnitOrderLine")).find((f) => f.name === "lineItemId");
+    expect(lineItemId!.text, "a pre-Wave-3 line answers no identity").not.toMatch(/lineItemId\s*:\s*ID!/);
+    expect(lineItemId!.text, "the line identity is the field a fulfillment names").toMatch(/lineItemId\s*:\s*ID/);
+  });
+
   test("AUTH: no Stage 3 fulfillment type, input, enum, or field carries an auth directive", () => {
     for (const name of [...Object.keys(SS3_TYPE_FIELDS), ...Object.keys(SS3_INPUT_FIELDS), ...Object.keys(SS3_ENUMS), SS3_MODE_ENUM]) {
       expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
     }
-    for (const name of [...SS3_MUTATION_FIELDS, "orderFulfillments"]) {
+    for (const name of [...SS3_MUTATION_FIELDS, "orderFulfillments", "unitScoutCampaignOrders"]) {
       const field = rootFieldByName("Mutation", name) ?? rootFieldByName("Query", name);
       expect(field, `${name} is missing`).toBeDefined();
       expect(field!.directives, `${name} must be directive-free`).toEqual([]);

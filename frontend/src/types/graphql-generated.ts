@@ -1562,6 +1562,8 @@ export type GqlQuery = {
   unitCampaigns: GqlUnitCampaignConnection;
   /** The unit's active, unused invites; the code is returned only for them. Unit Admin. */
   unitInvites: GqlUnitInviteConnection;
+  /** The individual Orders one Scout Campaign holds for this Unit Campaign, newest first, in the projection a fulfillment write needs: origin scope, the stable line identity, each line's fulfilled quantity, and the version the next fulfillment conditions on. Unit Admin for the Unit Campaign, which is the Order's immutable origin; Orders another Unit took under the same Scout Campaign are not answered here, and no customer contact detail is. */
+  unitScoutCampaignOrders: GqlUnitOrderConnection;
 };
 
 /** The root query object for the KernelWorx API. */
@@ -1786,6 +1788,13 @@ export type GqlQuery_UnitCampaignsArgs = {
 export type GqlQuery_UnitInvitesArgs = {
   page?: InputMaybe<GqlPageInput>;
   unitId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitScoutCampaignOrdersArgs = {
+  campaignId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+  unitCampaignId: Scalars['ID']['input'];
 };
 
 /** Input for recordInventoryReceipt. Stock only: no Order, payment, credit, or We Owe effect. */
@@ -2308,6 +2317,38 @@ export type GqlUnitInviteConnection = {
   pageInfo: GqlPageInfo;
 };
 
+/** One individual Order in the projection a Unit Admin fulfills (§2.4, §5.19): the Order, the immutable Unit scope it was taken under, and each line's stable identity with its fulfilled quantity. Deliberately not the legacy `Order` shape - customer contact details are not part of administering stock, and this projection carries none of them. */
+export type GqlUnitOrder = {
+  __typename?: 'UnitOrder';
+  /** The Scout Campaign the Order was placed under. */
+  campaignId: Scalars['ID']['output'];
+  /** The customer name the Scout recorded on the Order. */
+  customerName: Scalars['String']['output'];
+  /** Serialization version for fulfilling and reversing this Order's lines (§5.19). Rows written before Wave 3 carry no value, which reads as 0. */
+  fulfillmentVersion?: Maybe<Scalars['Int']['output']>;
+  /** The Order's lines, each with the identity a fulfillment names. */
+  lineItems: Array<GqlUnitOrderLine>;
+  /** Business moment of the Order. */
+  orderDate: Scalars['AWSDateTime']['output'];
+  /** The Order ID. */
+  orderId: Scalars['ID']['output'];
+  /** The Scout who took the Order. */
+  profileId: Scalars['ID']['output'];
+  /** The Unit Campaign that is this Order's immutable origin. */
+  unitCampaignId: Scalars['ID']['output'];
+  /** The Unit that owns the stock: the origin captured at sale time (API-FIX-05). */
+  unitId: Scalars['ID']['output'];
+};
+
+/** A page of one Unit Campaign's individual Orders, newest first. */
+export type GqlUnitOrderConnection = {
+  __typename?: 'UnitOrderConnection';
+  /** The Orders on this page. */
+  items: Array<GqlUnitOrder>;
+  /** Cursor state for this page. */
+  pageInfo: GqlPageInfo;
+};
+
 /** An individual order within a unit report. */
 export type GqlUnitOrderDetail = {
   __typename?: 'UnitOrderDetail';
@@ -2323,6 +2364,21 @@ export type GqlUnitOrderDetail = {
   orderId: Scalars['ID']['output'];
   /** The order's total amount. */
   totalAmount: Scalars['Float']['output'];
+};
+
+/** One line of a Unit-scope Order: what was ordered, the stable id a fulfillment names, and how much of it is already fulfilled. */
+export type GqlUnitOrderLine = {
+  __typename?: 'UnitOrderLine';
+  /** Kernels already fulfilled on this line. A row written before Wave 3 carries none, and is answered as 0. */
+  fulfilledQuantity: Scalars['Int']['output'];
+  /** The stable line identity (§5.19). A row written before stable line ids carries none, and such a line cannot be fulfilled by name. */
+  lineItemId?: Maybe<Scalars['ID']['output']>;
+  /** The product this line names. */
+  productId: Scalars['ID']['output'];
+  /** The product's name as the Order recorded it. */
+  productName: Scalars['String']['output'];
+  /** Kernels ordered on this line. */
+  quantity: Scalars['Int']['output'];
 };
 
 /** A unit-level sales report aggregating sellers (profiles) and their orders for a unit and season. */
@@ -4481,6 +4537,566 @@ export type GqlRemoveUnitCampaignMembershipMutation = {
     removedAt?: string | null | undefined;
     version: number;
     guardVersion?: number | null | undefined;
+  };
+};
+
+export type GqlInventoryPositionFieldsFragment = {
+  __typename?: 'InventoryPosition';
+  unitCampaignId: string;
+  productId: string;
+  kernelPhysicalQty: number;
+  soldInPossessionQty: number;
+  councilOnOrderQty: number;
+  version: number;
+  createdAt?: string | null | undefined;
+  updatedAt?: string | null | undefined;
+  sellableKernelQty: number;
+  assignedOpenQty: number;
+  unassignedKernelQty: number;
+  assignmentOverageQty: number;
+  withScoutQty: number;
+  totalUnitOwnedUndeliveredQty: number;
+};
+
+export type GqlInventoryMovementFieldsFragment = {
+  __typename?: 'InventoryMovement';
+  movementId: string;
+  unitCampaignId: string;
+  productId: string;
+  movementType: GqlInventoryMovementType;
+  kernelPhysicalDelta: number;
+  soldPossessionDelta: number;
+  withScoutDelta: number;
+  assignedDelta: number;
+  councilOnOrderDelta: number;
+  profileId?: string | null | undefined;
+  showAndSellId?: string | null | undefined;
+  orderId?: string | null | undefined;
+  fulfillmentId?: string | null | undefined;
+  reason?: string | null | undefined;
+  actorAccountId: string;
+  occurredAt: string;
+  idempotencyKey: string;
+  inventoryVersion?: number | null | undefined;
+};
+
+export type GqlScoutCustodyBalanceFieldsFragment = {
+  __typename?: 'ScoutCustodyBalance';
+  unitCampaignId: string;
+  productId: string;
+  profileId: string;
+  campaignId: string;
+  withScoutQty: number;
+  version: number;
+  createdAt?: string | null | undefined;
+  updatedAt?: string | null | undefined;
+};
+
+export type GqlOrderFulfillmentFieldsFragment = {
+  __typename?: 'OrderFulfillment';
+  fulfillmentId: string;
+  orderId: string;
+  campaignId: string;
+  profileId: string;
+  unitId?: string | null | undefined;
+  unitCampaignId?: string | null | undefined;
+  lineItemId: string;
+  productId: string;
+  recordType: GqlOrderFulfillmentRecordType;
+  quantity: number;
+  source: GqlOrderFulfillmentSource;
+  inventoryMovementId?: string | null | undefined;
+  reversalOfFulfillmentId?: string | null | undefined;
+  actorAccountId: string;
+  createdAt: string;
+};
+
+export type GqlUnitOrderFieldsFragment = {
+  __typename?: 'UnitOrder';
+  orderId: string;
+  profileId: string;
+  campaignId: string;
+  unitId: string;
+  unitCampaignId: string;
+  customerName: string;
+  orderDate: string;
+  fulfillmentVersion?: number | null | undefined;
+  lineItems: Array<{
+    __typename?: 'UnitOrderLine';
+    productId: string;
+    productName: string;
+    quantity: number;
+    lineItemId?: string | null | undefined;
+    fulfilledQuantity: number;
+  }>;
+};
+
+export type GqlGetInventoryPositionsQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+  productIds?: InputMaybe<Array<Scalars['ID']['input']> | Scalars['ID']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlGetInventoryPositionsQuery = {
+  __typename?: 'Query';
+  inventoryPositions: {
+    __typename?: 'InventoryPositionConnection';
+    items: Array<{
+      __typename?: 'InventoryPosition';
+      unitCampaignId: string;
+      productId: string;
+      kernelPhysicalQty: number;
+      soldInPossessionQty: number;
+      councilOnOrderQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+      sellableKernelQty: number;
+      assignedOpenQty: number;
+      unassignedKernelQty: number;
+      assignmentOverageQty: number;
+      withScoutQty: number;
+      totalUnitOwnedUndeliveredQty: number;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlGetInventoryMovementsQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  movementType?: InputMaybe<GqlInventoryMovementType>;
+  showAndSellId?: InputMaybe<Scalars['ID']['input']>;
+  profileId?: InputMaybe<Scalars['ID']['input']>;
+  dateRange?: InputMaybe<GqlDateRangeFilter>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlGetInventoryMovementsQuery = {
+  __typename?: 'Query';
+  inventoryMovements: {
+    __typename?: 'InventoryMovementConnection';
+    items: Array<{
+      __typename?: 'InventoryMovement';
+      movementId: string;
+      unitCampaignId: string;
+      productId: string;
+      movementType: GqlInventoryMovementType;
+      kernelPhysicalDelta: number;
+      soldPossessionDelta: number;
+      withScoutDelta: number;
+      assignedDelta: number;
+      councilOnOrderDelta: number;
+      profileId?: string | null | undefined;
+      showAndSellId?: string | null | undefined;
+      orderId?: string | null | undefined;
+      fulfillmentId?: string | null | undefined;
+      reason?: string | null | undefined;
+      actorAccountId: string;
+      occurredAt: string;
+      idempotencyKey: string;
+      inventoryVersion?: number | null | undefined;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlGetScoutCustodyBalancesQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+  profileId?: InputMaybe<Scalars['ID']['input']>;
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlGetScoutCustodyBalancesQuery = {
+  __typename?: 'Query';
+  scoutCustodyBalances: {
+    __typename?: 'ScoutCustodyBalanceConnection';
+    totalWithScoutQty: number;
+    items: Array<{
+      __typename?: 'ScoutCustodyBalance';
+      unitCampaignId: string;
+      productId: string;
+      profileId: string;
+      campaignId: string;
+      withScoutQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlGetOrderFulfillmentsQueryVariables = Exact<{
+  orderId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlGetOrderFulfillmentsQuery = {
+  __typename?: 'Query';
+  orderFulfillments: {
+    __typename?: 'OrderFulfillmentConnection';
+    items: Array<{
+      __typename?: 'OrderFulfillment';
+      fulfillmentId: string;
+      orderId: string;
+      campaignId: string;
+      profileId: string;
+      unitId?: string | null | undefined;
+      unitCampaignId?: string | null | undefined;
+      lineItemId: string;
+      productId: string;
+      recordType: GqlOrderFulfillmentRecordType;
+      quantity: number;
+      source: GqlOrderFulfillmentSource;
+      inventoryMovementId?: string | null | undefined;
+      reversalOfFulfillmentId?: string | null | undefined;
+      actorAccountId: string;
+      createdAt: string;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlListUnitScoutCampaignOrdersQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+  campaignId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListUnitScoutCampaignOrdersQuery = {
+  __typename?: 'Query';
+  unitScoutCampaignOrders: {
+    __typename?: 'UnitOrderConnection';
+    items: Array<{
+      __typename?: 'UnitOrder';
+      orderId: string;
+      profileId: string;
+      campaignId: string;
+      unitId: string;
+      unitCampaignId: string;
+      customerName: string;
+      orderDate: string;
+      fulfillmentVersion?: number | null | undefined;
+      lineItems: Array<{
+        __typename?: 'UnitOrderLine';
+        productId: string;
+        productName: string;
+        quantity: number;
+        lineItemId?: string | null | undefined;
+        fulfilledQuantity: number;
+      }>;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlRecordInventoryReceiptMutationVariables = Exact<{
+  input: GqlRecordInventoryReceiptInput;
+}>;
+
+export type GqlRecordInventoryReceiptMutation = {
+  __typename?: 'Mutation';
+  recordInventoryReceipt: {
+    __typename?: 'InventoryPosition';
+    unitCampaignId: string;
+    productId: string;
+    kernelPhysicalQty: number;
+    soldInPossessionQty: number;
+    councilOnOrderQty: number;
+    version: number;
+    createdAt?: string | null | undefined;
+    updatedAt?: string | null | undefined;
+    sellableKernelQty: number;
+    assignedOpenQty: number;
+    unassignedKernelQty: number;
+    assignmentOverageQty: number;
+    withScoutQty: number;
+    totalUnitOwnedUndeliveredQty: number;
+  };
+};
+
+export type GqlAdjustInventoryMutationVariables = Exact<{
+  input: GqlAdjustInventoryInput;
+}>;
+
+export type GqlAdjustInventoryMutation = {
+  __typename?: 'Mutation';
+  adjustInventory: {
+    __typename?: 'InventoryPosition';
+    unitCampaignId: string;
+    productId: string;
+    kernelPhysicalQty: number;
+    soldInPossessionQty: number;
+    councilOnOrderQty: number;
+    version: number;
+    createdAt?: string | null | undefined;
+    updatedAt?: string | null | undefined;
+    sellableKernelQty: number;
+    assignedOpenQty: number;
+    unassignedKernelQty: number;
+    assignmentOverageQty: number;
+    withScoutQty: number;
+    totalUnitOwnedUndeliveredQty: number;
+  };
+};
+
+export type GqlAdjustCouncilOnOrderMutationVariables = Exact<{
+  input: GqlAdjustCouncilOnOrderInput;
+}>;
+
+export type GqlAdjustCouncilOnOrderMutation = {
+  __typename?: 'Mutation';
+  adjustCouncilOnOrder: {
+    __typename?: 'InventoryPosition';
+    unitCampaignId: string;
+    productId: string;
+    kernelPhysicalQty: number;
+    soldInPossessionQty: number;
+    councilOnOrderQty: number;
+    version: number;
+    createdAt?: string | null | undefined;
+    updatedAt?: string | null | undefined;
+    sellableKernelQty: number;
+    assignedOpenQty: number;
+    unassignedKernelQty: number;
+    assignmentOverageQty: number;
+    withScoutQty: number;
+    totalUnitOwnedUndeliveredQty: number;
+  };
+};
+
+export type GqlIssueStockToScoutMutationVariables = Exact<{
+  input: GqlIssueStockToScoutInput;
+}>;
+
+export type GqlIssueStockToScoutMutation = {
+  __typename?: 'Mutation';
+  issueStockToScout: {
+    __typename?: 'IssueStockToScoutPayload';
+    inventoryPosition: {
+      __typename?: 'InventoryPosition';
+      unitCampaignId: string;
+      productId: string;
+      kernelPhysicalQty: number;
+      soldInPossessionQty: number;
+      councilOnOrderQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+      sellableKernelQty: number;
+      assignedOpenQty: number;
+      unassignedKernelQty: number;
+      assignmentOverageQty: number;
+      withScoutQty: number;
+      totalUnitOwnedUndeliveredQty: number;
+    };
+    custodyBalance: {
+      __typename?: 'ScoutCustodyBalance';
+      unitCampaignId: string;
+      productId: string;
+      profileId: string;
+      campaignId: string;
+      withScoutQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    };
+  };
+};
+
+export type GqlReturnStockFromScoutMutationVariables = Exact<{
+  input: GqlReturnStockFromScoutInput;
+}>;
+
+export type GqlReturnStockFromScoutMutation = {
+  __typename?: 'Mutation';
+  returnStockFromScout: {
+    __typename?: 'ReturnStockFromScoutPayload';
+    inventoryPositions: Array<{
+      __typename?: 'InventoryPosition';
+      unitCampaignId: string;
+      productId: string;
+      kernelPhysicalQty: number;
+      soldInPossessionQty: number;
+      councilOnOrderQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+      sellableKernelQty: number;
+      assignedOpenQty: number;
+      unassignedKernelQty: number;
+      assignmentOverageQty: number;
+      withScoutQty: number;
+      totalUnitOwnedUndeliveredQty: number;
+    }>;
+    custodyBalances: Array<{
+      __typename?: 'ScoutCustodyBalance';
+      unitCampaignId: string;
+      productId: string;
+      profileId: string;
+      campaignId: string;
+      withScoutQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+  };
+};
+
+export type GqlOrderWriteStateFragment = {
+  __typename?: 'Order';
+  orderId: string;
+  fulfillmentVersion?: number | null | undefined;
+  lineItems: Array<{
+    __typename?: 'LineItem';
+    lineItemId?: string | null | undefined;
+    productId: string;
+    quantity: number;
+    fulfilledQuantity?: number | null | undefined;
+  }>;
+};
+
+export type GqlRecordCustodySaleMutationVariables = Exact<{
+  input: GqlCreateOrderInput;
+}>;
+
+export type GqlRecordCustodySaleMutation = {
+  __typename?: 'Mutation';
+  createOrder: {
+    __typename?: 'Order';
+    orderId: string;
+    fulfillmentVersion?: number | null | undefined;
+    lineItems: Array<{
+      __typename?: 'LineItem';
+      lineItemId?: string | null | undefined;
+      productId: string;
+      quantity: number;
+      fulfilledQuantity?: number | null | undefined;
+    }>;
+  };
+};
+
+export type GqlFulfillIndividualOrderLineMutationVariables = Exact<{
+  input: GqlFulfillIndividualOrderLineInput;
+}>;
+
+export type GqlFulfillIndividualOrderLineMutation = {
+  __typename?: 'Mutation';
+  fulfillIndividualOrderLine: {
+    __typename?: 'FulfillIndividualOrderLinePayload';
+    order: {
+      __typename?: 'Order';
+      orderId: string;
+      fulfillmentVersion?: number | null | undefined;
+      lineItems: Array<{
+        __typename?: 'LineItem';
+        lineItemId?: string | null | undefined;
+        productId: string;
+        quantity: number;
+        fulfilledQuantity?: number | null | undefined;
+      }>;
+    };
+    fulfillment: {
+      __typename?: 'OrderFulfillment';
+      fulfillmentId: string;
+      orderId: string;
+      campaignId: string;
+      profileId: string;
+      unitId?: string | null | undefined;
+      unitCampaignId?: string | null | undefined;
+      lineItemId: string;
+      productId: string;
+      recordType: GqlOrderFulfillmentRecordType;
+      quantity: number;
+      source: GqlOrderFulfillmentSource;
+      inventoryMovementId?: string | null | undefined;
+      reversalOfFulfillmentId?: string | null | undefined;
+      actorAccountId: string;
+      createdAt: string;
+    };
+    inventoryPosition?:
+      | {
+          __typename?: 'InventoryPosition';
+          unitCampaignId: string;
+          productId: string;
+          kernelPhysicalQty: number;
+          soldInPossessionQty: number;
+          councilOnOrderQty: number;
+          version: number;
+          createdAt?: string | null | undefined;
+          updatedAt?: string | null | undefined;
+          sellableKernelQty: number;
+          assignedOpenQty: number;
+          unassignedKernelQty: number;
+          assignmentOverageQty: number;
+          withScoutQty: number;
+          totalUnitOwnedUndeliveredQty: number;
+        }
+      | null
+      | undefined;
+  };
+};
+
+export type GqlReverseIndividualOrderFulfillmentMutationVariables = Exact<{
+  input: GqlReverseIndividualOrderFulfillmentInput;
+}>;
+
+export type GqlReverseIndividualOrderFulfillmentMutation = {
+  __typename?: 'Mutation';
+  reverseIndividualOrderFulfillment: {
+    __typename?: 'ReverseIndividualOrderFulfillmentPayload';
+    order: {
+      __typename?: 'Order';
+      orderId: string;
+      fulfillmentVersion?: number | null | undefined;
+      lineItems: Array<{
+        __typename?: 'LineItem';
+        lineItemId?: string | null | undefined;
+        productId: string;
+        quantity: number;
+        fulfilledQuantity?: number | null | undefined;
+      }>;
+    };
+    reversal: {
+      __typename?: 'OrderFulfillment';
+      fulfillmentId: string;
+      orderId: string;
+      campaignId: string;
+      profileId: string;
+      unitId?: string | null | undefined;
+      unitCampaignId?: string | null | undefined;
+      lineItemId: string;
+      productId: string;
+      recordType: GqlOrderFulfillmentRecordType;
+      quantity: number;
+      source: GqlOrderFulfillmentSource;
+      inventoryMovementId?: string | null | undefined;
+      reversalOfFulfillmentId?: string | null | undefined;
+      actorAccountId: string;
+      createdAt: string;
+    };
+    inventoryPosition?:
+      | {
+          __typename?: 'InventoryPosition';
+          unitCampaignId: string;
+          productId: string;
+          kernelPhysicalQty: number;
+          soldInPossessionQty: number;
+          councilOnOrderQty: number;
+          version: number;
+          createdAt?: string | null | undefined;
+          updatedAt?: string | null | undefined;
+          sellableKernelQty: number;
+          assignedOpenQty: number;
+          unassignedKernelQty: number;
+          assignmentOverageQty: number;
+          withScoutQty: number;
+          totalUnitOwnedUndeliveredQty: number;
+        }
+      | null
+      | undefined;
   };
 };
 

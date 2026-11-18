@@ -12,19 +12,37 @@ import userEvent from '@testing-library/user-event';
 
 type User = ReturnType<typeof userEvent.setup>;
 
+/**
+ * The editable element inside a field wrapper.
+ *
+ * MUI puts the `data-testid` on the wrapper, and the element that takes input is an
+ * `input` for a one-line field and a `textarea` for a multiline one — a helper that
+ * only looked for the first would hand back null for the reason field every dialog
+ * with one uses.
+ */
+function editableInside(field: HTMLElement): HTMLElement {
+  if (field.tagName === 'INPUT' || field.tagName === 'TEXTAREA') return field;
+  return field.querySelector('input, textarea') as HTMLElement;
+}
+
 /** Type into the input inside a field wrapper carrying `testId`. */
 export async function typeInto(testId: string, value: string, user: User) {
   const field = await screen.findByTestId(testId);
-  const input = (field.tagName === 'INPUT' ? field : field.querySelector('input')) as HTMLElement;
-  await user.type(input, value);
+  await user.type(editableInside(field), value);
 }
 
 /** Replace a field's contents, for editing a value that already has one. */
 export async function clearAndType(testId: string, value: string, user: User) {
   const field = await screen.findByTestId(testId);
-  const input = (field.tagName === 'INPUT' ? field : field.querySelector('input')) as HTMLElement;
+  const input = editableInside(field);
   await user.clear(input);
   await user.type(input, value);
+}
+
+/** Empty a field, for the case where the admin deletes what they typed and stops. */
+export async function clearField(testId: string, user: User) {
+  const field = await screen.findByTestId(testId);
+  await user.clear(editableInside(field));
 }
 
 /** Open a MUI Select by its wrapper test id and choose an option by name. */

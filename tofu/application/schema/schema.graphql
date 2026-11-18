@@ -1787,6 +1787,50 @@ type OrderFulfillmentConnection {
   pageInfo: PageInfo!
 }
 
+"""One individual Order in the projection a Unit Admin fulfills (§2.4, §5.19): the Order, the immutable Unit scope it was taken under, and each line's stable identity with its fulfilled quantity. Deliberately not the legacy `Order` shape - customer contact details are not part of administering stock, and this projection carries none of them."""
+type UnitOrder {
+  """The Order ID."""
+  orderId: ID!
+  """The Scout who took the Order."""
+  profileId: ID!
+  """The Scout Campaign the Order was placed under."""
+  campaignId: ID!
+  """The Unit that owns the stock: the origin captured at sale time (API-FIX-05)."""
+  unitId: ID!
+  """The Unit Campaign that is this Order's immutable origin."""
+  unitCampaignId: ID!
+  """The customer name the Scout recorded on the Order."""
+  customerName: String!
+  """Business moment of the Order."""
+  orderDate: AWSDateTime!
+  """Serialization version for fulfilling and reversing this Order's lines (§5.19). Rows written before Wave 3 carry no value, which reads as 0."""
+  fulfillmentVersion: Int
+  """The Order's lines, each with the identity a fulfillment names."""
+  lineItems: [UnitOrderLine!]!
+}
+
+"""One line of a Unit-scope Order: what was ordered, the stable id a fulfillment names, and how much of it is already fulfilled."""
+type UnitOrderLine {
+  """The stable line identity (§5.19). A row written before stable line ids carries none, and such a line cannot be fulfilled by name."""
+  lineItemId: ID
+  """The product this line names."""
+  productId: ID!
+  """The product's name as the Order recorded it."""
+  productName: String!
+  """Kernels ordered on this line."""
+  quantity: Int!
+  """Kernels already fulfilled on this line. A row written before Wave 3 carries none, and is answered as 0."""
+  fulfilledQuantity: Int!
+}
+
+"""A page of one Unit Campaign's individual Orders, newest first."""
+type UnitOrderConnection {
+  """The Orders on this page."""
+  items: [UnitOrder!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+}
+
 # ============================================================================
 # Query Root
 # ============================================================================
@@ -1904,6 +1948,15 @@ type Query {
     """Pagination parameters."""
     page: PageInput
   ): OrderFulfillmentConnection!
+  """The individual Orders one Scout Campaign holds for this Unit Campaign, newest first, in the projection a fulfillment write needs: origin scope, the stable line identity, each line's fulfilled quantity, and the version the next fulfillment conditions on. Unit Admin for the Unit Campaign, which is the Order's immutable origin; Orders another Unit took under the same Scout Campaign are not answered here, and no customer contact detail is."""
+  unitScoutCampaignOrders(
+    """The Unit Campaign whose admin is asking."""
+    unitCampaignId: ID!
+    """The Scout Campaign the Orders were placed under."""
+    campaignId: ID!
+    """Pagination parameters."""
+    page: PageInput
+  ): UnitOrderConnection!
 
   # Account queries
   """The authenticated caller's account. The row is created automatically on first read if it does not yet exist."""

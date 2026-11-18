@@ -53,6 +53,18 @@ const collectFragmentNames = (doc: DocumentNode): string[] => {
   return names;
 };
 
+/** Every field name a document asks for, fragment definitions included. */
+const selectedFields = (doc: DocumentNode): Set<string> => {
+  const fields = new Set<string>();
+  for (const definition of doc.definitions) {
+    JSON.stringify(definition, (_key, value) => {
+      if (value && value.kind === 'Field') fields.add(value.name.value);
+      return value;
+    });
+  }
+  return fields;
+};
+
 describe('browser GraphQL documents against the served SDL', () => {
   it('finds the Show & Sell documents to guard', () => {
     const names = namedDocuments.map((entry) => entry.name);
@@ -66,6 +78,19 @@ describe('browser GraphQL documents against the served SDL', () => {
       'CREATE_UNIT_CAMPAIGN',
       'JOIN_UNIT_CAMPAIGN',
       'LIST_UNIT_CAMPAIGN_ROSTER',
+      'GET_INVENTORY_POSITIONS',
+      'GET_INVENTORY_MOVEMENTS',
+      'GET_SCOUT_CUSTODY_BALANCES',
+      'GET_ORDER_FULFILLMENTS',
+      'LIST_UNIT_SCOUT_CAMPAIGN_ORDERS',
+      'RECORD_INVENTORY_RECEIPT',
+      'ADJUST_INVENTORY',
+      'ADJUST_COUNCIL_ON_ORDER',
+      'ISSUE_STOCK_TO_SCOUT',
+      'RETURN_STOCK_FROM_SCOUT',
+      'RECORD_CUSTODY_SALE',
+      'FULFILL_INDIVIDUAL_ORDER_LINE',
+      'REVERSE_INDIVIDUAL_ORDER_FULFILLMENT',
     ]) {
       expect(names).toContain(required);
     }
@@ -76,8 +101,49 @@ describe('browser GraphQL documents against the served SDL', () => {
 
     // The defect this guards: a request spreads a fragment shape whose definition
     // it never interpolated, so the API rejects the document before resolvers run.
-    for (const fragment of ['UnitFields', 'UnitAccessGrantFields', 'UnitInviteFields', 'UnitCampaignFields', 'UnitCampaignMembershipFields']) {
+    for (const fragment of [
+      'UnitFields',
+      'UnitAccessGrantFields',
+      'UnitInviteFields',
+      'UnitCampaignFields',
+      'UnitCampaignMembershipFields',
+      'InventoryPositionFields',
+      'InventoryMovementFields',
+      'ScoutCustodyBalanceFields',
+      'OrderFulfillmentFields',
+      'UnitOrderFields',
+      'OrderWriteState',
+    ]) {
       expect(attached).toContain(fragment);
+    }
+  });
+
+  it('keeps the fulfillment audit in the one read entitled to it', () => {
+    const named = (name: string): DocumentNode => namedDocuments.find((entry) => entry.name === name)?.doc as DocumentNode;
+
+    // §10.2: the actor account and the inventory movement behind a fulfillment are
+    // administrative audit. The browser makes exactly one fulfillment history read — the
+    // Unit-Admin audit — and the Scout's preview of the same records is that page with both
+    // fields removed, so the split lives in one place instead of in a second document that
+    // could forget it.
+    for (const auditField of ['actorAccountId', 'inventoryMovementId']) {
+      expect(selectedFields(named('GET_ORDER_FULFILLMENTS'))).toContain(auditField);
+    }
+
+    // No browser document asks the participant projection for anything: an Unit Admin is
+    // not authorized to read it, and the screen's preview is built by subtraction.
+    const attached = new Set(operations.flatMap((entry) => collectFragmentNames(entry.doc)));
+    expect(attached.has('ParticipantOrderFulfillmentFields'), 'no request selects the participant type').toBe(false);
+
+    // The fulfillment writes echo only what the next write conditions on. A write result
+    // that spread the full Order shape would carry the customer's contact details into a
+    // stock screen that never reads them.
+    const writeState = selectedFields(named('REVERSE_INDIVIDUAL_ORDER_FULFILLMENT'));
+    for (const needed of ['fulfillmentVersion', 'lineItemId', 'fulfilledQuantity']) {
+      expect(writeState).toContain(needed);
+    }
+    for (const notNeeded of ['customerPhone', 'address', 'notes']) {
+      expect(writeState.has(notNeeded), `OrderWriteState.${notNeeded} is not part of fulfilling`).toBe(false);
     }
   });
 

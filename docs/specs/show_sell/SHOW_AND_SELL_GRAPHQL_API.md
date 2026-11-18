@@ -1,7 +1,7 @@
 # Show & Sell and inventory GraphQL API contract
 
 **Status:** Proposed resolver contracts; no resolver implementation  
-**Last updated:** 2026-10-30  
+**Last updated:** 2026-11-18  
 **Requirements:** [Show & Sell and inventory specification](SHOW_AND_SELL_INVENTORY_SPECIFICATION.md)  
 **Data model:** [Show & Sell data model](SHOW_AND_SELL_DATA_MODEL.md)  
 **Acceptance workflows:** [Show & Sell smoke test plan](SHOW_AND_SELL_SMOKE_TEST_PLAN.md)  
@@ -377,6 +377,45 @@ The server captures the Campaign's current joined `unitId`/`unitCampaignId` at O
 - Any remainder stays unfulfilled and contributes to Council demand.
 - Kernel stock is not decremented. With Scout cannot become negative. Insufficient custody is never a sale-blocking error.
 
+### 10.3 `unitScoutCampaignOrders` — the Unit Admin's individual-Order read
+
+`listOrdersByCampaign` and `getOrder` keep their existing authorization: Profile Owner/WRITE and Profile READ shares. A Unit Admin who has to fulfill somebody else's Order (§10.1 `CONSUME_SCOUT_CUSTODY` demand; spec §2.4.3, §2.4.4) is neither, so through those reads the fulfillment screen is empty. This operation is the Unit Admin's read over the same rows. It does not replace, widen, or relax the existing Order reads, which remain the Scout's own path.
+
+```graphql
+unitScoutCampaignOrders(
+  unitCampaignId: ID!
+  campaignId: ID!
+  page: PageInput
+): UnitOrderConnection!
+```
+
+| Rule | Contract |
+| --- | --- |
+| Caller | Unit Admin of the Unit Campaign named in `unitCampaignId`. |
+| Authorization source | Each row's immutable `unitCampaignId` — the scope captured when the sale was taken — never a scope the caller claims. Orders another Unit took under the same Scout Campaign, and independent Orders carrying no Unit scope at all, sit in the same partition and are not answered: naming a Scout Campaign is not an access path. |
+| Refusal | A caller who is not an admin of that Unit Campaign is answered `NOT_FOUND`, the same answer every other Unit-scoped read gives, so the existence of another Unit's campaign is not disclosed. |
+| Pagination | `page: PageInput` with the contract's default and maximum `limit`. The `cursor` is positional inside one `(unitCampaignId, campaignId)` pair; a cursor issued for another pair is `INVALID_INPUT`. The Scout Campaign's Order partition is read wholly, then paged, so a line that still owes stock cannot be hidden past the first page. |
+| Sort | Newest first by `orderDate` **compared as an instant**, never as the stored text: Order writers keep the caller's AWSDateTime verbatim, so one moment arrives as `…Z` and another as `…+00:00` and lexical order would let the offset decide the page boundary. `orderId` breaks a tie so two pages of one list agree where the cut falls. A row whose stamp cannot be parsed sorts last rather than being dropped. |
+
+`UnitOrder` is the fulfillment projection, not the legacy `Order` type. It carries what a fulfillment write needs and none of the customer's contact, payment, status, or note fields, which is what lets the read authorize on the Order's origin without disclosing anything the fulfillment path never uses.
+
+| Field | Type | Nullability and meaning |
+| --- | --- | --- |
+| `orderId` | `ID!` | The Order. |
+| `profileId` | `ID!` | The Scout who took it. |
+| `campaignId` | `ID!` | The Scout Campaign it was placed under. |
+| `unitId` / `unitCampaignId` | `ID!` | The origin captured at sale time (§10.1); never follows a later roster change. |
+| `customerName` | `String!` | The name the Scout recorded. No phone, address, payment method, notes, total, or status is in this projection. |
+| `orderDate` | `AWSDateTime!` | Business moment of the Order, stored as written; falls back to `createdAt` for a row with none. |
+| `fulfillmentVersion` | `Int`, nullable | Nullable because the stored attribute is optional, exactly as `Order.fulfillmentVersion` is. **The read never answers null**: a row written before Wave 3 answers `0`, the same number the fulfill/reverse guard pins for that row, so the version the screen shows is the version the next write conditions on. |
+| `lineItems` | `[UnitOrderLine!]!` | In stored order. |
+| `LineItem.lineItemId` | `ID`, nullable | A line written before stable line ids answers null and cannot be fulfilled by name; the caller withholds the control rather than naming a line by position. |
+| `LineItem.productId` / `productName` | `ID!` / `String!` | The product, and the name as the Order recorded it. |
+| `LineItem.quantity` | `Int!` | Kernels ordered on the line. |
+| `LineItem.fulfilledQuantity` | `Int!` | Kernels already fulfilled; an absent attribute answers `0`. |
+
+Fulfillment history itself stays on the existing reads: `orderFulfillments` is the administrative audit read (it names the actor account and the inventory movement), and `Order.fulfillments` stays the participant projection with those fields removed. This operation answers neither.
+
 ## 11. Resolver coverage summary
 
 | Workflow | Resolvers |
@@ -389,6 +428,6 @@ The server captures the Campaign's current joined `unitId`/`unitCampaignId` at O
 | Sales/We Owe | Sale create/correct/void, reservation/fulfillment, We Owe queries |
 | Finalization | Preview, rounding draft, finalize, reopen, versioned finalization query |
 | Reporting data | Raw Order/credit/allocation/inventory/event/We Owe queries and `showAndSellSignupCalendarData`; browser generates all reports, CSV/XLSX, print documents, and ICS |
-| Individual sales | Existing Order API plus custody-fulfillment extensions |
+| Individual sales | Existing Order API plus custody-fulfillment extensions, and `unitScoutCampaignOrders` (§10.3) for the Unit Admin's fulfillment read |
 
 Every confirmed user workflow has an API contract without exposing resolver implementation details or introducing per-event payment settings, rescheduling, offline queues, automatic notifications, or direct-to-Council mega-order handling.
