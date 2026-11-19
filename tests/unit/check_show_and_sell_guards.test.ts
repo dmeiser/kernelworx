@@ -400,9 +400,15 @@ describe("Show & Sell Stage 1 - tenant authorization (AUTH)", () => {
 
   test("a participant-safe type never exposes administrative fields (and a leaking schema is rejected)", () => {
     const derived = participantTypes(RAW_SCHEMA);
-    // The marker is load-bearing: exactly the join preview opts in, and the
+    // The marker is load-bearing: the join preview and the three Stage 3.1
+    // opportunity types opt in (§3.1.5 names them participant-safe), and the
     // check set cannot silently drift away from what the SDL declares.
-    expect(derived).toEqual(["UnitCampaignJoinPreview"]);
+    expect(derived).toEqual([
+      "UnitCampaignJoinPreview",
+      "ShowAndSellOpportunity",
+      "ShowAndSellOpportunitySlot",
+      "ParticipantSignup",
+    ]);
     for (const typeName of derived) {
       expect(BY_NAME.get(typeName), `participant type ${typeName} is missing`).toBeDefined();
     }
