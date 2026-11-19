@@ -505,6 +505,63 @@ describe('create_order_fn request: CONSUME_SCOUT_CUSTODY (ORD-API-02)', () => {
         assert.strictEqual(ctx.stash.orderItem, undefined);
     });
 
+    it('follows the Campaign into a new Unit Campaign without moving the sale that came before (ORD-API-02-04)', () => {
+        // API-FIX-05 at the write boundary: one Scout Campaign sells in one Unit Campaign, joins
+        // another, and sells again. The first sale's rows are never re-stamped and never touched by
+        // the second transaction — §1.4.3 captures the scope once, and the read side of that promise
+        // (the old Order, its fulfillments, and the demand it owes still answering for the original
+        // campaign) is proven in tests/unit/test_stage2_scope_retention.py.
+        const REJOINED_SCOPE = 'uc-pack-3149-spring-2025';
+        const ORIGINAL_KEY = 'UNIT_CAMPAIGN#uc-pack-3149-fall-2026';
+        const REJOINED_KEY = `UNIT_CAMPAIGN#${REJOINED_SCOPE}`;
+
+        const first = request(saleCtx({ custodyRows: [{ productId: 'PROD#1', withScoutQty: 5, version: 2 }] }));
+        const firstOrder = orderRow(first);
+        assert.strictEqual(firstOrder.unitCampaignId, 'uc-pack-3149-fall-2026');
+
+        // The join moved the guard's pointer and the Campaign's latest link together (§1.5.4), and the
+        // custody read rides the new link. A guard naming the old campaign here would stamp the new
+        // sale into the campaign the Scout left, which is the case the refusal test above covers.
+        const rejoined = saleCtx({
+            input: { customerName: 'Second Buyer' },
+            custodyRows: [{ productId: 'PROD#1', withScoutQty: 5, version: 2 }]
+        });
+        rejoined.stash.membershipGuard = Object.assign({}, rejoined.stash.membershipGuard, {
+            activeUnitCampaignId: REJOINED_SCOPE
+        });
+        rejoined.stash.campaign = Object.assign({}, rejoined.stash.campaign, { unitCampaignId: REJOINED_SCOPE });
+        rejoined.stash.custodySaleRead.unitCampaignId = REJOINED_SCOPE;
+        const second = request(rejoined);
+
+        const secondOrder = orderRow(second);
+        assert.strictEqual(secondOrder.customerName, 'Second Buyer');
+        assert.strictEqual(secondOrder.unitCampaignId, REJOINED_SCOPE, 'the new sale follows the current link');
+        assert.strictEqual(secondOrder.unitId, 'UNIT#pack-3149');
+
+        const secondFulfillments = itemsByTable(second, FULFILLMENT_TABLE).filter(function (item) {
+            return item.attributeValues && item.attributeValues.entityType === 'OrderFulfillment';
+        });
+        assert.strictEqual(secondFulfillments.length, 1);
+        assert.strictEqual(secondFulfillments[0].attributeValues.unitCampaignId, REJOINED_SCOPE);
+
+        const custodyKeys = itemsByTable(second, INVENTORY_TABLE)
+            .filter(function (item) {
+                return item.operation === 'UpdateItem';
+            })
+            .map(function (item) {
+                return item.key.pk;
+            });
+        assert.deepStrictEqual(custodyKeys, [REJOINED_KEY], 'custody is consumed where it is held, not where it was sold');
+
+        // The earlier sale is not part of this transaction at all: the only orders-table action is
+        // the PutItem for this sale, so no pre-existing Order row is re-stamped or rewritten, and no
+        // action is keyed into the Unit Campaign the Scout left.
+        const orderWrites = itemsByTable(second, ORDERS_TABLE);
+        assert.strictEqual(orderWrites.length, 1);
+        assert.strictEqual(orderWrites[0].operation, 'PutItem');
+        assert.strictEqual(JSON.stringify(second.transactItems).indexOf(ORIGINAL_KEY), -1, 'the new sale wrote into the campaign the Scout left');
+    });
+
     it('treats a marker still in flight as a race rather than a second sale', () => {
         const ctx = saleCtx({ marker: { status: 'IN_FLIGHT', fingerprint: 'fp' } });
         assert.throws(() => request(ctx), /RESOURCE_BUSY: This sale is still being processed for that idempotencyKey/);

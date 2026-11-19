@@ -187,6 +187,7 @@ ffmpeg -i <in>.webm -c:v libx264 -pix_fmt yuv420p -movflags +faststart <out>.mp4
 | `test_smoke_reports.py` | Reports page smoke: load and request/download report |
 | `test_smoke_account_deletion.py` | Account deletion flow (gated by RUN_ACCOUNT_DELETION; runs disposable-user test in CI) |
 | `test_smoke_show_sell.py` | Show & Sell Stage 1 acceptance journey (own lane identities; not a `smoke` test) |
+| `test_smoke_show_sell_stage2.py` | Show & Sell Stage 2 acceptance journey — stock, Scout custody, Order fulfillment (same fixture identities; not a `smoke` test) |
 
 ---
 
@@ -393,6 +394,120 @@ by name is not an option — see the deploy-smoke entry in `AGENTS.md`.
   on dev. The roster membership and the second admin grant *are* removed, and both
   removals are asserted. Re-runs with a fresh `DATA_ID` add rows; pin `SS_DATA_ID`
   to reuse them. `qa_fixture.py down --yes` is what sweeps the pool side.
+
+### Stage 2 lane: `test_smoke_show_sell_stage2.py`
+
+`test_smoke_show_sell_stage2.py` is checklist §2.8.5: the Stage 2 journey — inventory receipt and
+stock-only adjustments, issue into Scout custody, a door-to-door sale that consumes custody,
+fulfillment from Kernel stock and from the Council, a reversal, a custody return — asserted against
+the deployed GraphQL reads and the three §2.6 screens, with the movement trail read back after the
+writes. It writes what the stack answered into `evidence.md`, and it stops with words rather than a
+pass when the stack cannot carry it. Same fixture identities as Stage 1, same loader above, same
+`slow` marker, and no CI workflow runs it or holds its passwords:
+
+```bash
+SS_DATA_ID=stage2-1118013 uv run pytest tests/e2e/test_smoke_show_sell_stage2.py -v
+```
+
+| Variable | Meaning |
+| --- | --- |
+| `SS_DATA_ID` | the lane's `DATA_ID`. The Unit number, campaign name, seller name and every idempotency key are derived from it. Unset, the run generates one — which is what a run meant as fresh evidence needs, because the keys mean a pinned re-run *replays* the writes (the idempotency layer answers the original payload) instead of performing them |
+| `SS_SHARED_CATALOG` | the admin-managed catalog both Campaigns are created on, by name. Unset, the run takes the first `ADMIN_MANAGED` catalog that carries products |
+| `SS_ACCEPTANCE_EVIDENCE_DIR` | where `evidence.json`, `evidence.md`, the traces and the masked screenshots go (default `test-results/show-sell-stage2-<SS_DATA_ID>`) |
+| `SS_SWEEP_PRIOR` | comma-separated `DATA_ID`s of earlier runs of this lane whose leftovers should be taken back before the record is written. Selection is by that lane's own naming templates — the Unit number derived from the id, the campaign name, the seller name — so a row the lane did not create cannot be caught by it, and the current run's id is excluded by the caller and again inside the sweep. That derivation is the lane's own rule, so a sibling lane whose Unit number does not follow it (the canary's Unit is the lane's number plus one) is not a valid value. The tokens handed to the sweeper come from reads of that run: its Unit from `myUnits`, its Unit Campaigns from `unitCampaigns`, those Campaigns' Scout Campaign ids from `unitCampaignRoster` (the active-join guard rule needs that exact id — a `profile` token names only one of the four shared fixture identities, and that identity has a guard per Campaign), and its seller profile from `listMyProfiles`. Each named id is reported as found / removed / left, and every one of them is handed to `scripts/qa_fixture.py sweep` even when those reads answer nothing, because that run's idempotency markers are keyed on its `DATA_ID` alone and are reachable after its Unit row is gone; a `DATA_ID` that turns out to have left nothing says so and counts as swept, one whose rows are still there fails the run, a sweep that left a row it could not attribute fails the run, and a sweep that could not read a table is recorded as blocked, naming the permission that table is missing, rather than as cleaned. An earlier run gets no residue census — its Unit Campaign rows are already gone, so no Stage 2 read can count what it left in an unreadable table — and its record says that plainly instead of claiming the residue is gone |
+| `SS_STRICT_CLEANUP` | `1` reverses the two residues checklist §2.8.7 accepts as amended (WORK-162, Amendment B) and makes them fail the run: the lane's own retained append-only movement rows (`HISTORY`, which the product has no path to delete), and a `BLOCKED <table>: <action> is not granted to this identity …` whose rows the record counted through a product read instead of a scan. `LEFT`, `FAILED` and `UNKNOWN` fail the run either way. Off by default on shared `dev`, where no supported path deletes an inventory balance or an audit movement and `kernelworx-qa-ue1-dev` is denied `dynamodb:Scan` on the Stage 2 tables; the acceptance is a switch rather than a default, so a reviewer can see it taken back |
+
+**One catalog has to serve both Campaigns, and only an app admin can create it.** Unit Campaign
+balances key on the Unit Campaign's own `catalogId` while `createOrder` prices the sale in the Scout
+Campaign's catalog, so a lane whose two Campaigns sit on different catalogs gets its custody sale
+refused with no Order written (AGENTS.md, "A joined Scout Campaign and its Unit Campaign can sell
+from different catalogs"). The create-campaign picker offers a caller their own catalogs plus
+`listManagedCatalogs`, and that query filters `catalogType = ADMIN_MANAGED`: a `createCatalog`
+catalog is `USER_CREATED` and the other identity never sees it, measured on dev on 2026-11-18, and
+`createManagedCatalog` answers the fixture Unit admin `FORBIDDEN` ("Admin access required"). So the
+lane uses the managed catalog the stack already carries — on dev, `E2E Test Catalog`
+(`CATALOG#e2e-test-catalog`) — and skips with those words when the stack carries none.
+
+**Line identities belong to the write.** `createOrder` mints each line's `lineItemId` (§5.19) and
+dev answers the sale with one; every fulfillment, reversal and screen row keys on that value, so the
+lane reads it out of the answer instead of naming its own. The same is true of the door-to-door
+sale's place in the trail: the custody it consumed is traced by an `INDIVIDUAL_FULFILL` movement
+naming the Order and its `SCOUT_CUSTODY` fulfillment, because the `SCOUT_SALE_CONSUME` type requires
+a Show & Sell event `saleId` the door-to-door path does not have.
+
+**Cleanup is a gate, not a log.** Every step runs in the `finally` and reports a verdict, the evidence is
+written first, and only then does `assert_cleanup_clean` turn an unmet step into a failed run. A mutation the
+server refused, a read-back that still answers the row it was meant to remove, or a canary the sweep disturbed
+is recorded as `failed` and always fails the run: before this shape a refused `deleteOrder` was filed as an
+ordinary observation and the suite exited 0, which is how a mandatory cleanup gate stops meaning anything. A
+step the *environment* made impossible is recorded as `blocked`, with the error that says why — the sweep's
+`BLOCKED <table>: …` line — and under checklist §2.8.7 as amended (WORK-162, Amendment B) that is accepted rather
+than fixed, because shared `dev` gives no path to delete a balance or an audit movement: the row still stands in
+the record with its counts, and `SS_STRICT_CLEANUP=1` turns it back into a failure. Either way a cleanup the run
+did not achieve is never presented as one it achieved. The sweep's survivors are judged by which class they belong
+to, and the classes are not interchangeable: a row a reviewed rule attributed to another tenant (`kept`) survives
+and the sweep still passes — that survival is the proof the sweep was narrow enough; a row this lane's tokens named
+that no rule can attribute (`UNKNOWN`) is residue nobody reviewed and fails the run; the lane's own append-only
+movement rows (`HISTORY`) and a table this identity cannot read (`BLOCKED`) are the two residues the amendment
+accepts, counted and attributed rather than reported as cleaned. A `BLOCKED` table is accepted only where the
+record can name what sits in it: the lane counts its own rows there with the application's own reads first
+(`_residue_census`, over the `inventory`, `orders` and `order-fulfillments` tables), and a blocked table no read
+answers stays `blocked` instead of passing. A sweeper exit code the record cannot account for is itself a `failed`
+row. The verdict rule lives in `tests/e2e/utils/show_sell_stage2_support.py` (`run_cleanup_step`,
+`assert_cleanup_clean`, `sweep_verdict`), so the unit suite can execute it without a deployed stack.
+
+**The lane cleans up after itself in the `finally`, not on the happy path.** It returns held custody, zeroes
+the balances it wrote (as compensating rows: `inventoryMovements` is append-only, and the inventory model's
+only correction is another movement), deletes the Orders it wrote — `deleteOrder` takes the whole fulfillment
+partition with the Order, and the Order is the seller profile's own record, so the teardown sends it with the
+Scout's token rather than the Unit Admin's — revokes the share it granted, removes the roster membership, then
+deletes the Scout Campaign and the seller profile. Every removal is read back through the endpoint the
+acceptance assertions use, because a mutation that answered `true` is not evidence that a row is gone. What it
+cannot remove is the Unit and Unit Campaign rows and the Stage 2 inventory partitions: the shipped SDL carries
+no `deleteUnit` and no `deleteUnitCampaign`. Its deactivation step is limited to the Campaigns this run created
+— lane construction reuses a Unit that already carries the run's tenant key, so the Unit's campaign list is not
+the lane's own set — and the record says how many Campaigns on that Unit it left alone. Those go through the one sanctioned fixture sweeper,
+`scripts/qa_fixture.py sweep --lane data-id=<DATA_ID> --lane unit=<unitId> --lane unit-campaign=<id> … --yes`,
+which the lane calls as a subprocess — project memory (AGENTS.md, "Show & Sell QA login fixture on the dev
+pool") says the harness holds no AWS credentials, so the lane never opens a DynamoDB client of its own. Every
+token names its kind (`data-id`, `unit`, `unit-campaign`, `campaign`, `profile`, `join-code`, `order`) and has
+to match the shape the application stores for it: the sweeper refuses free text, a prefix of an id, or a kind
+it does not know, because `--yes` is already given and a token with no kind is a sweep that guesses. The sweeper
+then applies one reviewed rule per key shape — Unit metadata and grants, Unit Campaign metadata, roster
+membership, active-join guard, join-code pointer, idempotency marker, inventory balance / custody / allocation
+/ movement, Order and fulfillment — and deletes only the rows a rule says belong to this lane, keeping a third
+party's grant, membership, custody, movement or marker that happens to sit on a lane partition and reporting
+each one as refused. Attribution alone was the old test, and it was not enough: a balance or custody row
+carries no account at all and a join-code pointer carries only a campaign id and a timestamp, which are exactly
+the rows a lane leaves behind (`docs/QA_FIXTURE_RUNBOOK.md` carries the rule table). The sweep then re-scans and
+applies the same rules, because a `delete_item` that returned without an error is not evidence, and prints
+`LEFT` for a lane row it did not take. A table the fixture identity cannot read is printed as
+`BLOCKED <table>: …` and fails the sweep: measured on dev on 2026-11-19, `kernelworx-qa-ue1-dev` is denied
+`dynamodb:Scan` on `kernelworx-inventory-ue1-dev`, `kernelworx-orders-ue1-dev` and
+`kernelworx-order-fulfillments-ue1-dev`, and no `iam:` call that would read or change its own policies is granted
+either, so no lane run can wait on a grant. Checklist §2.8.7 as amended (WORK-162, Amendment B) therefore accepts
+those three tables as residue the record must *name*: the lane counts its own rows in them through the
+application's reads (`inventoryPositions`, `scoutCustodyBalances`, `inventoryMovements`,
+`unitScoutCampaignOrders`, `orderFulfillments`) before the teardown and the sweep hide them, and a blocked table no
+read answers is reported as residue nobody can prove and stays blocked
+(`docs/QA_FIXTURE_RUNBOOK.md`, "Known gap: which tables the sweep can even read").
+
+**The canary is a second lane, not a second campaign.** Acceptance item 5 asks for proof that *another lane's*
+data is untouched, and a campaign this run made for show proves nothing: this run's sweep is free to define it
+out of the set. So the run first builds a whole second lane under its own `DATA_ID` (`stage2can-<digits>`, never a string that contains the lane's own id) — Unit,
+Unit Campaign, seller profile, Scout Campaign, roster join — seeds it with a receipt, a custody issue and a
+sale, snapshots it, and only then starts the acceptance lane. After the acceptance lane's teardown the snapshot
+has to answer identically: position rows, movement row count, Orders with their real line quantities,
+fulfillment records, custody, roster status and the Unit Campaign's `isActive` — the last because the teardown's
+closing step is a deactivation, and a deactivation of a campaign this run does not own would otherwise read as an
+untouched canary. An order quantity the query never selected reads as missing, and `or 0` turns that into a
+number, so the snapshot sums the `lineItems` the document does select and refuses an Order that answers none. The same teardown and the same sweep are then pointed at the canary's own ids, so the
+record also shows a whole lane's rows being removed when the sweeper is told to remove them.
+
+**Not every clause of §2.8.5 is executable yet.** The raw-data half names
+`unitCampaignOrderLines` / `scoutCampaignOrderLines` (§2.5) and the §6 reporting reads, which the
+shipped SDL does not carry. The run reads `__schema` before it builds anything and reports the
+Stage 2 fields the deployed API answers, so a build that is missing them cannot read as a pass.
 
 ---
 

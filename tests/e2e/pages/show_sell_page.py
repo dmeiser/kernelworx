@@ -66,6 +66,48 @@ ID_CAMPAIGN_NAME = "campaign-name"
 ID_CREATED_CAMPAIGN_NOTE = "created-campaign-note"
 ID_CREATED_JOIN_CODE = "created-join-code"
 ID_ROSTER_COUNT = "roster-count"
+
+# --- Stage 2: stock, Scout custody, Order fulfillment (§2.6) ----------------
+# The workspace reaches these three screens through the tab buttons below.  Each screen's
+# "opened" control is the one its body always renders — a count line or the panel's own primary
+# button — because a tab that opened while its resolver failed looks identical until you ask for
+# the number the screen itself claims.
+ID_TAB_INVENTORY = "tab-inventory"
+ID_TAB_CUSTODY = "tab-custody"
+ID_TAB_ORDERS = "tab-orders"
+ID_INVENTORY_COUNT = "position-count"
+ID_CUSTODY_TOTAL = "custody-total"
+ID_RECORD_CUSTODY_SALE = "record-custody-sale"
+ID_FULFILLMENT_CAMPAIGN = "fulfillment-campaign"
+ID_NO_ORDER_SELECTED = "no-order-selected-note"
+PREFIX_INVENTORY_ROW = "position-row-"
+PREFIX_CUSTODY_SCOUT_HELD = "custody-scout-held-"
+PREFIX_ORDER_BLOCK = "order-block-"
+PREFIX_LINE_ROW = "line-row-"
+PREFIX_LINE_FULFILLED = "line-fulfilled-"
+PREFIX_LINE_OWED = "line-owed-"
+
+#: Tab button → a test id only that tab's screen renders.
+STAGE_TWO_TAB_CONTROLS: dict[str, str] = {
+    ID_TAB_INVENTORY: ID_INVENTORY_COUNT,
+    ID_TAB_CUSTODY: ID_CUSTODY_TOTAL,
+    ID_TAB_ORDERS: ID_RECORD_CUSTODY_SALE,
+}
+
+#: The §7 quantity a stock row answers, and the test-id stem that carries it
+#: (``frontend/src/components/InventoryPanel.tsx``, ``PositionRow``).  The names are the SDL's,
+#: so a GraphQL read and the screen can be compared key by key.
+INVENTORY_COLUMNS: dict[str, str] = {
+    "kernelPhysicalQty": "position-kernel-",
+    "soldInPossessionQty": "position-sold-",
+    "sellableKernelQty": "position-sellable-",
+    "assignedOpenQty": "position-assigned-",
+    "unassignedKernelQty": "position-unassigned-",
+    "assignmentOverageQty": "position-overage-",
+    "withScoutQty": "position-with-scout-",
+    "totalUnitOwnedUndeliveredQty": "position-owned-",
+    "councilOnOrderQty": "position-on-order-",
+}
 ID_JOIN_PROFILE_EMPTY = "join-profile-empty"
 PREFIX_CAMPAIGN_ROW = "campaign-row-"
 PREFIX_CAMPAIGN_STATUS = "campaign-status-"
@@ -771,6 +813,274 @@ class ShowSellPage(BasePage):
         self.page.get_by_test_id(ID_SUBMIT_JOIN).click()
         expect(self.page.get_by_test_id(ID_JOIN_SUCCESS)).to_be_visible(timeout=25_000)
         return matches[0]
+
+    # ------------------------------------------------------------------
+    # Stage 2: stock, Scout custody, Order fulfillment (§2.6 screens)
+    # ------------------------------------------------------------------
+
+    def goto_unit_campaign(self, unit_id: str, campaign_id: str) -> None:
+        """Open one Unit Campaign workspace, where the Stage 2 screens live.
+
+        Args:
+            unit_id: the Unit that owns the campaign.
+            campaign_id: the Unit Campaign to open.
+        """
+        self.navigate(f"{UNIT_ROUTE}/{unit_id}/campaigns/{campaign_id}")
+        self.wait_for_loading()
+        expect(self.page.get_by_test_id(ID_TAB_INVENTORY)).to_be_visible(timeout=15_000)
+
+    def open_stage_two_tab(self, tab_test_id: str) -> None:
+        """Open one Stage 2 tab and wait for the control only that screen renders.
+
+        Args:
+            tab_test_id: one of ``tab-inventory``, ``tab-custody``, ``tab-orders``.
+
+        Raises:
+            AssertionError: the tab is not a Stage 2 tab this page object knows.
+        """
+        control = STAGE_TWO_TAB_CONTROLS.get(tab_test_id)
+        assert control is not None, f"{tab_test_id!r} is not a Stage 2 tab; known tabs: {sorted(STAGE_TWO_TAB_CONTROLS)}"
+        self.open_tab(tab_test_id)
+        expect(self.page.get_by_test_id(control)).to_be_visible(timeout=20_000)
+
+    def _cell_text(self, stem: str, key: str) -> str:
+        """Text of one Stage 2 cell, or an empty string when it is not on screen."""
+        cell = self.page.get_by_test_id(f"{stem}{key}")
+        return "" if cell.count() == 0 else (cell.first.inner_text() or "").strip()
+
+    def _reopen_tab(self, tab_test_id: str, campaign_name: str | None = None) -> None:
+        """Reload the workspace and reopen *tab_test_id*, the way a user would.
+
+        Args:
+            tab_test_id: the Stage 2 tab to reopen.
+            campaign_name: a Scout Campaign to re-select afterwards.  The Order fulfillment tab
+                keeps its Scout choice in component state, so a reload that is meant to refresh a
+                read has to choose that Scout again — a waiter that reloads without re-choosing is
+                waiting on a tab that was told to show nothing.
+        """
+        self.page.reload(wait_until="networkidle")
+        self.wait_for_loading()
+        self.open_stage_two_tab(tab_test_id)
+        if campaign_name is not None:
+            self.select_fulfillment_campaign(campaign_name)
+
+    def _test_id_suffixes(self, prefix: str) -> list[str]:
+        """Every test id on screen that starts with *prefix*, with the prefix removed.
+
+        :meth:`_id_suffixes` is limited to ``div`` because the Stage 1 ids it reads are all
+        divs; the Stage 2 screens key their ``<tr>`` rows and cells instead, so this one asks for
+        any element.
+
+        Args:
+            prefix: test-id prefix to collect.
+
+        Returns:
+            The remaining part of each matching test id, in document order.
+        """
+        suffixes: list[str] = []
+        for element in self.page.query_selector_all(f"[data-testid^='{prefix}']"):
+            test_id = element.get_attribute("data-testid") or ""
+            if test_id:
+                suffixes.append(test_id[len(prefix) :])
+        return suffixes
+
+    def inventory_product_ids(self) -> list[str]:
+        """Product ids with a stock row on the open Stock tab.
+
+        Returns:
+            Product ids, in document order.
+        """
+        return self._test_id_suffixes(PREFIX_INVENTORY_ROW)
+
+    def wait_for_inventory_position(self, product_id: str, *, attempts: int = 8) -> dict[str, int]:
+        """Return the open Stock tab's row for *product_id*, reloading until it appears.
+
+        Every Stage 2 screen recomputes its numbers from the movement and balance rows on each
+        read, and a write that just committed can still be missing from the first one, so the
+        waiter reloads rather than reading once.  Giving up names the rows that *were* on screen,
+        which is the difference between "the write did not land" and "the screen keys its rows
+        differently than expected".
+
+        Args:
+            product_id: product whose position is wanted.
+            attempts: how many reads to take before giving up.
+
+        Returns:
+            The §7 quantity names mapped to the numbers the screen shows.
+        """
+        seen: list[str] = []
+        for attempt in range(attempts):
+            seen = self.inventory_product_ids()
+            if product_id in seen or any(row.endswith(product_id) for row in seen):
+                row_key = next(row for row in seen if row == product_id or row.endswith(product_id))
+                cells: dict[str, int] = {}
+                for quantity, stem in INVENTORY_COLUMNS.items():
+                    text = self._cell_text(stem, row_key)
+                    if text:
+                        cells[quantity] = int(text)
+                return cells
+            if attempt + 1 < attempts:
+                self._reopen_tab(ID_TAB_INVENTORY)
+        raise AssertionError(
+            f"the Stock tab never showed a position row for {product_id!r} in {attempts} reads; "
+            f"it shows {seen or 'no rows at all'}"
+        )
+
+    def select_fulfillment_campaign(self, campaign_name: str) -> None:
+        """Choose the Scout Campaign the Order fulfillment tab lists Orders for.
+
+        The tab starts with no Scout chosen and says so (``no-order-selected-note``): individual
+        Orders belong to a Scout Campaign, so the panel will not guess which joined Scout's Orders
+        to read (``frontend/src/components/OrderFulfillmentPanel.tsx``, ``CampaignPicker``).  The
+        menu's option text is the Scout and campaign labels joined together, so the match is on
+        the campaign name the lane chose — and the failure names the options that were offered.
+
+        Args:
+            campaign_name: the Scout Campaign's name, as the lane named it.
+        """
+        self.page.get_by_test_id(ID_FULFILLMENT_CAMPAIGN).click()
+        listbox = self.page.get_by_role("listbox")
+        expect(listbox).to_be_visible(timeout=10_000)
+        options = listbox.locator('[role="option"]:not([aria-disabled="true"])')
+        expect(options.first).to_be_visible(timeout=10_000)
+        wanted = options.filter(has_text=campaign_name)
+        if wanted.count() == 0:
+            offered = [option.inner_text() for option in options.all()]
+            raise AssertionError(
+                f"the Order fulfillment tab's Scout picker does not offer {campaign_name!r}; it offers {offered}"
+            )
+        wanted.first.click()
+        self.wait_for_loading()
+
+    def fulfillment_notes(self) -> list[str]:
+        """What the Order fulfillment tab says about having nothing to show, if anything."""
+        notes = []
+        for test_id in (ID_NO_ORDER_SELECTED, "no-campaign-note", "no-orders-note"):
+            note = self.page.get_by_test_id(test_id)
+            if note.count() > 0:
+                notes.append(f"{test_id}: {(note.first.inner_text() or '').strip()}")
+        return notes
+
+    def custody_scout_totals(self) -> dict[str, int]:
+        """Scout custody key to kernels held, from the open custody tab's Scout table.
+
+        Returns:
+            One entry per Scout row, keyed by the test id's own key so the caller can see how
+            the screen groups a Scout's custody.
+        """
+        totals: dict[str, int] = {}
+        for element in self.page.query_selector_all(f"[data-testid^='{PREFIX_CUSTODY_SCOUT_HELD}']"):
+            test_id = element.get_attribute("data-testid") or ""
+            text = (element.inner_text() or "").strip()
+            if text:
+                totals[test_id.removeprefix(PREFIX_CUSTODY_SCOUT_HELD)] = int(text)
+        return totals
+
+    def custody_line_test_ids(self) -> list[str]:
+        """Every custody-line test id on the open custody tab, for a failure message."""
+        return [f"custody-line{suffix}" for suffix in self._test_id_suffixes("custody-line-")]
+
+    def wait_for_custody_held(self, profile_id: str, *, attempts: int = 8) -> int:
+        """Return the custody tab's kernels held for *profile_id*, reloading until the row shows.
+
+        The custody screen is the one place a Scout sees what it is carrying, and the number is
+        recomputed from the custody rows on each read, so the waiter reloads rather than reading
+        once — and gives up naming the rows it did see.
+
+        Args:
+            profile_id: the Scout's profile id, in any spelling.
+            attempts: how many reads to take before giving up.
+
+        Returns:
+            Units in that Scout's custody across the campaign, as the screen states them.
+        """
+        wanted = profile_key(profile_id)
+        seen: list[str] = []
+        for attempt in range(attempts):
+            totals = self.custody_scout_totals()
+            seen = sorted(totals)
+            for key, held in totals.items():
+                if wanted and wanted in key:
+                    return held
+            if attempt + 1 < attempts:
+                self._reopen_tab(ID_TAB_CUSTODY)
+        raise AssertionError(
+            f"the Scout custody tab never showed {profile_id!r} in {attempts} reads; it shows {seen}"
+        )
+
+    def custody_line_qty(self, profile_id: str, product_id: str) -> int | None:
+        """Return the custody tab's per-line quantity for one Scout and product, if it shows one.
+
+        Args:
+            profile_id: the Scout's profile id, in any spelling.
+            product_id: the product whose custody line is wanted.
+
+        Returns:
+            Units on that line, or ``None`` when the screen has no such line.
+        """
+        for suffix in self._test_id_suffixes("custody-line-qty-"):
+            if profile_key(profile_id) in suffix and product_id in suffix:
+                return int((self._cell_text("custody-line-qty-", suffix) or "0"))
+        return None
+
+    def wait_for_order_line(
+        self,
+        line_item_id: str,
+        *,
+        campaign_name: str | None = None,
+        attempts: int = 8,
+    ) -> tuple[int, int]:
+        """Return the fulfillment tab's ``(fulfilled, still owed)`` for one line, reloading until it shows.
+
+        Args:
+            line_item_id: the line's id, which is also the row's key.
+            campaign_name: the Scout Campaign to choose after each reload, for the same reason
+                :meth:`_reopen_tab` takes it.
+            attempts: how many reads to take before giving up.
+        """
+        seen: list[str] = []
+        for attempt in range(attempts):
+            seen = self._test_id_suffixes(PREFIX_LINE_ROW)
+            if line_item_id in seen or any(row.endswith(line_item_id) for row in seen):
+                return self.order_line_quantities(line_item_id)
+            if attempt + 1 < attempts:
+                self._reopen_tab(ID_TAB_ORDERS, campaign_name)
+        raise AssertionError(
+            f"the Order fulfillment tab never showed line {line_item_id!r} in {attempts} reads; "
+            f"it shows lines {seen or 'none'} and says {self.fulfillment_notes() or 'nothing about being empty'}"
+        )
+
+    def order_line_quantities(self, line_item_id: str) -> tuple[int, int]:
+        """Return ``(fulfilled, still owed)`` for one Order line on the open fulfillment tab.
+
+        Args:
+            line_item_id: the line's id, which is also the row's key.
+        """
+        fulfilled = self._cell_text(PREFIX_LINE_FULFILLED, line_item_id)
+        owed = self._cell_text(PREFIX_LINE_OWED, line_item_id)
+        assert fulfilled and owed, (
+            f"the fulfillment tab shows no quantities for line {line_item_id!r}; "
+            f"line cells on screen: {self._test_id_suffixes(PREFIX_LINE_FULFILLED)}"
+        )
+        return int(fulfilled), int(owed)
+
+    def order_block_ids(self) -> list[str]:
+        """Order ids with a block on the open Order fulfillment tab."""
+        return self._test_id_suffixes(PREFIX_ORDER_BLOCK)
+
+    def stage_two_notes(self) -> list[str]:
+        """Return the guidance the Stage 2 screens are showing.
+
+        The panels explain a refusal in place — a catalog mismatch between the two Campaigns, no
+        eligible Scout, no orders yet — and that sentence is what tells the next reader whether a
+        step stopped because of the build or because of the lane.
+        """
+        notes = []
+        for test_id in ("catalog-mismatch-note", "no-campaign-note", "no-eligible-note", "no-orders-note"):
+            note = self.page.get_by_test_id(test_id)
+            if note.count() > 0:
+                notes.append(f"{test_id}: {(note.first.inner_text() or '').strip()}")
+        return notes
 
     # ------------------------------------------------------------------
     # Evidence masking

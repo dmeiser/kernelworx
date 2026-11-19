@@ -124,6 +124,7 @@ DynamoDB
 EEYQ
 EFGH
 elif
+elts
 emailAddress
 emoji
 emojis
@@ -132,11 +133,13 @@ endswith
 env
 errorMessage
 esac
+finalbody
 isinstance
 jank
 metas
 mockqr
 neighbour
+neighbours
 prin
 rasterizing
 resends
@@ -600,3 +603,4 @@ testsfailed
 libx
 movflags
 faststart
+timespec

@@ -5,6 +5,10 @@
     uv run python scripts/qa_fixture.py up            # create/refresh the four identities
     uv run python scripts/qa_fixture.py down          # delete them and sweep their rows
     uv run python scripts/qa_fixture.py down --yes    # ...without the confirmation prompt
+    uv run python scripts/qa_fixture.py sweep \
+        --lane data-id=stage2-1118107 --lane unit=<uuid> \
+        --lane unit-campaign=<uuid> --lane join-code=<CODE> --yes
+                                                    # one acceptance lane's rows, users kept
 
 Why this exists
 ---------------
@@ -44,6 +48,65 @@ application row by ``Username``, or that assumes the stored ``Username`` is an
 address, silently matches nothing. Join on ``sub`` or ``email``;
 :func:`pool_users` keys by address for exactly this reason.
 
+``sweep`` narrows the same idea to one acceptance lane, because an
+acceptance run leaves rows the product cannot delete: the SDL carries no
+``deleteUnit`` and no ``deleteUnitCampaign``, so the Unit and its Unit Campaign
+rows outlive every GraphQL teardown the run performs.
+
+Two things keep it narrow, and both matter:
+
+* **Typed tokens.** A token is ``kind=value`` and must match the stored shape of
+  its kind (``data-id``, ``unit``, ``unit-campaign``, ``campaign``, ``profile``,
+  ``order``, ``join-code``, ``idem``). Free text is refused: a token with no kind,
+  a short one, or a partial one would select rows the caller never meant, with
+  ``--yes`` already given. A token is compared only to the field its kind names.
+* **One reviewed rule per key shape.** Most rows a Stage 2 lane writes carry no
+  fixture identity at all — an inventory balance or custody row names only its
+  Unit Campaign, product and Scout profile, and a join-code pointer only its
+  campaign id and a timestamp — so attribution alone cannot find them. Each key
+  shape has its own rule, written against the builders that mint it
+  (``src/utils/unit_models.py``, ``src/utils/unit_campaign_models.py``,
+  ``src/utils/inventory_models.py``, ``src/utils/order_fulfillment_models.py``,
+  ``src/utils/order_keys.py``, ``src/utils/mutations.py``). A row whose shape no
+  rule describes is reported as ``kept`` and never deleted. Attribution is not a
+  substitute for identity either, and three rules are narrow because of it: an
+  active-join guard goes only when its exact Scout Campaign id is named (one
+  profile holds a guard per Campaign, so a profile token cannot say which is
+  joined), an idempotency marker goes only when a fixture identity wrote it (the
+  idempotency key is caller-supplied, so the same key can exist for another
+  actor), and an inventory movement row is never deleted at all — it is the
+  append-only audit record the lane exists to produce, reported as history.
+
+After deleting, ``sweep`` re-scans and applies the same rules again, printing
+``LEFT <table>/<key>`` for a lane row that survived (a ``delete_item`` that
+returned without an error is not evidence) and one line per named row in the
+residue class it belongs to:
+
+* ``kept`` — a reviewed rule says the row belongs to someone else: a third
+  party's ``GRANT#…`` or ``MEMBERSHIP#…`` on a lane partition, a foreign custody
+  row, a marker no fixture identity wrote.  It survives, and that survival is the
+  proof another tenant's data is untouched, so it does not fail the sweep.
+* ``UNKNOWN`` — a lane token names the row and no reviewed rule describes its
+  shape, or it cannot be attributed either way (a guard whose Campaign is not
+  named).  Never deleted, and the sweep fails closed: residue nobody reviewed is
+  not a clean result.
+* ``HISTORY`` — the lane's own append-only ``InventoryMovement`` rows, which the
+  lane must not delete.  They are the lane's residue, so they are never reported
+  as cleaned: that gate stays open until the owner accepts the residual, which is
+  a checklist decision and deliberately not a flag on this command.
+
+A table the identity cannot read prints ``BLOCKED <table>: <denied action> is not
+granted to this identity (<error>)``: a denied scan is reported with the
+permission it is missing, never treated as an empty table and never reduced to a
+count. Measured on 2026-11-19, ``kernelworx-qa-ue1-dev`` is denied
+``dynamodb:Scan`` and ``dynamodb:DeleteItem`` on the Stage 2 inventory, orders
+and order-fulfillment tables, so those rows are a named finding until a grant
+lands — an IAM grant alone does not close the sweep, it only makes these tables
+readable enough for the rules to run, and once they are readable the retained
+history still leaves the sweep non-zero. Any ``LEFT``, ``FAILED``, ``UNKNOWN``,
+``HISTORY`` or ``BLOCKED`` line makes the exit
+code non-zero. The identities are never touched. See ``docs/QA_FIXTURE_RUNBOOK.md``.
+
 Teardown is deliberate: ``down`` prints its full plan first, asks before it
 writes, deletes the rows before the identities, and deletes nothing it cannot
 attribute to a fixture ``sub``. The plan names the evidence for every row — the
@@ -60,6 +123,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import secrets
 import string
 import sys
@@ -94,6 +158,21 @@ TABLES: dict[str, tuple[str, tuple[str, ...], str]] = {
     "units": ("kernelworx-units-ue1-dev", ("pk", "sk"), "createdByAccountId"),
     "unit-campaigns": ("kernelworx-unit-campaigns-ue1-dev", ("pk", "sk"), "createdByAccountId"),
 }
+
+# Tables an acceptance lane writes that ``down`` does not reach by identity alone:
+# the rows are keyed on resource ids (``INV#<unitCampaignId>``, ``CAMPAIGN#…/ORDER#…``)
+# rather than on a fixture ``sub``, so ``sweep`` narrows them by lane token as well.
+# Key shapes and owner attributes come from ``tofu/application/modules/dynamodb/main.tf``,
+# ``src/utils/inventory_models.py`` (``actorAccountId`` on a movement row) and
+# ``src/utils/order_fulfillment_models.py``.
+LANE_TABLES: dict[str, tuple[str, tuple[str, ...], str]] = {
+    "inventory": ("kernelworx-inventory-ue1-dev", ("pk", "sk"), "actorAccountId"),
+    "orders": ("kernelworx-orders-ue1-dev", ("campaignId", "orderId"), "createdByAccountId"),
+    "order-fulfillments": ("kernelworx-order-fulfillments-ue1-dev", ("pk", "sk"), "createdByAccountId"),
+}
+
+# Everything a lane sweep may consider, in one place.
+SWEEP_TABLES: dict[str, tuple[str, tuple[str, ...], str]] = {**TABLES, **LANE_TABLES}
 
 # Rows the pool should never accumulate: per-run sign-ups that were created and
 # then abandoned without ever being confirmed. ``status`` counts them so a new
@@ -312,9 +391,357 @@ def _owner_ids(value: str) -> set[str]:
     return embedded | set(parts)
 
 
-def owned_rows(
-    d: Any, subs: Iterable[str]
-) -> tuple[list[tuple[str, str, dict[str, str], str]], list[tuple[str, str]]]:
+def _attribution(
+    item: dict[str, Any], key_names: tuple[str, ...], owner_attr: str, wanted: set[str], mails: set[str]
+) -> tuple[dict[str, str], str] | None:
+    """Why this row belongs to a fixture identity, or ``None`` if nothing says so.
+
+    One rule, used by ``down`` and by ``sweep`` alike: a key part that is a fixture address, a key
+    part that is a fixture ``sub``, or the table's owner attribute naming one. Sharing a partition
+    key with a fixture row is not attribution.
+    """
+    flat = _flatten(item)
+    # These tables key on strings, and every owner attribute this script reads is a string; a bool
+    # (``isActive``) or a number is not something to search, so it is skipped rather than matched.
+    key_vals = {k: str(flat.get(k, "")) for k in key_names}
+    parts = {p for v in key_vals.values() for p in _segments(v)}
+    owner_value = flat.get(owner_attr, "")
+    owners = _owner_ids(owner_value) if isinstance(owner_value, str) else set()
+    if parts & mails:
+        return key_vals, "key names a fixture address"
+    if parts & wanted:
+        return key_vals, "key names a fixture sub"
+    if owners & wanted:
+        return key_vals, f"{owner_attr} names a fixture sub"
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Lane sweep: typed tokens, one reviewed rule per key shape, and a residue scan
+# --------------------------------------------------------------------------- #
+
+#: A lane sweep deletes without a prompt, so it never accepts free text.  A token names its kind
+#: and must match the shape the application stores for that kind, and it is compared only to the
+#: field that kind addresses — a Unit id is matched against a row's partition key, not against
+#: every string in the row.  ``--lane 1`` is therefore refused rather than selecting every row
+#: whose payload happens to contain ``1`` in every readable table.
+_UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+TOKEN_SHAPES: dict[str, tuple[str, int]] = {
+    "data-id": (r"[a-z][a-z0-9]*(?:-[a-z0-9]+)+", 8),
+    "unit": (_UUID, 36),
+    "unit-campaign": (_UUID, 36),
+    "campaign": (_UUID, 36),
+    "profile": (_UUID, 36),
+    "order": (r"ORDER#" + _UUID + r"#[A-Za-z0-9_-]{4,64}", 12),
+    "join-code": (r"[A-Z0-9]{16}", 16),
+    "idem": (r"[A-Za-z][A-Za-z0-9_-]{7,127}", 8),
+}
+
+#: What a lane rule may answer, and what each answer does to the exit code.  The distinction between
+#: the last three is the whole point: a row the rules reviewed and attributed to someone else may
+#: survive a sweep; a row nobody reviewed, or the lane's own audit history, may not be reported as
+#: cleaned.  A false-clean sweep is the defect this exists to prevent.
+LANE_VERDICTS: tuple[str, ...] = ("delete", "keep", "unknown", "history")
+
+
+def parse_lane_tokens(values: Iterable[str]) -> tuple[dict[str, set[str]], list[str]]:
+    """Read ``kind=value`` lane tokens, and return every way one fails the shape it claims.
+
+    Refusal happens before any table is read, so a mistyped sweep is a message rather than a set
+    of deleted rows.
+    """
+    tokens: dict[str, set[str]] = {kind: set() for kind in TOKEN_SHAPES}
+    problems: list[str] = []
+    for value in values:
+        kind, sep, raw = value.partition("=")
+        if not sep:
+            problems.append(f"{value!r}: a lane token names its kind, e.g. --lane unit-campaign=<uuid>")
+            continue
+        if kind not in TOKEN_SHAPES:
+            problems.append(f"{value!r}: unknown token kind; expected one of {', '.join(sorted(TOKEN_SHAPES))}")
+            continue
+        pattern, minimum = TOKEN_SHAPES[kind]
+        if len(raw) < minimum or not re.fullmatch(pattern, raw):
+            problems.append(
+                f"{value!r}: {kind} must match {pattern}; a short or partial token could name another run's rows"
+            )
+            continue
+        tokens[kind].add(raw)
+    return tokens, problems
+
+
+def _bare(value: str, prefix: str) -> str:
+    """One stored id spelling with its application prefix removed (``PROFILE#x`` to ``x``)."""
+    head, sep, rest = value.partition("#")
+    return rest if sep and head == prefix else value
+
+
+def _strings(item: dict[str, Any]) -> dict[str, str]:
+    """The string scalars of a raw item.
+
+    ``_flatten`` hands back whatever a scalar attribute holds, and ``isActive`` holds a bool and a
+    quantity holds a number; neither is something to compare an id token against.
+    """
+    return {k: v for k, v in _flatten(item).items() if isinstance(v, str)}
+
+
+def _mask_secret(value: str) -> str:
+    """Never carry a live join code into a report a person pastes into an issue."""
+    return re.sub(r"[A-Z0-9]{16}", "*" * 16, value)
+
+
+_DENIED_ACTION = re.compile(r"not authorized to perform:\s*([A-Za-z0-9:*_-]+)")
+
+
+def _denied_action(exc: BaseException) -> str:
+    """The permission a failed DynamoDB call is missing, when the service says which one it is.
+
+    DynamoDB spells the denied action and the resource into the message, so a reader of a sweep report
+    sees what to ask for rather than that something went wrong.  Measured on dev on 2026-11-19,
+    ``kernelworx-qa-ue1-dev`` holds neither ``dynamodb:Scan`` nor ``dynamodb:DeleteItem`` on the Stage 2
+    inventory, orders and order-fulfillment tables.  Anything the message does not name — a timeout, a
+    wrong table — is reported by its exception type instead of being guessed at.
+    """
+    message = str(exc)
+    denied = _DENIED_ACTION.search(message)
+    return denied.group(1) if denied else type(exc).__name__
+
+
+def _blocked_line(table: str, exc: BaseException) -> str:
+    """One unreadable table, reported with the permission that is missing, never as a bare count."""
+    message = str(exc)[:300]
+    action = _denied_action(exc)
+    if action == type(exc).__name__:
+        return f"BLOCKED {table}: {type(exc).__name__}: {message}"
+    return f"BLOCKED {table}: {action} is not granted to this identity ({type(exc).__name__}: {message})"
+
+
+def _rule_units(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
+    """``UNIT#<unitId>``: the metadata row is the lane's, a grant only when it is a fixture identity's."""
+    flat = _strings(item)
+    pk, sk = flat.get("pk", ""), flat.get("sk", "")
+    if not pk.startswith("UNIT#"):
+        return None
+    unit = pk[len("UNIT#") :]
+    if unit not in tokens["unit"]:
+        return None
+    if sk == "METADATA":
+        if _owner_ids(flat.get("createdByAccountId", "")) & subs:
+            return "delete", f"Unit metadata row for lane Unit {unit}, created by a fixture identity"
+        return "keep", f"Unit {unit} carries no createdByAccountId naming a fixture identity"
+    if sk.startswith("GRANT#"):
+        named = {p for p in _owner_ids(sk) if p not in {"GRANT", "ACCOUNT"}}
+        foreign = sorted(p for p in named if p not in subs)
+        if named and not foreign:
+            return "delete", f"Unit Admin grant held by a fixture identity on lane Unit {unit}"
+        who = ", ".join(foreign) or _mask_secret(sk)
+        return "keep", f"grant on lane Unit {unit} names {who}: not a fixture identity"
+    return "unknown", f"row shape {sk!r} on lane Unit {unit} is not described by any rule"
+
+
+def _rule_marker(pk: str, sk: str, tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
+    """``IDEM#<actor>#<operation>#<scope>`` with sort key ``IDEM#<idempotencyKey>``.
+
+    ``src/utils/mutations.py`` mints these as ``actor + operation + scope + caller-supplied key``, and
+    the last of those four is exactly that: nothing in the application makes a key unique per tenant, so
+    the same ``idem`` token can legitimately exist for another actor's partition.  A named key therefore
+    selects a row only when the partition key also names a fixture identity as its author — authorship is
+    checked first, before any of the three delete branches, and a marker that a lane token names but that
+    no fixture identity wrote is reported and left.  The author is read by ``#`` segment after undoing
+    ``_escape_key_segment``'s ``%23``, so neither the spelling of the actor (bare ``sub``, or an escaped
+    ``ACCOUNT#sub``) nor a substring of an id changes the answer.  A tenant outside the fixture pool that
+    happened to choose a ``stage2-…`` key is not this lane.
+
+    Given authorship, the marker is the lane's when the key carries the lane's ``DATA_ID`` prefix — every
+    key the Stage 2 lane sends is ``<data-id>-…`` — when the caller named that key, or when the partition
+    key names a resource this lane named as its scope.
+
+    Anything else is left.  A marker no token of this lane says anything about is not reported at all:
+    the ``unit-campaigns`` table holds every earlier run's markers, and a sweep that listed them as
+    refused would bury the rows a rule actually weighed.  What is reported is the case worth a reader —
+    a marker naming a resource this lane created, or an idempotency key this lane named, that someone
+    outside the fixture pool wrote, which stays and says so.
+    """
+    if not pk.startswith("IDEM#") or not sk.startswith("IDEM#"):
+        return None
+    key = sk[len("IDEM#") :]
+    segments = _owner_ids(pk.replace("%23", "#"))
+    authored = bool(segments & subs)
+    scopes = tokens["unit"] | tokens["unit-campaign"] | tokens["campaign"] | tokens["join-code"] | tokens["order"]
+    scoped = bool(segments & scopes)
+    if not authored:
+        if scoped or key in tokens["idem"]:
+            return "keep", f"marker key {key} names a lane resource but no fixture identity wrote it"
+        return None
+    if key in tokens["idem"]:
+        return "delete", f"marker for an idempotency key the caller named ({key}), written by a fixture identity"
+    if any(key.startswith(f"{data_id}-") for data_id in tokens["data-id"]):
+        return "delete", f"marker this lane's DATA_ID wrote ({key})"
+    if scoped:
+        return "delete", f"marker written by a fixture identity scoped to a lane resource ({key})"
+    return None
+
+
+def _rule_unit_campaigns(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
+    """The shapes a Unit Campaign partition, a Scout Campaign guard, a join-code pointer and a marker hold.
+
+    ``build_membership_item`` writes a ``profileId``, so a roster row is the lane's when the lane names
+    that profile — on a Unit Campaign this lane named, which is the half that bounds it.  A guard is not
+    the same shape: ``build_membership_guard_item`` is one row per Scout, and a Scout profile runs many
+    Scout Campaigns, so a profile token says which person's guard this is and nothing about which
+    Campaign is joined.  A guard is therefore deleted only when its exact Campaign identity is named; a
+    prior run whose Campaign id cannot be recovered reports its guard as unresolved and leaves it.
+    ``removeUnitCampaignMembership`` clears the guard's ``activeUnitCampaignId`` but leaves the guard row
+    itself (``guard_release_action``), and nothing deletes a join-code pointer or a marker once its
+    mutation is done: these are the rows a lane keeps.
+    """
+    flat = _strings(item)
+    pk, sk = flat.get("pk", ""), flat.get("sk", "")
+    if pk.startswith("UNIT_CAMPAIGN#"):
+        campaign = _bare(pk[len("UNIT_CAMPAIGN#") :], "CAMPAIGN")
+        if campaign not in tokens["unit-campaign"]:
+            return None
+        if sk == "METADATA":
+            if _owner_ids(flat.get("createdByAccountId", "")) & subs:
+                return "delete", f"Unit Campaign metadata row for lane Unit Campaign {campaign}"
+            return "keep", f"Unit Campaign {campaign} carries no createdByAccountId naming a fixture identity"
+        if sk.startswith("MEMBERSHIP#"):
+            profile = _bare(flat.get("profileId") or sk[len("MEMBERSHIP#") :], "PROFILE")
+            if profile in tokens["profile"]:
+                return "delete", f"roster membership of the lane's own Scout profile on Unit Campaign {campaign}"
+            return (
+                "keep",
+                f"membership of profile {profile} on lane Unit Campaign {campaign}: that profile is not this lane's",
+            )
+        return "unknown", f"row shape {sk!r} on lane Unit Campaign {campaign} is not described by any rule"
+    if pk.startswith("SCOUT_CAMPAIGN#"):
+        campaign = _bare(pk[len("SCOUT_CAMPAIGN#") :], "CAMPAIGN")
+        profile = _bare(flat.get("profileId", ""), "PROFILE")
+        if campaign not in tokens["campaign"] and profile not in tokens["profile"]:
+            return None
+        if sk == "MEMBERSHIP_GUARD":
+            if campaign not in tokens["campaign"]:
+                return (
+                    "unknown",
+                    f"active-join guard of profile {profile}'s Scout Campaign {campaign}: that Campaign is not "
+                    "named, and one profile holds a guard per Campaign, so a profile token cannot say which is joined",
+                )
+            return "delete", f"active-join guard of lane Scout Campaign {campaign}"
+        return "unknown", f"row shape {sk!r} for lane Scout Campaign {campaign} is not described by any rule"
+    if pk.startswith("JOIN_CODE#"):
+        code = pk[len("JOIN_CODE#") :]
+        unit_campaign = _bare(flat.get("unitCampaignId", ""), "CAMPAIGN")
+        if sk == "POINTER" and (code in tokens["join-code"] or unit_campaign in tokens["unit-campaign"]):
+            return "delete", f"join-code pointer for lane Unit Campaign {unit_campaign or code}"
+        return None
+    if pk.startswith("IDEM#"):
+        return _rule_marker(pk, sk, tokens, subs)
+    return None
+
+
+def _rule_inventory(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
+    """``UNIT_CAMPAIGN#<id>`` partitions: balances, custody and allocations, and the movement history.
+
+    This is the shape a balance or custody row is invisible to under attribution: neither carries
+    an owner attribute, and only a movement row carries ``actorAccountId``.  The partition key is
+    the ownership fact, so it is the rule — narrowed by a principal guard, because a custody row
+    for a profile this lane did not name, or a movement written by an account outside the fixture
+    pool, is not this lane's to delete.  Attribution alone never deletes anything here: a row in a
+    partition no ``unit-campaign`` token names is not reported at all.
+
+    The movement rows are the lane's own residue, reported as ``history`` and never deleted.
+    ``src/utils/inventory_models.py`` describes ``InventoryMovement`` as an immutable audit record, and
+    ``build_movement_sk`` mints one row per write (``PRODUCT#<id>#MOVEMENT#<moment>#<n>``): deleting it
+    would rewrite the trail an acceptance run exists to prove, and it is what an auditor or an
+    accounting backfill reads after the lane is gone.  Every other row in the partition is a position a
+    lane's own return and reconcile steps drove to zero, so taking it back is teardown, not evidence.
+    Leaving it is not the same as cleaning it though, so it is not a ``keep``: a ``keep`` is a reviewed
+    rule saying the row belongs to somebody else, and this row is this lane's.  It is residue the gate
+    has to keep open until the owner says otherwise.
+    """
+    flat = _strings(item)
+    pk = flat.get("pk", "")
+    if not pk.startswith("UNIT_CAMPAIGN#"):
+        return None
+    campaign = _bare(pk[len("UNIT_CAMPAIGN#") :], "CAMPAIGN")
+    if campaign not in tokens["unit-campaign"]:
+        return None
+    profile = _bare(flat.get("profileId", ""), "PROFILE")
+    if profile and profile not in tokens["profile"]:
+        return (
+            "keep",
+            f"custody row for profile {profile} in lane Unit Campaign {campaign}: that profile is not this lane's",
+        )
+    actor = flat.get("actorAccountId", "")
+    if actor and not (_owner_ids(actor) & subs):
+        return "keep", f"inventory row in lane Unit Campaign {campaign} written by {actor}, not a fixture identity"
+    if flat.get("entityType") == "InventoryMovement" or "#MOVEMENT#" in flat.get("sk", ""):
+        return (
+            "history",
+            f"append-only inventory movement history in lane Unit Campaign {campaign}: immutable audit record, "
+            "reported as history this sweep does not delete",
+        )
+    what = flat.get("entityType") or flat.get("sk", "").split("#")[-1]
+    return "delete", f"inventory {what} row in lane Unit Campaign {campaign}"
+
+
+def _rule_orders(item: dict[str, Any], tokens: dict[str, set[str]]) -> tuple[str, str] | None:
+    """``{campaignId, orderId}``: an Order is the lane's when its campaign or its id is named."""
+    flat = _strings(item)
+    campaign = _bare(flat.get("campaignId", ""), "CAMPAIGN")
+    order = flat.get("orderId", "")
+    if campaign not in tokens["campaign"] and order not in tokens["order"]:
+        return None
+    profile = _bare(flat.get("profileId", ""), "PROFILE")
+    if profile and profile not in tokens["profile"]:
+        return "keep", f"Order {order} on campaign {campaign} belongs to profile {profile}, not named by this lane"
+    return "delete", f"Order row of lane Scout Campaign {campaign} ({order})"
+
+
+def _rule_fulfillments(item: dict[str, Any], tokens: dict[str, set[str]]) -> tuple[str, str] | None:
+    """``pk`` is the Order's fulfillment partition; a lane Order owns its whole partition."""
+    flat = _strings(item)
+    pk = flat.get("pk", "")
+    order = pk if pk.startswith("ORDER#") else ""
+    campaign = _bare(flat.get("campaignId", ""), "CAMPAIGN")
+    if order not in tokens["order"] and campaign not in tokens["campaign"]:
+        return None
+    return "delete", f"fulfillment row of lane Order {_mask_secret(order or campaign)}"
+
+
+def _lane_rule(label: str, item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
+    """One reviewed rule's verdict on one row a lane token named, or ``None`` for "not this sweep's business".
+
+    Every key shape an acceptance lane writes has its own rule here, written against the builders that
+    mint it, and each rule returns one of :data:`LANE_VERDICTS`:
+
+    ``delete``   the row is this lane's and a rule says to take it;
+    ``keep``     a rule reviewed the row and says it belongs to someone else — another account's grant,
+                 another profile's membership or custody, a marker another actor wrote.  It survives,
+                 and its survival is the proof that another tenant's data is untouched, so it does not
+                 fail the sweep;
+    ``unknown``  a lane token names the row and no reviewed rule describes its shape, or the row cannot
+                 be attributed either way (a guard whose Campaign no token names).  Nothing is deleted
+                 and the sweep fails closed: residue nobody reviewed is never a clean result;
+    ``history``  the lane's own append-only audit rows, which the lane must not delete and the sweep
+                 must not report as cleaned.  A gate the owner has to accept, not a pass.
+    """
+    if label == "accounts":
+        return None  # identities outlive a lane sweep: the next run needs them
+    if label == "units":
+        return _rule_units(item, tokens, subs)
+    if label == "unit-campaigns":
+        return _rule_unit_campaigns(item, tokens, subs)
+    if label == "inventory":
+        return _rule_inventory(item, tokens, subs)
+    if label == "orders":
+        return _rule_orders(item, tokens)
+    if label == "order-fulfillments":
+        return _rule_fulfillments(item, tokens)
+    return None
+
+
+def owned_rows(d: Any, subs: Iterable[str]) -> tuple[list[tuple[str, str, dict[str, str], str]], list[tuple[str, str]]]:
     """Rows attributable to the fixture accounts, and rows that merely look related.
 
     A row is deletable only when a fixture identity is spelled in the row itself:
@@ -344,18 +771,12 @@ def owned_rows(
         while True:
             page = d.scan(**scan_kw)
             for item in page.get("Items", []):
-                flat = _flatten(item)
-                key_vals = {k: flat.get(k, "") for k in key_names}
-                parts = {p for v in key_vals.values() for p in _segments(v)}
-                owners = _owner_ids(flat.get(owner_attr, ""))
-                if parts & mails:
-                    rows.append((key_vals, "key names a fixture address"))
-                elif parts & wanted:
-                    rows.append((key_vals, "key names a fixture sub"))
-                elif owners & wanted:
-                    rows.append((key_vals, f"{owner_attr} names a fixture sub"))
+                found = _attribution(item, key_names, owner_attr, wanted, mails)
+                if found is None:
+                    flat = _flatten(item)
+                    skipped.append((label, "/".join(flat.get(k, "") for k in key_names)))
                 else:
-                    skipped.append((label, "/".join(key_vals.values())))
+                    rows.append(found)
             if "LastEvaluatedKey" not in page:
                 break
             scan_kw["ExclusiveStartKey"] = page["LastEvaluatedKey"]
@@ -464,15 +885,207 @@ def apply_down(
     return 0
 
 
+def _scan_lane_rows(
+    d: Any, label: str, table: str, tokens: dict[str, set[str]], subs: set[str]
+) -> list[tuple[dict[str, str], str, str]]:
+    """Every row in one table a lane token names, with its decision and the rule that decided it.
+
+    The scan does not filter on attribution first: a row the lane owns but that names no fixture
+    identity (a balance, a custody row, a join-code pointer) is exactly what a lane leaves behind,
+    and the residue report has to show it whether or not the delete took it.
+    """
+    key_names = SWEEP_TABLES[label][1]
+    hits: list[tuple[dict[str, str], str, str]] = []
+    scan_kw: dict[str, Any] = {"TableName": table, "ConsistentRead": False}
+    while True:
+        page = d.scan(**scan_kw)
+        for item in page.get("Items", []):
+            found = _lane_rule(label, item, tokens, subs)
+            if found is None:
+                continue
+            decision, reason = found
+            flat = _strings(item)
+            hits.append(({k: flat.get(k, "") for k in key_names}, decision, reason))
+        if "LastEvaluatedKey" not in page:
+            return hits
+        scan_kw["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
+def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], out: TextIO) -> int:
+    """Delete one acceptance lane's rows by rule, then re-scan and report every lane row left.
+
+    A row is deleted only when a reviewed rule for its key shape says it belongs to this lane, so
+    the sweep neither depends on the row carrying a fixture identity nor reaches rows the rules do
+    not describe.  The read-back re-applies the same rules and prints one line per row the lane
+    tokens named, in the four classes :data:`LANE_VERDICTS` defines:
+
+    ``LEFT``     a lane row the delete did not take — a failure;
+    ``kept``     a row a reviewed rule says belongs to someone else — a third party's grant or
+                 membership on a lane partition, a foreign custody row, a marker no fixture identity
+                 wrote.  Reported, and the proof that another tenant's data survives; it does not fail
+                 the sweep, because the sweep was never meant to take that row;
+    ``UNKNOWN``  a row a lane token names in a shape no reviewed rule describes, or one that cannot be
+                 attributed either way (a guard whose Scout Campaign no token names).  Never deleted,
+                 and the sweep fails closed: residue nobody reviewed is not a clean result;
+    ``HISTORY``  this lane's own append-only audit rows, which the lane must not delete.  They are the
+                 lane's residue, so they are not ``kept`` either: the gate stays open until the owner
+                 accepts the residual, which is a checklist decision rather than a flag here;
+    ``BLOCKED``  a table this identity cannot read, named with the action it is denied — its lane
+                 rows are neither removed nor proven absent.
+
+    Any ``LEFT``, ``FAILED``, ``UNKNOWN``, ``HISTORY`` or ``BLOCKED`` line makes the exit code
+    non-zero.  The identities are never touched: ``sweep_lane_rows`` is not even given the Cognito
+    client.
+    """
+    wanted = {s for s in subs if s}
+    if not wanted:
+        print("sweep: no fixture subs to attribute rows to; nothing deleted", file=out)
+        return 1
+    named = sum(len(values) for values in tokens.values())
+    if not named:
+        print(
+            "sweep: refusing to run without a typed --lane <kind>=<value> token; an unbounded "
+            "sweep would reach another run's rows",
+            file=out,
+        )
+        return 1
+
+    plan: list[tuple[str, str, dict[str, str], str]] = []
+    kept: list[str] = []
+    unknown: list[str] = []
+    history: list[str] = []
+    blocked: list[str] = []
+    denied: list[str] = []
+    scanned: list[str] = []
+    for label, (table, _key_names, _owner_attr) in SWEEP_TABLES.items():
+        try:
+            found = _scan_lane_rows(d, label, table, tokens, wanted)
+        except Exception as exc:  # noqa: BLE001 - a denied scan is reported, never treated as empty
+            blocked.append(_blocked_line(table, exc))
+            denied.append(f"{table}: {_denied_action(exc)}")
+            continue
+        scanned.append(f"reach {table:<34} scanned, {len(found)} row(s) named by these tokens")
+        for key_vals, decision, reason in found:
+            key = _mask_secret("/".join(key_vals.values()))
+            if decision == "delete":
+                plan.append((label, key, dict(key_vals), reason))
+            elif decision == "unknown":
+                unknown.append(f"UNKNOWN  {label:<18} {key}  [{reason}]")
+            elif decision == "history":
+                history.append(f"HISTORY  {label:<18} {key}  [{reason}]")
+            elif decision == "keep":
+                kept.append(f"kept   {label:<18} {key}  [{reason}]")
+            else:
+                # A rule that answers with a class this command does not know about is not evidence of
+                # anything, and reading it as a reviewed ``keep`` is exactly how a false clean returns.
+                unknown.append(f"UNKNOWN  {label:<18} {key}  [rule verdict {decision!r} is not one of {LANE_VERDICTS}]")
+
+    print(f"plan: sweep {named} lane token(s) over {len(SWEEP_TABLES)} table(s)", file=out)
+    for line in scanned:
+        print(f"  {line}", file=out)
+    for line in blocked:
+        print(f"  {line}", file=out)
+    for label, key, _key_doc, reason in plan:
+        print(f"  row    {label:<18} {key}  [{reason}]", file=out)
+    for line in unknown:
+        print(f"  {line}", file=out)
+    for line in history:
+        print(f"  {line}", file=out)
+    for line in kept:
+        print(f"  {line}", file=out)
+    if not plan:
+        print("  row    (no row names these lane tokens in a shape a rule deletes)", file=out)
+
+    failures = 0
+    for label, key, key_doc, _reason in plan:
+        table = SWEEP_TABLES[label][0]
+        try:
+            d.delete_item(TableName=table, Key={k: {"S": v} for k, v in key_doc.items()})
+            print(f"  deleted row  {label:<18} {key}", file=out)
+        except Exception as exc:  # noqa: BLE001 - report each row, keep sweeping the rest
+            failures += 1
+            print(f"  FAILED row   {label:<18} {key}  {type(exc).__name__}", file=out)
+
+    # Read-back: a delete_item that returned without an error is not evidence on its own.  A ``kept``,
+    # ``unknown`` or ``history`` row is expected to still be here, so only a ``delete`` row re-appearing
+    # is a failure.
+    for label, (table, _key_names, _owner_attr) in SWEEP_TABLES.items():
+        if any(line.startswith(f"BLOCKED {table}") for line in blocked):
+            continue
+        try:
+            still = _scan_lane_rows(d, label, table, tokens, wanted)
+        except Exception as exc:  # noqa: BLE001 - the read-back failing is itself a finding
+            failures += 1
+            print(f"  FAILED scan  {table}  {type(exc).__name__}", file=out)
+            continue
+        for key_vals, decision, reason in still:
+            key = _mask_secret("/".join(key_vals.values()))
+            if decision == "delete":
+                failures += 1
+                print(f"  LEFT   {label:<18} {key}  [{reason}]", file=out)
+    if kept:
+        print(
+            f"  {len(kept)} row(s) a rule reviewed and left: another tenant's row on a lane partition, "
+            "which this sweep was never meant to take",
+            file=out,
+        )
+    if unknown:
+        print(
+            f"  {len(unknown)} row(s) a lane token names are UNRESOLVED: no reviewed rule describes that shape, "
+            "or the row cannot be attributed either way.  Nothing deleted them and the sweep cannot say they are "
+            "this lane's, so it fails closed",
+            file=out,
+        )
+    if history:
+        print(
+            f"  {len(history)} row(s) of this lane's own append-only history are retained on purpose and are "
+            "NOT cleaned: that residual is the owner's to accept, not this command's",
+            file=out,
+        )
+    if blocked:
+        print(
+            f"  {len(blocked)} table(s) could not be read by this identity ({'; '.join(denied)}): their "
+            "lane rows are neither removed nor proven absent, and the permission named there is what to ask for",
+            file=out,
+        )
+    if failures or blocked or unknown or history:
+        return 1
+    print(
+        f"  swept {len(plan)} row(s); a re-scan finds no row these rules call this lane's",
+        file=out,
+    )
+    return 0
+
+
 def main(argv: list[str], out: TextIO = sys.stdout) -> int:
     action = argv[1] if len(argv) > 1 else "status"
-    if action not in {"status", "up", "down"}:
+    if action not in {"status", "up", "down", "sweep"}:
         print(__doc__, file=out)
         return 2
     cognito = cip()
     if action == "status":
         render_status(cognito, out)
         return 0
+    if action == "sweep":
+        raw_tokens = tuple(v for i, v in enumerate(argv) if i > 1 and argv[i - 1] == "--lane" and v)
+        tokens, problems = parse_lane_tokens(raw_tokens)
+        for problem in problems:
+            print(f"sweep: refused — {problem}", file=out)
+        if problems:
+            return 2
+        if not any(tokens.values()):
+            print(
+                "sweep: pass at least one --lane <kind>=<value> token "
+                f"({', '.join(sorted(TOKEN_SHAPES))}); an unbounded sweep would reach another run's rows",
+                file=out,
+            )
+            return 2
+        if "--yes" not in argv:
+            print("sweep: refusing to delete without --yes (this sweep is not interactive)", file=out)
+            return 2
+        have = pool_users(cognito)
+        subs = {s for s in (_attrs(have[m]).get("sub") for m in emails().values() if m in have) if s}
+        return sweep_lane_rows(ddb(), subs, tokens, out)
     if action == "up":
         values = apply_up(cognito, out)
         sign_in_proof(cognito, values, out)
