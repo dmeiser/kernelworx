@@ -61,6 +61,10 @@ QUERY_FIELDS = {
     "myScoutCustody",
     "orderFulfillments",
     "unitScoutCampaignOrders",
+    "showAndSell",
+    "showAndSells",
+    "unitCampaignOpportunities",
+    "showAndSellOpportunity",
 }
 MUTATION_FIELDS = {
     "createUnit",
@@ -80,6 +84,9 @@ MUTATION_FIELDS = {
     "returnStockFromScout",
     "fulfillIndividualOrderLine",
     "reverseIndividualOrderFulfillment",
+    "createShowAndSell",
+    "updateShowAndSell",
+    "cancelShowAndSell",
 }
 
 
@@ -236,7 +243,8 @@ def test_unit_tenant_role_writes_the_unit_tables_and_the_join_link_only() -> Non
             "campaigns",
             "order_fulfillments",
             "orders",
-        }, f"write actions outside the Unit tables, the inventory and fulfillment tables, the counter and the links: {keys}"
+            "show_and_sells",
+        }, f"write actions outside the Unit tables, the inventory, fulfillment and event tables, the counter and the links: {keys}"
         if "orders" in keys and "order_fulfillments" not in keys:
             assert set(statement["actions"]) <= {
                 "dynamodb:GetItem",
@@ -267,6 +275,7 @@ def test_unit_tenant_role_writes_the_unit_tables_and_the_join_link_only() -> Non
         "campaigns",
         "order_fulfillments",
         "orders",
+        "show_and_sells",
     }, f"unexpected write surface: {writable}"
 
     joined = " ".join(str(s["actions"]) for s in statements)
@@ -282,12 +291,13 @@ def test_unit_operations_datasource_is_lambda_backed() -> None:
     assert "unit-operations" in str(config["function_arn"]), "the data source must invoke the unit-operations Lambda"
 
 
-def test_all_thirty_two_unit_fields_are_resolved_on_that_datasource() -> None:
-    """Fifteen queries and seventeen mutations, Stage 1 through Stage 3 alike.
+def test_all_thirty_nine_unit_fields_are_resolved_on_that_datasource() -> None:
+    """Nineteen queries and twenty mutations, Stage 1 through Stage 3 alike.
 
     Stage 2 adds the inventory and custody reads and the balance and custody writes to
-    the same data source, and Stage 3 §2.4 adds the two Order-fulfillment mutations, the
-    fulfillment audit query, and the Order list a Unit Admin fulfills from: tenant
+    the same data source, Stage 3 §2.4 adds the two Order-fulfillment mutations, the
+    fulfillment audit query, and the Order list a Unit Admin fulfills from, and §3.1
+    adds the three event mutations with the admin and participant event reads: tenant
     isolation, the Unit Admin check, and the Profile share check all live in the one
     handler, so a new field is a new name in its router, and an unbound SDL field answers
     nothing on ``dev``.
@@ -309,4 +319,4 @@ def test_all_thirty_two_unit_fields_are_resolved_on_that_datasource() -> None:
         assert f"Query:{field}" in bound, f"Query.{field} has no resolver on UnitOperationsDS"
     for field in sorted(MUTATION_FIELDS):
         assert f"Mutation:{field}" in bound, f"Mutation.{field} has no resolver on UnitOperationsDS"
-    assert len(bound) == 32, f"expected exactly the 32 Unit-tenant resolvers, got {sorted(bound)}"
+    assert len(bound) == 39, f"expected exactly the 39 Unit-tenant resolvers, got {sorted(bound)}"
