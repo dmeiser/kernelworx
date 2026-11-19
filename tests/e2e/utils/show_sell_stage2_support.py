@@ -40,7 +40,6 @@ __all__ = [
     "STAGE_TWO_WRITES",
     "adjust_input",
     "assert_cleanup_clean",
-    "assert_cleanup_clean",
     "council_need_positions",
     "council_on_order_input",
     "custody_by_product",
@@ -67,6 +66,7 @@ __all__ = [
     "return_input",
     "reverse_input",
     "stage_two_contract_violations",
+    "sweep_verdict",
     "stage_two_fields_in_schema",
     "stage_two_selection_violations",
 ]
@@ -489,6 +489,39 @@ def fixture_sweep(tokens: Sequence[str]) -> tuple[int, list[str], list[str]]:
     lines = [line.strip() for line in (done.stdout + done.stderr).splitlines() if line.strip()]
     blocked = [line for line in lines if line.startswith("BLOCKED")]
     return done.returncode, blocked, lines
+
+
+def sweep_verdict(
+    *,
+    left: Sequence[str],
+    failed: Sequence[str],
+    unknown: Sequence[str],
+    history: Sequence[str],
+    blocked: Sequence[str],
+) -> str:
+    """Which cleanup verdict one fixture-sweep report earns, by the class of row it left behind.
+
+    The sweep's exit code says only that something survived.  The classes are not interchangeable, and
+    a cleanup that reports a survival as a pass is the defect this exists to prevent:
+
+    * ``left`` / ``failed`` — the lane's own row is still there, or a delete errored: the lane's fault,
+      always fatal;
+    * ``unknown`` — a row this lane's tokens named in a shape no reviewed rule describes, or one that
+      cannot be attributed either way (an active-join guard whose Scout Campaign no token names).
+      Nothing deleted it and nothing says whose it is, so nobody may call the lane clean;
+    * ``history`` — the lane's own append-only movement rows, retained on purpose.  Not a lane fault,
+      and not cleaned either, so it is a gate that stays open: it fails the run under
+      ``SS_STRICT_CLEANUP=1`` and keeps §2.8.7 unchecked until the owner accepts that residue;
+    * ``blocked`` — a table this identity cannot read, named with the action it is denied.
+
+    A sweep whose only survivors are reviewed third-party rows (``kept``) is ``observed``: those rows
+    are the proof another tenant's data survived, and the sweep was never meant to take them.
+    """
+    if left or failed or unknown:
+        return CLEANUP_FAILED
+    if history or blocked:
+        return CLEANUP_BLOCKED
+    return CLEANUP_OBSERVED
 
 
 # ---------------------------------------------------------------------------

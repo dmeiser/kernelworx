@@ -605,9 +605,14 @@ def _lane_tokens(mod: ModuleType) -> Dict[str, set[str]]:
     return tokens
 
 
-def _lane_rows() -> Dict[str, List[Dict[str, Any]]]:
-    """Two lanes' rows and a third party's, in the shapes the Stage 2 lane writes."""
-    return {
+def _lane_rows(*, residue: bool = True) -> Dict[str, List[Dict[str, Any]]]:
+    """Two lanes' rows and a third party's, in the shapes the Stage 2 lane writes.
+
+    ``residue=False`` drops the two survivors that keep a sweep from reporting clean — a shape no rule
+    describes and the lane's own movement history — so a test about what gets *deleted* can assert the
+    exit code without re-litigating the gate.
+    """
+    rows = {
         "kernelworx-units-ue1-dev": [
             _item(
                 pk=f"UNIT#{_LANE_UNIT}",
@@ -731,6 +736,16 @@ def _lane_rows() -> Dict[str, List[Dict[str, Any]]]:
         ],
         "kernelworx-accounts-ue1-dev": [_item(accountId=f"ACCOUNT#{_ADMIN_SUB}")],
     }
+    if not residue:
+        rows["kernelworx-units-ue1-dev"] = [
+            item for item in rows["kernelworx-units-ue1-dev"] if item["sk"]["S"] != "SOMETHING#ELSE"
+        ]
+        rows["kernelworx-inventory-ue1-dev"] = [
+            item
+            for item in rows["kernelworx-inventory-ue1-dev"]
+            if not item["sk"]["S"].startswith("PRODUCT#p1#MOVEMENT#2026-11-19T00:00:00Z")
+        ]
+    return rows
 
 
 def _survivors(d: StubDynamo) -> set[str]:
@@ -761,7 +776,10 @@ def test_sweep_removes_lane_rows_that_carry_no_fixture_identity(mod: ModuleType)
     deleted = {(t, tuple(sorted(k.items()))) for t, k in d.deleted}
     text = out.getvalue()
 
-    assert code == 0
+    assert code == 1, (
+        "this fixture holds the lane's own movement history and a shape no rule describes, and a sweep "
+        "that could not attribute everything it named never reports clean"
+    )
     assert (
         "kernelworx-inventory-ue1-dev",
         (("pk", f"UNIT_CAMPAIGN#{_LANE_UC}"), ("sk", "PRODUCT#p1#BALANCE")),
@@ -792,12 +810,13 @@ def test_sweep_removes_lane_rows_that_carry_no_fixture_identity(mod: ModuleType)
 
 
 def test_sweep_reports_every_lane_token_match_and_deletes_only_its_own(mod: ModuleType) -> None:
-    """A lane token that names a row is never silent: it is either deleted or reported as kept.
+    """A lane token that names a row is never silent: it is deleted, or reported in its class.
 
     Third-party rows on a lane partition — another account's Unit Admin grant, another profile's
     roster membership, another profile's custody, a movement written by an account outside the
-    fixture pool, another run's idempotency marker — survive, and the report says why each survived.
-    The lane's own movement history survives too, and says it survived because it is history.
+    fixture pool, another run's idempotency marker — survive as ``kept``, and the report says why each
+    survived.  The lane's own movement history survives as ``HISTORY``, and a shape no rule describes
+    survives as ``UNKNOWN``, and both keep the sweep from reporting clean.
     """
     d = StubDynamo(_lane_rows())
     out = io.StringIO()
@@ -806,7 +825,7 @@ def test_sweep_reports_every_lane_token_match_and_deletes_only_its_own(mod: Modu
     text = out.getvalue()
     survivors = _survivors(d)
 
-    assert code == 0
+    assert code == 1
     assert f"kernelworx-units-ue1-dev/UNIT#{_OTHER_UNIT}/METADATA" in survivors
     assert f"kernelworx-unit-campaigns-ue1-dev/UNIT_CAMPAIGN#{_OTHER_UC}/METADATA" in survivors
     assert f"kernelworx-inventory-ue1-dev/UNIT_CAMPAIGN#{_OTHER_UC}/PRODUCT#p1#BALANCE" in survivors
@@ -840,12 +859,14 @@ def test_sweep_reports_every_lane_token_match_and_deletes_only_its_own(mod: Modu
     assert "that profile is not this lane" in text
     assert "written by ACCOUNT#someone-else, not a fixture identity" in text
     assert "names a lane resource but no fixture identity wrote it" in text
-    assert "append-only inventory movement history in lane Unit Campaign" in text, (
-        "history is reported as history, not as a row the sweep could not remove"
-    )
+    assert "HISTORY  inventory" in text, "history is reported as history, not as a row the sweep could not remove"
+    assert "append-only inventory movement history in lane Unit Campaign" in text
     assert _OTHER_CODE not in out.getvalue(), "a marker no lane token names is not this sweep's business"
+    assert "UNKNOWN  units" in text
     assert "row shape 'SOMETHING#ELSE' on lane Unit" in text, "a shape no rule describes is reported, never deleted"
-    assert "7 row(s) a lane token names are deliberately left" in text
+    assert "5 row(s) a rule reviewed and left" in text, "another tenant's rows are the proof, and they pass"
+    assert "1 row(s) a lane token names are UNRESOLVED" in text
+    assert "1 row(s) of this lane's own append-only history are retained on purpose and are NOT cleaned" in text
 
 
 def test_a_guard_needs_its_exact_campaign_identity(mod: ModuleType) -> None:
@@ -881,14 +902,16 @@ def test_a_guard_needs_its_exact_campaign_identity(mod: ModuleType) -> None:
     tokens, problems = mod.parse_lane_tokens([f"data-id={_LANE}", f"profile={_LANE_PROFILE}"])
     assert not problems, problems
 
-    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, tokens, out) == 0
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, tokens, out) == 1, (
+        "a guard nobody may be said to own is unresolved residue, not a survivor to pass over"
+    )
     deleted = {tuple(sorted(k.items())) for _t, k in d.deleted}
     text = out.getvalue()
 
     assert deleted == set(), "no Campaign token, no guard delete"
     assert (("pk", f"SCOUT_CAMPAIGN#CAMPAIGN#{_OTHER_CAMPAIGN}"), ("sk", "MEMBERSHIP_GUARD")) not in deleted
     assert "that Campaign is not named, and one profile holds a guard per Campaign" in text
-    assert "2 row(s) a lane token names are deliberately left" in text
+    assert "2 row(s) a lane token names are UNRESOLVED" in text
 
 
 def test_a_named_campaign_takes_the_guard_its_roster_row_points_at(mod: ModuleType) -> None:
@@ -942,7 +965,7 @@ def test_a_named_campaign_takes_the_guard_its_roster_row_points_at(mod: ModuleTy
 
 def test_the_lane_grant_and_its_own_membership_are_removed(mod: ModuleType) -> None:
     """The lane's own fixture grant and membership go; only a foreign principal survives."""
-    d = StubDynamo(_lane_rows())
+    d = StubDynamo(_lane_rows(residue=False))
 
     assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), io.StringIO()) == 0
     deleted = {tuple(sorted(k.items())) for _t, k in d.deleted}
@@ -1070,6 +1093,119 @@ def test_a_named_idempotency_key_never_reaches_another_actors_marker(mod: Module
     assert "names a lane resource but no fixture identity wrote it" in text
 
 
+def test_a_shape_no_rule_describes_fails_the_sweep_closed(mod: ModuleType) -> None:
+    """A lane token names the row and no reviewed rule describes it: nothing may call that clean.
+
+    Deleting it would be a guess about whose row it is, and passing over it is exactly how the earlier
+    sweep exited 0 with rows still on the table.  So it is ``UNKNOWN`` — never deleted, and the run that
+    could not attribute everything it named does not get a zero exit code.
+    """
+    rows = {"kernelworx-unit-campaigns-ue1-dev": [_item(pk=f"UNIT_CAMPAIGN#{_LANE_UC}", sk="REPORT#pending")]}
+    d = StubDynamo(rows)
+    out = io.StringIO()
+    tokens, problems = mod.parse_lane_tokens([f"unit-campaign={_LANE_UC}"])
+    assert not problems, problems
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, tokens, out) == 1
+    text = out.getvalue()
+
+    assert "UNKNOWN  unit-campaigns" in text
+    assert "row shape 'REPORT#pending' on lane Unit Campaign" in text
+    assert "1 row(s) a lane token names are UNRESOLVED" in text
+    assert d.deleted == [], "a row nobody reviewed is never deleted"
+
+
+def test_the_lanes_own_history_is_residue_the_gate_stays_open_on(mod: ModuleType) -> None:
+    """Retained audit trail is not a third party's row, and it is not a cleanup that happened.
+
+    The movement rows are the lane's own and the lane must not delete them, so reporting them as
+    ``kept`` would put them in the same class as another tenant's grant and let a sweep exit 0 with the
+    lane's writes still on the table.  They are ``HISTORY``, and the exit code stays non-zero even
+    though every position row in the same partition went — which is the owner's decision to accept, not
+    a flag on this command.
+    """
+    rows = {
+        "kernelworx-inventory-ue1-dev": [
+            _item(pk=f"UNIT_CAMPAIGN#{_LANE_UC}", sk="PRODUCT#p1#BALANCE", entityType="InventoryBalance"),
+            _item(
+                pk=f"UNIT_CAMPAIGN#{_LANE_UC}",
+                sk="PRODUCT#p1#MOVEMENT#2026-11-19T00:00:00Z#m1",
+                entityType="InventoryMovement",
+                actorAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+            ),
+        ]
+    }
+    d = StubDynamo(rows)
+    out = io.StringIO()
+    tokens, problems = mod.parse_lane_tokens([f"unit-campaign={_LANE_UC}"])
+    assert not problems, problems
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, tokens, out) == 1
+    text = out.getvalue()
+
+    assert [k["sk"] for _t, k in d.deleted] == ["PRODUCT#p1#BALANCE"], "the position goes, the trail stays"
+    assert "HISTORY  inventory" in text
+    assert "kept   inventory" not in text, "the lane's own trail is not another tenant's row"
+    assert "1 row(s) of this lane's own append-only history are retained on purpose and are NOT cleaned" in text
+
+
+def test_only_reviewed_foreign_survivors_leave_the_sweep_clean(mod: ModuleType) -> None:
+    """The other half, so the rule above is not just "any survivor is a failure".
+
+    A lane that shares a partition with a real tenant has to be able to report a clean teardown: the
+    rows a rule reviewed and attributed elsewhere survive, and that is the proof the tenant's data is
+    untouched.
+    """
+    d = StubDynamo(_lane_rows(residue=False))
+    out = io.StringIO()
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out) == 0
+    text = out.getvalue()
+
+    assert "UNKNOWN" not in text and "HISTORY" not in text
+    assert "5 row(s) a rule reviewed and left" in text
+    assert "a re-scan finds no row these rules call this lane" in text
+
+
+def test_a_verdict_this_command_does_not_know_about_fails_closed(
+    mod: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rule that answers with a fifth class must not land in the passing branch by default."""
+    monkeypatch.setattr(
+        mod, "_lane_rule", lambda label, item, tokens, subs: ("quarantine", "a class this command has never heard of")
+    )
+    d = StubDynamo({"kernelworx-units-ue1-dev": [_item(pk=f"UNIT#{_LANE_UNIT}", sk="METADATA")]})
+    out = io.StringIO()
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out) == 1
+    text = out.getvalue()
+
+    assert "rule verdict 'quarantine' is not one of" in text
+    assert d.deleted == []
+
+
+def test_every_rule_verdict_is_a_class_the_sweep_reports(mod: ModuleType) -> None:
+    """The rules and the report are one vocabulary, and a new verdict has to be registered in both."""
+    import ast
+
+    tree = ast.parse(SCRIPT_REL.read_text(encoding="utf-8"))
+    verdicts: set[str] = set()
+    for fn in ast.walk(tree):
+        if not (isinstance(fn, ast.FunctionDef) and fn.name.startswith("_rule_")):
+            continue
+        for ret in ast.walk(fn):
+            value = ret.value if isinstance(ret, ast.Return) else None
+            if isinstance(value, ast.Tuple) and value.elts:
+                first = value.elts[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    verdicts.add(first.value)
+
+    assert {"delete", "keep", "unknown", "history"} <= verdicts, sorted(verdicts)
+    assert verdicts <= set(mod.LANE_VERDICTS), (
+        f"a rule returned {sorted(verdicts - set(mod.LANE_VERDICTS))}, which sweep_lane_rows cannot classify"
+    )
+
+
 def test_attribution_alone_never_deletes_an_inventory_row(mod: ModuleType) -> None:
     """A fixture identity in the token set is not a lane boundary in the inventory table.
 
@@ -1078,7 +1214,7 @@ def test_attribution_alone_never_deletes_an_inventory_row(mod: ModuleType) -> No
     positions.  The inventory rule is the partition key: no ``unit-campaign`` token, no row is even
     reported, whatever else the sweep names.
     """
-    d = StubDynamo(_lane_rows())
+    d = StubDynamo(_lane_rows(residue=False))
     out = io.StringIO()
     tokens, problems = mod.parse_lane_tokens([f"data-id={_LANE}", f"unit={_LANE_UNIT}", f"profile={_LANE_PROFILE}"])
     assert not problems, problems
@@ -1090,7 +1226,7 @@ def test_attribution_alone_never_deletes_an_inventory_row(mod: ModuleType) -> No
 
 def test_a_join_code_never_reaches_the_report(mod: ModuleType) -> None:
     """A pointer row is planned and deleted, and its code is masked in the same breath."""
-    d = StubDynamo(_lane_rows())
+    d = StubDynamo(_lane_rows(residue=False))
     out = io.StringIO()
 
     assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out) == 0

@@ -723,6 +723,64 @@ def test_the_strict_cleanup_gate_is_an_environment_switch_not_a_code_default(
         )
 
 
+def test_a_sweep_report_is_judged_by_which_class_of_row_survived() -> None:
+    """A surviving row is not one thing: the class says whether the lane may call itself clean.
+
+    The sweeper's exit code only says something was left behind, and the lane used to read that as its
+    own pass or fail.  Another tenant's row surviving is the proof the sweep was narrow enough; a row
+    this lane's tokens named that no reviewed rule can attribute is residue nobody looked at, and is the
+    lane's failure; the lane's own append-only history is a residue the owner has to accept.
+    """
+    clean: dict[str, list[str]] = {"left": [], "failed": [], "unknown": [], "history": [], "blocked": []}
+
+    assert stage2.sweep_verdict(**clean) == stage2.CLEANUP_OBSERVED, (
+        "kept rows are not passed to this function: they are the sweep working as intended"
+    )
+    for cls in ("left", "failed", "unknown"):
+        assert stage2.sweep_verdict(**{**clean, cls: [f"{cls} inventory row"]}) == stage2.CLEANUP_FAILED, cls
+    for cls in ("history", "blocked"):
+        assert stage2.sweep_verdict(**{**clean, cls: [f"{cls} inventory row"]}) == stage2.CLEANUP_BLOCKED, cls
+    assert (
+        stage2.sweep_verdict(**{**clean, "unknown": ["UNKNOWN units row"], "blocked": ["BLOCKED table"]})
+        == stage2.CLEANUP_FAILED
+    ), "a survivor nobody can attribute outranks the permission that hid the rest"
+
+
+def test_retained_history_keeps_the_cleanup_gate_open_and_fails_a_strict_run() -> None:
+    """The lane cannot delete the audit trail, so it must not be able to report the table as clean either."""
+    rows = [
+        stage2.cleanup_row(
+            "§2.8.7 fixture sweep / lane",
+            "1 lane history row(s) retained (inventory 1)",
+            result=stage2.CLEANUP_BLOCKED,
+        )
+    ]
+
+    assert stage2.cleanup_problems(rows) == stage2.cleanup_blocked(rows)
+    assert stage2.cleanup_failures(rows) == [], "retained history is not the lane's fault"
+    with pytest.raises(stage2.StageTwoCleanupError):
+        stage2.assert_cleanup_clean(rows, strict=True)
+
+
+def test_the_lane_reads_every_survivor_class_and_never_passes_on_the_exit_code_alone() -> None:
+    """The report is only as good as the parser, so the classes have to survive the trip into the record."""
+    sweep = next(
+        node
+        for node in ast.walk(_spec_tree())
+        if isinstance(node, ast.FunctionDef) and node.name == "_lane_table_sweep"
+    )
+    source = ast.unparse(sweep)
+    support = Path(stage2.__file__).read_text(encoding="utf-8")
+
+    for cls in ("LEFT", "FAILED", "kept", "UNKNOWN", "HISTORY"):
+        assert f"startswith('{cls}')" in source, f"the lane stops seeing the sweeper's {cls} class"
+    assert 'line.startswith("BLOCKED")' in support, "a denied table still reaches the record"
+    assert "sweep_verdict" in source, "the verdict comes from the classes, not from a count"
+    assert "CLEANUP_FAILED" in source and "code" in source, (
+        "a non-zero exit the record cannot explain is a failed cleanup, not an observed one"
+    )
+
+
 def test_an_unrecognized_cleanup_verdict_is_refused_at_the_row() -> None:
     """There is no third verdict that means "fine, move on"."""
     with pytest.raises(AssertionError, match="unknown cleanup result"):

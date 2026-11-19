@@ -79,18 +79,32 @@ Two things keep it narrow, and both matter:
 
 After deleting, ``sweep`` re-scans and applies the same rules again, printing
 ``LEFT <table>/<key>`` for a lane row that survived (a ``delete_item`` that
-returned without an error is not evidence) and ``kept`` for a row a lane token
-names that the rules refuse to remove — a third party's ``GRANT#…`` or
-``MEMBERSHIP#…`` on a lane partition, a guard whose Campaign is not named, a
-marker no fixture identity wrote, or that movement history. A table the identity
-cannot read prints ``BLOCKED <table>: <denied action> is not granted to this
-identity (<error>)``: a denied scan is reported with the permission it is
-missing, never treated as an empty table and never reduced to a count. Measured
-on 2026-11-19, ``kernelworx-qa-ue1-dev`` is denied ``dynamodb:Scan`` and
-``dynamodb:DeleteItem`` on the Stage 2 inventory, orders and order-fulfillment
-tables, so those rows are a named finding until a grant lands — an IAM grant
-alone does not close the sweep, it only makes these tables readable enough for
-the rules to run. Any ``LEFT``, ``FAILED`` or ``BLOCKED`` line makes the exit
+returned without an error is not evidence) and one line per named row in the
+residue class it belongs to:
+
+* ``kept`` — a reviewed rule says the row belongs to someone else: a third
+  party's ``GRANT#…`` or ``MEMBERSHIP#…`` on a lane partition, a foreign custody
+  row, a marker no fixture identity wrote.  It survives, and that survival is the
+  proof another tenant's data is untouched, so it does not fail the sweep.
+* ``UNKNOWN`` — a lane token names the row and no reviewed rule describes its
+  shape, or it cannot be attributed either way (a guard whose Campaign is not
+  named).  Never deleted, and the sweep fails closed: residue nobody reviewed is
+  not a clean result.
+* ``HISTORY`` — the lane's own append-only ``InventoryMovement`` rows, which the
+  lane must not delete.  They are the lane's residue, so they are never reported
+  as cleaned: that gate stays open until the owner accepts the residual, which is
+  a checklist decision and deliberately not a flag on this command.
+
+A table the identity cannot read prints ``BLOCKED <table>: <denied action> is not
+granted to this identity (<error>)``: a denied scan is reported with the
+permission it is missing, never treated as an empty table and never reduced to a
+count. Measured on 2026-11-19, ``kernelworx-qa-ue1-dev`` is denied
+``dynamodb:Scan`` and ``dynamodb:DeleteItem`` on the Stage 2 inventory, orders
+and order-fulfillment tables, so those rows are a named finding until a grant
+lands — an IAM grant alone does not close the sweep, it only makes these tables
+readable enough for the rules to run, and once they are readable the retained
+history still leaves the sweep non-zero. Any ``LEFT``, ``FAILED``, ``UNKNOWN``,
+``HISTORY`` or ``BLOCKED`` line makes the exit
 code non-zero. The identities are never touched. See ``docs/QA_FIXTURE_RUNBOOK.md``.
 
 Teardown is deliberate: ``down`` prints its full plan first, asks before it
@@ -423,6 +437,12 @@ TOKEN_SHAPES: dict[str, tuple[str, int]] = {
     "idem": (r"[A-Za-z][A-Za-z0-9_-]{7,127}", 8),
 }
 
+#: What a lane rule may answer, and what each answer does to the exit code.  The distinction between
+#: the last three is the whole point: a row the rules reviewed and attributed to someone else may
+#: survive a sweep; a row nobody reviewed, or the lane's own audit history, may not be reported as
+#: cleaned.  A false-clean sweep is the defect this exists to prevent.
+LANE_VERDICTS: tuple[str, ...] = ("delete", "keep", "unknown", "history")
+
 
 def parse_lane_tokens(values: Iterable[str]) -> tuple[dict[str, set[str]], list[str]]:
     """Read ``kind=value`` lane tokens, and return every way one fails the shape it claims.
@@ -516,7 +536,7 @@ def _rule_units(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str
             return "delete", f"Unit Admin grant held by a fixture identity on lane Unit {unit}"
         who = ", ".join(foreign) or _mask_secret(sk)
         return "keep", f"grant on lane Unit {unit} names {who}: not a fixture identity"
-    return "keep", f"row shape {sk!r} on lane Unit {unit} is not described by any rule"
+    return "unknown", f"row shape {sk!r} on lane Unit {unit} is not described by any rule"
 
 
 def _rule_marker(pk: str, sk: str, tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
@@ -593,7 +613,7 @@ def _rule_unit_campaigns(item: dict[str, Any], tokens: dict[str, set[str]], subs
                 "keep",
                 f"membership of profile {profile} on lane Unit Campaign {campaign}: that profile is not this lane's",
             )
-        return "keep", f"row shape {sk!r} on lane Unit Campaign {campaign} is not described by any rule"
+        return "unknown", f"row shape {sk!r} on lane Unit Campaign {campaign} is not described by any rule"
     if pk.startswith("SCOUT_CAMPAIGN#"):
         campaign = _bare(pk[len("SCOUT_CAMPAIGN#") :], "CAMPAIGN")
         profile = _bare(flat.get("profileId", ""), "PROFILE")
@@ -602,12 +622,12 @@ def _rule_unit_campaigns(item: dict[str, Any], tokens: dict[str, set[str]], subs
         if sk == "MEMBERSHIP_GUARD":
             if campaign not in tokens["campaign"]:
                 return (
-                    "keep",
+                    "unknown",
                     f"active-join guard of profile {profile}'s Scout Campaign {campaign}: that Campaign is not "
                     "named, and one profile holds a guard per Campaign, so a profile token cannot say which is joined",
                 )
             return "delete", f"active-join guard of lane Scout Campaign {campaign}"
-        return "keep", f"row shape {sk!r} for lane Scout Campaign {campaign} is not described by any rule"
+        return "unknown", f"row shape {sk!r} for lane Scout Campaign {campaign} is not described by any rule"
     if pk.startswith("JOIN_CODE#"):
         code = pk[len("JOIN_CODE#") :]
         unit_campaign = _bare(flat.get("unitCampaignId", ""), "CAMPAIGN")
@@ -629,12 +649,15 @@ def _rule_inventory(item: dict[str, Any], tokens: dict[str, set[str]], subs: set
     pool, is not this lane's to delete.  Attribution alone never deletes anything here: a row in a
     partition no ``unit-campaign`` token names is not reported at all.
 
-    The movement rows are reported separately and never deleted.  ``src/utils/inventory_models.py``
-    describes ``InventoryMovement`` as an immutable audit record, and ``build_movement_sk`` mints one
-    row per write (``PRODUCT#<id>#MOVEMENT#<moment>#<n>``): deleting it would rewrite the trail an
-    acceptance run exists to prove, and it is what an auditor or an accounting backfill reads after
-    the lane is gone.  Every other row in the partition is a position a lane's own return and
-    reconcile steps drove to zero, so taking it back is teardown, not evidence.
+    The movement rows are the lane's own residue, reported as ``history`` and never deleted.
+    ``src/utils/inventory_models.py`` describes ``InventoryMovement`` as an immutable audit record, and
+    ``build_movement_sk`` mints one row per write (``PRODUCT#<id>#MOVEMENT#<moment>#<n>``): deleting it
+    would rewrite the trail an acceptance run exists to prove, and it is what an auditor or an
+    accounting backfill reads after the lane is gone.  Every other row in the partition is a position a
+    lane's own return and reconcile steps drove to zero, so taking it back is teardown, not evidence.
+    Leaving it is not the same as cleaning it though, so it is not a ``keep``: a ``keep`` is a reviewed
+    rule saying the row belongs to somebody else, and this row is this lane's.  It is residue the gate
+    has to keep open until the owner says otherwise.
     """
     flat = _strings(item)
     pk = flat.get("pk", "")
@@ -654,7 +677,7 @@ def _rule_inventory(item: dict[str, Any], tokens: dict[str, set[str]], subs: set
         return "keep", f"inventory row in lane Unit Campaign {campaign} written by {actor}, not a fixture identity"
     if flat.get("entityType") == "InventoryMovement" or "#MOVEMENT#" in flat.get("sk", ""):
         return (
-            "keep",
+            "history",
             f"append-only inventory movement history in lane Unit Campaign {campaign}: immutable audit record, "
             "reported as history this sweep does not delete",
         )
@@ -687,11 +710,21 @@ def _rule_fulfillments(item: dict[str, Any], tokens: dict[str, set[str]]) -> tup
 
 
 def _lane_rule(label: str, item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
-    """Whether one row belongs to this lane, and why — or why a lane token is not enough to delete it.
+    """One reviewed rule's verdict on one row a lane token named, or ``None`` for "not this sweep's business".
 
-    Every key shape an acceptance lane writes has its own rule here, written against the builders
-    that mint it.  A row a lane token names whose shape no rule describes comes back as ``keep``:
-    visible in the record, never deleted, and never counted as a clean sweep.
+    Every key shape an acceptance lane writes has its own rule here, written against the builders that
+    mint it, and each rule returns one of :data:`LANE_VERDICTS`:
+
+    ``delete``   the row is this lane's and a rule says to take it;
+    ``keep``     a rule reviewed the row and says it belongs to someone else — another account's grant,
+                 another profile's membership or custody, a marker another actor wrote.  It survives,
+                 and its survival is the proof that another tenant's data is untouched, so it does not
+                 fail the sweep;
+    ``unknown``  a lane token names the row and no reviewed rule describes its shape, or the row cannot
+                 be attributed either way (a guard whose Campaign no token names).  Nothing is deleted
+                 and the sweep fails closed: residue nobody reviewed is never a clean result;
+    ``history``  the lane's own append-only audit rows, which the lane must not delete and the sweep
+                 must not report as cleaned.  A gate the owner has to accept, not a pass.
     """
     if label == "accounts":
         return None  # identities outlive a lane sweep: the next run needs them
@@ -883,18 +916,26 @@ def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], ou
 
     A row is deleted only when a reviewed rule for its key shape says it belongs to this lane, so
     the sweep neither depends on the row carrying a fixture identity nor reaches rows the rules do
-    not describe.  The read-back re-applies the same rules and prints:
+    not describe.  The read-back re-applies the same rules and prints one line per row the lane
+    tokens named, in the four classes :data:`LANE_VERDICTS` defines:
 
     ``LEFT``     a lane row the delete did not take — a failure;
-    ``kept``     a row a lane token names that the rules refuse to delete — a third party's grant or
-                 membership on a lane partition, a foreign custody row, a guard whose Scout Campaign
-                 is not named exactly, a marker no fixture identity wrote, or the lane's own
-                 append-only movement history.  Every one is reported, and the first four are the
-                 proof that another tenant's data survives;
+    ``kept``     a row a reviewed rule says belongs to someone else — a third party's grant or
+                 membership on a lane partition, a foreign custody row, a marker no fixture identity
+                 wrote.  Reported, and the proof that another tenant's data survives; it does not fail
+                 the sweep, because the sweep was never meant to take that row;
+    ``UNKNOWN``  a row a lane token names in a shape no reviewed rule describes, or one that cannot be
+                 attributed either way (a guard whose Scout Campaign no token names).  Never deleted,
+                 and the sweep fails closed: residue nobody reviewed is not a clean result;
+    ``HISTORY``  this lane's own append-only audit rows, which the lane must not delete.  They are the
+                 lane's residue, so they are not ``kept`` either: the gate stays open until the owner
+                 accepts the residual, which is a checklist decision rather than a flag here;
     ``BLOCKED``  a table this identity cannot read, named with the action it is denied — its lane
-                 rows are neither removed nor proven absent, so the sweep fails.
+                 rows are neither removed nor proven absent.
 
-    The identities are never touched: ``sweep_lane_rows`` is not even given the Cognito client.
+    Any ``LEFT``, ``FAILED``, ``UNKNOWN``, ``HISTORY`` or ``BLOCKED`` line makes the exit code
+    non-zero.  The identities are never touched: ``sweep_lane_rows`` is not even given the Cognito
+    client.
     """
     wanted = {s for s in subs if s}
     if not wanted:
@@ -911,6 +952,8 @@ def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], ou
 
     plan: list[tuple[str, str, dict[str, str], str]] = []
     kept: list[str] = []
+    unknown: list[str] = []
+    history: list[str] = []
     blocked: list[str] = []
     denied: list[str] = []
     scanned: list[str] = []
@@ -926,8 +969,16 @@ def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], ou
             key = _mask_secret("/".join(key_vals.values()))
             if decision == "delete":
                 plan.append((label, key, dict(key_vals), reason))
-            else:
+            elif decision == "unknown":
+                unknown.append(f"UNKNOWN  {label:<18} {key}  [{reason}]")
+            elif decision == "history":
+                history.append(f"HISTORY  {label:<18} {key}  [{reason}]")
+            elif decision == "keep":
                 kept.append(f"kept   {label:<18} {key}  [{reason}]")
+            else:
+                # A rule that answers with a class this command does not know about is not evidence of
+                # anything, and reading it as a reviewed ``keep`` is exactly how a false clean returns.
+                unknown.append(f"UNKNOWN  {label:<18} {key}  [rule verdict {decision!r} is not one of {LANE_VERDICTS}]")
 
     print(f"plan: sweep {named} lane token(s) over {len(SWEEP_TABLES)} table(s)", file=out)
     for line in scanned:
@@ -936,6 +987,10 @@ def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], ou
         print(f"  {line}", file=out)
     for label, key, _key_doc, reason in plan:
         print(f"  row    {label:<18} {key}  [{reason}]", file=out)
+    for line in unknown:
+        print(f"  {line}", file=out)
+    for line in history:
+        print(f"  {line}", file=out)
     for line in kept:
         print(f"  {line}", file=out)
     if not plan:
@@ -951,7 +1006,9 @@ def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], ou
             failures += 1
             print(f"  FAILED row   {label:<18} {key}  {type(exc).__name__}", file=out)
 
-    # Read-back: a delete_item that returned without an error is not evidence on its own.
+    # Read-back: a delete_item that returned without an error is not evidence on its own.  A ``kept``,
+    # ``unknown`` or ``history`` row is expected to still be here, so only a ``delete`` row re-appearing
+    # is a failure.
     for label, (table, _key_names, _owner_attr) in SWEEP_TABLES.items():
         if any(line.startswith(f"BLOCKED {table}") for line in blocked):
             continue
@@ -968,8 +1025,21 @@ def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], ou
                 print(f"  LEFT   {label:<18} {key}  [{reason}]", file=out)
     if kept:
         print(
-            f"  {len(kept)} row(s) a lane token names are deliberately left: another tenant's row on a "
-            "lane partition, a row whose identity no token names exactly, or append-only history",
+            f"  {len(kept)} row(s) a rule reviewed and left: another tenant's row on a lane partition, "
+            "which this sweep was never meant to take",
+            file=out,
+        )
+    if unknown:
+        print(
+            f"  {len(unknown)} row(s) a lane token names are UNRESOLVED: no reviewed rule describes that shape, "
+            "or the row cannot be attributed either way.  Nothing deleted them and the sweep cannot say they are "
+            "this lane's, so it fails closed",
+            file=out,
+        )
+    if history:
+        print(
+            f"  {len(history)} row(s) of this lane's own append-only history are retained on purpose and are "
+            "NOT cleaned: that residual is the owner's to accept, not this command's",
             file=out,
         )
     if blocked:
@@ -978,7 +1048,7 @@ def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], ou
             "lane rows are neither removed nor proven absent, and the permission named there is what to ask for",
             file=out,
         )
-    if failures or blocked:
+    if failures or blocked or unknown or history:
         return 1
     print(
         f"  swept {len(plan)} row(s); a re-scan finds no row these rules call this lane's",

@@ -124,6 +124,7 @@ DynamoDB
 EEYQ
 EFGH
 elif
+elts
 emailAddress
 emoji
 emojis

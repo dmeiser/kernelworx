@@ -636,12 +636,18 @@ def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
     sweeper's per-key-shape rules decide which of them to delete, then re-scan to prove the delete
     landed.  Attribution is not enough on its own, and that was a review finding: an inventory balance
     or Scout custody row carries no account at all, only a Unit Campaign and a product, and a join-code
-    pointer carries a campaign id and a timestamp — the shapes a lane actually leaves behind.  A row a
-    token names that a rule refuses survives and is counted as refused, which is the proof that another
-    tenant's data is untouched: another account's grant, another profile's roster membership or
-    custody, a guard whose Scout Campaign no token names exactly (one profile holds a guard per
-    Campaign), a marker no fixture identity wrote, and the lane's own append-only movement history,
-    which is audit trail rather than teardown.
+    pointer carries a campaign id and a timestamp — the shapes a lane actually leaves behind.
+
+    Three classes of surviving row are reported apart, and only the first may pass.  A row a reviewed
+    rule attributed to someone else (``kept``: another account's grant, another profile's roster
+    membership or custody, a marker no fixture identity wrote) survives, and that survival is the proof
+    another tenant's data is untouched.  A row this lane's tokens named that no rule describes, or that
+    cannot be attributed either way (``UNKNOWN``, including a guard whose Scout Campaign no token names
+    — one profile holds a guard per Campaign and every lane shares the fixture identities), fails the
+    sweep closed: residue nobody reviewed is never a clean lane.  And the lane's own append-only movement
+    rows (``HISTORY``) are neither another tenant's nor deletable, so they stay an open gate —
+    :func:`tests.e2e.utils.show_sell_stage2_support.sweep_verdict` records them as blocked, which a
+    strict run turns into a failure, until the owner accepts that residue.
 
     A table the fixture identity cannot read is a ``blocked`` row carrying the sweeper's own
     ``BLOCKED <table>: <action> is not granted to this identity (<error>)`` line, and the counts name
@@ -655,6 +661,8 @@ def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
     left = [line for line in lines if line.startswith("LEFT")]
     failed_rows = [line for line in lines if line.startswith("FAILED")]
     kept = [line for line in lines if line.startswith("kept")]
+    unknown = [line for line in lines if line.startswith("UNKNOWN")]
+    history = [line for line in lines if line.startswith("HISTORY")]
 
     def by_table(prefix: str, index: int) -> str:
         """How many of the sweeper's rows for one verdict fell in each table, by table label only.
@@ -720,27 +728,52 @@ def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
 
     counts = (
         f"{deleted} row(s) deleted ({by_table('deleted row', 2) or 'none'}; shapes: {shapes() or 'none'}), "
-        f"{len(left)} left, {len(failed_rows)} delete(s) failed, {len(kept)} row(s) a rule refused "
-        f"({by_table('kept', 1) or 'none'})"
+        f"{len(left)} left, {len(failed_rows)} delete(s) failed, "
+        f"{len(kept)} row(s) reviewed as another tenant's ({by_table('kept', 1) or 'none'}), "
+        f"{len(unknown)} unresolved residue row(s) ({by_table('UNKNOWN', 1) or 'none'}), "
+        f"{len(history)} lane history row(s) retained ({by_table('HISTORY', 1) or 'none'})"
         + (f", {len(blocked)} table(s) unreadable ({unreadable()})" if blocked else ", 0 table(s) unreadable")
     )
-    if code == 0 and not blocked:
+
+    verdict = stage2.sweep_verdict(left=left, failed=failed_rows, unknown=unknown, history=history, blocked=blocked)
+    if verdict == stage2.CLEANUP_OBSERVED and code != 0:
+        # The sweeper says it failed and no class the record can see explains why.  Guessing "clean"
+        # from a report the parser does not fully understand is the false-clean this whole gate exists
+        # to prevent, so a disagreement between the exit code and the report is the lane's failure.
+        verdict = stage2.CLEANUP_FAILED
+
+    if verdict == stage2.CLEANUP_OBSERVED:
         return [
             stage2.cleanup_row(
                 f"§2.8.7 fixture sweep / {label}",
                 f"scripts/qa_fixture.py sweep --lane {argv_tail} exited 0: {counts}; the re-scan finds no "
-                "row these rules call this lane's, and a row a token names that a rule refused is a "
-                "third party's on this partition (the report lines are not echoed here: an idempotency "
-                "marker's key carries a join code, and the sweeper masks payloads for the same reason)",
+                "row these rules call this lane's, and every survivor is a row a reviewed rule attributed "
+                "to another tenant (the report lines are not echoed here: an idempotency marker's key "
+                "carries a join code, and the sweeper masks payloads for the same reason)",
             )
         ]
-    detail = "; ".join([*(line[:160] for line in (left + failed_rows)[:4]), *(line[:200] for line in blocked)])
+    detail = "; ".join(
+        [
+            *(line[:160] for line in (left + failed_rows + unknown)[:4]),
+            *(line[:200] for line in (history + blocked)[:4]),
+        ]
+    )
+    why = (
+        "a row this lane's tokens named could not be attributed either way, so the sweep fails closed"
+        if unknown
+        else "the lane's own append-only history is still on the stack, which is a residue the owner has "
+        "to accept rather than a cleanup that happened"
+        if history
+        else "a row this lane wrote is still there"
+        if left or failed_rows
+        else "the sweep could not read every Stage 2 table for this identity"
+    )
     return [
         stage2.cleanup_row(
             f"§2.8.7 fixture sweep / {label}",
-            f"scripts/qa_fixture.py sweep --lane {argv_tail} exited {code}: {counts}"
-            + (f" — {detail}" if detail else ""),
-            result=stage2.CLEANUP_BLOCKED if blocked else stage2.CLEANUP_FAILED,
+            f"scripts/qa_fixture.py sweep --lane {argv_tail} exited {code}: {counts} — {why}"
+            + (f"; {detail}" if detail else ""),
+            result=verdict,
         )
     ]
 

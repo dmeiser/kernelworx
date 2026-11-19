@@ -160,12 +160,13 @@ written against the builders that mint it (`unit_models.py`,
 | `UNIT#<unitId>/GRANT#ACCOUNT#…` | delete when every account in the grant is a fixture identity; a third party's grant on a lane Unit is reported and kept |
 | `UNIT_CAMPAIGN#<id>/METADATA` | delete when `createdByAccountId` names a fixture identity |
 | `UNIT_CAMPAIGN#<id>/MEMBERSHIP#PROFILE#…` | delete when the row's `profileId` is a lane profile; another profile's membership is reported and kept |
-| `SCOUT_CAMPAIGN#<id>/MEMBERSHIP_GUARD` | delete only when that Campaign id is itself a named `campaign` token; a guard reached through a `profile` token alone is reported as unresolved and kept, because one profile holds a guard per Campaign and every lane shares the fixture identities |
+| `SCOUT_CAMPAIGN#<id>/MEMBERSHIP_GUARD` | delete only when that Campaign id is itself a named `campaign` token; a guard reached through a `profile` token alone is **unresolved** — never deleted, reported `UNKNOWN`, and the sweep fails — because one profile holds a guard per Campaign and every lane shares the fixture identities |
 | `JOIN_CODE#<code>/POINTER` | delete when the code or its `unitCampaignId` is the lane's |
 | `IDEM#<actor>#<op>#<scope>` / `IDEM#<key>` | delete only when a fixture identity wrote it, and then when the key is named, carries the lane's `DATA_ID` prefix, or a fixture actor wrote it scoped to a lane resource. The idempotency key is caller-supplied, so the same key can exist for another actor: an exact `idem` token naming a marker no fixture identity wrote is reported and kept, as is a marker naming a lane resource that no fixture identity wrote. A marker no token says anything about is not reported at all, because the table holds every earlier run's markers |
-| `inventory`, `UNIT_CAMPAIGN#<id>` | delete that campaign's balances, custody and allocations — and only rows in a campaign a `unit-campaign` token names, never on attribution alone; its `#MOVEMENT#` rows are the append-only audit trail and are reported as history, not deleted. A custody row for a profile the lane did not name, or a movement whose `actorAccountId` is outside the fixture pool, is reported and kept |
+| `inventory`, `UNIT_CAMPAIGN#<id>` | delete that campaign's balances, custody and allocations — and only rows in a campaign a `unit-campaign` token names, never on attribution alone; its `#MOVEMENT#` rows are the append-only audit trail and are reported as `HISTORY`, not deleted, which leaves the sweep non-zero until the owner accepts that residue. A custody row for a profile the lane did not name, or a movement whose `actorAccountId` is outside the fixture pool, is reported and kept |
 | `orders` `{campaignId, orderId}` | delete when the Order's campaign or its id is the lane's |
 | `order-fulfillments`, `pk = ORDER#…` | delete when that Order is the lane's |
+| any other shape on a partition a token names | **Unresolved.** No reviewed rule describes it, so nothing is deleted and the sweep fails closed: residue nobody reviewed is never a clean result |
 
 Attribution alone cannot carry this. An inventory balance or Scout custody row
 carries no account at all (only a movement row has `actorAccountId`), a join-code
@@ -177,17 +178,21 @@ lane never reaches a third party's grant, membership, custody or marker on a
 partition it names. Attribution is not a substitute for exact identity either: a
 guard is one row per Scout Campaign, so only its Campaign id selects it, and an
 idempotency key is caller-supplied, so only a fixture author makes a marker the
-lane's. A row whose shape no rule describes is reported `kept` and never deleted.
+lane's. A row whose shape no rule describes is **not** a keep: it is `UNKNOWN`,
+never deleted, and the sweep fails on it.
 
 `sweep` then re-scans and applies the same rules, printing `LEFT <table>/<key>`
 for a lane row the delete did not take (a `delete_item` that returned without an
-error is not evidence), `kept <table> <key> [reason]` for a row a lane token names
-that a rule refuses — which is the proof that another tenant's data survives — and
+error is not evidence), and one line per surviving row in the class it belongs
+to: `kept` for a row a reviewed rule attributed to someone else — the proof that
+another tenant's data survives, and the only survivor that does not fail the
+sweep; `UNKNOWN` for a named row no rule describes or cannot attribute either
+way; `HISTORY` for this lane's own append-only movement rows; and
 `BLOCKED <table>: <action> is not granted to this identity (<error>)` for a table
 the identity cannot read, because a denied scan is never treated as an empty table
-and never reduced to a count. Any `LEFT`, `FAILED` or `BLOCKED` line makes the
-exit code non-zero. The identities are never touched: `sweep_lane_rows` is not
-even given the Cognito client.
+and never reduced to a count. Any `LEFT`, `FAILED`, `UNKNOWN`, `HISTORY` or
+`BLOCKED` line makes the exit code non-zero. The identities are never touched:
+`sweep_lane_rows` is not even given the Cognito client.
 
 Measured again on 2026-11-19 with the Stage 2 lane tables added to
 `SWEEP_TABLES`: `accounts`, `units` and `unit-campaigns` read and delete;
@@ -197,10 +202,13 @@ Measured again on 2026-11-19 with the Stage 2 lane tables added to
 finding until the table grant lands, and the grant alone does not close it: what
 it buys is that the inventory and order rules above can actually run against
 those tables, and even then the movement history stays because it is audit trail,
-not residue. `tests/e2e/test_smoke_show_sell_stage2.py` calls this command in its
-teardown and records what it reported — rows deleted by table and by shape, rows a
-rule refused, and tables it could not read together with the action each one is
-missing — so a lane cannot claim a clean sweep it did not get.
+which is why the sweep still exits non-zero and the Stage 2 lane records that
+residue as a gate that is not met rather than as a cleanup that happened.
+`tests/e2e/test_smoke_show_sell_stage2.py` calls this command in its
+teardown and records what it reported — rows deleted by table and by shape, rows
+reviewed as another tenant's, unresolved residue, retained history, and tables it
+could not read together with the action each one is missing — so a lane cannot
+claim a clean sweep it did not get.
 
 ### AWS identity
 
