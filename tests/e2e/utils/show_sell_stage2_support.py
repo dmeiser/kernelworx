@@ -469,16 +469,18 @@ def fixture_sweep(tokens: Sequence[str]) -> tuple[int, list[str], list[str]]:
     ``scripts/qa_fixture.py`` checks each against the stored shape of that kind before reading a table.
     The sweeper then applies one reviewed rule per key shape, deletes what a rule says belongs to this
     lane, re-scans, and reports what survived (``LEFT``), what a rule refused (``kept``: another
-    tenant's grant, membership, custody or marker on a partition this lane named), and what it could not
-    read (``BLOCKED``).  Nothing here removes a row directly.
+    tenant's grant, membership, custody or marker on a partition this lane named, a guard whose Scout
+    Campaign no token names exactly, and the lane's own append-only movement history), and what it could
+    not read (``BLOCKED``).  Nothing here removes a row directly.
 
     Returns:
         ``(exit code, blocked lines, report lines)``.  Exit code 0 means every row a rule called this
         lane's was deleted and the re-scan found none of them left.  A ``BLOCKED`` line names a table the
-        fixture identity cannot read — measured on dev on 2026-11-19, ``kernelworx-inventory-ue1-dev``,
-        ``kernelworx-orders-ue1-dev`` and ``kernelworx-order-fulfillments-ue1-dev`` all deny
-        ``dynamodb:Scan`` to ``kernelworx-qa-ue1-dev`` — which is an owner or infrastructure
-        decision, not something the lane can code around.
+        fixture identity cannot read together with the action it is denied — measured on dev on
+        2026-11-19, ``kernelworx-inventory-ue1-dev``, ``kernelworx-orders-ue1-dev`` and
+        ``kernelworx-order-fulfillments-ue1-dev`` all deny ``dynamodb:Scan`` (and ``dynamodb:DeleteItem``)
+        to ``kernelworx-qa-ue1-dev`` — which is an owner or infrastructure decision, not something the
+        lane can code around.
     """
     argv = [sys.executable, str(QA_FIXTURE_SCRIPT), "sweep", "--yes"]
     for token in tokens:

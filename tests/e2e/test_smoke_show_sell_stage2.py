@@ -637,14 +637,17 @@ def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
     landed.  Attribution is not enough on its own, and that was a review finding: an inventory balance
     or Scout custody row carries no account at all, only a Unit Campaign and a product, and a join-code
     pointer carries a campaign id and a timestamp — the shapes a lane actually leaves behind.  A row a
-    token names that a rule refuses (another account's grant, another profile's roster membership or
-    custody, a movement written outside the fixture pool) survives and is counted as refused, which is
-    the proof that another tenant's data is untouched.
+    token names that a rule refuses survives and is counted as refused, which is the proof that another
+    tenant's data is untouched: another account's grant, another profile's roster membership or
+    custody, a guard whose Scout Campaign no token names exactly (one profile holds a guard per
+    Campaign), a marker no fixture identity wrote, and the lane's own append-only movement history,
+    which is audit trail rather than teardown.
 
     A table the fixture identity cannot read is a ``blocked`` row carrying the sweeper's own
-    ``BLOCKED <table>: <error>`` line: on dev the QA identity is denied ``dynamodb:Scan`` on the Stage
-    2 inventory, orders and order-fulfillment tables, so those rows are neither removed nor proven
-    absent.  That is reported as a gate that is *not met* rather than as a cleanup that succeeded.
+    ``BLOCKED <table>: <action> is not granted to this identity (<error>)`` line, and the counts name
+    that action too: on dev the QA identity is denied ``dynamodb:Scan`` on the Stage 2 inventory,
+    orders and order-fulfillment tables, so those rows are neither removed nor proven absent.  That is
+    reported as a gate that is *not met* rather than as a cleanup that succeeded.
     """
     argv_tail = " ".join(tokens)
     code, blocked, lines = stage2.fixture_sweep(tokens)
@@ -701,10 +704,25 @@ def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
                     break
         return ", ".join(f"{count} {shape}" for shape, count in sorted(counts.items()))
 
+    def unreadable() -> str:
+        """Each table the sweep could not read, with the permission it is missing.
+
+        A count of blocked tables tells the reader the sweep is incomplete; the action in the
+        sweeper's own ``BLOCKED`` line is the thing to ask an owner for.  On dev that is
+        ``dynamodb:Scan`` on the Stage 2 inventory, orders and order-fulfillment tables.
+        """
+        parts: list[str] = []
+        for line in blocked:
+            table, sep, rest = line[len("BLOCKED") :].strip().partition(": ")
+            action = rest.split(" is not granted")[0] if sep else ""
+            parts.append(f"{table}: {action or 'read failed'}")
+        return "; ".join(parts)
+
     counts = (
         f"{deleted} row(s) deleted ({by_table('deleted row', 2) or 'none'}; shapes: {shapes() or 'none'}), "
         f"{len(left)} left, {len(failed_rows)} delete(s) failed, {len(kept)} row(s) a rule refused "
-        f"({by_table('kept', 1) or 'none'}), {len(blocked)} table(s) unreadable"
+        f"({by_table('kept', 1) or 'none'})"
+        + (f", {len(blocked)} table(s) unreadable ({unreadable()})" if blocked else ", 0 table(s) unreadable")
     )
     if code == 0 and not blocked:
         return [
@@ -1037,9 +1055,11 @@ def _lane_sweep_tokens(data_id: str, built: dict[str, Any]) -> list[str]:
     * ``order`` — the Orders the lane sold, in the ``ORDER#<campaign>#<suffix>`` spelling ``build_order_id``
       mints, which is also the fulfillment partition key.
 
-    A prior run's join code and Scout Campaign id are not recoverable once its profile is gone, which
-    is why :func:`_sweep_prior_lanes` names what its reads can still see and the sweep's guard and
-    membership rules match those rows by the ``profileId`` the builders write.
+    A prior run's join code is not recoverable once its Unit Campaign rows are gone, and its Scout
+    Campaign ids are read from that Campaign's roster before its profile is deleted — which is what
+    lets :func:`_sweep_prior_lanes` name an active-join guard exactly.  A guard it cannot name is left
+    and reported: matching a guard by ``profileId`` alone would reach every Campaign that shared
+    fixture Scout has ever joined, including another lane's.
     """
     tokens: list[str] = []
 
@@ -1258,8 +1278,12 @@ def _sweep_prior_lanes(
     something.
 
     The product path reaches the seller profile (whose cascade takes the Scout Campaign and its
-    Orders) and can only deactivate a Unit Campaign; the Unit and Unit Campaign rows themselves go
-    through the fixture sweep, which is why the verification read comes after it.
+    Orders) and can only deactivate a Unit Campaign; the Unit and Unit Campaign rows, the roster row
+    a removal keeps, and the active-join guard a removal keeps go through the fixture sweep, which is
+    why the verification read comes after it.  The sweep reaches a guard only by its exact Scout
+    Campaign id, so this reads the roster of each prior Unit Campaign while the join still exists and
+    names those ids: a guard it cannot name is reported by the sweep as unresolved rather than deleted
+    on the strength of a shared fixture profile.
     """
     admin_token = _token_for(identities["admin"])
     scout_token = _token_for(identities["scout"])
@@ -1289,6 +1313,7 @@ def _sweep_prior_lanes(
 
         unit_id = unit_rows().get(number)
         campaign_ids: list[str] = []
+        scout_campaign_ids: list[str] = []
         found_campaigns = 0
         active_off = 0
         if unit_id:
@@ -1300,6 +1325,23 @@ def _sweep_prior_lanes(
                     continue
                 found_campaigns += 1
                 campaign_ids.append(str(row["unitCampaignId"]))
+                # The roster of a Unit Campaign this run named holds only that run's joins, and it
+                # answers the Scout Campaign id each join used — the exact identity the sweep's
+                # active-join guard rule needs.  Read it here, while the join still exists.
+                scout_campaign_ids += [
+                    _bare_id(str(r.get("campaignId") or ""), "CAMPAIGN")
+                    for r in (
+                        (
+                            api.gql(
+                                admin_token,
+                                documents["roster"],
+                                {"unitCampaignId": str(row["unitCampaignId"])},
+                            ).get("unitCampaignRoster")
+                            or {}
+                        ).get("items")
+                        or []
+                    )
+                ]
                 if not row.get("isActive"):
                     continue
                 api.gql(
@@ -1326,13 +1368,16 @@ def _sweep_prior_lanes(
             api.gql(scout_token, documents["deleteProfile"], {"profileId": profile_id})
 
         # Those reads are what this run can honestly name about an earlier one: its Unit, the Unit
-        # Campaigns under it, and the seller profile whose name carries its DATA_ID.  The roster row and
-        # the active-join guard a removal left behind are reached from that profile id, because
-        # ``build_membership_item`` and ``build_membership_guard_item`` both write a ``profileId``.
+        # Campaigns under it, those Campaigns' roster joins, and the seller profile whose name carries
+        # its DATA_ID.  The roster read names each prior Scout Campaign exactly, which is what the
+        # sweep's guard rule needs: ``build_membership_guard_item`` writes one guard per Scout Campaign
+        # and every lane shares the four fixture identities, so a ``profile`` token alone cannot say
+        # which of that person's Campaigns is joined without reaching another run's guard.
         prior_tokens = _lane_sweep_tokens(data_id, {})
         if unit_id:
             prior_tokens.append(f"unit={_bare_id(unit_id, 'UNIT')}")
         prior_tokens += [f"unit-campaign={_bare_id(uc, 'CAMPAIGN')}" for uc in campaign_ids]
+        prior_tokens += [f"campaign={cid}" for cid in dict.fromkeys(scout_campaign_ids) if cid]
         prior_tokens += [f"profile={_bare_id(p, 'PROFILE')}" for p in profiles_found]
         # The sweep runs even when the three reads answer nothing: a prior run's idempotency markers
         # are keyed on that run's DATA_ID alone, and the sweep reaches them when its Unit row is long gone.
@@ -1386,10 +1431,11 @@ def _sweep_prior_lanes(
             stage2.cleanup_row(
                 "§2.8.7 prior-lane sweep",
                 f"{data_id}: found {found_campaigns} Unit Campaign(s) on Unit {unit_id or 'no row for number ' + str(number)} "
-                f"({active_off} deactivated, the rest already inactive) and {len(profiles_found)} seller profile(s) "
-                f"named {wanted_name}; the profile delete cascaded that Scout Campaign and its Orders, the fixture "
-                "sweep took the Unit and Unit Campaign rows, and the re-read answers no Unit for that number and no "
-                "such seller name",
+                f"({active_off} deactivated, the rest already inactive), {len(dict.fromkeys(scout_campaign_ids))} "
+                f"roster join(s) naming those Campaigns' Scout Campaigns, and {len(profiles_found)} seller "
+                f"profile(s) named {wanted_name}; the profile delete cascaded that Scout Campaign and its Orders, "
+                "the fixture sweep took the Unit, Unit Campaign, roster and named active-join guard rows, and the "
+                "re-read answers no Unit for that number and no such seller name",
             )
         )
     return rows

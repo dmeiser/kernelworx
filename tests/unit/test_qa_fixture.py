@@ -542,15 +542,27 @@ def test_sweep_without_a_sub_touches_nothing(mod: ModuleType) -> None:
 
 
 class DeniedScanDynamo(StubDynamo):
-    """A table the IAM identity cannot read at all, which is how dev answers today."""
+    """A table the IAM identity cannot read at all, which is how dev answers today.
 
-    def __init__(self, tables: Dict[str, List[Dict[str, Any]]], denied: List[str]) -> None:
+    The message is the shape DynamoDB returns for a missing grant, because the sweep report is held to
+    naming the permission that is missing rather than only the fact that a read failed.
+    """
+
+    DENIED = (
+        "An error occurred (AccessDeniedException) when calling the Scan operation: User: "
+        "arn:aws:iam::750620721302:user/kernelworx-qa-ue1-dev is not authorized to perform: "
+        "dynamodb:Scan on resource: arn:aws:dynamodb:us-east-1:750620721302:table/{table} because no "
+        "identity-based policy allows the dynamodb:Scan action"
+    )
+
+    def __init__(self, tables: Dict[str, List[Dict[str, Any]]], denied: List[str], *, message: str = DENIED) -> None:
         super().__init__(tables)
         self.denied = set(denied)
+        self.message = message
 
     def scan(self, *, TableName: str, **_: Any) -> Dict[str, Any]:
         if TableName in self.denied:
-            raise ScanRejected("AccessDeniedException")
+            raise ScanRejected(self.message.format(table=TableName))
         return super().scan(TableName=TableName, **_)
 
 
@@ -738,7 +750,9 @@ def test_sweep_removes_lane_rows_that_carry_no_fixture_identity(mod: ModuleType)
 
     An inventory balance or custody row names no account at all (only a movement row carries
     ``actorAccountId``), and a join-code pointer carries only ``unitCampaignId`` and a timestamp.
-    A membership guard carries neither.  Each is removed by the rule for its key shape.
+    A membership guard carries neither, and is taken back by its exact Scout Campaign id.  Each is
+    removed by the rule for its key shape; the movement row in the same partition is the one lane row
+    the rule deliberately does not remove, which the test below holds it to.
     """
     d = StubDynamo(_lane_rows())
     out = io.StringIO()
@@ -757,10 +771,9 @@ def test_sweep_removes_lane_rows_that_carry_no_fixture_identity(mod: ModuleType)
         (("pk", f"UNIT_CAMPAIGN#{_LANE_UC}"), ("sk", f"PRODUCT#p1#CUSTODY#PROFILE#{_LANE_PROFILE}")),
     ) in deleted
     assert (
-        "kernelworx-inventory-ue1-dev",
-        (("pk", f"UNIT_CAMPAIGN#{_LANE_UC}"), ("sk", "PRODUCT#p1#MOVEMENT#2026-11-19T00:00:00Z#m1")),
+        "kernelworx-unit-campaigns-ue1-dev",
+        (("pk", f"JOIN_CODE#{_LANE_CODE}"), ("sk", "POINTER")),
     ) in deleted
-    assert ("kernelworx-unit-campaigns-ue1-dev", (("pk", f"JOIN_CODE#{_LANE_CODE}"), ("sk", "POINTER"))) in deleted
     assert (
         "kernelworx-unit-campaigns-ue1-dev",
         (("pk", f"SCOUT_CAMPAIGN#{_LANE_CAMPAIGN}"), ("sk", "MEMBERSHIP_GUARD")),
@@ -784,6 +797,7 @@ def test_sweep_reports_every_lane_token_match_and_deletes_only_its_own(mod: Modu
     Third-party rows on a lane partition — another account's Unit Admin grant, another profile's
     roster membership, another profile's custody, a movement written by an account outside the
     fixture pool, another run's idempotency marker — survive, and the report says why each survived.
+    The lane's own movement history survives too, and says it survived because it is history.
     """
     d = StubDynamo(_lane_rows())
     out = io.StringIO()
@@ -807,6 +821,10 @@ def test_sweep_reports_every_lane_token_match_and_deletes_only_its_own(mod: Modu
         in survivors
     )
     assert (
+        f"kernelworx-inventory-ue1-dev/UNIT_CAMPAIGN#{_LANE_UC}/PRODUCT#p1#MOVEMENT#2026-11-19T00:00:00Z#m1"
+        in survivors
+    ), "the lane's own movement trail is append-only history, never a teardown target"
+    assert (
         f"kernelworx-inventory-ue1-dev/UNIT_CAMPAIGN#{_LANE_UC}/PRODUCT#p1#MOVEMENT#2026-11-19T00:00:01Z#m2"
         in survivors
     )
@@ -822,19 +840,64 @@ def test_sweep_reports_every_lane_token_match_and_deletes_only_its_own(mod: Modu
     assert "that profile is not this lane" in text
     assert "written by ACCOUNT#someone-else, not a fixture identity" in text
     assert "names a lane resource but no fixture identity wrote it" in text
+    assert "append-only inventory movement history in lane Unit Campaign" in text, (
+        "history is reported as history, not as a row the sweep could not remove"
+    )
     assert _OTHER_CODE not in out.getvalue(), "a marker no lane token names is not this sweep's business"
     assert "row shape 'SOMETHING#ELSE' on lane Unit" in text, "a shape no rule describes is reported, never deleted"
-    assert "6 row(s) a lane token names are deliberately left" in text
+    assert "7 row(s) a lane token names are deliberately left" in text
 
 
-def test_a_prior_runs_guard_and_roster_row_are_reached_from_its_profile_id(mod: ModuleType) -> None:
-    """A prior lane's Scout Campaign id is not discoverable once its profile is deleted, its profile id is.
+def test_a_guard_needs_its_exact_campaign_identity(mod: ModuleType) -> None:
+    """A profile token selects a person, not a Campaign, and one person holds a guard per Campaign.
 
-    ``_sweep_prior_lanes`` reads the prior run's Unit, Unit Campaigns and seller profiles through the
-    product, so those are the tokens it can honestly name.  ``build_membership_guard_item`` and
-    ``build_membership_item`` both write a ``profileId``, so the guard ``guard_release_action`` leaves
-    behind and the roster row the removal audit keeps are still found — and a guard whose campaign this
-    lane cannot name and whose profile is not the lane's stays untouched.
+    All four fixture identities are shared by every lane, so a profile token says which Scout this is
+    and nothing about which of that Scout's Campaigns is joined: a profile-only prior-lane sweep would
+    have deleted the guard of a Campaign another lane is still using.  ``build_membership_guard_item``
+    writes one ``SCOUT_CAMPAIGN#<campaignId>/MEMBERSHIP_GUARD`` row per Scout Campaign, so the exact
+    Campaign identity is what selects it, and a guard whose Campaign no token names is reported as
+    unresolved and left standing.
+    """
+    rows = {
+        "kernelworx-unit-campaigns-ue1-dev": [
+            _item(
+                pk=f"SCOUT_CAMPAIGN#CAMPAIGN#{_LANE_CAMPAIGN}",
+                sk="MEMBERSHIP_GUARD",
+                campaignId=f"CAMPAIGN#{_LANE_CAMPAIGN}",
+                profileId=f"PROFILE#{_LANE_PROFILE}",
+            ),
+            # The same Scout's other Campaign, joined by a run whose Campaign id nobody named: the
+            # profile attribute matches, and that is precisely the match that must not delete it.
+            _item(
+                pk=f"SCOUT_CAMPAIGN#CAMPAIGN#{_OTHER_CAMPAIGN}",
+                sk="MEMBERSHIP_GUARD",
+                campaignId=f"CAMPAIGN#{_OTHER_CAMPAIGN}",
+                profileId=f"PROFILE#{_LANE_PROFILE}",
+            ),
+        ]
+    }
+    d = StubDynamo(rows)
+    out = io.StringIO()
+    tokens, problems = mod.parse_lane_tokens([f"data-id={_LANE}", f"profile={_LANE_PROFILE}"])
+    assert not problems, problems
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, tokens, out) == 0
+    deleted = {tuple(sorted(k.items())) for _t, k in d.deleted}
+    text = out.getvalue()
+
+    assert deleted == set(), "no Campaign token, no guard delete"
+    assert (("pk", f"SCOUT_CAMPAIGN#CAMPAIGN#{_OTHER_CAMPAIGN}"), ("sk", "MEMBERSHIP_GUARD")) not in deleted
+    assert "that Campaign is not named, and one profile holds a guard per Campaign" in text
+    assert "2 row(s) a lane token names are deliberately left" in text
+
+
+def test_a_named_campaign_takes_the_guard_its_roster_row_points_at(mod: ModuleType) -> None:
+    """A prior lane's guard is still reachable: the roster row names its Campaign exactly.
+
+    ``_sweep_prior_lanes`` reads the prior run's Unit, its Unit Campaigns and that Campaigns' roster
+    through the product, so it can name the Scout Campaign ids before it deletes the profile that made
+    them.  With the Campaign named, the guard ``guard_release_action`` leaves behind and the roster row
+    the removal audit keeps both go; another run's Campaign on the same shared profile does not.
     """
     rows = {
         "kernelworx-unit-campaigns-ue1-dev": [
@@ -860,7 +923,12 @@ def test_a_prior_runs_guard_and_roster_row_are_reached_from_its_profile_id(mod: 
     }
     d = StubDynamo(rows)
     tokens, problems = mod.parse_lane_tokens(
-        [f"data-id={_LANE}", f"unit-campaign={_OTHER_UC}", f"profile={_LANE_PROFILE}"]
+        [
+            f"data-id={_LANE}",
+            f"unit-campaign={_OTHER_UC}",
+            f"campaign={_LANE_CAMPAIGN}",
+            f"profile={_LANE_PROFILE}",
+        ]
     )
     assert not problems, problems
 
@@ -969,6 +1037,57 @@ def test_a_named_idempotency_key_selects_its_marker_and_no_other(mod: ModuleType
     assert [k["sk"] for _t, k in d.deleted] == [f"IDEM#{_LANE}-odd-key"]
 
 
+def test_a_named_idempotency_key_never_reaches_another_actors_marker(mod: ModuleType) -> None:
+    """The idempotency key is caller-supplied, so naming one is not ownership of it.
+
+    ``src/utils/mutations.py`` identifies a marker by actor + operation + scope + key, and nothing in
+    the application makes that last part unique per tenant: two callers can send the same key.  The
+    same key therefore selects only a marker a fixture identity wrote.  A tenant outside the fixture
+    pool that happens to hold it stays, and says why.
+    """
+    shared_key = "deadbeef-2222-4222-8222-222222222222"
+    rows = {
+        "kernelworx-unit-campaigns-ue1-dev": [
+            # The same caller-supplied key, two authors.
+            _item(pk=f"IDEM#{_ADMIN_SUB}#joinUnitCampaign#{_LANE_CODE}", sk=f"IDEM#{shared_key}"),
+            _item(pk=f"IDEM#someone-else#joinUnitCampaign#{_LANE_CODE}", sk=f"IDEM#{shared_key}"),
+        ]
+    }
+    d = StubDynamo(rows)
+    out = io.StringIO()
+    tokens, problems = mod.parse_lane_tokens([f"idem={shared_key}", f"join-code={_LANE_CODE}"])
+    assert not problems, problems
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, tokens, out) == 0
+    text = out.getvalue()
+
+    assert [k["pk"] for _t, k in d.deleted] == [f"IDEM#{_ADMIN_SUB}#joinUnitCampaign#{_LANE_CODE}"]
+    assert (
+        f"kernelworx-unit-campaigns-ue1-dev/IDEM#someone-else#joinUnitCampaign#{_LANE_CODE}/IDEM#{shared_key}"
+        in _survivors(d)
+    )
+    assert "*" * 16 in text, "the report masks the join code in the row it names"
+    assert "names a lane resource but no fixture identity wrote it" in text
+
+
+def test_attribution_alone_never_deletes_an_inventory_row(mod: ModuleType) -> None:
+    """A fixture identity in the token set is not a lane boundary in the inventory table.
+
+    A movement row carries ``actorAccountId``, so an attribution rule could select it from a fixture
+    sub alone — and an account is shared by every lane, so that rule would reach into another run's
+    positions.  The inventory rule is the partition key: no ``unit-campaign`` token, no row is even
+    reported, whatever else the sweep names.
+    """
+    d = StubDynamo(_lane_rows())
+    out = io.StringIO()
+    tokens, problems = mod.parse_lane_tokens([f"data-id={_LANE}", f"unit={_LANE_UNIT}", f"profile={_LANE_PROFILE}"])
+    assert not problems, problems
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, tokens, out) == 0
+    assert [t for t, _k in d.deleted if t == "kernelworx-inventory-ue1-dev"] == []
+    assert f"reach {'kernelworx-inventory-ue1-dev':<34} scanned, 0 row(s) named by these tokens" in out.getvalue()
+
+
 def test_a_join_code_never_reaches_the_report(mod: ModuleType) -> None:
     """A pointer row is planned and deleted, and its code is masked in the same breath."""
     d = StubDynamo(_lane_rows())
@@ -1006,13 +1125,13 @@ def test_a_lane_row_the_delete_left_behind_fails_the_sweep(mod: ModuleType) -> N
 
 
 def test_a_table_the_identity_cannot_read_is_reported_blocked_and_the_sweep_fails(mod: ModuleType) -> None:
-    """A denied ``Scan`` is a finding, not an empty table.
+    """A denied ``Scan`` is a finding, not an empty table, and the report names the missing grant.
 
     This is the measured dev state on 2026-11-19: ``kernelworx-qa-ue1-dev`` is denied
     ``dynamodb:Scan`` on the Stage 2 inventory table, so a lane's inventory rows are neither removed
-    nor proven absent.  ``sweep`` says so and exits non-zero rather than reporting a clean sweep —
-    and the grant that would fix it does not by itself make the sweep correct, which is what the
-    per-shape rules above are for.
+    nor proven absent.  ``sweep`` says so, names the action that is missing so the next reader knows
+    what to ask for, and exits non-zero rather than reporting a clean sweep — and the grant that would
+    fix it does not by itself make the sweep correct, which is what the per-shape rules above are for.
     """
     d = DeniedScanDynamo(_lane_rows(), denied=["kernelworx-inventory-ue1-dev"])
     out = io.StringIO()
@@ -1021,9 +1140,26 @@ def test_a_table_the_identity_cannot_read_is_reported_blocked_and_the_sweep_fail
     text = out.getvalue()
 
     assert code == 1
-    assert "BLOCKED kernelworx-inventory-ue1-dev: ScanRejected" in text
-    assert "1 table(s) could not be read by this identity" in text
+    assert "BLOCKED kernelworx-inventory-ue1-dev: dynamodb:Scan is not granted to this identity" in text
+    assert "1 table(s) could not be read by this identity (kernelworx-inventory-ue1-dev: dynamodb:Scan)" in text
     assert all(table != "kernelworx-inventory-ue1-dev" for table, _key in d.deleted), "a denied table is not swept"
+
+
+def test_a_read_that_fails_for_another_reason_is_not_blamed_on_a_missing_grant(mod: ModuleType) -> None:
+    """The action is named when DynamoDB names it, and never invented when it does not."""
+    d = DeniedScanDynamo(
+        _lane_rows(),
+        denied=["kernelworx-orders-ue1-dev"],
+        message="Could not connect to the endpoint URL: https://dynamodb.us-east-1.amazonaws.com/",
+    )
+    out = io.StringIO()
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out) == 1
+    text = out.getvalue()
+
+    assert "BLOCKED kernelworx-orders-ue1-dev: ScanRejected: Could not connect" in text
+    assert "kernelworx-orders-ue1-dev: ScanRejected)" in text
+    assert "dynamodb:Scan is not granted" not in text
 
 
 def test_the_residue_scan_follows_the_page_token(mod: ModuleType) -> None:

@@ -822,7 +822,8 @@ def test_the_lane_names_its_rows_by_kind_never_by_free_text() -> None:
     worthless if the caller that builds the tokens hands over a bare ``DATA_ID``.  So the lane's token
     builder is pinned to the kinds its rows are actually keyed on, which is also the list that closes
     the attribution gap: a balance or custody row names a Unit Campaign and a product, a join-code
-    pointer names a campaign id and a code, and a roster or guard row names a profile.
+    pointer names a campaign id and a code, a roster row names a profile, and an active-join guard is
+    the one row only its own Scout Campaign id can select.
     """
     builder = next(
         node
@@ -841,6 +842,38 @@ def test_the_lane_names_its_rows_by_kind_never_by_free_text() -> None:
         if isinstance(call, ast.Call) and getattr(call.func, "attr", "") == "append":
             first = call.args[0] if call.args else None
             assert isinstance(first, ast.JoinedStr), "every token is kind=value"
+
+
+def test_a_prior_lane_sweep_names_a_guard_by_its_campaign_id() -> None:
+    """A prior run's active-join guard is only reachable by that run's Scout Campaign id.
+
+    Every lane shares the same four fixture identities, and ``build_membership_guard_item`` writes one
+    ``SCOUT_CAMPAIGN#<campaignId>/MEMBERSHIP_GUARD`` row per Scout Campaign, so a sweep that named only
+    a profile would delete the guard of a Campaign another lane is still joined to.  The sweeper's rule
+    requires the exact Campaign identity; the prior-lane sweep therefore reads each prior Unit
+    Campaign's roster — the read that answers ``campaignId`` — while the join still exists, and hands
+    those ids over as ``campaign=`` tokens.  A guard it cannot name is left and reported.
+    """
+    sweep = next(
+        node
+        for node in ast.walk(_spec_tree())
+        if isinstance(node, ast.FunctionDef) and node.name == "_sweep_prior_lanes"
+    )
+    source = ast.unparse(sweep)
+    token_prefixes = {
+        node.value
+        for node in ast.walk(sweep)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.value.rstrip().endswith("=")
+        and node.value.rstrip()[:-1] in stage2.LANE_TOKEN_KINDS
+    }
+
+    assert "'roster'" in source, "the prior run's Scout Campaign ids come from its roster rows"
+    assert "campaign=" in token_prefixes, (
+        f"the sweep stops naming the Campaigns whose guards it wants: {token_prefixes}"
+    )
+    assert "scout_campaign_ids" in source, "the Campaign ids are read before the profile delete takes them"
 
 
 def test_the_lane_deactivates_only_the_campaigns_it_created() -> None:

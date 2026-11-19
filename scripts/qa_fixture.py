@@ -68,21 +68,30 @@ Two things keep it narrow, and both matter:
   (``src/utils/unit_models.py``, ``src/utils/unit_campaign_models.py``,
   ``src/utils/inventory_models.py``, ``src/utils/order_fulfillment_models.py``,
   ``src/utils/order_keys.py``, ``src/utils/mutations.py``). A row whose shape no
-  rule describes is reported as ``kept`` and never deleted.
+  rule describes is reported as ``kept`` and never deleted. Attribution is not a
+  substitute for identity either, and three rules are narrow because of it: an
+  active-join guard goes only when its exact Scout Campaign id is named (one
+  profile holds a guard per Campaign, so a profile token cannot say which is
+  joined), an idempotency marker goes only when a fixture identity wrote it (the
+  idempotency key is caller-supplied, so the same key can exist for another
+  actor), and an inventory movement row is never deleted at all — it is the
+  append-only audit record the lane exists to produce, reported as history.
 
 After deleting, ``sweep`` re-scans and applies the same rules again, printing
 ``LEFT <table>/<key>`` for a lane row that survived (a ``delete_item`` that
 returned without an error is not evidence) and ``kept`` for a row a lane token
 names that the rules refuse to remove — a third party's ``GRANT#…`` or
-``MEMBERSHIP#…`` on a lane partition, or a marker this lane did not name. A
-table the identity cannot read prints ``BLOCKED <table>: <error>``: a denied
-scan is reported, never treated as an empty table. Measured on 2026-11-19,
-``kernelworx-qa-ue1-dev`` is denied ``dynamodb:Scan`` on the Stage 2 inventory,
-orders and order-fulfillment tables, so those rows are a named finding until a
-grant lands — an IAM grant alone does not close the sweep, it only makes these
-tables readable enough for the rules to run. Any ``LEFT``, ``FAILED`` or
-``BLOCKED`` line makes the exit code non-zero. The identities are never touched.
-See ``docs/QA_FIXTURE_RUNBOOK.md``.
+``MEMBERSHIP#…`` on a lane partition, a guard whose Campaign is not named, a
+marker no fixture identity wrote, or that movement history. A table the identity
+cannot read prints ``BLOCKED <table>: <denied action> is not granted to this
+identity (<error>)``: a denied scan is reported with the permission it is
+missing, never treated as an empty table and never reduced to a count. Measured
+on 2026-11-19, ``kernelworx-qa-ue1-dev`` is denied ``dynamodb:Scan`` and
+``dynamodb:DeleteItem`` on the Stage 2 inventory, orders and order-fulfillment
+tables, so those rows are a named finding until a grant lands — an IAM grant
+alone does not close the sweep, it only makes these tables readable enough for
+the rules to run. Any ``LEFT``, ``FAILED`` or ``BLOCKED`` line makes the exit
+code non-zero. The identities are never touched. See ``docs/QA_FIXTURE_RUNBOOK.md``.
 
 Teardown is deliberate: ``down`` prints its full plan first, asks before it
 writes, deletes the rows before the identities, and deletes nothing it cannot
@@ -461,6 +470,32 @@ def _mask_secret(value: str) -> str:
     return re.sub(r"[A-Z0-9]{16}", "*" * 16, value)
 
 
+_DENIED_ACTION = re.compile(r"not authorized to perform:\s*([A-Za-z0-9:*_-]+)")
+
+
+def _denied_action(exc: BaseException) -> str:
+    """The permission a failed DynamoDB call is missing, when the service says which one it is.
+
+    DynamoDB spells the denied action and the resource into the message, so a reader of a sweep report
+    sees what to ask for rather than that something went wrong.  Measured on dev on 2026-11-19,
+    ``kernelworx-qa-ue1-dev`` holds neither ``dynamodb:Scan`` nor ``dynamodb:DeleteItem`` on the Stage 2
+    inventory, orders and order-fulfillment tables.  Anything the message does not name — a timeout, a
+    wrong table — is reported by its exception type instead of being guessed at.
+    """
+    message = str(exc)
+    denied = _DENIED_ACTION.search(message)
+    return denied.group(1) if denied else type(exc).__name__
+
+
+def _blocked_line(table: str, exc: BaseException) -> str:
+    """One unreadable table, reported with the permission that is missing, never as a bare count."""
+    message = str(exc)[:300]
+    action = _denied_action(exc)
+    if action == type(exc).__name__:
+        return f"BLOCKED {table}: {type(exc).__name__}: {message}"
+    return f"BLOCKED {table}: {action} is not granted to this identity ({type(exc).__name__}: {message})"
+
+
 def _rule_units(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
     """``UNIT#<unitId>``: the metadata row is the lane's, a grant only when it is a fixture identity's."""
     flat = _strings(item)
@@ -487,20 +522,25 @@ def _rule_units(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str
 def _rule_marker(pk: str, sk: str, tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
     """``IDEM#<actor>#<operation>#<scope>`` with sort key ``IDEM#<idempotencyKey>``.
 
-    ``src/utils/mutations.py`` mints these, and the sort key is the only part that is the caller's
-    idempotency key, so that is what a named ``idem`` token is compared to.  Otherwise a marker is the
-    lane's when the key carries the lane's ``DATA_ID`` prefix — every key the Stage 2 lane sends is
-    ``<data-id>-…`` — or when the partition key names a resource this lane named as its scope.  Both
-    branches first require the partition key to name a fixture identity as its actor, and both read it
-    by ``#`` segment after undoing ``_escape_key_segment``'s ``%23``, so neither the spelling of the
-    actor (bare ``sub``, or an escaped ``ACCOUNT#sub``) nor a substring of an id changes the answer.
-    A tenant outside the fixture pool that happened to choose a ``stage2-…`` key is not this lane.
+    ``src/utils/mutations.py`` mints these as ``actor + operation + scope + caller-supplied key``, and
+    the last of those four is exactly that: nothing in the application makes a key unique per tenant, so
+    the same ``idem`` token can legitimately exist for another actor's partition.  A named key therefore
+    selects a row only when the partition key also names a fixture identity as its author — authorship is
+    checked first, before any of the three delete branches, and a marker that a lane token names but that
+    no fixture identity wrote is reported and left.  The author is read by ``#`` segment after undoing
+    ``_escape_key_segment``'s ``%23``, so neither the spelling of the actor (bare ``sub``, or an escaped
+    ``ACCOUNT#sub``) nor a substring of an id changes the answer.  A tenant outside the fixture pool that
+    happened to choose a ``stage2-…`` key is not this lane.
+
+    Given authorship, the marker is the lane's when the key carries the lane's ``DATA_ID`` prefix — every
+    key the Stage 2 lane sends is ``<data-id>-…`` — when the caller named that key, or when the partition
+    key names a resource this lane named as its scope.
 
     Anything else is left.  A marker no token of this lane says anything about is not reported at all:
     the ``unit-campaigns`` table holds every earlier run's markers, and a sweep that listed them as
     refused would bury the rows a rule actually weighed.  What is reported is the case worth a reader —
-    a marker naming a resource this lane created that someone outside the fixture pool wrote, which
-    stays and says so.
+    a marker naming a resource this lane created, or an idempotency key this lane named, that someone
+    outside the fixture pool wrote, which stays and says so.
     """
     if not pk.startswith("IDEM#") or not sk.startswith("IDEM#"):
         return None
@@ -509,26 +549,31 @@ def _rule_marker(pk: str, sk: str, tokens: dict[str, set[str]], subs: set[str]) 
     authored = bool(segments & subs)
     scopes = tokens["unit"] | tokens["unit-campaign"] | tokens["campaign"] | tokens["join-code"] | tokens["order"]
     scoped = bool(segments & scopes)
-    if key in tokens["idem"]:
-        return "delete", f"marker for an idempotency key the caller named ({key})"
-    if authored and any(key.startswith(f"{data_id}-") for data_id in tokens["data-id"]):
-        return "delete", f"marker this lane's DATA_ID wrote ({key})"
-    if authored and scoped:
-        return "delete", f"marker written by a fixture identity scoped to a lane resource ({key})"
-    if not scoped:
+    if not authored:
+        if scoped or key in tokens["idem"]:
+            return "keep", f"marker key {key} names a lane resource but no fixture identity wrote it"
         return None
-    return "keep", f"marker key {key} names a lane resource but no fixture identity wrote it"
+    if key in tokens["idem"]:
+        return "delete", f"marker for an idempotency key the caller named ({key}), written by a fixture identity"
+    if any(key.startswith(f"{data_id}-") for data_id in tokens["data-id"]):
+        return "delete", f"marker this lane's DATA_ID wrote ({key})"
+    if scoped:
+        return "delete", f"marker written by a fixture identity scoped to a lane resource ({key})"
+    return None
 
 
 def _rule_unit_campaigns(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
     """The shapes a Unit Campaign partition, a Scout Campaign guard, a join-code pointer and a marker hold.
 
-    ``build_membership_item`` and ``build_membership_guard_item`` write a ``profileId`` attribute, so a
-    roster row or a guard is the lane's when the lane names the profile as well as when it names the
-    campaign — which is what lets a prior run's roster row and guard be swept from the profile id its
-    ``listMyProfiles`` read still answers.  ``removeUnitCampaignMembership`` clears the guard's
-    ``activeUnitCampaignId`` but leaves the guard row itself (``guard_release_action``), and nothing
-    deletes a join-code pointer or a marker once its mutation is done: these are the rows a lane keeps.
+    ``build_membership_item`` writes a ``profileId``, so a roster row is the lane's when the lane names
+    that profile — on a Unit Campaign this lane named, which is the half that bounds it.  A guard is not
+    the same shape: ``build_membership_guard_item`` is one row per Scout, and a Scout profile runs many
+    Scout Campaigns, so a profile token says which person's guard this is and nothing about which
+    Campaign is joined.  A guard is therefore deleted only when its exact Campaign identity is named; a
+    prior run whose Campaign id cannot be recovered reports its guard as unresolved and leaves it.
+    ``removeUnitCampaignMembership`` clears the guard's ``activeUnitCampaignId`` but leaves the guard row
+    itself (``guard_release_action``), and nothing deletes a join-code pointer or a marker once its
+    mutation is done: these are the rows a lane keeps.
     """
     flat = _strings(item)
     pk, sk = flat.get("pk", ""), flat.get("sk", "")
@@ -555,12 +600,13 @@ def _rule_unit_campaigns(item: dict[str, Any], tokens: dict[str, set[str]], subs
         if campaign not in tokens["campaign"] and profile not in tokens["profile"]:
             return None
         if sk == "MEMBERSHIP_GUARD":
-            who = (
-                f"Scout Campaign {campaign}"
-                if campaign in tokens["campaign"]
-                else f"profile {profile}'s Scout Campaign {campaign}"
-            )
-            return "delete", f"active-join guard of the lane's own {who}"
+            if campaign not in tokens["campaign"]:
+                return (
+                    "keep",
+                    f"active-join guard of profile {profile}'s Scout Campaign {campaign}: that Campaign is not "
+                    "named, and one profile holds a guard per Campaign, so a profile token cannot say which is joined",
+                )
+            return "delete", f"active-join guard of lane Scout Campaign {campaign}"
         return "keep", f"row shape {sk!r} for lane Scout Campaign {campaign} is not described by any rule"
     if pk.startswith("JOIN_CODE#"):
         code = pk[len("JOIN_CODE#") :]
@@ -574,13 +620,21 @@ def _rule_unit_campaigns(item: dict[str, Any], tokens: dict[str, set[str]], subs
 
 
 def _rule_inventory(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
-    """``UNIT_CAMPAIGN#<id>`` partitions: balances, custody, allocations and the movement history.
+    """``UNIT_CAMPAIGN#<id>`` partitions: balances, custody and allocations, and the movement history.
 
     This is the shape a balance or custody row is invisible to under attribution: neither carries
     an owner attribute, and only a movement row carries ``actorAccountId``.  The partition key is
     the ownership fact, so it is the rule — narrowed by a principal guard, because a custody row
     for a profile this lane did not name, or a movement written by an account outside the fixture
-    pool, is not this lane's to delete.
+    pool, is not this lane's to delete.  Attribution alone never deletes anything here: a row in a
+    partition no ``unit-campaign`` token names is not reported at all.
+
+    The movement rows are reported separately and never deleted.  ``src/utils/inventory_models.py``
+    describes ``InventoryMovement`` as an immutable audit record, and ``build_movement_sk`` mints one
+    row per write (``PRODUCT#<id>#MOVEMENT#<moment>#<n>``): deleting it would rewrite the trail an
+    acceptance run exists to prove, and it is what an auditor or an accounting backfill reads after
+    the lane is gone.  Every other row in the partition is a position a lane's own return and
+    reconcile steps drove to zero, so taking it back is teardown, not evidence.
     """
     flat = _strings(item)
     pk = flat.get("pk", "")
@@ -598,6 +652,12 @@ def _rule_inventory(item: dict[str, Any], tokens: dict[str, set[str]], subs: set
     actor = flat.get("actorAccountId", "")
     if actor and not (_owner_ids(actor) & subs):
         return "keep", f"inventory row in lane Unit Campaign {campaign} written by {actor}, not a fixture identity"
+    if flat.get("entityType") == "InventoryMovement" or "#MOVEMENT#" in flat.get("sk", ""):
+        return (
+            "keep",
+            f"append-only inventory movement history in lane Unit Campaign {campaign}: immutable audit record, "
+            "reported as history this sweep does not delete",
+        )
     what = flat.get("entityType") or flat.get("sk", "").split("#")[-1]
     return "delete", f"inventory {what} row in lane Unit Campaign {campaign}"
 
@@ -826,11 +886,13 @@ def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], ou
     not describe.  The read-back re-applies the same rules and prints:
 
     ``LEFT``     a lane row the delete did not take — a failure;
-    ``kept``     a row a lane token names that the rules refuse to delete (a third party's grant or
-                 membership on a lane partition, a foreign custody row, a marker this lane did not
-                 name) — reported, and the proof that another tenant's data survives;
-    ``BLOCKED``  a table this identity cannot read — its lane rows are neither removed nor proven
-                 absent, so the sweep fails.
+    ``kept``     a row a lane token names that the rules refuse to delete — a third party's grant or
+                 membership on a lane partition, a foreign custody row, a guard whose Scout Campaign
+                 is not named exactly, a marker no fixture identity wrote, or the lane's own
+                 append-only movement history.  Every one is reported, and the first four are the
+                 proof that another tenant's data survives;
+    ``BLOCKED``  a table this identity cannot read, named with the action it is denied — its lane
+                 rows are neither removed nor proven absent, so the sweep fails.
 
     The identities are never touched: ``sweep_lane_rows`` is not even given the Cognito client.
     """
@@ -850,12 +912,14 @@ def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], ou
     plan: list[tuple[str, str, dict[str, str], str]] = []
     kept: list[str] = []
     blocked: list[str] = []
+    denied: list[str] = []
     scanned: list[str] = []
     for label, (table, _key_names, _owner_attr) in SWEEP_TABLES.items():
         try:
             found = _scan_lane_rows(d, label, table, tokens, wanted)
         except Exception as exc:  # noqa: BLE001 - a denied scan is reported, never treated as empty
-            blocked.append(f"BLOCKED {table}: {type(exc).__name__}: {exc}")
+            blocked.append(_blocked_line(table, exc))
+            denied.append(f"{table}: {_denied_action(exc)}")
             continue
         scanned.append(f"reach {table:<34} scanned, {len(found)} row(s) named by these tokens")
         for key_vals, decision, reason in found:
@@ -904,14 +968,14 @@ def sweep_lane_rows(d: Any, subs: Iterable[str], tokens: dict[str, set[str]], ou
                 print(f"  LEFT   {label:<18} {key}  [{reason}]", file=out)
     if kept:
         print(
-            f"  {len(kept)} row(s) a lane token names are deliberately left: a rule says they are "
-            "not this lane's to delete",
+            f"  {len(kept)} row(s) a lane token names are deliberately left: another tenant's row on a "
+            "lane partition, a row whose identity no token names exactly, or append-only history",
             file=out,
         )
     if blocked:
         print(
-            f"  {len(blocked)} table(s) could not be read by this identity: their lane rows are "
-            "neither removed nor proven absent",
+            f"  {len(blocked)} table(s) could not be read by this identity ({'; '.join(denied)}): their "
+            "lane rows are neither removed nor proven absent, and the permission named there is what to ask for",
             file=out,
         )
     if failures or blocked:
