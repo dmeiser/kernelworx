@@ -1079,16 +1079,16 @@ def test_evt_q_02_02_a_campaign_with_no_roster_offers_nothing_to_anyone(world: D
         Item=unit_campaign_item(
             lonely,
             unit_id=PACK_3149,
-            campaign_name="Pack 3149 Rosterless Show & Sell",
+            campaign_name="Pack 3149 Empty Roster Show & Sell",
             campaign_year=2027,
             catalog_id="CATALOG#fixture-default",
             join_code="JOINPK3149MATE01",
             created_by="Avery",
         )
     )
-    _seed_event(world["show_and_sells"], "SSE#rosterless", campaign=lonely)
+    _seed_event(world["show_and_sells"], "SSE#empty-roster", campaign=lonely)
     assert_is_error(_opportunities(caller="Devon", campaign=lonely), "NOT_FOUND")
-    assert_is_error(_opportunity(caller="Devon", event_id="SSE#rosterless", persona="Devon"), "NOT_FOUND")
+    assert_is_error(_opportunity(caller="Devon", event_id="SSE#empty-roster", persona="Devon"), "NOT_FOUND")
 
 
 def test_evt_q_02_02_a_removed_scout_keeps_only_the_events_they_took_part_in(world: Dict[str, Any]) -> None:

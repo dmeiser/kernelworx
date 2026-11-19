@@ -4,7 +4,7 @@ Model-layer tests for the row §3.1 writes: ``SHOW_AND_SELL#<id> / METADATA`` wi
 Unit/Campaign scope, required location, optional address, immutable UTC start/end,
 state, split override, We Owe default-off, cumulative ``productIds``, finalization
 pointers, version, and cancellation audit. The §3.1.1 work order names the four
-families this file is organised around — overlap, empty-product, immutable-time and
+families this file is organized around — overlap, empty-product, immutable-time and
 state-invariant — and each is asserted against the model rather than through a
 resolver, because every later stage (§3.2 allocation, §3.3 slots, §3.4 signup, §3.6
 finalization) re-reads this row and must inherit these rules rather than re-state
@@ -278,7 +278,7 @@ def test_cancellation_reason_is_required_and_capped_like_every_other_reason() ->
             ssm.normalize_cancellation_reason(rejected)
 
 
-def test_moments_are_canonicalised_to_one_utc_spelling_so_sort_keys_compare_as_instants() -> None:
+def test_moments_are_canonicalized_to_one_utc_spelling_so_sort_keys_compare_as_instants() -> None:
     assert ssm.normalize_moment("2026-11-07T01:00:00Z", "startAt") == "2026-11-07T01:00:00+00:00"
     assert ssm.normalize_moment("2026-11-07T01:00:00-07:00", "startAt") == "2026-11-07T08:00:00+00:00"
     for rejected in (None, "", "  ", "2026-11-07T08:00:00", "yesterday", 1_700_000_000):
@@ -428,8 +428,8 @@ def test_the_interval_and_state_and_shape_invariants_are_each_named() -> None:
     not_a_list[ssm.PRODUCT_IDS_ATTRIBUTE] = PRODUCT
     assert "productIds must be a list" in ssm._row_shape_violations(not_a_list)
     extra = dict(_event_row())
-    extra["surprise"] = "unmodeled"
-    assert "unmodeled attributes surprise" in ssm._row_shape_violations(extra)
+    extra["surprise"] = "not in the model"
+    assert "attributes the model leaves out: surprise" in ssm._row_shape_violations(extra)
 
 
 def test_the_state_invariants_are_enforced_where_the_row_is_built() -> None:

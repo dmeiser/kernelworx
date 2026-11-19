@@ -174,7 +174,7 @@ CONFIRMED_BY_ATTRIBUTE = "confirmedByAccountId"
 CONFIRMED_AT_ATTRIBUTE = "confirmedAt"
 
 #: Every attribute a METADATA row may carry (§5.10, in full). An extra attribute
-#: would be an unmodeled fact that no read projects and no test covers.
+#: would be a fact the model never declares, so no read projects it and no test covers it.
 EVENT_ROW_ATTRIBUTES: frozenset[str] = frozenset(
     {
         "pk",
@@ -525,7 +525,7 @@ def _state_violations(item: Mapping[str, Any]) -> List[str]:
 
 
 def _row_shape_violations(item: Mapping[str, Any]) -> List[str]:
-    """The row-shape invariants: no unmodeled attribute, and a clean ``productIds``.
+    """The row-shape invariants: no attribute the model leaves out, and a clean ``productIds``.
 
     ``productIds`` is how an event's allocation rows are found authoritatively
     (§6.3), so a repeated entry would double-count an allocation read, and an
@@ -535,7 +535,7 @@ def _row_shape_violations(item: Mapping[str, Any]) -> List[str]:
     problems: List[str] = []
     extra = set(item) - EVENT_ROW_ATTRIBUTES
     if extra:
-        problems.append(f"unmodeled attributes {', '.join(sorted(extra))}")
+        problems.append(f"attributes the model leaves out: {', '.join(sorted(extra))}")
     product_ids = item.get(PRODUCT_IDS_ATTRIBUTE)
     if not isinstance(product_ids, list):
         problems.append("productIds must be a list")
