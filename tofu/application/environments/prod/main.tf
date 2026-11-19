@@ -295,6 +295,7 @@ module "lambda" {
     unit_campaigns         = module.dynamodb.unit_campaigns_table_name
     inventory              = module.dynamodb.inventory_table_name
     order_fulfillments     = module.dynamodb.order_fulfillments_table_name
+    show_and_sells         = module.dynamodb.show_and_sells_table_name
   }
 
   user_pool_id = module.cognito.user_pool_id
