@@ -1361,3 +1361,117 @@ describe("Show & Sell Stage 3.2 stock-assignment SDL (schema.graphql)", () => {
     }
   });
 });
+
+// --- Wave 4.3: the slot board (§3.3.2) and deleting an unused slot (§3.3.3) ---
+
+const SS33_MUTATION_FIELDS: string[] = ["upsertShowAndSellSlot", "deleteShowAndSellSlot"];
+
+const SS33_INPUTS: string[] = ["UpsertShowAndSellSlotInput", "DeleteShowAndSellSlotInput"];
+
+/**
+ * The exact field set of each §3.3 input, in declaration order.
+ *
+ * §3.3 mints no output type of its own: the slot answer is §3.1's `ShowAndSellSlot`, the
+ * same row the schedule screen already reads, so the browser holds one slot shape and the
+ * `expectedSlotVersion` it sends next is the one it was shown. `slotVersion` is the only
+ * optional block on the upsert because it is the one fact a create cannot have — a slot
+ * that does not exist yet has no version anyone could have read. The delete names no slot
+ * version at all: the caller's number is the event's, and the row's own version comes from
+ * the consistent read the request makes.
+ */
+const SS33_TYPE_FIELDS: Record<string, string[]> = {
+  UpsertShowAndSellSlotInput: [
+    "showAndSellId", "slotId", "label", "startAt", "endAt", "capacity",
+    "version", "slotVersion", "idempotency",
+  ],
+  DeleteShowAndSellSlotInput: ["showAndSellId", "slotId", "version", "idempotency"],
+};
+
+describe("Show & Sell Stage 3.3 slot-board SDL (schema.graphql)", () => {
+  test("every §3.3 input is present with exactly the contract fields", () => {
+    for (const name of SS33_INPUTS) {
+      expect(definition(name).kind, `${name} must be an input`).toBe("input");
+    }
+    for (const [name, expected] of Object.entries(SS33_TYPE_FIELDS)) {
+      expect([...fieldNameSet(definition(name))], `${name} fields`).toEqual(expected);
+    }
+  });
+
+  test("a create names no slot, an edit names its version, and neither names a tenant", () => {
+    const field = rootFieldByName("Mutation", "upsertShowAndSellSlot");
+    expect(field, "Mutation.upsertShowAndSellSlot is missing").toBeDefined();
+    expect(field!.text, "the mutation takes one input").toMatch(/input\s*:\s*UpsertShowAndSellSlotInput!/);
+    // §3.1's slot type, non-null: the caller gets back the row it can immediately edit.
+    expect(field!.text).toMatch(/\):\s*ShowAndSellSlot!/);
+    expect(returnTypeName(field!.text), "upsertShowAndSellSlot answers the §3.1 slot type").toBe("ShowAndSellSlot");
+
+    const input = fieldsOf(definition("UpsertShowAndSellSlotInput"));
+    expect(input.find((f) => f.name === "showAndSellId")!.text).toMatch(/showAndSellId\s*:\s*ID!/);
+    // Optional is what separates the two shapes, and nothing else about the request does.
+    expect(input.find((f) => f.name === "slotId")!.text, "slotId is optional: a create omits it").toMatch(/slotId\s*:\s*ID\s*$/m);
+    expect(input.find((f) => f.name === "slotVersion")!.text, "slotVersion is optional").toMatch(
+      /slotVersion\s*:\s*VersionedInput\s*$/m,
+    );
+    expect(input.find((f) => f.name === "version")!.text).toMatch(/version\s*:\s*VersionedInput!/);
+    expect(input.find((f) => f.name === "idempotency")!.text).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
+    // Any duration is legal (SSE-03): the SDL carries no duration unit, step, or enum.
+    for (const [name, pattern] of [
+      ["startAt", /startAt\s*:\s*AWSDateTime!/],
+      ["endAt", /endAt\s*:\s*AWSDateTime!/],
+      ["capacity", /capacity\s*:\s*Int!/],
+      ["label", /label\s*:\s*String\s*$/m],
+    ] as const) {
+      expect(input.find((f) => f.name === name)!.text, `UpsertShowAndSellSlotInput.${name}`).toMatch(pattern);
+    }
+    const names = fieldNameSet(definition("UpsertShowAndSellSlotInput"));
+    for (const forbidden of [
+      "unitId",
+      "unitCampaignId",
+      "profileId",
+      "status",
+      "activeSignupCount",
+      "createdAt",
+      "updatedAt",
+      "durationMinutes",
+      "startMinute",
+      "step",
+    ]) {
+      expect(names.has(forbidden), `UpsertShowAndSellSlotInput.${forbidden} would move a fact only the server owns`).toBe(false);
+    }
+  });
+
+  test("a deletion names parent, slot, version and key, and answers a plain boolean", () => {
+    const field = rootFieldByName("Mutation", "deleteShowAndSellSlot");
+    expect(field, "Mutation.deleteShowAndSellSlot is missing").toBeDefined();
+    expect(field!.text).toMatch(/input\s*:\s*DeleteShowAndSellSlotInput!/);
+    // `Boolean!` and no payload type: the only outcome is that the row is gone, and a slot
+    // that held somebody is refused rather than reported.
+    expect(returnTypeName(field!.text), "deleteShowAndSellSlot answers a plain boolean").toBe("Boolean");
+    expect(field!.text).toMatch(/\):\s*Boolean!/);
+
+    const input = fieldsOf(definition("DeleteShowAndSellSlotInput"));
+    expect(input.find((f) => f.name === "showAndSellId")!.text, "the parent is part of the slot's key").toMatch(
+      /showAndSellId\s*:\s*ID!/,
+    );
+    expect(input.find((f) => f.name === "slotId")!.text, "a deletion always names its row").toMatch(/slotId\s*:\s*ID!/);
+    expect(input.find((f) => f.name === "version")!.text).toMatch(/version\s*:\s*VersionedInput!/);
+    expect(input.find((f) => f.name === "idempotency")!.text).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
+    for (const forbidden of ["slotVersion", "status", "force", "cascade", "cancelSignups", "unitId", "profileId"]) {
+      expect(
+        fieldNameSet(definition("DeleteShowAndSellSlotInput")).has(forbidden),
+        `DeleteShowAndSellSlotInput.${forbidden} would let a deletion drop a participant or re-check a number the caller cannot hold`,
+      ).toBe(false);
+    }
+  });
+
+  test("AUTH: no §3.3 input or root field carries an auth directive", () => {
+    for (const name of SS33_INPUTS) {
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+    }
+    for (const name of SS33_MUTATION_FIELDS) {
+      const field = rootFieldByName("Mutation", name);
+      expect(field, `${name} is missing`).toBeDefined();
+      expect(field!.directives, `${name} must be directive-free (Cognito-only)`).toEqual([]);
+    }
+  });
+});

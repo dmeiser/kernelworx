@@ -2236,6 +2236,40 @@ type AssignShowAndSellInventoryPayload {
   warnings: [AllocationWarning!]!
 }
 
+"""Input for upsertShowAndSellSlot. A create names no slot and no slot version; an edit names both. Slot writes are allowed only while the event is scheduled (checklist §3.3.2)."""
+input UpsertShowAndSellSlotInput {
+  """The event whose slot board is being edited; the parent is part of the slot's key."""
+  showAndSellId: ID!
+  """The slot being edited; omit to add a slot whose id the server mints."""
+  slotId: ID
+  """Display label; null clears it, and a created slot simply has none."""
+  label: String
+  """Slot start (ISO 8601 UTC); never before the event's startAt."""
+  startAt: AWSDateTime!
+  """Slot end (ISO 8601 UTC); never after the event's endAt and always after its own startAt. Any duration — no hour or half-hour is assumed."""
+  endAt: AWSDateTime!
+  """Maximum active signups for this slot (1-100); never below the signups the slot already holds."""
+  capacity: Int!
+  """The event version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """The slot version the caller last read; required when `slotId` names an existing slot, omitted when creating one."""
+  slotVersion: VersionedInput
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for deleteShowAndSellSlot. Allowed only while the slot holds nobody, so a deletion can never silently drop a participant (checklist §3.3.3)."""
+input DeleteShowAndSellSlotInput {
+  """The event that owns the slot; a slot id from another event is not found here."""
+  showAndSellId: ID!
+  """The slot to delete."""
+  slotId: ID!
+  """The event version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
 # ============================================================================
 # Query Root
 # ============================================================================
@@ -2719,6 +2753,18 @@ type Mutation {
     """The assignment batch."""
     input: AssignShowAndSellInventoryInput!
   ): AssignShowAndSellInventoryPayload!
+
+  # Show & Sell — slot board (checklist §3.3)
+  """Add or edit one working slot of an event: an interval inside the event's immutable interval, an optional label, and a capacity of 1-100. Any duration is legal — no hour or half-hour is assumed. Allowed only while the event is scheduled, at most 20 slots per event, and an edit revalidates the signups the slot already holds: a capacity below the active count, or a new time that would put an already-signed-up Scout into overlap with another slot of this event or with a commitment at any other Show & Sell, is refused and writes nothing. The slot row and the event version commit together, so a caller holding a stale event version writes nothing. Unit Admin for the event's Unit."""
+  upsertShowAndSellSlot(
+    """The slot."""
+    input: UpsertShowAndSellSlotInput!
+  ): ShowAndSellSlot!
+  """Delete one slot, only while it holds no active signup, so a deletion can never silently cancel a participant: their signups are cancelled by cancelling them. The parent id is part of the key, so a slot id from another event is not found. The delete and the event version it bumps commit together. Allowed only while the event is scheduled. Unit Admin for the event's Unit."""
+  deleteShowAndSellSlot(
+    """The deletion."""
+    input: DeleteShowAndSellSlotInput!
+  ): Boolean!
 
   # Account mutations
   """Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account."""

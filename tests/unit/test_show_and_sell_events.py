@@ -251,12 +251,10 @@ def _seed_slot(
         **ssm.slot_key(event_id, slot_id),
         "entityType": ssm.ENTITY_TYPE_SLOT,
         ssm.SHOW_AND_SELL_ID_ATTRIBUTE: event_id,
-        ssm.UNIT_CAMPAIGN_ID_ATTRIBUTE: CAMPAIGN,
         ssm.SLOT_ID_ATTRIBUTE: slot_id,
         ssm.LABEL_ATTRIBUTE: f"Saturday {slot_id}",
         ssm.START_AT_ATTRIBUTE: start_at,
         ssm.END_AT_ATTRIBUTE: end_at,
-        ssm.STATUS_ATTRIBUTE: ssm.SIGNUP_ACTIVE,
         ssm.CAPACITY_ATTRIBUTE: capacity,
         ssm.ACTIVE_SIGNUP_COUNT_ATTRIBUTE: active,
         ssm.VERSION_ATTRIBUTE: version,
@@ -330,16 +328,18 @@ def _seed_commitment(
     profile_id = _profile(persona)
     item = {
         **ssm.commitment_key(profile_id, FUTURE_START, CAMPAIGN, slot_id),
-        "entityType": "ShowAndSellCommitment",
+        "entityType": ssm.ENTITY_TYPE_COMMITMENT,
         ssm.SHOW_AND_SELL_ID_ATTRIBUTE: event_id,
         ssm.UNIT_CAMPAIGN_ID_ATTRIBUTE: CAMPAIGN,
         ssm.CAMPAIGN_ID_ATTRIBUTE: _scout_campaign(persona),
+        ssm.COMMITMENT_ID_ATTRIBUTE: ssm.signup_sk(slot_id, profile_id),
         ssm.PROFILE_ID_ATTRIBUTE: profile_id,
         ssm.SLOT_ID_ATTRIBUTE: slot_id,
         ssm.STATUS_ATTRIBUTE: status,
         ssm.START_AT_ATTRIBUTE: FUTURE_START,
         ssm.END_AT_ATTRIBUTE: FUTURE_END,
         ssm.VERSION_ATTRIBUTE: version,
+        ssm.CREATED_AT_ATTRIBUTE: FUTURE_START,
         ssm.UPDATED_AT_ATTRIBUTE: FUTURE_START,
     }
     unit_campaigns_table.put_item(Item=item)

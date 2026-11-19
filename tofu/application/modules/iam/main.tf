@@ -995,10 +995,12 @@ data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
   # versioned Updates, and a cancellation commits event + allocation + signup +
   # commitment + guard + counter rows in one TransactWriteItems, each conditioned
   # on the version it read — hence ConditionCheckItem and TransactWriteItems
-  # riding with the item actions (impact map §4.2). No DeleteItem: SSE-05 and
-  # §8.8 keep every cancelled signup, allocation and event row as history, so a
-  # Show & Sell delete is not part of this feature's contract, and the marker row
-  # on this table expires through the table's own seven-day TTL (§8.9).
+  # riding with the item actions (impact map §4.2). DeleteItem is for one row
+  # only: §3.3.3 lets an unused slot row be deleted, and it is the sole delete
+  # this aggregate takes — SSE-05 and §8.8 keep every cancelled signup,
+  # allocation and event row as history, and the write itself carries the
+  # zero-active-signups condition so the grant cannot delete a slot in use. The
+  # marker row on this table expires through the table's own seven-day TTL (§8.9).
   statement {
     effect = "Allow"
     actions = [
@@ -1007,6 +1009,7 @@ data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
       "dynamodb:Query",
       "dynamodb:PutItem",
       "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
       "dynamodb:ConditionCheckItem",
       "dynamodb:TransactWriteItems",
     ]

@@ -1287,3 +1287,31 @@ resource "aws_appsync_resolver" "assign_show_and_sell_inventory" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+resource "aws_appsync_resolver" "upsert_show_and_sell_slot" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "upsertShowAndSellSlot"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "delete_show_and_sell_slot" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "deleteShowAndSellSlot"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

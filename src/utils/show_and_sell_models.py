@@ -39,10 +39,11 @@ The invariants enforced here:
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import AbstractSet, Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, TypeGuard
 
 from . import inventory_models
 from .dynamodb import batch_get_chunked, tables
@@ -203,6 +204,20 @@ SIGNED_UP_BY_ATTRIBUTE = "signedUpByAccountId"
 CONFIRMED_BY_ATTRIBUTE = "confirmedByAccountId"
 CONFIRMED_AT_ATTRIBUTE = "confirmedAt"
 
+#: Row types of the §5.13 projection pair on ``unit_campaigns`` (§6.2).
+ENTITY_TYPE_COMMITMENT = "ScoutCommitment"
+ENTITY_TYPE_COMMITMENT_GUARD = "ScoutCommitmentGuard"
+
+#: The commitment projection's own identity attribute (§5.13): "same identity as
+#: the signup". It is spelled with :func:`signup_sk`, because that is exactly the
+#: signup's identity inside its aggregate — one name for one fact, so a reader
+#: holding a commitment can point at the signup row it came from.
+COMMITMENT_ID_ATTRIBUTE = "commitmentId"
+
+#: The guard's version attribute (§5.13). Named here because the guard increment
+#: (:func:`bump_commitment_guard_action`) and the guard builder must spell it alike.
+COMMITMENT_VERSION_ATTRIBUTE = "commitmentVersion"
+
 #: Every attribute a METADATA row may carry (§5.10, in full). An extra attribute
 #: would be a fact the model never declares, so no read projects it and no test covers it.
 EVENT_ROW_ATTRIBUTES: frozenset[str] = frozenset(
@@ -236,6 +251,83 @@ EVENT_ROW_ATTRIBUTES: frozenset[str] = frozenset(
     }
 )
 
+#: Every attribute a ``SLOT#`` row may carry (§5.12, in full). Same rule as
+#: :data:`EVENT_ROW_ATTRIBUTES`: an extra attribute is a fact the design never
+#: declares, so no read projects it and no test covers it.
+SLOT_ROW_ATTRIBUTES: frozenset[str] = frozenset(
+    {
+        "pk",
+        "sk",
+        "entityType",
+        SHOW_AND_SELL_ID_ATTRIBUTE,
+        SLOT_ID_ATTRIBUTE,
+        LABEL_ATTRIBUTE,
+        START_AT_ATTRIBUTE,
+        END_AT_ATTRIBUTE,
+        CAPACITY_ATTRIBUTE,
+        ACTIVE_SIGNUP_COUNT_ATTRIBUTE,
+        VERSION_ATTRIBUTE,
+        CREATED_AT_ATTRIBUTE,
+        UPDATED_AT_ATTRIBUTE,
+    }
+)
+
+#: Every attribute a ``SIGNUP#`` row may carry (§5.13, in full). The signup is
+#: written by §3.4, but the row shape is declared here because §3.3 owns the
+#: aggregate's storage contract: the slot counter, the update revalidation, and the
+#: cancellation reads all reason about this row.
+SIGNUP_ROW_ATTRIBUTES: frozenset[str] = frozenset(
+    {
+        "pk",
+        "sk",
+        "entityType",
+        SHOW_AND_SELL_ID_ATTRIBUTE,
+        SLOT_ID_ATTRIBUTE,
+        PROFILE_ID_ATTRIBUTE,
+        UNIT_CAMPAIGN_ID_ATTRIBUTE,
+        CAMPAIGN_ID_ATTRIBUTE,
+        STATUS_ATTRIBUTE,
+        ACTUAL_MINUTES_ATTRIBUTE,
+        SIGNED_UP_BY_ATTRIBUTE,
+        CONFIRMED_BY_ATTRIBUTE,
+        CONFIRMED_AT_ATTRIBUTE,
+        VERSION_ATTRIBUTE,
+        CREATED_AT_ATTRIBUTE,
+        UPDATED_AT_ATTRIBUTE,
+    }
+)
+
+#: The ``COMMITMENT#`` projection row (§5.13) and the one-row-per-Scout guard.
+COMMITMENT_ROW_ATTRIBUTES: frozenset[str] = frozenset(
+    {
+        "pk",
+        "sk",
+        "entityType",
+        PROFILE_ID_ATTRIBUTE,
+        UNIT_CAMPAIGN_ID_ATTRIBUTE,
+        COMMITMENT_ID_ATTRIBUTE,
+        SHOW_AND_SELL_ID_ATTRIBUTE,
+        SLOT_ID_ATTRIBUTE,
+        START_AT_ATTRIBUTE,
+        END_AT_ATTRIBUTE,
+        STATUS_ATTRIBUTE,
+        VERSION_ATTRIBUTE,
+        CREATED_AT_ATTRIBUTE,
+        UPDATED_AT_ATTRIBUTE,
+    }
+)
+
+COMMITMENT_GUARD_ROW_ATTRIBUTES: frozenset[str] = frozenset(
+    {
+        "pk",
+        "sk",
+        "entityType",
+        PROFILE_ID_ATTRIBUTE,
+        COMMITMENT_VERSION_ATTRIBUTE,
+        UPDATED_AT_ATTRIBUTE,
+    }
+)
+
 #: The fields ``updateShowAndSell`` may write (API contract §6.2). Everything else
 #: on the row is either derived, server-owned, or immutable, and :func:`writable_changes`
 #: refuses a payload that smuggles one in — including ``startAt``/``endAt``, which is
@@ -265,6 +357,22 @@ MAX_LOCATION_NAME_LENGTH = 100
 MAX_ADDRESS_LENGTH = 500
 MAX_REASON_LENGTH = 500
 
+# --- Slot and capacity limits (API contract §3.4/§6.3, data model §5.12) ---------
+
+#: A slot holds at least one Scout: capacity 0 would be a slot nobody can ever
+#: fill, and an admin who wants a slot gone deletes it (§3.3.3).
+MIN_SLOT_CAPACITY = 1
+#: The ceiling §3.3.2 enforces as input validation — a "1000-person booth" is a
+#: typo at the keyboard, not a Scout roster.
+MAX_SLOT_CAPACITY = 100
+#: An event carries at most 20 slots (§3.3.2). The count is decided against the
+#: event's own slot partition under the event-version condition, so two concurrent
+#: creations cannot each count 20 and land 21.
+MAX_SLOTS_PER_EVENT = 20
+#: A slot label is display text for the signup screen; 100 characters covers every
+#: real booth name and keeps the row small (§5.12's label is optional text).
+MAX_SLOT_LABEL_LENGTH = 100
+
 _MOMENT_PATTERN_HINT = "must be an ISO 8601 date-time with a time zone"
 
 
@@ -282,6 +390,18 @@ def new_show_and_sell_id() -> str:
     A UUID rather than a counter: the id is the event's partition key, so two
     Kernels creating an event at the same moment must not collide on a key either
     of them guessed.
+    """
+    return str(uuid.uuid4())
+
+
+def new_slot_id() -> str:
+    """A stable slot identity, generated before the write (§5.12).
+
+    The slot id is the suffix of the slot row's sort key inside the event's
+    partition, so two Kernels adding a slot to the same event at the same moment
+    must not collide on one the other guessed — and an id the browser sent could
+    collide with a slot that event already has, which would read as a duplicate
+    rather than as the new slot that was asked for.
     """
     return str(uuid.uuid4())
 
@@ -414,6 +534,46 @@ def merge_product_ids(existing: Any, additions: Iterable[str]) -> List[str]:
         if product_id not in merged:
             merged.append(product_id)
     return merged
+
+
+def normalize_slot_id(value: Any, field: str = SLOT_ID_ATTRIBUTE) -> str:
+    """Validate a slot id by the same id rules as every other key component."""
+    return normalize_event_id(value, field)
+
+
+def normalize_label(value: Any, field: str = LABEL_ATTRIBUTE) -> Optional[str]:
+    """The optional slot label (§5.12): an absent or blank label is no label."""
+    return normalize_optional_text(value, field, MAX_SLOT_LABEL_LENGTH)
+
+
+def normalize_capacity(value: Any, field: str = CAPACITY_ATTRIBUTE) -> int:
+    """A slot capacity inside 1-100 (§3.3.2).
+
+    The range is validation, not a tunable: 0 is a slot nobody can fill, and a
+    four-digit capacity is a keyboard slip that would let a thousand Scouts into
+    one booth before any signup write could refuse it.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        raise _invalid(field, "must be an integer")
+    number = int(value)
+    if number < MIN_SLOT_CAPACITY or number > MAX_SLOT_CAPACITY:
+        raise _invalid(field, f"must be between {MIN_SLOT_CAPACITY} and {MAX_SLOT_CAPACITY}")
+    return number
+
+
+def normalize_active_count(value: Any, field: str = ACTIVE_SIGNUP_COUNT_ATTRIBUTE) -> int:
+    """The maintained counter as a non-negative integer (§5.12)."""
+    if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+        raise _invalid(field, "must be an integer")
+    number = int(value)
+    if number < 0:
+        raise _invalid(field, "must not be negative")
+    return number
+
+
+def normalize_actual_minutes(value: Any, field: str = ACTUAL_MINUTES_ATTRIBUTE) -> int:
+    """Confirmed work minutes as a non-negative integer (§5.13): 0 means unconfirmed."""
+    return normalize_active_count(value, field)
 
 
 # --- Key builders ----------------------------------------------------------------
@@ -673,6 +833,26 @@ def require_cancellable(item: Mapping[str, Any], now_iso: Optional[str] = None) 
     return state
 
 
+def require_slots_writable(item: Mapping[str, Any], now_iso: Optional[str] = None) -> str:
+    """Require the event to be in the one state §3.3 allows slot writes in.
+
+    §3.3.2 and §3.3.3 both say SCHEDULED, and it is stricter than §3.5's general
+    editable matrix on purpose: once the event has started, its slots are facts the
+    Scouts already worked against — moving or deleting one after the fact would
+    rewrite the schedule people showed up to. ``REOPENED`` is refused here for the
+    same reason: what a reopened event edits are the finalization drafts, not the
+    shift board.
+    """
+    state = derive_event_status(item, now_iso)
+    if state != STATUS_SCHEDULED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "Slots can only be changed while the event is scheduled. Once it has started, its slots stand as signed up.",
+            details={"subcode": "EVENT_STATE", "status": state},
+        )
+    return state
+
+
 def we_owe_disable_blocked(obligations: Iterable[Mapping[str, Any]]) -> bool:
     """Whether turning We Owe off would strand an obligation that is still open.
 
@@ -700,6 +880,26 @@ def load_show_and_sell_or_not_found(show_and_sell_id: str) -> Dict[str, Any]:
     if event is None:
         raise AppError(ErrorCode.NOT_FOUND, "Show & Sell not found")
     return event
+
+
+def read_slot(show_and_sell_id: str, slot_id: str) -> Optional[Dict[str, Any]]:
+    """Strongly consistent read of one slot by its parent and its own id (SEC-06).
+
+    The parent id is part of the key, which is what makes a slot id from another
+    event simply absent here rather than found and then refused: §3.3.3's
+    wrong-parent case is a key fact, not a comparison.
+    """
+    response = tables.show_and_sells.get_item(Key=slot_key(show_and_sell_id, slot_id), ConsistentRead=True)
+    item = response.get("Item")
+    return dict(item) if isinstance(item, dict) else None
+
+
+def load_slot_or_not_found(show_and_sell_id: str, slot_id: str) -> Dict[str, Any]:
+    """Read one slot, answering ``NOT_FOUND`` when this event does not hold it."""
+    slot = read_slot(show_and_sell_id, slot_id)
+    if slot is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Slot not found for this Show & Sell")
+    return slot
 
 
 def list_campaign_events(unit_campaign_id: str) -> List[Dict[str, Any]]:
@@ -964,6 +1164,24 @@ def wire_item(item: Mapping[str, Any]) -> Dict[str, Any]:
     return {name: wire_item_value(value) for name, value in item.items()}
 
 
+_ALIAS_PATTERN = re.compile(r"#[A-Za-z0-9_]+")
+
+
+def _register_aliases(names: Dict[str, str], expression: str) -> None:
+    """Register every ``#alias`` an expression uses, so a guard cannot be malformed.
+
+    DynamoDB rejects a write whose expression names an alias its
+    ``ExpressionAttributeNames`` map lacks, and an in-memory plan cannot see that: it
+    surfaces only at commit. Every alias in this module is spelled ``#<attribute>``, so
+    the mapping is derivable from the expression, and deriving it lets a guard name an
+    attribute the write does not itself set — the event's ``status`` in
+    :func:`bump_event_version_action`, a slot's ``activeSignupCount`` in
+    :func:`update_slot_action` — without a second list anyone can forget.
+    """
+    for token in _ALIAS_PATTERN.findall(expression):
+        names.setdefault(token, token[1:])
+
+
 def _conditioned_update(
     key: Mapping[str, str],
     table_name: str,
@@ -986,7 +1204,9 @@ def _conditioned_update(
         sets: Attribute name -> new value. The caller's ``version`` entry, when it
             supplies one, is the value the write produces.
         extra_conditions: ``(placeholder, expression, value)`` triples appended to
-            the condition, each with its own value placeholder.
+            the condition, each with its own value placeholder. Any ``#alias`` an
+            expression uses is registered in the names map, whether or not the write
+            also sets that attribute.
     """
     names: Dict[str, str] = {"#version": VERSION_ATTRIBUTE}
     values: Dict[str, Any] = {":expectedVersion": expected_version}
@@ -997,6 +1217,7 @@ def _conditioned_update(
         set_parts.append(f"#{attribute} = :{attribute}")
     condition_parts: List[str] = ["#version = :expectedVersion"]
     for placeholder, expression, value in extra_conditions:
+        _register_aliases(names, expression)
         values[placeholder] = value
         condition_parts.append(expression)
     return (
@@ -1513,10 +1734,61 @@ def cancel_commitment_action(
     )
 
 
+def move_commitment_action(
+    *,
+    commitment: Mapping[str, Any],
+) -> Tuple[str, Dict[str, Any]]:
+    """Delete one commitment projection at the interval it was written under.
+
+    A commitment's sort key IS its interval (§6.2), so moving a slot's time cannot update
+    the interval in place — the row moves. :func:`put_commitment_action` writes the
+    projection that replaces it at the new key as a second transaction action: two
+    operations on one item are not allowed in a transaction, and the old and new keys are
+    different rows, so the pair is one move.
+
+    The version condition is what makes the move safe rather than destructive: a signup
+    or cancellation that re-wrote this projection between the read and this commit moves
+    its version, and this plan fails instead of deleting a row it never saw.
+    """
+    return (
+        "Delete",
+        {
+            "TableName": tables.unit_campaigns.table_name,
+            "Key": wire_key({"pk": str(commitment["pk"]), "sk": str(commitment["sk"])}),
+            "ConditionExpression": "attribute_exists(#pk) AND #version = :expectedVersion",
+            "ExpressionAttributeNames": {"#pk": "pk", "#version": VERSION_ATTRIBUTE},
+            "ExpressionAttributeValues": wire_values(
+                {":expectedVersion": normalize_required_version(commitment.get(VERSION_ATTRIBUTE, 1))}
+            ),
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def put_commitment_action(*, item: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Insert one commitment projection at the interval it now describes.
+
+    ``attribute_not_exists`` on both key attributes is the collision guard: a projection
+    already living at the new key belongs to another signup this request never read, and
+    overwriting it would answer an overlap question later with a row this write destroyed.
+    """
+    return (
+        "Put",
+        {
+            "TableName": tables.unit_campaigns.table_name,
+            "Item": wire_item(item),
+            "ConditionExpression": "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
+            "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
 def bump_commitment_guard_action(
     *,
     profile_id: str,
     updated_at: str,
+    expected_commitment_version: Optional[int] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """Advance one Scout's commitment guard, incrementing it in the write itself.
 
@@ -1528,25 +1800,723 @@ def bump_commitment_guard_action(
     ``commitmentVersion`` is incremented by DynamoDB rather than written from a read
     value. Two writers that both read the guard and then wrote ``read + 1`` would
     land on the same number and both believe they serialized; ``+ :one`` makes the
-    increment itself the lock, and ``attribute_exists`` makes "this Scout never
-    signed up, so there is no guard" fail the transaction instead of inventing a row.
+    increment itself the lock.
+
+    ``expected_commitment_version`` is the version the caller validated its plan
+    against, and it turns the bump into a compare-and-set. An increment that only
+    requires the guard to EXIST serializes nothing: two slot moves on two different
+    events each re-validate one Scout's commitments against what that Scout's board
+    looked like when it read, each bump succeeds, and the Scout ends up with two
+    overlapping commitments at two different Show & Sells — the injury AC-14 forbids,
+    and no event-version condition can see it because the two plans touch two
+    different events. Pinning the version means the second writer's condition fails
+    and its whole plan rolls back. A caller that never read the guard — the
+    cancellation in §3.1, whose plan is already serialized by the event version and
+    which releases only that event's own commitments — leaves it ``None`` and keeps
+    the existence condition.
     """
+    if expected_commitment_version is None:
+        condition = "attribute_exists(#pk) AND attribute_exists(#commitmentVersion)"
+        values: Dict[str, Any] = {":one": 1, ":updatedAt": updated_at}
+    else:
+        condition = "attribute_exists(#pk) AND #commitmentVersion = :expectedCommitmentVersion"
+        values = {
+            ":one": 1,
+            ":updatedAt": updated_at,
+            ":expectedCommitmentVersion": normalize_required_version(expected_commitment_version),
+        }
     return (
         "Update",
         {
             "TableName": tables.unit_campaigns.table_name,
             "Key": wire_key(commitment_guard_key(profile_id)),
             "UpdateExpression": "SET #commitmentVersion = #commitmentVersion + :one, #updatedAt = :updatedAt",
-            "ConditionExpression": "attribute_exists(#pk) AND attribute_exists(#commitmentVersion)",
+            "ConditionExpression": condition,
             "ExpressionAttributeNames": {
                 "#commitmentVersion": "commitmentVersion",
                 "#updatedAt": UPDATED_AT_ATTRIBUTE,
                 "#pk": "pk",
             },
-            "ExpressionAttributeValues": wire_values({":one": 1, ":updatedAt": updated_at}),
+            "ExpressionAttributeValues": wire_values(values),
             "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
         },
     )
+
+
+# --- Slots and commitments (data model §5.12–§5.13, checklist §3.3) --------------
+
+# §3.3 owns three row shapes at once: the slot it writes, and the signup/commitment
+# pair whose storage contract the slot's writes reason about — the slot's
+# ``activeSignupCount`` counts the signup rows, the slot update revalidates them,
+# and the slot delete refuses on them. The commitment projection is the row §3.4's
+# signup will later write; it is declared here because the cross-campaign overlap
+# rule (SLOT-04) that a slot move must respect is decided against exactly this row,
+# so the interval rule and the row shape have one owner rather than two.
+
+
+def slot_bounds_violations(event: Mapping[str, Any], start_at: str, end_at: str) -> List[str]:
+    """Whether a slot interval fits inside the event's immutable interval.
+
+    §5.12's bound is ``event.startAt <= slot.startAt < slot.endAt <= event.endAt``:
+    a slot may start the moment the event starts and end the moment it ends, but
+    not a second outside. ``endAt > startAt`` itself is already enforced by
+    :func:`normalize_interval`, so only the two outer bounds live here.
+    """
+    problems: List[str] = []
+    event_start = str(event.get(START_AT_ATTRIBUTE) or "")
+    event_end = str(event.get(END_AT_ATTRIBUTE) or "")
+    if event_start and start_at < event_start:
+        problems.append("the slot starts before the event starts")
+    if event_end and end_at > event_end:
+        problems.append("the slot ends after the event ends")
+    return problems
+
+
+def build_show_and_sell_slot_item(
+    *,
+    event: Mapping[str, Any],
+    slot_id: Any,
+    start_at: Any,
+    end_at: Any,
+    capacity: Any,
+    now_iso: Any,
+    label: Any = None,
+    active_signup_count: Any = 0,
+    version: Any = 1,
+) -> Dict[str, Any]:
+    """The §5.12 slot row, validated on the way in.
+
+    ``event`` is the event row, not an id: the interval bound is only decidable
+    against the interval itself, and reading the event is the resolver's one
+    consistent read — passing the row through keeps the bound and the version
+    condition about the same event. ``active_signup_count`` and ``version`` carry
+    create-time defaults because a create cannot produce either: the counter starts
+    at zero because nobody has signed up yet, and §3.3 offers no input that could
+    change either one.
+    """
+    event_id = normalize_event_id(event.get(SHOW_AND_SELL_ID_ATTRIBUTE))
+    sid = normalize_slot_id(slot_id)
+    start, end = normalize_interval(start_at, end_at)
+    stamp = normalize_moment(now_iso, UPDATED_AT_ATTRIBUTE)
+    item: Dict[str, Any] = {
+        "pk": show_and_sell_pk(event_id),
+        "sk": slot_sk(sid),
+        "entityType": ENTITY_TYPE_SLOT,
+        SHOW_AND_SELL_ID_ATTRIBUTE: event_id,
+        SLOT_ID_ATTRIBUTE: sid,
+        LABEL_ATTRIBUTE: normalize_label(label),
+        START_AT_ATTRIBUTE: start,
+        END_AT_ATTRIBUTE: end,
+        CAPACITY_ATTRIBUTE: normalize_capacity(capacity),
+        ACTIVE_SIGNUP_COUNT_ATTRIBUTE: normalize_active_count(active_signup_count),
+        VERSION_ATTRIBUTE: normalize_required_version(version),
+        CREATED_AT_ATTRIBUTE: stamp,
+        UPDATED_AT_ATTRIBUTE: stamp,
+    }
+    violations = slot_invariant_violations(item, event)
+    if violations:
+        raise _invalid(SLOT_ID_ATTRIBUTE, f"would break the slot invariants: {'; '.join(violations)}")
+    return item
+
+
+def _entity_row_shape_violations(item: Mapping[str, Any], entity_type: str, declared: AbstractSet[str]) -> List[str]:
+    """Row shape for any Show & Sell row: the entity tag, and only declared attributes.
+
+    The three §3.3 rows share this rule and differ only in which tag and which set,
+    so it is one function: an attribute outside the declared set is a fact no write
+    in this feature produces, and a missing one is a row a later read would have to
+    guess at.
+    """
+    problems: List[str] = []
+    if str(item.get("entityType") or "") != entity_type:
+        problems.append(f"entityType is not {entity_type}")
+    extra = set(item) - declared
+    if extra:
+        problems.append(f"attributes the model leaves out: {', '.join(sorted(extra))}")
+    missing = declared - set(item)
+    if missing:
+        problems.append(f"missing attributes: {', '.join(sorted(missing))}")
+    return problems
+
+
+def _is_count(value: Any) -> TypeGuard[int | Decimal]:
+    """A Dynamo number, and not a boolean wearing one."""
+    return not isinstance(value, bool) and isinstance(value, (int, Decimal))
+
+
+def _counter_violations(item: Mapping[str, Any], attribute: str) -> List[str]:
+    """A counter that must never go negative: ``activeSignupCount``, ``actualMinutes``."""
+    value = item.get(attribute)
+    if not _is_count(value):
+        return [f"{attribute} must be an integer"]
+    if int(value) < 0:
+        return [f"{attribute} must not be negative"]
+    return []
+
+
+def _capacity_violations(item: Mapping[str, Any]) -> List[str]:
+    """Capacity is 1–100 (§5.12): no slot that cannot hold anyone, none a Unit cannot run."""
+    capacity = item.get(CAPACITY_ATTRIBUTE)
+    if not _is_count(capacity):
+        return ["capacity must be an integer"]
+    if not MIN_SLOT_CAPACITY <= int(capacity) <= MAX_SLOT_CAPACITY:
+        return [f"capacity must be between {MIN_SLOT_CAPACITY} and {MAX_SLOT_CAPACITY}"]
+    return []
+
+
+def _counter_within_capacity_violations(item: Mapping[str, Any]) -> List[str]:
+    """The counter cannot exceed the capacity stored beside it (§5.12).
+
+    Only comparable when both sides are numbers: a row whose capacity is a string is
+    already reported by :func:`_capacity_violations`, and this would report a second
+    breach about a value that cannot be compared.
+    """
+    count = item.get(ACTIVE_SIGNUP_COUNT_ATTRIBUTE)
+    capacity = item.get(CAPACITY_ATTRIBUTE)
+    if _is_count(count) and _is_count(capacity) and int(count) > int(capacity):
+        return ["activeSignupCount exceeds capacity"]
+    return []
+
+
+def slot_invariant_violations(item: Mapping[str, Any], event: Optional[Mapping[str, Any]] = None) -> List[str]:
+    """Every §5.12 invariant one slot row can break, as plain-language breaches.
+
+    Same style as :func:`event_invariant_violations`: the builder runs it before a
+    write, and a reader that finds a row violating it is looking at a broken
+    aggregate rather than something to repair on read. ``event`` is optional
+    because the bound check needs the interval while the row-shape and counter
+    checks stand alone.
+    """
+    problems = _entity_row_shape_violations(item, ENTITY_TYPE_SLOT, SLOT_ROW_ATTRIBUTES)
+    problems += _interval_violations(item) + _capacity_violations(item)
+    problems += _counter_violations(item, ACTIVE_SIGNUP_COUNT_ATTRIBUTE)
+    problems += _counter_within_capacity_violations(item)
+    if event is None:
+        return problems
+    start = str(item.get(START_AT_ATTRIBUTE) or "")
+    end = str(item.get(END_AT_ATTRIBUTE) or "")
+    if start and end:
+        problems += slot_bounds_violations(event, start, end)
+    return problems
+
+
+def normalize_signup_status(value: Any, field: str = STATUS_ATTRIBUTE) -> str:
+    """Validate a signup/commitment state against §9.3's two-state vocabulary."""
+    text = normalize_required_text(value, field, 32).upper()
+    if text not in {SIGNUP_ACTIVE, SIGNUP_CANCELLED}:
+        raise _invalid(field, f"must be one of {SIGNUP_ACTIVE}, {SIGNUP_CANCELLED}")
+    return text
+
+
+def build_show_and_sell_signup_item(
+    *,
+    event: Mapping[str, Any],
+    slot_id: Any,
+    profile_id: Any,
+    campaign_id: Any,
+    signed_up_by_account_id: Any,
+    now_iso: Any,
+    status: Any = SIGNUP_ACTIVE,
+    actual_minutes: Any = 0,
+    confirmed_by_account_id: Any = None,
+    confirmed_at: Any = None,
+    version: Any = 1,
+) -> Dict[str, Any]:
+    """The §5.13 signup row.
+
+    §3.4 writes this row; §3.3 declares it because the slot contract depends on it
+    — the counter counts ACTIVE rows of exactly this shape, the update revalidation
+    reads them, and the delete refuses while any of them exists. ``unitCampaignId``
+    and ``campaignId`` come off the event and the caller: the first is the roster
+    and credit scope the event already belongs to, the second is the Scout's own
+    Scout Campaign, which §5.13 keeps because credit and Orders retain their
+    originating scope after a roster move. The confirmation audit is a build
+    argument rather than a post-build patch so §3.4.3 can re-emit a confirmed row
+    (a replay of a confirmed signup rewrites the whole row) — and :func:`
+    signup_invariant_violations` is what catches the half-written audit that makes.
+    """
+    event_id = normalize_event_id(event.get(SHOW_AND_SELL_ID_ATTRIBUTE))
+    sid = normalize_slot_id(slot_id)
+    stamp = normalize_moment(now_iso, UPDATED_AT_ATTRIBUTE)
+    item: Dict[str, Any] = {
+        "pk": show_and_sell_pk(event_id),
+        "sk": signup_sk(sid, normalize_event_id(profile_id, PROFILE_ID_ATTRIBUTE)),
+        "entityType": ENTITY_TYPE_SIGNUP,
+        SHOW_AND_SELL_ID_ATTRIBUTE: event_id,
+        SLOT_ID_ATTRIBUTE: sid,
+        PROFILE_ID_ATTRIBUTE: normalize_event_id(profile_id, PROFILE_ID_ATTRIBUTE),
+        UNIT_CAMPAIGN_ID_ATTRIBUTE: normalize_event_id(
+            event.get(UNIT_CAMPAIGN_ID_ATTRIBUTE), UNIT_CAMPAIGN_ID_ATTRIBUTE
+        ),
+        CAMPAIGN_ID_ATTRIBUTE: normalize_event_id(campaign_id, CAMPAIGN_ID_ATTRIBUTE),
+        STATUS_ATTRIBUTE: normalize_signup_status(status),
+        ACTUAL_MINUTES_ATTRIBUTE: normalize_actual_minutes(actual_minutes),
+        SIGNED_UP_BY_ATTRIBUTE: normalize_event_id(signed_up_by_account_id, SIGNED_UP_BY_ATTRIBUTE),
+        CONFIRMED_BY_ATTRIBUTE: (
+            None
+            if confirmed_by_account_id is None
+            else normalize_event_id(confirmed_by_account_id, CONFIRMED_BY_ATTRIBUTE)
+        ),
+        CONFIRMED_AT_ATTRIBUTE: None
+        if confirmed_at is None
+        else normalize_moment(confirmed_at, CONFIRMED_AT_ATTRIBUTE),
+        VERSION_ATTRIBUTE: normalize_required_version(version),
+        CREATED_AT_ATTRIBUTE: stamp,
+        UPDATED_AT_ATTRIBUTE: stamp,
+    }
+    violations = signup_invariant_violations(item)
+    if violations:
+        raise _invalid(SLOT_ID_ATTRIBUTE, f"would break the signup invariants: {'; '.join(violations)}")
+    return item
+
+
+def _signup_status_violations(item: Mapping[str, Any]) -> List[str]:
+    """The signup and its commitment projection share §9.3's two-state vocabulary."""
+    if str(item.get(STATUS_ATTRIBUTE) or "") in {SIGNUP_ACTIVE, SIGNUP_CANCELLED}:
+        return []
+    return [f"status is not one of {SIGNUP_ACTIVE}, {SIGNUP_CANCELLED}"]
+
+
+def signup_invariant_violations(item: Mapping[str, Any]) -> List[str]:
+    """The §5.13 signup invariants: vocabulary, floor, and confirmation audit.
+
+    "At most one ACTIVE signup per ``(slotId, profileId)``" needs no check here:
+    the signup's sort key IS that pair, so the second active signup for one Scout
+    in one slot would be the same row. What this function catches is the rest —
+    minutes below zero, a state outside the vocabulary, and a confirmation that
+    names no confirmer (an audit trail that says work was confirmed but not by whom
+    is the trail §3.4.3 exists to prevent).
+    """
+    problems = _entity_row_shape_violations(item, ENTITY_TYPE_SIGNUP, SIGNUP_ROW_ATTRIBUTES)
+    problems += _signup_status_violations(item) + _counter_violations(item, ACTUAL_MINUTES_ATTRIBUTE)
+    if item.get(CONFIRMED_AT_ATTRIBUTE) is not None and not item.get(CONFIRMED_BY_ATTRIBUTE):
+        problems.append("confirmed work requires confirmedByAccountId")
+    return problems
+
+
+def build_scout_commitment_item(
+    *,
+    profile_id: Any,
+    unit_campaign_id: Any,
+    show_and_sell_id: Any,
+    slot_id: Any,
+    start_at: Any,
+    end_at: Any,
+    now_iso: Any,
+    version: Any,
+    status: Any = SIGNUP_ACTIVE,
+) -> Dict[str, Any]:
+    """The §5.13 cross-campaign commitment projection.
+
+    The interval rides denormalized (as it does on the allocation row, §5.11)
+    because the commitment IS the interval — the authoritative answer to "is this
+    Scout already somewhere else at that time" is one consistent query over the
+    Scout's partition sorted by ``startAt``, and a reader that had to join back to
+    each slot row could not run it. ``version`` is supplied, never defaulted:
+    §5.13 defines the projection's version as matching the source signup's, so the
+    caller that writes the signup passes the number the signup row moves to.
+    """
+    start, end = normalize_interval(start_at, end_at)
+    stamp = normalize_moment(now_iso, UPDATED_AT_ATTRIBUTE)
+    sid = normalize_slot_id(slot_id)
+    profile = normalize_event_id(profile_id, PROFILE_ID_ATTRIBUTE)
+    item: Dict[str, Any] = {
+        "pk": commitment_pk(profile),
+        "sk": commitment_sk(start, normalize_event_id(unit_campaign_id, UNIT_CAMPAIGN_ID_ATTRIBUTE), sid),
+        "entityType": ENTITY_TYPE_COMMITMENT,
+        PROFILE_ID_ATTRIBUTE: profile,
+        UNIT_CAMPAIGN_ID_ATTRIBUTE: normalize_event_id(unit_campaign_id, UNIT_CAMPAIGN_ID_ATTRIBUTE),
+        COMMITMENT_ID_ATTRIBUTE: signup_sk(sid, profile),
+        SHOW_AND_SELL_ID_ATTRIBUTE: normalize_event_id(show_and_sell_id),
+        SLOT_ID_ATTRIBUTE: sid,
+        START_AT_ATTRIBUTE: start,
+        END_AT_ATTRIBUTE: end,
+        STATUS_ATTRIBUTE: normalize_signup_status(status),
+        VERSION_ATTRIBUTE: normalize_required_version(version),
+        CREATED_AT_ATTRIBUTE: stamp,
+        UPDATED_AT_ATTRIBUTE: stamp,
+    }
+    # No builder-side invariant pass: every field above is normalized on the way in
+    # and the identity is computed rather than supplied, so no build argument can
+    # produce a violating row. :func:`commitment_invariant_violations` is the
+    # read-side oracle instead — it is what proves a STORED projection still agrees
+    # with its source, and §3.3's slot revalidation runs it over the rows it reads.
+    return item
+
+
+def commitment_invariant_violations(item: Mapping[str, Any]) -> List[str]:
+    """The §5.13 commitment invariants: the projection agrees with its source.
+
+    A commitment whose ``status`` is outside the signup vocabulary or whose interval
+    is inverted would answer the overlap question wrongly for every future signup,
+    and an attribute outside the declared set is a fact no signup write produces.
+    """
+    return (
+        _entity_row_shape_violations(item, ENTITY_TYPE_COMMITMENT, COMMITMENT_ROW_ATTRIBUTES)
+        + _interval_violations(item)
+        + _signup_status_violations(item)
+    )
+
+
+def build_commitment_guard_item(*, profile_id: Any, commitment_version: Any, now_iso: Any) -> Dict[str, Any]:
+    """The one-row-per-Scout commitment guard (§5.13).
+
+    Written by the first signup (§3.4), read by every commitment change — and
+    declared here because §3.3's slot update reads the commitment partition it
+    serializes. ``commitmentVersion`` is required, never defaulted: a guard whose
+    version nobody chose is a lock that says nothing about which change it
+    witnessed.
+    """
+    stamp = normalize_moment(now_iso, UPDATED_AT_ATTRIBUTE)
+    profile = normalize_event_id(profile_id, PROFILE_ID_ATTRIBUTE)
+    return {
+        "pk": commitment_pk(profile),
+        "sk": COMMITMENT_GUARD_SK,
+        "entityType": ENTITY_TYPE_COMMITMENT_GUARD,
+        PROFILE_ID_ATTRIBUTE: profile,
+        COMMITMENT_VERSION_ATTRIBUTE: normalize_required_version(commitment_version, COMMITMENT_VERSION_ATTRIBUTE),
+        UPDATED_AT_ATTRIBUTE: stamp,
+    }
+
+
+def put_slot_action(item: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Create one slot: the conditional insert is also the slot-count race guard.
+
+    Two concurrent 20→21 creations both count 20 slots in their read, but the
+    event-version condition on the aggregate bump that rides every slot write
+    commits one and fails the other — the insert condition just keeps a second
+    create of one slot id from overwriting the first.
+    """
+    return (
+        "Put",
+        {
+            "TableName": tables.show_and_sells.table_name,
+            "Item": wire_item(item),
+            "ConditionExpression": "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
+            "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def update_slot_action(
+    *,
+    show_and_sell_id: str,
+    slot_id: str,
+    expected_version: int,
+    label: Optional[str],
+    start_at: str,
+    end_at: str,
+    capacity: int,
+    updated_at: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """Rewrite one slot's writable fields under its version plus a capacity floor.
+
+    An upsert writes the whole slot as offered — label, interval, capacity — because
+    that is what an edit screen submits, and it is what makes the fingerprint
+    honest: two requests that offer different slots are different requests. The
+    ``activeSignupCount <= :capacity`` condition is §5.12's shrink rule expressed on
+    the write itself: the resolver refuses a capacity below the count it read, and
+    this catches the case where a signup moved the counter between that read and
+    this commit without any other writer touching the version the caller sent.
+    """
+    return _conditioned_update(
+        slot_key(show_and_sell_id, slot_id),
+        tables.show_and_sells.table_name,
+        expected_version=expected_version,
+        sets={
+            LABEL_ATTRIBUTE: label,
+            START_AT_ATTRIBUTE: start_at,
+            END_AT_ATTRIBUTE: end_at,
+            CAPACITY_ATTRIBUTE: capacity,
+            VERSION_ATTRIBUTE: expected_version + 1,
+            UPDATED_AT_ATTRIBUTE: updated_at,
+        },
+        extra_conditions=((":roomCondition", "#activeSignupCount <= :roomCondition", capacity),),
+    )
+
+
+def delete_slot_action(
+    *,
+    show_and_sell_id: str,
+    slot_id: str,
+    expected_version: int,
+) -> Tuple[str, Dict[str, Any]]:
+    """Delete one slot only while it holds nobody and has not moved since the read.
+
+    Three guards in one write, and each catches a different race:
+    ``attribute_exists`` is the wrong-parent guard — with the parent in the key, a
+    slot id from another event simply has no row here; ``#version`` is the row the
+    resolver read, so any signup that touched the slot between read and commit
+    moves it; and ``#activeSignupCount = :zero`` is §3.3.3's promise that a
+    deletion never silently drops a participant, enforced on the row rather than
+    only against the read the resolver made.
+    """
+    return (
+        "Delete",
+        {
+            "TableName": tables.show_and_sells.table_name,
+            "Key": wire_key(slot_key(show_and_sell_id, slot_id)),
+            "ConditionExpression": (
+                "attribute_exists(#pk) AND #version = :expectedVersion AND #activeSignupCount = :zeroCondition"
+            ),
+            "ExpressionAttributeNames": {
+                "#pk": "pk",
+                "#version": VERSION_ATTRIBUTE,
+                "#activeSignupCount": ACTIVE_SIGNUP_COUNT_ATTRIBUTE,
+            },
+            "ExpressionAttributeValues": wire_values({":expectedVersion": expected_version, ":zeroCondition": 0}),
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def bump_event_version_action(
+    *,
+    show_and_sell_id: str,
+    expected_version: int,
+    updated_by_account_id: str,
+    updated_at: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """Move the event version because its slot board just moved.
+
+    §8.3's rule for participant-side changes — "an incremented event version
+    prevents finalization from approving a stale participant/sale set" — applies to
+    the slot rows that define what a signup could have been for: finalization must
+    not approve a work set measured against slots that changed under it. The
+    version condition makes every concurrent slot write settle against one
+    serialization point, and the stored-state condition is §3.3's SCHEDULED
+    requirement re-checked at commit: an event that was cancelled, started into a
+    terminal workflow, finalized, or reopened between this read and this write
+    fails the plan instead of having its slot board edited behind the workflow.
+    """
+    return _conditioned_update(
+        event_metadata_key(show_and_sell_id),
+        tables.show_and_sells.table_name,
+        expected_version=expected_version,
+        sets={
+            VERSION_ATTRIBUTE: expected_version + 1,
+            UPDATED_BY_ATTRIBUTE: updated_by_account_id,
+            UPDATED_AT_ATTRIBUTE: updated_at,
+        },
+        extra_conditions=((":stateCondition", "#status = :stateCondition", STATUS_SCHEDULED),),
+    )
+
+
+def active_slot_signups(signups: Sequence[Mapping[str, Any]], slot_id: str) -> List[Mapping[str, Any]]:
+    """The ACTIVE signups holding one slot — the rows a slot edit must keep legal.
+
+    The rows, not the slot's ``activeSignupCount``: the counter is a projection kept for
+    the board's arithmetic, and a §3.3 guard decided on it would be decided on the copy.
+    """
+    return [
+        signup
+        for signup in signups
+        if str(signup.get(SLOT_ID_ATTRIBUTE) or "") == slot_id
+        and str(signup.get(STATUS_ATTRIBUTE) or "") == SIGNUP_ACTIVE
+    ]
+
+
+def active_signup_profiles(signups: Sequence[Mapping[str, Any]], slot_id: str) -> List[str]:
+    """The Scouts holding an ACTIVE signup in one slot, in the order a plan stages them.
+
+    Sorted, not insertion-ordered: a slot write commits one commitment per Scout, and two
+    requests that stage the same Scout set in different orders would take the guards in
+    different orders and could deadlock on each other.
+    """
+    return sorted({str(signup.get(PROFILE_ID_ATTRIBUTE) or "") for signup in active_slot_signups(signups, slot_id)})
+
+
+def active_commitment_for(
+    commitments: Sequence[Mapping[str, Any]], show_and_sell_id: str, slot_id: str
+) -> Optional[Dict[str, Any]]:
+    """One Scout's ACTIVE projection for one slot of one event, when the aggregate holds one.
+
+    The ``(showAndSellId, slotId)`` pair is the row's identity, not its key: the sort key is
+    the interval (§6.2), so a slot that has been re-timed already carries its projection under
+    a different key, and only these two attributes say which slot the row describes.
+    """
+    for row in commitments:
+        if (
+            str(row.get(STATUS_ATTRIBUTE) or "") == SIGNUP_ACTIVE
+            and str(row.get(SHOW_AND_SELL_ID_ATTRIBUTE) or "") == show_and_sell_id
+            and str(row.get(SLOT_ID_ATTRIBUTE) or "") == slot_id
+        ):
+            return dict(row)
+    return None
+
+
+def slot_commitment_state(
+    *,
+    show_and_sell_id: str,
+    slot_id: str,
+    signups: Sequence[Mapping[str, Any]],
+    commitments_by_profile: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[str]]:
+    """``(pairs, violations)`` for the Scouts holding this slot: each one with their projection, and the ones missing it.
+
+    A signup and its projection are one aggregate written by one transaction (§5.13), so an
+    ACTIVE signup with no ACTIVE projection is not a state a slot edit may build on. Moving
+    such a slot would commit a row at a new interval with nothing at that interval to block
+    the next overlapping signup — the Scout could then be signed up twice at the same hour,
+    which is exactly what AC-14 says cannot happen. Leaving the slot where it is does not
+    repair the aggregate either, so this refuses rather than picking a side: the violation is
+    reported, and §3.7's validation owns the repair.
+    """
+    pairs: List[Tuple[str, Dict[str, Any]]] = []
+    violations: List[str] = []
+    for profile_id in active_signup_profiles(signups, slot_id):
+        projection = active_commitment_for(commitments_by_profile.get(profile_id, ()), show_and_sell_id, slot_id)
+        if projection is None:
+            violations.append(f"Scout {profile_id} holds a signup on this slot with no ACTIVE commitment row")
+        else:
+            pairs.append((profile_id, projection))
+    return pairs, violations
+
+
+def _overlapped_sibling_slot(
+    *,
+    signups: Sequence[Mapping[str, Any]],
+    slot_by_id: Mapping[str, Mapping[str, Any]],
+    profile_id: str,
+    slot_id: str,
+    start_at: str,
+    end_at: str,
+) -> Optional[str]:
+    """The first OTHER slot in this event the Scout holds that the new time would overlap.
+
+    A Scout signed up for two slots of the same Show & Sell has two rows and two slot
+    rows; moving one of them onto the other is the same breach as moving it onto
+    another Show & Sell, and the sibling is the nearer evidence, so it is named first.
+    A signup pointing at a slot row this event does not hold is broken on its own and
+    is not evidence about this interval.
+    """
+    for signup in signups:
+        sibling_id = str(signup.get(SLOT_ID_ATTRIBUTE) or "")
+        sibling = slot_by_id.get(sibling_id)
+        if (
+            sibling_id != slot_id
+            and str(signup.get(PROFILE_ID_ATTRIBUTE) or "") == profile_id
+            and str(signup.get(STATUS_ATTRIBUTE) or "") == SIGNUP_ACTIVE
+            and sibling is not None
+            and intervals_overlap(start_at, end_at, str(sibling[START_AT_ATTRIBUTE]), str(sibling[END_AT_ATTRIBUTE]))
+        ):
+            return sibling_id
+    return None
+
+
+def _overlapped_commitment(
+    *,
+    commitments: Sequence[Mapping[str, Any]],
+    show_and_sell_id: str,
+    slot_id: str,
+    start_at: str,
+    end_at: str,
+) -> Optional[Mapping[str, Any]]:
+    """The Scout's first ACTIVE commitment the new time would overlap, other than this slot's.
+
+    The commitment projection is the row §3.4's signup consults, so the cross-campaign
+    answer a slot move gets is the answer a later signup would get (SLOT-04). This
+    slot's own projection is excluded: the Scout holding this slot necessarily has a
+    commitment running when this slot runs, and the move is not allowed to fail
+    against the very row that proves she is in it.
+    """
+    for commitment in commitments:
+        if str(commitment.get(STATUS_ATTRIBUTE) or "") != SIGNUP_ACTIVE:
+            continue
+        same_slot = (
+            str(commitment.get(SHOW_AND_SELL_ID_ATTRIBUTE) or "") == show_and_sell_id
+            and str(commitment.get(SLOT_ID_ATTRIBUTE) or "") == slot_id
+        )
+        if not same_slot and intervals_overlap(
+            start_at, end_at, str(commitment[START_AT_ATTRIBUTE]), str(commitment[END_AT_ATTRIBUTE])
+        ):
+            return commitment
+    return None
+
+
+def slot_revalidation_violations(
+    *,
+    show_and_sell_id: str,
+    slot_id: str,
+    start_at: str,
+    end_at: str,
+    capacity: int,
+    slots: Sequence[Mapping[str, Any]],
+    signups: Sequence[Mapping[str, Any]],
+    commitments_by_profile: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> List[str]:
+    """What an existing-signup revalidation (§3.3.2) would break, as plain sentences.
+
+    A slot edit is legal only while every Scout already signed up for it stays
+    legal. Two rules decide that, and each reads the row the later blocker reads:
+
+    - **Capacity floor.** The new capacity cannot be below the ACTIVE signups the
+      slot already holds (§5.12). Freeing Scouts is the signup cancellation's job
+      (§3.4), never a side effect of a keyboard slip in the capacity box.
+    - **No newly-conflicting time.** A Scout signed up for this slot already holds
+      a commitment running when this slot runs. Moving the slot may not put that
+      commitment — or any other the Scout holds, including one at a different Show
+      & Sell, in a different Unit Campaign (SLOT-04) — into overlap with the new
+      interval. Adjacency stays legal (:func:`intervals_overlap` never overlaps
+      touching ends, SLOT-03).
+    """
+    problems: List[str] = []
+    holding = active_slot_signups(signups, slot_id)
+    if len(holding) > capacity:
+        problems.append(f"the slot already holds {len(holding)} active signup(s); the capacity cannot drop below that")
+    slot_by_id = {str(slot.get(SLOT_ID_ATTRIBUTE) or ""): slot for slot in slots}
+    for profile_id in sorted({str(signup.get(PROFILE_ID_ATTRIBUTE) or "") for signup in holding}):
+        sibling = _overlapped_sibling_slot(
+            signups=signups,
+            slot_by_id=slot_by_id,
+            profile_id=profile_id,
+            slot_id=slot_id,
+            start_at=start_at,
+            end_at=end_at,
+        )
+        if sibling is not None:
+            problems.append(
+                f"the new time would overlap slot {sibling}, which Scout {profile_id} is already signed up for"
+            )
+            continue
+        other = _overlapped_commitment(
+            commitments=commitments_by_profile.get(profile_id, ()),
+            show_and_sell_id=show_and_sell_id,
+            slot_id=slot_id,
+            start_at=start_at,
+            end_at=end_at,
+        )
+        if other is not None:
+            problems.append(
+                "the new time would overlap "
+                f"Scout {profile_id}'s commitment at show & sell {other.get(SHOW_AND_SELL_ID_ATTRIBUTE)}"
+            )
+    return problems
+
+
+def slot_counter_reconciliation(show_and_sell_id: str) -> List[Tuple[str, int, int]]:
+    """``(slotId, stored, expected)`` for every slot whose counter disagrees with its signups.
+
+    ``activeSignupCount`` is maintained transactionally (§5.12), so a disagreement
+    is not drift to absorb — it is proof that a write escaped the aggregate's one
+    serialization point. The event's own partitions are the authority for both
+    sides, read consistently, so this answers the question without touching an
+    index, and §3.7's validation runs it as an oracle after every signup-shaped
+    mutation.
+    """
+    expected: Dict[str, int] = {}
+    for signup in active_signups(show_and_sell_id):
+        slot_id = str(signup.get(SLOT_ID_ATTRIBUTE) or "")
+        expected[slot_id] = expected.get(slot_id, 0) + 1
+    mismatches: List[Tuple[str, int, int]] = []
+    for slot in event_slot_rows(show_and_sell_id):
+        slot_id = str(slot.get(SLOT_ID_ATTRIBUTE) or "")
+        stored = int(slot.get(ACTIVE_SIGNUP_COUNT_ATTRIBUTE) or 0)
+        want = expected.get(slot_id, 0)
+        if stored != want:
+            mismatches.append((slot_id, stored, want))
+    return mismatches
 
 
 # --- Output projections (API contract §3.2, SEC-04) ------------------------------
