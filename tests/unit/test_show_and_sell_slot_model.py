@@ -249,6 +249,22 @@ def test_slot_bounds_are_decided_against_the_interval_not_the_clock() -> None:
     assert ssm.slot_bounds_violations(broken_event, "2026-11-07T06:00:00+00:00", AFTER) == []
 
 
+def test_an_event_bound_is_not_measured_against_a_slot_that_carries_no_interval() -> None:
+    """A row with no instants of its own has nothing to bound.
+
+    The bound check would answer "ends after the event ends" about a row whose real defect
+    is that ``endAt`` is missing, and §3.7's validator reports one defect once: the interval
+    checker already named the missing pair, so the bound check stands down rather than
+    inventing a comparison against an absent value.
+    """
+    row = dict(_slot_row())
+    del row[ssm.START_AT_ATTRIBUTE]
+    del row[ssm.END_AT_ATTRIBUTE]
+    violations = ssm.slot_invariant_violations(row, event=_event_row())
+    assert any("startAt and endAt are required" in problem for problem in violations), violations
+    assert not any("event starts" in problem or "event ends" in problem for problem in violations), violations
+
+
 # --- Slot writes: the conditions the transaction carries -------------------------
 
 
@@ -436,10 +452,24 @@ def test_commitments_at_different_campaigns_share_one_scout_partition() -> None:
 
 
 def test_adjacent_commitments_never_overlap_and_touching_ends_stay_legal() -> None:
-    assert ssm.intervals_overlap("2026-11-07T08:00:00+00:00", "2026-11-07T09:00:00+00:00",
-                                 "2026-11-07T09:00:00+00:00", "2026-11-07T10:00:00+00:00") is False
-    assert ssm.intervals_overlap("2026-11-07T08:00:00+00:00", "2026-11-07T09:30:00+00:00",
-                                 "2026-11-07T09:00:00+00:00", "2026-11-07T10:00:00+00:00") is True
+    assert (
+        ssm.intervals_overlap(
+            "2026-11-07T08:00:00+00:00",
+            "2026-11-07T09:00:00+00:00",
+            "2026-11-07T09:00:00+00:00",
+            "2026-11-07T10:00:00+00:00",
+        )
+        is False
+    )
+    assert (
+        ssm.intervals_overlap(
+            "2026-11-07T08:00:00+00:00",
+            "2026-11-07T09:30:00+00:00",
+            "2026-11-07T09:00:00+00:00",
+            "2026-11-07T10:00:00+00:00",
+        )
+        is True
+    )
 
 
 def test_a_commitment_projection_is_measured_against_its_invariants() -> None:
@@ -457,7 +487,9 @@ def test_a_commitment_projection_is_measured_against_its_invariants() -> None:
     assert any("missing attributes" in problem for problem in ssm.commitment_invariant_violations(missing))
     smuggled = dict(_commitment_row())
     smuggled["buyerName"] = "someone"
-    assert any("attributes the model leaves out" in problem for problem in ssm.commitment_invariant_violations(smuggled))
+    assert any(
+        "attributes the model leaves out" in problem for problem in ssm.commitment_invariant_violations(smuggled)
+    )
 
 
 def test_the_guard_is_the_one_small_version_row_per_scout() -> None:
@@ -533,13 +565,16 @@ def test_a_move_next_to_a_sibling_signup_stays_legal() -> None:
     starts is exactly what the rule permits."""
     slot1 = _slot_row(slot_id="slot-1", start_at="2026-11-07T09:00:00+00:00", end_at="2026-11-07T10:30:00+00:00")
     signups = [_signup_row(slot_id="slot-1")]
-    assert _revalidate(
-        slot_id="slot-2",
-        start_at="2026-11-07T10:30:00+00:00",
-        end_at="2026-11-07T12:00:00+00:00",
-        slots=[slot1],
-        signups=signups,
-    ) == []
+    assert (
+        _revalidate(
+            slot_id="slot-2",
+            start_at="2026-11-07T10:30:00+00:00",
+            end_at="2026-11-07T12:00:00+00:00",
+            slots=[slot1],
+            signups=signups,
+        )
+        == []
+    )
 
 
 def test_a_time_move_that_collides_with_another_show_and_sell_is_refused() -> None:
@@ -581,10 +616,13 @@ def test_a_slot_never_conflicts_with_its_own_commitment_and_cancelled_rows_never
         end_at="2026-11-07T12:00:00+00:00",
     )
     signups = [_signup_row(), _signup_row(profile=OTHER_PROFILE, status=ssm.SIGNUP_CANCELLED)]
-    assert _revalidate(
-        signups=signups,
-        commitments_by_profile={PROFILE: [own, cancelled_elsewhere, quiet]},
-    ) == []
+    assert (
+        _revalidate(
+            signups=signups,
+            commitments_by_profile={PROFILE: [own, cancelled_elsewhere, quiet]},
+        )
+        == []
+    )
 
 
 def test_a_signup_holding_a_missing_slot_row_does_not_fabricate_a_conflict() -> None:

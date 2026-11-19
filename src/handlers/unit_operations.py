@@ -155,6 +155,10 @@ SHOW_AND_SELL_ID_ARGUMENT = "showAndSellId"
 ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD = "assignShowAndSellInventory"
 EVENT_INVENTORY_ALLOCATIONS_FIELD = "eventInventoryAllocations"
 
+# Stage 3.3 — the slot board (§3.3.2-§3.3.3).
+UPSERT_SLOT_FIELD = "upsertShowAndSellSlot"
+DELETE_SLOT_FIELD = "deleteShowAndSellSlot"
+
 # Argument names that carry no write intent, so they stay out of the writable-field
 # check.  ``idempotency`` and ``version`` are the mutation contract's own envelopes and
 # ``showAndSellId`` names the row being addressed; every other name in the input is a
@@ -224,18 +228,34 @@ def _idempotency_key(payload: Mapping[str, Any]) -> str:
     return str(idempotency["idempotencyKey"])
 
 
-def _expected_version(payload: Mapping[str, Any]) -> int:
-    """Read ``version.expectedVersion`` (optimistic concurrency)."""
-    version_input = payload.get("version")
+def _read_expected_version(payload: Mapping[str, Any], field: str) -> Optional[int]:
+    """Read ``<field>.expectedVersion`` when the caller sent that version block at all.
+
+    A slot upsert carries two optimistic-concurrency numbers — the event's always, and
+    the slot's only when it is editing a slot the caller has read — so the block itself
+    is what says which of the two the caller means to move. Absent is a real answer;
+    present-but-shapeless is not.
+    """
+    version_input = payload.get(field)
+    if version_input is None:
+        return None
     if not isinstance(version_input, Mapping) or version_input.get("expectedVersion") is None:
-        raise AppError(ErrorCode.INVALID_INPUT, "version.expectedVersion is required")
+        raise AppError(ErrorCode.INVALID_INPUT, f"{field}.expectedVersion is required")
     value = version_input["expectedVersion"]
     if isinstance(value, bool) or not isinstance(value, (int, str, Decimal)):
-        raise AppError(ErrorCode.INVALID_INPUT, "version.expectedVersion must be an integer")
+        raise AppError(ErrorCode.INVALID_INPUT, f"{field}.expectedVersion must be an integer")
     try:
         return int(value)
     except ValueError, ArithmeticError:
-        raise AppError(ErrorCode.INVALID_INPUT, "version.expectedVersion must be an integer") from None
+        raise AppError(ErrorCode.INVALID_INPUT, f"{field}.expectedVersion must be an integer") from None
+
+
+def _expected_version(payload: Mapping[str, Any]) -> int:
+    """Read ``version.expectedVersion`` (optimistic concurrency)."""
+    value = _read_expected_version(payload, "version")
+    if value is None:
+        raise AppError(ErrorCode.INVALID_INPUT, "version.expectedVersion is required")
+    return value
 
 
 def _fingerprint(payload: Mapping[str, Any]) -> str:
@@ -4059,7 +4079,7 @@ def _event_update_changes(payload: Mapping[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-def _require_read_version(event_row: Mapping[str, Any], expected_version: int) -> None:
+def _require_read_version(row: Mapping[str, Any], expected_version: int, noun: str = "event") -> None:
     """Refuse a mutation whose supplied version is not the row that was just read.
 
     The version condition on the write is what makes a race safe, but on its own it
@@ -4073,14 +4093,12 @@ def _require_read_version(event_row: Mapping[str, Any], expected_version: int) -
     state and the version one fact about one row, and the conditional write still
     guards the window between this read and the commit.
     """
-    read_version = show_and_sell_models.normalize_required_version(
-        event_row.get(show_and_sell_models.VERSION_ATTRIBUTE, 1)
-    )
+    read_version = show_and_sell_models.normalize_required_version(row.get(show_and_sell_models.VERSION_ATTRIBUTE, 1))
     if expected_version == read_version:
         return
     raise AppError(
         ErrorCode.CONFLICT,
-        "The event changed since you read it. Re-read it and retry with the version the read answered.",
+        f"The {noun} changed since you read it. Re-read it and retry with the version the read answered.",
         details={
             "subcode": "VERSION_MISMATCH",
             "expectedVersion": expected_version,
@@ -5135,6 +5153,536 @@ def _event_inventory_allocations(event: Dict[str, Any], caller_id: str) -> Dict[
     return page
 
 
+# --- Show & Sell slots (§3.3) ----------------------------------------------------
+
+
+def _slot_target(payload: Mapping[str, Any]) -> Tuple[Optional[str], Optional[int]]:
+    """Which slot this request addresses, and the version the caller read for it.
+
+    A ``slotId`` with no ``slotVersion`` is not a create that happens to carry an
+    extra field: it is an edit of a row the caller has already read, and guessing its
+    version would make §3.3.2's ``expectedSlotVersion`` requirement decorative
+    (VER-01). A ``slotVersion`` with no ``slotId`` is the mirror mistake — a number
+    for a row the request never named.
+    """
+    raw_slot = payload.get("slotId")
+    slot_id = None if raw_slot is None else show_and_sell_models.normalize_slot_id(raw_slot)
+    expected_slot_version = _read_expected_version(payload, "slotVersion")
+    if slot_id is None:
+        if expected_slot_version is not None:
+            raise AppError(
+                ErrorCode.INVALID_INPUT,
+                "slotVersion is only for an existing slot; omit it when creating one.",
+            )
+        return None, None
+    if expected_slot_version is None:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "slotVersion.expectedVersion is required when updating an existing slot.",
+        )
+    return slot_id, expected_slot_version
+
+
+def _slot_offer(event_row: Mapping[str, Any], payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """The slot this request offers, normalized, and refused if the event cannot hold it.
+
+    Normalized once here so the revalidation, the write, and the fingerprint all
+    reason about the same interval and capacity the caller will get back. The bound is
+    §5.12's — the slot sits inside the event's immutable interval — and it is decided
+    against the event row this request just read, so an interval that cannot hold the
+    slot is refused before any write rather than stored and discovered by a signup.
+    """
+    start_at, end_at = show_and_sell_models.normalize_interval(payload.get("startAt"), payload.get("endAt"))
+    capacity = show_and_sell_models.normalize_capacity(payload.get("capacity"))
+    bounds = show_and_sell_models.slot_bounds_violations(event_row, start_at, end_at)
+    if bounds:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            f"This slot does not fit the event: {'; '.join(bounds)}.",
+            details={"subcode": "SLOT_BOUNDS", "startAt": start_at, "endAt": end_at},
+        )
+    return {
+        "startAt": start_at,
+        "endAt": end_at,
+        "capacity": capacity,
+        "label": show_and_sell_models.normalize_label(payload.get("label")),
+    }
+
+
+def _slot_board(event_id: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """The event's slot rows and its ACTIVE signups, both read consistently.
+
+    Two questions are answered from this one read pair: whether there is room for
+    another slot at all, and whether the change keeps every existing signup legal.
+    Both come from the event's own partition rather than an index, so the answer is
+    the same rows the write conditions on (SEC-06).
+    """
+    return show_and_sell_models.event_slot_rows(event_id), show_and_sell_models.active_signups(event_id)
+
+
+def _revalidation_commitments(signups: Sequence[Mapping[str, Any]], slot_id: str) -> Dict[str, List[Dict[str, Any]]]:
+    """Every commitment held by a Scout signed up for this slot, from the Scout's partition.
+
+    The commitment projection — not the signup row — is what a later signup consults
+    before admitting a Scout to an overlapping slot, and it is partitioned by Scout so
+    the cross-campaign question (SLOT-04) is one consistent read. Deciding a slot move
+    per Unit Campaign would answer "no conflict" about the Scout already working a
+    different campaign at that hour.
+
+    One read serves both halves of a slot edit: the revalidation below asks "would this
+    new time put one of these Scouts somewhere they already are", and the move below
+    asks "which projection has to move because this slot's time changed".
+    """
+    return {
+        profile_id: show_and_sell_models.commitment_rows(profile_id)
+        for profile_id in show_and_sell_models.active_signup_profiles(signups, slot_id)
+    }
+
+
+def _refuse_slot_limit(slots: Sequence[Mapping[str, Any]]) -> None:
+    """Refuse a 21st slot (§3.3.2's cap) before writing it.
+
+    The cap is counted, not conditioned — DynamoDB has no count condition — and it is
+    still race-safe, because the same transaction bumps the event version against the
+    caller's ``expectedEventVersion``: two creates read the same 20 slots, and only the
+    one holding the current event version commits, so the loser retries against a board
+    that now shows 21.
+    """
+    if len(slots) < show_and_sell_models.MAX_SLOTS_PER_EVENT:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        (
+            f"This event already has {len(slots)} slots, and one event may hold at most "
+            f"{show_and_sell_models.MAX_SLOTS_PER_EVENT}. Delete a slot that is not in use first."
+        ),
+        details={"subcode": "SLOT_LIMIT", "slotCount": len(slots), "limit": show_and_sell_models.MAX_SLOTS_PER_EVENT},
+    )
+
+
+def _refuse_slot_revalidation(
+    event_row: Mapping[str, Any],
+    slot_id: str,
+    offer: Mapping[str, Any],
+    slots: Sequence[Mapping[str, Any]],
+    signups: Sequence[Mapping[str, Any]],
+    commitments: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> None:
+    """Refuse a slot change that would break a signup that already exists (§3.3.2).
+
+    The rules and their sentences come from the model, so a signup write later decides
+    "is this Scout free at that time" the same way (§3.4), and the refusal names the
+    real Scout, slot, and event the change collides with rather than a count.
+    """
+    violations = show_and_sell_models.slot_revalidation_violations(
+        show_and_sell_id=str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+        slot_id=slot_id,
+        start_at=str(offer["startAt"]),
+        end_at=str(offer["endAt"]),
+        capacity=int(offer["capacity"]),
+        slots=slots,
+        signups=signups,
+        commitments_by_profile=commitments,
+    )
+    if not violations:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        f"This slot change would break an existing signup: {'; '.join(violations)}. Nothing was written.",
+        details={"subcode": "SLOT_REVALIDATION", "slotId": slot_id, "violations": violations},
+    )
+
+
+def _slot_commitment(commitments: Sequence[Mapping[str, Any]], event_id: str, slot_id: str) -> Optional[Dict[str, Any]]:
+    """The Scout's ACTIVE projection for this slot, when the aggregate holds one.
+
+    A signup with no projection is a broken aggregate, not something this write repairs:
+    inventing a row would need a version to condition on, and the projection's version is
+    its source signup's, which is exactly the agreement §3.7's validation exists to check.
+    """
+    for row in commitments:
+        if (
+            str(row.get(show_and_sell_models.STATUS_ATTRIBUTE) or "") == show_and_sell_models.SIGNUP_ACTIVE
+            and str(row.get(show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE) or "") == event_id
+            and str(row.get(show_and_sell_models.SLOT_ID_ATTRIBUTE) or "") == slot_id
+        ):
+            return dict(row)
+    return None
+
+
+def _commitment_moves(
+    *,
+    event_row: Mapping[str, Any],
+    slot_id: str,
+    signups: Sequence[Mapping[str, Any]],
+    commitments: Mapping[str, Sequence[Mapping[str, Any]]],
+    offer: Mapping[str, Any],
+    now_iso: str,
+) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """``(stale row, replacement row)`` for every Scout whose slot moved through time.
+
+    A commitment's sort key IS its interval (§6.2), so an event-bounded time change moves
+    the projection rather than editing it. Leaving it where it was would be the worse
+    answer: the cross-campaign overlap rule (SLOT-04) reads that row, so a later signup
+    would be refused for hours nobody is working any more and admitted beside a Scout who
+    is now working them — AC-14's "no overlapping commitments at the same or different
+    Show & Sells" is decided against the projection, so §3.3 keeps it truthful in the same
+    transaction that moved the slot.
+
+    The version rides unchanged: §5.13 defines the projection's version as its source
+    signup's, and the signup did not move. Each affected Scout's commitment guard still
+    increments, because the commitment changed — and that is what makes a signup planned
+    against the old guard fail rather than commit beside a board that moved under it.
+    """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    unit_campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    moves: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+    for profile_id in show_and_sell_models.active_signup_profiles(signups, slot_id):
+        stale = _slot_commitment(commitments.get(profile_id, ()), event_id, slot_id)
+        if stale is None or _interval_matches(stale, offer):
+            continue
+        moves.append(
+            (
+                stale,
+                show_and_sell_models.build_scout_commitment_item(
+                    profile_id=profile_id,
+                    unit_campaign_id=unit_campaign_id,
+                    show_and_sell_id=event_id,
+                    slot_id=slot_id,
+                    start_at=offer["startAt"],
+                    end_at=offer["endAt"],
+                    now_iso=now_iso,
+                    version=show_and_sell_models.normalize_required_version(
+                        stale.get(show_and_sell_models.VERSION_ATTRIBUTE, 1)
+                    ),
+                    status=str(stale.get(show_and_sell_models.STATUS_ATTRIBUTE) or show_and_sell_models.SIGNUP_ACTIVE),
+                ),
+            )
+        )
+    return moves
+
+
+def _interval_matches(stale: Mapping[str, Any], offer: Mapping[str, Any]) -> bool:
+    """Whether the projection already describes the offered interval.
+
+    A slot edit that only changes a label or a capacity moves no commitment, and staging
+    a delete-and-put pair for a row that is not moving would spend two transaction actions
+    and a guard bump on a row that cannot change.
+    """
+    return bool(
+        str(stale.get(show_and_sell_models.START_AT_ATTRIBUTE) or "") == str(offer["startAt"])
+        and str(stale.get(show_and_sell_models.END_AT_ATTRIBUTE) or "") == str(offer["endAt"])
+    )
+
+
+def _refuse_oversized_slot_move(moves: Sequence[Tuple[Dict[str, Any], Dict[str, Any]]]) -> None:
+    """Refuse a time change whose commitment moves cannot fit one transaction.
+
+    The move is atomic or it does not happen: a slot at its new time beside stale
+    commitments is the exact disagreement AC-14 exists to prevent, so the plan is never
+    split. The pair plus the guard is three actions per Scout inside the plan's 90-action
+    ceiling, and the refusal says so and points at §3.4's cancellation as the way to free
+    room.
+    """
+    actions = 3 * len(moves) + 3
+    if actions <= MAX_TRANSACTION_ACTIONS:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        (
+            f"This slot has {len(moves)} active signup(s), and moving its time re-commits each of them; "
+            f"that is more than one transaction can carry ({MAX_TRANSACTION_ACTIONS} writes). Cancel the "
+            "signups first, then move the slot."
+        ),
+        details={"subcode": "SLOT_MOVE_TOO_LARGE", "signupCount": len(moves), "maxActions": MAX_TRANSACTION_ACTIONS},
+    )
+
+
+def _stage_slot_writes(
+    plan: Any,
+    runner: Any,
+    *,
+    keys: Any,
+    fingerprint: str,
+    slot_id: str,
+    existing: Optional[Mapping[str, Any]],
+    event_row: Mapping[str, Any],
+    offer: Mapping[str, Any],
+    caller_id: str,
+    expected_event_version: int,
+    expected_slot_version: Optional[int],
+    moves: Sequence[Tuple[Dict[str, Any], Dict[str, Any]]],
+    now_iso: str,
+) -> None:
+    """Stage the whole slot change: marker, slot row, the commitments the move carries, event version.
+
+    One plan, one commit. The marker goes first (API contract §8.9) so a replay can never
+    be answered for a write that did not happen, and the event version goes last so every
+    concurrent slot write on this event settles against one serialization point.
+    """
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=slot_id)
+    if existing is None:
+        plan.add(
+            *show_and_sell_models.put_slot_action(
+                show_and_sell_models.build_show_and_sell_slot_item(
+                    event=event_row,
+                    slot_id=slot_id,
+                    start_at=offer["startAt"],
+                    end_at=offer["endAt"],
+                    capacity=offer["capacity"],
+                    label=offer["label"],
+                    now_iso=now_iso,
+                )
+            )
+        )
+    else:
+        plan.add(
+            *show_and_sell_models.update_slot_action(
+                show_and_sell_id=str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+                slot_id=slot_id,
+                expected_version=cast(int, expected_slot_version),
+                label=offer["label"],
+                start_at=offer["startAt"],
+                end_at=offer["endAt"],
+                capacity=offer["capacity"],
+                updated_at=now_iso,
+            )
+        )
+    for stale, replacement in moves:
+        plan.add(*show_and_sell_models.move_commitment_action(commitment=stale))
+        plan.add(*show_and_sell_models.put_commitment_action(item=replacement))
+    for profile_id in sorted({str(stale.get(show_and_sell_models.PROFILE_ID_ATTRIBUTE) or "") for stale, _ in moves}):
+        plan.add(*show_and_sell_models.bump_commitment_guard_action(profile_id=profile_id, updated_at=now_iso))
+    plan.add(
+        *show_and_sell_models.bump_event_version_action(
+            show_and_sell_id=str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+            expected_version=expected_event_version,
+            updated_by_account_id=caller_id,
+            updated_at=now_iso,
+        )
+    )
+
+
+def _load_slot_answer(event_id: str, stored_slot_id: str) -> Dict[str, Any]:
+    """Rebuild one slot answer from the stored row, for a replay or a post-write read."""
+    return dict(
+        show_and_sell_models.slot_admin_payload(show_and_sell_models.load_slot_or_not_found(event_id, stored_slot_id))
+    )
+
+
+def _upsert_show_and_sell_slot(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Create or edit one slot of an event (§3.3.2, SLOT-M-01).
+
+    One request, one versioned write plan: the marker, the slot row, and the event
+    version bump commit together or not at all. The three guards run in the order that
+    keeps each honest:
+
+    - Replay first, because the first attempt's own write moved both versions and a
+      retry that re-ran a version guard would answer ``CONFLICT`` about a request it
+      already completed.
+    - Then the event's version and its state, then the slot's own version. §3.3 allows
+      slot writes only while the event is ``SCHEDULED`` — after the start its slots are
+      facts the Scouts already worked against — and ``REOPENED`` is refused too, because
+      what a reopened event edits is the finalization draft, not the shift board.
+    - Then the bounds, the 20-slot cap, and the existing-signup revalidation, before
+      anything is staged.
+
+    A create carries no ``slotId`` and no ``slotVersion``; the id is the server's, and
+    the conditional insert is the duplicate guard. An update carries both, and its
+    version condition is what makes the state check apply to the row the caller read.
+    The capacity floor is checked twice on purpose: against the counter this request
+    read, and as a condition on the write itself, which catches a signup that moved the
+    counter between the read and the commit without touching the version the caller
+    sent.
+
+    A slot whose time actually changed also carries its signups' commitment projections
+    to the new interval — the projection's key IS its interval, so leaving it behind
+    would answer the next cross-campaign overlap question about hours nobody works
+    (AC-14). That move is part of this one plan, guard bumps included, and a re-time with
+    more signups than one transaction can hold is refused rather than split.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    event_id = _resource_id(payload, show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE)
+    expected_event_version = _expected_version(payload)
+    slot_id, expected_slot_version = _slot_target(payload)
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(caller_id=caller_id, operation=UPSERT_SLOT_FIELD, scope=event_id, idempotency_key=key)
+    replayed = _replay(runner, keys, fingerprint, UPSERT_SLOT_FIELD, lambda stored: _load_slot_answer(event_id, stored))
+    if replayed is not None:
+        return replayed
+
+    # After replay for the reason the docstring names: the completed attempt moved the
+    # event version and, for an update, the slot's too.
+    _require_read_version(event_row, expected_event_version)
+    show_and_sell_models.require_slots_writable(event_row)
+    offer = _slot_offer(event_row, payload)
+    slots, signups = _slot_board(event_id)
+
+    existing: Optional[Dict[str, Any]] = None
+    if slot_id is None:
+        _refuse_slot_limit(slots)
+        slot_id = show_and_sell_models.new_slot_id()
+    else:
+        existing = show_and_sell_models.load_slot_or_not_found(event_id, slot_id)
+        _require_read_version(existing, cast(int, expected_slot_version), noun="slot")
+    commitments = _revalidation_commitments(signups, slot_id)
+    _refuse_slot_revalidation(event_row, slot_id, offer, slots, signups, commitments)
+
+    now_iso = utc_now_iso()
+    moves = _commitment_moves(
+        event_row=event_row, slot_id=slot_id, signups=signups, commitments=commitments, offer=offer, now_iso=now_iso
+    )
+    _refuse_oversized_slot_move(moves)
+
+    plan = WritePlan()
+    _stage_slot_writes(
+        plan,
+        runner,
+        keys=keys,
+        fingerprint=fingerprint,
+        slot_id=slot_id,
+        existing=existing,
+        event_row=event_row,
+        offer=offer,
+        caller_id=caller_id,
+        expected_event_version=expected_event_version,
+        expected_slot_version=expected_slot_version,
+        moves=moves,
+        now_iso=now_iso,
+    )
+
+    build_result = _once(lambda: _load_slot_answer(event_id, slot_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=UPSERT_SLOT_FIELD,
+        fingerprint=fingerprint,
+        result_id=slot_id,
+        load_result=lambda stored: _load_slot_answer(event_id, stored),
+        result_payload=build_result,
+    )
+    answer = build_result()
+    log.info(
+        "Show & Sell slot upserted",
+        show_and_sell_id=event_id,
+        slot_id=slot_id,
+        caller_id=caller_id,
+        version=answer["version"],
+        created=existing is None,
+        commitments_moved=len(moves),
+    )
+    return answer
+
+
+def _refuse_deleting_a_held_slot(
+    event_row: Mapping[str, Any], slot_id: str, signups: Sequence[Mapping[str, Any]]
+) -> None:
+    """Refuse a deletion that would drop a participant (§3.3.3, SLOT-M-02-02).
+
+    A signup is a Scout's place in a slot, and cancelling one is its own mutation with
+    its own audit and its own commitment release (§3.4). Deleting a slot that holds
+    Scouts would cancel them without either, leaving signup rows pointing at a slot that
+    no longer exists.
+
+    The count is the signup ROWS, not the slot's ``activeSignupCount``: §5.13's rows are
+    the participants and the counter is the projection kept for the board's arithmetic, so
+    a guard decided on the counter would delete a slot beside the Scouts it holds the
+    moment that counter drifted. The write conditions on the counter anyway
+    (``#activeSignupCount = :zero``), and that is what catches the opposite drift — a
+    signup that landed between this read and the commit — cancelling the plan instead of
+    dropping the Scout who just signed up.
+    """
+    held = len(show_and_sell_models.active_slot_signups(signups, slot_id))
+    if held == 0:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        (
+            f"This slot has {held} active signup(s). Cancel the signups before deleting the slot; "
+            "deleting it would drop those Scouts without a cancellation of their own."
+        ),
+        details={
+            "subcode": "SLOT_HAS_SIGNUPS",
+            "showAndSellId": str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+            "slotId": slot_id,
+            "activeSignupCount": held,
+        },
+    )
+
+
+def _delete_show_and_sell_slot(event: Dict[str, Any], caller_id: str) -> bool:
+    """Delete one unused slot (§3.3.3, SLOT-M-02).
+
+    The parent id is part of the key, which is what makes the wrong-parent case a key
+    fact rather than a comparison: a slot id from another event has no row under this
+    event's partition, so the answer is ``NOT_FOUND`` — the same answer as for a slot
+    that never existed. The caller's version is the event's, because that is the number
+    the schedule screen holds, and the slot row's own version comes from the consistent
+    read this request just made: either one moving means the plan writes nothing.
+
+    The event version bumps with the delete, so a caller holding the version from
+    before the delete cannot then finalize or cancel against a slot set it never saw.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    event_id = _resource_id(payload, show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE)
+    slot_id = show_and_sell_models.normalize_slot_id(payload.get("slotId"))
+    expected_event_version = _expected_version(payload)
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(caller_id=caller_id, operation=DELETE_SLOT_FIELD, scope=event_id, idempotency_key=key)
+    replayed = _replay(runner, keys, fingerprint, DELETE_SLOT_FIELD, lambda stored: True)
+    if replayed is not None:
+        return True
+
+    _require_read_version(event_row, expected_event_version)
+    show_and_sell_models.require_slots_writable(event_row)
+    slot_row = show_and_sell_models.load_slot_or_not_found(event_id, slot_id)
+    _refuse_deleting_a_held_slot(event_row, slot_id, show_and_sell_models.active_signups(event_id))
+
+    now_iso = utc_now_iso()
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=slot_id)
+    plan.add(
+        *show_and_sell_models.delete_slot_action(
+            show_and_sell_id=event_id,
+            slot_id=slot_id,
+            expected_version=show_and_sell_models.normalize_required_version(slot_row.get("version", 1)),
+        )
+    )
+    plan.add(
+        *show_and_sell_models.bump_event_version_action(
+            show_and_sell_id=event_id,
+            expected_version=expected_event_version,
+            updated_by_account_id=caller_id,
+            updated_at=now_iso,
+        )
+    )
+    runner.execute(
+        keys,
+        plan,
+        operation=DELETE_SLOT_FIELD,
+        fingerprint=fingerprint,
+        result_id=slot_id,
+        load_result=lambda stored: True,
+        result_payload=lambda: True,
+    )
+    log.info("Show & Sell slot deleted", show_and_sell_id=event_id, slot_id=slot_id, caller_id=caller_id)
+    return True
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -5180,6 +5728,8 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     SHOW_AND_SELL_OPPORTUNITY_FIELD: _show_and_sell_opportunity,
     ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD: _assign_show_and_sell_inventory,
     EVENT_INVENTORY_ALLOCATIONS_FIELD: _event_inventory_allocations,
+    UPSERT_SLOT_FIELD: _upsert_show_and_sell_slot,
+    DELETE_SLOT_FIELD: _delete_show_and_sell_slot,
 }
 
 

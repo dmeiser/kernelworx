@@ -85,6 +85,7 @@ cognitoonly
 componentkit
 conditionalcheck
 confirmable
+confirmer
 conftest
 contrib
 COOLDOWN
@@ -514,6 +515,7 @@ unvalidated
 updatable
 updateable
 upsert
+upserted
 urlEncode
 urlId
 useCallback

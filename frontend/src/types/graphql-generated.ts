@@ -538,6 +538,18 @@ export type GqlDateRangeFilter = {
   startAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
 };
 
+/** Input for deleteShowAndSellSlot. Allowed only while the slot holds nobody, so a deletion can never silently drop a participant (checklist §3.3.3). */
+export type GqlDeleteShowAndSellSlotInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The event that owns the slot; a slot id from another event is not found here. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The slot to delete. */
+  slotId: Scalars['ID']['input'];
+  /** The event version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
+};
+
 /** A page of raw allocation facts for one Unit Campaign (data query §6.2, DATA-Q-03). It carries rows and never a total: assigned, unassigned, and overage totals are the browser's arithmetic, over every page it fetched. */
 export type GqlEventInventoryAllocationConnection = {
   __typename?: 'EventInventoryAllocationConnection';
@@ -861,6 +873,8 @@ export type GqlMutation = {
   deleteSellerProfile: Scalars['Boolean']['output'];
   /** Delete a shared campaign the caller created. Returns true on success. */
   deleteSharedCampaign: Scalars['Boolean']['output'];
+  /** Delete one slot, only while it holds no active signup, so a deletion can never silently cancel a participant: their signups are cancelled by cancelling them. The parent id is part of the key, so a slot id from another event is not found. The delete and the event version it bumps commit together. Allowed only while the event is scheduled. Unit Admin for the event's Unit. */
+  deleteShowAndSellSlot: Scalars['Boolean']['output'];
   /** Fulfill part or all of one individual Order line from Kernel stock or an external Council supply. Unit Admin for the Order's immutable originating Unit. Kernel stock is taken only for KERNEL_STOCK, and never more than the line still owes (§5.19). */
   fulfillIndividualOrderLine: GqlFulfillIndividualOrderLinePayload;
   /** Issue unassigned Kernel stock to an ACTIVE Scout on this campaign's roster. Unit Admin for the parent Unit; Kernel stock down, With Scout up, total unit-owned stock unchanged, and no Order, sale, credit, or We Owe effect. */
@@ -917,6 +931,8 @@ export type GqlMutation = {
   updateUnit: GqlUnit;
   /** Update a Unit Campaign's name, year, and active state. Unit Admin for the parent Unit. */
   updateUnitCampaign: GqlUnitCampaignAdmin;
+  /** Add or edit one working slot of an event: an interval inside the event's immutable interval, an optional label, and a capacity of 1-100. Any duration is legal — no hour or half-hour is assumed. Allowed only while the event is scheduled, at most 20 slots per event, and an edit revalidates the signups the slot already holds: a capacity below the active count, or a new time that would put an already-signed-up Scout into overlap with another slot of this event or with a commitment at any other Show & Sell, is refused and writes nothing. The slot row and the event version commit together, so a caller holding a stale event version writes nothing. Unit Admin for the event's Unit. */
+  upsertShowAndSellSlot: GqlShowAndSellSlot;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1090,6 +1106,11 @@ export type GqlMutation_DeleteSharedCampaignArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_DeleteShowAndSellSlotArgs = {
+  input: GqlDeleteShowAndSellSlotInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_FulfillIndividualOrderLineArgs = {
   input: GqlFulfillIndividualOrderLineInput;
 };
@@ -1229,6 +1250,11 @@ export type GqlMutation_UpdateUnitArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpdateUnitCampaignArgs = {
   input: GqlUpdateUnitCampaignInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpsertShowAndSellSlotArgs = {
+  input: GqlUpsertShowAndSellSlotInput;
 };
 
 /** A customer order placed in a campaign. */
@@ -3016,6 +3042,28 @@ export type GqlUpdateUnitInput = {
   /** The scout unit type. */
   unitType?: InputMaybe<Scalars['String']['input']>;
   /** The version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
+};
+
+/** Input for upsertShowAndSellSlot. A create names no slot and no slot version; an edit names both. Slot writes are allowed only while the event is scheduled (checklist §3.3.2). */
+export type GqlUpsertShowAndSellSlotInput = {
+  /** Maximum active signups for this slot (1-100); never below the signups the slot already holds. */
+  capacity: Scalars['Int']['input'];
+  /** Slot end (ISO 8601 UTC); never after the event's endAt and always after its own startAt. Any duration — no hour or half-hour is assumed. */
+  endAt: Scalars['AWSDateTime']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Display label; null clears it, and a created slot simply has none. */
+  label?: InputMaybe<Scalars['String']['input']>;
+  /** The event whose slot board is being edited; the parent is part of the slot's key. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The slot being edited; omit to add a slot whose id the server mints. */
+  slotId?: InputMaybe<Scalars['ID']['input']>;
+  /** The slot version the caller last read; required when `slotId` names an existing slot, omitted when creating one. */
+  slotVersion?: InputMaybe<GqlVersionedInput>;
+  /** Slot start (ISO 8601 UTC); never before the event's startAt. */
+  startAt: Scalars['AWSDateTime']['input'];
+  /** The event version the caller last read (optimistic concurrency). */
   version: GqlVersionedInput;
 };
 
