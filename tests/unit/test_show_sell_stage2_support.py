@@ -727,11 +727,20 @@ def test_a_sweep_report_is_judged_by_which_class_of_row_survived() -> None:
     """A surviving row is not one thing: the class says whether the lane may call itself clean.
 
     The sweeper's exit code only says something was left behind, and the lane used to read that as its
-    own pass or fail.  Another tenant's row surviving is the proof the sweep was narrow enough; a row
-    this lane's tokens named that no reviewed rule can attribute is residue nobody looked at, and is the
-    lane's failure; the lane's own append-only history is a residue the owner has to accept.
+    own pass or fail.  Another tenant's row surviving is the proof the sweep was narrow enough; a row this
+    lane's tokens named that no reviewed rule can attribute is residue nobody looked at, and is the lane's
+    failure; the two residues checklist §2.8.7 accepts as amended (WORK-162) are recorded with their
+    counts and are fatal only for a strict run; and a table no product read can answer is a gate that
+    stays open, because nothing about it is proven.
     """
-    clean: dict[str, list[str]] = {"left": [], "failed": [], "unknown": [], "history": [], "blocked": []}
+    clean: dict[str, list[str]] = {
+        "left": [],
+        "failed": [],
+        "unknown": [],
+        "history": [],
+        "blocked": [],
+        "unproven": [],
+    }
 
     assert stage2.sweep_verdict(**clean) == stage2.CLEANUP_OBSERVED, (
         "kept rows are not passed to this function: they are the sweep working as intended"
@@ -739,27 +748,122 @@ def test_a_sweep_report_is_judged_by_which_class_of_row_survived() -> None:
     for cls in ("left", "failed", "unknown"):
         assert stage2.sweep_verdict(**{**clean, cls: [f"{cls} inventory row"]}) == stage2.CLEANUP_FAILED, cls
     for cls in ("history", "blocked"):
-        assert stage2.sweep_verdict(**{**clean, cls: [f"{cls} inventory row"]}) == stage2.CLEANUP_BLOCKED, cls
+        assert stage2.sweep_verdict(**{**clean, cls: [f"{cls} inventory row"]}) == stage2.CLEANUP_OBSERVED, cls
+        assert (
+            stage2.sweep_verdict(**{**clean, cls: [f"{cls} inventory row"]}, strict=True) == stage2.CLEANUP_BLOCKED
+        ), f"{cls}: SS_STRICT_CLEANUP=1 is the reversal path the amendment names"
     assert (
         stage2.sweep_verdict(**{**clean, "unknown": ["UNKNOWN units row"], "blocked": ["BLOCKED table"]})
         == stage2.CLEANUP_FAILED
     ), "a survivor nobody can attribute outranks the permission that hid the rest"
+    assert stage2.sweep_verdict(**{**clean, "blocked": ["BLOCKED table"], "unproven": ["table (dynamodb:Scan)"]}) == (
+        stage2.CLEANUP_BLOCKED
+    ), "an unreadable table no product read answers is residue that is neither removed nor proven absent"
+    assert stage2.sweep_verdict(**clean, exit_code=1) == stage2.CLEANUP_FAILED, (
+        "a non-zero sweep with nothing in the report to explain it is a failed cleanup, not a clean table"
+    )
+    assert (
+        stage2.sweep_verdict(**{**clean, "history": ["HISTORY inventory row"]}, exit_code=1) == stage2.CLEANUP_OBSERVED
+    ), "the sweeper exits non-zero over the accepted residue too — that exit is explained, not guessed at"
 
 
-def test_retained_history_keeps_the_cleanup_gate_open_and_fails_a_strict_run() -> None:
-    """The lane cannot delete the audit trail, so it must not be able to report the table as clean either."""
-    rows = [
-        stage2.cleanup_row(
-            "§2.8.7 fixture sweep / lane",
-            "1 lane history row(s) retained (inventory 1)",
-            result=stage2.CLEANUP_BLOCKED,
-        )
-    ]
+def test_the_two_accepted_residues_are_recorded_and_not_reported_as_cleaned() -> None:
+    """Amendment B accepts a retained audit trail and an unreadable table; it does not hide either one.
 
-    assert stage2.cleanup_problems(rows) == stage2.cleanup_blocked(rows)
-    assert stage2.cleanup_failures(rows) == [], "retained history is not the lane's fault"
+    The lane has no supported path to an ``InventoryMovement`` delete and no grant to scan the Stage 2
+    tables, so those two residues are a decision rather than a defect.  They still have to reach the record
+    with their counts, and ``SS_STRICT_CLEANUP=1`` has to turn them back into a failed run — the acceptance
+    is reversible without an edit, which is what keeps it an acceptance rather than a quiet default.
+    """
+    residue = {
+        "left": [],
+        "failed": [],
+        "unknown": [],
+        "history": ["HISTORY inventory row"],
+        "blocked": ["BLOCKED kernelworx-inventory-ue1-dev: dynamodb:Scan"],
+        "unproven": [],
+    }
+
+    accepted = stage2.cleanup_row(
+        "§2.8.7 fixture sweep / lane",
+        "1 lane history row(s) retained (inventory 1), 1 table(s) unreadable "
+        "(kernelworx-inventory-ue1-dev: dynamodb:Scan); residue proven by product read: "
+        "kernelworx-inventory-ue1-dev: inventoryMovements answered 13 row(s)",
+        result=stage2.sweep_verdict(**residue),
+    )
+    assert accepted["result"] == stage2.CLEANUP_OBSERVED, "accepted residue is not the lane's fault"
+    assert stage2.cleanup_problems([accepted]) == [], "the acceptance makes it non-fatal, not unsaid"
+    assert "inventoryMovements answered 13 row(s)" in accepted["summary"], (
+        "the row says what proves the residue is there, rather than asserting that it is gone"
+    )
+
+    strict = stage2.cleanup_row(
+        "§2.8.7 fixture sweep / lane",
+        accepted["summary"],
+        result=stage2.sweep_verdict(**residue, strict=True),
+    )
+    assert strict["result"] == stage2.CLEANUP_BLOCKED
+    assert stage2.cleanup_problems([strict]) == stage2.cleanup_blocked([strict])
+    assert stage2.cleanup_failures([strict]) == [], "a residue this lane cannot remove is not its failure"
     with pytest.raises(stage2.StageTwoCleanupError):
-        stage2.assert_cleanup_clean(rows, strict=True)
+        stage2.assert_cleanup_clean([strict], strict=True)
+
+
+def test_the_lane_counts_its_residue_before_the_teardown_that_hides_it() -> None:
+    """Amendment B's counts exist only while a read still answers, so the order in the ``finally`` is the gate.
+
+    The sweep deletes the Unit and Unit Campaign rows every Stage 2 query is keyed on.  Counted afterwards,
+    those reads answer ``NOT_FOUND`` and a careless record would print that as zero residue while the
+    append-only movement rows sit on in the same partition.  So the census has to come first, then the
+    product teardown, then the sweep.
+    """
+    tree = _spec_tree()
+    test = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "test_show_sell_stage2_journey"
+    )
+    journey_try = next(node for node in ast.walk(test) if isinstance(node, ast.Try) and node.finalbody)
+    calls = ast.Module(body=journey_try.finalbody, type_ignores=[])
+
+    def first(name: str) -> int:
+        return min(
+            (node.lineno for node in ast.walk(calls) if isinstance(node, ast.Call) and name in ast.unparse(node.func)),
+            default=0,
+        )
+
+    census, teardown, sweep = first("_residue_census"), first("_teardown_lane"), first("_lane_table_sweep")
+    assert census and teardown and sweep, "the lane still counts, takes down, and sweeps its own lane"
+    assert census < teardown < sweep, (
+        "the residue census has to be read before the teardown and the sweep hide the rows it counts"
+    )
+    census_call = next(
+        node for node in ast.walk(calls) if isinstance(node, ast.Call) and "_residue_census" in ast.unparse(node.func)
+    )
+    assert any(getattr(arg, "id", "") == "identities" for arg in census_call.args), (
+        "the census reads through the fixture identities, never an AWS client of its own"
+    )
+
+
+def test_an_unanswerable_table_keeps_the_sweep_gate_open() -> None:
+    """The amendment accepts residue it can name, not residue it has no way to see."""
+    row = stage2.cleanup_row(
+        "§2.8.7 fixture sweep / lane",
+        "0 row(s) deleted, 3 table(s) unreadable (kernelworx-inventory-ue1-dev: dynamodb:Scan); "
+        "residue no product read can prove: kernelworx-inventory-ue1-dev (dynamodb:Scan)",
+        result=stage2.sweep_verdict(
+            left=[],
+            failed=[],
+            unknown=[],
+            history=[],
+            blocked=["BLOCKED kernelworx-inventory-ue1-dev: dynamodb:Scan"],
+            unproven=["kernelworx-inventory-ue1-dev (dynamodb:Scan)"],
+        ),
+    )
+
+    assert row["result"] == stage2.CLEANUP_BLOCKED
+    assert stage2.cleanup_blocked([row]), "the step is reported open, never as a cleanup that happened"
+    assert "no product read can prove" in row["summary"]
 
 
 def test_the_lane_reads_every_survivor_class_and_never_passes_on_the_exit_code_alone() -> None:
@@ -776,8 +880,53 @@ def test_the_lane_reads_every_survivor_class_and_never_passes_on_the_exit_code_a
         assert f"startswith('{cls}')" in source, f"the lane stops seeing the sweeper's {cls} class"
     assert 'line.startswith("BLOCKED")' in support, "a denied table still reaches the record"
     assert "sweep_verdict" in source, "the verdict comes from the classes, not from a count"
-    assert "CLEANUP_FAILED" in source and "code" in source, (
+    assert "unproven=" in source, (
+        "a table this identity cannot read is only accepted where a product read answers its rows"
+    )
+    assert "exit_code=code" in source, (
         "a non-zero exit the record cannot explain is a failed cleanup, not an observed one"
+    )
+
+
+def test_every_table_the_sweep_cannot_read_is_answered_by_a_named_product_read() -> None:
+    """Amendment B's acceptance is conditional: the residue has to be nameable without a scan.
+
+    ``kernelworx-qa-ue1-dev`` is denied ``dynamodb:Scan`` on exactly the Stage 2 inventory, orders and
+    order-fulfillment tables (``docs/QA_FIXTURE_RUNBOOK.md``), and the lane holds no other AWS path.  So the
+    record answers each of those three with the application's own queries, scoped to the ids this lane was
+    answered.  A fourth unreadable table with no entry here is reported as residue nobody can prove, which
+    is the whole point of the mapping being a table rather than a sentence.
+    """
+    tree = _spec_tree()
+    assignment = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "_RESIDUE_READS"
+    )
+    mapping: dict[str, tuple[str, ...]] = ast.literal_eval(assignment.value)
+
+    assert set(mapping) == {"inventory", "orders", "order-fulfillments"}, (
+        "the stand-ins are pinned to the tables the measured IAM reach denies; a new one names its read or "
+        "stays unproven"
+    )
+    for documents in mapping.values():
+        assert documents, "a table answered by nothing is not answered"
+        for document in documents:
+            assert document in stage2.STAGE_TWO_DOCUMENTS, f"{document} is not a query this lane can run"
+
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_lane_table_sweep"
+    ]
+    assert calls, "the lane still sweeps its own rows"
+    for call in calls:
+        assert len(call.args) + len(call.keywords) >= 3, (
+            f"the sweep at line {call.lineno} names no product read to stand in for a table it cannot open"
+        )
+    probe = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_residue_probe")
+    assert "except" in ast.unparse(probe), (
+        "a probe that cannot run proves nothing: it must return no answer rather than an absent row"
     )
 
 

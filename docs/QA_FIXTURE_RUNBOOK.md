@@ -198,17 +198,26 @@ Measured again on 2026-11-19 with the Stage 2 lane tables added to
 `SWEEP_TABLES`: `accounts`, `units` and `unit-campaigns` read and delete;
 `kernelworx-inventory-ue1-dev`, `kernelworx-orders-ue1-dev` and
 `kernelworx-order-fulfillments-ue1-dev` answer `AccessDeniedException` on
-`Scan` and on `DeleteItem`. So a Stage 2 lane's inventory rows are a named
-finding until the table grant lands, and the grant alone does not close it: what
-it buys is that the inventory and order rules above can actually run against
-those tables, and even then the movement history stays because it is audit trail,
-which is why the sweep still exits non-zero and the Stage 2 lane records that
-residue as a gate that is not met rather than as a cleanup that happened.
-`tests/e2e/test_smoke_show_sell_stage2.py` calls this command in its
-teardown and records what it reported — rows deleted by table and by shape, rows
-reviewed as another tenant's, unresolved residue, retained history, and tables it
-could not read together with the action each one is missing — so a lane cannot
-claim a clean sweep it did not get.
+`Scan` and on `DeleteItem`. So a Stage 2 lane's inventory rows are a named finding, and no grant closes it: what
+a grant would buy is that the inventory and order rules above can actually run against
+those tables, and even then the movement history stays because it is audit trail.
+The sweeper therefore stays fail-closed and exits non-zero over both classes — it
+has no amendment context and no way to know whose residue is acceptable. The
+acceptance lives in the lane that calls it: checklist §2.8.7 as amended by card
+WORK-162 (Amendment B, 2026-11-19) accepts `HISTORY` and `BLOCKED` as residue that
+is enumerated, attributed and left standing, and refuses to accept any of them that
+the record cannot name. `tests/e2e/test_smoke_show_sell_stage2.py` implements that
+reading: it counts its own rows in the three unreadable tables with the
+application's reads — `inventoryPositions`, `scoutCustodyBalances`,
+`inventoryMovements`, `unitScoutCampaignOrders`, `orderFulfillments` — *before* the
+teardown, because the sweep deletes the Unit and Unit Campaign rows those queries
+are keyed on and a `NOT_FOUND` afterwards proves the Campaign is gone and says
+nothing about the rows under its key. It then calls this command and records what it
+reported — rows deleted by table and by shape, rows reviewed as another tenant's,
+unresolved residue, retained history, and tables it could not read together with the
+action each one is missing and the product read that stands in for that scan — so a
+lane cannot claim a clean sweep it did not get, and an unreadable table no read
+answers stays a gate that is not met.
 
 ### AWS identity
 

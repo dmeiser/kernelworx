@@ -498,29 +498,41 @@ def sweep_verdict(
     unknown: Sequence[str],
     history: Sequence[str],
     blocked: Sequence[str],
+    unproven: Sequence[str] = (),
+    exit_code: int = 0,
+    strict: bool | None = None,
 ) -> str:
     """Which cleanup verdict one fixture-sweep report earns, by the class of row it left behind.
 
-    The sweep's exit code says only that something survived.  The classes are not interchangeable, and
-    a cleanup that reports a survival as a pass is the defect this exists to prevent:
+    The sweep's exit code says only that something survived; the classes say whether the lane may call
+    itself clean.  WORK-162's Amendment B to checklist §2.8.7 decides the two middle classes: on shared
+    ``dev`` no supported path deletes an inventory balance or an append-only ``InventoryMovement`` row
+    (``SHOW_AND_SELL_DATA_MODEL.md`` §5.8, §3 principle 5), so the leaf accepts those two residues as
+    long as they are enumerated, attributed and left standing rather than reported as cleaned.
 
-    * ``left`` / ``failed`` — the lane's own row is still there, or a delete errored: the lane's fault,
-      always fatal;
-    * ``unknown`` — a row this lane's tokens named in a shape no reviewed rule describes, or one that
-      cannot be attributed either way (an active-join guard whose Scout Campaign no token names).
-      Nothing deleted it and nothing says whose it is, so nobody may call the lane clean;
-    * ``history`` — the lane's own append-only movement rows, retained on purpose.  Not a lane fault,
-      and not cleaned either, so it is a gate that stays open: it fails the run under
-      ``SS_STRICT_CLEANUP=1`` and keeps §2.8.7 unchecked until the owner accepts that residue;
-    * ``blocked`` — a table this identity cannot read, named with the action it is denied.
-
-    A sweep whose only survivors are reviewed third-party rows (``kept``) is ``observed``: those rows
-    are the proof another tenant's data survived, and the sweep was never meant to take them.
+    * ``left`` / ``failed`` — the lane's own row is still there, or a delete errored: always fatal.
+    * ``unknown`` — a row this lane's tokens named that no reviewed rule describes or cannot attribute
+      either way.  Nothing deleted it and nothing says whose it is, so it fails closed whatever the
+      amendment says: accepting a residue is not the same as not knowing whose it is.
+    * ``history`` — the lane's own append-only movement rows, and ``blocked`` — a table this identity
+      cannot read, named with the action it is denied.  Accepted under Amendment B, recorded with their
+      counts and shapes, and fatal again under ``strict`` (the ``SS_STRICT_CLEANUP=1`` stance) — the
+      acceptance is a switch a reviewer can see, not a quiet default.
+    * ``unproven`` holds any blocked table the record does *not* name a product read for: Amendment B
+      requires that stand-in ("nothing may be reported as cleaned that a re-read still answers"), so an
+      unnamed one keeps the step ``blocked`` instead of passing it.
+    * ``exit_code`` — the sweeper's own status.  It exits non-zero over every surviving class, accepted or
+      not, so a non-zero exit with nothing in any class is a report this parser does not fully understand,
+      and guessing "clean" from that is the false clean this gate exists to prevent.
     """
+    if strict is None:
+        strict = STRICT_CLEANUP
     if left or failed or unknown:
         return CLEANUP_FAILED
-    if history or blocked:
+    if unproven or (strict and (history or blocked)):
         return CLEANUP_BLOCKED
+    if exit_code != 0 and not (left or failed or unknown or history or blocked):
+        return CLEANUP_FAILED
     return CLEANUP_OBSERVED
 
 

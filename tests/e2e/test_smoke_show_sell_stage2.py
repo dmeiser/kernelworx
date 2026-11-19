@@ -37,7 +37,7 @@ import datetime
 import json
 import os
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -624,7 +624,153 @@ def _sale_line(sale: dict[str, Any], product_id: str, ordered: int) -> tuple[str
     return order_id, line_item_id
 
 
-def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
+#: Which product reads stand in for a scan of each swept table the fixture identity cannot open.
+#: Amendment B to checklist §2.8.7 accepts a table it cannot read only as residue that is named *and*
+#: provable, and a DynamoDB scan is not the only way to prove a row exists: the application answers every
+#: Stage 2 row class through its own queries, so the rows this lane wrote in an unreadable table are
+#: enumerated through those endpoints instead.  That includes the append-only ``InventoryMovement`` rows
+#: the amendment keeps on purpose — a sweep that cannot read the table cannot even count them, and
+#: ``inventoryMovements`` is what names them.  A blocked table with no entry here cannot be proven either
+#: way, so the record keeps that step blocked rather than calling it clean.
+_RESIDUE_READS: dict[str, tuple[str, ...]] = {
+    "inventory": ("inventoryPositions", "scoutCustodyBalances", "inventoryMovements"),
+    "orders": ("unitScoutCampaignOrders",),
+    "order-fulfillments": ("orderFulfillments",),
+}
+
+
+def _swept_table_key(table: str) -> str:
+    """Which swept table a ``BLOCKED <table>`` line names, or ``""`` when this record cannot say.
+
+    The sweeper prints the physical table name, which carries the environment suffix, so the match is on
+    the logical key.  An unrecognized name is not guessed at: it becomes residue the record cannot prove.
+    """
+    name = table.lower()
+    for key in _RESIDUE_READS:
+        if key in name:
+            return key
+    return ""
+
+
+def _residue_probe(
+    identities: dict[str, dict[str, str]],
+    unit_campaign_ids: Sequence[str],
+    scout_pairs: Sequence[tuple[str, str]],
+    order_ids: Sequence[str] = (),
+) -> Callable[[str], str]:
+    """A read that answers one lane's rows in a table the sweep could not scan.
+
+    Scoped to the ids this lane was answered, never a whole-table read: the point is what *this* lane left
+    behind, and a read that spans the stack would report other tenants' rows as this lane's residue.
+    Sign-in is lazy, so a sweep that reads every table costs nothing extra, and a read this identity cannot
+    make returns no answer rather than an invented one — which leaves that table unproven instead of proven
+    absent.
+    """
+    units = [str(item) for item in unit_campaign_ids if item]
+    pairs = [(str(unit), str(scout)) for unit, scout in scout_pairs if unit]
+    orders = sorted({str(item) for item in order_ids if item})
+    signed_in: list[str] = []
+
+    def read_rows(document: str, variables: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+        """One product read as the record states it, plus the rows it answered.
+
+        The statement is empty when the read is refused or cannot run: a probe that failed proves nothing,
+        and reporting that as an absence is the false clean this gate exists to prevent.  A ``NOT_FOUND``
+        on a Campaign-keyed query means the Campaign row is gone, which says nothing about the rows that
+        share its partition key — so it answers nothing here, and the record leaves that table unproven
+        rather than reading an absence into it.
+        """
+        try:
+            if not signed_in:
+                signed_in.append(_token_for(identities["admin"]))
+            payload = api.gql_raw(signed_in[0], stage2.STAGE_TWO_DOCUMENTS[document], variables)
+        except Exception:  # noqa: BLE001 - a probe that cannot run proves nothing, and must not invent it
+            return "", []
+        if api.error_summaries(payload):
+            return "", []
+        data = (payload.get("data") or {}).get(document)
+        items = data.get("items") if isinstance(data, dict) else data
+        rows = [row for row in (items or []) if isinstance(row, dict)]
+        return f"{document} answered {len(rows)} row(s)", rows
+
+    def probe(table: str) -> str:
+        key = _swept_table_key(table)
+        if not key:
+            return ""
+        answers: list[str] = []
+        for document in _RESIDUE_READS[key]:
+            if document == "unitScoutCampaignOrders":
+                for unit, scout in pairs:
+                    statement, _ = read_rows(document, {"unitCampaignId": unit, "campaignId": scout})
+                    if statement:
+                        answers.append(statement)
+            elif document == "orderFulfillments":
+                # A fulfillment row is partitioned by its Order, so this lane can name one only through an
+                # Order read: the Orders it sold, plus any Order its Campaigns still answer.
+                named = list(orders)
+                for unit, scout in pairs:
+                    _, rows = read_rows("unitScoutCampaignOrders", {"unitCampaignId": unit, "campaignId": scout})
+                    named += [str(row.get("orderId") or "") for row in rows]
+                ids = sorted({item for item in named if item})
+                if not ids:
+                    answers.append(
+                        "unitScoutCampaignOrders answers no Order for this lane, and an Order id is the only "
+                        "key an orderFulfillments row can have"
+                    )
+                for order_id in ids:
+                    statement, _ = read_rows(document, {"orderId": order_id})
+                    if statement:
+                        answers.append(f"{statement} for Order {order_id}")
+            else:
+                for unit in units:
+                    statement, _ = read_rows(document, {"unitCampaignId": unit})
+                    if statement:
+                        answers.append(statement)
+        return "; ".join(answers)
+
+    return probe
+
+
+def _lane_residue_probe(identities: dict[str, dict[str, str]], built: dict[str, Any]) -> Callable[[str], str]:
+    """The same probe, taken from the ids a finished lane was answered — the same scope `_lane_sweep_tokens` names."""
+    unit_ids = [str(built.get("unitCampaignId") or ""), *(str(item) for item in built.get("extraCampaignIds") or [])]
+    scout = str(built.get("scoutCampaignId") or "")
+    return _residue_probe(
+        identities,
+        [item for item in unit_ids if item],
+        [(item, scout) for item in unit_ids if item],
+        [str(item) for item in built.get("orderIds") or []],
+    )
+
+
+def _residue_census(identities: dict[str, dict[str, str]], built: dict[str, Any]) -> dict[str, str]:
+    """What this lane leaves in each unreadable table, read while a read still answers it.
+
+    Amendment B accepts those tables as residue only where the record can name the rows, and the window for
+    naming them is before the teardown, not after the sweep.  The sweep deletes the Unit and Unit Campaign
+    rows the Stage 2 reads are keyed on; afterwards ``inventoryPositions`` and ``inventoryMovements`` answer
+    ``NOT_FOUND`` for the Campaign, which proves the Campaign row is gone and says nothing at all about the
+    append-only movement rows that share its partition key.  So the counts are taken here and carried into
+    the sweep's record, which is where a reader needs them.
+    """
+    probe = _lane_residue_probe(identities, built)
+    return {key: probe(key) for key in _RESIDUE_READS}
+
+
+def _residue_row(lane_label: str, census: Mapping[str, str]) -> dict[str, str]:
+    """One record row enumerating the residue Amendment B keeps on purpose, with its counts."""
+    return stage2.cleanup_row(
+        f"§2.8.7 residue census / {lane_label}",
+        "read before the teardown, through the endpoints the application ships for the three tables "
+        "``kernelworx-qa-ue1-dev`` cannot Scan: "
+        + "; ".join(f"{key}: {value or 'no read answers this lane'}" for key, value in sorted(census.items()))
+        + " — the append-only ``InventoryMovement`` rows and the position rows those movements explain stay "
+        "by design (``SHOW_AND_SELL_DATA_MODEL.md`` §5.8), and the Orders and fulfillment records in that "
+        "count are the ones the ORD-API teardown steps take through ``deleteOrder`` and re-read absent",
+    )
+
+
+def _lane_table_sweep(label: str, tokens: list[str], residue: Mapping[str, str] | None = None) -> list[dict[str, str]]:
     """Remove one lane's rows through the sanctioned fixture sweeper, and record what it reported.
 
     The product gives a caller nothing here: the SDL carries no ``deleteUnit`` and no
@@ -638,22 +784,32 @@ def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
     or Scout custody row carries no account at all, only a Unit Campaign and a product, and a join-code
     pointer carries a campaign id and a timestamp — the shapes a lane actually leaves behind.
 
-    Three classes of surviving row are reported apart, and only the first may pass.  A row a reviewed
-    rule attributed to someone else (``kept``: another account's grant, another profile's roster
-    membership or custody, a marker no fixture identity wrote) survives, and that survival is the proof
-    another tenant's data is untouched.  A row this lane's tokens named that no rule describes, or that
-    cannot be attributed either way (``UNKNOWN``, including a guard whose Scout Campaign no token names
-    — one profile holds a guard per Campaign and every lane shares the fixture identities), fails the
-    sweep closed: residue nobody reviewed is never a clean lane.  And the lane's own append-only movement
-    rows (``HISTORY``) are neither another tenant's nor deletable, so they stay an open gate —
-    :func:`tests.e2e.utils.show_sell_stage2_support.sweep_verdict` records them as blocked, which a
-    strict run turns into a failure, until the owner accepts that residue.
+    Four classes of surviving row are reported apart, and the lane judges them apart (see
+    :func:`tests.e2e.utils.show_sell_stage2_support.sweep_verdict`):
 
-    A table the fixture identity cannot read is a ``blocked`` row carrying the sweeper's own
-    ``BLOCKED <table>: <action> is not granted to this identity (<error>)`` line, and the counts name
-    that action too: on dev the QA identity is denied ``dynamodb:Scan`` on the Stage 2 inventory,
-    orders and order-fulfillment tables, so those rows are neither removed nor proven absent.  That is
-    reported as a gate that is *not met* rather than as a cleanup that succeeded.
+    * ``kept`` — a reviewed rule attributed the row to someone else: another account's grant, another
+      profile's roster membership or custody, a marker no fixture identity wrote.  It survives, and that
+      survival is the proof another tenant's data is untouched, so it never fails the sweep;
+    * ``UNKNOWN`` — a row this lane's tokens named that no rule describes, or that cannot be attributed
+      either way (a guard whose Scout Campaign no token names — one profile holds a guard per Campaign
+      and every lane shares the fixture identities).  Never deleted, and it fails the run closed: nothing
+       may be called clean while a row sits there that no rule has reviewed, amendment or no amendment;
+    * ``HISTORY`` — the lane's own append-only ``InventoryMovement`` rows, which the product has no path
+      to delete.  Counted and attributed, never reported as cleaned;
+    * ``BLOCKED`` — a table this identity cannot read, named with the action it is denied.
+
+    The last two are the residuals checklist §2.8.7 accepts as amended (card WORK-162, 2026-11-19):
+    "clean all Stage 2 records" was written for the per-PR stack WORK-76 retired, and on shared ``dev``
+    no supported path deletes a balance row or an audit movement, so the only literal satisfaction would
+    be raw deletes of immutable rows in the account the stack runs in.  The amendment accepts them only
+    as residue that is *named and provable*, so each blocked table is answered here by what a product read
+    answers in its place (:data:`_RESIDUE_READS`), carried in from :func:`_residue_census` — which is taken
+    before the teardown, because the sweep deletes the Unit and Unit Campaign rows those reads are keyed
+    on, and after it a ``NOT_FOUND`` for the Campaign proves the Campaign is gone and says nothing about
+    the movement rows under its key.  The sweeper stays fail-closed and exits non-zero over both classes —
+    it has no amendment context — and this record says which classes the exit code was arguing about.  A
+    non-zero exit that no class in the report explains, or a blocked table no product read names, is the
+    lane's failure rather than an accepted residue: nothing is called clean that a re-read still answers.
     """
     argv_tail = " ".join(tokens)
     code, blocked, lines = stage2.fixture_sweep(tokens)
@@ -712,19 +868,25 @@ def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
                     break
         return ", ".join(f"{count} {shape}" for shape, count in sorted(counts.items()))
 
-    def unreadable() -> str:
-        """Each table the sweep could not read, with the permission it is missing.
+    def unreadable() -> list[tuple[str, str, str]]:
+        """Each table the sweep could not read, with the permission it is missing and the read that stands in.
 
-        A count of blocked tables tells the reader the sweep is incomplete; the action in the
-        sweeper's own ``BLOCKED`` line is the thing to ask an owner for.  On dev that is
-        ``dynamodb:Scan`` on the Stage 2 inventory, orders and order-fulfillment tables.
+        A count of blocked tables tells the reader the sweep is incomplete; the action in the sweeper's
+        own ``BLOCKED`` line is the thing to ask an owner for, and the census answer is what makes the
+        residue provable without that grant (WORK-162, Amendment B).  A table no product read answers is
+        carried with an empty answer so the record cannot call it clean.
         """
-        parts: list[str] = []
+        found: list[tuple[str, str, str]] = []
         for line in blocked:
             table, sep, rest = line[len("BLOCKED") :].strip().partition(": ")
-            action = rest.split(" is not granted")[0] if sep else ""
-            parts.append(f"{table}: {action or 'read failed'}")
-        return "; ".join(parts)
+            action = rest.split(" is not granted")[0] if sep else "read failed"
+            answer = (residue or {}).get(_swept_table_key(table), "")
+            found.append((table, action, answer))
+        return found
+
+    blocked_tables = unreadable()
+    unproven = [f"{table} ({action})" for table, action, answer in blocked_tables if not answer]
+    proven = [f"{table}: {answer}" for table, action, answer in blocked_tables if answer]
 
     counts = (
         f"{deleted} row(s) deleted ({by_table('deleted row', 2) or 'none'}; shapes: {shapes() or 'none'}), "
@@ -732,24 +894,37 @@ def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
         f"{len(kept)} row(s) reviewed as another tenant's ({by_table('kept', 1) or 'none'}), "
         f"{len(unknown)} unresolved residue row(s) ({by_table('UNKNOWN', 1) or 'none'}), "
         f"{len(history)} lane history row(s) retained ({by_table('HISTORY', 1) or 'none'})"
-        + (f", {len(blocked)} table(s) unreadable ({unreadable()})" if blocked else ", 0 table(s) unreadable")
+        + (f", {len(blocked)} table(s) unreadable" if blocked else ", 0 table(s) unreadable")
+        + (f" ({'; '.join(f'{table}: {action}' for table, action, _ in blocked_tables)})" if blocked_tables else "")
+        + (
+            f"; residue counted by the application's own read before the teardown took it down: "
+            f"{'; '.join(proven)} (the inventory rows stay by design; the Order and fulfillment counts are "
+            "what the ORD-API teardown steps take through ``deleteOrder`` and re-read absent)"
+            if proven
+            else ""
+        )
+        + (f"; residue no product read can prove: {'; '.join(unproven)}" if unproven else "")
     )
 
-    verdict = stage2.sweep_verdict(left=left, failed=failed_rows, unknown=unknown, history=history, blocked=blocked)
-    if verdict == stage2.CLEANUP_OBSERVED and code != 0:
-        # The sweeper says it failed and no class the record can see explains why.  Guessing "clean"
-        # from a report the parser does not fully understand is the false-clean this whole gate exists
-        # to prevent, so a disagreement between the exit code and the report is the lane's failure.
-        verdict = stage2.CLEANUP_FAILED
+    verdict = stage2.sweep_verdict(
+        left=left,
+        failed=failed_rows,
+        unknown=unknown,
+        history=history,
+        blocked=blocked,
+        unproven=unproven,
+        exit_code=code,
+    )
 
     if verdict == stage2.CLEANUP_OBSERVED:
         return [
             stage2.cleanup_row(
                 f"§2.8.7 fixture sweep / {label}",
-                f"scripts/qa_fixture.py sweep --lane {argv_tail} exited 0: {counts}; the re-scan finds no "
-                "row these rules call this lane's, and every survivor is a row a reviewed rule attributed "
-                "to another tenant (the report lines are not echoed here: an idempotency marker's key "
-                "carries a join code, and the sweeper masks payloads for the same reason)",
+                f"scripts/qa_fixture.py sweep --lane {argv_tail} exited {code}: {counts}; the re-scan finds no "
+                "row these rules call this lane's, and every survivor is a row a reviewed rule attributed to "
+                "another tenant or one of the two residues Amendment B accepts, counted above (the report lines "
+                "are not echoed here: an idempotency marker's key carries a join code, and the sweeper masks "
+                "payloads for the same reason)",
             )
         ]
     detail = "; ".join(
@@ -759,14 +934,18 @@ def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
         ]
     )
     why = (
-        "a row this lane's tokens named could not be attributed either way, so the sweep fails closed"
-        if unknown
-        else "the lane's own append-only history is still on the stack, which is a residue the owner has "
-        "to accept rather than a cleanup that happened"
-        if history
-        else "a row this lane wrote is still there"
+        "a row this lane wrote is still there"
         if left or failed_rows
-        else "the sweep could not read every Stage 2 table for this identity"
+        else "a row this lane's tokens named could not be attributed either way, so the sweep fails closed"
+        if unknown
+        else "a table this identity cannot read has no product read standing in for it, so its rows are "
+        "neither removed nor provable"
+        if unproven
+        else "the lane's append-only movement rows are retained by decision (WORK-162, Amendment B) — "
+        "counted and attributed here, never reported as cleaned"
+        if history
+        else "tables this identity cannot scan, with this lane's rows in each one counted by the "
+        "application's own read before the teardown took them down (WORK-162, Amendment B)"
     )
     return [
         stage2.cleanup_row(
@@ -1316,7 +1495,9 @@ def _sweep_prior_lanes(
     why the verification read comes after it.  The sweep reaches a guard only by its exact Scout
     Campaign id, so this reads the roster of each prior Unit Campaign while the join still exists and
     names those ids: a guard it cannot name is reported by the sweep as unresolved rather than deleted
-    on the strength of a shared fixture profile.
+    on the strength of a shared fixture profile.  That roster read is also what lets the Stage 2 tables
+    the fixture identity cannot scan be answered per prior Campaign by :func:`_residue_probe` — an
+    unreadable table is accepted as residue only where a product read names the rows in it.
     """
     admin_token = _token_for(identities["admin"])
     scout_token = _token_for(identities["scout"])
@@ -1361,20 +1542,15 @@ def _sweep_prior_lanes(
                 # The roster of a Unit Campaign this run named holds only that run's joins, and it
                 # answers the Scout Campaign id each join used — the exact identity the sweep's
                 # active-join guard rule needs.  Read it here, while the join still exists.
-                scout_campaign_ids += [
-                    _bare_id(str(r.get("campaignId") or ""), "CAMPAIGN")
-                    for r in (
-                        (
-                            api.gql(
-                                admin_token,
-                                documents["roster"],
-                                {"unitCampaignId": str(row["unitCampaignId"])},
-                            ).get("unitCampaignRoster")
-                            or {}
-                        ).get("items")
-                        or []
-                    )
-                ]
+                roster_rows = (
+                    api.gql(
+                        admin_token,
+                        documents["roster"],
+                        {"unitCampaignId": str(row["unitCampaignId"])},
+                    ).get("unitCampaignRoster")
+                    or {}
+                ).get("items") or []
+                scout_campaign_ids += [_bare_id(str(r.get("campaignId") or ""), "CAMPAIGN") for r in roster_rows]
                 if not row.get("isActive"):
                     continue
                 api.gql(
@@ -1414,7 +1590,10 @@ def _sweep_prior_lanes(
         prior_tokens += [f"profile={_bare_id(p, 'PROFILE')}" for p in profiles_found]
         # The sweep runs even when the three reads answer nothing: a prior run's idempotency markers
         # are keyed on that run's DATA_ID alone, and the sweep reaches them when its Unit row is long gone.
-        swept = _lane_table_sweep(f"prior lane {data_id}", prior_tokens)
+        # No residue census is possible for an earlier run: its Unit Campaign rows are already gone, so no
+        # Stage 2 read can count what it left in a table this identity cannot Scan, and the record says that
+        # rather than calling the step clean.
+        swept = _lane_table_sweep(f"prior lane {data_id}", prior_tokens, None)
         rows.extend(swept)
         unmet = [row for row in swept if row["result"] != stage2.CLEANUP_OBSERVED]
         if any(row["result"] == stage2.CLEANUP_FAILED for row in unmet):
@@ -2458,6 +2637,13 @@ def test_show_sell_stage2_journey(
         # leaves a record, and only then does a failed step turn the run red.  Before this shape, a
         # refused ``deleteOrder`` or a disturbed canary was recorded as an observation and pytest
         # exited 0 — which is exactly how a cleanup gate stops meaning anything.
+        # Amendment B's residue census comes first, and before the teardown: the sweep below deletes the
+        # Unit and Unit Campaign rows every Stage 2 read is keyed on, so a count of what this lane leaves in
+        # the three tables no QA identity can Scan can only be taken while those reads still answer.
+        residue: dict[str, str] = {}
+        if built.get("unitCampaignId"):
+            residue = _residue_census(identities, built)
+            cleanup.append(_residue_row(str(lane["data_id"]), residue))
         try:
             cleanup.extend(_teardown_lane(lane["data_id"], built, identities))
         except Exception as exc:  # noqa: BLE001 - a teardown that dies mid-step must still cost the run nothing but its verdict
@@ -2467,7 +2653,13 @@ def test_show_sell_stage2_journey(
                 )
             )
         if built.get("unitCampaignId"):
-            cleanup.extend(_lane_table_sweep(lane["data_id"], _lane_sweep_tokens(str(lane["data_id"]), built)))
+            cleanup.extend(
+                _lane_table_sweep(
+                    lane["data_id"],
+                    _lane_sweep_tokens(str(lane["data_id"]), built),
+                    residue,
+                )
+            )
         if canary_before and canary.get("unitCampaignId"):
             try:
                 cleanup.append(_canary_survived(canary_before, _lane_snapshot(canary, identities), canary, identities))
@@ -2482,11 +2674,17 @@ def test_show_sell_stage2_journey(
             cleanup.extend(_sweep_prior_lanes(identities, sweep_ids, lane["data_id"]))
         if canary.get("unitCampaignId"):
             # The canary's own turn: the same teardown, pointed at the canary's ids, proves the sweep
-            # removes a whole lane's rows when it is told to — and leaves no fixture behind.
+            # removes a whole lane's rows when it is told to — and leaves no fixture behind.  Its census is
+            # taken here, after the acceptance lane's teardown, so the counts also show that the lane's
+            # teardown left the canary's residue standing.
+            canary_residue = _residue_census(identities, canary)
+            cleanup.append(_residue_row(f"canary lane {canary['data_id']}", canary_residue))
             cleanup.extend(_teardown_lane(str(canary["data_id"]), canary, identities))
             cleanup.extend(
                 _lane_table_sweep(
-                    f"canary lane {canary['data_id']}", _lane_sweep_tokens(str(canary["data_id"]), canary)
+                    f"canary lane {canary['data_id']}",
+                    _lane_sweep_tokens(str(canary["data_id"]), canary),
+                    canary_residue,
                 )
             )
         for row in cleanup:
