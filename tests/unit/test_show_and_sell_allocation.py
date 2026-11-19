@@ -47,6 +47,11 @@ OTHER_UNIT_CAMPAIGN = CREW_529_SPRING
 CATALOG_ID = "CATALOG#fixture-default"
 PRODUCT = f"{CATALOG_ID}#prod-1"
 OTHER_PRODUCT = f"{CATALOG_ID}#prod-2"
+#: A second product whose id continues this one. Product ids carry ``#`` inside them
+#: (§6.3), so ``PRODUCT#<extra>`` sits INSIDE the ``PRODUCT#`` sort-key range that a
+#: per-product read asks for, and only the row's own ``productId`` attribute tells the two
+#: products apart.
+NESTED_PRODUCT = f"{PRODUCT}#nested"
 MORNING = "SSE#morning"
 AFTERNOON = "SSE#afternoon"
 LOCATION = "Aurora armory lot"
@@ -403,6 +408,35 @@ def test_evt_m_04_01_the_refusal_grows_when_the_stock_is_smaller_than_the_first_
     assert _stored_allocation(inventory_table, AFTERNOON) is None
 
 
+def test_evt_m_04_01_an_over_assigned_instant_does_not_license_one_at_another(
+    world: Dict[str, Any],
+) -> None:
+    """ALLOC-02 is an every-instant rule, so a fresh violation is refused where it lands.
+
+    The morning is committed to one Kernel of a product the campaign does not hold — a
+    state the Kernel has to be able to correct, and the campaign's worst instant. The
+    afternoon instant this request opens carries nothing today, so the campaign's peak does
+    not move at all and a campaign-wide ceiling would let the write land. It is refused at
+    the afternoon instant, and reducing the morning stays possible afterwards.
+    """
+    inventory_table = world["inventory"]
+    _seed_event(world["show_and_sells"], MORNING)
+    _seed_event(world["show_and_sells"], AFTERNOON, start_at=ADJACENT_START, end_at=ADJACENT_END)
+    _seed_allocation(inventory_table, MORNING, PRODUCT, allocated=1)
+
+    refused = _assign(event_id=AFTERNOON, items=[_target(1)], key="assign-afternoon")
+
+    error = assert_is_error(refused, "CONFLICT")
+    for fact in (PRODUCT, "0", "1"):
+        assert fact in error["message"], f"the refusal states the numbers: {error['message']}"
+    assert _stored_allocation(inventory_table, AFTERNOON) is None
+    assert _movements(inventory_table) == []
+
+    _ok(_assign(event_id=MORNING, items=[_target(0)], key="release-morning"))
+    morning = _stored_allocation(inventory_table, MORNING)
+    assert morning is not None and morning[inv.REMAINING_QTY] == 0, "the remedy was never blocked"
+
+
 def test_evt_m_04_01_a_released_allocation_frees_the_instant_for_another_event(
     world: Dict[str, Any],
 ) -> None:
@@ -511,7 +545,12 @@ def test_restating_a_target_saves_without_another_allocation_write_or_movement(w
 def test_a_target_below_what_the_event_sold_is_refused_without_touching_the_row(
     world: Dict[str, Any],
 ) -> None:
-    """§3.2.1 sold-stock protection: a sale at the event is history the target cannot undo."""
+    """§3.2.1 sold-stock protection: a sale at the event is history the target cannot undo.
+
+    A non-zero target below ``soldQty + releasedQty`` is refused outright. Zero is the one
+    target that is allowed past that floor, because it is not a quantity under the history
+    but the command that releases the remainder — see the zero cases below.
+    """
     _seed_event(world["show_and_sells"], MORNING, product_ids=[PRODUCT])
     _seed_balance(world["inventory"], PRODUCT, physical=6, sold=4)
     _seed_allocation(world["inventory"], MORNING, PRODUCT, allocated=6, sold=4)
@@ -523,6 +562,91 @@ def test_a_target_below_what_the_event_sold_is_refused_without_touching_the_row(
     stored = _stored_allocation(world["inventory"], MORNING)
     assert stored is not None and stored[inv.ALLOCATED_QTY] == 6
     assert _stored_event(world["show_and_sells"])[ssm.VERSION_ATTRIBUTE] == 1
+
+
+def test_a_target_of_zero_after_a_sale_releases_the_remainder_and_keeps_the_sale(
+    world: Dict[str, Any],
+) -> None:
+    """§3.1, §6.2: zero removes the remaining allocation, and a sale is not in the way.
+
+    6 allocated, 4 sold at the event: the 4 sold are history the target cannot undo, and
+    the 2 still assigned are exactly what a zero releases. The row keeps its sold quantity
+    and lands on the floor with nothing remaining, so the sale, the position and the audit
+    trail go on agreeing about the same two Kernels.
+    """
+    _seed_event(world["show_and_sells"], MORNING, product_ids=[PRODUCT])
+    _seed_balance(world["inventory"], PRODUCT, physical=6, sold=4)
+    _seed_allocation(world["inventory"], MORNING, PRODUCT, allocated=6, sold=4)
+
+    answer = _ok(_assign(items=[_target(0)]))
+
+    stored = _stored_allocation(world["inventory"], MORNING)
+    assert stored is not None
+    assert (stored[inv.ALLOCATED_QTY], stored[inv.SOLD_QTY], stored[inv.RELEASED_QTY]) == (4, 4, 0)
+    assert stored[inv.REMAINING_QTY] == 0
+    assert stored[ssm.STATUS_ATTRIBUTE] == inv.ALLOCATION_OPEN, "zero is a reduction, not the §9.2 RELEASED state"
+    movement = _movements(world["inventory"])[0]
+    assert movement[inv.MOVEMENT_TYPE_ATTRIBUTE] == inv.EVENT_MANUAL_REDUCE
+    assert movement[inv.ASSIGNED_DELTA] == -2, "only the remainder moved"
+    position = answer["inventoryPositions"][0]
+    assert (position["assignedOpenQty"], position["sellableKernelQty"], position["unassignedKernelQty"]) == (0, 2, 2)
+    assert answer["warnings"] == []
+
+
+def test_a_target_of_zero_after_a_release_releases_only_what_is_still_assigned(
+    world: Dict[str, Any],
+) -> None:
+    """A row that already put part of its remainder back is still zero-able, once."""
+    _seed_event(world["show_and_sells"], MORNING, product_ids=[PRODUCT])
+    _seed_balance(world["inventory"], PRODUCT, physical=6)
+    _seed_allocation(world["inventory"], MORNING, PRODUCT, allocated=6, sold=2, released=3)
+
+    _ok(_assign(items=[_target(0)]))
+
+    stored = _stored_allocation(world["inventory"], MORNING)
+    assert stored is not None
+    assert (stored[inv.ALLOCATED_QTY], stored[inv.SOLD_QTY], stored[inv.RELEASED_QTY]) == (5, 2, 3)
+    assert stored[inv.REMAINING_QTY] == 0
+    assert [am.assigned_delta_of(row) for row in _movements(world["inventory"])] == [-1]
+
+
+def test_assigning_a_product_never_touches_the_product_whose_id_shares_its_key_range(
+    world: Dict[str, Any],
+) -> None:
+    """§6.3: a product id contains ``#``, so a per-product key range is two products wide.
+
+    ``PRODUCT#nested`` lives inside the ``PRODUCT#`` range this mutation reads before it
+    plans a write, and only the rows' own ``productId`` attribute separates the two
+    products. Read as if the range were an identity, the neighbour's allocation for the
+    same event is planned as though it were the requested product's: the write moves the
+    neighbour's row while bumping the requested product's balance and auditing the
+    requested product, and the allocation, the position and the audit trail then disagree
+    about which product ever changed.
+    """
+    inventory_table = world["inventory"]
+    _seed_event(world["show_and_sells"], MORNING, product_ids=[NESTED_PRODUCT])
+    _seed_balance(inventory_table, PRODUCT, physical=6)
+    _seed_balance(inventory_table, NESTED_PRODUCT, physical=6)
+    _seed_allocation(inventory_table, MORNING, NESTED_PRODUCT, allocated=5)
+
+    answer = _ok(_assign(items=[_target(2)]))
+
+    mine = _stored_allocation(inventory_table, MORNING, PRODUCT)
+    assert mine is not None, "the product that was asked for gets its own allocation row"
+    assert (mine[inv.PRODUCT_ID_ATTRIBUTE], mine[inv.ALLOCATED_QTY], mine[inv.REMAINING_QTY]) == (PRODUCT, 2, 2)
+    neighbour = _stored_allocation(inventory_table, MORNING, NESTED_PRODUCT)
+    assert neighbour is not None
+    assert (neighbour[inv.ALLOCATED_QTY], neighbour[ssm.VERSION_ATTRIBUTE]) == (5, 1), "the neighbour is not rewritten"
+    assert _stored_balance(inventory_table, NESTED_PRODUCT)[inv.VERSION_ATTRIBUTE] == 1
+    assert _stored_balance(inventory_table, PRODUCT)[inv.VERSION_ATTRIBUTE] == 2
+    assert [row[inv.PRODUCT_ID_ATTRIBUTE] for row in _movements(inventory_table)] == [PRODUCT]
+    assert sorted((row["productId"], row["allocatedQty"]) for row in answer["allocations"]) == [
+        (PRODUCT, 2),
+        (NESTED_PRODUCT, 5),
+    ]
+    positions = {row["productId"]: row for row in answer["inventoryPositions"]}
+    assert positions[PRODUCT]["assignedOpenQty"] == 2, "a position counts its own product's allocations only"
+    assert positions[NESTED_PRODUCT]["assignedOpenQty"] == 5
 
 
 def test_a_released_allocation_is_not_re_opened_by_an_assignment(world: Dict[str, Any]) -> None:
@@ -559,24 +683,52 @@ def test_evt_m_04_03_a_sixteenth_product_is_allowed_and_the_plan_fits_the_budget
     # The complete plan this commit ran: marker + event row + (allocation, movement,
     # balance version) per product, well inside the 90-action budget.
     assert 2 + 3 * 16 <= MAX_TRANSACTION_ACTIONS
+    # And the finalization this assignment makes possible still fits its own budget:
+    # 3 baseline writes + 4 per touched product = 67 (§9).
+    assert 3 + 4 * 16 == 67 <= MAX_TRANSACTION_ACTIONS
+
+
+def test_21_allocated_products_are_the_most_the_event_can_still_finalize(world: Dict[str, Any]) -> None:
+    """§8.10, §9: the floor reaches 87 writes at 21 products, which is still inside 90.
+
+    The arithmetic is the documented estimate written out rather than a computation on the
+    implementation's constants, so a changed constant moves a failing line instead of
+    quietly moving the boundary a Kernel can put their event on.
+    """
+    products = _offer_products(world["catalogs"], 21)
+    _seed_event(world["show_and_sells"], MORNING)
+    for product_id in products:
+        _seed_balance(world["inventory"], product_id, physical=2)
+
+    answer = _ok(_assign(items=[_target(1, product_id) for product_id in products]))
+
+    assert 3 + 4 * 21 == 87 <= MAX_TRANSACTION_ACTIONS
+    assert len(answer["allocations"]) == 21
+    assert len(_allocations(world["inventory"])) == 21
+    assert len(_movements(world["inventory"])) == 21
 
 
 def test_evt_m_04_03_a_batch_the_event_could_no_longer_finalize_is_refused_first(
     world: Dict[str, Any],
 ) -> None:
-    """§8.10: the finalization-feasibility preflight runs before any write, and says what to reduce."""
-    too_many = (
-        MAX_TRANSACTION_ACTIONS - am.FINALIZATION_OVERHEAD_ACTIONS
-    ) // am.FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT
-    products = _offer_products(world["catalogs"], too_many + 1)
+    """§8.10: 22 products would need 3 + 4*22 = 91 writes to finalize, one over the budget.
+
+    The preflight runs before a single action is staged, so the refusal leaves no
+    allocation, no movement, no marker and no moved version, and names what to reduce. The
+    assignment's own plan is only 68 actions here: what the event can still finalize is the
+    binding limit, not the size of this request.
+    """
+    products = _offer_products(world["catalogs"], 22)
     _seed_event(world["show_and_sells"], MORNING)
     for product_id in products:
         _seed_balance(world["inventory"], product_id, physical=2)
 
     refused = _assign(items=[_target(1, product_id) for product_id in products])
 
+    assert 3 + 4 * 22 == 91 > MAX_TRANSACTION_ACTIONS
     error = assert_is_error(refused, "CONFLICT")
     assert "finalize" in error["message"]
+    assert "91" in error["message"], "the refusal states the write count the event can no longer reach"
     assert _allocations(world["inventory"]) == []
     assert _movements(world["inventory"]) == []
     assert _marker_rows(world["show_and_sells"]) == []

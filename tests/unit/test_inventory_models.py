@@ -673,6 +673,46 @@ def test_a_product_range_returns_only_that_product(inventory_table: Any) -> None
     assert inv.read_inventory_balance(CAMPAIGN, "CATALOG#fixture-default#prod-99") is None
 
 
+def test_a_product_range_excludes_a_product_whose_id_continues_this_one(inventory_table: Any) -> None:
+    """``PRODUCT#P#`` is a range, and a product spelled ``P#<extra>`` lives inside it.
+
+    The trailing ``#`` is what keeps ``prod-1`` from answering with ``prod-10``, but a
+    nested id starts with the whole prefix of its parent, so its balance, allocation and
+    custody rows fall into the parent's section. A mutation that plans from that section
+    then writes the neighbour's row while bumping the parent's balance and auditing the
+    parent — three rows disagreeing about which product moved. The row's own ``productId``
+    attribute is the identity that separates them, which is also what the campaign-wide
+    bucketing and the movement reader filter on.
+    """
+    nested = f"{PRODUCT}#case-lot"
+    for product in (PRODUCT, nested):
+        _put(
+            inventory_table,
+            inv.build_inventory_balance_item(
+                unit_campaign_id=CAMPAIGN, product_id=product, kernel_physical_qty=4, now_iso=NOW
+            ),
+        )
+        _put(
+            inventory_table,
+            inv.build_event_inventory_allocation_item(
+                unit_campaign_id=CAMPAIGN,
+                product_id=product,
+                show_and_sell_id=EVENT,
+                start_at="2026-11-07T08:00:00+00:00",
+                end_at="2026-11-07T12:00:00+00:00",
+                allocated_qty=3,
+                now_iso=NOW,
+            ),
+        )
+
+    rows = inv.read_inventory_product_rows(CAMPAIGN, PRODUCT)
+    assert {str(row["productId"]) for row in rows} == {PRODUCT}, "the range is not an identity test"
+    sections = inv.inventory_position_rows(CAMPAIGN, PRODUCT)
+    assert [row[inv.ALLOCATED_QTY] for row in sections["allocations"]] == [3]
+    assert {row["productId"] for row in sections["balance"] + sections["allocations"]} == {PRODUCT}
+    assert inv.read_inventory_balance(CAMPAIGN, nested)["productId"] == nested, "an exact key still finds it"
+
+
 def test_sections_bucket_by_the_product_attribute_not_a_split_of_the_sort_key(inventory_table: Any) -> None:
     """A product id contains ``#``, so splitting the key would name the catalog.
 

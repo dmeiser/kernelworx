@@ -4789,8 +4789,11 @@ def _plan_live_assignments(
     refused must change nothing: with the writes staged first, a product accepted early
     in the batch would already be in the transaction when a later product's target turned
     out to over-assign. The concurrency rule is evaluated on the campaign's other open
-    allocations for that product, with this event's own row excluded — the candidate
-    replaces it, it does not stack on top of it.
+    allocations for that product, with this event's own row excluded from them because the
+    candidate replaces it rather than stacks on top of it, and passed to the evaluator as
+    the state each instant carried before this write — ALLOC-02 is a per-instant rule, so
+    the question is what each instant committed before and after, not how large the
+    campaign's single worst instant is.
 
     A target that restates what the row already carries yields no change and is simply
     absent from the plan: it spends no movement and no allocation write, while the request
@@ -4816,7 +4819,7 @@ def _plan_live_assignments(
             end_at=change.end_at,
             remaining_qty=change.remaining_qty,
             other_allocations=[row for row in section["allocations"] if row is not existing],
-            current_remaining_qty=int(existing.get(inventory_models.REMAINING_QTY) or 0) if existing else 0,
+            current_allocation=existing,
         )
         if conflict is not None:
             _refuse_concurrent_over_assignment(conflict)

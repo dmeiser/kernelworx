@@ -20,13 +20,19 @@ What each rule is protecting:
 * **Sold stock is protected** (§3.2.1). A target below ``soldQty + releasedQty`` would
   contradict quantities that are history: what was sold at the event and what was
   already released. The refusal is ``INVALID_INPUT``, not a clamp — silently raising
-  the target to the floor would assign stock the Kernel did not ask for.
+  the target to the floor would assign stock the Kernel did not ask for. Zero is the one
+  target that is always allowed: §3.1 and §6.2 make it the command that removes the
+  remaining target allocation, so it lands on the floor and releases the remainder.
 * **No event-wide product cap** (§5.10). Sixteen products is a legal event; the ceiling
   is the computed write plan (§8.10), never a count of products.
 * **Concurrent over-assignment is blocked at every instant** (ALLOC-02, AC-09). Four
-  boxes cannot carry three to each of two overlapping events. The comparison is made on
-  the allocation rows' own denormalized intervals (§5.11), because the row is the record
-  the rule was decided on.
+  boxes cannot carry three to each of two overlapping events, and a violation that moves
+  to another instant is still a violation: the rule compares the committed total of every
+  instant before and after this write, and refuses any instant this write pushes past
+  sellable stock. A reduction of a state that is already over stock worsens no instant,
+  so it stays reachable (§8.10's remedy). The comparison is made on the allocation rows'
+  own denormalized intervals (§5.11), because the row is the record the rule was decided
+  on.
 * **Sequential over-assignment warns** (ALLOC-03, AC-10). Three boxes to a morning event
   and three to a non-overlapping afternoon event is allowed with four on hand, and the
   warning has to name the product, the actual current stock, the assigned total and the
@@ -34,16 +40,20 @@ What each rule is protecting:
 
 The interval arithmetic has one simplification worth stating, because it is what makes
 the check exact rather than sampled: the sum of overlapping allocations is piecewise
-constant and only ever increases at an interval's ``startAt``, so its maximum over the
-whole timeline is attained at one of the ``startAt`` instants. Every instant is covered
-by checking those, and touching endpoints do not overlap (§5.11 half-open intervals via
+constant and its only breakpoints are interval endpoints, so sampling every ``startAt``
+and ``endAt`` samples every instant the rule can fail at. Sampling only the ``startAt``
+instants answers "where is the peak" — the total only ever increases at a ``startAt`` —
+but it is not enough to answer ALLOC-02, which is about every instant: a campaign whose
+morning is already over stock has its peak there, and the afternoon instant where this
+write opens a second violation is not a ``startAt`` of anything stored. Touching
+endpoints do not overlap (§5.11 half-open intervals via
 :func:`src.utils.show_and_sell_models.intervals_overlap`).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .errors import AppError, ErrorCode
 from .inventory_models import (
@@ -78,13 +88,14 @@ SEQUENTIAL_OVER_ASSIGNMENT = "SEQUENTIAL_OVER_ASSIGNMENT"
 #: save is refused and nothing is written.
 CONCURRENT_OVER_ASSIGNMENT = "CONCURRENT_OVER_ASSIGNMENT"
 
-#: §8.10 requires every mutation that adds products to preflight the minimum write set
-#: of the finalization it is making possible. Allocation-side only, stated per allocated
-#: product: the release of the allocation, its return/reconcile movement, and its return
-#: line. The event-side rows are counted once, and the participant-side rows are counted
-#: by the mutations that write them (§3.4) and by finalization's own plan (§5.2).
-FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT = 3
-FINALIZATION_OVERHEAD_ACTIONS = 4
+#: §8.10 requires every mutation that adds products to preflight the minimum write set of
+#: the finalization it is making possible. The arithmetic is §9 of the sequence diagrams'
+#: first-finalization estimate with the terms this mutation cannot influence left at zero
+#: — no sale, work, credit or Scout-total rows, no later-event reductions — which leaves
+#: the ``3`` baseline writes (marker + event row + finalization row) and ``4P`` for every
+#: touched product (return snapshot + allocation release + balance + movement).
+FINALIZATION_OVERHEAD_ACTIONS = 3
+FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT = 4
 
 #: The movement type a target change of this sign is audited as (§5.8): an increase is an
 #: assignment, a decrease is a manual reduction. A zero delta writes nothing, so it has
@@ -175,7 +186,8 @@ def allocation_floor(row: Mapping[str, Any]) -> int:
     releasedQty >= 0`` (§5.11) together mean a target below ``soldQty + releasedQty``
     cannot be stated at all. Sold and released quantities are history — an immediate
     sale at the event, and a remainder already put back on the shelf — so a request
-    under the floor is refused rather than clamped up.
+    under the floor is refused rather than clamped up. A zero target is the exception, and
+    it lands on this floor rather than under it: :func:`plan_allocation_target`.
     """
     return int(row.get(SOLD_QTY) or 0) + int(row.get(RELEASED_QTY) or 0)
 
@@ -197,6 +209,29 @@ def _require_open_row(row: Mapping[str, Any], product_id: str) -> None:
         )
 
 
+def _target_against_floor(target: AllocationTarget, existing: Mapping[str, Any]) -> int:
+    """The quantity this row should carry, after the sold-and-released floor is applied.
+
+    A non-zero target below ``soldQty + releasedQty`` contradicts quantities that are
+    history and is refused, not clamped. Zero is the one target that skips the comparison,
+    and it lands ON the floor: §3.1 defines it as removing the remaining target allocation,
+    so what the row keeps is the sold and released history and what it gives back is the
+    remainder (§6.2).
+    """
+    floor = allocation_floor(existing)
+    if target.quantity == 0:
+        return floor
+    if target.quantity < floor:
+        raise _invalid(
+            "quantity",
+            (
+                f"cannot take {target.product_id} below the {floor} Kernels this event has already "
+                f"sold and released (soldQty + releasedQty)"
+            ),
+        )
+    return target.quantity
+
+
 def plan_allocation_target(
     event: Mapping[str, Any],
     target: AllocationTarget,
@@ -214,6 +249,13 @@ def plan_allocation_target(
     - a row and a different target — re-state it (``EVENT_ASSIGN`` upward,
       ``EVENT_MANUAL_REDUCE`` downward), keeping the row's sold and released quantities
       and re-deriving ``remainingQty`` from the target.
+
+    A zero target against a row that has sold or released is the one target that skips the
+    floor check, and it is not a quantity below that history: §3.1 defines it as "removes
+    the remaining target allocation" and §6.2 as "target zero releases remaining
+    allocation". It therefore lands on the floor — ``allocatedQty = soldQty +
+    releasedQty``, ``remainingQty = 0`` — which keeps every §5.11 invariant true and moves
+    exactly the remainder the row still holds.
     """
     event_id = str(event["showAndSellId"])
     start_at = str(event[START_AT_ATTRIBUTE])
@@ -242,18 +284,10 @@ def plan_allocation_target(
     sold = int(existing.get(SOLD_QTY) or 0)
     released = int(existing.get(RELEASED_QTY) or 0)
     current = int(existing.get(ALLOCATED_QTY) or 0)
-    if target.quantity < allocation_floor(existing):
-        floor = allocation_floor(existing)
-        raise _invalid(
-            "quantity",
-            (
-                f"cannot take {target.product_id} below the {floor} Kernels this event has already "
-                f"sold and released (soldQty + releasedQty)"
-            ),
-        )
-    if target.quantity == current:
+    allocated = _target_against_floor(target, existing)
+    if allocated == current:
         return None
-    delta = target.quantity - current
+    delta = allocated - current
     return AllocationChange(
         product_id=target.product_id,
         show_and_sell_id=event_id,
@@ -261,10 +295,10 @@ def plan_allocation_target(
         start_at=start_at,
         end_at=end_at,
         status=str(existing.get(STATUS_ATTRIBUTE) or ALLOCATION_OPEN),
-        allocated_qty=target.quantity,
+        allocated_qty=allocated,
         sold_qty=sold,
         released_qty=released,
-        remaining_qty=target.quantity - sold - released,
+        remaining_qty=allocated - sold - released,
         assigned_delta=delta,
         movement_type=MOVEMENT_TYPE_BY_SIGN[delta > 0],
         creates_row=False,
@@ -381,22 +415,78 @@ def overlapping_assigned_qty(at: str, allocations: Iterable[Mapping[str, Any]]) 
     return total
 
 
+def _committed_rows(allocations: Iterable[Mapping[str, Any]]) -> List[Mapping[str, Any]]:
+    """The rows one instant can count: still ``OPEN``, and still holding something.
+
+    A released or cancelled allocation's stock is back on the shelf (§9.2), and a row
+    whose ``remainingQty`` is zero commits nothing anywhere, so neither competes.
+    """
+    return [
+        row
+        for row in allocations
+        if str(row.get(STATUS_ATTRIBUTE) or "") == ALLOCATION_OPEN and int(row.get(REMAINING_QTY) or 0) > 0
+    ]
+
+
+def _boundary_instants(allocations: Iterable[Mapping[str, Any]]) -> List[str]:
+    """Every instant at which a concurrent total can change, in time order.
+
+    A concurrent total is piecewise constant and its only breakpoints are interval
+    endpoints, so the half-open strip between two consecutive endpoints carries one value
+    for that total. Sampling the endpoints therefore samples every instant, and a
+    half-open interval is not counted at its own ``endAt``.
+    """
+    instants: set[str] = set()
+    for row in allocations:
+        start_at, end_at = allocation_interval(row)
+        instants.add(start_at)
+        instants.add(end_at)
+    return sorted(instants)
+
+
 def peak_concurrent_assignment(allocations: Iterable[Mapping[str, Any]]) -> Tuple[int, str]:
     """The largest number of Kernels any one instant carries, and that instant.
 
-    The concurrent total changes only at interval boundaries and only ever increases at a
-    ``startAt``, so the maximum over the whole timeline is one of the ``startAt``
-    instants — checking each of those checks every instant between them too. Ties return
-    the earliest instant, which is the one a Kernel can act on.
+    The concurrent total changes only at interval endpoints, so the maximum over the whole
+    timeline is attained at one of them. Endpoints are visited in time order and only a
+    strictly larger total replaces the answer, so a tie names the earliest instant — the
+    one a Kernel can act on.
     """
     rows = list(allocations)
     peak, peak_at = 0, ""
-    for row in rows:
-        at = allocation_interval(row)[0]
+    for at in _boundary_instants(rows):
         total = overlapping_assigned_qty(at, rows)
-        if total > peak or (peak_at and total == peak and at < peak_at):
+        if total > peak:
             peak, peak_at = total, at
     return peak, peak_at
+
+
+def _worsened_instant(
+    new_rows: Sequence[Mapping[str, Any]],
+    old_rows: Sequence[Mapping[str, Any]],
+    sellable_qty: int,
+) -> Optional[Tuple[int, str]]:
+    """The worst instant this write pushes past stock, and the total it lands on.
+
+    ``new_rows`` are the campaign's committed allocations as this write would leave them
+    and ``old_rows`` the same rows as stored — this event's own row included in each,
+    because the comparison is per instant and not per row. An instant is a violation only
+    when both halves hold at it: the new total is over sellable stock, and it is larger
+    than the total that instant already carried. The second half is what keeps ALLOC-02 an
+    every-instant rule while §8.10's remedy stays reachable. A reduction worsens no
+    instant, so an over-assigned campaign is never frozen at its own mistake; and a
+    promise that moves from one instant to another is refused at the instant it lands,
+    even when some other instant was already over stock and the campaign's peak does not
+    change at all.
+    """
+    worst_qty, worst_at = 0, ""
+    for at in _boundary_instants([*new_rows, *old_rows]):
+        assigned = overlapping_assigned_qty(at, new_rows)
+        if assigned <= sellable_qty or assigned <= overlapping_assigned_qty(at, old_rows):
+            continue
+        if assigned > worst_qty:
+            worst_qty, worst_at = assigned, at
+    return None if not worst_at else (worst_qty, worst_at)
 
 
 def conflict_message(conflict: ConcurrentConflict) -> str:
@@ -431,44 +521,45 @@ def concurrent_conflict(
     end_at: str,
     remaining_qty: int,
     other_allocations: Iterable[Mapping[str, Any]],
-    current_remaining_qty: int = 0,
+    current_allocation: Optional[Mapping[str, Any]] = None,
 ) -> Optional[ConcurrentConflict]:
-    """Whether this write creates or worsens an over-assignment at a shared instant (ALLOC-02).
+    """Whether this write creates or worsens an over-assignment at some instant (ALLOC-02).
 
-    The candidate is compared against the campaign's other open allocations for that
-    product — every event of that Unit Campaign, read from the same product prefix as the
-    balance — because "at every point in time" is a question about the whole campaign's
-    commitments and not about the one event being edited.
+    Three sets of rows answer one question. ``other_allocations`` are the campaign's other
+    open allocations of this product — every event of that Unit Campaign, read from the
+    same product prefix as the balance — because "at every point in time" is a question
+    about the whole campaign's commitments and not about the one event being edited.
+    ``current_allocation`` is this event's own stored row for that product, which the
+    candidate replaces rather than stacks on top of, and the candidate is the target this
+    write would put in its place.
 
-    The ceiling is ``max(sellable, the peak as it is already stored)``. Two things follow,
-    and both are the rule rather than a loophole:
+    Two things follow from comparing each instant before and after the write, and both are
+    the rule rather than a loophole:
 
-    - a campaign that is inside its stock cannot be taken outside it — an increase past
-      what the campaign holds is refused at the instant it fails;
-    - a campaign that is already outside it (stock left the campaign after the assignments
-      were made) can still be corrected. Refusing a reduction because the state it leaves
-      is still over-assigned would strand the only remedy §8.10 names, so an improvement
-      is never blocked even when the ceiling it stays under is the stored peak.
+    - a campaign inside its stock cannot be taken outside it at any instant, including an
+      instant this write opens where that instant carried nothing before. That is the case
+      a single campaign-wide peak misses: the stored peak sits on the over-assigned
+      morning, and the fresh violation lands on the afternoon;
+    - a campaign that is already outside its stock (stock left the campaign after the
+      assignments were made) can still be corrected. Refusing a reduction because the
+      state it leaves is still over-assigned would strand the only remedy §8.10 names, so
+      an improvement is never blocked.
 
-    A zero remainder therefore never conflicts: it adds nothing to any instant, and the
-    peak it leaves is below the one it replaced.
+    A zero remainder therefore never conflicts: it adds nothing to any instant.
     """
-    rows = [
-        row
-        for row in other_allocations
-        if str(row.get(STATUS_ATTRIBUTE) or "") == ALLOCATION_OPEN and int(row.get(REMAINING_QTY) or 0) > 0
-    ]
-    stored_peak, _ = peak_concurrent_assignment(rows + _candidate_row(start_at, end_at, current_remaining_qty))
-    ceiling = max(sellable_qty, stored_peak)
-    peak, peak_at = peak_concurrent_assignment(rows + _candidate_row(start_at, end_at, remaining_qty))
-    if peak <= ceiling:
+    others = _committed_rows(other_allocations)
+    old_rows = others + _committed_rows(() if current_allocation is None else (current_allocation,))
+    new_rows = others + _candidate_row(start_at, end_at, remaining_qty)
+    worst = _worsened_instant(new_rows, old_rows, sellable_qty)
+    if worst is None:
         return None
+    assigned_qty, at = worst
     return ConcurrentConflict(
         product_id=product_id,
         current_stock_qty=sellable_qty,
-        assigned_qty=peak,
-        overage_qty=peak - sellable_qty,
-        at=peak_at,
+        assigned_qty=assigned_qty,
+        overage_qty=assigned_qty - sellable_qty,
+        at=at,
     )
 
 
@@ -510,12 +601,15 @@ def sequential_warning(
 def minimum_finalization_action_count(allocated_product_count: int) -> int:
     """The smallest write set the finalization of this event will need (§8.10).
 
-    One release, one return/reconcile movement, and one return line per allocated
-    product, plus the marker, the event row, the finalization row, and its cash
-    reconciliation. Participant and credit rows are counted by the mutations that create
-    them, so this is the floor the allocation side commits the event to — which is exactly
-    what a mutation that adds products has to preflight: an event must stay legally
-    finalizable, and the remedy (reduce allocations) is in the same screen.
+    The arithmetic is §9's first-finalization estimate, with the terms this mutation
+    cannot influence left at zero — no sale snapshot (``S``), work snapshot (``W``),
+    credit or Scout-total projection (``2C``), later-event reduction (``2L``) or affected
+    later event (``E``). What is left is the estimate's floor: the ``3`` baseline writes
+    (marker + event/status/version + finalization metadata) plus ``4P``, one return
+    snapshot, allocation release, balance, and movement for every touched product — ``P``
+    counting every product finalization touches, exactly as §9 states. Every term the
+    estimate leaves out can only add actions, so this is a true lower bound: an event
+    whose floor already busts the budget has no finalization that fits it.
     """
     return FINALIZATION_OVERHEAD_ACTIONS + FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT * allocated_product_count
 

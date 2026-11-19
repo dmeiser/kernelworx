@@ -984,14 +984,33 @@ def read_inventory_balance(unit_campaign_id: str, product_id: str) -> Optional[D
     return cast(Optional[Dict[str, Any]], dict(item) if isinstance(item, dict) else None)
 
 
+def exact_product_rows(rows: Iterable[Mapping[str, Any]], product_id: str) -> List[Dict[str, Any]]:
+    """Keep the rows whose own ``productId`` attribute is exactly this product.
+
+    ``PRODUCT#<productId>#`` is a sort-key range, not an identity test. Product ids carry
+    ``#`` inside them (``CATALOG#fixture-default#prod-1``, and §6.3 resolves an ambiguous
+    segment from the row's own attribute rather than a split of its key), so the range that
+    finds one product also finds every row of a product spelled ``<productId>#<extra>``.
+    Reading a range as if it were an identity is how a write to the first product lands on
+    the second one's row: the position, the allocation, and the audit trail then disagree
+    about which product moved. The movement reader already refuses that class
+    (:func:`list_inventory_movements` filters an exact ``productId`` alongside its key
+    prefix); this is the same predicate for the balance, allocation and custody rows.
+    """
+    wanted = normalize_inventory_id(product_id, "productId")
+    return [dict(row) for row in rows if str(row.get(PRODUCT_ID_ATTRIBUTE)) == wanted]
+
+
 def read_inventory_product_rows(unit_campaign_id: str, product_id: str) -> List[Dict[str, Any]]:
     """Every row under one product prefix: balance, allocations, custody, movements.
 
     One consistent query answers a position for that product, which is what §8.4
     requires before a stock write: the balance and the open allocations that compete
-    with it must come from the same read.
+    with it must come from the same read. The range is then narrowed to this exact
+    product — a prefix read is not an identity test, and a nested product id shares the
+    range of its own prefix parent (:func:`exact_product_rows`).
     """
-    return list(
+    return exact_product_rows(
         query_all_items(
             tables.inventory,
             {
@@ -1003,7 +1022,8 @@ def read_inventory_product_rows(unit_campaign_id: str, product_id: str) -> List[
                 },
                 "ConsistentRead": True,
             },
-        )
+        ),
+        product_id,
     )
 
 

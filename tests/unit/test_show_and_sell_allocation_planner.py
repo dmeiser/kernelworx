@@ -181,6 +181,33 @@ def test_a_target_below_what_the_event_sold_and_released_is_refused() -> None:
     assert at_the_floor.remaining_qty == 0, "6 allocated, 4 sold, 2 released: the remainder is exactly 0"
 
 
+def test_a_target_of_zero_releases_the_remainder_even_after_a_sale_or_a_release() -> None:
+    """§3.1, §6.2: zero removes the remaining allocation, and it is never under the floor.
+
+    10 allocated, 4 sold, 2 released: the sold and released quantities are history the
+    Kernel cannot undo, and the 4 still assigned are exactly what a zero releases. The row
+    lands on the floor — ``allocatedQty = soldQty + releasedQty``, ``remainingQty = 0`` —
+    which keeps every §5.11 relation true, and the movement names the remainder.
+    """
+    after_a_sale = am.plan_allocation_target(_event(), _target(0), _allocation(MORNING_EVENT, allocated=10, sold=4))
+    assert after_a_sale is not None
+    assert (after_a_sale.allocated_qty, after_a_sale.sold_qty, after_a_sale.released_qty) == (4, 4, 0)
+    assert (after_a_sale.remaining_qty, after_a_sale.assigned_delta) == (0, -6)
+    assert after_a_sale.movement_type == inv.EVENT_MANUAL_REDUCE
+
+    after_a_release = am.plan_allocation_target(
+        _event(), _target(0), _allocation(MORNING_EVENT, allocated=10, sold=4, released=2)
+    )
+    assert after_a_release is not None
+    assert (after_a_release.allocated_qty, after_a_release.remaining_qty) == (6, 0)
+    assert after_a_release.assigned_delta == -4, "the remainder is 10 - 4 - 2, and that is what the audit names"
+
+
+def test_a_zero_target_for_a_row_that_holds_no_remainder_writes_nothing() -> None:
+    """A row whose whole target was sold has nothing left to release, so zero restates it."""
+    assert am.plan_allocation_target(_event(), _target(0), _allocation(MORNING_EVENT, allocated=4, sold=4)) is None
+
+
 def test_a_released_or_cancelled_allocation_is_not_re_opened() -> None:
     """§9.2: a terminal allocation's stock went back on the shelf; re-opening it counts it twice."""
     for status, subcode in ((inv.ALLOCATION_RELEASED, "ALLOCATION_CLOSED"), (inv.ALLOCATION_CANCELLED, None)):
@@ -372,8 +399,8 @@ def test_a_reduction_is_never_blocked_by_an_over_assignment_it_leaves() -> None:
     """The remedy has to stay reachable: a state already over stock is corrected, not frozen.
 
     The campaign holds 4 and two events are committed to 8 (stock left the campaign after
-    the assignments were made). Reducing one to 5 is progress, so it is accepted; the
-    warning surface reports what is still over.
+    the assignments were made). Reducing one to 5 is progress at every instant, so it is
+    accepted; the warning surface reports what is still over.
     """
     conflict = am.concurrent_conflict(
         product_id=PRODUCT,
@@ -381,7 +408,7 @@ def test_a_reduction_is_never_blocked_by_an_over_assignment_it_leaves() -> None:
         start_at=MORNING_START,
         end_at=MORNING_END,
         remaining_qty=5,
-        current_remaining_qty=8,
+        current_allocation=_allocation(MORNING_EVENT, allocated=8),
         other_allocations=[_allocation(AFTERNOON_EVENT, allocated=3)],
     )
 
@@ -396,11 +423,81 @@ def test_an_increase_beyond_an_already_over_assigned_state_is_still_refused() ->
         start_at=MORNING_START,
         end_at=MORNING_END,
         remaining_qty=6,
-        current_remaining_qty=5,
+        current_allocation=_allocation(MORNING_EVENT, allocated=5),
         other_allocations=[_allocation(AFTERNOON_EVENT, allocated=3)],
     )
 
     assert conflict is not None and (conflict.assigned_qty, conflict.overage_qty) == (9, 5)
+
+
+def test_a_new_violation_is_refused_even_when_the_campaign_s_peak_never_moves() -> None:
+    """ALLOC-02 is an every-instant rule, so the comparison is per instant, not per peak.
+
+    Nothing is sellable and the morning already commits one Kernel, which is a violation
+    the campaign lives with. The afternoon instant this write opens carries nothing before
+    it and one Kernel after it, so the campaign's worst instant is still one and its peak
+    does not move — while a second instant goes from legal to violated. Correcting the
+    morning stays possible; promising the afternoon is not.
+    """
+    morning = _allocation(MORNING_EVENT, allocated=1)
+    others = [morning]
+
+    assert am.peak_concurrent_assignment(others) == (1, MORNING_START)
+    conflict = am.concurrent_conflict(
+        product_id=PRODUCT,
+        sellable_qty=0,
+        start_at=AFTERNOON_START,
+        end_at=AFTERNOON_END,
+        remaining_qty=1,
+        other_allocations=others,
+    )
+
+    assert conflict is not None, "a shifted violation is still a violation"
+    assert (conflict.current_stock_qty, conflict.assigned_qty, conflict.overage_qty) == (0, 1, 1)
+    assert conflict.at == AFTERNOON_START, "the instant that carried nothing and now carries one"
+    afternoon = _allocation(AFTERNOON_EVENT, allocated=1, start_at=AFTERNOON_START, end_at=AFTERNOON_END)
+    assert am.peak_concurrent_assignment(others + [afternoon]) == (1, MORNING_START)
+
+
+def test_an_over_assigned_instant_does_not_license_a_second_one_elsewhere() -> None:
+    """The same rule with stock on the table: 4 sellable, 6 already promised at the morning."""
+    conflict = am.concurrent_conflict(
+        product_id=PRODUCT,
+        sellable_qty=4,
+        start_at=AFTERNOON_START,
+        end_at=AFTERNOON_END,
+        remaining_qty=5,
+        other_allocations=[_allocation(MORNING_EVENT, allocated=6)],
+    )
+
+    assert conflict is not None
+    assert (conflict.assigned_qty, conflict.overage_qty, conflict.at) == (5, 1, AFTERNOON_START)
+
+
+def test_equal_violations_at_two_instants_are_one_refusal_at_the_earliest_one() -> None:
+    """A candidate that breaks two instants equally is reported where the Kernel sees it first.
+
+    Each stored row already sits one Kernel above what the campaign holds, at two separate
+    hours, and the candidate spans both and pushes each one higher. The worst total is
+    reached twice, so the tie-break decides which instant the refusal names — and it is the
+    earliest, the same rule the campaign-wide peak uses.
+    """
+    others = [
+        _allocation("evt-a", allocated=5, start_at="2026-11-07T09:00:00+00:00", end_at="2026-11-07T10:00:00+00:00"),
+        _allocation("evt-b", allocated=5, start_at="2026-11-07T11:00:00+00:00", end_at="2026-11-07T12:00:00+00:00"),
+    ]
+
+    conflict = am.concurrent_conflict(
+        product_id=PRODUCT,
+        sellable_qty=4,
+        start_at="2026-11-07T09:00:00+00:00",
+        end_at="2026-11-07T12:00:00+00:00",
+        remaining_qty=1,
+        other_allocations=others,
+    )
+
+    assert conflict is not None
+    assert (conflict.assigned_qty, conflict.overage_qty, conflict.at) == (6, 2, "2026-11-07T09:00:00+00:00")
 
 
 def test_only_open_allocations_compete() -> None:
@@ -476,24 +573,37 @@ def test_the_warning_ignores_what_is_no_longer_assigned() -> None:
 # --- §8.10 — finalization feasibility -------------------------------------------
 
 
-def test_the_finalization_floor_grows_per_allocated_product() -> None:
-    assert am.minimum_finalization_action_count(0) == am.FINALIZATION_OVERHEAD_ACTIONS
-    assert am.minimum_finalization_action_count(16) == (
-        am.FINALIZATION_OVERHEAD_ACTIONS + 16 * am.FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT
-    )
+def test_the_finalization_floor_is_the_documented_three_baseline_plus_four_per_product() -> None:
+    """§9 of the sequence diagrams: 3 baseline writes + 4P for every touched product.
+
+    The expectations are the documented numbers written out, not arithmetic on the
+    implementation's constants — a formula checked against itself catches nothing, and the
+    boundary it decides is how many products a Kernel may put on one event.
+    """
+    assert am.minimum_finalization_action_count(0) == 3
+    assert am.minimum_finalization_action_count(1) == 7
+    assert am.minimum_finalization_action_count(16) == 67
+    assert am.minimum_finalization_action_count(21) == 87
+    assert am.minimum_finalization_action_count(22) == 91
 
 
 def test_an_event_that_could_no_longer_finalize_is_refused_within_the_same_budget() -> None:
-    """§8.10: the verdict and subcode match the plan-size guard, and the remedy is named."""
-    fits = (90 - am.FINALIZATION_OVERHEAD_ACTIONS) // am.FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT
-    am.require_finalization_feasible(fits, 90)
+    """§8.10: 21 allocated products still finalize inside 90 actions, 22 cannot.
+
+    Same verdict and subcode as the plan-size guard, and the same remedy named, because the
+    Kernel who is refused has to know which lever to pull. The numbers are the documented
+    estimate written out: 3 baseline writes plus 4 for every touched product.
+    """
+    am.require_finalization_feasible(21, 90)  # 3 + 4 * 21 = 87 actions, inside the budget
 
     with pytest.raises(AppError) as refused:
-        am.require_finalization_feasible(fits + 1, 90)
+        am.require_finalization_feasible(22, 90)  # 3 + 4 * 22 = 91, one over
     assert refused.value.error_code == ErrorCode.CONFLICT
     assert refused.value.details is not None
     assert refused.value.details["subcode"] == ErrorCode.OPERATION_TOO_LARGE
+    assert refused.value.details["plannedActions"] == 91
     assert refused.value.details["maxActions"] == 90
+    assert "91" in refused.value.message and "90" in refused.value.message
     assert "Reduce" in refused.value.message or "reduce" in refused.value.message
 
 
