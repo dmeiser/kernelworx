@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Set, Tuple
 
 import botocore.client
@@ -32,6 +33,7 @@ import pytest
 from src.handlers.unit_operations import (
     ADJUST_COUNCIL_FIELD,
     ADJUST_INVENTORY_FIELD,
+    CANCEL_SHOW_AND_SELL_FIELD,
     CREATE_INVITE_FIELD,
     CREATE_UNIT_CAMPAIGN_FIELD,
     CREATE_UNIT_FIELD,
@@ -52,6 +54,7 @@ from src.handlers.unit_operations import (
     REVOKE_GRANT_FIELD,
     REVOKE_INVITE_FIELD,
     SCOUT_CUSTODY_FIELD,
+    SHOW_AND_SELL_FIELD,
     UNIT_ADMINS_FIELD,
     UNIT_CAMPAIGN_CATALOG_FIELD,
     UNIT_CAMPAIGN_FIELD,
@@ -64,6 +67,8 @@ from src.handlers.unit_operations import (
     UPDATE_UNIT_FIELD,
     handle_unit_operation,
 )
+from src.utils import inventory_models as inv
+from src.utils import show_and_sell_models as ssm
 from tests.unit.show_sell_fixtures import (
     FIXTURE_PRODUCT_ID,
     PACK_3149,
@@ -858,3 +863,87 @@ def test_the_unit_order_list_read_stays_inside_the_shipped_role(
         "the Order list no longer reads the Scout Campaign's own partition on the base table"
     )
     assert_within_role_scope(dynamodb_calls.calls)
+
+
+# --- an event holding stock is read and cancelled across two tables -------------
+
+
+def test_an_event_with_allocations_reads_and_releases_the_inventory_table(
+    seeded: Dict[str, Any],
+    inventory_table: Any,
+    show_and_sells_table: Any,
+    dynamodb_calls: DynamoDbCallRecorder,
+) -> None:
+    """§3.1.5 / §3.1.4 / SEC-1: an event's allocations live on the inventory table.
+
+    ``productIds`` is the authoritative locator for an event's allocations (§6.3 note):
+    the read is a keyed ``BatchGetItem`` on the inventory table, never a GSI query, and a
+    cancellation commits the allocation write, its ``EVENT_RELEASE`` movement, the event
+    row and the idempotency marker in one ``TransactWriteItems``. DynamoDB authorizes a
+    transaction per table, so an omitted grant on the inventory table is an
+    ``AccessDeniedException`` that cancels the whole mutation — and moto never evaluates
+    IAM, so only this file can see it before ``dev`` does.
+    """
+    now = datetime.now(timezone.utc)
+    start, end = (now + timedelta(hours=72)).isoformat(), (now + timedelta(hours=76)).isoformat()
+    event_id = "SSE#role-scope"
+    show_and_sells_table.put_item(
+        Item=ssm.build_show_and_sell_item(
+            show_and_sell_id=event_id,
+            unit_id=PACK_3149,
+            unit_campaign_id=PACK_3149_FALL,
+            location_name="Aurora armory lot",
+            start_at=start,
+            end_at=end,
+            created_by_account_id=account_id("Avery"),
+            now_iso=now.isoformat(),
+            product_ids=[FIXTURE_PRODUCT_ID],
+        )
+    )
+    inventory_table.put_item(
+        Item=inv.build_event_inventory_allocation_item(
+            unit_campaign_id=PACK_3149_FALL,
+            product_id=FIXTURE_PRODUCT_ID,
+            show_and_sell_id=event_id,
+            start_at=start,
+            end_at=end,
+            allocated_qty=6,
+            now_iso=now.isoformat(),
+        )
+    )
+
+    dynamodb_calls.attach()
+
+    answer = _ok(_call(SHOW_AND_SELL_FIELD, "Avery", arguments={"showAndSellId": event_id}))
+    assert [row["productId"] for row in answer["allocations"]] == [FIXTURE_PRODUCT_ID]
+    assert ("BatchGetItem", _physical_table("inventory")) in dynamodb_calls.calls, (
+        "the event read still resolves its allocations by key on the inventory table"
+    )
+
+    _ok(
+        _call(
+            CANCEL_SHOW_AND_SELL_FIELD,
+            "Avery",
+            mutation={
+                "showAndSellId": event_id,
+                "version": {"expectedVersion": 1},
+                "reason": "storm warning",
+                "idempotency": {"idempotencyKey": "cancel-role-scope"},
+            },
+        )
+    )
+    allocation = dict(
+        inventory_table.get_item(Key=ssm.event_allocation_key(PACK_3149_FALL, FIXTURE_PRODUCT_ID, event_id))["Item"]
+    )
+    assert allocation[ssm.STATUS_ATTRIBUTE] == inv.ALLOCATION_CANCELLED
+
+    inventory_calls = {
+        (action, table) for action, table in dynamodb_calls.calls if table == _physical_table("inventory")
+    }
+    assert ("UpdateItem", _physical_table("inventory")) in inventory_calls, "the allocation release is a write"
+    assert ("PutItem", _physical_table("inventory")) in inventory_calls, "and its movement is a second write"
+    assert ("TransactWriteItems", _physical_table("inventory")) in inventory_calls, (
+        "both ride the same transaction as the event row, so the role needs the API grant too"
+    )
+    assert_within_role_scope(dynamodb_calls.calls)
+    assert_only_the_join_link_writes_a_legacy_table(dynamodb_calls.calls)

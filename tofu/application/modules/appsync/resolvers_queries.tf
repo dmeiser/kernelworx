@@ -870,3 +870,71 @@ resource "aws_appsync_resolver" "unit_scout_campaign_orders_query" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Stage 3.1 §3.1.5: the two administrative event reads and the two participant
+# opportunity reads. Same unit resolver and same UnitOperationsDS as every other
+# Unit field — the Unit Admin check, the Profile share check, and the tenancy that
+# comes off the event or campaign row all live in the one handler, so a new read
+# adds a field name to its router and nothing else. The participant reads are
+# separate resolver bindings from the administrative one because they answer
+# different types: `showAndSell`/`showAndSells` return `ShowAndSellAdmin` with
+# allocations, stock quantities, audit actors and finalization pointers, while
+# `unitCampaignOpportunities`/`showAndSellOpportunity` return the participant-safe
+# projection with none of that on it (SEC-04). Keeping them apart is what makes
+# "a Scout cannot read stock through the event API" a fact about the deployed
+# surface rather than a filter inside one payload.
+resource "aws_appsync_resolver" "show_and_sell_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSell"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "show_and_sells_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSells"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "unit_campaign_opportunities_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitCampaignOpportunities"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "show_and_sell_opportunity_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellOpportunity"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

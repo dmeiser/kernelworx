@@ -18,6 +18,7 @@ from tests.unit.table_schemas import (
     create_all_tables,
     create_inventory_table_schema,
     create_order_fulfillments_table_schema,
+    create_show_and_sells_table_schema,
 )
 
 # Set environment variables at module load time so that module-level code in
@@ -42,6 +43,7 @@ os.environ["UNIT_CAMPAIGNS_TABLE_NAME"] = "kernelworx-unit-campaigns-ue1-dev"
 os.environ["INVENTORY_TABLE_NAME"] = "kernelworx-inventory-ue1-dev"
 os.environ["ORDER_FULFILLMENTS_TABLE_NAME"] = "kernelworx-order-fulfillments-ue1-dev"
 os.environ["PUBLIC_ORDER_THROTTLES_TABLE_NAME"] = "kernelworx-public-order-throttles-ue1-dev"
+os.environ["SHOW_AND_SELLS_TABLE_NAME"] = "kernelworx-show-and-sells-ue1-dev"
 # S3 bucket names
 os.environ["EXPORTS_BUCKET"] = "kernelworx-exports-ue1-dev"
 
@@ -99,6 +101,7 @@ def aws_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("INVENTORY_TABLE_NAME", "kernelworx-inventory-ue1-dev")
     monkeypatch.setenv("ORDER_FULFILLMENTS_TABLE_NAME", "kernelworx-order-fulfillments-ue1-dev")
     monkeypatch.setenv("PUBLIC_ORDER_THROTTLES_TABLE_NAME", "kernelworx-public-order-throttles-ue1-dev")
+    monkeypatch.setenv("SHOW_AND_SELLS_TABLE_NAME", "kernelworx-show-and-sells-ue1-dev")
     monkeypatch.setenv("EXPORTS_BUCKET", "kernelworx-exports-ue1-dev")
 
 
@@ -222,6 +225,26 @@ def order_fulfillments_table(dynamodb_table: Any) -> Any:
     """
     dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
     schema = create_order_fulfillments_table_schema()
+    ttl = schema.pop("TimeToLiveSpecification", None)
+    table = dynamodb.create_table(**schema)
+    if ttl is not None:
+        dynamodb.meta.client.update_time_to_live(TableName=table.table_name, TimeToLiveSpecification=ttl)
+    yield table
+    table.delete()
+
+
+@pytest.fixture
+def show_and_sells_table(dynamodb_table: Any) -> Any:
+    """Get the Show & Sell event-aggregate table.
+
+    Created on top of the standard fixture set and deleted afterwards, exactly as the
+    inventory and order-fulfillment tables do it, so the pinned 10-table fixture
+    contract stays exact. The Stage 3.1 event mutations write this table inside a
+    ``TransactWriteItems`` alongside the idempotency marker, so the table has to exist
+    for the create/update/cancel paths to be exercised at all (WORK-163, §3.1).
+    """
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    schema = create_show_and_sells_table_schema()
     ttl = schema.pop("TimeToLiveSpecification", None)
     table = dynamodb.create_table(**schema)
     if ttl is not None:

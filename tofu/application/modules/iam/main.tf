@@ -910,11 +910,15 @@ data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
   # (attribute_not_exists for the first receipt of a product, version + §4.1 floor
   # guards afterwards), so ConditionCheckItem rides with the item actions and
   # TransactWriteItems rides with them because the item actions are not permission
-  # to invoke the transaction API.
+  # to invoke the transaction API. BatchGetItem is here for the §3.1 event reads and
+  # the cancellation plan: an event's allocations are read authoritatively by key from
+  # its own productIds (§6.3 note), not through an index, so an event with any product
+  # on it reads the inventory table by key before it can answer or cancel.
   statement {
     effect = "Allow"
     actions = [
       "dynamodb:GetItem",
+      "dynamodb:BatchGetItem",
       "dynamodb:Query",
       "dynamodb:PutItem",
       "dynamodb:UpdateItem",
@@ -979,6 +983,38 @@ data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
     resources = [var.dynamodb_table_arns["public_order_throttles"]]
   }
 
+
+  # Stage 3 §3.1: the Show & Sell event aggregate of data model §6.4 — the event
+  # METADATA row and, in the same partition, its slots, signups, We Owe
+  # obligations and (from later waves) sales and finalization rows. Reads: the
+  # event is a base-table GetItem, its slots and signups are a partition Query,
+  # and a campaign's schedule is discovered through unitCampaignId-startAt-index
+  # and then re-read consistently by key, which is why BatchGetItem and the index
+  # grant are both here. Writes: create is a conditional Put (the
+  # attribute_not_exists condition IS the duplicate guard), update and cancel are
+  # versioned Updates, and a cancellation commits event + allocation + signup +
+  # commitment + guard + counter rows in one TransactWriteItems, each conditioned
+  # on the version it read — hence ConditionCheckItem and TransactWriteItems
+  # riding with the item actions (impact map §4.2). No DeleteItem: SSE-05 and
+  # §8.8 keep every cancelled signup, allocation and event row as history, so a
+  # Show & Sell delete is not part of this feature's contract, and the marker row
+  # on this table expires through the table's own seven-day TTL (§8.9).
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:BatchGetItem",
+      "dynamodb:Query",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [
+      var.dynamodb_table_arns["show_and_sells"],
+      "${var.dynamodb_table_arns["show_and_sells"]}/index/*",
+    ]
+  }
   # Authorization and join inputs that live outside the Unit tables: Profile
   # ownership/shares, the catalog usability guard, the account directory for
   # invite/grant display, and the legacy Campaign read behind the join guard.

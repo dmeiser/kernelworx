@@ -927,3 +927,283 @@ describe("Show & Sell Stage 3 order-fulfillment SDL (schema.graphql)", () => {
     }
   });
 });
+
+// --- Stage 3.1 (Wave 4.1, §3.1): the event aggregate surface --------------------
+
+/**
+ * DATA_MODEL §5.10-§5.13 and GRAPHQL_API §6 for the four §3.1 reads and three
+ * §3.1 writes. The event state enum is the whole point of this leaf: three of its
+ * values are derived from the immutable interval and three are written by a
+ * workflow, so the closed set is what keeps "ENDED" from being stored and later
+ * re-opened into "ACTIVE" by a second writer.
+ */
+const SS31_ENUMS: Record<string, string[]> = {
+  ShowAndSellStatus: ["SCHEDULED", "ACTIVE", "ENDED", "CANCELLED", "FINALIZED", "REOPENED"],
+};
+
+const SS31_QUERY_FIELDS: string[] = [
+  "showAndSell",
+  "showAndSells",
+  "unitCampaignOpportunities",
+  "showAndSellOpportunity",
+];
+
+const SS31_MUTATION_FIELDS: string[] = ["createShowAndSell", "updateShowAndSell", "cancelShowAndSell"];
+
+const SS31_INPUTS: string[] = ["CreateShowAndSellInput", "UpdateShowAndSellInput", "CancelShowAndSellInput"];
+
+/** Connection name -> the type its `items` list holds. */
+const SS31_CONNECTION_ITEMS: Record<string, string> = {
+  ShowAndSellAdminConnection: "ShowAndSellAdmin",
+  ShowAndSellOpportunityConnection: "ShowAndSellOpportunity",
+};
+
+const SS31_OUTPUT_TYPES: string[] = [
+  "ShowAndSellAdmin",
+  "ShowAndSellAdminConnection",
+  "ShowAndSellOpportunity",
+  "ShowAndSellOpportunitySlot",
+  "ParticipantSignup",
+  "ShowAndSellOpportunityConnection",
+  "CancelShowAndSellPayload",
+];
+
+/**
+ * The exact field set of each §3.1 type, in declaration order.
+ *
+ * `ShowAndSellAdmin` is the administrative projection: the ten settings, the
+ * products the event has ever held, its allocations and slots read through the
+ * event's own partition, the finalization pointers, and the full audit of who
+ * wrote what. `ShowAndSellOpportunity`, `ShowAndSellOpportunitySlot` and
+ * `ParticipantSignup` are the participant projections (SEC-04), and the
+ * difference between the two spellings of the same row is the deliverable: the
+ * participant type names no inventory, sale, buyer, cash, finalization, actor, or
+ * tenancy field, and reports the version a signup conditions on as `eventVersion`
+ * rather than as the row's own `version`.
+ */
+const SS31_TYPE_FIELDS: Record<string, string[]> = {
+  ShowAndSellAdmin: [
+    "showAndSellId", "unitId", "unitCampaignId", "locationName", "address", "startAt", "endAt",
+    "status", "splitMethod", "weOweEnabled", "productIds", "allocations", "slots",
+    "approvedFinalizationId", "latestFinalizationId", "version", "createdAt", "updatedAt",
+    "createdByAccountId", "updatedByAccountId", "cancelledByAccountId", "cancelledAt",
+    "cancellationReason",
+  ],
+  ShowAndSellAdminConnection: ["items", "pageInfo"],
+  ShowAndSellOpportunity: [
+    "showAndSellId", "locationName", "address", "startAt", "endAt", "status", "splitMethod",
+    "weOweEnabled", "timezone", "eventVersion", "slots", "mySignups",
+  ],
+  ShowAndSellOpportunitySlot: ["slotId", "label", "startAt", "endAt", "capacity", "openCapacity"],
+  ParticipantSignup: ["showAndSellId", "slotId", "startAt", "endAt", "status", "actualMinutes"],
+  ShowAndSellOpportunityConnection: ["items", "pageInfo"],
+  CancelShowAndSellPayload: ["event", "releasedAllocations", "cancelledSignups"],
+  // §5.11-§5.13 rows as §3.1 reads them. The allocation is addressed by the campaign
+  // product pair it competes with and names its own event, because the overlap rule is
+  // evaluated per product per instant, not per event.
+  ShowAndSellAllocation: [
+    "unitCampaignId", "productId", "showAndSellId", "startAt", "endAt", "status", "allocatedQty",
+    "soldQty", "releasedQty", "remainingQty", "version", "createdAt", "updatedAt",
+  ],
+  ShowAndSellSlot: [
+    "showAndSellId", "slotId", "label", "startAt", "endAt", "capacity", "activeSignupCount",
+    "version", "createdAt", "updatedAt",
+  ],
+  ShowAndSellSignup: [
+    "showAndSellId", "slotId", "profileId", "unitCampaignId", "campaignId", "status",
+    "actualMinutes", "signedUpByAccountId", "confirmedByAccountId", "confirmedAt", "version",
+    "createdAt", "updatedAt",
+  ],
+};
+
+describe("Show & Sell Stage 3.1 event SDL (schema.graphql)", () => {
+  test("the event state enum carries exactly the six §9.1 states", () => {
+    for (const [name, values] of Object.entries(SS31_ENUMS)) {
+      const def = definition(name);
+      expect(def.kind, `${name} must be an enum`).toBe("enum");
+      const found = def.body.split("\n").map((l) => l.trim()).filter((l) => /^[A-Z][A-Z0-9_]*$/.test(l));
+      expect(found, `${name} values`).toEqual(values);
+    }
+    // Signup state is its own closed set: a signup is a place that is held or given
+    // back, and the decline/declined vocabulary of a signup *request* is not a state
+    // this wave's rows can hold.
+    const signup = definition("SignupStatus");
+    expect(signup.kind).toBe("enum");
+    const signupValues = signup.body.split("\n").map((l) => l.trim()).filter((l) => /^[A-Z][A-Z0-9_]*$/.test(l));
+    expect(signupValues, "SignupStatus values").toEqual(["ACTIVE", "CANCELLED"]);
+  });
+
+  test("every §3.1 type and input is present with exactly the contract fields", () => {
+    for (const name of [...SS31_OUTPUT_TYPES, ...SS31_INPUTS]) {
+      const def = definition(name);
+      expect(["type", "input"].includes(def.kind), `${name} must be a type or input`).toBe(true);
+    }
+    for (const [name, expected] of Object.entries(SS31_TYPE_FIELDS)) {
+      expect([...fieldNameSet(definition(name))], `${name} fields`).toEqual(expected);
+    }
+  });
+
+  test("the three event writes are declared, take one input, and answer their own result", () => {
+    for (const [mutation, input, returns] of [
+      ["createShowAndSell", "CreateShowAndSellInput", "ShowAndSellAdmin"],
+      ["updateShowAndSell", "UpdateShowAndSellInput", "ShowAndSellAdmin"],
+      ["cancelShowAndSell", "CancelShowAndSellInput", "CancelShowAndSellPayload"],
+    ] as const) {
+      const field = rootFieldByName("Mutation", mutation);
+      expect(field, `Mutation.${mutation} is missing`).toBeDefined();
+      expect(field!.text, `${mutation} takes ${input}`).toMatch(new RegExp(`input\\s*:\\s*${input}!`));
+      expect(returnTypeName(field!.text), `${mutation} return type`).toBe(returns);
+      expect(field!.text, `${mutation} returns a non-null result`).toMatch(new RegExp(`\\):\\s*${returns}!`));
+    }
+    // The cancellation answers the whole workflow in one object: the cancelled event,
+    // the allocations whose remainder went back on the shelf, and the signups it
+    // released. A payload that named only the event would leave the browser to guess
+    // what the commit did.
+    const payload = fieldsOf(definition("CancelShowAndSellPayload"));
+    expect(returnTypeName(payload.find((f) => f.name === "event")!.text)).toBe("ShowAndSellAdmin");
+    expect(payload.find((f) => f.name === "releasedAllocations")!.text).toMatch(/:\s*\[ShowAndSellAllocation!\]!/);
+    expect(payload.find((f) => f.name === "cancelledSignups")!.text).toMatch(/:\s*\[ShowAndSellSignup!\]!/);
+  });
+
+  test("the times are created once and never edited, and every write is idempotent and versioned", () => {
+    const create = fieldsOf(definition("CreateShowAndSellInput"));
+    for (const [name, pattern] of [
+      ["unitCampaignId", /unitCampaignId\s*:\s*ID!/],
+      ["locationName", /locationName\s*:\s*String!/],
+      ["startAt", /startAt\s*:\s*AWSDateTime!/],
+      ["endAt", /endAt\s*:\s*AWSDateTime!/],
+    ] as const) {
+      expect(create.find((f) => f.name === name)!.text, `CreateShowAndSellInput.${name}`).toMatch(pattern);
+    }
+    // The split and We Owe settings are the two things a create may choose, and both
+    // are optional: omitting the split inherits the Unit default and omitting We Owe
+    // means off (§4.1). A required `splitMethod` would make the Unit default dead code.
+    for (const name of ["splitMethod", "weOweEnabled"]) {
+      const field = create.find((f) => f.name === name)!;
+      expect(field.text, `${name} is chosen, not required`).toMatch(new RegExp(`\\??:\\s*(SplitMethod|Boolean)(?!!)`));
+    }
+
+    // §3.1.3 / EVT-M-02-01: the update surface is exactly the four settings. No
+    // `startAt`/`endAt` means a wrong time is cancelled and recreated, and no
+    // `status`/`productIds` means no caller edits the workflow state or the product
+    // history directly.
+    const update = fieldNameSet(definition("UpdateShowAndSellInput"));
+    for (const forbidden of ["startAt", "endAt", "status", "productIds", "unitCampaignId", "hostProfileId"]) {
+      expect(update.has(forbidden), `UpdateShowAndSellInput.${forbidden} would break an immutable fact`).toBe(false);
+    }
+
+    for (const name of SS31_INPUTS) {
+      const fields = fieldsOf(definition(name));
+      const idem = fields.find((f) => f.name === "idempotency");
+      expect(idem!.text, `${name}.idempotency is required`).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
+      // Optimistic concurrency is a VersionedInput block, never a bare Int: a caller
+      // that could send an unlabelled number could also send one it never read.
+      const version = fields.find((f) => f.name === "version");
+      if (name === "CreateShowAndSellInput") {
+        expect(version, "a create carries no version to condition on").toBeUndefined();
+      } else {
+        expect(returnTypeName(version!.text), `${name}.version is the VersionedInput block`).toBe("VersionedInput");
+        expect(version!.text, `${name}.version is required`).toMatch(/version\s*:\s*VersionedInput!/);
+      }
+    }
+    // §3.1.4: the reason is mandatory, because this write releases stock and cancels
+    // Scouts, and the audit trail has to say why.
+    const cancel = fieldsOf(definition("CancelShowAndSellInput"));
+    expect(cancel.find((f) => f.name === "reason")!.text).toMatch(/reason\s*:\s*String!/);
+  });
+
+  test("the four §3.1 reads keep the admin/participant split and the paging contract", () => {
+    const one = rootFieldByName("Query", "showAndSell")!;
+    expect(one.text).toContain("showAndSellId: ID!");
+    expect(returnTypeName(one.text)).toBe("ShowAndSellAdmin");
+
+    const list = rootFieldByName("Query", "showAndSells")!;
+    for (const arg of ["unitCampaignId: ID!", "status: ShowAndSellStatus", "dateRange: DateRangeFilter", "page: PageInput"]) {
+      expect(list.text, `showAndSells(${arg}) is missing`).toContain(arg);
+    }
+    expect(returnTypeName(list.text)).toBe("ShowAndSellAdminConnection");
+    expect(list.text).toMatch(/\):\s*ShowAndSellAdminConnection!/);
+    // The state filter is a single state, not a list: the browser filters by the state
+    // it renders on, and a list of states has no defined meaning against a state that
+    // is partly derived from the clock.
+    expect(list.text, "showAndSells filters to one state").not.toMatch(/status:\s*\[/);
+
+    const opportunities = rootFieldByName("Query", "unitCampaignOpportunities")!;
+    for (const arg of ["unitCampaignId: ID!", "includePast: Boolean = false", "page: PageInput"]) {
+      expect(opportunities.text, `unitCampaignOpportunities(${arg}) is missing`).toContain(arg);
+    }
+    expect(returnTypeName(opportunities.text)).toBe("ShowAndSellOpportunityConnection");
+    // No caller may name the Scout whose opportunities are being read: the answer is
+    // built from the Scouts the caller can read on this campaign's roster.
+    expect(opportunities.text, "unitCampaignOpportunities takes no profileId").not.toContain("profileId");
+
+    const opportunity = rootFieldByName("Query", "showAndSellOpportunity")!;
+    for (const arg of ["showAndSellId: ID!", "profileId: ID!"]) {
+      expect(opportunity.text, `showAndSellOpportunity(${arg}) is missing`).toContain(arg);
+    }
+    expect(opportunity.text, "one event's participant view is not a paged list").not.toMatch(/page\s*:\s*PageInput/);
+    expect(returnTypeName(opportunity.text)).toBe("ShowAndSellOpportunity");
+
+    for (const [conn, element] of Object.entries(SS31_CONNECTION_ITEMS)) {
+      const def = definition(conn);
+      expect(returnTypeName(fieldsOf(def).find((f) => f.name === "items")!.text), `${conn}.items`).toBe(element);
+      expect(returnTypeName(fieldsOf(def).find((f) => f.name === "pageInfo")!.text), `${conn}.pageInfo`).toBe("PageInfo");
+    }
+    // `openCapacity` is computed server-side from the slot's maintained counter
+    // (SEC-05): the participant surface hands the browser no capacity number to do
+    // its own arithmetic against.
+    const slot = fieldsOf(definition("ShowAndSellOpportunitySlot"));
+    expect(slot.find((f) => f.name === "openCapacity")!.text).toMatch(/openCapacity\s*:\s*Int!/);
+    expect(fieldNameSet(definition("ShowAndSellOpportunitySlot")).has("activeSignupCount"), "a participant must not see the maintained counter itself").toBe(false);
+  });
+
+  test("the participant projections carry no administrative field, under any spelling", () => {
+    const ADMINISTRATIVE = [
+      "unitId", "unitCampaignId", "campaignId", "profileId", "version", "createdAt", "updatedAt",
+      "createdByAccountId", "updatedByAccountId", "cancelledByAccountId", "cancelledAt",
+      "cancellationReason", "allocatedQty", "soldQty", "releasedQty", "remainingQty",
+      "activeSignupCount", "productIds", "approvedFinalizationId", "latestFinalizationId",
+      "signedUpByAccountId", "confirmedByAccountId", "confirmedAt", "amountCents", "buyerName",
+      "reason", "actorAccountId",
+    ];
+    for (const type of ["ShowAndSellOpportunity", "ShowAndSellOpportunitySlot", "ParticipantSignup"]) {
+      const names = fieldNameSet(definition(type));
+      for (const field of ADMINISTRATIVE) {
+        expect(names.has(field), `${type}.${field} would disclose an administrative fact`).toBe(false);
+      }
+    }
+    // And the admin projection is the one that carries them, so the two surfaces are
+    // genuinely different types rather than one type with a resolver that hopes.
+    const admin = fieldNameSet(definition("ShowAndSellAdmin"));
+    for (const needed of ["unitId", "unitCampaignId", "version", "productIds", "cancellationReason", "cancelledByAccountId"]) {
+      expect(admin.has(needed), `ShowAndSellAdmin.${needed} is the audit the admin surface exists to carry`).toBe(true);
+    }
+  });
+
+  test("AUTH: no §3.1 type, input, enum, or root field carries an auth directive", () => {
+    for (const name of [...SS31_OUTPUT_TYPES, ...SS31_INPUTS, ...Object.keys(SS31_ENUMS)]) {
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+    }
+    for (const name of [...SS31_QUERY_FIELDS, ...SS31_MUTATION_FIELDS]) {
+      const field = rootFieldByName("Query", name) ?? rootFieldByName("Mutation", name);
+      expect(field, `${name} is missing`).toBeDefined();
+      expect(field!.directives, `${name} must be directive-free (Cognito-only)`).toEqual([]);
+    }
+  });
+
+  test("no §3.1 type or field name is a reserved or invalid GraphQL token", () => {
+    const RESERVED = new Set([
+      "query", "mutation", "subscription", "type", "input", "interface", "enum", "union",
+      "scalar", "implements", "extend", "directive", "schema", "fragment", "on", "repeatable",
+    ]);
+    const NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+    const names = [
+      ...SS31_QUERY_FIELDS, ...SS31_MUTATION_FIELDS, ...SS31_OUTPUT_TYPES, ...SS31_INPUTS,
+      ...Object.keys(SS31_ENUMS),
+    ];
+    for (const name of names) {
+      expect(NAME.test(name), `${name} must be a valid GraphQL Name`).toBe(true);
+      expect(RESERVED.has(name), `${name} is a reserved GraphQL keyword`).toBe(false);
+    }
+  });
+});

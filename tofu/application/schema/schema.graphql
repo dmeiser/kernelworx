@@ -1848,6 +1848,341 @@ type UnitOrderConnection {
 }
 
 # ============================================================================
+# Show & Sell and inventory — Stage 3.1: events, their lifecycle, and the
+# participant-facing opportunity read (delivery checklist §3.1)
+#
+# One event is the aggregate everything else in a Show & Sell hangs from: the
+# event row's `version` is what allocation, slot, signup, sale and finalization
+# writes all condition on, which is why §3.1.4 keeps every event-aggregate write
+# under one owner. Times are immutable after creation (spec SSE-07): the workflow
+# for a wrong time is cancel-and-recreate, never reschedule, and there is no
+# `RESCHEDULED` state. `status` answers where the event stands on the calendar
+# AND what a workflow has done to it — `SCHEDULED`, `ACTIVE` and `ENDED` are read
+# from the immutable interval, because nothing in this design advances a clock by
+# writing a row, while `CANCELLED`, `FINALIZED` and `REOPENED` are the three
+# states a mutation actually records (data model §9.1).
+#
+# The two halves of the read are deliberately different types. A Unit Admin sees
+# `ShowAndSellAdmin` with allocations, slots, stock quantities, audit actors and
+# the finalization pointers. A Scout sees `ShowAndSellOpportunity` — event facts,
+# the slots and the room left in them, and their own signups — with no inventory,
+# sale, buyer, cash, finalization or actor field anywhere on it (API contract
+# SEC-04). The three participant types carry the `# participant-safe` marker so
+# the schema guard keeps checking them as the surface grows.
+#
+# Same posture as Stages 1 and 2: every field is Cognito-authenticated at the
+# schema boundary, no field is API-key or public, and Unit Admin / SellerProfile
+# authorization lives in the resolver.
+# ============================================================================
+
+"""Where a Show & Sell event stands: the three calendar states read from the immutable interval, and the three a workflow records (data model §9.1). There is no rescheduled state, and an ended event is not a finalized one (spec SSE-04)."""
+enum ShowAndSellStatus {
+  """Before its startAt; cancellable by a Unit Admin."""
+  SCHEDULED
+  """Between startAt and endAt."""
+  ACTIVE
+  """At or after endAt, awaiting finalization."""
+  ENDED
+  """Cancelled before startAt by a Unit Admin; terminal, with its reason and actor stored."""
+  CANCELLED
+  """Credit approved against a finalization version."""
+  FINALIZED
+  """A finalized version suspended for correction; approved credit cleared, history preserved."""
+  REOPENED
+}
+
+"""One event's reservation of one product's stock (data model §5.11). OPEN counts as assigned against the campaign balance; CANCELLED is an event cancellation and RELEASED is finalization, and both are terminal."""
+enum AllocationStatus {
+  """Still holding a reservation."""
+  OPEN
+  """Released by finalization."""
+  RELEASED
+  """Released by a pre-start event cancellation."""
+  CANCELLED
+}
+
+"""A Scout's signup for one slot: ACTIVE holds a place and counts against capacity, CANCELLED is history that is never deleted (data model §9.3, spec SSE-05)."""
+enum SignupStatus {
+  """Holding a place in the slot."""
+  ACTIVE
+  """Cancelled; the row stays for history and reports."""
+  CANCELLED
+}
+
+"""One event's reservation of one product: the quantities an admin sees, and the interval the overlap rule was decided on. `remainingQty` is stored rather than derived so no reader can compute a different answer than the write that maintained it."""
+type ShowAndSellAllocation {
+  """The Unit Campaign whose stock is reserved."""
+  unitCampaignId: ID!
+  """The catalog product reserved."""
+  productId: ID!
+  """The event holding the reservation."""
+  showAndSellId: ID!
+  """The event's start, denormalized onto the allocation for authoritative overlap checks."""
+  startAt: AWSDateTime!
+  """The event's end, denormalized onto the allocation for authoritative overlap checks."""
+  endAt: AWSDateTime!
+  """OPEN, RELEASED, or CANCELLED."""
+  status: AllocationStatus!
+  """Quantity reserved to this event."""
+  allocatedQty: Int!
+  """Quantity sold at this event."""
+  soldQty: Int!
+  """Quantity released back to the campaign by a cancellation or finalization."""
+  releasedQty: Int!
+  """Still unsold and unreleased."""
+  remainingQty: Int!
+  """Allocation version; every allocation write and the cancellation condition on it."""
+  version: Int!
+  """When the allocation was created."""
+  createdAt: AWSDateTime
+  """When the allocation was last written."""
+  updatedAt: AWSDateTime
+}
+
+"""One working slot of an event (data model §5.12): an arbitrary interval inside the event's immutable interval, a capacity, and the counter every signup write maintains transactionally."""
+type ShowAndSellSlot {
+  """The event this slot belongs to."""
+  showAndSellId: ID!
+  """The slot's stable ID."""
+  slotId: ID!
+  """Display label; absent when the Kernel never named the slot."""
+  label: String
+  """Slot start; never before the event's startAt."""
+  startAt: AWSDateTime!
+  """Slot end; never after the event's endAt, and always after its own startAt."""
+  endAt: AWSDateTime!
+  """Maximum active signups (1-100)."""
+  capacity: Int!
+  """Active signups now holding a place in this slot."""
+  activeSignupCount: Int!
+  """Slot version; signup, capacity and slot edits condition on it."""
+  version: Int!
+  """When the slot was created."""
+  createdAt: AWSDateTime
+  """When the slot was last written."""
+  updatedAt: AWSDateTime
+}
+
+"""One Scout's signup for one slot, with its audit trail (data model §5.13). The actor fields are why this type is administrative: a Scout sees `ParticipantSignup` instead."""
+type ShowAndSellSignup {
+  """The event signed up for."""
+  showAndSellId: ID!
+  """The slot signed up for."""
+  slotId: ID!
+  """The Scout holding (or having held) the place."""
+  profileId: ID!
+  """The Unit Campaign whose roster and credit scope this signup belongs to."""
+  unitCampaignId: ID!
+  """The Scout's own Scout Campaign, kept for credit and Order identity."""
+  campaignId: ID!
+  """ACTIVE or CANCELLED."""
+  status: SignupStatus!
+  """Confirmed work minutes; 0 until a Kernel confirms the work, and setting it back to 0 un-confirms it."""
+  actualMinutes: Int!
+  """Account that placed the signup — the Scout's own WRITE Account or a Unit Admin."""
+  signedUpByAccountId: ID!
+  """Account that confirmed the work; null until it is confirmed."""
+  confirmedByAccountId: ID
+  """When the work was confirmed; null until it is."""
+  confirmedAt: AWSDateTime
+  """Signup version; work confirmation and cancellation condition on it."""
+  version: Int!
+  """When the signup was created."""
+  createdAt: AWSDateTime
+  """When the signup was last written."""
+  updatedAt: AWSDateTime
+}
+
+"""A Show & Sell event as its Unit Admin manages it: identity, the immutable interval, the split and We Owe settings, the products it has ever held, its allocations and slots, its finalization pointers, and the audit of who wrote what."""
+type ShowAndSellAdmin {
+  """The event's stable ID; never derived from location or times."""
+  showAndSellId: ID!
+  """The owning Unit, read off the event rather than claimed by the caller."""
+  unitId: ID!
+  """The Unit Campaign this event belongs to; the scope of its stock, roster, and credit."""
+  unitCampaignId: ID!
+  """Required short name of where the event is."""
+  locationName: String!
+  """Optional address."""
+  address: String
+  """Event start; immutable after creation, so a wrong time is cancelled and recreated."""
+  startAt: AWSDateTime!
+  """Event end; immutable, and always after startAt."""
+  endAt: AWSDateTime!
+  """Where the event stands, combining the calendar and any workflow state written for it."""
+  status: ShowAndSellStatus!
+  """How earnings split: the Unit default inherited at creation, or this event's override."""
+  splitMethod: SplitMethod!
+  """Whether We Owe may be offered at this event; off unless a Kernel turns it on."""
+  weOweEnabled: Boolean!
+  """Every product this event has ever been allocated or sold, in the order they were added; no event-wide cap."""
+  productIds: [ID!]!
+  """This event's stock allocations, read authoritatively through `productIds` rather than through an index."""
+  allocations: [ShowAndSellAllocation!]!
+  """This event's working slots, soonest first."""
+  slots: [ShowAndSellSlot!]!
+  """The approved credit version, or null while credit is pending or the event is reopened."""
+  approvedFinalizationId: ID
+  """The most recent finalization version, for history."""
+  latestFinalizationId: ID
+  """Event version; every event-state write conditions on it, so a stale read cancels the write."""
+  version: Int!
+  """When the event was created."""
+  createdAt: AWSDateTime!
+  """When the event was last written."""
+  updatedAt: AWSDateTime!
+  """Account that created the event."""
+  createdByAccountId: ID!
+  """Account that last wrote the event."""
+  updatedByAccountId: ID!
+  """Account that cancelled the event; null unless it was cancelled."""
+  cancelledByAccountId: ID
+  """When the event was cancelled; null unless it was."""
+  cancelledAt: AWSDateTime
+  """The reason a Unit Admin gave when cancelling; null unless it was cancelled."""
+  cancellationReason: String
+}
+
+"""A page of a Unit Campaign's events."""
+type ShowAndSellAdminConnection {
+  """The events on this page, soonest first."""
+  items: [ShowAndSellAdmin!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+}
+
+# participant-safe: what a Scout is offered, and nothing about the Unit's bookkeeping
+"""One event as a Scout sees it: where and when it runs, whether We Owe is offered, how the pool splits, the slots with room left, and this Scout's own signups. It carries no inventory, sale, buyer, cash, finalization, actor, or tenancy field (API contract SEC-04), and it hands the browser no stock number to do arithmetic against."""
+type ShowAndSellOpportunity {
+  """The event on offer."""
+  showAndSellId: ID!
+  """Required short name of where the event is."""
+  locationName: String!
+  """Optional address."""
+  address: String
+  """Event start."""
+  startAt: AWSDateTime!
+  """Event end."""
+  endAt: AWSDateTime!
+  """Where the event stands; an ended or cancelled event is history, not an offer."""
+  status: ShowAndSellStatus!
+  """How earnings split among participants."""
+  splitMethod: SplitMethod!
+  """Whether We Owe may be offered at this event."""
+  weOweEnabled: Boolean!
+  """The Unit's IANA timezone, so the browser can render the interval in local time and build an ICS itself."""
+  timezone: String!
+  """The event version a signup or cancellation conditions on."""
+  eventVersion: Int!
+  """The event's slots, soonest first, with how many places each one still has."""
+  slots: [ShowAndSellOpportunitySlot!]!
+  """This Scout's signups for this event, cancelled ones included."""
+  mySignups: [ParticipantSignup!]!
+}
+
+# participant-safe: a slot as an offer, not as a capacity record
+"""One slot a Scout can choose: when it runs, what it is called, how many places it has, and how many are left. `openCapacity` is computed server-side so the browser cannot do its own arithmetic against a capacity it hopes for (SEC-05)."""
+type ShowAndSellOpportunitySlot {
+  """The slot's stable ID."""
+  slotId: ID!
+  """Display label; absent when the Kernel never named the slot."""
+  label: String
+  """Slot start."""
+  startAt: AWSDateTime!
+  """Slot end."""
+  endAt: AWSDateTime!
+  """Maximum active signups (1-100)."""
+  capacity: Int!
+  """Places still open, computed from the slot's own maintained counter."""
+  openCapacity: Int!
+}
+
+# participant-safe: a Scout's own signup, without the audit of who placed or confirmed it
+"""One signup as the Scout who holds it sees it: which slot, whether it is still active, and how much work was confirmed. The actor fields are administrative and appear on `ShowAndSellSignup` instead."""
+type ParticipantSignup {
+  """The event signed up for."""
+  showAndSellId: ID!
+  """The slot signed up for."""
+  slotId: ID!
+  """When the slot runs."""
+  startAt: AWSDateTime!
+  """When the slot ends."""
+  endAt: AWSDateTime!
+  """ACTIVE or CANCELLED."""
+  status: SignupStatus!
+  """Confirmed work minutes; 0 means the work is not confirmed yet."""
+  actualMinutes: Int!
+}
+
+"""A page of the events one Unit Campaign is offering to one caller's Scouts."""
+type ShowAndSellOpportunityConnection {
+  """The opportunities on this page, soonest first."""
+  items: [ShowAndSellOpportunity!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+}
+
+"""Input for createShowAndSell. The times are chosen here and never changed afterwards."""
+input CreateShowAndSellInput {
+  """The Unit Campaign the event belongs to; its admin creates the event."""
+  unitCampaignId: ID!
+  """Required short location name (1-100 trimmed characters)."""
+  locationName: String!
+  """Optional address (at most 500 characters)."""
+  address: String
+  """Event start (ISO 8601 UTC)."""
+  startAt: AWSDateTime!
+  """Event end (ISO 8601 UTC); must be after startAt. No assumed hour or half-hour."""
+  endAt: AWSDateTime!
+  """Split override for this event; omit to inherit the Unit's split default."""
+  splitMethod: SplitMethod
+  """Offer We Owe at this event; omitting it means off."""
+  weOweEnabled: Boolean
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for updateShowAndSell. There is deliberately no startAt or endAt: rescheduling is not a feature, and a cancelled-and-recreated event keeps the audit of the one it replaces."""
+input UpdateShowAndSellInput {
+  """The event to edit."""
+  showAndSellId: ID!
+  """New location name; omit to leave it alone."""
+  locationName: String
+  """New address; send null to clear it, omit to leave it alone."""
+  address: String
+  """New split override for this event; omit to leave it alone."""
+  splitMethod: SplitMethod
+  """Turn We Owe on or off; refused when switching it off would strand an open We Owe obligation."""
+  weOweEnabled: Boolean
+  """The event version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for cancelShowAndSell. Legal only before startAt, and the reason is required: a state change that releases stock and cancels Scouts has to say why."""
+input CancelShowAndSellInput {
+  """The event to cancel."""
+  showAndSellId: ID!
+  """The event version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Why the event is being cancelled (1-500 trimmed characters)."""
+  reason: String!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""What a cancellation did, in one coherent answer: the cancelled event, every allocation whose remainder went back on the shelf, and every signup it released."""
+type CancelShowAndSellPayload {
+  """The event, now cancelled, with its stored reason and actor."""
+  event: ShowAndSellAdmin!
+  """Allocations this cancellation cancelled, with the quantity released."""
+  releasedAllocations: [ShowAndSellAllocation!]!
+  """Signups this cancellation cancelled; their commitment projections were cancelled with them."""
+  cancelledSignups: [ShowAndSellSignup!]!
+}
+
+# ============================================================================
 # Query Root
 # ============================================================================
 
@@ -1973,6 +2308,40 @@ type Query {
     """Pagination parameters."""
     page: PageInput
   ): UnitOrderConnection!
+
+  # Show & Sell — events and opportunities (checklist §3.1)
+  """One event as its Unit Admin manages it: identity, immutable times, split and We Owe settings, allocations, slots, status, and the version the next write conditions on. Unit Admin for the event's Unit."""
+  showAndSell(
+    """The event ID."""
+    showAndSellId: ID!
+  ): ShowAndSellAdmin!
+  """A Unit Campaign's events, soonest first, with optional state and date-window filters. Unit Admin for the campaign's Unit."""
+  showAndSells(
+    """The Unit Campaign whose events are being listed."""
+    unitCampaignId: ID!
+    """Filter to events in one state; the state compared is the one the answer reports, so a filter of `ENDED` matches an event whose interval has passed."""
+    status: ShowAndSellStatus
+    """Inclusive window on event start; at most 366 days wide."""
+    dateRange: DateRangeFilter
+    """Pagination parameters."""
+    page: PageInput
+  ): ShowAndSellAdminConnection!
+  """The events one Unit Campaign is offering to the caller's own Scouts, soonest first, with the slots, the room left in them, and each Scout's signups. Profile Owner/WRITE or READ for a joined Scout; a Scout removed from the roster keeps visibility of what they already took part in and gains no new opportunity. No stock, sale, buyer, cash, or actor field is on this surface, and a Unit Admin uses `showAndSells` instead."""
+  unitCampaignOpportunities(
+    """The Unit Campaign whose events are being offered."""
+    unitCampaignId: ID!
+    """Include events that have already ended; omitting it means upcoming events only."""
+    includePast: Boolean = false
+    """Pagination parameters."""
+    page: PageInput
+  ): ShowAndSellOpportunityConnection!
+  """One event's participant view for one Scout: the slots and that Scout's commitments. Profile Owner/WRITE or READ for that Scout, or a Unit Admin for the event's Unit. An unjoined Scout, another Unit's event, or a Scout the caller cannot read returns `NOT_FOUND`, and no administrative field is present."""
+  showAndSellOpportunity(
+    """The event ID."""
+    showAndSellId: ID!
+    """The Scout whose view is being read."""
+    profileId: ID!
+  ): ShowAndSellOpportunity!
 
   # Account queries
   """The authenticated caller's account. The row is created automatically on first read if it does not yet exist."""
@@ -2259,6 +2628,23 @@ type Mutation {
     """The reversal."""
     input: ReverseIndividualOrderFulfillmentInput!
   ): ReverseIndividualOrderFulfillmentPayload!
+
+  # Show & Sell — event lifecycle (checklist §3.1)
+  """Create a Show & Sell event on a Unit Campaign: required location, optional address, immutable UTC interval, the Unit's split default or an override, and We Owe off unless turned on. Overlapping events are allowed. Unit Admin for the campaign's Unit."""
+  createShowAndSell(
+    """The event."""
+    input: CreateShowAndSellInput!
+  ): ShowAndSellAdmin!
+  """Edit an event's location, address, split override, or We Owe setting. There is no time input: times are immutable, and the workflow for a wrong time is cancel-and-recreate. Allowed while scheduled, running, or ended, and as a draft while reopened; refused once finalized or cancelled, and refused when turning We Owe off would strand an open obligation. Unit Admin for the event's Unit."""
+  updateShowAndSell(
+    """The edit."""
+    input: UpdateShowAndSellInput!
+  ): ShowAndSellAdmin!
+  """Cancel an event before it starts, in one atomic workflow: the event goes CANCELLED with its reason and actor, every open allocation is cancelled with its remainder released, signups and their commitment projections are cancelled, slot counters go to zero, and each Scout's commitment guard moves. An event that has started is finished by finalizing it, not by cancelling it. Unit Admin for the event's Unit."""
+  cancelShowAndSell(
+    """The cancellation."""
+    input: CancelShowAndSellInput!
+  ): CancelShowAndSellPayload!
 
   # Account mutations
   """Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account."""

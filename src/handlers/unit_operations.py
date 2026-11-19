@@ -38,15 +38,29 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, cast
 
 from botocore.exceptions import ClientError
 
 try:  # pragma: no cover
-    from utils import inventory_models, order_fulfillment_models, unit_auth, unit_campaign_models, unit_models
+    from utils import (
+        inventory_models,
+        order_fulfillment_models,
+        show_and_sell_models,
+        unit_auth,
+        unit_campaign_models,
+        unit_models,
+    )
     from utils.import_fallback import import_from_utils
 except ModuleNotFoundError:  # pragma: no cover
-    from ..utils import inventory_models, order_fulfillment_models, unit_auth, unit_campaign_models, unit_models
+    from ..utils import (
+        inventory_models,
+        order_fulfillment_models,
+        show_and_sell_models,
+        unit_auth,
+        unit_campaign_models,
+        unit_models,
+    )
     from ..utils.import_fallback import import_from_utils
 
 
@@ -56,6 +70,8 @@ tables = import_from_utils("dynamodb", "tables")
 batch_get_chunked = import_from_utils("dynamodb", "batch_get_chunked")
 get_dynamodb_client = import_from_utils("dynamodb", "get_dynamodb_client")
 ensure_account_id = import_from_utils("ids", "ensure_account_id")
+batch_check_profile_access = import_from_utils("auth", "batch_check_profile_access")
+check_profile_access = import_from_utils("auth", "check_profile_access")
 require_profile_access = import_from_utils("auth", "require_profile_access")
 paginate_page = import_from_utils("pagination", "paginate_page")
 get_logger = import_from_utils("logging", "get_logger")
@@ -120,6 +136,23 @@ FULFILL_LINE_FIELD = "fulfillIndividualOrderLine"
 REVERSE_FULFILLMENT_FIELD = "reverseIndividualOrderFulfillment"
 ORDER_FULFILLMENTS_FIELD = "orderFulfillments"
 UNIT_SCOUT_ORDERS_FIELD = "unitScoutCampaignOrders"
+
+# Stage 3.1 — the Show & Sell event aggregate (§3.1.2-§3.1.5).
+CREATE_SHOW_AND_SELL_FIELD = "createShowAndSell"
+UPDATE_SHOW_AND_SELL_FIELD = "updateShowAndSell"
+CANCEL_SHOW_AND_SELL_FIELD = "cancelShowAndSell"
+SHOW_AND_SELL_FIELD = "showAndSell"
+SHOW_AND_SELLS_FIELD = "showAndSells"
+UNIT_CAMPAIGN_OPPORTUNITIES_FIELD = "unitCampaignOpportunities"
+SHOW_AND_SELL_OPPORTUNITY_FIELD = "showAndSellOpportunity"
+SHOW_AND_SELL_ID_ARGUMENT = "showAndSellId"
+
+# Argument names that carry no write intent, so they stay out of the writable-field
+# check.  ``idempotency`` and ``version`` are the mutation contract's own envelopes and
+# ``showAndSellId`` names the row being addressed; every other name in the input is a
+# field the caller is offering to change, which is what makes a smuggled ``startAt`` a
+# refusal rather than an ignored key.
+_EVENT_INPUT_BOOKKEEPING = frozenset({"idempotency", "version", SHOW_AND_SELL_ID_ARGUMENT})
 
 MAX_ACTIVE_UNIT_INVITES = 20
 INVITE_FAILURES_PER_HOUR = 10
@@ -198,9 +231,21 @@ def _fingerprint(payload: Mapping[str, Any]) -> str:
     """The request fingerprint a retry must reproduce exactly.
 
     ``drop_none`` makes an omitted optional field and an explicit null the same
-    request, which is what "normalized" means in API contract §3.1.
+    request, which is what "normalized" means in API contract §3.1 for a create: both
+    spellings ask for the same row.
     """
     return str(normalized_fingerprint(payload, drop_none=True))
+
+
+def _update_fingerprint(payload: Mapping[str, Any]) -> str:
+    """The fingerprint of an update, where an omitted field and a null are different requests.
+
+    SDL §6 makes ``address`` (omitted) leave the row alone and ``address: null`` clear
+    it, and the same shape holds for the split and We Owe settings. Folding nulls away
+    would give those two requests one fingerprint, so a retry of "change the location"
+    would answer a later "clear the address" as already done — and write nothing.
+    """
+    return str(normalized_fingerprint(payload))
 
 
 def _resource_id(payload: Mapping[str, Any], field: str) -> str:
@@ -3754,6 +3799,879 @@ def _unit_scout_campaign_orders(event: Dict[str, Any], caller_id: str) -> Dict[s
     return dict(paginate_page(orders, scope, _page_argument(event)))
 
 
+# --- Show & Sell events (§3.1) -------------------------------------------------
+
+
+def _show_and_sell_marker(*, caller_id: str, operation: str, scope: str, idempotency_key: str) -> Any:
+    """Resolve this request's marker address on the event aggregate table.
+
+    The marker rides the table the mutation writes, which is the rule every Show &
+    Sell mutation follows (§8.9): a cancellation's marker and its event row are in
+    the same transaction, so a replay can never be answered for a commit that did
+    not happen, and the seven-day TTL on that table collects the marker with nothing
+    else left dangling.
+    """
+    return marker_keys(
+        table_key="show_and_sells",
+        table_name=tables.show_and_sells.table_name,
+        actor_id=caller_id,
+        operation=operation,
+        scope=scope,
+        idempotency_key=idempotency_key,
+    )
+
+
+def _event_admin_guard(event: Dict[str, Any], caller_id: str, name: str = SHOW_AND_SELL_ID_ARGUMENT) -> Dict[str, Any]:
+    """Load the addressed event and require admin of the Unit the event row names.
+
+    Tenancy comes from the event's own ``unitId``, never from a Unit id the caller
+    sends, and the denial is ``NOT_FOUND``: a caller who is not an admin of the
+    owning Unit is told the same thing whether the event exists or not, so a
+    cross-Unit id is never a resource-existence oracle (SEC-03, AUTH-U).
+    """
+    stored: Dict[str, Any] = dict(show_and_sell_models.load_show_and_sell_or_not_found(_query_argument(event, name)))
+    unit_auth.require_unit_admin(caller_id, str(stored[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+    return stored
+
+
+def _event_detail(event_row: Mapping[str, Any]) -> Dict[str, Any]:
+    """The administrative event answer: the aggregate plus its allocation and slot reads.
+
+    ``allocations`` are read through the event's own ``productIds`` rather than
+    through ``showAndSellId-index`` — that index is for display, and an eventually
+    consistent index can lag a write the event has already committed, which would
+    show an admin a stock reservation that no longer matches the balance it was
+    taken against (SEC-06).
+
+    The two child reads are part of this one answer on purpose. An admin deciding
+    whether to cancel an event is deciding about its stock and its slots at the same
+    time, and making the screen ask three times would let the three answers come
+    from three different moments.
+    """
+    payload: Dict[str, Any] = dict(show_and_sell_models.event_admin_payload(event_row))
+    payload["allocations"] = [
+        show_and_sell_models.allocation_payload(row) for row in show_and_sell_models.event_allocations(event_row)
+    ]
+    payload["slots"] = [
+        show_and_sell_models.slot_admin_payload(row)
+        for row in sorted(
+            show_and_sell_models.event_slot_rows(str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])),
+            key=lambda row: (str(row.get(show_and_sell_models.START_AT_ATTRIBUTE) or ""), str(row.get("slotId") or "")),
+        )
+    ]
+    return payload
+
+
+def _event_list_filters(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Read ``showAndSells``' optional state and date-window filters."""
+    arguments = event.get("arguments")
+    status = arguments.get("status") if isinstance(arguments, Mapping) else None
+    range_value = arguments.get("dateRange") if isinstance(arguments, Mapping) else None
+    start_at, end_at = inventory_models.normalize_date_range(range_value)
+    return {
+        "status": None if status is None else show_and_sell_models.normalize_event_status(status),
+        "startAt": start_at,
+        "endAt": end_at,
+    }
+
+
+def _event_in_window(event_row: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
+    """Whether an event's start falls inside the requested window.
+
+    The window is on ``startAt`` because that is what a schedule is ordered by and
+    what the discovery index sorts on; the bound is inclusive at both ends, matching
+    ``DateRangeFilter``'s documented shape.
+    """
+    start = str(event_row.get(show_and_sell_models.START_AT_ATTRIBUTE) or "")
+    lower = filters.get("startAt")
+    upper = filters.get("endAt")
+    if isinstance(lower, str) and start < lower:
+        return False
+    return not (isinstance(upper, str) and start > upper)
+
+
+def _event_has_state(event_row: Mapping[str, Any], wanted: Optional[str]) -> bool:
+    """Compare the filter against the state the answer reports, not the stored one.
+
+    A filter of ``ENDED`` has to match an event whose row still says ``SCHEDULED`` but
+    whose interval has passed, because that is the state the same query reports: a
+    filter that matched the stored spelling instead would answer "no ended events"
+    about an event the caller can see listed as ended two lines above.
+    """
+    if wanted is None:
+        return True
+    return bool(show_and_sell_models.derive_event_status(event_row) == wanted)
+
+
+def _create_show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Create an event on a Unit Campaign (§3.1.2, EVT-M-01).
+
+    The caller chooses location, interval, split and We Owe; everything else is the
+    server's to decide. Two of those choices are load-bearing:
+
+    - The interval is validated once, here, and is never writable afterwards, so
+      "cancellable only before ``startAt``" and every interval comparison in later
+      stages are decisions about a value that cannot have moved.
+    - ``splitMethod`` inherits the Unit's default unless the caller overrides it, so
+      an event never silently acquires a split nobody chose for that Unit.
+
+    Overlap is allowed and not even warned about (SSE-02): two events may run at the
+    same time, and whether they may share stock is §3.2's concurrent-assignment rule,
+    decided against real allocations rather than against a calendar guess here.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    unit_campaign_id = _resource_id(payload, "unitCampaignId")
+
+    campaign = unit_campaign_models.load_unit_campaign_or_not_found(unit_campaign_id)
+    unit = unit_models.load_unit_or_not_found(str(campaign["unitId"]))
+    unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(
+        caller_id=caller_id, operation=CREATE_SHOW_AND_SELL_FIELD, scope=unit_campaign_id, idempotency_key=key
+    )
+    replayed = _replay(runner, keys, fingerprint, CREATE_SHOW_AND_SELL_FIELD, _load_event_answer)
+    if replayed is not None:
+        return replayed
+
+    event_id = show_and_sell_models.new_show_and_sell_id()
+    item = show_and_sell_models.build_show_and_sell_item(
+        show_and_sell_id=event_id,
+        unit_id=str(campaign["unitId"]),
+        unit_campaign_id=unit_campaign_id,
+        location_name=payload.get("locationName"),
+        address=payload.get("address"),
+        start_at=payload.get("startAt"),
+        end_at=payload.get("endAt"),
+        split_method=payload.get("splitMethod") or unit.get("splitDefault"),
+        we_owe_enabled=payload.get("weOweEnabled"),
+        created_by_account_id=caller_id,
+        now_iso=utc_now_iso(),
+    )
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=event_id)
+    plan.add(*show_and_sell_models.put_show_and_sell_action(item))
+    build_result = _once(lambda: _event_detail(item))
+    runner.execute(
+        keys,
+        plan,
+        operation=CREATE_SHOW_AND_SELL_FIELD,
+        fingerprint=fingerprint,
+        result_id=event_id,
+        load_result=_load_event_answer,
+        result_payload=build_result,
+    )
+    created = build_result()
+    log.info(
+        "Show & Sell created",
+        show_and_sell_id=event_id,
+        unit_campaign_id=unit_campaign_id,
+        caller_id=caller_id,
+        start_at=created["startAt"],
+    )
+    return created
+
+
+def _load_event_answer(stored_id: str) -> Dict[str, Any]:
+    """Rebuild an event answer from the stored row, for a marker with no payload."""
+    return _event_detail(show_and_sell_models.load_show_and_sell_or_not_found(stored_id))
+
+
+def _event_update_changes(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """The writable fields this update actually offered, normalized.
+
+    Three rules are stated here and nowhere else:
+
+    - A field that is absent is left alone. ``address`` is the one field a caller may
+      also send as null, and null means "clear it" — the difference between the two is
+      the difference between an unchanged address and no address.
+    - ``splitMethod`` and ``weOweEnabled`` are booleans-of-choice: sending null means
+      nothing the caller wants changed, so it is not a change.
+    - Any other name in the input is refused outright, which is where
+      ``startAt``/``endAt`` die (EVT-M-02-01). The refusal is an invalid input rather
+      than a silently ignored field: a caller who believes they rescheduled an event
+      and is told nothing has an event they will show up at at the wrong time.
+    """
+    offered = {name: value for name, value in payload.items() if name not in _EVENT_INPUT_BOOKKEEPING}
+    changes = show_and_sell_models.writable_changes(offered)
+    normalized: Dict[str, Any] = {}
+    if changes.get(show_and_sell_models.LOCATION_NAME_ATTRIBUTE) is not None:
+        normalized[show_and_sell_models.LOCATION_NAME_ATTRIBUTE] = show_and_sell_models.normalize_location_name(
+            changes[show_and_sell_models.LOCATION_NAME_ATTRIBUTE]
+        )
+    if show_and_sell_models.ADDRESS_ATTRIBUTE in changes:
+        normalized[show_and_sell_models.ADDRESS_ATTRIBUTE] = show_and_sell_models.normalize_address(
+            changes[show_and_sell_models.ADDRESS_ATTRIBUTE]
+        )
+    if changes.get(show_and_sell_models.SPLIT_METHOD_ATTRIBUTE) is not None:
+        normalized[show_and_sell_models.SPLIT_METHOD_ATTRIBUTE] = show_and_sell_models.normalize_split_method(
+            changes[show_and_sell_models.SPLIT_METHOD_ATTRIBUTE]
+        )
+    if changes.get(show_and_sell_models.WE_OWE_ENABLED_ATTRIBUTE) is not None:
+        normalized[show_and_sell_models.WE_OWE_ENABLED_ATTRIBUTE] = show_and_sell_models.normalize_we_owe_enabled(
+            changes[show_and_sell_models.WE_OWE_ENABLED_ATTRIBUTE]
+        )
+    if not normalized:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            f"At least one of {', '.join(sorted(show_and_sell_models.WRITABLE_FIELDS))} must be provided.",
+        )
+    return normalized
+
+
+def _require_read_version(event_row: Mapping[str, Any], expected_version: int) -> None:
+    """Refuse a mutation whose supplied version is not the row that was just read.
+
+    The version condition on the write is what makes a race safe, but on its own it
+    only proves that nobody moved the row since the *caller* read it. Every state rule
+    in this handler — "still editable", "still cancellable" — is evaluated against the
+    row *this request* read a moment earlier. If the caller's number is allowed to be a
+    different one, those two reads come apart: a request holding version 2 can pass the
+    editable check against a freshly-read SCHEDULED version 1, a competing cancellation
+    then commits version 2, and the write's condition matches a row whose state was
+    never checked. Requiring the supplied version to equal the row just read makes the
+    state and the version one fact about one row, and the conditional write still
+    guards the window between this read and the commit.
+    """
+    read_version = show_and_sell_models.normalize_required_version(
+        event_row.get(show_and_sell_models.VERSION_ATTRIBUTE, 1)
+    )
+    if expected_version == read_version:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        "The event changed since you read it. Re-read it and retry with the version the read answered.",
+        details={
+            "subcode": "VERSION_MISMATCH",
+            "expectedVersion": expected_version,
+            "currentVersion": read_version,
+        },
+    )
+
+
+def _refuse_unsafe_we_owe_disable(event_row: Mapping[str, Any], changes: Mapping[str, Any], event_id: str) -> None:
+    """Refuse a We Owe switch-off that would strand an open obligation (EVT-M-02-02).
+
+    Turning We Owe off is not a display setting: it is the event saying it will not
+    offer deferred payment. An obligation that is still OPEN is a Kernel the buyer is
+    owed and the event has promised to account for, and an event that no longer offers
+    We Owe has no legal way to finish it — so the change is refused while any
+    obligation is open, and allowed once they are all closed, at which point they are
+    history rather than a promise.
+    """
+    turning_off = changes.get(show_and_sell_models.WE_OWE_ENABLED_ATTRIBUTE) is False
+    if not turning_off or not bool(event_row.get(show_and_sell_models.WE_OWE_ENABLED_ATTRIBUTE)):
+        return
+    obligations = show_and_sell_models.event_we_owe_rows(event_id)
+    if not show_and_sell_models.we_owe_disable_blocked(obligations):
+        return
+    open_count = sum(
+        1 for row in obligations if str(row.get("status") or "") == show_and_sell_models.WE_OWE_STATUS_OPEN
+    )
+    raise AppError(
+        ErrorCode.CONFLICT,
+        (
+            f"This event still has {open_count} open We Owe obligation(s). Close or cancel them before "
+            "turning We Owe off, so no buyer is left owing and unaccounted for."
+        ),
+        details={"subcode": "WE_OWE_OBLIGATIONS_OPEN", "openObligationCount": open_count},
+    )
+
+
+def _update_show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Edit an event's location, address, split, or We Owe setting (§3.1.3, EVT-M-02).
+
+    The state matrix is checked before the write, and the version condition is what
+    makes the check honest: between the read and the commit the event may have been
+    finalized, cancelled, or edited by another Kernel, and in every one of those cases
+    the version the caller read has moved and the transaction writes nothing. A
+    state check that only ever ran against a fresh read would let two admins each
+    believe they edited an event that had already been finalized.
+
+    Replay is consulted before the state and version checks for the usual reason: the
+    first attempt's own write moved the version, and a retry that re-ran the guard
+    would answer ``CONFLICT`` about a request it already completed.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _update_fingerprint(payload)
+    event_id = _resource_id(payload, show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE)
+    expected_version = _expected_version(payload)
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(
+        caller_id=caller_id, operation=UPDATE_SHOW_AND_SELL_FIELD, scope=event_id, idempotency_key=key
+    )
+    replayed = _replay(runner, keys, fingerprint, UPDATE_SHOW_AND_SELL_FIELD, _load_event_answer)
+    if replayed is not None:
+        return replayed
+
+    # After replay for the reason the docstring names: the first attempt's own write
+    # moved the version, so a retry that re-ran this would answer CONFLICT about a
+    # request it already completed.
+    _require_read_version(event_row, expected_version)
+    changes = _event_update_changes(payload)
+    show_and_sell_models.require_editable(event_row)
+    _refuse_unsafe_we_owe_disable(event_row, changes, event_id)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=event_id)
+    plan.add(
+        *show_and_sell_models.update_event_settings_action(
+            show_and_sell_id=event_id,
+            expected_version=expected_version,
+            changes=changes,
+            updated_by_account_id=caller_id,
+            updated_at=utc_now_iso(),
+        )
+    )
+    build_result = _once(lambda: _load_event_answer(event_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=UPDATE_SHOW_AND_SELL_FIELD,
+        fingerprint=fingerprint,
+        result_id=event_id,
+        load_result=_load_event_answer,
+        result_payload=build_result,
+    )
+    updated = build_result()
+    log.info(
+        "Show & Sell updated",
+        show_and_sell_id=event_id,
+        caller_id=caller_id,
+        version=updated["version"],
+        changed=sorted(changes),
+    )
+    return updated
+
+
+def _cancellation_reads(event_row: Mapping[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """Everything a cancellation has to know before it writes anything (§8.8 step 1).
+
+    Each read is the authoritative one: allocations come from the event's
+    ``productIds`` through consistent reads, signups and slots from the event's own
+    partition, and the commitment projections from the Scout's partition rather than
+    from a signup index — because a commitment is what blocks a later overlapping
+    signup, so the writer that releases one has to be looking at the row the blocker
+    reads (SEC-06).
+    """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    signups = show_and_sell_models.active_signups(event_id)
+    profiles: List[str] = []
+    commitments: List[Dict[str, Any]] = []
+    for signup in signups:
+        profile_id = str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE])
+        if profile_id not in profiles:
+            profiles.append(profile_id)
+        # Only the ACTIVE commitments are released. The projection keeps cancelled
+        # rows as history (§5.13), and rewriting one would move an audit record this
+        # request did not create — and spend a transaction action on it.
+        commitments.extend(
+            row
+            for row in show_and_sell_models.active_commitments(profile_id, event_id)
+            if str(row.get(show_and_sell_models.SLOT_ID_ATTRIBUTE) or "")
+            == str(signup[show_and_sell_models.SLOT_ID_ATTRIBUTE])
+        )
+    return {
+        "allocations": show_and_sell_models.open_allocations(event_row),
+        "signups": signups,
+        "profiles": profiles,
+        "commitments": commitments,
+        "slots": show_and_sell_models.slots_holding_signups(event_id),
+    }
+
+
+def _stage_cancellation_writes(
+    plan: Any,
+    event_row: Mapping[str, Any],
+    reads: Mapping[str, List[Dict[str, Any]]],
+    *,
+    event_id: str,
+    expected_version: int,
+    caller_id: str,
+    reason: str,
+    now_iso: str,
+    idempotency_key: str,
+) -> None:
+    """Stage §8.8 step 3 in one plan: the event, then everything it releases.
+
+    Every action is conditioned on the version this request read — the event's, each
+    allocation's, each signup's, each slot's, and each Scout's commitment guard. That
+    is what turns a race with a concurrent signup or assignment into a cancelled
+    transaction instead of a partially applied one, and it is why a cancellation that
+    lost the race is retried against fresh state rather than resurrecting a record the
+    other writer already closed (§8.8 step 4).
+
+    The release movement is written next to each allocation write because an
+    allocation that silently dropped its reservation would leave the audit trail unable
+    to explain the balance it now adds up to. Its delta is the allocation's own
+    remaining quantity — the quantity this request moves — and it is the only delta
+    ``EVENT_RELEASE`` may move: a cancellation releases a reservation, it never moves a
+    Kernel. The allocation row's ``releasedQty`` is the other number, the new
+    cumulative total, and keeping the two apart is what lets the movement trail sum to
+    the allocation instead of double-counting an earlier release.
+
+    A signup and the commitment projection it mirrors move to one shared new version
+    (§5.13: ``ScoutCommitment.version`` "matches source signup update"), so a reader
+    who compares the pair sees one transition rather than two disagreeing versions.
+    """
+    plan.add(
+        *show_and_sell_models.cancel_event_action(
+            show_and_sell_id=event_id,
+            expected_version=expected_version,
+            cancelled_by_account_id=caller_id,
+            cancelled_at=now_iso,
+            reason=reason,
+        )
+    )
+    for allocation in reads["allocations"]:
+        remaining = int(allocation.get(inventory_models.REMAINING_QTY, 0) or 0)
+        released_total = int(allocation.get(inventory_models.RELEASED_QTY, 0) or 0) + remaining
+        plan.add(
+            *show_and_sell_models.cancel_allocation_action(
+                allocation=allocation, released_total=released_total, updated_at=now_iso
+            )
+        )
+        plan.add(
+            *show_and_sell_models.event_release_movement_action(
+                event=event_row,
+                allocation=allocation,
+                released_qty=remaining,
+                actor_account_id=caller_id,
+                occurred_at=now_iso,
+                idempotency_key=idempotency_key,
+            )
+        )
+    new_signup_versions: Dict[Tuple[str, str], int] = {}
+    for signup in reads["signups"]:
+        signup_version = show_and_sell_models.normalize_required_version(signup.get("version", 1))
+        slot_id = str(signup[show_and_sell_models.SLOT_ID_ATTRIBUTE])
+        profile_id = str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE])
+        new_signup_versions[(profile_id, slot_id)] = signup_version + 1
+        plan.add(
+            *show_and_sell_models.cancel_signup_action(
+                show_and_sell_id=event_id,
+                slot_id=slot_id,
+                profile_id=profile_id,
+                expected_version=signup_version,
+                new_version=signup_version + 1,
+                updated_at=now_iso,
+            )
+        )
+    for commitment in reads["commitments"]:
+        pair = (
+            str(commitment[show_and_sell_models.PROFILE_ID_ATTRIBUTE]),
+            str(commitment[show_and_sell_models.SLOT_ID_ATTRIBUTE]),
+        )
+        plan.add(
+            *show_and_sell_models.cancel_commitment_action(
+                commitment=commitment,
+                new_version=new_signup_versions[pair],
+                updated_at=now_iso,
+            )
+        )
+    for guard_profile_id in reads["profiles"]:
+        # One guard bump per Scout, however many slots this cancellation released for
+        # them: the guard serializes commitment changes across the Scout's whole set of
+        # memberships, and one transaction that moved two of their commitments has to
+        # advance that single number once (§5.13).
+        plan.add(*show_and_sell_models.bump_commitment_guard_action(profile_id=guard_profile_id, updated_at=now_iso))
+    for slot in reads["slots"]:
+        plan.add(
+            *show_and_sell_models.zero_slot_counter_action(
+                show_and_sell_id=event_id,
+                slot_id=str(slot[show_and_sell_models.SLOT_ID_ATTRIBUTE]),
+                expected_version=show_and_sell_models.normalize_required_version(slot.get("version", 1)),
+                updated_at=now_iso,
+            )
+        )
+
+
+def _cancellation_answer(event_id: str) -> Dict[str, Any]:
+    """The one coherent result a cancellation owes: the event, the stock, the Scouts.
+
+    "Released" and "cancelled" mean *by this commit*. Every row this transaction wrote
+    carries the same instant as the event's ``cancelledAt``, so that stamp is what
+    separates the rows this request moved from the rows an earlier request closed —
+    a signup a Scout cancelled themselves through §3.4, or an allocation §3.2 released
+    before the event was called off. Reporting those as this cancellation's work would
+    overstate what the caller did and, on a replay, would answer a different set of rows
+    than the first attempt committed.
+
+    The same rule makes the replay exact: the event row still carries ``cancelledAt``
+    after the commit, so a retry rebuilds the identical answer from the rows the first
+    attempt stamped.
+    """
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    stamp = str(event_row.get(show_and_sell_models.CANCELLED_AT_ATTRIBUTE) or "")
+    released = [
+        show_and_sell_models.allocation_payload(row)
+        for row in show_and_sell_models.event_allocations(event_row)
+        if _written_by_this_commit(row, stamp)
+    ]
+    signups = [
+        show_and_sell_models.signup_admin_payload(row)
+        for row in show_and_sell_models.event_signup_rows(event_id)
+        if _written_by_this_commit(row, stamp)
+    ]
+    return {"event": _event_detail(event_row), "releasedAllocations": released, "cancelledSignups": signups}
+
+
+def _written_by_this_commit(row: Mapping[str, Any], cancelled_at: str) -> bool:
+    """Whether one row is a cancelled-state row carrying this cancellation's own instant.
+
+    A row §3.2 closed on its own — ``RELEASED`` by an allocation mutation, or cancelled
+    earlier — fails here on its state or on its instant, so it is never reported as this
+    request's work. An event row with no ``cancelledAt`` can only answer an empty stamp,
+    which no aggregate row carries, so the result is empty rather than a guess.
+    """
+    status = str(row.get(show_and_sell_models.STATUS_ATTRIBUTE) or "")
+    if status not in (inventory_models.ALLOCATION_CANCELLED, show_and_sell_models.SIGNUP_CANCELLED):
+        return False
+    return str(row.get(show_and_sell_models.UPDATED_AT_ATTRIBUTE) or "") == cancelled_at
+
+
+def _cancel_show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Cancel a future event and release everything it holds (§3.1.4, EVT-M-03).
+
+    Two independent guards say the same thing in different ways, and both are needed:
+    the state must still be ``SCHEDULED``, and the current instant must still precede
+    ``startAt``. The first catches an event the clock has already moved past; the
+    second catches a stored state that has not caught up to an event that has begun.
+    Past ``startAt`` the answer is ``CONFLICT`` — Scouts have begun working, so the
+    event is finished by finalizing it, and §8.8's release arithmetic no longer
+    describes what happened (EVT-M-03-02).
+
+    The reason is required and is written in the same write as the state change: an
+    admin cancelling stock reservations and other people's signups owes a record of
+    why, and a cancellation that committed and then lost its reason would be an
+    untraceable state change.
+
+    The plan size is not checked here. ``WritePlan`` counts every action as it is
+    staged — the marker, the event, each allocation with its movement, each signup,
+    each commitment, each guard, each slot counter — and refuses the 91st before a
+    single DynamoDB call is made (§8.10, EVT-M-03-03). The reduction that makes an
+    oversized event cancellable is real and available to the caller: cancel the
+    signups first, then the event.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    event_id = _resource_id(payload, show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE)
+    expected_version = _expected_version(payload)
+    reason = show_and_sell_models.normalize_cancellation_reason(payload.get("reason"))
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(
+        caller_id=caller_id, operation=CANCEL_SHOW_AND_SELL_FIELD, scope=event_id, idempotency_key=key
+    )
+    replayed = _replay(runner, keys, fingerprint, CANCEL_SHOW_AND_SELL_FIELD, _cancellation_answer)
+    if replayed is not None:
+        return replayed
+
+    # Replay first, then one fact about one row: the state guard and the version guard
+    # are both evaluated against the row this request just read, so the conditional
+    # write cannot match a row whose state was never checked.
+    _require_read_version(event_row, expected_version)
+    show_and_sell_models.require_cancellable(event_row)
+    reads = _cancellation_reads(event_row)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=event_id)
+    _stage_cancellation_writes(
+        plan,
+        event_row,
+        reads,
+        event_id=event_id,
+        expected_version=expected_version,
+        caller_id=caller_id,
+        reason=reason,
+        now_iso=utc_now_iso(),
+        idempotency_key=key,
+    )
+    build_result = _once(lambda: _cancellation_answer(event_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=CANCEL_SHOW_AND_SELL_FIELD,
+        fingerprint=fingerprint,
+        result_id=event_id,
+        load_result=_cancellation_answer,
+        result_payload=build_result,
+    )
+    cancelled = build_result()
+    log.info(
+        "Show & Sell cancelled",
+        show_and_sell_id=event_id,
+        caller_id=caller_id,
+        allocations=len(cancelled["releasedAllocations"]),
+        signups=len(cancelled["cancelledSignups"]),
+        planned_actions=plan.action_count,
+    )
+    return cancelled
+
+
+# --- Event reads (§3.1.5) ------------------------------------------------------
+
+
+def _show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One event's administrative detail (§6.1, EVT-Q-01-01)."""
+    return _event_detail(_event_admin_guard(event, caller_id))
+
+
+def _show_and_sells(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """A campaign's events, soonest first, with state and date-window filters.
+
+    Discovery is the campaign GSI; the rows themselves come back through consistent
+    reads, so the page reports the state the events are in now rather than the state
+    an index had reached when it was last updated. Both filters are part of the
+    cursor scope, so a cursor from a ``FINALIZED`` page cannot walk an unfiltered
+    schedule (PAGE-01).
+
+    The detail reads (allocations and slots) are built for the page's rows only,
+    after the slice, so a one-page request does not pay for events it never sees.
+    """
+    campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    filters = _event_list_filters(event)
+    rows = [
+        row for row in show_and_sell_models.list_campaign_events(unit_campaign_id) if _event_in_window(row, filters)
+    ]
+    rows = [row for row in rows if _event_has_state(row, filters["status"])]
+    token = "#".join("" if filters[name] is None else str(filters[name]) for name in ("status", "startAt", "endAt"))
+    page = dict(paginate_page(rows, f"{SHOW_AND_SELLS_FIELD}#{unit_campaign_id}#{token}", _page_argument(event)))
+    page["items"] = [_event_detail(row) for row in page["items"]]
+    return page
+
+
+def _eligible_scout_ids(caller_id: str, unit_campaign_id: str) -> List[Dict[str, Any]]:
+    """The roster rows on this campaign whose Scout this caller may read.
+
+    The check is the existing Profile access rule — ownership or a READ/WRITE share —
+    run over the campaign's own roster in one batch, so the candidate set is the
+    campaign's members and never some profile id the caller typed. A Unit Admin is not
+    eligible through this path: an admin reads ``showAndSells``, which answers the
+    administrative type, and the participant surface stays participant-shaped.
+    """
+    # Consistent, because this read decides who may see anything. A stale ACTIVE row
+    # that outlives a removal would put a former member back in ``active_ids``, and the
+    # history-only rule for a removed Scout would then hand them the campaign's whole
+    # upcoming schedule (EVT-Q-02-02).
+    roster = unit_campaign_models.list_memberships(unit_campaign_id, consistent_read=True)
+    profile_ids = [str(row["profileId"]) for row in roster]
+    if not profile_ids:
+        return []
+    accessible = batch_check_profile_access(caller_id, profile_ids, "READ")
+    return [row for row in roster if str(row["profileId"]) in accessible]
+
+
+def _opportunity_answer(
+    event_row: Mapping[str, Any], *, timezone_name: str, signups: Sequence[Mapping[str, Any]]
+) -> Dict[str, Any]:
+    """The participant answer for one event: its slots, and the caller's signups.
+
+    The slots are ordered by when they run, and a signup inherits its position from the
+    slot it holds — the signup row carries no interval of its own (§5.13), so the slot
+    partition is the only place that order exists.
+    """
+    slots = show_and_sell_models.event_slot_rows(str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]))
+    ordered = sorted(slots, key=lambda row: (str(row.get("startAt") or ""), str(row.get("slotId") or "")))
+    starts = {str(row.get("slotId") or ""): str(row.get("startAt") or "") for row in ordered}
+    signups = sorted(
+        signups, key=lambda row: (starts.get(str(row.get("slotId") or ""), ""), str(row.get("slotId") or ""))
+    )
+    return dict(
+        show_and_sell_models.opportunity_payload(
+            event_row,
+            timezone_name=timezone_name,
+            slots=ordered,
+            signups=signups,
+        )
+    )
+
+
+def _signup_rows_for(event_id: str, profile_ids: Sequence[str]) -> List[Dict[str, Any]]:
+    """The event's signup rows belonging to any of these Scouts, in a stable order.
+
+    One partition read per event covers every Scout in the caller's set, which is why
+    the profile filter happens on the rows rather than in the key. The order is the
+    slot and profile identity, not an interval: §5.13 gives a signup row no
+    ``startAt``/``endAt``, and sorting on a missing attribute silently degenerates into
+    insertion order (the slot's own order is applied when the payload is built).
+    """
+    wanted = set(profile_ids)
+    rows = [
+        row
+        for row in show_and_sell_models.event_signup_rows(event_id)
+        if str(row.get(show_and_sell_models.PROFILE_ID_ATTRIBUTE) or "") in wanted
+    ]
+    return sorted(rows, key=lambda row: (str(row.get("slotId") or ""), str(row.get("profileId") or "")))
+
+
+def _roster_membership_split(eligible: Sequence[Mapping[str, Any]]) -> Tuple[List[str], List[str]]:
+    """Split a caller's eligible roster rows into current and former members.
+
+    The split decides visibility, not eligibility: an ACTIVE row is what lets a Scout
+    be offered a new event, and a REMOVED row only ever shows what that Scout already
+    took part in. Keeping the two lists apart is what makes that difference a fact
+    about the rows rather than a flag a caller sets.
+    """
+    active: List[str] = []
+    former: List[str] = []
+    for row in eligible:
+        profile_id = str(row["profileId"])
+        if str(row.get("status") or "") == unit_campaign_models.MEMBERSHIP_STATUS_ACTIVE:
+            active.append(profile_id)
+        else:
+            former.append(profile_id)
+    return active, former
+
+
+def _visible_opportunities(
+    unit_campaign_id: str,
+    *,
+    active_ids: Sequence[str],
+    former_ids: Sequence[str],
+    include_past: bool,
+) -> List[Tuple[Dict[str, Any], List[Dict[str, Any]]]]:
+    """The campaign's events that are this caller's to see, soonest first.
+
+    The answer is the candidate set — each event row paired with the signup rows that
+    name it — rather than the built payloads. Hydrating a payload costs a slot partition
+    read per event, so it happens after the page is cut: otherwise ``page.limit`` bounds
+    what the caller receives and nothing bounds what the handler reads, and a campaign
+    with a long history pays for every event on every page.
+
+    Two exclusions, and both are about the Scout rather than the event:
+
+    - A cancelled event is dropped. Its row is still listed for an admin through
+      ``showAndSells``, with its reason and actor; on the participant surface it would
+      read as a cancelled offer, which is nothing a Scout can act on.
+    - With no current membership behind the caller, only the events actually holding
+      one of the former member's signup rows come back (EVT-Q-02-02). A removed Scout
+      keeps the participation history and gains no new opportunity.
+
+    Signup rows are read per event, not per Scout, because the event's own partition
+    covers every Scout in the caller's set at once.
+    """
+    all_ids = list(active_ids) + list(former_ids)
+    candidates: List[Tuple[Dict[str, Any], List[Dict[str, Any]]]] = []
+    for event_row in show_and_sell_models.list_campaign_events(unit_campaign_id):
+        state = show_and_sell_models.derive_event_status(event_row)
+        if state == show_and_sell_models.STATUS_CANCELLED:
+            continue
+        if not include_past and state not in show_and_sell_models.OPEN_STATUSES:
+            continue
+        event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+        signups = _signup_rows_for(event_id, all_ids)
+        if not active_ids and not any(str(row.get("profileId") or "") in former_ids for row in signups):
+            continue
+        candidates.append((dict(event_row), signups))
+    return candidates
+
+
+def _unit_campaign_opportunities(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The events one campaign is offering to this caller's own Scouts (§6.1, EVT-Q-02).
+
+    Who may ask, and what they are shown, are the same question. The caller is
+    eligible through a Profile they can read that holds a roster row on this campaign;
+    with no such Scout the answer is ``NOT_FOUND``, because naming a campaign is not an
+    access path and the answer must not confirm that the campaign has events at all
+    (SEC-03, AUTH-P).
+
+    A Scout removed from the roster keeps visibility of what they already took part in
+    and gains no new opportunity (EVT-Q-02-02): their membership row says ``REMOVED``,
+    which blocks a new signup, so their events are exactly the ones holding one of
+    their signup rows — cancelled ones included, because a cancelled signup is still
+    the participation history that visibility is based on.
+
+    A cancelled event is never an opportunity. Its row may still be listed for an
+    admin, who reads it through ``showAndSells`` with its reason and actor; on the
+    participant surface it would read as a cancelled offer, which is not a thing a
+    Scout can act on.
+    """
+    campaign = unit_campaign_models.load_unit_campaign_or_not_found(_query_argument(event, "unitCampaignId"))
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    include_past = bool((event.get("arguments") or {}).get("includePast"))
+
+    eligible = _eligible_scout_ids(caller_id, unit_campaign_id)
+    if not eligible:
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell not found")
+
+    active_ids, former_ids = _roster_membership_split(eligible)
+    unit = unit_models.load_unit_or_not_found(str(campaign["unitId"]))
+    candidates = _visible_opportunities(
+        unit_campaign_id,
+        active_ids=active_ids,
+        former_ids=former_ids,
+        include_past=include_past,
+    )
+    scope = f"{UNIT_CAMPAIGN_OPPORTUNITIES_FIELD}#{unit_campaign_id}#{caller_id}#{int(include_past)}"
+    timezone_name = str(unit.get("timezone") or "")
+    page = dict(paginate_page(candidates, scope, _page_argument(event)))
+    # Hydration after the slice: only the events on this page pay for their slots.
+    page["items"] = [
+        _opportunity_answer(event_row, timezone_name=timezone_name, signups=signups)
+        for event_row, signups in page["items"]
+    ]
+    return page
+
+
+def _show_and_sell_opportunity(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One event's participant view for one Scout (§6.1, EVT-Q-03).
+
+    Every denial here is ``NOT_FOUND`` and every denial is decided before any
+    participant fact is returned: an unjoined Scout, a Scout the caller cannot read,
+    and an event in another Unit are answered identically, so nothing about the
+    existence of someone else's event or roster row is disclosed (SEC-03, EVT-Q-03-02).
+
+    A Unit Admin may read the same view, which is the one case where the caller is not
+    the Scout's Profile holder — and even then the Scout must hold a roster row on the
+    event's campaign, because "ineligible Scout receives ``NOT_FOUND``" is about the
+    Scout's eligibility, not about who is asking.
+    """
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(_query_argument(event, SHOW_AND_SELL_ID_ARGUMENT))
+    profile_id = _query_argument(event, "profileId")
+    unit_campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+
+    membership = unit_campaign_models.read_membership(unit_campaign_id, profile_id)
+    if membership is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell not found")
+    is_admin = unit_auth.is_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+    if not is_admin and not check_profile_access(caller_id, profile_id, "READ"):
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell not found")
+
+    # A cancelled event is answered exactly like an event that was never there. The
+    # campaign-level read already drops it, and this field answers the participant type
+    # rather than the administrative one: leaving it readable would give a Scout a
+    # per-event path to a cancelled offer that the list refuses, so the two surfaces
+    # would disagree about the same row (EVT-Q-02-02, EVT-Q-03-02).
+    if show_and_sell_models.derive_event_status(event_row) == show_and_sell_models.STATUS_CANCELLED:
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell not found")
+
+    signups = _signup_rows_for(str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]), [profile_id])
+    removed = str(membership.get("status") or "") != unit_campaign_models.MEMBERSHIP_STATUS_ACTIVE
+    if removed and not signups:
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell not found")
+
+    unit = unit_models.load_unit_or_not_found(str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+    timezone_name = str(unit.get("timezone") or "")
+    return _opportunity_answer(event_row, timezone_name=timezone_name, signups=signups)
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -3790,6 +4708,13 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     REVERSE_FULFILLMENT_FIELD: _reverse_fulfillment,
     ORDER_FULFILLMENTS_FIELD: _order_fulfillments,
     UNIT_SCOUT_ORDERS_FIELD: _unit_scout_campaign_orders,
+    CREATE_SHOW_AND_SELL_FIELD: _create_show_and_sell,
+    UPDATE_SHOW_AND_SELL_FIELD: _update_show_and_sell,
+    CANCEL_SHOW_AND_SELL_FIELD: _cancel_show_and_sell,
+    SHOW_AND_SELL_FIELD: _show_and_sell,
+    SHOW_AND_SELLS_FIELD: _show_and_sells,
+    UNIT_CAMPAIGN_OPPORTUNITIES_FIELD: _unit_campaign_opportunities,
+    SHOW_AND_SELL_OPPORTUNITY_FIELD: _show_and_sell_opportunity,
 }
 
 

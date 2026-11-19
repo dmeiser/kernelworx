@@ -162,6 +162,7 @@ locals {
         UNITS_TABLE_NAME          = var.table_names.units
         UNIT_CAMPAIGNS_TABLE_NAME = var.table_names.unit_campaigns
         INVENTORY_TABLE_NAME      = var.table_names.inventory
+        SHOW_AND_SELLS_TABLE_NAME = var.table_names.show_and_sells
       }
     }
     "delete-campaign-orders" = {

@@ -1223,3 +1223,53 @@ resource "aws_appsync_resolver" "reverse_individual_order_fulfillment" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Stage 3.1 §3.1.2-§3.1.4: the event lifecycle writes. Same unit resolver and same
+# UnitOperationsDS as the rest of the Unit tenant, because the authorization is the
+# same check every other Unit field makes — a current UnitAccessGrant on the Unit the
+# event row itself names — and because the event aggregate has exactly one write
+# owner: one handler routes every write that may move `ShowAndSell.version`, which is
+# what every later allocation, slot, signup, sale and finalization mutation conditions
+# on. Splitting these across a second Lambda would put that serialization point in two
+# deployments.
+resource "aws_appsync_resolver" "create_show_and_sell" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "createShowAndSell"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "update_show_and_sell" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "updateShowAndSell"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "cancel_show_and_sell" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "cancelShowAndSell"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
