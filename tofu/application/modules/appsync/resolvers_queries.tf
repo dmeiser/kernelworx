@@ -938,3 +938,17 @@ resource "aws_appsync_resolver" "show_and_sell_opportunity_query" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+resource "aws_appsync_resolver" "event_inventory_allocations_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "eventInventoryAllocations"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

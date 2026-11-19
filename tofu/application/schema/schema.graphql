@@ -1939,6 +1939,14 @@ type ShowAndSellAllocation {
   updatedAt: AWSDateTime
 }
 
+"""A page of raw allocation facts for one Unit Campaign (data query §6.2, DATA-Q-03). It carries rows and never a total: assigned, unassigned, and overage totals are the browser's arithmetic, over every page it fetched."""
+type EventInventoryAllocationConnection {
+  """The allocation rows on this page, ordered by product then event."""
+  items: [ShowAndSellAllocation!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+}
+
 """One working slot of an event (data model §5.12): an arbitrary interval inside the event's immutable interval, a capacity, and the counter every signup write maintains transactionally."""
 type ShowAndSellSlot {
   """The event this slot belongs to."""
@@ -2182,6 +2190,52 @@ type CancelShowAndSellPayload {
   cancelledSignups: [ShowAndSellSignup!]!
 }
 
+"""One product's stock target for one event (checklist §3.2.1). A target, not a delta: the request says how many the event should hold, and the resolver works out what that changes."""
+input AllocationTargetInput {
+  """The catalog product being assigned; it must be a product of this campaign's catalog."""
+  productId: ID!
+  """How many the event should hold after this write (>= 0). Zero releases the remainder this event still holds."""
+  quantity: Int!
+}
+
+"""Input for assignShowAndSellInventory. A batch is one atomic save: at most one target per product, no product-wide cap, and the batch is refused before any write when its computed plan could no longer be finalized (§8.10)."""
+input AssignShowAndSellInventoryInput {
+  """The event whose stock is being set."""
+  showAndSellId: ID!
+  """Non-empty, at most one entry per product. A product left out keeps whatever it already holds."""
+  items: [AllocationTargetInput!]!
+  """The event version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""A save that was allowed and said: the campaign holds less than its open allocations promise. Reported, never clamped, and never a refusal — a campaign may hold a morning and an afternoon event against the same four Kernels (spec ALLOC-03)."""
+type AllocationWarning {
+  """What the warning is: `SEQUENTIAL_OVER_ASSIGNMENT`."""
+  code: String!
+  """The product the warning is about."""
+  productId: ID!
+  """Sellable Kernel stock for that product right now."""
+  currentStockQty: Int!
+  """What every open allocation of this campaign holds for that product, this write included."""
+  assignedQty: Int!
+  """assignedQty - currentStockQty."""
+  overageQty: Int!
+  """The sentence for the tooltip, carrying the product, the stock, the assigned total, and the overage."""
+  message: String!
+}
+
+"""What one assignment save did: the event's allocations, each product's position, and any over-assignment it is warning about (§6.2)."""
+type AssignShowAndSellInventoryPayload {
+  """This event's allocation rows after the write, for the products the event lists."""
+  allocations: [ShowAndSellAllocation!]!
+  """The position for each of those products, with the assigned/unassigned/overage quantities the save moved."""
+  inventoryPositions: [InventoryPosition!]!
+  """One warning per product whose open allocations now exceed sellable stock; empty when nothing is over-assigned."""
+  warnings: [AllocationWarning!]!
+}
+
 # ============================================================================
 # Query Root
 # ============================================================================
@@ -2342,6 +2396,21 @@ type Query {
     """The Scout whose view is being read."""
     profileId: ID!
   ): ShowAndSellOpportunity!
+
+  # Show & Sell — raw allocation facts (checklist §3.2.4, data query §6.2)
+  """One Unit Campaign's allocation rows, product then event: the interval each was decided on, and allocated/sold/released/remaining quantities with the row's version. Raw facts only — no assigned/unassigned/overage total is computed here, because the browser fetches every page and adds them up itself (DATA-Q-03). Unit Admin for the campaign's Unit."""
+  eventInventoryAllocations(
+    """The Unit Campaign whose allocations are being read."""
+    unitCampaignId: ID!
+    """Filter to one product."""
+    productId: ID
+    """Filter to one event."""
+    showAndSellId: ID
+    """Filter to one allocation state."""
+    status: AllocationStatus
+    """Pagination parameters."""
+    page: PageInput
+  ): EventInventoryAllocationConnection!
 
   # Account queries
   """The authenticated caller's account. The row is created automatically on first read if it does not yet exist."""
@@ -2645,6 +2714,11 @@ type Mutation {
     """The cancellation."""
     input: CancelShowAndSellInput!
   ): CancelShowAndSellPayload!
+  """Set how many Kernels a live event holds, per product, as one atomic save: the allocation rows, one movement each, the balance versions, the event's cumulative productIds, and the event version — while the event is reopened, only the admin's draft inputs, because a reopened event's stock answer belongs to re-finalization. A product left out keeps what it holds; a target of zero releases that product's remainder; what the event already sold is never taken back. Assigning more than the campaign holds at a shared instant is refused and writes nothing, and assigning more than it holds across events that never overlap saves with a warning naming the product, the stock, the assigned total, and the overage. Physical stock never moves. Unit Admin for the event's Unit."""
+  assignShowAndSellInventory(
+    """The assignment batch."""
+    input: AssignShowAndSellInventoryInput!
+  ): AssignShowAndSellInventoryPayload!
 
   # Account mutations
   """Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account."""

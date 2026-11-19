@@ -148,6 +148,12 @@ PROFILE_ID_ATTRIBUTE = "profileId"
 CAMPAIGN_ID_ATTRIBUTE = "campaignId"
 SHOW_AND_SELL_ID_ATTRIBUTE = "showAndSellId"
 
+#: The state attribute of an allocation or custody-shaped row (§9.2). It shares a name
+#: with the event's own ``status``, and that is deliberate: :func:`_status` and
+#: :func:`normalize_allocation_status` both read it, and a second spelling of the same
+#: attribute is how a filter starts matching nothing.
+STATUS_ATTRIBUTE = "status"
+
 BALANCE_QUANTITY_ATTRIBUTES: frozenset[str] = frozenset(
     {KERNEL_PHYSICAL_QTY, SOLD_IN_POSSESSION_QTY, COUNCIL_ON_ORDER_QTY}
 )
@@ -908,7 +914,7 @@ def assigned_open_qty(allocations: Iterable[Mapping[str, Any]]) -> int:
 
 
 def _status(item: Mapping[str, Any]) -> str:
-    value = item.get("status")
+    value = item.get(STATUS_ATTRIBUTE)
     return value if isinstance(value, str) else ""
 
 
@@ -978,14 +984,33 @@ def read_inventory_balance(unit_campaign_id: str, product_id: str) -> Optional[D
     return cast(Optional[Dict[str, Any]], dict(item) if isinstance(item, dict) else None)
 
 
+def exact_product_rows(rows: Iterable[Mapping[str, Any]], product_id: str) -> List[Dict[str, Any]]:
+    """Keep the rows whose own ``productId`` attribute is exactly this product.
+
+    ``PRODUCT#<productId>#`` is a sort-key range, not an identity test. Product ids carry
+    ``#`` inside them (``CATALOG#fixture-default#prod-1``, and §6.3 resolves an ambiguous
+    segment from the row's own attribute rather than a split of its key), so the range that
+    finds one product also finds every row of a product spelled ``<productId>#<extra>``.
+    Reading a range as if it were an identity is how a write to the first product lands on
+    the second one's row: the position, the allocation, and the audit trail then disagree
+    about which product moved. The movement reader already refuses that class
+    (:func:`list_inventory_movements` filters an exact ``productId`` alongside its key
+    prefix); this is the same predicate for the balance, allocation and custody rows.
+    """
+    wanted = normalize_inventory_id(product_id, "productId")
+    return [dict(row) for row in rows if str(row.get(PRODUCT_ID_ATTRIBUTE)) == wanted]
+
+
 def read_inventory_product_rows(unit_campaign_id: str, product_id: str) -> List[Dict[str, Any]]:
     """Every row under one product prefix: balance, allocations, custody, movements.
 
     One consistent query answers a position for that product, which is what §8.4
     requires before a stock write: the balance and the open allocations that compete
-    with it must come from the same read.
+    with it must come from the same read. The range is then narrowed to this exact
+    product — a prefix read is not an identity test, and a nested product id shares the
+    range of its own prefix parent (:func:`exact_product_rows`).
     """
-    return list(
+    return exact_product_rows(
         query_all_items(
             tables.inventory,
             {
@@ -997,7 +1022,8 @@ def read_inventory_product_rows(unit_campaign_id: str, product_id: str) -> List[
                 },
                 "ConsistentRead": True,
             },
-        )
+        ),
+        product_id,
     )
 
 
@@ -1029,6 +1055,23 @@ def read_scout_custody(unit_campaign_id: str, product_id: str, profile_id: str) 
     return cast(Optional[Dict[str, Any]], dict(item) if isinstance(item, dict) else None)
 
 
+def _filter_rows(
+    rows: Sequence[Mapping[str, Any]], filters: Sequence[tuple[str, Optional[str]]]
+) -> List[Dict[str, Any]]:
+    """Keep the rows whose own attribute equals each requested value.
+
+    The filters are (attribute, value) pairs and an unset filter is skipped, which is how
+    one helper serves every optional filter of the campaign-scoped reads. Copying each row
+    on the way out keeps the caller's rows its own: a caller that sorts or annotates a page
+    must not annotate a dict the model still holds.
+    """
+    kept: List[Dict[str, Any]] = [dict(row) for row in rows]
+    for attribute, value in filters:
+        if value is not None:
+            kept = [row for row in kept if row.get(attribute) == value]
+    return kept
+
+
 def campaign_custody_rows(
     unit_campaign_id: str, *, profile_id: Optional[str] = None, product_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
@@ -1042,15 +1085,47 @@ def campaign_custody_rows(
     GSI is eventually consistent.
     """
     rows = [
-        cast(Dict[str, Any], dict(row))
+        row
         for row in read_campaign_inventory_rows(unit_campaign_id)
         if row.get(ENTITY_TYPE_ATTRIBUTE) == CUSTODY_ENTITY_TYPE
     ]
-    if profile_id is not None:
-        rows = [row for row in rows if row.get(PROFILE_ID_ATTRIBUTE) == profile_id]
-    if product_id is not None:
-        rows = [row for row in rows if row.get(PRODUCT_ID_ATTRIBUTE) == product_id]
-    return rows
+    return _filter_rows(rows, ((PROFILE_ID_ATTRIBUTE, profile_id), (PRODUCT_ID_ATTRIBUTE, product_id)))
+
+
+def campaign_allocation_rows(
+    unit_campaign_id: str,
+    *,
+    product_id: Optional[str] = None,
+    show_and_sell_id: Optional[str] = None,
+    status: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """One campaign's ``EventInventoryAllocation`` rows, in sort-key order (§6.3).
+
+    The product id is the first component of an allocation's sort key, so the campaign read
+    answers allocations grouped per product, which is the order the assignment screen and
+    the browser-side overage arithmetic want (DATA-Q-03). The filters are applied to the
+    rows this read already returned rather than through a ``FilterExpression``, for the same
+    reason :func:`campaign_custody_rows` states: the read that decides what a mutation may
+    write and the read that answers about it have to be the same read, and an index lags a
+    write.
+
+    ``status`` is validated before it is compared, so an unknown spelling is
+    ``INVALID_INPUT`` rather than an empty page that looks like "no allocations".
+    """
+    wanted = None if status is None else normalize_allocation_status(status)
+    rows = [
+        row
+        for row in read_campaign_inventory_rows(unit_campaign_id)
+        if row.get(ENTITY_TYPE_ATTRIBUTE) == ALLOCATION_ENTITY_TYPE
+    ]
+    return _filter_rows(
+        rows,
+        (
+            (PRODUCT_ID_ATTRIBUTE, product_id),
+            (SHOW_AND_SELL_ID_ATTRIBUTE, show_and_sell_id),
+            (STATUS_ATTRIBUTE, wanted),
+        ),
+    )
 
 
 def product_inventory_sections(rows: Sequence[Mapping[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:

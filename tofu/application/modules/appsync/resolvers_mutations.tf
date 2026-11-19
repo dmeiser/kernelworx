@@ -1273,3 +1273,17 @@ resource "aws_appsync_resolver" "cancel_show_and_sell" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+resource "aws_appsync_resolver" "assign_show_and_sell_inventory" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "assignShowAndSellInventory"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

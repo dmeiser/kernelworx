@@ -33,10 +33,12 @@ import pytest
 from src.handlers.unit_operations import (
     ADJUST_COUNCIL_FIELD,
     ADJUST_INVENTORY_FIELD,
+    ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD,
     CANCEL_SHOW_AND_SELL_FIELD,
     CREATE_INVITE_FIELD,
     CREATE_UNIT_CAMPAIGN_FIELD,
     CREATE_UNIT_FIELD,
+    EVENT_INVENTORY_ALLOCATIONS_FIELD,
     FULFILL_LINE_FIELD,
     INVENTORY_MOVEMENTS_FIELD,
     INVENTORY_POSITIONS_FIELD,
@@ -944,6 +946,77 @@ def test_an_event_with_allocations_reads_and_releases_the_inventory_table(
     assert ("PutItem", _physical_table("inventory")) in inventory_calls, "and its movement is a second write"
     assert ("TransactWriteItems", _physical_table("inventory")) in inventory_calls, (
         "both ride the same transaction as the event row, so the role needs the API grant too"
+    )
+    assert_within_role_scope(dynamodb_calls.calls)
+    assert_only_the_join_link_writes_a_legacy_table(dynamodb_calls.calls)
+
+
+def test_the_stock_assignment_and_the_allocation_read_stay_inside_the_shipped_role(
+    seeded: Dict[str, Any],
+    inventory_table: Any,
+    show_and_sells_table: Any,
+    dynamodb_calls: DynamoDbCallRecorder,
+) -> None:
+    """§3.2.3 and §3.2.4: one save writes an allocation, a movement and a balance version.
+
+    All three live on the inventory table and ride the same ``TransactWriteItems`` as the
+    event row and its idempotency marker, and the raw allocation read is a ``Query`` on the
+    campaign's inventory partition with the filters applied in memory. A missing grant on
+    any of those is an ``AccessDeniedException`` that cancels the whole save, and moto never
+    evaluates IAM — so this is the only place that sees it before ``dev`` does.
+    """
+    now = datetime.now(timezone.utc)
+    start, end = (now + timedelta(hours=72)).isoformat(), (now + timedelta(hours=76)).isoformat()
+    event_id = "SSE#assign-role-scope"
+    show_and_sells_table.put_item(
+        Item=ssm.build_show_and_sell_item(
+            show_and_sell_id=event_id,
+            unit_id=PACK_3149,
+            unit_campaign_id=PACK_3149_FALL,
+            location_name="Aurora armory lot",
+            start_at=start,
+            end_at=end,
+            created_by_account_id=account_id("Avery"),
+            now_iso=now.isoformat(),
+        )
+    )
+    inventory_table.put_item(
+        Item=inv.build_inventory_balance_item(
+            unit_campaign_id=PACK_3149_FALL,
+            product_id=FIXTURE_PRODUCT_ID,
+            kernel_physical_qty=6,
+            sold_in_possession_qty=0,
+            council_on_order_qty=0,
+            now_iso=now.isoformat(),
+        )
+    )
+
+    dynamodb_calls.attach()
+
+    answer = _ok(
+        _call(
+            ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD,
+            "Avery",
+            mutation={
+                "showAndSellId": event_id,
+                "items": [{"productId": FIXTURE_PRODUCT_ID, "quantity": 4}],
+                "version": {"expectedVersion": 1},
+                **_idem("assign-role-scope"),
+            },
+        )
+    )
+    assert [(row["showAndSellId"], row["allocatedQty"]) for row in answer["allocations"]] == [(event_id, 4)]
+
+    page = _ok(_call(EVENT_INVENTORY_ALLOCATIONS_FIELD, "Avery", arguments={"unitCampaignId": PACK_3149_FALL}))
+    assert [(row["productId"], row["remainingQty"]) for row in page["items"]] == [(FIXTURE_PRODUCT_ID, 4)]
+
+    inventory = _physical_table("inventory")
+    inventory_calls = {(action, table) for action, table in dynamodb_calls.calls if table == inventory}
+    assert ("PutItem", inventory) in inventory_calls, "the allocation row and its movement are inventory writes"
+    assert ("UpdateItem", inventory) in inventory_calls, "the balance version bump is an inventory write"
+    assert ("Query", inventory) in inventory_calls, "the allocation read is a partition query, never a scan"
+    assert ("TransactWriteItems", inventory) in inventory_calls, (
+        "the whole save is one transaction, so the role needs the API grant on this table too"
     )
     assert_within_role_scope(dynamodb_calls.calls)
     assert_only_the_join_link_writes_a_legacy_table(dynamodb_calls.calls)
