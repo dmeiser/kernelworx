@@ -39,6 +39,7 @@ from src.handlers.unit_operations import (
 )
 from src.utils import inventory_models as inv
 from src.utils import show_and_sell_models as ssm
+from src.utils import unit_campaign_models as ucm
 from tests.unit.show_sell_fixtures import (
     CREW_529_SPRING,
     PACK_3149,
@@ -58,7 +59,9 @@ OTHER_UNIT_CAMPAIGN = CREW_529_SPRING
 INACTIVE_CAMPAIGN = PACK_3149_OLD
 PRODUCT = "CATALOG#fixture-default#prod-1"
 OTHER_PRODUCT = "CATALOG#fixture-default#prod-2"
+RELEASED_PRODUCT = "CATALOG#fixture-default#prod-3"
 LOCATION = "Aurora armory lot"
+
 
 # Past and future, measured from the run rather than from a calendar date: the
 # resolvers derive state from ``utc_now_iso()``, so a literal "future" date goes
@@ -272,7 +275,28 @@ def _seed_signup(
     persona: str = "Devon",
     status: str = ssm.SIGNUP_ACTIVE,
     version: int = 1,
+    start_at: str = FUTURE_START,
+    end_at: str = FUTURE_END,
+    capacity: int = 4,
 ) -> Dict[str, Any]:
+    """One signup row, in the shape §3.4 writes, with the slot it belongs to.
+
+    The slot is seeded alongside it because §5.13 gives ``ShowAndSellSignup`` no
+    ``startAt``/``endAt`` — a signup runs when its slot runs — so a signup with no slot
+    row is a broken aggregate, and a fixture that denormalized the interval onto the
+    signup would hide any projection that read it from the wrong row. An existing slot
+    row is left alone so a test that configured capacity or a counter first keeps it.
+    """
+    if "Item" not in show_and_sells_table.get_item(Key=ssm.slot_key(event_id, slot_id)):
+        _seed_slot(
+            show_and_sells_table,
+            event_id,
+            slot_id,
+            active=0 if status == ssm.SIGNUP_CANCELLED else 1,
+            capacity=capacity,
+            start_at=start_at,
+            end_at=end_at,
+        )
     profile_id = _profile(persona)
     item = {
         "pk": ssm.show_and_sell_pk(event_id),
@@ -284,8 +308,6 @@ def _seed_signup(
         ssm.PROFILE_ID_ATTRIBUTE: profile_id,
         ssm.SLOT_ID_ATTRIBUTE: slot_id,
         ssm.STATUS_ATTRIBUTE: status,
-        ssm.START_AT_ATTRIBUTE: FUTURE_START,
-        ssm.END_AT_ATTRIBUTE: FUTURE_END,
         ssm.ACTUAL_MINUTES_ATTRIBUTE: 30,
         ssm.SIGNED_UP_BY_ATTRIBUTE: f"ACCOUNT#{persona.lower()}-fixture",
         ssm.VERSION_ATTRIBUTE: version,
@@ -592,7 +614,9 @@ def test_evt_m_02_01_an_update_may_not_reschedule_or_rename_the_event_itself(
     """EVT-M-02-01: there is no rescheduling input, and a smuggled one is a refusal."""
     event_id = _ok(_create(key="create-1"))["showAndSellId"]
     for smuggled in ("startAt", "endAt", "status", "version", "productIds", "unitId", "createdByAccountId"):
-        refused = assert_is_error(_update(event_id=event_id, key=f"update-{smuggled}", **{smuggled: "x"}), "INVALID_INPUT")
+        refused = assert_is_error(
+            _update(event_id=event_id, key=f"update-{smuggled}", **{smuggled: "x"}), "INVALID_INPUT"
+        )
         assert smuggled in refused["message"]
     assert_is_error(_update(event_id=event_id, key="update-empty"), "INVALID_INPUT")
     assert _stored(world["show_and_sells"], event_id)["version"] == 1
@@ -673,6 +697,100 @@ def test_evt_m_02_03_an_update_replays_and_a_non_admin_is_refused(world: Dict[st
 # --- EVT-M-03: cancelShowAndSell (§3.1.4) ---------------------------------------
 
 
+def test_ver_01_a_mutation_holding_a_version_that_is_not_the_row_it_read_is_refused(
+    world: Dict[str, Any],
+) -> None:
+    """VER-01 / FUNC-3: the version the caller names must be the version that was read.
+
+    The write's version condition only proves nobody moved the row since the *caller*
+    read it. Every state rule — "still editable", "still cancellable" — is answered from
+    the row *this request* read a moment earlier, so a supplied version that names a
+    different row splits the two: a request holding version 2 can pass the editable
+    check against a freshly-read SCHEDULED version 1, a competing cancellation can then
+    commit version 2, and the write matches a row whose state was never checked.
+    """
+    event_id = _seed_event(world["show_and_sells"], "SSE#version-race")
+
+    refused = assert_is_error(_update(event_id=event_id, expected_version=2, key="update-ahead"), "CONFLICT")
+    assert "changed since you read it" in str(refused.get("message") or "")
+    refused = assert_is_error(_cancel(event_id=event_id, expected_version=2, key="cancel-ahead"), "CONFLICT")
+    assert "changed since you read it" in str(refused.get("message") or "")
+
+    stored = _stored(world["show_and_sells"], event_id)
+    assert stored[ssm.VERSION_ATTRIBUTE] == 1
+    assert stored[ssm.STATUS_ATTRIBUTE] == ssm.STATUS_SCHEDULED, "a refused mutation writes nothing"
+
+
+def test_evt_m_02_04_an_update_that_arrives_after_a_cancellation_meets_the_state_guard(
+    world: Dict[str, Any],
+) -> None:
+    """EVT-M-02-04: the update-versus-cancel interleaving, with both guards in place.
+
+    The update arrives carrying the version the cancellation produced, so the version
+    condition alone would let it write. It is the state guard that refuses it, which is
+    only honest because the version check above proved the row it checked is the row it
+    writes.
+    """
+    event_id = _seed_event(world["show_and_sells"], "SSE#cancel-then-update")
+    _ok(_cancel(event_id=event_id, key="cancel-1"))
+
+    assert_is_error(_update(event_id=event_id, expected_version=2, locationName="after the storm"), "CONFLICT")
+    stored = _stored(world["show_and_sells"], event_id)
+    assert stored[ssm.LOCATION_NAME_ATTRIBUTE] == LOCATION
+    assert stored[ssm.VERSION_ATTRIBUTE] == 2, "a refused update does not advance the event again"
+    assert stored[ssm.CANCELLATION_REASON_ATTRIBUTE] == "storm warning"
+
+
+def test_evt_m_03_04_a_second_cancellation_cannot_rewrite_the_first_one_s_audit(
+    world: Dict[str, Any],
+) -> None:
+    """EVT-M-03-04: the cancellation's own precondition rides in its write.
+
+    A second cancellation of an empty event carrying the version the first produced
+    would otherwise replace the reason, actor and instant of the cancellation that
+    actually happened, and move the event to a third version.
+    """
+    event_id = _seed_event(world["show_and_sells"], "SSE#cancel-twice")
+    first = _ok(_cancel(event_id=event_id, key="cancel-1"))
+
+    assert_is_error(
+        _cancel(event_id=event_id, expected_version=2, reason="late second thought", key="cancel-2"), "CONFLICT"
+    )
+    stored = _stored(world["show_and_sells"], event_id)
+    assert stored[ssm.CANCELLATION_REASON_ATTRIBUTE] == "storm warning"
+    assert stored[ssm.CANCELLED_AT_ATTRIBUTE] == first["event"]["cancelledAt"]
+    assert stored[ssm.VERSION_ATTRIBUTE] == 2
+    assert _stored(world["show_and_sells"], event_id) == _stored(world["show_and_sells"], event_id)
+
+
+def test_evt_m_02_05_an_explicit_clear_is_not_the_replay_of_an_omitted_field(
+    world: Dict[str, Any],
+) -> None:
+    """EVT-M-02-05 / IDEM: ``address`` omitted leaves it alone, ``address: null`` clears it.
+
+    SDL §6 makes those two requests different requests. Folding nulls out of the update
+    fingerprint gives them the same one, so a retry of "change the location" would answer
+    a later "clear the address" as already done and clear nothing.
+    """
+    event_id = _ok(_create(key="create-1", address="12 Aurora Way"))["showAndSellId"]
+
+    first = _ok(_update(event_id=event_id, expected_version=1, key="same-key", locationName="replayed lot"))
+    assert first["address"] == "12 Aurora Way"
+
+    reused = assert_is_error(
+        _update(event_id=event_id, expected_version=1, key="same-key", address=None), "INVALID_INPUT"
+    )
+    assert "different request content" in str(reused.get("message") or ""), (
+        f"an explicit clear must not be answered as the replay of an omitted field: {reused!r}"
+    )
+    assert _stored(world["show_and_sells"], event_id)[ssm.ADDRESS_ATTRIBUTE] == "12 Aurora Way"
+
+    cleared = _ok(_update(event_id=event_id, expected_version=2, key="clear-key", address=None))
+    assert cleared["address"] is None
+    stored_after = _stored(world["show_and_sells"], event_id)
+    assert ssm.ADDRESS_ATTRIBUTE in stored_after and stored_after[ssm.ADDRESS_ATTRIBUTE] is None
+
+
 def _cancel_ready_event(world: Dict[str, Any], event_id: str = "SSE#cancel-me") -> str:
     """An event holding stock, a slot, a signup, and the Scout-side commitment."""
     _seed_event(world["show_and_sells"], event_id, product_ids=[PRODUCT])
@@ -705,9 +823,7 @@ def test_evt_m_03_01_cancelling_releases_stock_and_signups_in_one_result(world: 
     assert stored[ssm.STATUS_ATTRIBUTE] == ssm.STATUS_CANCELLED
     assert stored[ssm.CANCELLATION_REASON_ATTRIBUTE] == "storm warning"
 
-    allocation = dict(
-        world["inventory"].get_item(Key=ssm.event_allocation_key(CAMPAIGN, PRODUCT, event_id))["Item"]
-    )
+    allocation = dict(world["inventory"].get_item(Key=ssm.event_allocation_key(CAMPAIGN, PRODUCT, event_id))["Item"])
     assert allocation[inv.REMAINING_QTY] == 0
     assert allocation[inv.RELEASED_QTY] == 8, "the read remainder joins the read released amount"
     assert allocation[ssm.STATUS_ATTRIBUTE] == inv.ALLOCATION_CANCELLED
@@ -716,10 +832,18 @@ def test_evt_m_03_01_cancelling_releases_stock_and_signups_in_one_result(world: 
     assert slot[ssm.ACTIVE_SIGNUP_COUNT_ATTRIBUTE] == 0, "the counter is zeroed, not left counting"
     assert slot[ssm.VERSION_ATTRIBUTE] == 2
 
-    signup = dict(world["show_and_sells"].get_item(Key={"pk": ssm.show_and_sell_pk(event_id), "sk": ssm.signup_sk("slot-1", _profile("Devon"))})["Item"])
+    signup = dict(
+        world["show_and_sells"].get_item(
+            Key={"pk": ssm.show_and_sell_pk(event_id), "sk": ssm.signup_sk("slot-1", _profile("Devon"))}
+        )["Item"]
+    )
     assert signup[ssm.STATUS_ATTRIBUTE] == ssm.SIGNUP_CANCELLED
 
-    commitment = dict(world["unit_campaigns"].get_item(Key=ssm.commitment_key(_profile("Devon"), FUTURE_START, CAMPAIGN, "slot-1"))["Item"])
+    commitment = dict(
+        world["unit_campaigns"].get_item(Key=ssm.commitment_key(_profile("Devon"), FUTURE_START, CAMPAIGN, "slot-1"))[
+            "Item"
+        ]
+    )
     assert commitment[ssm.STATUS_ATTRIBUTE] == ssm.SIGNUP_CANCELLED
     guard = dict(world["unit_campaigns"].get_item(Key=ssm.commitment_guard_key(_profile("Devon")))["Item"])
     assert guard["commitmentVersion"] == 4, "the guard is incremented by the write itself"
@@ -735,7 +859,14 @@ def test_evt_m_03_01_cancelling_releases_stock_and_signups_in_one_result(world: 
     ]
     assert len(movements) == 1
     assert movements[0]["movementType"] == inv.EVENT_RELEASE
-    assert movements[0][inv.ASSIGNED_DELTA] == -8
+    # The allocation's ``releasedQty`` is the cumulative total (1 + 7 = 8); the movement
+    # is a delta, so it says -7. A movement of -8 would count the earlier release twice
+    # against an allocation that only ever held 10.
+    assert movements[0][inv.ASSIGNED_DELTA] == -7
+    assert movements[0][inv.ASSIGNED_DELTA] != -8, "the cumulative total belongs on the allocation row only"
+    # SDL §5.8: ``inventoryVersion`` is non-null only when an ``InventoryPosition``
+    # moved. A cancellation releases a reservation; it writes no balance.
+    assert inv.INVENTORY_VERSION_ATTRIBUTE not in movements[0]
     for untouched in (
         inv.KERNEL_PHYSICAL_DELTA,
         inv.WITH_SCOUT_DELTA,
@@ -757,7 +888,9 @@ def test_evt_m_03_02_cancelling_at_or_after_start_is_refused_and_changes_nothing
         refused = assert_is_error(_cancel(event_id=event_id), "CONFLICT")
         assert "has not started" in refused["message"]
         assert _stored(world["show_and_sells"], event_id)[ssm.STATUS_ATTRIBUTE] == ssm.STATUS_SCHEDULED
-        allocation = dict(world["inventory"].get_item(Key=ssm.event_allocation_key(CAMPAIGN, PRODUCT, event_id))["Item"])
+        allocation = dict(
+            world["inventory"].get_item(Key=ssm.event_allocation_key(CAMPAIGN, PRODUCT, event_id))["Item"]
+        )
         assert allocation[ssm.STATUS_ATTRIBUTE] == inv.ALLOCATION_OPEN
 
 
@@ -768,17 +901,20 @@ def test_evt_m_03_02_a_scout_may_not_cancel_and_a_second_cancel_is_refused(world
         assert_is_error(_cancel(caller=persona, event_id=event_id, key=f"cancel-{persona}"), "NOT_FOUND")
     _ok(_cancel(event_id=event_id))
     assert_is_error(_cancel(event_id=event_id, expected_version=2, key="cancel-2"), "CONFLICT")
-    assert len(
-        [
-            row
-            for row in world["inventory"].query(
-                KeyConditionExpression="#pk = :pk",
-                ExpressionAttributeNames={"#pk": "pk"},
-                ExpressionAttributeValues={":pk": inv.inventory_pk(CAMPAIGN)},
-            )["Items"]
-            if row.get("entityType") == inv.MOVEMENT_ENTITY_TYPE
-        ]
-    ) == 1, "a refused second cancel released nothing twice"
+    assert (
+        len(
+            [
+                row
+                for row in world["inventory"].query(
+                    KeyConditionExpression="#pk = :pk",
+                    ExpressionAttributeNames={"#pk": "pk"},
+                    ExpressionAttributeValues={":pk": inv.inventory_pk(CAMPAIGN)},
+                )["Items"]
+                if row.get("entityType") == inv.MOVEMENT_ENTITY_TYPE
+            ]
+        )
+        == 1
+    ), "a refused second cancel released nothing twice"
 
 
 def test_evt_m_03_01_cancelling_an_empty_event_returns_empty_lists(world: Dict[str, Any]) -> None:
@@ -815,7 +951,9 @@ def test_evt_m_03_01_one_scout_holding_two_slots_is_released_with_one_guard_bump
         slot = dict(world["show_and_sells"].get_item(Key=ssm.slot_key(event_id, slot_id))["Item"])
         assert slot[ssm.ACTIVE_SIGNUP_COUNT_ATTRIBUTE] == 0
         commitment = dict(
-            world["unit_campaigns"].get_item(Key=ssm.commitment_key(_profile("Devon"), FUTURE_START, CAMPAIGN, slot_id))["Item"]
+            world["unit_campaigns"].get_item(
+                Key=ssm.commitment_key(_profile("Devon"), FUTURE_START, CAMPAIGN, slot_id)
+            )["Item"]
         )
         assert commitment[ssm.STATUS_ATTRIBUTE] == ssm.SIGNUP_CANCELLED
     guard = dict(world["unit_campaigns"].get_item(Key=ssm.commitment_guard_key(_profile("Devon")))["Item"])
@@ -852,7 +990,11 @@ def test_evt_m_03_03_a_stale_version_cancels_the_whole_plan_not_half_of_it(
     assert_is_error(_cancel(event_id=event_id, expected_version=1), "CONFLICT")
 
     assert _stored(world["show_and_sells"], event_id)[ssm.STATUS_ATTRIBUTE] == ssm.STATUS_SCHEDULED
-    signup = dict(world["show_and_sells"].get_item(Key={"pk": ssm.show_and_sell_pk(event_id), "sk": ssm.signup_sk("slot-1", _profile("Devon"))})["Item"])
+    signup = dict(
+        world["show_and_sells"].get_item(
+            Key={"pk": ssm.show_and_sell_pk(event_id), "sk": ssm.signup_sk("slot-1", _profile("Devon"))}
+        )["Item"]
+    )
     assert signup[ssm.STATUS_ATTRIBUTE] == ssm.SIGNUP_ACTIVE
     allocation = dict(world["inventory"].get_item(Key=ssm.event_allocation_key(CAMPAIGN, PRODUCT, event_id))["Item"])
     assert allocation[ssm.STATUS_ATTRIBUTE] == inv.ALLOCATION_OPEN
@@ -871,17 +1013,110 @@ def test_evt_m_03_03_cancellation_requires_a_reason_and_replays_its_first_answer
     first = _ok(_cancel(event_id=event_id))
     again = _ok(_cancel(event_id=event_id))
     assert again == first
-    assert len(
-        [
-            row
-            for row in world["inventory"].query(
-                KeyConditionExpression="#pk = :pk",
-                ExpressionAttributeNames={"#pk": "pk"},
-                ExpressionAttributeValues={":pk": inv.inventory_pk(CAMPAIGN)},
-            )["Items"]
-            if row.get("entityType") == inv.MOVEMENT_ENTITY_TYPE
+    assert (
+        len(
+            [
+                row
+                for row in world["inventory"].query(
+                    KeyConditionExpression="#pk = :pk",
+                    ExpressionAttributeNames={"#pk": "pk"},
+                    ExpressionAttributeValues={":pk": inv.inventory_pk(CAMPAIGN)},
+                )["Items"]
+                if row.get("entityType") == inv.MOVEMENT_ENTITY_TYPE
+            ]
+        )
+        == 1
+    )
+
+
+def test_evt_m_03_05_a_cancellation_touches_and_reports_only_the_rows_it_releases(
+    world: Dict[str, Any],
+) -> None:
+    """EVT-M-03-05: history another request closed stays history.
+
+    A Scout who cancelled her own signup, and an allocation §3.2 released before the
+    event was called off, are both terminal rows. Rewriting them moves an audit record
+    this request did not create, spends a transaction action on a row that cannot
+    change, and makes the result claim work the caller never did — so a replay answers a
+    different set of rows than the first attempt committed.
+    """
+    event_id = "SSE#mixed-history"
+    _seed_event(world["show_and_sells"], event_id, product_ids=[PRODUCT, OTHER_PRODUCT, RELEASED_PRODUCT])
+    _seed_slot(world["show_and_sells"], event_id, active=2)
+    _seed_signup(world["show_and_sells"], event_id, persona="Devon")
+    _seed_commitment(world["unit_campaigns"], event_id, persona="Devon")
+    _seed_signup(world["show_and_sells"], event_id, persona="Emery", status=ssm.SIGNUP_CANCELLED, version=4)
+    _seed_commitment(world["unit_campaigns"], event_id, persona="Emery", status=ssm.SIGNUP_CANCELLED, version=4)
+    _seed_guard(world["unit_campaigns"])
+    _seed_allocation(world["inventory"], event_id, sold=2, released=1, remaining=7)
+    _seed_allocation(
+        world["inventory"],
+        event_id,
+        OTHER_PRODUCT,
+        allocated=4,
+        sold=0,
+        released=4,
+        remaining=0,
+        status=inv.ALLOCATION_CANCELLED,
+        version=3,
+    )
+    _seed_allocation(
+        world["inventory"],
+        event_id,
+        RELEASED_PRODUCT,
+        allocated=3,
+        sold=3,
+        released=0,
+        remaining=0,
+        status=inv.ALLOCATION_RELEASED,
+        version=5,
+    )
+
+    answer = _ok(_cancel(event_id=event_id))
+    assert [row["productId"] for row in answer["releasedAllocations"]] == [PRODUCT], (
+        "an allocation another path already closed is not this cancellation's work, whether it was "
+        "released by §3.2 or cancelled earlier"
+    )
+    assert [row["profileId"] for row in answer["cancelledSignups"]] == [_profile("Devon")]
+
+    signup_key = {"pk": ssm.show_and_sell_pk(event_id), "sk": ssm.signup_sk("slot-1", _profile("Emery"))}
+    past_signup = dict(world["show_and_sells"].get_item(Key=signup_key)["Item"])
+    assert past_signup[ssm.VERSION_ATTRIBUTE] == 4, "a cancelled signup keeps the version that closed it"
+    assert past_signup[ssm.UPDATED_AT_ATTRIBUTE] == FUTURE_START, "and the instant that closed it"
+
+    commitment_key = ssm.commitment_key(_profile("Devon"), FUTURE_START, CAMPAIGN, "slot-1")
+    commitment = dict(world["unit_campaigns"].get_item(Key=commitment_key)["Item"])
+    past_commitment = dict(
+        world["unit_campaigns"].get_item(Key=ssm.commitment_key(_profile("Emery"), FUTURE_START, CAMPAIGN, "slot-1"))[
+            "Item"
         ]
-    ) == 1
+    )
+    assert past_commitment[ssm.VERSION_ATTRIBUTE] == 4, "a released commitment is not re-dated"
+
+    released_signup = dict(
+        world["show_and_sells"].get_item(
+            Key={"pk": ssm.show_and_sell_pk(event_id), "sk": ssm.signup_sk("slot-1", _profile("Devon"))}
+        )["Item"]
+    )
+    # §5.13 defines ``ScoutCommitment.version`` as matching the source signup's update,
+    # so the pair a reader compares moves to one number, not two disagreeing ones.
+    assert released_signup[ssm.STATUS_ATTRIBUTE] == ssm.SIGNUP_CANCELLED
+    assert released_signup[ssm.VERSION_ATTRIBUTE] == 2
+    assert commitment[ssm.STATUS_ATTRIBUTE] == ssm.SIGNUP_CANCELLED
+    assert commitment[ssm.VERSION_ATTRIBUTE] == released_signup[ssm.VERSION_ATTRIBUTE]
+
+    allocation = dict(
+        world["inventory"].get_item(Key=ssm.event_allocation_key(CAMPAIGN, OTHER_PRODUCT, event_id))["Item"]
+    )
+    assert allocation[ssm.VERSION_ATTRIBUTE] == 3, "the closed allocation is not rewritten"
+
+    again = _ok(_cancel(event_id=event_id))
+    assert again == answer, "the replay answers exactly the rows the first attempt committed"
+
+    admin = _ok(_show(event_id=event_id))
+    assert {row["productId"] for row in admin["allocations"]} == {PRODUCT, OTHER_PRODUCT, RELEASED_PRODUCT}, (
+        "the administrative read still shows the whole history; only the result narrows"
+    )
 
 
 # --- EVT-Q-01: the administrative reads (§3.1.5) --------------------------------
@@ -1119,6 +1354,81 @@ def test_evt_q_02_02_past_events_appear_only_when_asked_for(world: Dict[str, Any
     assert [item["showAndSellId"] for item in both["items"]] == ["SSE#history", "SSE#upcoming"]
 
 
+def test_evt_q_03_03_a_cancelled_event_is_not_a_participant_view_even_to_its_own_scout(
+    world: Dict[str, Any],
+) -> None:
+    """EVT-Q-03-03: the two participant surfaces agree about a cancelled event.
+
+    The campaign-level read already drops a cancelled event. If the per-event field kept
+    answering it, a Scout would hold a path to a cancelled offer the list refuses, and
+    the same row would have two answers.
+    """
+    event_id = _seed_event(world["show_and_sells"], "SSE#cancelled-view", status=ssm.STATUS_CANCELLED)
+    _seed_slot(world["show_and_sells"], event_id)
+    _seed_signup(world["show_and_sells"], event_id)
+    assert [item["showAndSellId"] for item in _ok(_opportunities(caller="Devon"))["items"]] == []
+    assert_is_error(_opportunity(caller="Devon", event_id=event_id, persona="Devon"), "NOT_FOUND")
+    assert_is_error(_opportunity(caller="Avery", event_id=event_id, persona="Devon"), "NOT_FOUND")
+
+
+def test_the_participant_surface_decides_authorization_from_a_strongly_consistent_roster(
+    world: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The roster read behind the participant decision is the current one.
+
+    ``active_ids``/``former_ids`` come from that read, and they decide whether a caller
+    sees the campaign's whole upcoming schedule or only the events their own signup rows
+    name. An eventually consistent ``ACTIVE`` row that outlives a removal would put a
+    former member back in ``active_ids`` and hand them every event on the campaign.
+    """
+    seen: List[Dict[str, Any]] = []
+    real = ucm.list_memberships
+
+    def spy(unit_campaign_id: str, **kwargs: Any) -> List[Dict[str, Any]]:
+        seen.append(kwargs)
+        return real(unit_campaign_id, **kwargs)
+
+    monkeypatch.setattr(ucm, "list_memberships", spy)
+    _seed_event(world["show_and_sells"], "SSE#roster-read")
+    _ok(_opportunities(caller="Devon"))
+    _ok(_opportunity(caller="Devon", event_id="SSE#roster-read", persona="Devon"))
+
+    assert seen, "the participant resolvers read the roster"
+    assert all(kwargs.get("consistent_read") is True for kwargs in seen), (
+        "an authorization decision may not be made from an eventually consistent roster"
+    )
+
+
+def test_page_01_only_the_events_on_the_page_are_hydrated(
+    world: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PAGE-01: ``page.limit`` bounds the reads, not only the items.
+
+    Slot hydration costs a partition read per event, so it happens after the page is
+    cut. A campaign with a long history otherwise pays for every event on every page,
+    and the caller's limit changes nothing about what the handler asked DynamoDB for.
+    """
+    hydrated: List[str] = []
+    real = ssm.event_slot_rows
+
+    def spy(show_and_sell_id: str) -> List[Dict[str, Any]]:
+        hydrated.append(show_and_sell_id)
+        return real(show_and_sell_id)
+
+    for index in range(4):
+        _seed_event(
+            world["show_and_sells"],
+            f"SSE#bounded-{index}",
+            start_at=_shift(24 * (index + 1)),
+            end_at=_shift(24 * (index + 1) + 4),
+        )
+    monkeypatch.setattr(ssm, "event_slot_rows", spy)
+
+    page = _ok(_opportunities(caller="Devon", page={"limit": 2}))
+    assert len(page["items"]) == 2 and page["pageInfo"]["hasNextPage"] is True
+    assert len(hydrated) == 2, f"hydration ran for {hydrated}, more events than this page holds"
+
+
 def test_page_01_an_opportunity_cursor_carries_the_caller_and_the_past_flag(world: Dict[str, Any]) -> None:
     for index in range(3):
         _seed_event(
@@ -1131,7 +1441,9 @@ def test_page_01_an_opportunity_cursor_carries_the_caller_and_the_past_flag(worl
     first = _ok(_opportunities(caller="Devon", page={"limit": 2}))
     assert len(first["items"]) == 2 and first["pageInfo"]["hasNextPage"] is True
     cursor = first["pageInfo"]["endCursor"]
-    assert_is_error(_opportunities(caller="Devon", page={"limit": 2, "cursor": cursor}, includePast=True), "INVALID_INPUT")
+    assert_is_error(
+        _opportunities(caller="Devon", page={"limit": 2, "cursor": cursor}, includePast=True), "INVALID_INPUT"
+    )
     assert_is_error(_opportunities(caller="Taylor", page={"limit": 2, "cursor": cursor}), "INVALID_INPUT")
 
 

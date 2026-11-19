@@ -456,13 +456,23 @@ def read_membership(unit_campaign_id: str, profile_id: str) -> Optional[Dict[str
     return dict(item) if isinstance(item, dict) else None
 
 
-def list_memberships(unit_campaign_id: str, *, status: Optional[str] = None) -> List[Dict[str, Any]]:
-    """A Unit Campaign's roster; ``status`` narrows it to ACTIVE or REMOVED."""
+def list_memberships(
+    unit_campaign_id: str, *, status: Optional[str] = None, consistent_read: bool = False
+) -> List[Dict[str, Any]]:
+    """A Unit Campaign's roster; ``status`` narrows it to ACTIVE or REMOVED.
+
+    ``consistent_read=True`` is for the callers whose decision depends on the current
+    state — most of all the authorization decision behind the participant surface,
+    where an eventually consistent ``ACTIVE`` row that outlives a removal would hand a
+    former member every event on the campaign instead of the participation history
+    their signup rows name.
+    """
     query_kwargs: Dict[str, Any] = {
         # The sort-key prefix sits in a KeyConditionExpression, matching how the
         # other roster reads in this codebase are written.
         "KeyConditionExpression": "pk = :pk AND begins_with(sk, :prefix)",
         "ExpressionAttributeValues": {":pk": unit_campaign_pk(unit_campaign_id), ":prefix": f"{MEMBERSHIP_SK_PREFIX}#"},
+        "ConsistentRead": consistent_read,
     }
     if status is not None:
         query_kwargs["FilterExpression"] = "#status = :status"

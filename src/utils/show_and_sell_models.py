@@ -95,7 +95,17 @@ EVENT_STATUSES: frozenset[str] = frozenset(
 
 #: The clock states, in the order the calendar moves through them. They are never
 #: stored: :func:`derive_event_status` computes them from the immutable interval.
+#: ``SCHEDULED`` is the stored placeholder a create writes; ``ACTIVE`` and ``ENDED``
+#: are what that placeholder reads as once the clock passes each end of the interval,
+#: so a row that stored either one would be a second, staler answer to the same
+#: question -- and a later writer could freeze an event at ``ACTIVE`` forever.
 DERIVED_STATUSES: frozenset[str] = frozenset({STATUS_SCHEDULED, STATUS_ACTIVE, STATUS_ENDED})
+
+#: The two states that must never reach a row. Writing one is the bug where a later
+#: wave "helpfully" persists the derived answer: nothing recomputes it, so the event
+#: keeps reporting ``ACTIVE`` after it ended and ``require_cancellable`` starts
+#: agreeing with the row instead of with the interval.
+NEVER_STORED_STATUSES: frozenset[str] = frozenset({STATUS_ACTIVE, STATUS_ENDED})
 
 #: States in which the event's own settings may still change (API contract §3.5).
 #: ``REOPENED`` is on the list because a reopened event's edits are drafts — they
@@ -130,6 +140,13 @@ ENTITY_TYPE_SIGNUP = "ShowAndSellSignup"
 #: read a cancelled event.
 SIGNUP_ACTIVE = "ACTIVE"
 SIGNUP_CANCELLED = "CANCELLED"
+
+#: The only legal move for a signup or its commitment projection (§5.13, §9.3):
+#: holding a place, then having given it back. Terminal once given back.
+SIGNUP_TRANSITIONS: Dict[str, frozenset[str]] = {
+    SIGNUP_ACTIVE: frozenset({SIGNUP_CANCELLED}),
+    SIGNUP_CANCELLED: frozenset(),
+}
 
 #: Sort-key prefixes of the §5.13 projection pair on ``unit_campaigns`` (§6.2).
 COMMITMENT_SK_PREFIX = "COMMITMENT"
@@ -514,6 +531,11 @@ def _state_violations(item: Mapping[str, Any]) -> List[str]:
     problems: List[str] = []
     if status not in EVENT_STATUSES:
         problems.append(f"status {status!r} is not one of {', '.join(sorted(EVENT_STATUSES))}")
+    elif status in NEVER_STORED_STATUSES:
+        problems.append(
+            f"{status} is derived from the interval and must never be stored; store {STATUS_SCHEDULED} "
+            "or the workflow state that actually happened"
+        )
     approved = item.get(APPROVED_FINALIZATION_ID_ATTRIBUTE)
     if status == STATUS_FINALIZED and not approved:
         problems.append("a FINALIZED event requires approvedFinalizationId")
@@ -808,6 +830,35 @@ def commitment_rows(profile_id: str, show_and_sell_id: Optional[str] = None) -> 
     return rows
 
 
+def active_commitments(profile_id: str, show_and_sell_id: str) -> List[Dict[str, Any]]:
+    """One Scout's ACTIVE commitments for one event.
+
+    A cancellation releases the commitments it is releasing, and nothing else. The
+    projection keeps cancelled rows as history (§5.13), so a read of "this event's
+    commitments" answers both, and re-writing a terminal row would move an audit
+    record backwards and spend a transaction action on a row that cannot change.
+    """
+    return [
+        row
+        for row in commitment_rows(profile_id, show_and_sell_id)
+        if str(row.get(STATUS_ATTRIBUTE) or "") == SIGNUP_ACTIVE
+    ]
+
+
+def _slot_for(slots: Sequence[Mapping[str, Any]], signup: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The slot row one signup belongs to.
+
+    A signup whose slot row is missing is a broken aggregate rather than a payload
+    with a blank interval, so this raises: the caller loaded the event's whole slot
+    partition, and a signup pointing outside it means the event is inconsistent.
+    """
+    slot_id = str(signup.get(SLOT_ID_ATTRIBUTE) or "")
+    for slot in slots:
+        if str(slot.get(SLOT_ID_ATTRIBUTE) or "") == slot_id:
+            return slot
+    raise KeyError(f"signup names slot {slot_id!r}, which this event does not hold")
+
+
 def read_commitment_guard(profile_id: str) -> Optional[Dict[str, Any]]:
     """The Scout's commitment guard row, or None when the Scout has none yet.
 
@@ -1000,30 +1051,38 @@ def cancel_event_action(
         tables.show_and_sells.table_name,
         expected_version=expected_version,
         sets=sets,
-        # A cancellation that raced a finalization must not overwrite a FINALIZED
-        # event: the state the caller read is part of the guard, not just the version.
-        extra_conditions=((":finalizedCondition", "#status <> :finalizedCondition", STATUS_FINALIZED),),
+        # The state this request checked is part of the write, not just the version.
+        # "Still SCHEDULED" is the precondition §3.1.4 states, so a row that some other
+        # writer cancelled, finalized or reopened between this read and the commit
+        # fails the condition instead of having its audit overwritten: a second
+        # cancellation would otherwise replace the first one's reason and actor and move
+        # the event to a third version, and an event that reached REOPENED or FINALIZED
+        # is finished by finalization arithmetic, not by a release plan.
+        extra_conditions=((":stateCondition", "#status = :stateCondition", STATUS_SCHEDULED),),
     )
 
 
 def cancel_allocation_action(
     *,
     allocation: Mapping[str, Any],
-    released_qty: int,
+    released_total: int,
     updated_at: str,
 ) -> Tuple[str, Dict[str, Any]]:
     """Release an open allocation's whole remainder (§8.8 step 3).
 
-    ``releasedQty`` becomes the value the read row's ``releasedQty + remainingQty``
-    adds to, and ``remainingQty`` becomes 0. Those are the numbers §8.8 names, taken
-    from the row this transaction read, and the read row's ``version`` is the
+    ``releasedTotal`` is the new cumulative total — the read row's ``releasedQty +
+    remainingQty`` — and ``remainingQty`` becomes 0. Those are the numbers §8.8 names,
+    taken from the row this transaction read, and the read row's ``version`` is the
     condition — so a concurrent allocation mutation that moved the remainder between
     the read and the commit cancels the whole plan rather than releasing an amount
     nobody agreed to.
 
-    ``released_qty`` is the caller's already-computed sum, so the arithmetic that
+    ``released_total`` is the caller's already-computed sum, so the arithmetic that
     decides how much stock goes back on the shelf has exactly one owner (the
-    cancellation resolver) and the action here is only what it means in DynamoDB.
+    cancellation resolver) and the action here is only what it means in DynamoDB. The
+    *cumulative* total belongs on this row and nowhere else: the movement beside it
+    reports how much quantity this one request moved, which is a different number
+    whenever the allocation was released before.
     """
     require_allocation_transition(allocation.get(STATUS_ATTRIBUTE), ALLOCATION_CANCELLED)
     return _conditioned_update(
@@ -1032,7 +1091,7 @@ def cancel_allocation_action(
         expected_version=normalize_required_version(allocation.get(VERSION_ATTRIBUTE, 1)),
         sets={
             VERSION_ATTRIBUTE: normalize_required_version(allocation.get(VERSION_ATTRIBUTE, 1)) + 1,
-            RELEASED_QTY: released_qty,
+            RELEASED_QTY: released_total,
             REMAINING_QTY: 0,
             STATUS_ATTRIBUTE: ALLOCATION_CANCELLED,
             UPDATED_AT_ATTRIBUTE: updated_at,
@@ -1052,7 +1111,6 @@ def event_release_movement_action(
     actor_account_id: str,
     occurred_at: str,
     idempotency_key: str,
-    allocation_version: int,
 ) -> Tuple[str, Dict[str, Any]]:
     """The audit row that says an allocation's remainder went back on the shelf.
 
@@ -1062,6 +1120,16 @@ def event_release_movement_action(
     and is the only delta ``EVENT_RELEASE`` is allowed to move, so physical stock and
     custody stay untouched — a cancellation releases a reservation, it never moves a
     Kernel.
+
+    ``released_qty`` here is the quantity *this* release moves — the allocation's
+    remainder as read — not the row's new cumulative ``releasedQty``. A movement is a
+    delta, and reporting the cumulative would double-count every earlier release of
+    the same allocation in the balance the trail has to sum to.
+
+    ``inventoryVersion`` is deliberately absent: SDL §5.8 makes it non-null only when
+    an ``InventoryPosition`` moved, and a cancellation touches the allocation row and
+    its own history, never the campaign balance. Stamping the allocation's version
+    there would point an audit reader at a balance version that never happened.
     """
     item = inventory_models.build_inventory_movement_item(
         movement_id=inventory_models.new_inventory_movement_id(),
@@ -1073,7 +1141,6 @@ def event_release_movement_action(
         idempotency_key=idempotency_key,
         assigned_delta=-abs(released_qty),
         show_and_sell_id=str(event[SHOW_AND_SELL_ID_ATTRIBUTE]),
-        inventory_version=allocation_version,
     )
     return inventory_models.put_inventory_movement_action(item)
 
@@ -1109,19 +1176,50 @@ def cancel_signup_action(
     slot_id: str,
     profile_id: str,
     expected_version: int,
+    new_version: int,
     updated_at: str,
 ) -> Tuple[str, Dict[str, Any]]:
     """Cancel one signup record, keeping the row as history (§8.8, SSE-05).
 
     Cancellation never deletes the signup: §3.1.4 releases the commitment while the
     audit trail of who was signed up stays, and the same is true of sales and We Owe.
+
+    The version moves with the state. §5.13 says a ``ScoutCommitment``'s version
+    "matches source signup update", so a cancelled signup that kept its old version
+    while its commitment advanced would leave the pair readable in two disagreeing
+    versions — and §3.4's own cancellation conditions on the signup version, so it
+    would be refusing a number no reader can reproduce.
     """
     return _conditioned_update(
         {"pk": show_and_sell_pk(show_and_sell_id), "sk": signup_sk(slot_id, profile_id)},
         tables.show_and_sells.table_name,
         expected_version=expected_version,
-        sets={STATUS_ATTRIBUTE: SIGNUP_CANCELLED, UPDATED_AT_ATTRIBUTE: updated_at},
+        sets={
+            STATUS_ATTRIBUTE: SIGNUP_CANCELLED,
+            VERSION_ATTRIBUTE: new_version,
+            UPDATED_AT_ATTRIBUTE: updated_at,
+        },
+        # ``CANCELLED`` is terminal for a signup as it is for an allocation: the row is
+        # history. The plan read only ACTIVE signups, so a Scout who cancelled her own
+        # signup between that read and this commit makes the condition fail the whole
+        # plan rather than let this request re-date a row it did not close.
+        extra_conditions=((":cancelledCondition", "#status <> :cancelledCondition", SIGNUP_CANCELLED),),
     )
+
+
+def require_signup_transition(current: Any, target: Any) -> None:
+    """Require a signup/commitment state change to be one §5.13 and §9.3 allow.
+
+    Signup and commitment share one transition table because the commitment is the
+    signup's projection, not an independent record: ``ACTIVE -> CANCELLED`` is the only
+    move, and ``CANCELLED`` is terminal. A projection that could be re-cancelled is a
+    history row whose ``updatedAt`` and ``version`` move under a later request, which is
+    exactly the audit trail SSE-05 keeps it for.
+    """
+    from_status = str(current or "")
+    to_status = str(target or "")
+    if from_status not in SIGNUP_TRANSITIONS or to_status not in SIGNUP_TRANSITIONS[from_status]:
+        raise _invalid(STATUS_ATTRIBUTE, f"cannot move a signup or commitment from {from_status} to {to_status}")
 
 
 def commitment_pk(profile_id: str) -> str:
@@ -1152,23 +1250,33 @@ def commitment_guard_key(profile_id: str) -> Dict[str, str]:
 def cancel_commitment_action(
     *,
     commitment: Mapping[str, Any],
+    new_version: int,
     updated_at: str,
 ) -> Tuple[str, Dict[str, Any]]:
-    """Mark one commitment projection cancelled, conditioned on its read version.
+    """Mark one ACTIVE commitment projection cancelled, conditioned on its read version.
 
     The commitment is what blocks a later overlapping signup, so leaving it ACTIVE
     after a cancellation would keep a Scout out of a slot she is no longer holding.
-    Its version is written to match the signup it mirrors (§5.13).
+    Its version is written to the value its signup moves to, because §5.13 defines
+    ``ScoutCommitment.version`` as matching the source signup's update; the write is
+    still conditioned on the commitment's own read version, so a commitment that moved
+    between read and commit fails the plan instead of overwriting the other writer.
     """
+    require_signup_transition(commitment.get(STATUS_ATTRIBUTE), SIGNUP_CANCELLED)
     return _conditioned_update(
         {"pk": str(commitment["pk"]), "sk": str(commitment["sk"])},
         tables.unit_campaigns.table_name,
         expected_version=normalize_required_version(commitment.get(VERSION_ATTRIBUTE, 1)),
         sets={
             STATUS_ATTRIBUTE: SIGNUP_CANCELLED,
-            VERSION_ATTRIBUTE: normalize_required_version(commitment.get(VERSION_ATTRIBUTE, 1)) + 1,
+            VERSION_ATTRIBUTE: new_version,
             UPDATED_AT_ATTRIBUTE: updated_at,
         },
+        # A commitment that is already cancelled is a history row (§5.13). The plan read
+        # only ACTIVE commitments, so this condition is what catches one that another
+        # request closed between the read and the commit — the §3.4 signup cancellation
+        # releases the same projection — and fails the plan instead of re-dating it.
+        extra_conditions=((":cancelledCondition", "#status <> :cancelledCondition", SIGNUP_CANCELLED),),
     )
 
 
@@ -1331,25 +1439,34 @@ def slot_opportunity_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
         START_AT_ATTRIBUTE: str(row[START_AT_ATTRIBUTE]),
         END_AT_ATTRIBUTE: str(row[END_AT_ATTRIBUTE]),
         CAPACITY_ATTRIBUTE: capacity,
-        ACTIVE_SIGNUP_COUNT_ATTRIBUTE: active,
+        # ``openCapacity`` only, never the maintained ``activeSignupCount``: SDL
+        # ``ShowAndSellOpportunitySlot`` declares capacity and places left, and this
+        # projection is that type's whole allowlist. Reporting the counter as well would
+        # let a second, derivable number reach a Scout and give a later change somewhere
+        # to drift.
         "openCapacity": max(capacity - active, 0),
     }
 
 
-def signup_summary_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
+def signup_summary_payload(row: Mapping[str, Any], slot: Mapping[str, Any]) -> Dict[str, Any]:
     """One participant's own signup, in the participant-safe shape (§5.13).
 
     No ``signedUpByAccountId``, no ``confirmedByAccountId``: SEC-04 and AUTH-P-04 keep
     the identity of who placed or confirmed a signup on the administrative surface
     only, and this payload is what the participant-facing queries return.
+
+    The interval is read off the **slot** row, not the signup row: §5.13 gives
+    ``ShowAndSellSignup`` no ``startAt``/``endAt``, because a signup runs when its slot
+    runs. Reading them off the signup would work only against a fixture that
+    denormalized them and would raise ``KeyError`` on a canonical row.
     """
     return {
         SLOT_ID_ATTRIBUTE: str(row[SLOT_ID_ATTRIBUTE]),
         SHOW_AND_SELL_ID_ATTRIBUTE: str(row[SHOW_AND_SELL_ID_ATTRIBUTE]),
         STATUS_ATTRIBUTE: str(row.get(STATUS_ATTRIBUTE) or ""),
-        START_AT_ATTRIBUTE: str(row[START_AT_ATTRIBUTE]),
-        END_AT_ATTRIBUTE: str(row[END_AT_ATTRIBUTE]),
-        "actualMinutes": int(row.get("actualMinutes") or 0),
+        START_AT_ATTRIBUTE: str(slot[START_AT_ATTRIBUTE]),
+        END_AT_ATTRIBUTE: str(slot[END_AT_ATTRIBUTE]),
+        "actualMinutes": int(row.get(ACTUAL_MINUTES_ATTRIBUTE) or 0),
         "signupVersion": int(row.get(VERSION_ATTRIBUTE) or 1),
     }
 
@@ -1383,7 +1500,7 @@ def opportunity_payload(
         "timezone": timezone_name,
         "eventVersion": normalize_required_version(event.get(VERSION_ATTRIBUTE, 1)),
         "slots": [slot_opportunity_payload(slot) for slot in slots],
-        "mySignups": [signup_summary_payload(signup) for signup in signups],
+        "mySignups": [signup_summary_payload(signup, _slot_for(slots, signup)) for signup in signups],
     }
 
 

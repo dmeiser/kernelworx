@@ -116,7 +116,13 @@ def _signup_row(
     actual_minutes: int = 0,
     version: int = 1,
 ) -> Dict[str, Any]:
-    """A signup projection (§5.13) in the shape §3.4 will write it."""
+    """A signup projection (§5.13) in the shape §3.4 will write it.
+
+    Deliberately no ``startAt``/``endAt``: §5.13 gives ``ShowAndSellSignup`` no interval,
+    because a signup runs when its slot runs. A fixture that denormalized the interval
+    onto the signup would let a projection read it and then raise ``KeyError`` against
+    the canonical rows §3.4 actually writes.
+    """
     return {
         "pk": ssm.show_and_sell_pk(event_id),
         "sk": ssm.signup_sk(slot_id, profile_id),
@@ -127,8 +133,6 @@ def _signup_row(
         ssm.PROFILE_ID_ATTRIBUTE: profile_id,
         ssm.SLOT_ID_ATTRIBUTE: slot_id,
         ssm.STATUS_ATTRIBUTE: status,
-        ssm.START_AT_ATTRIBUTE: START,
-        ssm.END_AT_ATTRIBUTE: END,
         ssm.ACTUAL_MINUTES_ATTRIBUTE: actual_minutes,
         ssm.SIGNED_UP_BY_ATTRIBUTE: ACTOR,
         ssm.CONFIRMED_BY_ATTRIBUTE: None,
@@ -421,6 +425,16 @@ def test_the_interval_and_state_and_shape_invariants_are_each_named() -> None:
     unknown[ssm.STATUS_ATTRIBUTE] = "ABANDONED"
     assert ssm._state_violations(unknown) != []
 
+    # Three of the six states are answers the clock gives. Only ``SCHEDULED`` is the
+    # stored placeholder; ``ACTIVE`` and ``ENDED`` are what that placeholder reads as
+    # once the interval is passed, so a row holding either one is a second, staler
+    # answer that nothing recomputes and that ``require_cancellable`` would start
+    # agreeing with instead of with the interval.
+    for stored in (ssm.STATUS_ACTIVE, ssm.STATUS_ENDED):
+        problems = ssm._state_violations(_stored_row(stored))
+        assert any(stored in problem for problem in problems), f"{stored} must never be stored"
+    assert ssm.NEVER_STORED_STATUSES == frozenset({ssm.STATUS_ACTIVE, ssm.STATUS_ENDED})
+
     repeated = dict(_event_row())
     repeated[ssm.PRODUCT_IDS_ATTRIBUTE] = [PRODUCT, PRODUCT]
     assert "productIds must not repeat a product" in ssm._row_shape_violations(repeated)
@@ -433,13 +447,11 @@ def test_the_interval_and_state_and_shape_invariants_are_each_named() -> None:
 
 
 def test_the_state_invariants_are_enforced_where_the_row_is_built() -> None:
-    for status in (ssm.STATUS_FINALIZED, ssm.STATUS_CANCELLED):
+    for status in (ssm.STATUS_FINALIZED, ssm.STATUS_CANCELLED, ssm.STATUS_ACTIVE, ssm.STATUS_ENDED):
         with pytest.raises(AppError):
             _event_row(status=status)
     finalized = _stored_row(ssm.STATUS_FINALIZED)
-    assert ssm.event_invariant_violations(finalized) == [
-        "a FINALIZED event requires approvedFinalizationId"
-    ]
+    assert ssm.event_invariant_violations(finalized) == ["a FINALIZED event requires approvedFinalizationId"]
     finalized[ssm.APPROVED_FINALIZATION_ID_ATTRIBUTE] = "FIN#1"
     assert ssm.event_invariant_violations(finalized) == []
     assert ssm.event_invariant_violations(_stored_row(ssm.STATUS_REOPENED)) == []
@@ -510,7 +522,9 @@ def test_cancellation_needs_both_the_scheduled_state_and_the_clock_before_start(
 def test_an_open_we_owe_obligation_blocks_turning_we_owe_off_and_a_closed_one_does_not() -> None:
     assert ssm.we_owe_disable_blocked([]) is False
     assert ssm.we_owe_disable_blocked([{"status": ssm.WE_OWE_STATUS_CLOSED}]) is False
-    assert ssm.we_owe_disable_blocked([{"status": ssm.WE_OWE_STATUS_CLOSED}, {"status": ssm.WE_OWE_STATUS_OPEN}]) is True
+    assert (
+        ssm.we_owe_disable_blocked([{"status": ssm.WE_OWE_STATUS_CLOSED}, {"status": ssm.WE_OWE_STATUS_OPEN}]) is True
+    )
 
 
 # --- Reads (§6.3, §6.4, SEC-06) -------------------------------------------------
@@ -519,7 +533,11 @@ def test_an_open_we_owe_obligation_blocks_turning_we_owe_off_and_a_closed_one_do
 @pytest.fixture
 def tables_are_ready(show_and_sells_table: Any, inventory_table: Any, unit_campaigns_table: Any) -> Dict[str, Any]:
     """The three tables an event aggregate's reads reach, with nothing in them yet."""
-    return {"show_and_sells": show_and_sells_table, "inventory": inventory_table, "unit_campaigns": unit_campaigns_table}
+    return {
+        "show_and_sells": show_and_sells_table,
+        "inventory": inventory_table,
+        "unit_campaigns": unit_campaigns_table,
+    }
 
 
 def test_a_missing_event_reads_as_none_and_as_not_found(tables_are_ready: Dict[str, Any]) -> None:
@@ -537,7 +555,9 @@ def test_an_event_written_by_the_model_reads_back_consistently(tables_are_ready:
 def test_the_campaign_read_finds_events_through_the_index_and_ignores_other_row_kinds(
     tables_are_ready: Dict[str, Any],
 ) -> None:
-    tables_are_ready["show_and_sells"].put_item(Item=_event_row(OTHER_EVENT_ID, start_at=END, end_at="2026-11-08T20:00:00+00:00"))
+    tables_are_ready["show_and_sells"].put_item(
+        Item=_event_row(OTHER_EVENT_ID, start_at=END, end_at="2026-11-08T20:00:00+00:00")
+    )
     tables_are_ready["show_and_sells"].put_item(Item=_event_row())
     tables_are_ready["show_and_sells"].put_item(Item=_slot_row())
     tables_are_ready["show_and_sells"].put_item(
@@ -631,7 +651,7 @@ def test_an_update_carries_the_read_version_and_the_cleared_address_is_removed_n
     assert payload["ExpressionAttributeValues"][":version"] == {"N": "5"}
 
 
-def test_cancellation_conditions_on_version_and_on_the_event_not_already_being_finalized() -> None:
+def test_cancellation_conditions_on_version_and_on_the_state_it_read() -> None:
     kind, payload = ssm.cancel_event_action(
         show_and_sell_id=EVENT_ID,
         expected_version=2,
@@ -641,13 +661,18 @@ def test_cancellation_conditions_on_version_and_on_the_event_not_already_being_f
     )
     assert kind == "Update"
     assert "#version = :expectedVersion" in payload["ConditionExpression"]
-    assert "#status <> :finalizedCondition" in payload["ConditionExpression"]
+    # The precondition §3.1.4 states is in the write itself: the row must still be the
+    # SCHEDULED row this request checked. ``<> FINALIZED`` would let a second
+    # cancellation replace the first one's reason, actor and ``cancelledAt`` and advance
+    # the event to a third version.
+    assert "#status = :stateCondition" in payload["ConditionExpression"]
+    assert payload["ExpressionAttributeValues"][":stateCondition"] == {"S": ssm.STATUS_SCHEDULED}
     assert payload["ExpressionAttributeValues"][f":{ssm.CANCELLATION_REASON_ATTRIBUTE}"] == {"S": "storm warning"}
 
 
 def test_releasing_an_allocation_moves_its_whole_remainder_and_refuses_a_terminal_state() -> None:
     kind, payload = ssm.cancel_allocation_action(
-        allocation=_allocation_row(released=2, remaining=8), released_qty=10, updated_at=AFTER
+        allocation=_allocation_row(released=2, remaining=8), released_total=10, updated_at=AFTER
     )
     assert kind == "Update"
     values = payload["ExpressionAttributeValues"]
@@ -656,7 +681,7 @@ def test_releasing_an_allocation_moves_its_whole_remainder_and_refuses_a_termina
     assert "#status <> :closedCondition" in payload["ConditionExpression"]
     with pytest.raises(AppError):
         ssm.cancel_allocation_action(
-            allocation=_allocation_row(status=inv.ALLOCATION_CANCELLED), released_qty=1, updated_at=AFTER
+            allocation=_allocation_row(status=inv.ALLOCATION_CANCELLED), released_total=1, updated_at=AFTER
         )
 
 
@@ -668,7 +693,6 @@ def test_the_release_movement_is_the_only_delta_a_cancellation_moves() -> None:
         actor_account_id=ACTOR,
         occurred_at=AFTER,
         idempotency_key="cancel-1",
-        allocation_version=2,
     )
     assert kind == "Put"
     item = payload["Item"]
@@ -681,6 +705,36 @@ def test_the_release_movement_is_the_only_delta_a_cancellation_moves() -> None:
         inv.COUNCIL_ON_ORDER_DELTA,
     ):
         assert item[unchanged] == {"N": "0"}, f"a cancellation must not move {unchanged}"
+    # SDL §5.8 makes ``inventoryVersion`` non-null only when an ``InventoryPosition``
+    # moved. A cancellation moves the allocation row and writes its own history; no
+    # balance is written, so the movement may not name a balance version.
+    assert inv.INVENTORY_VERSION_ATTRIBUTE not in item, "a movement with no balance write names no balance version"
+
+
+def test_a_release_reports_the_quantity_this_request_moved_not_the_new_total() -> None:
+    """An allocation released before must not double-count its earlier release.
+
+    ``releasedQty`` on the allocation is cumulative; the ``EVENT_RELEASE`` movement is a
+    delta. With 1 already released and 7 remaining, the row goes to 8 and the movement
+    says -7. Reporting 8 would leave the trail summing to more released assignment than
+    the allocation ever held, and the reconciliation that checks the movement trail
+    against the balance would fail on a cancellation that was correct.
+    """
+    allocation = _allocation_row(released=1, remaining=7, allocated=10, sold=2)
+    _, update = ssm.cancel_allocation_action(allocation=allocation, released_total=8, updated_at=AFTER)
+    values = update["ExpressionAttributeValues"]
+    assert values[f":{inv.RELEASED_QTY}"] == {"N": "8"}
+    assert values[f":{inv.REMAINING_QTY}"] == {"N": "0"}
+
+    _, movement = ssm.event_release_movement_action(
+        event=_event_row(),
+        allocation=allocation,
+        released_qty=7,
+        actor_account_id=ACTOR,
+        occurred_at=AFTER,
+        idempotency_key="cancel-2",
+    )
+    assert movement["Item"]["assignedDelta"] == {"N": "-7"}
 
 
 def test_zeroing_a_slot_and_cancelling_a_signup_and_a_commitment_all_condition_on_the_read_version(
@@ -690,15 +744,33 @@ def test_zeroing_a_slot_and_cancelling_a_signup_and_a_commitment_all_condition_o
         show_and_sell_id=EVENT_ID, slot_id="slot-1", expected_version=3, updated_at=AFTER
     )
     signup = ssm.cancel_signup_action(
-        show_and_sell_id=EVENT_ID, slot_id="slot-1", profile_id=PROFILE, expected_version=2, updated_at=AFTER
+        show_and_sell_id=EVENT_ID,
+        slot_id="slot-1",
+        profile_id=PROFILE,
+        expected_version=2,
+        new_version=3,
+        updated_at=AFTER,
     )
-    commitment = ssm.cancel_commitment_action(commitment=_commitment_row(), updated_at=AFTER)
+    commitment = ssm.cancel_commitment_action(commitment=_commitment_row(version=2), new_version=3, updated_at=AFTER)
     for kind, payload in (slot, signup, commitment):
         assert kind == "Update"
         assert "#version = :expectedVersion" in payload["ConditionExpression"]
     assert slot[1]["ExpressionAttributeValues"][f":{ssm.ACTIVE_SIGNUP_COUNT_ATTRIBUTE}"] == {"N": "0"}
     assert signup[1]["ExpressionAttributeValues"][f":{ssm.STATUS_ATTRIBUTE}"] == {"S": ssm.SIGNUP_CANCELLED}
     assert commitment[1]["TableName"] == tables_are_ready["unit_campaigns"].table_name
+    # §5.13: ``ScoutCommitment.version`` matches the source signup's update, so a reader
+    # who compares the pair sees one transition rather than two disagreeing versions.
+    assert signup[1]["ExpressionAttributeValues"][f":{ssm.VERSION_ATTRIBUTE}"] == {"N": "3"}
+    assert commitment[1]["ExpressionAttributeValues"][f":{ssm.VERSION_ATTRIBUTE}"] == {"N": "3"}
+    # A signup or commitment that is already cancelled is history this request must not
+    # rewrite, and both rows carry the terminal condition in their own write.
+    assert "#status <> :cancelledCondition" in commitment[1]["ConditionExpression"]
+    assert "#status <> :cancelledCondition" in signup[1]["ConditionExpression"]
+    cancelled_commitment = _commitment_row(status=ssm.SIGNUP_CANCELLED)
+    with pytest.raises(AppError):
+        ssm.cancel_commitment_action(commitment=cancelled_commitment, new_version=3, updated_at=AFTER)
+    assert ssm.SIGNUP_TRANSITIONS[ssm.SIGNUP_CANCELLED] == frozenset()
+    assert ssm.active_commitments(PROFILE, EVENT_ID) == []
 
 
 def test_the_commitment_guard_increments_in_the_write_itself() -> None:
@@ -791,10 +863,28 @@ def test_the_participant_projection_is_the_allowlist_and_carries_no_administrati
         inv.REMAINING_QTY,
         inv.KERNEL_PHYSICAL_QTY,
     }
-    surfaces: List[Any] = [opportunity, opportunity["slots"], opportunity["mySignups"]]
+    surfaces: List[Any] = [
+        opportunity,
+        *opportunity["slots"],
+        *opportunity["mySignups"],
+    ]
+    assert len(surfaces) == 3, "every nested participant surface has to be checked as a mapping"
     for surface in surfaces:
         for name in forbidden:
             assert name not in surface, f"{name} must never reach a participant surface"
+    # The exact key sets, not only an absence list: the nested types are part of the
+    # contract, and one added field on a slot or signup projection is exactly how an
+    # administrative fact would reach a Scout.
+    assert set(opportunity["slots"][0]) == {"slotId", "label", "startAt", "endAt", "capacity", "openCapacity"}
+    assert set(opportunity["mySignups"][0]) == {
+        "showAndSellId",
+        "slotId",
+        "status",
+        "startAt",
+        "endAt",
+        "actualMinutes",
+        "signupVersion",
+    }
 
 
 def test_the_admin_side_projections_carry_the_counters_and_audit_a_kernel_needs() -> None:
@@ -815,9 +905,17 @@ def test_the_admin_side_projections_carry_the_counters_and_audit_a_kernel_needs(
     assert signup[ssm.SIGNED_UP_BY_ATTRIBUTE] == ACTOR
     assert signup[ssm.VERSION_ATTRIBUTE] == 2
 
-    summary = ssm.signup_summary_payload(_signup_row(actual_minutes=45, version=2))
+    # A signup names the slot it holds; a signup pointing outside the event's slot
+    # partition is a broken aggregate, not a payload with a blank interval.
+    with pytest.raises(KeyError):
+        ssm._slot_for([_slot_row()], _signup_row(slot_id="slot-nowhere"))
+
+    summary = ssm.signup_summary_payload(_signup_row(actual_minutes=45, version=2), _slot_row())
     assert summary["actualMinutes"] == 45
     assert summary["signupVersion"] == 2
+    # §5.13 puts the interval on the slot, so the participant view inherits it there.
+    assert summary[ssm.START_AT_ATTRIBUTE] == START
+    assert summary[ssm.END_AT_ATTRIBUTE] == END
     assert ssm.SIGNED_UP_BY_ATTRIBUTE not in summary
     assert ssm.CONFIRMED_BY_ATTRIBUTE not in summary
 
@@ -833,5 +931,8 @@ def test_projections_default_a_missing_counter_to_zero_rather_than_raising() -> 
     }
     assert ssm.slot_opportunity_payload(thin)["capacity"] == 0
     assert ssm.slot_opportunity_payload(thin)["openCapacity"] == 0
-    assert ssm.signup_summary_payload(thin)["actualMinutes"] == 0
-    assert ssm.signup_summary_payload(thin)["signupVersion"] == 1
+    assert ssm.ACTIVE_SIGNUP_COUNT_ATTRIBUTE not in ssm.slot_opportunity_payload(thin), (
+        "the participant slot view is the SDL allowlist, not the maintained counter"
+    )
+    assert ssm.signup_summary_payload(thin, thin)["actualMinutes"] == 0
+    assert ssm.signup_summary_payload(thin, thin)["signupVersion"] == 1

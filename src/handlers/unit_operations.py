@@ -231,9 +231,21 @@ def _fingerprint(payload: Mapping[str, Any]) -> str:
     """The request fingerprint a retry must reproduce exactly.
 
     ``drop_none`` makes an omitted optional field and an explicit null the same
-    request, which is what "normalized" means in API contract §3.1.
+    request, which is what "normalized" means in API contract §3.1 for a create: both
+    spellings ask for the same row.
     """
     return str(normalized_fingerprint(payload, drop_none=True))
+
+
+def _update_fingerprint(payload: Mapping[str, Any]) -> str:
+    """The fingerprint of an update, where an omitted field and a null are different requests.
+
+    SDL §6 makes ``address`` (omitted) leave the row alone and ``address: null`` clear
+    it, and the same shape holds for the split and We Owe settings. Folding nulls away
+    would give those two requests one fingerprint, so a retry of "change the location"
+    would answer a later "clear the address" as already done — and write nothing.
+    """
+    return str(normalized_fingerprint(payload))
 
 
 def _resource_id(payload: Mapping[str, Any], field: str) -> str:
@@ -4011,6 +4023,36 @@ def _event_update_changes(payload: Mapping[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def _require_read_version(event_row: Mapping[str, Any], expected_version: int) -> None:
+    """Refuse a mutation whose supplied version is not the row that was just read.
+
+    The version condition on the write is what makes a race safe, but on its own it
+    only proves that nobody moved the row since the *caller* read it. Every state rule
+    in this handler — "still editable", "still cancellable" — is evaluated against the
+    row *this request* read a moment earlier. If the caller's number is allowed to be a
+    different one, those two reads come apart: a request holding version 2 can pass the
+    editable check against a freshly-read SCHEDULED version 1, a competing cancellation
+    then commits version 2, and the write's condition matches a row whose state was
+    never checked. Requiring the supplied version to equal the row just read makes the
+    state and the version one fact about one row, and the conditional write still
+    guards the window between this read and the commit.
+    """
+    read_version = show_and_sell_models.normalize_required_version(
+        event_row.get(show_and_sell_models.VERSION_ATTRIBUTE, 1)
+    )
+    if expected_version == read_version:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        "The event changed since you read it. Re-read it and retry with the version the read answered.",
+        details={
+            "subcode": "VERSION_MISMATCH",
+            "expectedVersion": expected_version,
+            "currentVersion": read_version,
+        },
+    )
+
+
 def _refuse_unsafe_we_owe_disable(event_row: Mapping[str, Any], changes: Mapping[str, Any], event_id: str) -> None:
     """Refuse a We Owe switch-off that would strand an open obligation (EVT-M-02-02).
 
@@ -4057,7 +4099,7 @@ def _update_show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, An
     log = get_logger(__name__)
     payload = _require_input(event)
     key = _idempotency_key(payload)
-    fingerprint = _fingerprint(payload)
+    fingerprint = _update_fingerprint(payload)
     event_id = _resource_id(payload, show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE)
     expected_version = _expected_version(payload)
 
@@ -4072,6 +4114,10 @@ def _update_show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, An
     if replayed is not None:
         return replayed
 
+    # After replay for the reason the docstring names: the first attempt's own write
+    # moved the version, so a retry that re-ran this would answer CONFLICT about a
+    # request it already completed.
+    _require_read_version(event_row, expected_version)
     changes = _event_update_changes(payload)
     show_and_sell_models.require_editable(event_row)
     _refuse_unsafe_we_owe_disable(event_row, changes, event_id)
@@ -4126,7 +4172,15 @@ def _cancellation_reads(event_row: Mapping[str, Any]) -> Dict[str, List[Dict[str
         profile_id = str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE])
         if profile_id not in profiles:
             profiles.append(profile_id)
-            commitments.extend(show_and_sell_models.commitment_rows(profile_id, event_id))
+        # Only the ACTIVE commitments are released. The projection keeps cancelled
+        # rows as history (§5.13), and rewriting one would move an audit record this
+        # request did not create — and spend a transaction action on it.
+        commitments.extend(
+            row
+            for row in show_and_sell_models.active_commitments(profile_id, event_id)
+            if str(row.get(show_and_sell_models.SLOT_ID_ATTRIBUTE) or "")
+            == str(signup[show_and_sell_models.SLOT_ID_ATTRIBUTE])
+        )
     return {
         "allocations": show_and_sell_models.open_allocations(event_row),
         "signups": signups,
@@ -4160,8 +4214,15 @@ def _stage_cancellation_writes(
     The release movement is written next to each allocation write because an
     allocation that silently dropped its reservation would leave the audit trail unable
     to explain the balance it now adds up to. Its delta is the allocation's own
-    remaining quantity, and it is the only delta ``EVENT_RELEASE`` may move: a
-    cancellation releases a reservation, it never moves a Kernel.
+    remaining quantity — the quantity this request moves — and it is the only delta
+    ``EVENT_RELEASE`` may move: a cancellation releases a reservation, it never moves a
+    Kernel. The allocation row's ``releasedQty`` is the other number, the new
+    cumulative total, and keeping the two apart is what lets the movement trail sum to
+    the allocation instead of double-counting an earlier release.
+
+    A signup and the commitment projection it mirrors move to one shared new version
+    (§5.13: ``ScoutCommitment.version`` "matches source signup update"), so a reader
+    who compares the pair sees one transition rather than two disagreeing versions.
     """
     plan.add(
         *show_and_sell_models.cancel_event_action(
@@ -4173,40 +4234,57 @@ def _stage_cancellation_writes(
         )
     )
     for allocation in reads["allocations"]:
-        current_version = show_and_sell_models.normalize_required_version(allocation.get("version", 1))
-        released = int(allocation.get(inventory_models.RELEASED_QTY, 0)) + int(
-            allocation.get(inventory_models.REMAINING_QTY, 0)
-        )
+        remaining = int(allocation.get(inventory_models.REMAINING_QTY, 0) or 0)
+        released_total = int(allocation.get(inventory_models.RELEASED_QTY, 0) or 0) + remaining
         plan.add(
             *show_and_sell_models.cancel_allocation_action(
-                allocation=allocation, released_qty=released, updated_at=now_iso
+                allocation=allocation, released_total=released_total, updated_at=now_iso
             )
         )
         plan.add(
             *show_and_sell_models.event_release_movement_action(
                 event=event_row,
                 allocation=allocation,
-                released_qty=released,
+                released_qty=remaining,
                 actor_account_id=caller_id,
                 occurred_at=now_iso,
                 idempotency_key=idempotency_key,
-                allocation_version=current_version + 1,
             )
         )
+    new_signup_versions: Dict[Tuple[str, str], int] = {}
     for signup in reads["signups"]:
+        signup_version = show_and_sell_models.normalize_required_version(signup.get("version", 1))
+        slot_id = str(signup[show_and_sell_models.SLOT_ID_ATTRIBUTE])
+        profile_id = str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE])
+        new_signup_versions[(profile_id, slot_id)] = signup_version + 1
         plan.add(
             *show_and_sell_models.cancel_signup_action(
                 show_and_sell_id=event_id,
-                slot_id=str(signup[show_and_sell_models.SLOT_ID_ATTRIBUTE]),
-                profile_id=str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE]),
-                expected_version=show_and_sell_models.normalize_required_version(signup.get("version", 1)),
+                slot_id=slot_id,
+                profile_id=profile_id,
+                expected_version=signup_version,
+                new_version=signup_version + 1,
                 updated_at=now_iso,
             )
         )
     for commitment in reads["commitments"]:
-        plan.add(*show_and_sell_models.cancel_commitment_action(commitment=commitment, updated_at=now_iso))
-    for profile_id in reads["profiles"]:
-        plan.add(*show_and_sell_models.bump_commitment_guard_action(profile_id=profile_id, updated_at=now_iso))
+        pair = (
+            str(commitment[show_and_sell_models.PROFILE_ID_ATTRIBUTE]),
+            str(commitment[show_and_sell_models.SLOT_ID_ATTRIBUTE]),
+        )
+        plan.add(
+            *show_and_sell_models.cancel_commitment_action(
+                commitment=commitment,
+                new_version=new_signup_versions[pair],
+                updated_at=now_iso,
+            )
+        )
+    for guard_profile_id in reads["profiles"]:
+        # One guard bump per Scout, however many slots this cancellation released for
+        # them: the guard serializes commitment changes across the Scout's whole set of
+        # memberships, and one transaction that moved two of their commitments has to
+        # advance that single number once (§5.13).
+        plan.add(*show_and_sell_models.bump_commitment_guard_action(profile_id=guard_profile_id, updated_at=now_iso))
     for slot in reads["slots"]:
         plan.add(
             *show_and_sell_models.zero_slot_counter_action(
@@ -4219,19 +4297,47 @@ def _stage_cancellation_writes(
 
 
 def _cancellation_answer(event_id: str) -> Dict[str, Any]:
-    """The one coherent result a cancellation owes: the event, the stock, the Scouts."""
+    """The one coherent result a cancellation owes: the event, the stock, the Scouts.
+
+    "Released" and "cancelled" mean *by this commit*. Every row this transaction wrote
+    carries the same instant as the event's ``cancelledAt``, so that stamp is what
+    separates the rows this request moved from the rows an earlier request closed —
+    a signup a Scout cancelled themselves through §3.4, or an allocation §3.2 released
+    before the event was called off. Reporting those as this cancellation's work would
+    overstate what the caller did and, on a replay, would answer a different set of rows
+    than the first attempt committed.
+
+    The same rule makes the replay exact: the event row still carries ``cancelledAt``
+    after the commit, so a retry rebuilds the identical answer from the rows the first
+    attempt stamped.
+    """
     event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
-    return {
-        "event": _event_detail(event_row),
-        "releasedAllocations": [
-            show_and_sell_models.allocation_payload(row) for row in show_and_sell_models.event_allocations(event_row)
-        ],
-        "cancelledSignups": [
-            show_and_sell_models.signup_admin_payload(row)
-            for row in show_and_sell_models.event_signup_rows(event_id)
-            if str(row.get(show_and_sell_models.STATUS_ATTRIBUTE) or "") == show_and_sell_models.SIGNUP_CANCELLED
-        ],
-    }
+    stamp = str(event_row.get(show_and_sell_models.CANCELLED_AT_ATTRIBUTE) or "")
+    released = [
+        show_and_sell_models.allocation_payload(row)
+        for row in show_and_sell_models.event_allocations(event_row)
+        if _written_by_this_commit(row, stamp)
+    ]
+    signups = [
+        show_and_sell_models.signup_admin_payload(row)
+        for row in show_and_sell_models.event_signup_rows(event_id)
+        if _written_by_this_commit(row, stamp)
+    ]
+    return {"event": _event_detail(event_row), "releasedAllocations": released, "cancelledSignups": signups}
+
+
+def _written_by_this_commit(row: Mapping[str, Any], cancelled_at: str) -> bool:
+    """Whether one row is a cancelled-state row carrying this cancellation's own instant.
+
+    A row §3.2 closed on its own — ``RELEASED`` by an allocation mutation, or cancelled
+    earlier — fails here on its state or on its instant, so it is never reported as this
+    request's work. An event row with no ``cancelledAt`` can only answer an empty stamp,
+    which no aggregate row carries, so the result is empty rather than a guess.
+    """
+    status = str(row.get(show_and_sell_models.STATUS_ATTRIBUTE) or "")
+    if status not in (inventory_models.ALLOCATION_CANCELLED, show_and_sell_models.SIGNUP_CANCELLED):
+        return False
+    return str(row.get(show_and_sell_models.UPDATED_AT_ATTRIBUTE) or "") == cancelled_at
 
 
 def _cancel_show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
@@ -4276,6 +4382,10 @@ def _cancel_show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, An
     if replayed is not None:
         return replayed
 
+    # Replay first, then one fact about one row: the state guard and the version guard
+    # are both evaluated against the row this request just read, so the conditional
+    # write cannot match a row whose state was never checked.
+    _require_read_version(event_row, expected_version)
     show_and_sell_models.require_cancellable(event_row)
     reads = _cancellation_reads(event_row)
 
@@ -4356,7 +4466,11 @@ def _eligible_scout_ids(caller_id: str, unit_campaign_id: str) -> List[Dict[str,
     eligible through this path: an admin reads ``showAndSells``, which answers the
     administrative type, and the participant surface stays participant-shaped.
     """
-    roster = unit_campaign_models.list_memberships(unit_campaign_id)
+    # Consistent, because this read decides who may see anything. A stale ACTIVE row
+    # that outlives a removal would put a former member back in ``active_ids``, and the
+    # history-only rule for a removed Scout would then hand them the campaign's whole
+    # upcoming schedule (EVT-Q-02-02).
+    roster = unit_campaign_models.list_memberships(unit_campaign_id, consistent_read=True)
     profile_ids = [str(row["profileId"]) for row in roster]
     if not profile_ids:
         return []
@@ -4367,9 +4481,18 @@ def _eligible_scout_ids(caller_id: str, unit_campaign_id: str) -> List[Dict[str,
 def _opportunity_answer(
     event_row: Mapping[str, Any], *, timezone_name: str, signups: Sequence[Mapping[str, Any]]
 ) -> Dict[str, Any]:
-    """The participant answer for one event: its slots, and the caller's signups."""
+    """The participant answer for one event: its slots, and the caller's signups.
+
+    The slots are ordered by when they run, and a signup inherits its position from the
+    slot it holds — the signup row carries no interval of its own (§5.13), so the slot
+    partition is the only place that order exists.
+    """
     slots = show_and_sell_models.event_slot_rows(str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]))
     ordered = sorted(slots, key=lambda row: (str(row.get("startAt") or ""), str(row.get("slotId") or "")))
+    starts = {str(row.get("slotId") or ""): str(row.get("startAt") or "") for row in ordered}
+    signups = sorted(
+        signups, key=lambda row: (starts.get(str(row.get("slotId") or ""), ""), str(row.get("slotId") or ""))
+    )
     return dict(
         show_and_sell_models.opportunity_payload(
             event_row,
@@ -4381,10 +4504,13 @@ def _opportunity_answer(
 
 
 def _signup_rows_for(event_id: str, profile_ids: Sequence[str]) -> List[Dict[str, Any]]:
-    """The event's signup rows belonging to any of these Scouts, in slot order.
+    """The event's signup rows belonging to any of these Scouts, in a stable order.
 
     One partition read per event covers every Scout in the caller's set, which is why
-    the profile filter happens on the rows rather than in the key.
+    the profile filter happens on the rows rather than in the key. The order is the
+    slot and profile identity, not an interval: §5.13 gives a signup row no
+    ``startAt``/``endAt``, and sorting on a missing attribute silently degenerates into
+    insertion order (the slot's own order is applied when the payload is built).
     """
     wanted = set(profile_ids)
     rows = [
@@ -4392,7 +4518,7 @@ def _signup_rows_for(event_id: str, profile_ids: Sequence[str]) -> List[Dict[str
         for row in show_and_sell_models.event_signup_rows(event_id)
         if str(row.get(show_and_sell_models.PROFILE_ID_ATTRIBUTE) or "") in wanted
     ]
-    return sorted(rows, key=lambda row: (str(row.get("startAt") or ""), str(row.get("slotId") or "")))
+    return sorted(rows, key=lambda row: (str(row.get("slotId") or ""), str(row.get("profileId") or "")))
 
 
 def _roster_membership_split(eligible: Sequence[Mapping[str, Any]]) -> Tuple[List[str], List[str]]:
@@ -4419,10 +4545,15 @@ def _visible_opportunities(
     *,
     active_ids: Sequence[str],
     former_ids: Sequence[str],
-    timezone_name: str,
     include_past: bool,
-) -> List[Dict[str, Any]]:
+) -> List[Tuple[Dict[str, Any], List[Dict[str, Any]]]]:
     """The campaign's events that are this caller's to see, soonest first.
+
+    The answer is the candidate set — each event row paired with the signup rows that
+    name it — rather than the built payloads. Hydrating a payload costs a slot partition
+    read per event, so it happens after the page is cut: otherwise ``page.limit`` bounds
+    what the caller receives and nothing bounds what the handler reads, and a campaign
+    with a long history pays for every event on every page.
 
     Two exclusions, and both are about the Scout rather than the event:
 
@@ -4437,7 +4568,7 @@ def _visible_opportunities(
     covers every Scout in the caller's set at once.
     """
     all_ids = list(active_ids) + list(former_ids)
-    rows: List[Dict[str, Any]] = []
+    candidates: List[Tuple[Dict[str, Any], List[Dict[str, Any]]]] = []
     for event_row in show_and_sell_models.list_campaign_events(unit_campaign_id):
         state = show_and_sell_models.derive_event_status(event_row)
         if state == show_and_sell_models.STATUS_CANCELLED:
@@ -4448,8 +4579,8 @@ def _visible_opportunities(
         signups = _signup_rows_for(event_id, all_ids)
         if not active_ids and not any(str(row.get("profileId") or "") in former_ids for row in signups):
             continue
-        rows.append(_opportunity_answer(event_row, timezone_name=timezone_name, signups=signups))
-    return rows
+        candidates.append((dict(event_row), signups))
+    return candidates
 
 
 def _unit_campaign_opportunities(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
@@ -4482,15 +4613,21 @@ def _unit_campaign_opportunities(event: Dict[str, Any], caller_id: str) -> Dict[
 
     active_ids, former_ids = _roster_membership_split(eligible)
     unit = unit_models.load_unit_or_not_found(str(campaign["unitId"]))
-    rows = _visible_opportunities(
+    candidates = _visible_opportunities(
         unit_campaign_id,
         active_ids=active_ids,
         former_ids=former_ids,
-        timezone_name=str(unit.get("timezone") or ""),
         include_past=include_past,
     )
     scope = f"{UNIT_CAMPAIGN_OPPORTUNITIES_FIELD}#{unit_campaign_id}#{caller_id}#{int(include_past)}"
-    return dict(paginate_page(rows, scope, _page_argument(event)))
+    timezone_name = str(unit.get("timezone") or "")
+    page = dict(paginate_page(candidates, scope, _page_argument(event)))
+    # Hydration after the slice: only the events on this page pay for their slots.
+    page["items"] = [
+        _opportunity_answer(event_row, timezone_name=timezone_name, signups=signups)
+        for event_row, signups in page["items"]
+    ]
+    return page
 
 
 def _show_and_sell_opportunity(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
@@ -4515,6 +4652,14 @@ def _show_and_sell_opportunity(event: Dict[str, Any], caller_id: str) -> Dict[st
         raise AppError(ErrorCode.NOT_FOUND, "Show & Sell not found")
     is_admin = unit_auth.is_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
     if not is_admin and not check_profile_access(caller_id, profile_id, "READ"):
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell not found")
+
+    # A cancelled event is answered exactly like an event that was never there. The
+    # campaign-level read already drops it, and this field answers the participant type
+    # rather than the administrative one: leaving it readable would give a Scout a
+    # per-event path to a cancelled offer that the list refuses, so the two surfaces
+    # would disagree about the same row (EVT-Q-02-02, EVT-Q-03-02).
+    if show_and_sell_models.derive_event_status(event_row) == show_and_sell_models.STATUS_CANCELLED:
         raise AppError(ErrorCode.NOT_FOUND, "Show & Sell not found")
 
     signups = _signup_rows_for(str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]), [profile_id])

@@ -910,11 +910,15 @@ data "aws_iam_policy_document" "lambda_unit_tenant_dynamodb" {
   # (attribute_not_exists for the first receipt of a product, version + §4.1 floor
   # guards afterwards), so ConditionCheckItem rides with the item actions and
   # TransactWriteItems rides with them because the item actions are not permission
-  # to invoke the transaction API.
+  # to invoke the transaction API. BatchGetItem is here for the §3.1 event reads and
+  # the cancellation plan: an event's allocations are read authoritatively by key from
+  # its own productIds (§6.3 note), not through an index, so an event with any product
+  # on it reads the inventory table by key before it can answer or cancel.
   statement {
     effect = "Allow"
     actions = [
       "dynamodb:GetItem",
+      "dynamodb:BatchGetItem",
       "dynamodb:Query",
       "dynamodb:PutItem",
       "dynamodb:UpdateItem",
