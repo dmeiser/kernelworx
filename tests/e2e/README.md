@@ -414,6 +414,7 @@ SS_DATA_ID=stage2-1118013 uv run pytest tests/e2e/test_smoke_show_sell_stage2.py
 | `SS_DATA_ID` | the lane's `DATA_ID`. The Unit number, campaign name, seller name and every idempotency key are derived from it. Unset, the run generates one — which is what a run meant as fresh evidence needs, because the keys mean a pinned re-run *replays* the writes (the idempotency layer answers the original payload) instead of performing them |
 | `SS_SHARED_CATALOG` | the admin-managed catalog both Campaigns are created on, by name. Unset, the run takes the first `ADMIN_MANAGED` catalog that carries products |
 | `SS_ACCEPTANCE_EVIDENCE_DIR` | where `evidence.json`, `evidence.md`, the traces and the masked screenshots go (default `test-results/show-sell-stage2-<SS_DATA_ID>`) |
+| `SS_SWEEP_PRIOR` | comma-separated `DATA_ID`s of earlier runs of this lane whose leftovers should be taken back before the record is written. Selection is by that lane's own naming templates — the Unit number derived from the id, the campaign name, the seller name — so a row the lane did not create cannot be caught by it, and the current run's id is excluded by the caller and again inside the sweep |
 
 **One catalog has to serve both Campaigns, and only an app admin can create it.** Unit Campaign
 balances key on the Unit Campaign's own `catalogId` while `createOrder` prices the sale in the Scout
@@ -432,6 +433,19 @@ lane reads it out of the answer instead of naming its own. The same is true of t
 sale's place in the trail: the custody it consumed is traced by an `INDIVIDUAL_FULFILL` movement
 naming the Order and its `SCOUT_CUSTODY` fulfillment, because the `SCOUT_SALE_CONSUME` type requires
 a Show & Sell event `saleId` the door-to-door path does not have.
+
+**The lane cleans up after itself in the `finally`, not on the happy path.** It returns held custody, zeroes
+the balances it wrote (as compensating rows: `inventoryMovements` is append-only, and the inventory model's
+only correction is another movement), deletes the Orders it wrote — `deleteOrder` takes the whole fulfillment
+partition with the Order, and the Order is the seller profile's own record, so the teardown sends it with the
+Scout's token rather than the Unit Admin's — revokes the share it granted, removes the roster membership, then
+deletes the Scout Campaign and the seller profile. Every removal is read back through the endpoint the
+acceptance assertions use, because a mutation that answered `true` is not evidence that a row is gone. What it
+cannot remove is the Unit and the Unit Campaign: the shipped SDL carries no `deleteUnit` and no
+`deleteUnitCampaign`, so no caller has a path to those rows. The lane therefore deactivates its Unit Campaign,
+says in the record that those two rows and the append-only history stay, and leaves a **canary** Unit Campaign
+— a second campaign on the same Unit with a receipt of its own — standing, then asserts that canary still
+answers its stock and `isActive` and that `CATALOG#e2e-test-catalog` is untouched.
 
 **Not every clause of §2.8.5 is executable yet.** The raw-data half names
 `unitCampaignOrderLines` / `scoutCampaignOrderLines` (§2.5) and the §6 reporting reads, which the

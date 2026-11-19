@@ -37,7 +37,7 @@ import datetime
 import json
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -75,29 +75,46 @@ CAMPAIGN_YEAR = "2026"
 #: the run used.
 PREFERRED_PRODUCT = "Cheese Popcorn"
 
-#: The balances ``SS-SM-10`` arranges for the traded product: 2 received, 2 issued to the Scout, 3 on
-#: order to the Council.  Issuing less than the sale asks for is deliberate — ``ORD-API-02`` is the
-#: sale that consumes what the Scout actually carries and stays owing the rest, never a sale that
-#: blocks because the Scout is short.  Two received rather than a shelf full is deliberate too: the
-#: lane ends with the shelf at zero and a line still owed, so the two Council Needs numbers are
-#: non-zero and a reader can see them move, instead of reading two zeroes that any arithmetic would
-#: have produced.
-RECEIVED_QTY = 2
-ISSUED_QTY = 2
-ON_ORDER_QTY = 3
-SALE_QTY = 4
-COUNCIL_FILL = 1
-STOCK_FILL = 1
-
-#: A second product, so the return leg has something to return.  ``CONSUME_SCOUT_CUSTODY`` takes
-#: everything the Scout carries up to the line quantity, so a sale that leaves an owed line has by
-#: construction emptied that Scout's custody for that product — a return of the sold product would
-#: be refused for going below zero, which is a real rule (§ INV-M-05) but not the one ``SS-SM-04``
-#: step 3 asks to see.  The lane therefore issues and returns a product it never sells.
-RETURN_PRODUCT = "Caramel Corn"
-RETURN_RECEIVED = 4
-RETURN_ISSUED = 2
+#: ``SS-SM-04`` exactly as §2.8.3 and the smoke plan name it, run live on one product: receipt 10,
+#: issue 4, sale 3, sale 2 with one unit fulfilled, issue 2, return 1 — ending Kernel 5, With Scout 1
+#: and total owned 6, with no double stock decrement.  The lane keeps these numbers on one product so
+#: a reader can recompute them from the leaf, and pushes every other leg onto the side product below.
+#: ``sale 2`` is the partial sale: it consumes what the Scout still carries (1) and stays owing the
+#: rest (1), because ``ORD-API-02`` never blocks a sale for a short Scout.
+RECEIVED_QTY = 10
+FIRST_ISSUE_QTY = 4
+FIRST_SALE_QTY = 3
+SECOND_SALE_QTY = 2
+SECOND_ISSUE_QTY = 2
 RETURN_QTY = 1
+EXPECTED_FINAL_KERNEL = 5
+EXPECTED_FINAL_WITH_SCOUT = 1
+EXPECTED_FINAL_OWNED = 6
+
+#: The second product carries everything the canonical sequence would disturb: the ``SS-SM-03``
+#: stock-only legs (a receipt, a +2/-1 adjustment pair, a Council-on-order adjustment that must not
+#: move physical stock), the per-product custody line, and the sale that leaves a line the Scout
+#: cannot fill from custody at all.  Balances key ``(unitCampaignId, productId)``, so this also shows
+#: two custody balances that never share a number a sale of the other product could consume.
+SIDE_PRODUCT = "Caramel Corn"
+SIDE_RECEIVED_QTY = 4
+SIDE_ADJUST_UP = 2
+SIDE_ADJUST_DOWN = -1
+ON_ORDER_QTY = 3
+SIDE_ISSUE_QTY = 1
+SIDE_SALE_QTY = 2
+
+#: The ``SS-SM-10`` read needs unfulfilled demand larger than the shelf, or both Council Needs numbers
+#: come back zero and prove nothing.  A sale of 8 against a Scout carrying 1 is the same
+#: ``ORD-API-02`` path — consume ``min(ordered, available)``, stay owing the rest — and leaves 8
+#: units of demand against 5 sellable Kernels.
+DEMAND_SALE_QTY = 8
+COUNCIL_FILL = 1
+STOCK_FILL = 2
+
+#: Stock the lane puts on the *other* Unit Campaign before it moves the Scout there, and never
+#: touches again: the canary the teardown has to leave standing.
+CANARY_QTY = 3
 
 SCOUT_NAME_TEMPLATE = "Avery Stage2 {data_id}"
 CAMPAIGN_TEMPLATE = "Stage 2 Stock {data_id}"
@@ -364,6 +381,22 @@ def _read(token: str, field: str, variables: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _campaign_custody(token: str, unit_campaign_id: str) -> dict[str, int]:
+    """Products with custody on one Unit Campaign, read from the balance rows.
+
+    ``withScoutQty`` on the ``InventoryPosition`` is the number §2.6.1 and §2.6.2 render, so the
+    lane's custody claims are made on the same value the screens show.  ``scoutCustodyBalances`` is
+    the participant-facing view of the same rows and is recorded beside it, but it answers a row per
+    product the Scout has ever held — including the products whose custody a sale has emptied — so
+    it is not compared to a ``> 0`` view of the balances.
+    """
+    return {
+        product_id: int(row["withScoutQty"] or 0)
+        for product_id, row in _positions(token, unit_campaign_id).items()
+        if int(row["withScoutQty"] or 0) > 0
+    }
+
+
 def _positions(token: str, unit_campaign_id: str) -> dict[str, dict[str, Any]]:
     """``inventoryPositions`` keyed by product id, with the §5.2 formulas checked on the way in.
 
@@ -569,6 +602,354 @@ def _write_evidence(
     redact_and_scan(evidence_dir, passwords=passwords, codes=codes)
 
 
+def _sale_line(sale: dict[str, Any], product_id: str, ordered: int) -> tuple[str, str]:
+    """Return one door-to-door sale's ``(orderId, lineItemId)``, refusing an answer with neither.
+
+    §5.19: the write mints the line's identity, so a lane that invents its own id ends up chasing a
+    line the Order never stored — which is how the first version of this lane died.  Every later
+    fulfillment, reversal and screen row keys on the id the answer carries.
+    """
+    order_id = str(sale.get("orderId") or "")
+    assert order_id, f"the sale answered no Order: {sale!r}"
+    lines = [item for item in sale.get("lineItems") or [] if str(item.get("productId")) == product_id]
+    assert len(lines) == 1, f"the sale answered {len(lines)} line(s) for {product_id}: {sale!r}"
+    assert int(lines[0].get("quantity") or 0) == ordered, lines[0]
+    line_item_id = str(lines[0].get("lineItemId") or "")
+    assert line_item_id, f"the sale answered no line identity; §5.19 says the write mints it: {sale!r}"
+    return order_id, line_item_id
+
+
+def _teardown_lane(lane_key: str, built: dict[str, Any], identities: dict[str, dict[str, str]]) -> list[tuple[str, str]]:
+    """Take back every record this lane created that the product lets a caller take back.
+
+    This runs in the journey's ``finally``: the run that stopped halfway is the one that most needs
+    its rows gone, and a lane that only cleans up on the happy path is a lane that litters the
+    deployed stack whenever it fails.  Every removal is read back through the same endpoint the
+    acceptance assertions use, because a mutation that answered ``true`` is not evidence that a row
+    is gone.  Each step is independent — one refusal gets recorded and the rest still run.
+
+    What gets removed is exactly what the shipped schema allows: the Orders (whose delete takes the
+    Order's whole fulfillment partition with it, ``src/handlers/campaign_operations.py``), the Scout
+    Campaign and the seller profile, which cascade their Orders, the roster membership, the READ
+    share the lane granted, and every balance the lane put on its Unit Campaign — zeroed, because
+    ``inventoryMovements`` is append-only and the only correction the inventory model allows is the
+    compensating row.
+
+    What cannot be removed is the Unit and its Unit Campaigns: the SDL carries no ``deleteUnit`` and
+    no ``deleteUnitCampaign``, so no caller — not an admin, not the creator — has a path to those
+    rows.  The lane deactivates its own Unit Campaign, which is what takes it out of every picker,
+    and records the rest as left on the stack rather than claiming a teardown it cannot perform.
+    """
+    unit_campaign_id = str(built.get("unitCampaignId") or "")
+    if not unit_campaign_id:
+        return [("§2.8.7 teardown", "nothing to take back: the lane never reached a Unit Campaign")]
+
+    admin_token = _token_for(identities["admin"])
+    scout_token = _token_for(identities["scout"])
+    scout_profile_id = str(built.get("scoutProfileId") or "")
+    scout_campaign_id = str(built.get("scoutCampaignId") or "")
+    documents = stage2.STAGE_TWO_SUPPORT_DOCUMENTS
+    observations: list[tuple[str, str]] = []
+
+    def step(acceptance: str, action: Callable[[], str]) -> None:
+        """Run one teardown step, recording a refusal instead of letting it end the teardown."""
+        try:
+            observations.append((acceptance, action()))
+        except api.GraphQLError as exc:
+            observations.append((acceptance, f"refused {exc.codes}: {exc}"))
+
+    def return_custody() -> str:
+        # Held stock is read from the balance rows, the same source the acceptance assertions use.
+        # ``scoutCustodyBalances`` is recorded next to it and can answer differently; a teardown that
+        # trusted only that read could report "nothing held" while a balance row still carries stock.
+        held = _campaign_custody(admin_token, unit_campaign_id)
+        if not held:
+            return "no position row on this Unit Campaign carries withScoutQty"
+        items = [{"productId": product_id, "quantity": quantity} for product_id, quantity in sorted(held.items())]
+        _write(
+            admin_token,
+            "returnStockFromScout",
+            {
+                "input": stage2.return_input(
+                    unit_campaign_id, scout_campaign_id, scout_profile_id, items, idempotency_key=f"{lane_key}-teardown-return"
+                )
+            },
+        )
+        left = _campaign_custody(admin_token, unit_campaign_id)
+        assert not left, f"custody balances still hold stock after the teardown return: {left}"
+        return (
+            f"returned {sum(int(item['quantity']) for item in items)} unit(s) across {len(items)} custody "
+            f"line(s); no position row on this Unit Campaign carries withScoutQty, and "
+            f"scoutCustodyBalances answers {stage2.custody_by_product(_custody(admin_token, unit_campaign_id))}"
+        )
+
+    def zero_balances() -> str:
+        cleared: list[str] = []
+        for index, (product_id, position) in enumerate(sorted(_positions(admin_token, unit_campaign_id).items())):
+            kernel = int(position.get("kernelPhysicalQty") or 0)
+            on_order = int(position.get("councilOnOrderQty") or 0)
+            if kernel > 0:
+                _write(
+                    admin_token,
+                    "adjustInventory",
+                    {
+                        "input": stage2.adjust_input(
+                            unit_campaign_id,
+                            product_id,
+                            -kernel,
+                            f"Stage 2 acceptance lane {lane_key} teardown",
+                            idempotency_key=f"{lane_key}-teardown-kernel-{index}",
+                        )
+                    },
+                )
+            if on_order != 0:
+                _write(
+                    admin_token,
+                    "adjustCouncilOnOrder",
+                    {
+                        "input": stage2.council_on_order_input(
+                            unit_campaign_id, product_id, -on_order, idempotency_key=f"{lane_key}-teardown-council-demand-{index}"
+                        )
+                    },
+                )
+            cleared.append(product_id)
+        standing = {
+            product_id: row
+            for product_id, row in _positions(admin_token, unit_campaign_id).items()
+            if any(int(row.get(field) or 0) != 0 for field in ("kernelPhysicalQty", "councilOnOrderQty", "withScoutQty"))
+        }
+        assert not standing, f"the lane left a balance standing: {standing}"
+        return (
+            f"zeroed kernelPhysicalQty and councilOnOrderQty on {len(cleared)} product row(s) of "
+            f"{unit_campaign_id}; every position that Unit Campaign owns now reads 0, and the movements "
+            "that got it there are untouched"
+        )
+
+    def delete_orders() -> str:
+        order_ids = [str(item) for item in built.get("orderIds") or []]
+        if not order_ids:
+            return "the lane wrote no Order"
+        for order_id in order_ids:
+            # deleteOrder is the legacy Order pipeline: it is the seller profile's own record, so the
+            # Unit Admin who can see the Order cannot delete it — the profile owner can ("Only profile
+            # owner or users with WRITE permission can perform this action", measured on dev on
+            # 2026-11-19).  The teardown therefore uses the Scout's own token here.
+            answered = api.gql(scout_token, documents["deleteOrder"], {"orderId": order_id})
+            assert answered.get("deleteOrder") is True, f"deleteOrder answered {answered!r} for {order_id}"
+        left = _scout_orders(admin_token, unit_campaign_id, scout_campaign_id)
+        assert not left, f"unitScoutCampaignOrders still answers {[row.get('orderId') for row in left]}"
+        history_answers = []
+        for order_id in order_ids:
+            raw = api.gql_raw(admin_token, stage2.STAGE_TWO_DOCUMENTS["orderFulfillments"], {"orderId": order_id})
+            errors = api.error_summaries(raw)
+            items = list(((raw.get("data") or {}).get("orderFulfillments") or {}).get("items") or [])
+            assert not items, f"orderFulfillments still answers {len(items)} record(s) for {order_id}"
+            history_answers.append(errors[0]["code"] if errors else "0 records")
+        return (
+            f"deleted {len(order_ids)} Order(s) through deleteOrder; unitScoutCampaignOrders is empty and "
+            f"orderFulfillments answers {history_answers} for them — the delete takes the whole fulfillment "
+            "partition with the Order"
+        )
+
+    def revoke_share() -> str:
+        account_id = str(built.get("shareAccountId") or "")
+        if not account_id:
+            return "the lane granted no share to revoke"
+        answered = api.gql(
+            scout_token, documents["revokeShare"], {"input": stage2.revoke_share_input(scout_profile_id, account_id)}
+        )
+        assert answered.get("revokeShare") is True, f"revokeShare answered {answered!r}"
+        shares = api.gql(scout_token, documents["shares"], {"profileId": scout_profile_id}).get("listSharesByProfile") or []
+        assert not shares, f"the profile still carries shares: {shares}"
+        return f"revoked the READ share on {account_id}; listSharesByProfile answers none"
+
+    def leave_roster() -> str:
+        where = str(built.get("canaryCampaignId") or unit_campaign_id)
+        roster_row = _roster_row(admin_token, where, scout_profile_id)
+        removed = api.gql(
+            admin_token,
+            documents["removeMembership"],
+            {
+                "input": stage2.remove_membership_input(
+                    where,
+                    scout_campaign_id,
+                    int(roster_row.get("version") or 1),
+                    int(roster_row.get("guardVersion") or 1),
+                    idempotency_key=f"{lane_key}-teardown-roster",
+                )
+            },
+        )
+        status = str((removed.get("removeUnitCampaignMembership") or {}).get("status"))
+        assert status == "REMOVED", removed
+        return f"removed the Scout Campaign from {where}: roster row status {status}"
+
+    def delete_scout_campaign() -> str:
+        answered = api.gql(scout_token, documents["deleteCampaign"], {"campaignId": scout_campaign_id})
+        assert answered.get("deleteCampaign") is True, f"deleteCampaign answered {answered!r}"
+        gone = api.gql(scout_token, documents["scoutCampaign"], {"campaignId": scout_campaign_id}).get("getCampaign")
+        assert gone is None, f"getCampaign still answers the deleted Scout Campaign: {gone!r}"
+        listed = api.gql(scout_token, documents["scoutCampaigns"], {"profileId": scout_profile_id})
+        rows = (listed.get("listCampaignsByProfile") or {}).get("campaigns") or []
+        assert scout_campaign_id not in {str(row.get("campaignId")) for row in rows}, rows
+        return f"deleted Scout Campaign {scout_campaign_id}; getCampaign answers null and the profile lists none"
+
+    def delete_profile() -> str:
+        answered = api.gql(scout_token, documents["deleteProfile"], {"profileId": scout_profile_id})
+        assert answered.get("deleteSellerProfile") is True, f"deleteSellerProfile answered {answered!r}"
+        profiles = api.gql(scout_token, documents["profiles"], {"limit": 200}).get("listMyProfiles") or {}
+        names = [str(row.get("sellerName")) for row in profiles.get("profiles") or []]
+        assert str(built.get("scoutName") or "") not in names, f"the profile is still listed: {names}"
+        return f"deleted seller profile {scout_profile_id} and with it the Campaigns and Orders under it; listMyProfiles no longer lists it"
+
+    def deactivate_lane_campaign() -> str:
+        rows = (
+            api.gql(admin_token, documents["unitCampaigns"], {"unitId": str(built.get("unitId") or "")})
+            .get("unitCampaigns") or {}
+        ).get("items") or []
+        lane_row = next((row for row in rows if str(row.get("unitCampaignId")) == unit_campaign_id), None)
+        assert lane_row, f"unitCampaigns(unitId={built.get('unitId')}) no longer answers {unit_campaign_id}"
+        updated = api.gql(
+            admin_token,
+            documents["deactivateUnitCampaign"],
+            {
+                "input": stage2.deactivate_unit_campaign_input(
+                    unit_campaign_id, int(lane_row.get("version") or 1), idempotency_key=f"{lane_key}-teardown-deactivate"
+                )
+            },
+        ).get("updateUnitCampaign") or {}
+        assert updated.get("isActive") is False, updated
+        return (
+            f"deactivated Unit Campaign {unit_campaign_id} (now v{updated.get('version')}); the Unit itself and "
+            "the Unit Campaign row have no delete mutation in the SDL, so those two rows and the append-only "
+            "inventory history stay on the stack"
+        )
+
+    def canary_survives() -> str:
+        canary_id = str(built.get("canaryCampaignId") or "")
+        if not canary_id:
+            return "the lane created no canary campaign"
+        position = _positions(admin_token, canary_id).get(str(built.get("productId") or ""))
+        assert position, f"the canary campaign answers no position: {canary_id}"
+        assert int(position["kernelPhysicalQty"]) == CANARY_QTY, (
+            f"the teardown disturbed the canary campaign's stock: {position}"
+        )
+        rows = (
+            api.gql(admin_token, documents["unitCampaigns"], {"unitId": str(built.get("unitId") or "")})
+            .get("unitCampaigns") or {}
+        ).get("items") or []
+        canary_row = next((row for row in rows if str(row.get("unitCampaignId")) == canary_id), None)
+        assert canary_row and canary_row.get("isActive") is True, f"the canary campaign is not standing: {canary_row}"
+        catalog_id = str(built.get("catalogId") or "")
+        catalogs = api.gql(admin_token, documents["managedCatalogs"], {}).get("listManagedCatalogs") or []
+        assert catalog_id in {str(row.get("catalogId")) for row in catalogs}, (
+            f"the lane touched the shared managed catalog {catalog_id}"
+        )
+        return (
+            f"canary Unit Campaign {canary_id} still answers kernelPhysicalQty "
+            f"{position['kernelPhysicalQty']} for {built.get('product')} and isActive true, and the shared "
+            f"catalog {catalog_id} is untouched"
+        )
+
+    def history_is_immutable() -> str:
+        written = int(built.get("movementCount") or 0)
+        after = _trail(admin_token, unit_campaign_id)
+        assert len(after) >= written, f"the trail shrank from {written} rows to {len(after)}: movements are append-only"
+        return (
+            f"{len(after)} movement rows answer the Unit Campaign, at or above the {written} the acceptance "
+            "steps wrote: the teardown's own corrections were appended as new rows, and no history row vanished"
+        )
+
+    step("§2.8.7 teardown / INV-M-05", return_custody)
+    step("§2.8.7 teardown / INV-M-02-03", zero_balances)
+    step("§2.8.7 teardown / ORD-API", delete_orders)
+    step("§2.8.7 teardown / AUTH-P", revoke_share)
+    step("§2.8.7 teardown / API-FIX-02", leave_roster)
+    step("§2.8.7 teardown / API-FIX-01-02", delete_scout_campaign)
+    step("§2.8.7 teardown / API-FIX-01", delete_profile)
+    step("§2.8.7 teardown / §2.6.1", deactivate_lane_campaign)
+    step("§2.8.7 canary", canary_survives)
+    step("§2.8.7 audit immutability", history_is_immutable)
+    return observations
+
+
+def _sweep_prior_lanes(
+    identities: dict[str, dict[str, str]],
+    prior_ids: list[str],
+    keep: str,
+) -> list[tuple[str, str]]:
+    """Remove what earlier runs of this lane left, by attribution, and never a stranger's rows.
+
+    The lane creates Units and Unit Campaigns it cannot delete, but everything hanging off them —
+    the seller profile, the Scout Campaign and the Orders — is removable, and leaving seven runs'
+    worth of Scout profiles on the deployed stack is not "canary-safe", it is a mess the next reader
+    has to step over.  Selection is by the lane's own naming templates for the named ``DATA_ID``s, so
+    a row the lane did not create cannot be caught by it; the current run's id is excluded by the
+    caller and again here.
+    """
+    admin_token = _token_for(identities["admin"])
+    scout_token = _token_for(identities["scout"])
+    documents = stage2.STAGE_TWO_SUPPORT_DOCUMENTS
+    wanted = [item for item in prior_ids if item and item != keep]
+    if not wanted:
+        return [("§2.8.7 prior-lane sweep", "no earlier DATA_IDs named, nothing to sweep")]
+
+    units = {
+        int(row.get("unitNumber") or 0): str(row.get("unitId"))
+        for row in (api.gql(admin_token, documents["myUnits"], {"page": {"limit": 100}}).get("myUnits") or {}).get("items")
+        or []
+    }
+    profiles = [
+        (str(row.get("profileId")), str(row.get("sellerName")))
+        for row in (api.gql(scout_token, documents["profiles"], {"limit": 200}).get("listMyProfiles") or {}).get("profiles")
+        or []
+    ]
+    observations: list[tuple[str, str]] = []
+    for data_id in wanted:
+        number = int(_unit_number(data_id))
+        unit_id = units.get(number)
+        campaigns_off = 0
+        if unit_id:
+            rows = (api.gql(admin_token, documents["unitCampaigns"], {"unitId": unit_id}).get("unitCampaigns") or {}).get(
+                "items"
+            ) or []
+            for row in rows:
+                if str(row.get("campaignName")) != CAMPAIGN_TEMPLATE.format(data_id=data_id) or not row.get("isActive"):
+                    continue
+                api.gql(
+                    admin_token,
+                    documents["deactivateUnitCampaign"],
+                    {
+                        "input": stage2.deactivate_unit_campaign_input(
+                            str(row["unitCampaignId"]),
+                            int(row.get("version") or 1),
+                            idempotency_key=f"sweep-{data_id}-{row['unitCampaignId']}",
+                        )
+                    },
+                )
+                campaigns_off += 1
+        wanted_name = SCOUT_NAME_TEMPLATE.format(data_id=data_id)
+        profiles_gone = 0
+        for profile_id, seller_name in profiles:
+            if seller_name != wanted_name:
+                continue
+            api.gql(scout_token, documents["deleteProfile"], {"profileId": profile_id})
+            profiles_gone += 1
+        remaining = [
+            str(row.get("sellerName"))
+            for row in (api.gql(scout_token, documents["profiles"], {"limit": 200}).get("listMyProfiles") or {}).get("profiles")
+            or []
+        ]
+        assert wanted_name not in remaining, f"the sweep left {wanted_name} listed"
+        observations.append(
+            (
+                "§2.8.7 prior-lane sweep",
+                f"{data_id}: deactivated {campaigns_off} Unit Campaign(s) on Unit {unit_id or 'not found'} and deleted "
+                f"{profiles_gone} seller profile(s) named {wanted_name} with their Campaigns and Orders",
+            )
+        )
+    return observations
+
+
 # ---------------------------------------------------------------------------
 # The journey
 # ---------------------------------------------------------------------------
@@ -600,9 +981,9 @@ def test_show_sell_stage2_journey(
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     built: dict[str, Any] = {}
 
-    def record(acceptance: str, summary: str) -> None:
+    def record(acceptance: str, summary: str, result: str = "observed") -> None:
         """Append one acceptance observation to the record."""
-        steps.append({"order": len(steps) + 1, "acceptance": acceptance, "result": "observed", "summary": summary})
+        steps.append({"order": len(steps) + 1, "acceptance": acceptance, "result": result, "summary": summary})
 
     try:
         # --- Gate 1: the deployed build has to carry Stage 2 -----------------------
@@ -652,7 +1033,7 @@ def test_show_sell_stage2_journey(
                     lane["campaign_name"], profile_id=scout_profile_id, catalog_name=catalog_name
                 )
             scout_campaign_id = _scout_campaign_id_for(scout_token, scout_profile_id, lane["campaign_name"])
-            built.update({"scoutProfileId": scout_profile_id, "scoutCampaignId": scout_campaign_id})
+            built.update({"scoutProfileId": scout_profile_id, "scoutCampaignId": scout_campaign_id, "scoutName": lane["scout_name"]})
             record("API-FIX-01/02", f"Scout profile {scout_profile_id} holds campaign {scout_campaign_id}")
 
         with _persona_session(browser, "03-scout-join", identities["scout"], evidence_dir) as (scout_page, _):
@@ -677,28 +1058,39 @@ def test_show_sell_stage2_journey(
         others = [name for name in sorted(products) if name != traded]
         if not others:
             raise pytest.skip(
-                f"{unit_catalog['catalogId']} carries one product only: the sale consumes every unit "
-                "of custody it can reach, so the return leg needs a second product to give back"
+                f"{unit_catalog['catalogId']} carries one product only: the SS-SM-03 stock-only legs have "
+                "to sit on a different product, or the canonical SS-SM-04 ending numbers stop being the "
+                "smoke plan's"
             )
-        returned_name = RETURN_PRODUCT if RETURN_PRODUCT in others else others[0]
-        return_product_id = products[returned_name]
+        side_name = SIDE_PRODUCT if SIDE_PRODUCT in others else others[0]
+        side_product_id = products[side_name]
         built.update({
             "catalogId": unit_catalog["catalogId"],
             "product": traded,
             "productId": product_id,
-            "returnedProduct": returned_name,
-            "returnedProductId": return_product_id,
+            "sideProduct": side_name,
+            "sideProductId": side_product_id,
         })
         record(
             "UNIT-06 / catalog identity",
-            f"both Campaigns sell from {unit_catalog['catalogId']}; the lane trades {traded} ({product_id})",
+            f"both Campaigns sell from {unit_catalog['catalogId']}; the lane trades {traded} ({product_id}) "
+            f"and runs its stock-only legs on {side_name} ({side_product_id})",
         )
 
-        # --- SS-SM-03: receipt and stock-only adjustments, with no money ----------
-        receipt = _write(
+        # --- SS-SM-03: stock-only writes, on the side product ---------------------
+        #
+        # The receipt, the +2/-1 adjustment pair and the Council-on-order adjustment all sit on a
+        # product the canonical SS-SM-04 sequence never touches.  That is deliberate: §2.8.3 names
+        # the ending balances of that sequence, and an adjustment landing on the same product would
+        # replace the leaf's numbers with arithmetic of the lane's own making.
+        side_receipt = _write(
             admin_token,
             "recordInventoryReceipt",
-            {"input": stage2.receipt_input(campaign_id, product_id, RECEIVED_QTY, idempotency_key=f"{lane['data_id']}-receipt")},
+            {
+                "input": stage2.receipt_input(
+                    campaign_id, side_product_id, SIDE_RECEIVED_QTY, idempotency_key=f"{lane['data_id']}-side-receipt"
+                )
+            },
         )
         raise_adjust = _write(
             admin_token,
@@ -706,8 +1098,8 @@ def test_show_sell_stage2_journey(
             {
                 "input": stage2.adjust_input(
                     campaign_id,
-                    product_id,
-                    2,
+                    side_product_id,
+                    SIDE_ADJUST_UP,
                     "Trade with Troop 7150; money settled outside app",
                     idempotency_key=f"{lane['data_id']}-raise",
                 )
@@ -719,67 +1111,77 @@ def test_show_sell_stage2_journey(
             {
                 "input": stage2.adjust_input(
                     campaign_id,
-                    product_id,
-                    -1,
+                    side_product_id,
+                    SIDE_ADJUST_DOWN,
                     "Gift to outgoing volunteer",
                     idempotency_key=f"{lane['data_id']}-lower",
                 )
             },
         )
-        council = _write(
+        council_adjust = _write(
             admin_token,
             "adjustCouncilOnOrder",
             {
                 "input": stage2.council_on_order_input(
-                    campaign_id, product_id, ON_ORDER_QTY, idempotency_key=f"{lane['data_id']}-council"
+                    campaign_id, side_product_id, ON_ORDER_QTY, idempotency_key=f"{lane['data_id']}-council"
                 )
             },
         )
-        assert receipt["kernelPhysicalQty"] == RECEIVED_QTY, receipt
-        assert raise_adjust["kernelPhysicalQty"] == RECEIVED_QTY + 2, raise_adjust
-        assert lower_adjust["kernelPhysicalQty"] == RECEIVED_QTY + 1, lower_adjust
+        assert side_receipt["kernelPhysicalQty"] == SIDE_RECEIVED_QTY, side_receipt
+        assert raise_adjust["kernelPhysicalQty"] == SIDE_RECEIVED_QTY + SIDE_ADJUST_UP, raise_adjust
+        assert lower_adjust["kernelPhysicalQty"] == SIDE_RECEIVED_QTY + SIDE_ADJUST_UP + SIDE_ADJUST_DOWN, lower_adjust
         assert lower_adjust["soldInPossessionQty"] == 0, lower_adjust
-        assert council["councilOnOrderQty"] == ON_ORDER_QTY, council
-        assert council["kernelPhysicalQty"] == RECEIVED_QTY + 1, (
-            f"the Council-on-order adjustment moved physical stock: {council}"
+        assert council_adjust["councilOnOrderQty"] == ON_ORDER_QTY, council_adjust
+        assert council_adjust["kernelPhysicalQty"] == SIDE_RECEIVED_QTY + SIDE_ADJUST_UP + SIDE_ADJUST_DOWN, (
+            f"the Council-on-order adjustment moved physical stock: {council_adjust}"
+        )
+        half_positions = _positions(admin_token, campaign_id)
+        assert product_id not in half_positions, (
+            f"the traded product answered a balance row before any stock was received for it: {half_positions[product_id]}"
         )
         record(
             "SS-SM-03 steps 4-6",
-            f"receipt {receipt['kernelPhysicalQty']}, adjustments +2/-1 → {lower_adjust['kernelPhysicalQty']}, "
-            f"on-order {council['councilOnOrderQty']} with kernelPhysicalQty unchanged",
+            f"{side_name}: receipt {side_receipt['kernelPhysicalQty']}, adjustments +{SIDE_ADJUST_UP}"
+            f"/{SIDE_ADJUST_DOWN} → {lower_adjust['kernelPhysicalQty']}, on-order "
+            f"{council_adjust['councilOnOrderQty']} with kernelPhysicalQty unchanged; {traded} still has no "
+            "balance row at all",
         )
 
         # --- IDEM-01: the same key replays the answer, it does not write again -----
         #
-        # The replay answers the *first* call's payload — same version, same
-        # ``kernelPhysicalQty`` — while the persisted position keeps the later adjustments.  Both
-        # halves matter: an answer that re-ran the write would double the stock, and an answer that
-        # matched the current row would mean the write ran again and only its response was rebuilt.
-        # The idempotency keys are derived from ``DATA_ID``, so a pinned re-run of this lane replays
+        # The replay answers the *first* call's payload while the persisted row is exactly where the
+        # first call left it.  Both halves matter: an answer that re-ran the write would double the
+        # shelf, and a row that moved would mean the write ran again and only its response was
+        # rebuilt.  The keys are derived from ``DATA_ID``, so a pinned re-run of this lane replays
         # every write below and changes nothing on the stack — which is why a run meant as fresh
         # evidence takes a fresh ``DATA_ID``.
-        replay = _write(
+        receipt = _write(
             admin_token,
             "recordInventoryReceipt",
             {"input": stage2.receipt_input(campaign_id, product_id, RECEIVED_QTY, idempotency_key=f"{lane['data_id']}-receipt")},
         )
-        assert replay == receipt, f"the replay answered something other than the first call: {replay!r} != {receipt!r}"
-        after_replay = _positions(admin_token, campaign_id)[product_id]
-        assert after_replay["kernelPhysicalQty"] == lower_adjust["kernelPhysicalQty"], (
-            f"the replayed receipt wrote stock again: {after_replay}"
+        receipt_replay = _write(
+            admin_token,
+            "recordInventoryReceipt",
+            {"input": stage2.receipt_input(campaign_id, product_id, RECEIVED_QTY, idempotency_key=f"{lane['data_id']}-receipt")},
         )
-        assert after_replay["version"] > receipt["version"], (
-            f"the position's version did not advance past the replay's write: {after_replay}"
+        assert receipt_replay == receipt, f"the replay answered something other than the first call: {receipt_replay!r}"
+        after_replay = _positions(admin_token, campaign_id)[product_id]
+        assert after_replay["kernelPhysicalQty"] == RECEIVED_QTY, (
+            f"the replayed receipt key wrote stock again: {after_replay}"
+        )
+        assert after_replay["version"] == receipt["version"], (
+            f"the replayed receipt key rewrote the balance row: {after_replay!r} != {receipt!r}"
         )
         record(
             "IDEM-01",
-            f"replayed receipt key answers the original v{receipt['version']} payload "
-            f"(kernel {receipt['kernelPhysicalQty']}) while the row stays at v{after_replay['version']} "
-            f"kernel {after_replay['kernelPhysicalQty']}",
+            f"replayed receipt key answers the original v{receipt['version']} payload (kernel "
+            f"{receipt['kernelPhysicalQty']}) and the row is still v{after_replay['version']} kernel "
+            f"{after_replay['kernelPhysicalQty']}, not {RECEIVED_QTY * 2}",
         )
 
-        # --- SS-SM-04 step 1: issue into Scout custody ----------------------------
-        issue = _write(
+        # --- SS-SM-04 step 1 / INV-M-04-01: issue 4, and a second custody balance --
+        first_issue = _write(
             admin_token,
             "issueStockToScout",
             {
@@ -788,39 +1190,133 @@ def test_show_sell_stage2_journey(
                     scout_campaign_id,
                     scout_profile_id,
                     product_id,
-                    ISSUED_QTY,
-                    idempotency_key=f"{lane['data_id']}-issue",
+                    FIRST_ISSUE_QTY,
+                    idempotency_key=f"{lane['data_id']}-issue-1",
                 )
             },
         )
-        custody_rows = _custody(admin_token, campaign_id)
-        assert stage2.custody_by_product(custody_rows).get(product_id) == issue["custodyBalance"]["withScoutQty"], custody_rows
-        assert issue["inventoryPosition"]["withScoutQty"] == ISSUED_QTY, issue
+        assert first_issue["inventoryPosition"]["kernelPhysicalQty"] == RECEIVED_QTY - FIRST_ISSUE_QTY, first_issue
+        assert first_issue["custodyBalance"]["withScoutQty"] == FIRST_ISSUE_QTY, first_issue
+        side_issue = _write(
+            admin_token,
+            "issueStockToScout",
+            {
+                "input": stage2.issue_input(
+                    campaign_id,
+                    scout_campaign_id,
+                    scout_profile_id,
+                    side_product_id,
+                    SIDE_ISSUE_QTY,
+                    idempotency_key=f"{lane['data_id']}-issue-side",
+                )
+            },
+        )
+        assert side_issue["custodyBalance"]["productId"] == side_product_id, side_issue
+        after_issues = _positions(admin_token, campaign_id)
+        assert after_issues[product_id]["withScoutQty"] == FIRST_ISSUE_QTY, after_issues[product_id]
+        assert after_issues[side_product_id]["withScoutQty"] == SIDE_ISSUE_QTY, after_issues[side_product_id]
+        assert stage2.custody_by_product(_custody(admin_token, campaign_id)) == {
+            product_id: FIRST_ISSUE_QTY,
+            side_product_id: SIDE_ISSUE_QTY,
+        }, "scoutCustodyBalances does not answer one row per product for this Scout"
         record(
-            "SS-SM-04 step 1",
-            f"issued {ISSUED_QTY} of {traded}: withScoutQty={issue['custodyBalance']['withScoutQty']}, "
-            f"kernelPhysicalQty={issue['inventoryPosition']['kernelPhysicalQty']}",
+            "SS-SM-04 step 1 / INV-M-04-01",
+            f"issued {FIRST_ISSUE_QTY} of {traded} (kernel {RECEIVED_QTY}→{first_issue['inventoryPosition']['kernelPhysicalQty']}) "
+            f"and {SIDE_ISSUE_QTY} of {side_name} as a second custody balance: the two balances answer "
+            f"{FIRST_ISSUE_QTY} and {SIDE_ISSUE_QTY} separately",
         )
 
-        # The return leg's product, received and issued to the same Scout.  A custody balance is
-        # keyed (unitCampaignId, productId, profileId), so this also shows the two balances do not
-        # share a number a sale of one product would consume — and the receipt first is not ceremony:
-        # a campaign holds no Kernels for a product until one is written, and issuing past them is
-        # refused ("quantity exceeds the 0 unassigned Kernels this campaign holds for that product",
-        # measured on dev on 2026-11-18).
-        second_receipt = _write(
+        # --- ORD-API-02-03: a READ-only account cannot spend custody ---------------
+        #
+        # The identity the leaf names, built the way the product builds it: the Scout shares the
+        # profile with the other fixture admin at READ and nothing else.  READ is "view the profile
+        # and its campaigns, orders, and generated reports"; placing an order needs WRITE or a Unit
+        # Admin of the originating Unit (``PermissionType``, ``createOrder``).  The refusal has to
+        # leave nothing behind — no Order, no custody movement — and the caller who *is* entitled
+        # then retries the same idempotency key, so the leg also proves the refused attempt wrote no
+        # marker that would make the retry answer a refusal.
+        other_admin_email = identities["admin2"]["email"]
+        other_admin_token = _token_for(identities["admin2"])
+        share = api.gql(
+            scout_token,
+            stage2.STAGE_TWO_SUPPORT_DOCUMENTS["shareRead"],
+            {"input": stage2.share_read_input(scout_profile_id, other_admin_email)},
+        )
+        share_row = share.get("shareProfileDirect") or {}
+        share_account_id = str(share_row.get("targetAccountId") or "")
+        assert list(share_row.get("permissions") or []) == ["READ"], share_row
+        assert share_account_id, f"the share answered no account id: {share_row!r}"
+        built["shareAccountId"] = share_account_id
+        sale_input = stage2.custody_sale_input(
+            scout_profile_id,
+            scout_campaign_id,
+            product_id,
+            FIRST_SALE_QTY,
+            SALE_CUSTOMER,
+            idempotency_key=f"{lane['data_id']}-sale-1",
+        )
+        denial_codes = [item["code"] for item in _refused(other_admin_token, "createOrder", {"input": sale_input})]
+        assert denial_codes, f"a READ-only account placed an Order on {scout_profile_id}"
+        assert stage2.custody_by_product(_custody(admin_token, campaign_id)).get(product_id) == FIRST_ISSUE_QTY, (
+            "the refused sale consumed Scout custody"
+        )
+        assert _scout_orders(admin_token, campaign_id, scout_campaign_id) == [], "the refused sale wrote an Order"
+        record(
+            "ORD-API-02-03-01",
+            f"READ-only {other_admin_email} refused {denial_codes} on createOrder: custody still "
+            f"{FIRST_ISSUE_QTY}, no Order in unitScoutCampaignOrders",
+        )
+
+        # --- SS-SM-04 step 2: sale 3, on the same key the denial just spent --------
+        first_sale = _write(admin_token, "createOrder", {"input": sale_input})
+        first_order_id, first_line_id = _sale_line(first_sale, product_id, FIRST_SALE_QTY)
+        assert str(first_sale["unitCampaignId"]) == campaign_id, first_sale
+        assert int(first_sale["lineItems"][0]["fulfilledQuantity"] or 0) == FIRST_SALE_QTY, first_sale
+        after_first_sale = _positions(admin_token, campaign_id)[product_id]
+        assert after_first_sale["withScoutQty"] == FIRST_ISSUE_QTY - FIRST_SALE_QTY, after_first_sale
+        assert after_first_sale["kernelPhysicalQty"] == RECEIVED_QTY - FIRST_ISSUE_QTY, (
+            f"a custody sale changed Kernel stock: {after_first_sale}"
+        )
+        record(
+            "ORD-API-02-01/03-02",
+            f"the entitled retry on key {lane['data_id']}-sale-1 wrote one Order {first_order_id} in "
+            f"unitCampaignId={first_sale['unitCampaignId']}: ordered {FIRST_SALE_QTY}, fulfilled "
+            f"{FIRST_SALE_QTY} from custody on line {first_line_id} (the write minted that id, §5.19), "
+            f"custody {FIRST_ISSUE_QTY}→{after_first_sale['withScoutQty']}, Kernel untouched",
+        )
+
+        # --- SS-SM-04 step 2: sale 2 against the one unit the Scout still carries --
+        second_sale = _write(
             admin_token,
-            "recordInventoryReceipt",
+            "createOrder",
             {
-                "input": stage2.receipt_input(
-                    campaign_id, return_product_id, RETURN_RECEIVED, idempotency_key=f"{lane['data_id']}-receipt-second"
+                "input": stage2.custody_sale_input(
+                    scout_profile_id,
+                    scout_campaign_id,
+                    product_id,
+                    SECOND_SALE_QTY,
+                    "Rowan Door",
+                    idempotency_key=f"{lane['data_id']}-sale-2",
                 )
             },
         )
-        assert second_receipt["kernelPhysicalQty"] == RETURN_RECEIVED, second_receipt
-        assert second_receipt["councilOnOrderQty"] == 0, (
-            f"the second product's receipt came with a Council-on-order balance attached: {second_receipt}"
+        second_order_id, second_line_id = _sale_line(second_sale, product_id, SECOND_SALE_QTY)
+        second_line = second_sale["lineItems"][0]
+        assert int(second_line["fulfilledQuantity"] or 0) == FIRST_ISSUE_QTY - FIRST_SALE_QTY, (
+            f"the partial sale consumed {second_line['fulfilledQuantity']} of the "
+            f"{FIRST_ISSUE_QTY - FIRST_SALE_QTY} the Scout carried: {second_line}"
         )
+        after_second_sale = _positions(admin_token, campaign_id)[product_id]
+        assert after_second_sale["withScoutQty"] == 0, f"custody survived the sale that emptied it: {after_second_sale}"
+        assert after_second_sale["kernelPhysicalQty"] == RECEIVED_QTY - FIRST_ISSUE_QTY, after_second_sale
+        record(
+            "ORD-API-02-02 partial",
+            f"sale {second_order_id} ordered {SECOND_SALE_QTY} against "
+            f"{FIRST_ISSUE_QTY - FIRST_SALE_QTY} of custody: fulfilled {second_line['fulfilledQuantity']}, "
+            f"still owing {SECOND_SALE_QTY - int(second_line['fulfilledQuantity'] or 0)}, Kernel untouched",
+        )
+
+        # --- SS-SM-04 steps 2b-3: issue 2, return 1, and the leaf's end state ------
         second_issue = _write(
             admin_token,
             "issueStockToScout",
@@ -829,30 +1325,55 @@ def test_show_sell_stage2_journey(
                     campaign_id,
                     scout_campaign_id,
                     scout_profile_id,
-                    return_product_id,
-                    RETURN_ISSUED,
-                    idempotency_key=f"{lane['data_id']}-issue-return-product",
+                    product_id,
+                    SECOND_ISSUE_QTY,
+                    idempotency_key=f"{lane['data_id']}-issue-2",
                 )
             },
         )
-        assert second_issue["custodyBalance"]["productId"] == return_product_id, second_issue
-        after_issues = _positions(admin_token, campaign_id)
-        assert after_issues[return_product_id]["withScoutQty"] == RETURN_ISSUED, after_issues[return_product_id]
-        assert after_issues[return_product_id]["kernelPhysicalQty"] == RETURN_RECEIVED - RETURN_ISSUED, (
-            after_issues[return_product_id]
+        assert second_issue["inventoryPosition"]["kernelPhysicalQty"] == RECEIVED_QTY - FIRST_ISSUE_QTY - SECOND_ISSUE_QTY, (
+            second_issue
         )
-        assert after_issues[product_id]["withScoutQty"] == ISSUED_QTY, after_issues[product_id]
+        returned = _write(
+            admin_token,
+            "returnStockFromScout",
+            {
+                "input": stage2.return_input(
+                    campaign_id,
+                    scout_campaign_id,
+                    scout_profile_id,
+                    [{"productId": product_id, "quantity": RETURN_QTY}],
+                    idempotency_key=f"{lane['data_id']}-return",
+                )
+            },
+        )
+        assert len(returned["custodyBalances"]) == 1 and len(returned["inventoryPositions"]) == 1, returned
+        sequence_position = _positions(admin_token, campaign_id)[product_id]
+        assert sequence_position["kernelPhysicalQty"] == EXPECTED_FINAL_KERNEL, sequence_position
+        assert sequence_position["withScoutQty"] == EXPECTED_FINAL_WITH_SCOUT, sequence_position
+        assert sequence_position["totalUnitOwnedUndeliveredQty"] == EXPECTED_FINAL_OWNED, sequence_position
+        sequence_trail = _trail(admin_token, campaign_id)
+        kernel_sum = sum(
+            int(row["kernelPhysicalDelta"] or 0) for row in sequence_trail if str(row.get("productId")) == product_id
+        )
+        assert kernel_sum == RECEIVED_QTY - FIRST_ISSUE_QTY - SECOND_ISSUE_QTY + RETURN_QTY, (
+            f"the {traded} trail sums to a Kernel movement of {kernel_sum}, so a step counted twice: "
+            f"expected {RECEIVED_QTY - FIRST_ISSUE_QTY - SECOND_ISSUE_QTY + RETURN_QTY}"
+        )
         record(
-            "INV-M-04-01",
-            f"received {RETURN_RECEIVED} and issued {RETURN_ISSUED} of {returned_name} as a second custody balance: "
-            f"withScoutQty {after_issues[product_id]['withScoutQty']} / {after_issues[return_product_id]['withScoutQty']} "
-            "per product, kernelPhysicalQty falls by what each issue moved",
+            "SS-SM-04 steps 2b-3 / §2.8.3",
+            f"issue {SECOND_ISSUE_QTY} then return {RETURN_QTY} ends the named sequence at Kernel "
+            f"{sequence_position['kernelPhysicalQty']}, With Scout {sequence_position['withScoutQty']}, total "
+            f"owned {sequence_position['totalUnitOwnedUndeliveredQty']}; the product's trail sums to "
+            f"{kernel_sum:+d} Kernel, so no step decremented stock twice",
         )
 
         # --- INV-Q-01: the balances, and the formulas they have to satisfy --------
         positions = _positions(admin_token, campaign_id)
-        traded_position = positions.get(product_id)
-        assert traded_position, f"inventoryPositions answers {sorted(positions)}, not {product_id!r}"
+        traded_position = positions[product_id]
+        side_position = positions[side_product_id]
+        violations = stage2.position_arithmetic_violations([traded_position, side_position])
+        assert violations == [], f"a derived balance disagrees with its formula: {violations}"
         built["tradedPosition"] = traded_position
 
         # --- The three §2.6 screens, read by the browser that renders them -------
@@ -862,32 +1383,34 @@ def test_show_sell_stage2_journey(
             admin.open_stage_two_tab(ID_TAB_INVENTORY)
             screen = admin.wait_for_inventory_position(product_id)
             shot = _screenshot(admin_page, "01-stock-screen", evidence_dir, masks=admin.code_mask_locators())
-            for quantity, value in (
-                ("kernelPhysicalQty", traded_position["kernelPhysicalQty"]),
-                ("sellableKernelQty", traded_position["sellableKernelQty"]),
-                ("withScoutQty", traded_position["withScoutQty"]),
-                ("councilOnOrderQty", traded_position["councilOnOrderQty"]),
-            ):
-                assert screen.get(quantity) == int(value), (
-                    f"the Stock tab shows {quantity}={screen.get(quantity)} where the server answers {value}"
+            for quantity in ("kernelPhysicalQty", "sellableKernelQty", "withScoutQty", "councilOnOrderQty"):
+                assert screen.get(quantity) == int(traded_position[quantity]), (
+                    f"the Stock tab shows {quantity}={screen.get(quantity)} where the server answers "
+                    f"{traded_position[quantity]}"
                 )
-            record("INV-Q-01 / §2.6.1", f"screen and server agree on {sorted(screen)}; {shot}")
+            side_screen = admin.wait_for_inventory_position(side_product_id)
+            assert side_screen.get("councilOnOrderQty") == int(side_position["councilOnOrderQty"]), (
+                f"the Stock tab shows the Council-on-order balance on the wrong product: {side_screen}"
+            )
+            record(
+                "INV-Q-01 / §2.6.1",
+                f"screen and server agree on {sorted(screen)} for {traded}, and the on-order balance "
+                f"{side_screen.get('councilOnOrderQty')} sits on {side_name}, not on {traded}; {shot}",
+            )
 
             admin.open_stage_two_tab(ID_TAB_CUSTODY)
             held = admin.wait_for_custody_held(scout_profile_id)
             shot = _screenshot(admin_page, "02-custody-screen", evidence_dir, masks=admin.code_mask_locators())
             lines = {
                 name: admin.custody_line_qty(scout_profile_id, ids)
-                for name, ids in ((traded, product_id), (returned_name, return_product_id))
+                for name, ids in ((traded, product_id), (side_name, side_product_id))
             }
-            assert held == ISSUED_QTY + RETURN_ISSUED, (
-                f"the custody tab shows {held} held for the Scout, the two balances answer "
-                f"{ISSUED_QTY} + {RETURN_ISSUED}"
-            )
-            assert lines == {traded: ISSUED_QTY, returned_name: RETURN_ISSUED}, (
-                f"the custody tab's per-product lines read {lines}, the balances are "
-                f"{traded}={ISSUED_QTY}, {returned_name}={RETURN_ISSUED}"
-            )
+            expected_held = int(traded_position["withScoutQty"]) + int(side_position["withScoutQty"])
+            assert held == expected_held, f"the custody tab shows {held} held, the balances answer {expected_held}"
+            assert lines == {
+                traded: int(traded_position["withScoutQty"]),
+                side_name: int(side_position["withScoutQty"]),
+            }, f"the custody tab's per-product lines read {lines}, the balances answer them differently"
             record("INV-Q-04 / §2.6.2", f"Scout holds {held} across {sorted(lines)}; {shot}")
 
             admin.open_stage_two_tab(ID_TAB_ORDERS)
@@ -896,16 +1419,22 @@ def test_show_sell_stage2_journey(
 
         # --- INV-Q-05: the Scout's own custody read, and nothing else -------------
         scout_custody = _my_custody(scout_token, campaign_id, scout_profile_id)
-        assert stage2.custody_by_product(scout_custody) == {product_id: ISSUED_QTY, return_product_id: RETURN_ISSUED}, (
-            scout_custody
-        )
+        assert stage2.custody_by_product(scout_custody) == {
+            product_id: int(traded_position["withScoutQty"]),
+            side_product_id: int(side_position["withScoutQty"]),
+        }, scout_custody
         record(
             "INV-Q-05-01",
             f"myScoutCustody answers {len(scout_custody)} line(s) for the Scout's own profile and no other's",
         )
 
-        # --- ORD-API-02: the door-to-door sale that consumes what the Scout carries
-        sale = _write(
+        # --- ORD-API-02-02 zero-custody, and SS-SM-10's two Council Needs ---------
+        #
+        # A sale against a Scout carrying one unit is the same path again: consume
+        # ``min(ordered, availableWithScoutQty)``, stay owing the rest.  It also creates the demand
+        # that makes the two Council Needs numbers mean something: with 8 units owed and 5 sellable
+        # Kernels, both read 3 instead of the two zeroes any arithmetic would produce.
+        demand_sale = _write(
             admin_token,
             "createOrder",
             {
@@ -913,41 +1442,44 @@ def test_show_sell_stage2_journey(
                     scout_profile_id,
                     scout_campaign_id,
                     product_id,
-                    SALE_QTY,
-                    SALE_CUSTOMER,
-                    idempotency_key=f"{lane['data_id']}-sale",
+                    DEMAND_SALE_QTY,
+                    "Sasha Door",
+                    idempotency_key=f"{lane['data_id']}-sale-3",
                 )
             },
         )
-        order_id = str(sale["orderId"])
-        sale_lines = [item for item in sale["lineItems"] or [] if str(item.get("productId")) == product_id]
-        assert len(sale_lines) == 1, f"the sale answered {len(sale_lines)} lines for {product_id}: {sale!r}"
-        sale_line = sale_lines[0]
-        line_item_id = str(sale_line.get("lineItemId") or "")
-        assert line_item_id, f"the sale answered no line identity; §5.19 says the write mints it: {sale!r}"
-        assert str(sale["unitCampaignId"]) == campaign_id, sale
-        assert int(sale_line["quantity"]) == SALE_QTY, sale_line
-        assert int(sale_line["fulfilledQuantity"] or 0) == ISSUED_QTY, (
-            f"the sale consumed {sale_line['fulfilledQuantity']} of the {ISSUED_QTY} the Scout carried: {sale_line}"
+        demand_order_id, demand_line_id = _sale_line(demand_sale, product_id, DEMAND_SALE_QTY)
+        after_demand_sale = _positions(admin_token, campaign_id)[product_id]
+        assert after_demand_sale["withScoutQty"] == 0, f"the sale took custody the Scout was not holding: {after_demand_sale}"
+        assert after_demand_sale["kernelPhysicalQty"] == EXPECTED_FINAL_KERNEL, (
+            f"a custody sale changed Kernel stock: {after_demand_sale}"
         )
-        after_sale = _positions(admin_token, campaign_id)[product_id]
-        assert after_sale["withScoutQty"] == 0, f"custody survived the sale that consumed it: {after_sale}"
-        assert after_sale["kernelPhysicalQty"] == traded_position["kernelPhysicalQty"], (
-            f"a custody sale changed Kernel stock: {after_sale}"
+        orders = _scout_orders(admin_token, campaign_id, scout_campaign_id)
+        demand = _demand(orders, product_id)
+        assert demand["orderedQty"] == FIRST_SALE_QTY + SECOND_SALE_QTY + DEMAND_SALE_QTY, orders
+        needs = stage2.council_need_positions(
+            demand=demand["unfulfilledQty"],
+            sellable=int(after_demand_sale["sellableKernelQty"]),
+            unassigned=int(after_demand_sale["unassignedKernelQty"]),
         )
-        built.update(
-            {
-                "orderId": order_id,
-                "lineItemId": line_item_id,
-                "orderedQty": SALE_QTY,
-                "custodyFulfilled": int(sale_line["fulfilledQuantity"] or 0),
-            }
+        assert after_demand_sale["assignedOpenQty"] == 0, (
+            f"Stage 2 has no Show & Sell event to assign stock, so assignedOpenQty must read 0: {after_demand_sale}"
         )
+        assert needs["physicalStockNeed"] > 0 and needs["afterAssignmentsNeed"] > 0, (
+            f"the lane arranged demand of {demand['unfulfilledQty']} against a shelf of "
+            f"{after_demand_sale['sellableKernelQty']}, so both Needs numbers should be non-zero: {needs}"
+        )
+        assert needs["physicalStockNeed"] == needs["afterAssignmentsNeed"], (
+            f"nothing is assigned to an event in Stage 2, so both Council Needs numbers must agree: {needs}"
+        )
+        built.update({"needs": needs, "demand": demand, "orderIds": [first_order_id, second_order_id, demand_order_id]})
         record(
-            "ORD-API-02-01/02",
-            f"sale {order_id} in unitCampaignId={sale['unitCampaignId']}: ordered {SALE_QTY}, "
-            f"fulfilled {sale_line['fulfilledQuantity']} from custody on line {line_item_id} "
-            f"(the write minted that id, §5.19), Kernel stock untouched",
+            "SS-SM-10 steps 2, 5-6 / ORD-API-02-02 zero-custody",
+            f"sale {demand_order_id} ordered {DEMAND_SALE_QTY} against 1 of custody and stayed owing the "
+            f"rest; unfulfilled demand {demand['unfulfilledQty']} against sellable "
+            f"{after_demand_sale['sellableKernelQty']} and assigned {after_demand_sale['assignedOpenQty']}: "
+            f"physical-stock need {needs['physicalStockNeed']}, after-assignments need "
+            f"{needs['afterAssignmentsNeed']}, one read",
         )
 
         # --- INV-M-06-02: the owed line, filled from the Council ------------------
@@ -955,16 +1487,15 @@ def test_show_sell_stage2_journey(
         # ``fulfillmentVersion`` starts at 0 on a door-to-door Order even though the sale itself
         # writes the custody fulfillment(s): the data model creates the Order with version 0 and
         # consumes custody in the same operation (SHOW_AND_SELL_DATA_MODEL.md §806), so the version
-        # the first fulfillment conditions on is the one the sale answered, not a number the sale
-        # advanced.
-        version = int(sale["fulfillmentVersion"] or 0)
+        # the first fulfillment conditions on is the one the sale answered.
+        version = int(second_sale["fulfillmentVersion"] or 0)
         council_fill = _write(
             admin_token,
             "fulfillIndividualOrderLine",
             {
                 "input": stage2.fulfill_input(
-                    order_id,
-                    line_item_id,
+                    second_order_id,
+                    second_line_id,
                     COUNCIL_FILL,
                     version,
                     source="EXTERNAL_COUNCIL",
@@ -977,15 +1508,15 @@ def test_show_sell_stage2_journey(
             f"a Council fulfillment named an inventory movement: {council_record}"
         )
         after_council_fill = _positions(admin_token, campaign_id)[product_id]
-        assert after_council_fill["councilOnOrderQty"] == ON_ORDER_QTY, (
+        assert after_council_fill["councilOnOrderQty"] == 0, (
             f"an external-Council fulfillment consumed the Council-on-order balance: {after_council_fill}. "
-            "councilOnOrderQty is expected Council supply and is never subtracted automatically "
-            "(SHOW_AND_SELL_DATA_MODEL.md, the balance table)"
+            "councilOnOrderQty is expected Council supply, is never subtracted automatically, and this "
+            "product never had one (SHOW_AND_SELL_DATA_MODEL.md, the balance table)"
         )
-        assert after_council_fill["kernelPhysicalQty"] == after_sale["kernelPhysicalQty"], (
+        assert after_council_fill["kernelPhysicalQty"] == EXPECTED_FINAL_KERNEL, (
             f"an external-Council fulfillment moved Kernel stock: {after_council_fill}"
         )
-        assert after_council_fill["version"] == after_sale["version"], (
+        assert after_council_fill["version"] == after_demand_sale["version"], (
             f"an external-Council fulfillment wrote the balance row anyway: {after_council_fill}"
         )
         council_version = int(council_fill["order"]["fulfillmentVersion"] or version + 1)
@@ -993,9 +1524,8 @@ def test_show_sell_stage2_journey(
         record(
             "INV-M-06-02",
             f"EXTERNAL_COUNCIL fulfillment {council_record['fulfillmentId']} names no movement and writes no "
-            f"inventory row at all: kernelPhysicalQty {after_council_fill['kernelPhysicalQty']} and "
-            f"councilOnOrderQty {after_council_fill['councilOnOrderQty']} both unchanged, balance still at "
-            f"v{after_council_fill['version']}, while the Order's version moved to {council_version}",
+            f"inventory row at all: kernelPhysicalQty {after_council_fill['kernelPhysicalQty']} and the balance "
+            f"row still at v{after_council_fill['version']}, while the Order's version moved to {council_version}",
         )
 
         # --- INV-M-07-01: the reversal puts the demand back and only that source ---
@@ -1004,29 +1534,32 @@ def test_show_sell_stage2_journey(
             "reverseIndividualOrderFulfillment",
             {
                 "input": stage2.reverse_input(
-                    order_id, str(council_record["fulfillmentId"]), council_version, idempotency_key=f"{lane['data_id']}-reverse"
+                    second_order_id,
+                    str(council_record["fulfillmentId"]),
+                    council_version,
+                    idempotency_key=f"{lane['data_id']}-reverse",
                 )
             },
         )
         reversal_record = reversal["reversal"]
         assert str(reversal_record["reversalOfFulfillmentId"]) == str(council_record["fulfillmentId"]), reversal_record
         after_reversal = _positions(admin_token, campaign_id)[product_id]
-        assert after_reversal["councilOnOrderQty"] == ON_ORDER_QTY, (
-            f"a reversal of a Council fulfillment touched the Council-on-order balance: {after_reversal}"
-        )
         assert after_reversal["version"] == after_council_fill["version"], (
             f"reversing a Council fulfillment wrote the balance row: {after_reversal}"
         )
-        assert after_reversal["kernelPhysicalQty"] == after_sale["kernelPhysicalQty"], (
+        assert after_reversal["kernelPhysicalQty"] == EXPECTED_FINAL_KERNEL, (
             f"a reversal of a Council fulfillment touched Kernel stock: {after_reversal}"
         )
+        reversed_line = next(
+            item for item in reversal["order"]["lineItems"] if str(item.get("lineItemId")) == second_line_id
+        )
+        assert int(reversed_line["fulfilledQuantity"] or 0) == FIRST_ISSUE_QTY - FIRST_SALE_QTY, reversed_line
         version = int(reversal["order"]["fulfillmentVersion"] or council_version + 1)
         record(
             "INV-M-07-01",
             f"reversal {reversal_record['fulfillmentId']} names {council_record['fulfillmentId']}, restores the "
-            f"line's demand, and leaves both balances exactly where they were "
-            f"(kernel {after_reversal['kernelPhysicalQty']}, on-order {after_reversal['councilOnOrderQty']}, "
-            f"balance v{after_reversal['version']})",
+            f"line to {reversed_line['fulfilledQuantity']}/{SECOND_SALE_QTY} fulfilled, and leaves the balance "
+            f"row exactly where it was (kernel {after_reversal['kernelPhysicalQty']}, v{after_reversal['version']})",
         )
 
         # --- VER-01: the version the reversal already spent is now stale ----------
@@ -1035,7 +1568,11 @@ def test_show_sell_stage2_journey(
             stage2.STAGE_TWO_DOCUMENTS["fulfillIndividualOrderLine"],
             {
                 "input": stage2.fulfill_input(
-                    order_id, line_item_id, STOCK_FILL, council_version, idempotency_key=f"{lane['data_id']}-stale"
+                    second_order_id,
+                    second_line_id,
+                    COUNCIL_FILL,
+                    council_version,
+                    idempotency_key=f"{lane['data_id']}-stale",
                 )
             },
         )
@@ -1048,187 +1585,207 @@ def test_show_sell_stage2_journey(
         assert after_stale["version"] == after_reversal["version"], (
             f"the refused fulfillment wrote the position anyway: {after_stale}"
         )
-        stale_line = _demand(_scout_orders(admin_token, campaign_id, scout_campaign_id), product_id)
-        assert stale_line["fulfilledQty"] == ISSUED_QTY, (
-            f"the refused fulfillment, or the reversal, changed what the line reports fulfilled: {stale_line}"
-        )
         record(
             "VER-01",
-            f"fulfillment pinned to the spent v{council_version} refused with {stale_codes}, position v"
-            f"{after_stale['version']} and line {stale_line['fulfilledQty']}/{SALE_QTY} unchanged",
+            f"fulfillment pinned to the spent v{council_version} refused with {stale_codes}: position still "
+            f"v{after_stale['version']} with {after_stale['unassignedKernelQty']} unassigned and the line "
+            f"still {reversed_line['fulfilledQuantity']}/{SECOND_SALE_QTY}",
         )
 
-        # --- INV-M-06-01: the same line, filled from unassigned Kernel stock ------
+        # --- INV-M-06-01: the third line, filled from unassigned Kernel stock -----
         stock_fill = _write(
             admin_token,
             "fulfillIndividualOrderLine",
             {
                 "input": stage2.fulfill_input(
-                    order_id, line_item_id, STOCK_FILL, version, idempotency_key=f"{lane['data_id']}-stock-fill"
+                    demand_order_id,
+                    demand_line_id,
+                    STOCK_FILL,
+                    int(demand_sale["fulfillmentVersion"] or 0),
+                    idempotency_key=f"{lane['data_id']}-stock-fill",
                 )
             },
         )
         stock_record = stock_fill["fulfillment"]
         assert stock_record["inventoryMovementId"], f"a KERNEL_STOCK fulfillment names no movement: {stock_record}"
-        filled_line = next(item for item in stock_fill["order"]["lineItems"] if str(item.get("lineItemId")) == line_item_id)
-        assert int(filled_line["fulfilledQuantity"] or 0) == ISSUED_QTY + STOCK_FILL, filled_line
+        filled_line = next(item for item in stock_fill["order"]["lineItems"] if str(item.get("lineItemId")) == demand_line_id)
+        assert int(filled_line["fulfilledQuantity"] or 0) == 1 + STOCK_FILL, filled_line
         after_stock_fill = _positions(admin_token, campaign_id)[product_id]
-        assert after_stock_fill["kernelPhysicalQty"] == after_reversal["kernelPhysicalQty"] - STOCK_FILL, (
+        assert after_stock_fill["kernelPhysicalQty"] == EXPECTED_FINAL_KERNEL - STOCK_FILL, (
             f"a Kernel-stock fulfillment did not take the stock it handed over: {after_stock_fill}"
         )
-        assert after_stock_fill["totalUnitOwnedUndeliveredQty"] == (
-            after_reversal["totalUnitOwnedUndeliveredQty"] - STOCK_FILL
-        ), f"the unit's owned-and-undelivered total did not follow the sale: {after_stock_fill}"
         assert after_stock_fill["unassignedKernelQty"] == after_reversal["unassignedKernelQty"] - STOCK_FILL, (
             f"the fulfillment did not consume unassigned stock: {after_stock_fill}"
         )
-        version = int(stock_fill["order"]["fulfillmentVersion"] or version + 1)
+        assert after_stock_fill["totalUnitOwnedUndeliveredQty"] == (
+            after_reversal["totalUnitOwnedUndeliveredQty"] - STOCK_FILL
+        ), f"the Unit's owned-and-undelivered total did not follow the sale: {after_stock_fill}"
         record(
             "INV-M-06-01",
             f"KERNEL_STOCK fulfillment {stock_record['fulfillmentId']} names movement "
-            f"{stock_record['inventoryMovementId']}; line now {filled_line['fulfilledQuantity']}/{SALE_QTY}, "
-            f"unassignedKernelQty {after_stock_fill['unassignedKernelQty']}",
+            f"{stock_record['inventoryMovementId']}; line {demand_line_id} now "
+            f"{filled_line['fulfilledQuantity']}/{DEMAND_SALE_QTY}, kernelPhysicalQty "
+            f"{EXPECTED_FINAL_KERNEL}→{after_stock_fill['kernelPhysicalQty']}",
         )
 
         # --- The fulfillment tab shows the line the server just wrote ------------
-        with _persona_session(browser, "06-admin-orders", identities["admin"], evidence_dir) as (admin_page, _):
+        with _persona_session(browser, "05-admin-orders", identities["admin"], evidence_dir) as (admin_page, _):
             admin = ShowSellPage(admin_page)
             admin.goto_unit_campaign(unit_id, campaign_id)
             admin.open_stage_two_tab(ID_TAB_ORDERS)
             admin.select_fulfillment_campaign(lane["campaign_name"])
-            screen_line = admin.order_block_ids()
+            screen_orders = admin.order_block_ids()
             shot = _screenshot(admin_page, "04-orders-after-fulfillment", evidence_dir, masks=admin.code_mask_locators())
-            assert order_id in screen_line, (
-                f"the fulfillment tab lists orders {screen_line} for {lane['campaign_name']!r}, not {order_id}; "
-                f"the tab says {admin.fulfillment_notes() or 'nothing about being empty'}"
+            assert demand_order_id in screen_orders, (
+                f"the fulfillment tab lists orders {screen_orders} for {lane['campaign_name']!r}, not "
+                f"{demand_order_id}; the tab says {admin.fulfillment_notes() or 'nothing about being empty'}"
             )
-            fulfilled, owed = admin.wait_for_order_line(line_item_id, campaign_name=lane["campaign_name"])
-            assert (fulfilled, owed) == (ISSUED_QTY + STOCK_FILL, SALE_QTY - ISSUED_QTY - STOCK_FILL), (
-                f"the tab shows line {line_item_id} as {fulfilled} fulfilled / {owed} owed, the server says "
-                f"{ISSUED_QTY + STOCK_FILL}/{SALE_QTY}"
+            fulfilled, owed = admin.wait_for_order_line(demand_line_id, campaign_name=lane["campaign_name"])
+            assert (fulfilled, owed) == (1 + STOCK_FILL, DEMAND_SALE_QTY - 1 - STOCK_FILL), (
+                f"the tab shows line {demand_line_id} as {fulfilled} fulfilled / {owed} owed, the server "
+                f"says {1 + STOCK_FILL}/{DEMAND_SALE_QTY}"
             )
             record(
                 "INV-Q-03 / §2.6.3",
-                f"the fulfillment tab shows line {line_item_id} at {fulfilled} fulfilled and {owed} owed; {shot}",
+                f"the fulfillment tab shows line {demand_line_id} at {fulfilled} fulfilled and {owed} owed; {shot}",
             )
-
-        # --- SS-SM-04 step 3 / INV-M-05: the return, one batch, one atomic result -
-        before_return = _positions(admin_token, campaign_id)
-        returned = _write(
-            admin_token,
-            "returnStockFromScout",
-            {
-                "input": stage2.return_input(
-                    campaign_id,
-                    scout_campaign_id,
-                    scout_profile_id,
-                    [{"productId": return_product_id, "quantity": RETURN_QTY}],
-                    idempotency_key=f"{lane['data_id']}-return",
-                )
-            },
-        )
-        assert len(returned["custodyBalances"]) == 1, returned
-        assert len(returned["inventoryPositions"]) == 1, returned
-        after_return = _positions(admin_token, campaign_id)
-        moved = after_return[return_product_id]
-        unchanged = after_return[product_id]
-        assert moved["withScoutQty"] == RETURN_ISSUED - RETURN_QTY, moved
-        assert moved["kernelPhysicalQty"] == before_return[return_product_id]["kernelPhysicalQty"] + RETURN_QTY, moved
-        assert unchanged["withScoutQty"] == 0, f"the sale left custody that the return then moved: {unchanged}"
-        assert unchanged["kernelPhysicalQty"] == before_return[product_id]["kernelPhysicalQty"], unchanged
-        record(
-            "INV-M-05-01 / SS-SM-04 step 3",
-            f"return of {RETURN_QTY} of {returned_name} answered 1 position and 1 custody row: "
-            f"kernelPhysicalQty {before_return[return_product_id]['kernelPhysicalQty']}→{moved['kernelPhysicalQty']}, "
-            f"withScoutQty {RETURN_ISSUED}→{moved['withScoutQty']}; {traded} untouched at "
-            f"kernel {unchanged['kernelPhysicalQty']}, custody {unchanged['withScoutQty']}",
-        )
 
         # --- INV-Q-02: the audit trail every one of those writes owes -------------
         trail = _trail(admin_token, campaign_id)
         expected_trail = [
+            {"movementType": "RECEIPT", "productId": side_product_id, "kernelPhysicalDelta": SIDE_RECEIVED_QTY},
+            {"movementType": "STOCK_ADJUSTMENT", "productId": side_product_id, "kernelPhysicalDelta": SIDE_ADJUST_UP},
+            {"movementType": "STOCK_ADJUSTMENT", "productId": side_product_id, "kernelPhysicalDelta": SIDE_ADJUST_DOWN},
+            {
+                "movementType": "COUNCIL_ON_ORDER_ADJUST",
+                "productId": side_product_id,
+                "councilOnOrderDelta": ON_ORDER_QTY,
+            },
+            {
+                "movementType": "SCOUT_ISSUE",
+                "productId": side_product_id,
+                "kernelPhysicalDelta": -SIDE_ISSUE_QTY,
+                "withScoutDelta": SIDE_ISSUE_QTY,
+            },
             {"movementType": "RECEIPT", "productId": product_id, "kernelPhysicalDelta": RECEIVED_QTY},
-            {"movementType": "STOCK_ADJUSTMENT", "productId": product_id, "kernelPhysicalDelta": 2},
-            {"movementType": "STOCK_ADJUSTMENT", "productId": product_id, "kernelPhysicalDelta": -1},
-            {"movementType": "COUNCIL_ON_ORDER_ADJUST", "productId": product_id, "councilOnOrderDelta": ON_ORDER_QTY},
             {
                 "movementType": "SCOUT_ISSUE",
                 "productId": product_id,
-                "kernelPhysicalDelta": -ISSUED_QTY,
-                "withScoutDelta": ISSUED_QTY,
+                "kernelPhysicalDelta": -FIRST_ISSUE_QTY,
+                "withScoutDelta": FIRST_ISSUE_QTY,
             },
-            # The sale's custody consumption is recorded as the fulfillment it wrote, not as a
+            # Each sale's custody consumption is recorded as the fulfillment it wrote, not as a
             # ``SCOUT_SALE_CONSUME`` row: that type exists for a Show & Sell event sale and its
             # required source link is the event's ``saleId`` (``src/utils/inventory_models.py``,
             # ``MOVEMENT_REQUIRED_SOURCE_LINKS``), which a door-to-door sale does not have.  Measured
-            # on dev on 2026-11-18, the custody the door-to-door sale consumed is traced by an
+            # on dev on 2026-11-18, the custody a door-to-door sale consumed is traced by an
             # ``INDIVIDUAL_FULFILL`` row naming the Order and the ``SCOUT_CUSTODY`` fulfillment.
             {
                 "movementType": "INDIVIDUAL_FULFILL",
                 "productId": product_id,
-                "withScoutDelta": -ISSUED_QTY,
+                "withScoutDelta": -FIRST_SALE_QTY,
                 "kernelPhysicalDelta": 0,
                 "profileId": scout_profile_id,
-                "orderId": order_id,
+                "orderId": first_order_id,
             },
-            {"movementType": "RECEIPT", "productId": return_product_id, "kernelPhysicalDelta": RETURN_RECEIVED},
+            {
+                "movementType": "INDIVIDUAL_FULFILL",
+                "productId": product_id,
+                "withScoutDelta": -(FIRST_ISSUE_QTY - FIRST_SALE_QTY),
+                "kernelPhysicalDelta": 0,
+                "profileId": scout_profile_id,
+                "orderId": second_order_id,
+            },
             {
                 "movementType": "SCOUT_ISSUE",
-                "productId": return_product_id,
-                "kernelPhysicalDelta": -RETURN_ISSUED,
-                "withScoutDelta": RETURN_ISSUED,
+                "productId": product_id,
+                "kernelPhysicalDelta": -SECOND_ISSUE_QTY,
+                "withScoutDelta": SECOND_ISSUE_QTY,
             },
             {
                 "movementType": "SCOUT_RETURN",
-                "productId": return_product_id,
+                "productId": product_id,
                 "kernelPhysicalDelta": RETURN_QTY,
                 "withScoutDelta": -RETURN_QTY,
+            },
+            {
+                "movementType": "INDIVIDUAL_FULFILL",
+                "productId": product_id,
+                "withScoutDelta": -1,
+                "kernelPhysicalDelta": 0,
+                "profileId": scout_profile_id,
+                "orderId": demand_order_id,
             },
             {"movementType": "INDIVIDUAL_FULFILL", "productId": product_id, "kernelPhysicalDelta": -STOCK_FILL},
         ]
         violations = stage2.movement_trail_violations(trail, expected_trail)
         assert violations == [], f"the trail does not hold the lane's writes: {violations}\n{trail}"
+        assert len(trail) == len(expected_trail), (
+            f"the Unit Campaign's trail answers {len(trail)} rows, the lane wrote {len(expected_trail)}: "
+            f"something is in the audit that no step of this lane owns"
+        )
+        council_rows = [row for row in trail if str(row.get("fulfillmentId") or "") == str(council_record["fulfillmentId"])]
+        assert not council_rows, f"an EXTERNAL_COUNCIL fulfillment wrote inventory history: {council_rows}"
         linked = [
             row
             for row in trail
-            if str(row.get("orderId") or "") == order_id and str(row.get("fulfillmentId") or "") == str(stock_record["fulfillmentId"])
+            if str(row.get("orderId") or "") == demand_order_id
+            and str(row.get("fulfillmentId") or "") == str(stock_record["fulfillmentId"])
         ]
-        assert linked, f"no movement names the fulfillment that filled the line: {order_id}"
+        assert linked, f"no movement names the fulfillment that filled the line: {demand_order_id}"
+        built["movementCount"] = len(trail)
         record(
             "INV-Q-02 / AC-03",
-            f"{len(trail)} movements cover both receipts, both adjustments, the on-order adjustment, both issues, "
-            f"the custody the sale consumed and the Kernel the fulfillment handed over; {len(linked)} names "
-            f"fulfillment {stock_record['fulfillmentId']}, and every stock adjustment carries its reason",
+            f"the trail answers exactly the {len(trail)} rows this lane wrote: both receipts, the adjustment pair, "
+            f"the on-order adjustment, all three issues, the return, the custody each sale consumed and the Kernel "
+            f"the fulfillment handed over; {len(linked)} names fulfillment {stock_record['fulfillmentId']}, none "
+            f"names the Council fulfillment {council_record['fulfillmentId']}, and every stock adjustment carries "
+            "its reason",
         )
 
-        # --- SS-SM-10: actual demand, and both Council Needs numbers together -----
-        orders = _scout_orders(admin_token, campaign_id, scout_campaign_id)
-        demand = _demand(orders, product_id)
-        final_position = _positions(admin_token, campaign_id)[product_id]
-        needs = stage2.council_need_positions(
-            demand=demand["unfulfilledQty"],
-            sellable=int(final_position["sellableKernelQty"]),
-            unassigned=int(final_position["unassignedKernelQty"]),
+        # --- ORD-API-02-04 / API-FIX-05: the Campaign joins ANOTHER Unit Campaign --
+        #
+        # The acceptance line is "after the Campaign joins another Unit Campaign, the old Order,
+        # fulfillment, and Council demand retain the original scope", so the live leg moves the Scout
+        # Campaign to a second Unit Campaign on the same Unit rather than rejoining the one it left —
+        # a rejoin of the same campaign would pass even if scope followed the membership.  The
+        # destination carries a receipt of its own before the move and is never touched again, so it
+        # doubles as the canary the teardown has to leave standing.
+        canary_name = f"{CAMPAIGN_TEMPLATE.format(data_id=lane['data_id'])} B"
+        with _persona_session(browser, "06-admin-second-campaign", identities["admin"], evidence_dir) as (admin_page, _):
+            admin = ShowSellPage(admin_page)
+            # ``goto_unit`` rather than a click on the Unit list: that list is a paged ``myUnits``
+            # read, and by this point in the lane's own life the account holds every Unit earlier
+            # runs left behind.  The workspace route is the direct, page-independent way in.
+            admin.goto_unit(unit_id)
+            admin.open_tab("tab-campaigns")
+            canary_id, canary_join_code = admin.create_campaign(
+                name=canary_name, year=CAMPAIGN_YEAR, catalog_name=catalog_name
+            )
+            codes.append(canary_join_code)
+            built["canaryCampaignId"] = canary_id
+        canary_receipt = _write(
+            admin_token,
+            "recordInventoryReceipt",
+            {
+                "input": stage2.receipt_input(
+                    canary_id, product_id, CANARY_QTY, idempotency_key=f"{lane['data_id']}-canary-receipt"
+                )
+            },
         )
-        assert demand["orderedQty"] == SALE_QTY, orders
-        assert demand["fulfilledQty"] == ISSUED_QTY + STOCK_FILL, demand
-        assert demand["unfulfilledQty"] == SALE_QTY - ISSUED_QTY - STOCK_FILL, demand
-        assert final_position["sellableKernelQty"] == 0, (
-            f"the lane was meant to end with the traded product's shelf empty: {final_position}"
-        )
-        owed = SALE_QTY - ISSUED_QTY - STOCK_FILL
-        assert needs == {"physicalStockNeed": owed, "afterAssignmentsNeed": owed}, (
-            f"with {owed} still owed and no Kernel left to sell, both Council Needs numbers must read {owed}: {needs}"
-        )
-        built.update({"needs": needs, "demand": demand, "finalPosition": final_position})
-        record(
-            "SS-SM-10 steps 2, 5-6",
-            f"demand {demand['orderedQty']} for {traded}, {demand['unfulfilledQty']} still unfulfilled against "
-            f"sellableKernelQty {final_position['sellableKernelQty']}; physical-stock need {needs['physicalStockNeed']} "
-            f"and after-assignments need {needs['afterAssignmentsNeed']} both computed from that one read",
-        )
+        assert canary_receipt["kernelPhysicalQty"] == CANARY_QTY, canary_receipt
 
-        # --- ORD-API-02-04 / API-FIX-05: the Campaign moves, the sale does not ----
+        # What the Scout is holding at the moment of the move is not a guess: the side product was
+        # issued SIDE_ISSUE_QTY and never sold or returned, and every unit of the traded product's
+        # custody went to the sales above — ``planLineConsumption`` in
+        # ``tofu/application/appsync/js-resolvers/lib/custody_sale.js`` consumes a line only against
+        # that line's own product, so those sales cannot have touched the side product.
+        expected_custody_at_move = {side_product_id: SIDE_ISSUE_QTY}
+        custody_before_move = _campaign_custody(admin_token, campaign_id)
+        custody_read_before = stage2.custody_by_product(_custody(admin_token, campaign_id))
+        assert custody_before_move == expected_custody_at_move, (
+            f"the lane reached its move holding {custody_before_move} instead of {expected_custody_at_move}"
+        )
         roster_row = _roster_row(admin_token, campaign_id, scout_profile_id)
         removed = api.gql(
             admin_token,
@@ -1244,27 +1801,56 @@ def test_show_sell_stage2_journey(
             },
         )
         assert str((removed.get("removeUnitCampaignMembership") or {}).get("status")) == "REMOVED", removed
-        with _persona_session(browser, "05-scout-rejoin", identities["scout"], evidence_dir) as (scout_page, _):
+        with _persona_session(browser, "07-scout-moves", identities["scout"], evidence_dir) as (scout_page, _):
             scout = ShowSellPage(scout_page)
             scout.goto_join()
-            scout.join_unit_campaign(join_code, scout_profile_id)
+            scout.join_unit_campaign(canary_join_code, scout_profile_id)
+
         still_there = _scout_orders(admin_token, campaign_id, scout_campaign_id)
-        assert [str(row["orderId"]) for row in still_there] == [order_id], (
-            f"the sale did not stay with the Unit Campaign it was sold in: {still_there}"
-        )
-        assert _demand(still_there, product_id)["orderedQty"] == SALE_QTY, still_there
-        history = _fulfillments(admin_token, order_id)
-        assert history, f"the Order's fulfillment records vanished: {order_id}"
-        assert {str(row["unitCampaignId"]) for row in history} == {campaign_id}, history
-        assert {str(row["campaignId"]) for row in history} == {scout_campaign_id}, history
+        assert sorted(str(row["orderId"]) for row in still_there) == sorted(
+            [first_order_id, second_order_id, demand_order_id]
+        ), f"the sales did not stay with the Unit Campaign they were sold in: {still_there}"
+        assert _demand(still_there, product_id)["orderedQty"] == (
+            FIRST_SALE_QTY + SECOND_SALE_QTY + DEMAND_SALE_QTY
+        ), still_there
+        history = []
+        for order_id in (first_order_id, second_order_id, demand_order_id):
+            records = _fulfillments(admin_token, order_id)
+            assert records, f"Order {order_id}'s fulfillment records vanished"
+            assert {str(row["unitCampaignId"]) for row in records} == {campaign_id}, records
+            assert {str(row["campaignId"]) for row in records} == {scout_campaign_id}, records
+            history.extend(records)
         still_linked = _trail(admin_token, campaign_id)
-        assert [row for row in still_linked if str(row.get("orderId") or "") == order_id], (
+        assert [row for row in still_linked if str(row.get("orderId") or "") == first_order_id], (
             "the sale's movements stopped answering the Unit Campaign they were written under"
+        )
+        moved_orders = _scout_orders(admin_token, canary_id, scout_campaign_id)
+        assert not moved_orders, f"the sales moved with the membership into {canary_id}: {moved_orders}"
+        assert not _custody(admin_token, canary_id), f"custody moved into {canary_id}"
+        canary_positions = _positions(admin_token, canary_id)
+        assert int(canary_positions[product_id]["kernelPhysicalQty"]) == CANARY_QTY, canary_positions[product_id]
+        assert int(canary_positions[product_id]["withScoutQty"]) == 0, canary_positions[product_id]
+        custody_after_move = _campaign_custody(admin_token, campaign_id)
+        custody_read_after = stage2.custody_by_product(_custody(admin_token, campaign_id))
+        assert custody_after_move == expected_custody_at_move, (
+            f"the removal took the custody with it: {custody_after_move} against {expected_custody_at_move}"
+        )
+        assert custody_after_move == custody_before_move, (
+            "the custody balances followed the membership into the new Unit Campaign instead of "
+            "staying on the one that issued them"
+        )
+        assert all(int(row["withScoutQty"] or 0) == 0 for row in canary_positions.values()), (
+            f"the move put custody on the destination campaign: {canary_positions}"
         )
         record(
             "ORD-API-02-04 / API-FIX-05",
-            f"after the removal and rejoin the Order, its {len(history)} fulfillment record(s) and its "
-            f"{SALE_QTY} of demand still answer {campaign_id}, and the trail still names the sale",
+            f"removed from {campaign_id} and joined {canary_id}: the three Orders, their {len(history)} "
+            f"fulfillment record(s) and {FIRST_SALE_QTY + SECOND_SALE_QTY + DEMAND_SALE_QTY} of demand still "
+            f"answer {campaign_id}, its trail still names the sale and its custody balances "
+            f"{custody_before_move} are untouched, while the new campaign answers 0 Orders, no custody and "
+            f"only its own {CANARY_QTY} Kernels; ``scoutCustodyBalances`` answered {custody_read_before} "
+            "before the removal and "
+            f"{custody_read_after} after it",
         )
 
         # --- AUTH-U: the right arguments from the wrong account answer nothing ---
@@ -1276,13 +1862,22 @@ def test_show_sell_stage2_journey(
             codes_moved = [item["code"] for item in _refused(token, "scoutCustodyBalances", {"unitCampaignId": campaign_id})]
             assert codes_moved, f"{label} read {campaign_id}'s custody balances"
         after_refusals = _positions(admin_token, campaign_id)[product_id]
-        assert after_refusals["kernelPhysicalQty"] == final_position["kernelPhysicalQty"], (
+        assert after_refusals["kernelPhysicalQty"] == after_stock_fill["kernelPhysicalQty"], (
             "a refused read changed a balance"
         )
         record("AUTH-U-03/05", "outside and an admin with no grant here were refused on both reads, with no balance change")
 
         built["finished"] = True
     finally:
+        try:
+            for acceptance, summary in _teardown_lane(lane["data_id"], built, identities):
+                record(acceptance, summary)
+        except Exception as exc:  # noqa: BLE001 - a teardown that throws must not cost the evidence
+            record("§2.8.7 teardown", f"stopped: {type(exc).__name__}: {exc}", result="blocked")
+        sweep_ids = [item.strip() for item in os.environ.get("SS_SWEEP_PRIOR", "").split(",") if item.strip()]
+        if sweep_ids:
+            for acceptance, summary in _sweep_prior_lanes(identities, sweep_ids, lane["data_id"]):
+                record(acceptance, summary)
         _write_evidence(
             evidence_dir,
             {
@@ -1296,6 +1891,7 @@ def test_show_sell_stage2_journey(
                     "catalogId": built.get("catalogId", ""),
                 },
                 "stoppedEarly": not built.get("finished", False),
+                "teardown": "always",
                 **{key: value for key, value in built.items() if key not in ("finished", "steps")},
             },
             steps,

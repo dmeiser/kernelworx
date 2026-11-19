@@ -41,6 +41,9 @@ def test_every_stage_two_endpoint_has_a_document_and_a_builder() -> None:
     assert set(stage2._BUILDERS) == set(stage2.STAGE_TWO_WRITES) | {
         "createOrder",
         "removeUnitCampaignMembership",
+        "shareProfileDirect",
+        "revokeShare",
+        "updateUnitCampaign",
     }
     for field, document in stage2.STAGE_TWO_DOCUMENTS.items():
         assert field in document, f"{field}'s document never names the field it sends"
@@ -217,8 +220,19 @@ def test_the_lane_support_documents_are_checked_against_the_sdl_too(monkeypatch:
         "catalogProducts",
         "managedCatalogs",
         "scoutCampaigns",
+        "scoutCampaign",
         "roster",
         "removeMembership",
+        "unitCampaigns",
+        "myUnits",
+        "shareRead",
+        "shares",
+        "revokeShare",
+        "deleteCampaign",
+        "deleteProfile",
+        "deleteOrder",
+        "profiles",
+        "deactivateUnitCampaign",
     }
     monkeypatch.setitem(
         stage2.STAGE_TWO_SUPPORT_DOCUMENTS,
@@ -228,6 +242,43 @@ def test_the_lane_support_documents_are_checked_against_the_sdl_too(monkeypatch:
     assert stage2.stage_two_selection_violations(_sdl()) == [
         "removeUnitCampaignMembership.guardVersions: UnitCampaignMembership declares no guardVersions"
     ]
+
+
+def test_the_lane_carries_a_document_for_every_record_it_has_to_take_back() -> None:
+    """§2.8.7's cleanup order needs a call for each record class the lane can remove.
+
+    A lane that cleans up "at the end" but has no document for, say, the seller profile leaves the
+    profile and its campaigns behind and reports success anyway.  These are the documents the
+    teardown asserts with, and the read-backs next to them are what make the removal a fact rather
+    than a mutation that returned ``true``.
+    """
+    documents = stage2.STAGE_TWO_SUPPORT_DOCUMENTS
+    removals = {"deleteCampaign": "deleteCampaign", "deleteProfile": "deleteSellerProfile", "deleteOrder": "deleteOrder"}
+    for key, field in removals.items():
+        assert field in documents[key], f"{key} does not send {field}"
+        assert documents[key].lstrip().startswith("mutation"), f"{key} is not a mutation"
+    for read_back in ("scoutCampaign", "profiles", "scoutCampaigns", "shares"):
+        assert documents[read_back].lstrip().startswith("query"), f"{read_back} is not a read"
+    assert '"revokeShare"' in documents["revokeShare"] or "revokeShare(input: $input)" in documents["revokeShare"]
+
+
+def test_the_teardown_stops_where_the_product_stops_and_says_so() -> None:
+    """The lane's cleanup boundary is the SDL's, not a wish.
+
+    ``deleteCampaign``, ``deleteSellerProfile`` and ``deleteOrder`` exist, so the lane removes the
+    Scout Campaign, the seller profile and the Orders it wrote.  No ``deleteUnit`` or
+    ``deleteUnitCampaign`` exists anywhere in the shipped schema, so the Unit and its Unit Campaigns
+    cannot be removed by any caller — the lane deactivates its Unit Campaign (the read side filters
+    ``isActive``) and records the rest as left behind.  Proving the absence here is what stops the
+    next reader from "adding the missing teardown call" out of thin air.
+    """
+    sdl = _sdl()
+    for available in ("deleteCampaign(", "deleteSellerProfile(", "deleteOrder("):
+        assert available in sdl, f"the SDL no longer carries {available}, so the teardown cannot claim it"
+    for absent in ("deleteUnit(", "deleteUnitCampaign(", "deleteInventory"):
+        assert absent not in sdl, f"{absent} now exists: the lane's teardown has to call it"
+    payload = stage2._SAMPLES["UpdateUnitCampaignInput"]
+    assert payload["isActive"] is False and "expectedVersion" in payload["version"], payload
 
 
 def test_the_introspection_gate_reports_what_the_deployed_api_answers() -> None:

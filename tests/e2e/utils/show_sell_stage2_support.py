@@ -193,8 +193,9 @@ def fulfill_input(
 
     ``source`` is the §5.19 choice the whole difference in effects hangs on: ``KERNEL_STOCK``
     consumes unassigned Kernel stock and must name the movement it wrote (``INV-M-06-01``),
-    ``EXTERNAL_COUNCIL`` consumes the separate Council-on-order balance and must name no movement at
-    all (``INV-M-06-02``).  ``expectedFulfillmentVersion`` is the guard both condition on: the Order's
+    ``EXTERNAL_COUNCIL`` met the demand from outside the Unit's stock and must name no movement at
+    all — it writes no inventory row whatever, so ``councilOnOrderQty`` stays where it was
+    (``INV-M-06-02``, measured on dev on 2026-11-18).  ``expectedFulfillmentVersion`` is the guard both condition on: the Order's
     version the caller last read, which every fulfillment and reversal increments (§5.19).
     """
     return {
@@ -271,6 +272,42 @@ def custody_sale_input(
         "lineItems": [{"productId": product_id, "quantity": quantity}],
         "fulfillmentMode": "CONSUME_SCOUT_CUSTODY",
         "idempotencyKey": idempotency_key,
+    }
+
+
+def share_read_input(profile_id: str, target_account_email: str) -> dict[str, Any]:
+    """``ShareProfileDirectInput`` granting READ and nothing else (``ORD-API-02-03``).
+
+    READ is "view the profile and its campaigns, orders, and generated reports"; WRITE is what
+    "place and update orders" needs (``PermissionType``, ``createOrder`` requires Profile Owner/WRITE
+    or a Unit Admin of the originating Unit).  A caller holding only READ is therefore the exact
+    identity ``ORD-API-02-03`` asks for: able to see the custody, not able to consume it.
+    """
+    return {
+        "profileId": profile_id,
+        "targetAccountEmail": target_account_email,
+        "permissions": ["READ"],
+    }
+
+
+def revoke_share_input(profile_id: str, target_account_id: str) -> dict[str, Any]:
+    """``RevokeShareInput``: the share is keyed by profile and account, not by the grant's id."""
+    return {"profileId": profile_id, "targetAccountId": target_account_id}
+
+
+def deactivate_unit_campaign_input(unit_campaign_id: str, version: int, *, idempotency_key: str) -> dict[str, Any]:
+    """``UpdateUnitCampaignInput`` closing one Unit Campaign the lane no longer needs.
+
+    This is the furthest the product goes toward taking a Unit Campaign down: there is no
+    ``deleteUnitCampaign`` mutation, and the read side filters on ``isActive``, so deactivating is
+    what makes a finished lane's rows inert instead of offering themselves to the next picker.  It
+    is not deletion, and the evidence record says so.
+    """
+    return {
+        "unitCampaignId": unit_campaign_id,
+        "isActive": False,
+        "version": {"expectedVersion": version},
+        "idempotency": _idempotency(idempotency_key),
     }
 
 
@@ -449,7 +486,8 @@ _WRITE_SELECTIONS: dict[str, str] = {
         "inventoryPosition { " + _POSITION_BODY + " }"
     ),
     "reverseIndividualOrderFulfillment": (
-        "order { orderId fulfillmentVersion } "
+        "order { orderId campaignId unitCampaignId fulfillmentVersion "
+        "lineItems { lineItemId productId quantity fulfilledQuantity } } "
         "reversal { fulfillmentId orderId unitCampaignId recordType quantity source inventoryMovementId "
         "reversalOfFulfillmentId actorAccountId } "
         "inventoryPosition { " + _POSITION_BODY + " }"
@@ -534,9 +572,6 @@ query StageTwoScoutCampaigns($profileId: ID!) {
 }
 """.strip()
 
-#: The admin's roster read for this lane: ``scoutCampaignCatalogId`` is what lets the suite compare
-#: the two catalogs before sending a sale the server would refuse (WORK-161), and ``version`` /
-#: ``guardVersion`` are what ``removeUnitCampaignMembership`` conditions on.
 #: The catalog a Stage 2 lane is allowed to build both Campaigns on.  It needs one catalog that
 #: *both* identities can pick: the Unit Campaign's stock keys on its own ``catalogId`` while
 #: ``createOrder`` prices the sale in the Scout Campaign's (WORK-161), so a lane whose two
@@ -564,6 +599,9 @@ query StageTwoManagedCatalogs {
 }
 """.strip()
 
+#: The admin's roster read for this lane: ``scoutCampaignCatalogId`` is what lets the suite compare
+#: the two catalogs before sending a sale the server would refuse (WORK-161), and ``version`` /
+#: ``guardVersion`` are what ``removeUnitCampaignMembership`` conditions on.
 _ROSTER = """
 query StageTwoRoster($unitCampaignId: ID!) {
   unitCampaignRoster(unitCampaignId: $unitCampaignId, page: {limit: 50}) {
@@ -596,6 +634,120 @@ mutation StageTwoRemoveMembership($input: RemoveUnitCampaignMembershipInput!) {
 }
 """.strip()
 
+# --- The lane's own lifecycle: the second Unit Campaign, the READ-only share, the teardown ----
+
+_UNIT_CAMPAIGNS = """
+query StageTwoUnitCampaigns($unitId: ID!) {
+  unitCampaigns(unitId: $unitId, page: {limit: 50}) {
+    items {
+      unitCampaignId
+      unitId
+      campaignName
+      campaignYear
+      catalogId
+      joinCode
+      isActive
+      version
+    }
+  }
+}
+""".strip()
+
+_MY_UNITS = """
+query StageTwoMyUnits($page: PageInput) {
+  myUnits(page: $page) {
+    items {
+      unitId
+      unitType
+      unitNumber
+      displayName
+      version
+    }
+  }
+}
+""".strip()
+
+_SHARE_READ = """
+mutation StageTwoShareRead($input: ShareProfileDirectInput!) {
+  shareProfileDirect(input: $input) {
+    shareId
+    profileId
+    targetAccountId
+    permissions
+  }
+}
+""".strip()
+
+_SHARES = """
+query StageTwoShares($profileId: ID!) {
+  listSharesByProfile(profileId: $profileId) {
+    shareId
+    profileId
+    targetAccountId
+    permissions
+  }
+}
+""".strip()
+
+_REVOKE_SHARE = """
+mutation StageTwoRevokeShare($input: RevokeShareInput!) {
+  revokeShare(input: $input)
+}
+""".strip()
+
+_DELETE_CAMPAIGN = """
+mutation StageTwoDeleteCampaign($campaignId: ID!) {
+  deleteCampaign(campaignId: $campaignId)
+}
+""".strip()
+
+_DELETE_PROFILE = """
+mutation StageTwoDeleteProfile($profileId: ID!) {
+  deleteSellerProfile(profileId: $profileId)
+}
+""".strip()
+
+_DELETE_ORDER = """
+mutation StageTwoDeleteOrder($orderId: ID!) {
+  deleteOrder(orderId: $orderId)
+}
+""".strip()
+
+_PROFILES = """
+query StageTwoProfiles($limit: Int) {
+  listMyProfiles(limit: $limit) {
+    profiles {
+      profileId
+      sellerName
+      isOwner
+    }
+  }
+}
+""".strip()
+
+_SCOUT_CAMPAIGN = """
+query StageTwoScoutCampaign($campaignId: ID!) {
+  getCampaign(campaignId: $campaignId) {
+    campaignId
+    campaignName
+    isActive
+  }
+}
+""".strip()
+
+_DEACTIVATE_UNIT_CAMPAIGN = """
+mutation StageTwoDeactivateUnitCampaign($input: UpdateUnitCampaignInput!) {
+  updateUnitCampaign(input: $input) {
+    unitCampaignId
+    unitId
+    campaignName
+    isActive
+    version
+  }
+}
+""".strip()
+
+
 #: Field → the document the suite sends for it.  The read documents spell out every field the
 #: acceptance assertions read, so a projection that stops answering one fails the run instead of
 #: reading as a zero.
@@ -616,8 +768,19 @@ STAGE_TWO_SUPPORT_DOCUMENTS: dict[str, str] = {
     "scoutCampaignCatalog": _SCOUT_CAMPAIGN_CATALOG,
     "catalogProducts": _CATALOG_PRODUCTS,
     "scoutCampaigns": _SCOUT_CAMPAIGNS,
+    "unitCampaigns": _UNIT_CAMPAIGNS,
+    "myUnits": _MY_UNITS,
     "roster": _ROSTER,
     "removeMembership": _REMOVE_MEMBERSHIP,
+    "shareRead": _SHARE_READ,
+    "shares": _SHARES,
+    "revokeShare": _REVOKE_SHARE,
+    "deleteCampaign": _DELETE_CAMPAIGN,
+    "deleteProfile": _DELETE_PROFILE,
+    "deleteOrder": _DELETE_ORDER,
+    "profiles": _PROFILES,
+    "scoutCampaign": _SCOUT_CAMPAIGN,
+    "deactivateUnitCampaign": _DEACTIVATE_UNIT_CAMPAIGN,
 }
 
 #: Which builder feeds which mutation, so the SDL check covers the payload keys as well.
@@ -631,6 +794,9 @@ _BUILDERS: dict[str, tuple[Callable[..., dict[str, Any]], str]] = {
     "reverseIndividualOrderFulfillment": (reverse_input, "ReverseIndividualOrderFulfillmentInput"),
     "createOrder": (custody_sale_input, "CreateOrderInput"),
     "removeUnitCampaignMembership": (remove_membership_input, "RemoveUnitCampaignMembershipInput"),
+    "shareProfileDirect": (share_read_input, "ShareProfileDirectInput"),
+    "revokeShare": (revoke_share_input, "RevokeShareInput"),
+    "updateUnitCampaign": (deactivate_unit_campaign_input, "UpdateUnitCampaignInput"),
 }
 
 #: One call per builder, with contract-shaped arguments, so its keys can be compared to its type.
@@ -646,6 +812,9 @@ _SAMPLES: dict[str, dict[str, Any]] = {
     "ReverseIndividualOrderFulfillmentInput": reverse_input("ORDER#x", "Fulfillment#x", 1, idempotency_key="k"),
     "CreateOrderInput": custody_sale_input("PROFILE#x", "CAMP#x", "PROD#x", 3, "Taylor Door", idempotency_key="k"),
     "RemoveUnitCampaignMembershipInput": remove_membership_input("UC#x", "CAMP#x", 1, 2, idempotency_key="k"),
+    "ShareProfileDirectInput": share_read_input("PROFILE#x", "scout@example.test"),
+    "RevokeShareInput": revoke_share_input("PROFILE#x", "ACCOUNT#x"),
+    "UpdateUnitCampaignInput": deactivate_unit_campaign_input("UC#x", 1, idempotency_key="k"),
 }
 
 
