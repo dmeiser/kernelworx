@@ -5293,29 +5293,80 @@ def _refuse_slot_revalidation(
     )
 
 
-def _slot_commitment(commitments: Sequence[Mapping[str, Any]], event_id: str, slot_id: str) -> Optional[Dict[str, Any]]:
-    """The Scout's ACTIVE projection for this slot, when the aggregate holds one.
+def _revalidation_guards(signups: Sequence[Mapping[str, Any]], slot_id: str) -> Dict[str, int]:
+    """The guard version each affected Scout's board was validated against.
 
-    A signup with no projection is a broken aggregate, not something this write repairs:
-    inventing a row would need a version to condition on, and the projection's version is
-    its source signup's, which is exactly the agreement §3.7's validation exists to check.
+    The revalidation is only as good as the moment it was read at, and a slot write has no
+    serialization point that reaches across events: two moves of the same Scout's slots, one
+    at each of two Show & Sells, hold different event versions and condition on different slot
+    rows, so nothing else in either plan can see the other. The guard is the one row this
+    Scout's whole commitment set shares (§5.13), so the plan pins it to the version it read.
     """
-    for row in commitments:
-        if (
-            str(row.get(show_and_sell_models.STATUS_ATTRIBUTE) or "") == show_and_sell_models.SIGNUP_ACTIVE
-            and str(row.get(show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE) or "") == event_id
-            and str(row.get(show_and_sell_models.SLOT_ID_ATTRIBUTE) or "") == slot_id
-        ):
-            return dict(row)
-    return None
+    versions: Dict[str, int] = {}
+    for profile_id in show_and_sell_models.active_signup_profiles(signups, slot_id):
+        guard = show_and_sell_models.read_commitment_guard(profile_id)
+        if guard is None:
+            continue
+        versions[profile_id] = show_and_sell_models.normalize_required_version(
+            guard.get(show_and_sell_models.COMMITMENT_VERSION_ATTRIBUTE, 1)
+        )
+    return versions
+
+
+def _refuse_slot_aggregate(slot_id: str, violations: Sequence[str]) -> None:
+    """Refuse a slot edit whose signup aggregate is already broken (§3.3.2, AC-14).
+
+    The rows §5.13 pairs — a signup and its commitment projection — are written and released
+    together, so a slot whose Scout has a signup and no projection is a disagreement this
+    write cannot resolve: moving the slot would leave the Scout's hours described by nothing,
+    and a later signup consulted against an absent projection admits an overlap. Refusing is
+    the only answer that writes nothing wrong, and the sentence names the Scout so the
+    disagreement can be found.
+    """
+    if not violations:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        f"This slot's board and its Scouts' commitments disagree: {'; '.join(violations)}. Nothing was written.",
+        details={"subcode": "SLOT_AGGREGATE_BROKEN", "slotId": slot_id, "violations": list(violations)},
+    )
+
+
+def _refuse_slot_guard_board(
+    moves: Sequence[Tuple[Dict[str, Any], Dict[str, Any]]], slot_id: str, guards: Mapping[str, int]
+) -> None:
+    """Refuse a re-time whose Scout has no guard to serialize against.
+
+    A move is made safe by pinning the Scout's commitment guard to the version its
+    revalidation read. A Scout with a commitment and no guard row has no such version, and
+    an unpinned increment would commit a move nobody serialized — so this refuses the plan
+    instead of staging a bump that cannot be made honest. The guard is written with the first
+    signup (§5.13), which makes a missing one the same broken aggregate as a missing
+    projection, and §3.7's validation owns the repair.
+    """
+    missing = sorted(
+        {
+            str(stale.get(show_and_sell_models.PROFILE_ID_ATTRIBUTE) or "")
+            for stale, _ in moves
+            if str(stale.get(show_and_sell_models.PROFILE_ID_ATTRIBUTE) or "") not in guards
+        }
+    )
+    if not missing:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        (
+            f"Scout {', '.join(missing)} holds a commitment on this slot with no commitment guard row, so "
+            "moving it cannot be serialized against the Scout's other commitments. Nothing was written."
+        ),
+        details={"subcode": "COMMITMENT_GUARD_MISSING", "slotId": slot_id, "profileIds": missing},
+    )
 
 
 def _commitment_moves(
     *,
     event_row: Mapping[str, Any],
-    slot_id: str,
-    signups: Sequence[Mapping[str, Any]],
-    commitments: Mapping[str, Sequence[Mapping[str, Any]]],
+    pairs: Sequence[Tuple[str, Dict[str, Any]]],
     offer: Mapping[str, Any],
     now_iso: str,
 ) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
@@ -5331,15 +5382,15 @@ def _commitment_moves(
 
     The version rides unchanged: §5.13 defines the projection's version as its source
     signup's, and the signup did not move. Each affected Scout's commitment guard still
-    increments, because the commitment changed — and that is what makes a signup planned
-    against the old guard fail rather than commit beside a board that moved under it.
+    increments, pinned to the version this request read — and that is what makes a signup
+    or a parallel slot move planned against the old guard fail rather than commit beside a
+    board that moved under it.
     """
     event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
     unit_campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
     moves: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
-    for profile_id in show_and_sell_models.active_signup_profiles(signups, slot_id):
-        stale = _slot_commitment(commitments.get(profile_id, ()), event_id, slot_id)
-        if stale is None or _interval_matches(stale, offer):
+    for profile_id, stale in pairs:
+        if _interval_matches(stale, offer):
             continue
         moves.append(
             (
@@ -5348,7 +5399,7 @@ def _commitment_moves(
                     profile_id=profile_id,
                     unit_campaign_id=unit_campaign_id,
                     show_and_sell_id=event_id,
-                    slot_id=slot_id,
+                    slot_id=str(stale[show_and_sell_models.SLOT_ID_ATTRIBUTE]),
                     start_at=offer["startAt"],
                     end_at=offer["endAt"],
                     now_iso=now_iso,
@@ -5412,13 +5463,17 @@ def _stage_slot_writes(
     expected_event_version: int,
     expected_slot_version: Optional[int],
     moves: Sequence[Tuple[Dict[str, Any], Dict[str, Any]]],
+    guards: Mapping[str, int],
     now_iso: str,
 ) -> None:
     """Stage the whole slot change: marker, slot row, the commitments the move carries, event version.
 
     One plan, one commit. The marker goes first (API contract §8.9) so a replay can never
     be answered for a write that did not happen, and the event version goes last so every
-    concurrent slot write on this event settles against one serialization point.
+    concurrent slot write on this event settles against one serialization point. Each
+    affected Scout's guard is pinned to the version this request revalidated against, which
+    is the only condition that reaches across events — see
+    :func:`show_and_sell_models.bump_commitment_guard_action`.
     """
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=slot_id)
     if existing is None:
@@ -5452,7 +5507,13 @@ def _stage_slot_writes(
         plan.add(*show_and_sell_models.move_commitment_action(commitment=stale))
         plan.add(*show_and_sell_models.put_commitment_action(item=replacement))
     for profile_id in sorted({str(stale.get(show_and_sell_models.PROFILE_ID_ATTRIBUTE) or "") for stale, _ in moves}):
-        plan.add(*show_and_sell_models.bump_commitment_guard_action(profile_id=profile_id, updated_at=now_iso))
+        plan.add(
+            *show_and_sell_models.bump_commitment_guard_action(
+                profile_id=profile_id,
+                updated_at=now_iso,
+                expected_commitment_version=guards[profile_id],
+            )
+        )
     plan.add(
         *show_and_sell_models.bump_event_version_action(
             show_and_sell_id=str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
@@ -5500,6 +5561,15 @@ def _upsert_show_and_sell_slot(event: Dict[str, Any], caller_id: str) -> Dict[st
     would answer the next cross-campaign overlap question about hours nobody works
     (AC-14). That move is part of this one plan, guard bumps included, and a re-time with
     more signups than one transaction can hold is refused rather than split.
+
+    Two things make that move safe rather than merely atomic. Each affected Scout's guard
+    is pinned to the version this request revalidated against, because the event-version
+    condition cannot serialize a Scout's commitments across two different events: two moves
+    of one Scout's slots, each on its own event, both revalidate against the other's old
+    interval and both would otherwise commit an overlapping pair (§5.13, AC-14). And a
+    signup whose ACTIVE projection is missing refuses the whole edit: the write cannot tell
+    which of the two rows is wrong, and a slot moved to an interval nothing describes is a
+    slot the next signup cannot be refused for.
     """
     log = get_logger(__name__)
     payload = _require_input(event)
@@ -5533,12 +5603,16 @@ def _upsert_show_and_sell_slot(event: Dict[str, Any], caller_id: str) -> Dict[st
         existing = show_and_sell_models.load_slot_or_not_found(event_id, slot_id)
         _require_read_version(existing, cast(int, expected_slot_version), noun="slot")
     commitments = _revalidation_commitments(signups, slot_id)
+    guards = _revalidation_guards(signups, slot_id)
     _refuse_slot_revalidation(event_row, slot_id, offer, slots, signups, commitments)
+    pairs, aggregate = show_and_sell_models.slot_commitment_state(
+        show_and_sell_id=event_id, slot_id=slot_id, signups=signups, commitments_by_profile=commitments
+    )
+    _refuse_slot_aggregate(slot_id, aggregate)
 
     now_iso = utc_now_iso()
-    moves = _commitment_moves(
-        event_row=event_row, slot_id=slot_id, signups=signups, commitments=commitments, offer=offer, now_iso=now_iso
-    )
+    moves = _commitment_moves(event_row=event_row, pairs=pairs, offer=offer, now_iso=now_iso)
+    _refuse_slot_guard_board(moves, slot_id, guards)
     _refuse_oversized_slot_move(moves)
 
     plan = WritePlan()
@@ -5555,6 +5629,7 @@ def _upsert_show_and_sell_slot(event: Dict[str, Any], caller_id: str) -> Dict[st
         expected_event_version=expected_event_version,
         expected_slot_version=expected_slot_version,
         moves=moves,
+        guards=guards,
         now_iso=now_iso,
     )
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import pytest
 
@@ -395,6 +395,73 @@ def _guard_version(unit_campaigns_table: Any, *, persona: str = "Devon") -> Opti
     found = unit_campaigns_table.get_item(Key=ssm.commitment_guard_key(_profile(persona)))
     item = found.get("Item")
     return None if not item else int(item[ssm.COMMITMENT_VERSION_ATTRIBUTE])
+
+
+def _guard_row(unit_campaigns_table: Any, *, persona: str = "Devon") -> Dict[str, Any]:
+    """The guard row itself, so a test can hand a request the version it read."""
+    found = unit_campaigns_table.get_item(Key=ssm.commitment_guard_key(_profile(persona)))
+    return dict(found["Item"])
+
+
+def _overlapping_pairs(rows: Sequence[Mapping[str, Any]]) -> List[tuple[str, str]]:
+    """Which of these commitment projections overlap each other.
+
+    AC-14's whole claim is that one Scout never holds two overlapping commitments, whichever
+    Show & Sell each of them belongs to, so a race test asserts the pair rather than the row
+    count: a plan that committed over a stale read shows up here as an overlap, and a plan
+    that rolled back shows up as none.
+    """
+    return [
+        (str(left[ssm.START_AT_ATTRIBUTE]), str(right[ssm.START_AT_ATTRIBUTE]))
+        for left in rows
+        for right in rows
+        if str(left["sk"]) < str(right["sk"])
+        and ssm.intervals_overlap(
+            str(left[ssm.START_AT_ATTRIBUTE]),
+            str(left[ssm.END_AT_ATTRIBUTE]),
+            str(right[ssm.START_AT_ATTRIBUTE]),
+            str(right[ssm.END_AT_ATTRIBUTE]),
+        )
+    ]
+
+
+def _frozen_scout_board(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    persona: str = "Devon",
+    commitments: Sequence[Mapping[str, Any]],
+    guard: Optional[Mapping[str, Any]],
+) -> None:
+    """Hand one Scout's reads the rows she had before another transaction committed, while storage moves on.
+
+    A version condition protects the window between a request's reads and its commit, and that
+    window cannot be opened by two sequential handler calls — each call reads and commits as
+    one turn, so the second call simply sees the first one's rows. The losing request's reads
+    are therefore pinned to the state it validated against, and its write then runs against
+    storage that has already moved. That is the real interleaving with its timing made
+    deterministic: the rows it decides on are the rows a concurrent writer would have read,
+    and the rows it must not damage are the rows that are actually stored.
+    """
+    rows = [dict(row) for row in commitments]
+    guard_snapshot = None if guard is None else dict(guard)
+    profile_id = _profile(persona)
+
+    def _commitment_rows(read_profile: str, show_and_sell_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        assert read_profile == profile_id, "only the frozen Scout's partition is stubbed"
+        if show_and_sell_id is None:
+            return [dict(row) for row in rows]
+        return [
+            row
+            for row in (dict(row) for row in rows)
+            if str(row.get(ssm.SHOW_AND_SELL_ID_ATTRIBUTE)) == show_and_sell_id
+        ]
+
+    def _guard(read_profile: str) -> Optional[Dict[str, Any]]:
+        assert read_profile == profile_id, "only the frozen Scout's guard is stubbed"
+        return None if guard_snapshot is None else dict(guard_snapshot)
+
+    monkeypatch.setattr(ssm, "commitment_rows", _commitment_rows)
+    monkeypatch.setattr(ssm, "read_commitment_guard", _guard)
 
 
 @pytest.fixture
@@ -795,22 +862,170 @@ def test_a_slot_edit_that_moves_no_time_writes_no_commitment_and_bumps_no_guard(
     assert _guard_version(world["unit_campaigns"]) == 3
 
 
-def test_a_signup_with_no_projection_has_nothing_to_move_and_the_move_still_succeeds(
-    world: Dict[str, Any],
-) -> None:
-    """A signup whose projection is missing is a broken aggregate, not something this write repairs.
+def test_a_signup_with_no_projection_refuses_the_move_and_writes_nothing(world: Dict[str, Any]) -> None:
+    """A signup whose ACTIVE projection is missing is a broken aggregate, and a re-time may not build on it.
 
-    Inventing a commitment row would need a version to condition on, and the projection's
-    version is its source signup's — the agreement §3.7's validation exists to check. The
-    slot still moves: the board is the admin's, and the disagreement is reported there.
+    The slot and the Scout's commitment set are one agreement, and this write cannot tell
+    which half is wrong. Moving the slot would describe the Scout's new hours with no row at
+    all, so the next overlapping signup would be admitted beside a Scout working them — the
+    AC-14 hole this card exists to close. Leaving the slot alone is no better, so the answer
+    is to refuse the edit and name the disagreement: §3.7's validation repairs the aggregate,
+    and until it does the board cannot be moved.
     """
     _signed_up_board(world, ("slot-1", _at(1), _at(3)), commitments=False)
 
-    _ok(_upsert(slot_id="slot-1", slot_version=1, start_at=_at(5), end_at=_at(7), version=1))
+    refusal = _refusal(_upsert(slot_id="slot-1", slot_version=1, start_at=_at(5), end_at=_at(7), version=1), "CONFLICT")
+    assert "no ACTIVE commitment row" in refusal, refusal
 
-    assert _stored_slot(world["show_and_sells"]) is not None
+    slot = _stored_slot(world["show_and_sells"])
+    assert slot is not None, "the slot row survives a refused move"
+    assert slot[ssm.START_AT_ATTRIBUTE] == _at(1) and slot[ssm.END_AT_ATTRIBUTE] == _at(3)
+    assert slot[ssm.VERSION_ATTRIBUTE] == 1, "a refused edit does not touch the slot's version"
+    assert _stored(world["show_and_sells"])[ssm.VERSION_ATTRIBUTE] == 1, "nor the event's"
     assert _commitment_rows(world["unit_campaigns"]) == []
     assert _guard_version(world["unit_campaigns"]) is None
+    assert _marker_rows(world["show_and_sells"]) == [], "a refusal leaves no receipt"
+
+
+def test_a_move_for_a_scout_with_no_guard_row_is_refused_before_anything_is_staged(
+    world: Dict[str, Any],
+) -> None:
+    """A commitment with no guard has no version to pin, so the move cannot be made safe at all.
+
+    The guard is what serializes one Scout's commitments across every Show & Sell she works
+    (§5.13), and §5.13 writes it with the first signup. Its absence is the same broken
+    aggregate as a missing projection — and an unpinned bump would commit a move that nothing
+    can undo, so this refuses instead of staging it.
+    """
+    _signed_up_board(world, ("slot-1", _at(1), _at(3)))
+    world["unit_campaigns"].delete_item(Key=ssm.commitment_guard_key(_profile("Devon")))
+
+    refusal = _refusal(_upsert(slot_id="slot-1", slot_version=1, start_at=_at(5), end_at=_at(7), version=1), "CONFLICT")
+    assert "no commitment guard row" in refusal, refusal
+
+    slot = _stored_slot(world["show_and_sells"])
+    assert slot is not None and slot[ssm.VERSION_ATTRIBUTE] == 1
+    assert slot[ssm.START_AT_ATTRIBUTE] == _at(1)
+    assert _stored(world["show_and_sells"])[ssm.VERSION_ATTRIBUTE] == 1
+    projections = _commitment_rows(world["unit_campaigns"])
+    assert len(projections) == 1 and projections[0][ssm.START_AT_ATTRIBUTE] == _at(1)
+    assert _guard_version(world["unit_campaigns"]) is None
+    assert _marker_rows(world["show_and_sells"]) == []
+
+
+def test_two_slot_moves_on_two_events_for_one_scout_commit_one_at_a_time(
+    world: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SLOT-04 across two Show & Sells, decided at commit: the guard is the only row either plan reads.
+
+    Devon works slot-1 at one Show & Sell and slot-9 at another, three hours later. Moving the
+    first to 10:00 and the second to 10:30 is legal against the other's OLD interval and illegal
+    against its NEW one, and neither plan can see the other through the rows it conditions on:
+    two events, two event versions, two slot rows. Each Scout's guard is the one row her whole
+    commitment set shares, so the second plan pins it to the version it revalidated against and
+    loses — which is the only way this pair ends with Devon working one set of hours.
+    """
+    shows, unit_campaigns = world["show_and_sells"], world["unit_campaigns"]
+    _seed_slot(shows, EVENT, "slot-1", start_at=_at(1), end_at=_at(3), active=1)
+    _seed_signup(shows, EVENT, "slot-1")
+    _seed_commitment(unit_campaigns, EVENT, "slot-1", start_at=_at(1), end_at=_at(3))
+    _seed_slot(shows, OTHER_EVENT, "slot-9", start_at=_at(8), end_at=_at(10), capacity=1, active=1)
+    _seed_signup(shows, OTHER_EVENT, "slot-9")
+    _seed_commitment(
+        unit_campaigns,
+        OTHER_EVENT,
+        "slot-9",
+        start_at=_at(8),
+        end_at=_at(10),
+        unit_campaign_id=OTHER_CAMPAIGN,
+    )
+    _seed_guard(unit_campaigns)
+
+    read_commitments = [dict(row) for row in _commitment_rows(unit_campaigns)]
+    read_guard = _guard_row(unit_campaigns)
+
+    first = _ok(_upsert(slot_id="slot-1", slot_version=1, start_at=_at(5), end_at=_at(7), key="move-a"))
+    assert first["startAt"] == _at(5)
+
+    _frozen_scout_board(monkeypatch, commitments=read_commitments, guard=read_guard)
+    refusal = _refusal(
+        _upsert(
+            "Avery",
+            event_id=OTHER_EVENT,
+            slot_id="slot-9",
+            slot_version=1,
+            start_at=_at(6),
+            end_at=_at(7.5),
+            capacity=1,
+            version=1,
+            key="move-b",
+        ),
+        "CONFLICT",
+    )
+    assert "changed underneath this request" in refusal, refusal
+
+    stale_board = _stored_slot(shows, OTHER_EVENT, "slot-9")
+    assert stale_board is not None
+    assert stale_board[ssm.START_AT_ATTRIBUTE] == _at(8) and stale_board[ssm.END_AT_ATTRIBUTE] == _at(10)
+    assert stale_board[ssm.VERSION_ATTRIBUTE] == 1, "the loser moved no slot row"
+    assert _stored(shows, OTHER_EVENT)[ssm.VERSION_ATTRIBUTE] == 1, "nor the other event's version"
+    assert _stored_slot(shows, EVENT, "slot-1")[ssm.START_AT_ATTRIBUTE] == _at(5), "the winner stands"
+    projections = _commitment_rows(unit_campaigns)
+    assert sorted(str(row[ssm.START_AT_ATTRIBUTE]) for row in projections) == sorted([_at(5), _at(8)])
+    assert _overlapping_pairs(projections) == [], "the loser's overlap never landed"
+    assert _guard_version(unit_campaigns) == 4, "only the winning move advanced the guard"
+    assert len(_marker_rows(shows)) == 1, "the loser wrote no receipt"
+
+
+def test_a_slot_move_does_not_commit_over_a_signup_written_after_it_read(
+    world: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A signup that lands between the slot's read and its commit invalidates that plan.
+
+    The admin re-times a slot to 10:00 while a Scout is being signed up for another Show & Sell
+    at the same hour. The move's revalidation asked "is this Scout free at 10:00" of the board
+    as it was a moment ago and got yes; the signup's own write bumped her commitment guard, and
+    that is the fact the move must fail on. Committing anyway would put a Scout at two booths at
+    once, and only a later read would tell anyone — so the move rolls back, the signup stands,
+    and the admin re-reads a board that now shows the clash.
+    """
+    shows, unit_campaigns = world["show_and_sells"], world["unit_campaigns"]
+    _seed_slot(shows, EVENT, "slot-1", start_at=_at(1), end_at=_at(3), active=1)
+    _seed_signup(shows, EVENT, "slot-1")
+    _seed_commitment(unit_campaigns, EVENT, "slot-1", start_at=_at(1), end_at=_at(3))
+    _seed_guard(unit_campaigns)
+
+    read_commitments = [dict(row) for row in _commitment_rows(unit_campaigns)]
+    read_guard = _guard_row(unit_campaigns)
+
+    #: The §3.4 signup as §5.13 pairs it — the signup row, its projection, and the guard bump.
+    _seed_slot(shows, OTHER_EVENT, "slot-9", start_at=_at(5), end_at=_at(7), capacity=1, active=1)
+    _seed_signup(shows, OTHER_EVENT, "slot-9")
+    _seed_commitment(
+        unit_campaigns,
+        OTHER_EVENT,
+        "slot-9",
+        start_at=_at(5),
+        end_at=_at(7),
+        unit_campaign_id=OTHER_CAMPAIGN,
+    )
+    _seed_guard(unit_campaigns, version=4)
+
+    _frozen_scout_board(monkeypatch, commitments=read_commitments, guard=read_guard)
+    refusal = _refusal(
+        _upsert(slot_id="slot-1", slot_version=1, start_at=_at(5), end_at=_at(7), key="move-a"), "CONFLICT"
+    )
+    assert "changed underneath this request" in refusal, refusal
+
+    moved = _stored_slot(shows, EVENT, "slot-1")
+    assert moved is not None
+    assert moved[ssm.START_AT_ATTRIBUTE] == _at(1) and moved[ssm.VERSION_ATTRIBUTE] == 1
+    assert _stored(shows, EVENT)[ssm.VERSION_ATTRIBUTE] == 1
+    projections = _commitment_rows(unit_campaigns)
+    assert sorted(str(row[ssm.START_AT_ATTRIBUTE]) for row in projections) == sorted([_at(1), _at(5)])
+    assert _overlapping_pairs(projections) == [], "the Scout the signup just placed keeps her one booth"
+    assert _guard_version(unit_campaigns) == 4, "the signup's bump is the version the move failed against"
+    assert _marker_rows(shows) == [], "a refused move leaves no receipt"
 
 
 def test_a_time_move_with_more_signups_than_one_transaction_can_hold_is_refused_first(

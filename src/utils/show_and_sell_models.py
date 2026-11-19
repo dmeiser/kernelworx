@@ -1788,6 +1788,7 @@ def bump_commitment_guard_action(
     *,
     profile_id: str,
     updated_at: str,
+    expected_commitment_version: Optional[int] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """Advance one Scout's commitment guard, incrementing it in the write itself.
 
@@ -1799,22 +1800,44 @@ def bump_commitment_guard_action(
     ``commitmentVersion`` is incremented by DynamoDB rather than written from a read
     value. Two writers that both read the guard and then wrote ``read + 1`` would
     land on the same number and both believe they serialized; ``+ :one`` makes the
-    increment itself the lock, and ``attribute_exists`` makes "this Scout never
-    signed up, so there is no guard" fail the transaction instead of inventing a row.
+    increment itself the lock.
+
+    ``expected_commitment_version`` is the version the caller validated its plan
+    against, and it turns the bump into a compare-and-set. An increment that only
+    requires the guard to EXIST serializes nothing: two slot moves on two different
+    events each re-validate one Scout's commitments against what that Scout's board
+    looked like when it read, each bump succeeds, and the Scout ends up with two
+    overlapping commitments at two different Show & Sells — the injury AC-14 forbids,
+    and no event-version condition can see it because the two plans touch two
+    different events. Pinning the version means the second writer's condition fails
+    and its whole plan rolls back. A caller that never read the guard — the
+    cancellation in §3.1, whose plan is already serialized by the event version and
+    which releases only that event's own commitments — leaves it ``None`` and keeps
+    the existence condition.
     """
+    if expected_commitment_version is None:
+        condition = "attribute_exists(#pk) AND attribute_exists(#commitmentVersion)"
+        values: Dict[str, Any] = {":one": 1, ":updatedAt": updated_at}
+    else:
+        condition = "attribute_exists(#pk) AND #commitmentVersion = :expectedCommitmentVersion"
+        values = {
+            ":one": 1,
+            ":updatedAt": updated_at,
+            ":expectedCommitmentVersion": normalize_required_version(expected_commitment_version),
+        }
     return (
         "Update",
         {
             "TableName": tables.unit_campaigns.table_name,
             "Key": wire_key(commitment_guard_key(profile_id)),
             "UpdateExpression": "SET #commitmentVersion = #commitmentVersion + :one, #updatedAt = :updatedAt",
-            "ConditionExpression": "attribute_exists(#pk) AND attribute_exists(#commitmentVersion)",
+            "ConditionExpression": condition,
             "ExpressionAttributeNames": {
                 "#commitmentVersion": "commitmentVersion",
                 "#updatedAt": UPDATED_AT_ATTRIBUTE,
                 "#pk": "pk",
             },
-            "ExpressionAttributeValues": wire_values({":one": 1, ":updatedAt": updated_at}),
+            "ExpressionAttributeValues": wire_values(values),
             "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
         },
     )
@@ -2302,6 +2325,53 @@ def active_signup_profiles(signups: Sequence[Mapping[str, Any]], slot_id: str) -
     different orders and could deadlock on each other.
     """
     return sorted({str(signup.get(PROFILE_ID_ATTRIBUTE) or "") for signup in active_slot_signups(signups, slot_id)})
+
+
+def active_commitment_for(
+    commitments: Sequence[Mapping[str, Any]], show_and_sell_id: str, slot_id: str
+) -> Optional[Dict[str, Any]]:
+    """One Scout's ACTIVE projection for one slot of one event, when the aggregate holds one.
+
+    The ``(showAndSellId, slotId)`` pair is the row's identity, not its key: the sort key is
+    the interval (§6.2), so a slot that has been re-timed already carries its projection under
+    a different key, and only these two attributes say which slot the row describes.
+    """
+    for row in commitments:
+        if (
+            str(row.get(STATUS_ATTRIBUTE) or "") == SIGNUP_ACTIVE
+            and str(row.get(SHOW_AND_SELL_ID_ATTRIBUTE) or "") == show_and_sell_id
+            and str(row.get(SLOT_ID_ATTRIBUTE) or "") == slot_id
+        ):
+            return dict(row)
+    return None
+
+
+def slot_commitment_state(
+    *,
+    show_and_sell_id: str,
+    slot_id: str,
+    signups: Sequence[Mapping[str, Any]],
+    commitments_by_profile: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[str]]:
+    """``(pairs, violations)`` for the Scouts holding this slot: each one with their projection, and the ones missing it.
+
+    A signup and its projection are one aggregate written by one transaction (§5.13), so an
+    ACTIVE signup with no ACTIVE projection is not a state a slot edit may build on. Moving
+    such a slot would commit a row at a new interval with nothing at that interval to block
+    the next overlapping signup — the Scout could then be signed up twice at the same hour,
+    which is exactly what AC-14 says cannot happen. Leaving the slot where it is does not
+    repair the aggregate either, so this refuses rather than picking a side: the violation is
+    reported, and §3.7's validation owns the repair.
+    """
+    pairs: List[Tuple[str, Dict[str, Any]]] = []
+    violations: List[str] = []
+    for profile_id in active_signup_profiles(signups, slot_id):
+        projection = active_commitment_for(commitments_by_profile.get(profile_id, ()), show_and_sell_id, slot_id)
+        if projection is None:
+            violations.append(f"Scout {profile_id} holds a signup on this slot with no ACTIVE commitment row")
+        else:
+            pairs.append((profile_id, projection))
+    return pairs, violations
 
 
 def _overlapped_sibling_slot(

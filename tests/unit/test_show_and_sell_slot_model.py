@@ -501,6 +501,29 @@ def test_the_guard_is_the_one_small_version_row_per_scout() -> None:
         ssm.build_commitment_guard_item(profile_id=PROFILE, commitment_version=None, now_iso=BEFORE)
 
 
+def test_the_guard_bump_pins_the_version_the_plan_validated_against() -> None:
+    """The bump is a compare-and-set, not just an increment.
+
+    An increment that only requires the guard to EXIST serializes nothing: two slot moves, one
+    at each of one Scout's two Show & Sells, each revalidate the Scout's board against the
+    other's old interval, both bumps succeed, and the Scout ends up with two commitments at the
+    same hour — the AC-14 breach, with no event-version condition anywhere to catch it. Pinning
+    the version the plan read makes the second writer's whole plan roll back, while the value
+    stays DynamoDB's own increment so no writer ever writes a number it invented.
+    """
+    kind, payload = ssm.bump_commitment_guard_action(
+        profile_id=PROFILE, updated_at=AFTER, expected_commitment_version=3
+    )
+    assert kind == "Update"
+    assert "#commitmentVersion = :expectedCommitmentVersion" in payload["ConditionExpression"]
+    assert payload["ExpressionAttributeValues"][":expectedCommitmentVersion"] == {"N": "3"}
+    assert payload["UpdateExpression"] == "SET #commitmentVersion = #commitmentVersion + :one, #updatedAt = :updatedAt"
+
+    unpinned = ssm.bump_commitment_guard_action(profile_id=PROFILE, updated_at=AFTER)[1]
+    assert unpinned["ConditionExpression"] == "attribute_exists(#pk) AND attribute_exists(#commitmentVersion)"
+    assert ":expectedCommitmentVersion" not in unpinned["ExpressionAttributeValues"]
+
+
 # --- The revalidation a slot edit must pass (§3.3.2) ------------------------------
 
 
@@ -524,6 +547,52 @@ def _revalidate(
         signups=signups or [],
         commitments_by_profile=commitments_by_profile or {},
     )
+
+
+def test_a_projection_is_found_by_its_event_and_slot_not_by_its_key() -> None:
+    """The ``(showAndSellId, slotId)`` pair identifies a projection; its key is only its interval.
+
+    A re-timed slot already lives under a new sort key, so "this slot's commitment" is a row
+    filter, not a key lookup — and a same-named slot at a different Show & Sell, or one this
+    Scout no longer holds, is not the row the move must carry.
+    """
+    moved = _commitment_row(slot_id="slot-1", start_at="2026-11-07T11:00:00+00:00", end_at="2026-11-07T12:30:00+00:00")
+    elsewhere = _commitment_row(slot_id="slot-1", event_id=OTHER_EVENT_ID, unit_campaign_id=OTHER_CAMPAIGN)
+
+    found = ssm.active_commitment_for([elsewhere, moved], EVENT_ID, "slot-1")
+    assert found is not None
+    assert found["sk"] == moved["sk"], "the row the interval moved to, not the one left behind"
+    assert ssm.active_commitment_for([elsewhere], EVENT_ID, "slot-1") is None
+    assert ssm.active_commitment_for([_commitment_row(status=ssm.SIGNUP_CANCELLED)], EVENT_ID, "slot-1") is None
+
+
+def test_a_signup_and_its_projection_are_reported_as_one_aggregate() -> None:
+    """The pair §5.13 writes together is read together, and a half-missing pair is a violation.
+
+    Returning the projection alongside each Scout holding the slot is what lets the resolver
+    stage a move without a second read; reporting the Scouts whose projection is absent is what
+    stops it staging a move at all. A cancelled projection does not count: it is history for a
+    signup that no longer holds the slot, and the signup that is ACTIVE has no row describing
+    the hours it is working.
+    """
+    pairs, violations = ssm.slot_commitment_state(
+        show_and_sell_id=EVENT_ID,
+        slot_id="slot-1",
+        signups=[_signup_row(), _signup_row(profile=OTHER_PROFILE)],
+        commitments_by_profile={PROFILE: [_commitment_row()], OTHER_PROFILE: []},
+    )
+    assert [profile for profile, _ in pairs] == [PROFILE]
+    assert pairs[0][1][ssm.START_AT_ATTRIBUTE] == "2026-11-07T09:00:00+00:00"
+    assert violations == [f"Scout {OTHER_PROFILE} holds a signup on this slot with no ACTIVE commitment row"]
+
+    cancelled_pairs, cancelled_violations = ssm.slot_commitment_state(
+        show_and_sell_id=EVENT_ID,
+        slot_id="slot-1",
+        signups=[_signup_row()],
+        commitments_by_profile={PROFILE: [_commitment_row(status=ssm.SIGNUP_CANCELLED)]},
+    )
+    assert cancelled_pairs == []
+    assert len(cancelled_violations) == 1
 
 
 def test_capacity_cannot_drop_below_the_active_signups_a_slot_holds() -> None:
