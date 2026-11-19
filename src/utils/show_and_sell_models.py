@@ -164,6 +164,19 @@ SPLIT_METHOD_ATTRIBUTE = "splitMethod"
 WE_OWE_ENABLED_ATTRIBUTE = "weOweEnabled"
 PRODUCT_IDS_ATTRIBUTE = "productIds"
 ROUNDING_DRAFT_ATTRIBUTE = "roundingDraftByProfileId"
+
+#: The Kernel's draft stock targets for a reopened event, keyed by product id
+#: (§3.2.3: while ``REOPENED`` the mutation writes "only draft inputs"). Stored on the
+#: event aggregate as a map, exactly like :data:`ROUNDING_DRAFT_ATTRIBUTE`, because it
+#: is the same kind of fact: an input that has been entered but not approved, and an
+#: input that re-finalization (§5.3.2) validates and applies. It is deliberately not an
+#: ``EventInventoryAllocation`` row — §5.11 allows ONE row per
+#: (campaign, product, event), finalization has already released that row to a terminal
+#: state (§9.2), and a second row for the same product would mean finalization's
+#: product walk finds two answers for one product. The data model names the behaviour
+#: ("Re-finalization validates the new allocation/return inputs", §8.6) without naming
+#: the attribute; this is the attribute, and Stage 5 owns reading it.
+ALLOCATION_DRAFT_ATTRIBUTE = "draftAllocationByProductId"
 APPROVED_FINALIZATION_ID_ATTRIBUTE = "approvedFinalizationId"
 LATEST_FINALIZATION_ID_ATTRIBUTE = "latestFinalizationId"
 VERSION_ATTRIBUTE = "version"
@@ -209,6 +222,7 @@ EVENT_ROW_ATTRIBUTES: frozenset[str] = frozenset(
         WE_OWE_ENABLED_ATTRIBUTE,
         PRODUCT_IDS_ATTRIBUTE,
         ROUNDING_DRAFT_ATTRIBUTE,
+        ALLOCATION_DRAFT_ATTRIBUTE,
         APPROVED_FINALIZATION_ID_ATTRIBUTE,
         LATEST_FINALIZATION_ID_ATTRIBUTE,
         VERSION_ATTRIBUTE,
@@ -929,7 +943,8 @@ def wire_item_value(value: Any) -> Dict[str, Any]:
     read of the authoritative allocation locator is then refused as malformed. This
     is the same trap WORK-160 documented for ``lineItems``, and the same remedy: the
     module that stores a non-scalar attribute owns an encoder that is total over
-    exactly what that row can hold — text, integer, boolean, null, and a list of ids.
+    exactly what that row can hold — text, integer, boolean, null, a list of ids, and
+    a map of ids to integers (``roundingDraftByProfileId`` and the assignment draft).
     """
     if isinstance(value, bool):
         return {"BOOL": value}
@@ -939,6 +954,8 @@ def wire_item_value(value: Any) -> Dict[str, Any]:
         return {"NULL": True}
     if isinstance(value, (list, tuple)):
         return {"L": [wire_item_value(entry) for entry in value]}
+    if isinstance(value, Mapping):
+        return {"M": {str(name): wire_item_value(entry) for name, entry in value.items()}}
     return {"S": str(value)}
 
 
@@ -1143,6 +1160,222 @@ def event_release_movement_action(
         show_and_sell_id=str(event[SHOW_AND_SELL_ID_ATTRIBUTE]),
     )
     return inventory_models.put_inventory_movement_action(item)
+
+
+# --- Event stock assignment writes (checklist §3.2.3; spec ALLOC-01..08, §8.4) -----
+
+
+def put_allocation_action(allocation: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Create the one allocation row a first assignment of a product to an event needs.
+
+    The event is the single write owner of this row (§5.11 "The event write owner
+    applies stock movement rules"), and the key is
+    ``<campaign>#<productId>#<showAndSellId>`` — one row per (product, event). The
+    ``attribute_not_exists`` guard is what makes that uniqueness real under a
+    concurrent assignment of the same product to the same event: the loser's whole
+    transaction is cancelled instead of overwriting a row that another admin's
+    target had already produced.
+    """
+    return (
+        "Put",
+        {
+            "TableName": tables.inventory.table_name,
+            "Item": wire_item(allocation),
+            "ConditionExpression": "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
+            "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def assignment_allocation_action(
+    *,
+    allocation: Mapping[str, Any],
+    allocated_qty: int,
+    remaining_qty: int,
+    updated_at: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """Write one event's whole stock target for one product (§7 ALLOC-01, ALLOC-04).
+
+    ``allocated_qty`` is the target the admin asked for, not a delta, and
+    ``remaining_qty`` is that target minus the row's own sold and released quantities.
+    Those two history quantities are read by this request and left untouched here, and the
+    pair is computed by the planner rather than re-derived in the write, because
+    ``remainingQty`` is stored for the reason §5.11 gives: every consumer of "what is
+    still assigned" must see the same number. A target of 0 is therefore the release of
+    the remaining allocation: 0 allocated, less what has already sold and been released,
+    leaves nothing assigned.
+
+    The status is deliberately not written. ``RELEASED`` and ``CANCELLED`` are the states
+    a cancellation or a finalization produces (§9.2), and neither happened here; a manual
+    reduction to zero is an allocation that now says "nothing", not a closed allocation,
+    and EVT-M-04-02's "automatic reductions can be manually adjusted" is the workflow
+    that needs the row to stay open for another target afterwards.
+
+    The ``version`` pin is the §7 "event aggregate version" guard for this row, and the
+    ``soldQty <= allocatedQty`` guard is the §5.11 invariant expressed in the database
+    rather than only in the resolver: a read-modify-write that raced a sale would
+    otherwise lower the target underneath quantity the event has already sold, and the
+    ledger would stop reconciling. ``soldQty`` appears here as a bare attribute name
+    because this write does not set it, so the placeholder map :func:`_conditioned_update`
+    builds from the SET list does not name it — and it is not a DynamoDB reserved word.
+    """
+    current_version = normalize_required_version(allocation.get(VERSION_ATTRIBUTE, 1))
+    return _conditioned_update(
+        {"pk": str(allocation["pk"]), "sk": str(allocation["sk"])},
+        tables.inventory.table_name,
+        expected_version=current_version,
+        sets={
+            ALLOCATED_QTY: allocated_qty,
+            REMAINING_QTY: remaining_qty,
+            VERSION_ATTRIBUTE: current_version + 1,
+            UPDATED_AT_ATTRIBUTE: updated_at,
+        },
+        extra_conditions=((":guardTarget", "soldQty <= :guardTarget", allocated_qty),),
+    )
+
+
+def event_assignment_movement_action(
+    *,
+    event: Mapping[str, Any],
+    product_id: str,
+    movement_type: str,
+    assigned_delta: int,
+    inventory_version: Optional[int] = None,
+    actor_account_id: str,
+    occurred_at: str,
+    idempotency_key: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """The audit row for one product's change of assigned quantity at one event.
+
+    ``EVENT_ASSIGN`` and ``EVENT_MANUAL_REDUCE`` are the two movement types §4.3 names
+    for an admin target going up and down, and both are allowed to move only
+    ``assignedDelta`` — so physical stock and Scout custody are untouched by
+    construction, which is what EVT-M-04's "physical stock never changes" claim rests on
+    at the write layer, not only in the planner. ``showAndSellId`` is a required link for
+    an event movement, so the trail says which event the stock was assigned to.
+
+    ``inventory_version`` is the balance version this request produced. SDL §5.8 makes
+    ``inventoryVersion`` non-null exactly when an ``InventoryPosition`` moved, and an
+    assignment bumps that row's version without moving a quantity (the assigned total is
+    derived from allocation rows, §7). A product the campaign has never received has no
+    balance row to bump, so there is no version to name and the field stays absent.
+    """
+    item = inventory_models.build_inventory_movement_item(
+        movement_id=inventory_models.new_inventory_movement_id(),
+        unit_campaign_id=str(event[UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+        product_id=product_id,
+        movement_type=movement_type,
+        actor_account_id=actor_account_id,
+        occurred_at=occurred_at,
+        idempotency_key=idempotency_key,
+        assigned_delta=assigned_delta,
+        show_and_sell_id=str(event[SHOW_AND_SELL_ID_ATTRIBUTE]),
+        inventory_version=inventory_version,
+    )
+    return inventory_models.put_inventory_movement_action(item)
+
+
+def _assignment_event_update(
+    show_and_sell_id: str,
+    expected_version: int,
+    sets: Mapping[str, Any],
+) -> Tuple[str, Dict[str, Any]]:
+    """One versioned event-row write whose values may be a list or a map.
+
+    :func:`_conditioned_update` cannot carry this row's values: it encodes through
+    :func:`src.utils.mutations.wire_value`, which is scalar-only, and ``productIds`` is
+    a list (the same trap :func:`wire_item_value` exists for). Everything else about the
+    write is the same as every other event write — the ``version`` pin is what makes the
+    assignment lose a race against a cancellation or a second admin rather than overwrite
+    it.
+
+    No state condition: §3.5 allows an assignment in all four editable states, so the
+    state that would refuse it is the one the resolver already refused, and the state a
+    racing writer would move it to (``FINALIZED``, ``CANCELLED``) also moves ``version``.
+    Adding a ``status <> CANCELLED`` style guard would allow ``FINALIZED`` through anyway
+    while being a second, drift-prone statement of the state matrix.
+    """
+    values: Dict[str, Any] = {":expectedVersion": expected_version}
+    names: Dict[str, str] = {"#version": VERSION_ATTRIBUTE}
+    set_parts: List[str] = []
+    for attribute, value in sets.items():
+        names[f"#{attribute}"] = attribute
+        values[f":{attribute}"] = value
+        set_parts.append(f"#{attribute} = :{attribute}")
+    return (
+        "Update",
+        {
+            "TableName": tables.show_and_sells.table_name,
+            "Key": wire_key(event_metadata_key(show_and_sell_id)),
+            "UpdateExpression": "SET " + ", ".join(set_parts),
+            "ConditionExpression": "#version = :expectedVersion",
+            "ExpressionAttributeNames": names,
+            "ExpressionAttributeValues": {name: wire_item_value(value) for name, value in values.items()},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def assignment_event_action(
+    *,
+    show_and_sell_id: str,
+    expected_version: int,
+    product_ids: Sequence[str],
+    updated_by_account_id: str,
+    updated_at: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """Record the products this assignment made the event hold, and move the aggregate.
+
+    ``productIds`` is written in the same transaction as the allocation rows it points at
+    (§8.4): a list that lagged the rows would hide an allocation from the authoritative
+    read finalization depends on. The list arrives already merged and de-duplicated from
+    :func:`src.utils.allocation_models.planned_product_ids`, which is cumulative and
+    uncapped — no product is ever removed.
+    """
+    return _assignment_event_update(
+        show_and_sell_id,
+        expected_version,
+        {
+            PRODUCT_IDS_ATTRIBUTE: list(product_ids),
+            VERSION_ATTRIBUTE: expected_version + 1,
+            UPDATED_BY_ATTRIBUTE: updated_by_account_id,
+            UPDATED_AT_ATTRIBUTE: updated_at,
+        },
+    )
+
+
+def assignment_draft_action(
+    *,
+    show_and_sell_id: str,
+    expected_version: int,
+    product_ids: Sequence[str],
+    draft: Mapping[str, int],
+    updated_by_account_id: str,
+    updated_at: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """The ``REOPENED`` half of the mutation: draft targets and nothing else (§3.2.3).
+
+    A reopened event's approved stock answer already exists — it is the finalization that
+    was suspended — and §5.3.2/§8.6 say a reopened edit is an input that re-finalization
+    validates and applies. So this write touches the event aggregate only: the draft map,
+    the cumulative ``productIds`` (a product named now has to be findable by
+    re-finalization's product walk, §8.6's "adds any newly referenced product to
+    ``ShowAndSell.productIds``"), and ``version``. No allocation row, no movement, and no
+    balance version moves, which is what "no immediate stock/allocation writes" means in
+    the rows.
+    """
+    return _assignment_event_update(
+        show_and_sell_id,
+        expected_version,
+        {
+            PRODUCT_IDS_ATTRIBUTE: list(product_ids),
+            ALLOCATION_DRAFT_ATTRIBUTE: dict(draft),
+            VERSION_ATTRIBUTE: expected_version + 1,
+            UPDATED_BY_ATTRIBUTE: updated_by_account_id,
+            UPDATED_AT_ATTRIBUTE: updated_at,
+        },
+    )
 
 
 def zero_slot_counter_action(

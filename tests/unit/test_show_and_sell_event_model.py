@@ -376,8 +376,13 @@ def test_the_created_row_carries_every_section_5_10_field_and_nothing_else() -> 
     assert item[ssm.CANCELLED_AT_ATTRIBUTE] is None
     assert item[ssm.CANCELLATION_REASON_ATTRIBUTE] is None
     assert set(item) <= set(ssm.EVENT_ROW_ATTRIBUTES)
-    assert set(ssm.EVENT_ROW_ATTRIBUTES) - set(item) == {ssm.ROUNDING_DRAFT_ATTRIBUTE}, (
-        "the cents-rounding draft is Wave 5's to write; every other §5.10 field lands at create"
+    assert set(ssm.EVENT_ROW_ATTRIBUTES) - set(item) == {
+        ssm.ROUNDING_DRAFT_ATTRIBUTE,
+        ssm.ALLOCATION_DRAFT_ATTRIBUTE,
+    }, (
+        "the two draft maps are admin inputs a later write supplies — the cents-rounding draft is "
+        "Wave 5's, the stock-assignment draft is §3.2.3's reopened path — and every other §5.10 "
+        "field lands at create"
     )
 
 
@@ -808,7 +813,17 @@ def test_the_admin_projection_reports_the_derived_state_and_the_full_audit() -> 
     assert payload[ssm.VERSION_ATTRIBUTE] == 1
     assert payload[ssm.UNIT_ID_ATTRIBUTE] == UNIT
     assert payload[ssm.ADDRESS_ATTRIBUTE] == "12 Main St"
-    assert set(payload) == set(ssm.EVENT_ROW_ATTRIBUTES) - {"pk", "sk", "entityType", ssm.ROUNDING_DRAFT_ATTRIBUTE}
+    # Neither draft is a field of `ShowAndSellAdmin`: both are write-side inputs. The
+    # cents-rounding draft is read back through `FinalizationPreview` (API §7.2); the
+    # stock-assignment draft is the input §8.6's re-finalization applies, and the §3.2.4
+    # allocation read returns allocation rows, of which a draft has none.
+    assert set(payload) == set(ssm.EVENT_ROW_ATTRIBUTES) - {
+        "pk",
+        "sk",
+        "entityType",
+        ssm.ROUNDING_DRAFT_ATTRIBUTE,
+        ssm.ALLOCATION_DRAFT_ATTRIBUTE,
+    }
 
 
 def test_the_participant_projection_is_the_allowlist_and_carries_no_administrative_field() -> None:
