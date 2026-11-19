@@ -374,7 +374,9 @@ def cleanup_failures(rows: Iterable[Mapping[str, str]]) -> list[str]:
     missing counts here too — a teardown step that reports nothing is not evidence that it removed
     something.
     """
-    return [f"{row.get('acceptance', '?')}: {row.get('summary', '')}" for row in rows if row.get("result") == CLEANUP_FAILED]
+    return [
+        f"{row.get('acceptance', '?')}: {row.get('summary', '')}" for row in rows if row.get("result") == CLEANUP_FAILED
+    ]
 
 
 def cleanup_problems(rows: Iterable[Mapping[str, str]]) -> list[str]:
@@ -398,7 +400,11 @@ def cleanup_blocked(rows: Iterable[Mapping[str, str]]) -> list[str]:
     ``dynamodb:Scan`` on the Stage 2 inventory table is denied to the QA identity, for instance.
     Still counted by :func:`cleanup_problems`, so it never passes for a removal.
     """
-    return [f"{row.get('acceptance', '?')}: {row.get('summary', '')}" for row in rows if row.get("result") == CLEANUP_BLOCKED]
+    return [
+        f"{row.get('acceptance', '?')}: {row.get('summary', '')}"
+        for row in rows
+        if row.get("result") == CLEANUP_BLOCKED
+    ]
 
 
 class CleanupBlocked(RuntimeError):
@@ -449,18 +455,26 @@ def assert_cleanup_clean(rows: Iterable[Mapping[str, str]], *, strict: bool | No
         raise StageTwoCleanupError(f"{len(problems)} §2.8.7 cleanup step(s) not met: " + "; ".join(problems))
 
 
-def fixture_sweep(tokens: Sequence[str]) -> tuple[int, list[str], list[str]]:
-    """Run the sanctioned fixture sweeper over these lane tokens and split its report.
+#: The token kinds a lane may name.  The *shapes* live in ``TOKEN_SHAPES`` in ``scripts/qa_fixture.py``,
+#: which is the one that refuses a token with no kind, or a partial one; this list is the vocabulary the lane
+#: builds, and ``tests/unit/test_qa_fixture.py`` fails if the two ever disagree.
+LANE_TOKEN_KINDS: tuple[str, ...] = ("data-id", "unit", "unit-campaign", "campaign", "profile", "order", "join-code")
 
-    The lane names the rows only it created: its ``DATA_ID`` (carried in the Unit display name and in
-    every Unit Campaign name it made) and the Unit and Unit Campaign ids it was answered.  The
-    sweeper then decides whether a matching row is also fixture-attributed, and deletes only the rows
-    that pass both tests.  Nothing here removes a row directly: the attribution rule, the plan, the
-    per-table failure reporting and the re-scan read-back all live in ``scripts/qa_fixture.py``.
+
+def fixture_sweep(tokens: Sequence[str]) -> tuple[int, list[str], list[str]]:
+    """Run the sanctioned fixture sweeper over these typed lane tokens and split its report.
+
+    The lane names what it created by kind — its ``DATA_ID``, the Unit, Unit Campaign and Scout Campaign
+    ids it was answered, its seller profile, the join codes it minted, the Orders it sold — and
+    ``scripts/qa_fixture.py`` checks each against the stored shape of that kind before reading a table.
+    The sweeper then applies one reviewed rule per key shape, deletes what a rule says belongs to this
+    lane, re-scans, and reports what survived (``LEFT``), what a rule refused (``kept``: another
+    tenant's grant, membership, custody or marker on a partition this lane named), and what it could not
+    read (``BLOCKED``).  Nothing here removes a row directly.
 
     Returns:
-        ``(exit code, blocked lines, report lines)``.  Exit code 0 means every selected row was
-        deleted and the re-scan found none of them left.  A ``BLOCKED`` line names a table the
+        ``(exit code, blocked lines, report lines)``.  Exit code 0 means every row a rule called this
+        lane's was deleted and the re-scan found none of them left.  A ``BLOCKED`` line names a table the
         fixture identity cannot read — measured on dev on 2026-11-19, ``kernelworx-inventory-ue1-dev``,
         ``kernelworx-orders-ue1-dev`` and ``kernelworx-order-fulfillments-ue1-dev`` all deny
         ``dynamodb:Scan`` to ``kernelworx-qa-ue1-dev`` — which is an owner or infrastructure
@@ -1084,9 +1098,7 @@ def _type_member_map(sdl: str) -> dict[str, dict[str, str]]:
     types: dict[str, dict[str, str]] = {}
     for match in _TYPE_BLOCK.finditer(sdl):
         body = _strip_doc_comments(match.group(2))
-        types[match.group(1)] = {
-            field.group(1): _unwrap_type(field.group(2)) for field in _FIELD_LINE.finditer(body)
-        }
+        types[match.group(1)] = {field.group(1): _unwrap_type(field.group(2)) for field in _FIELD_LINE.finditer(body)}
     return types
 
 
@@ -1208,7 +1220,6 @@ def stage_two_selection_violations(sdl: str) -> list[str]:
 
 
 def stage_two_contract_violations(sdl: str) -> list[str]:
-
     """Every way the shipped SDL and the Stage 2 suite's documents and payloads disagree.
 
     An empty list means the suite can be sent to this API: each Stage 2 field exists, every
@@ -1334,7 +1345,9 @@ def position_arithmetic_violations(positions: Iterable[Mapping[str, Any]]) -> li
         for key, want in expected.items():
             if int(position[key]) != want:
                 numbers = {key: position[key] for key in wanted}
-                violations.append(f"{product_id}: {key}={position[key]}, {_FORMULA_TEXT[key]} says {want} for {numbers}")
+                violations.append(
+                    f"{product_id}: {key}={position[key]}, {_FORMULA_TEXT[key]} says {want} for {numbers}"
+                )
     return violations
 
 

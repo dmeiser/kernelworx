@@ -558,83 +558,451 @@ class ScanRejected(RuntimeError):
     """Stand-in for the ``AccessDeniedException`` dev answers on a denied table."""
 
 
+# Real key shapes, taken from the builders that mint them, so a rule is tested against the row
+# the application actually writes rather than a sketch of one.
+_LANE = "stage2-1118140"
+_LANE_UNIT = "11111111-1111-4111-8111-111111111111"
+_OTHER_UNIT = "88888888-8888-4888-8888-888888888888"
+_LANE_UC = "22222222-2222-4222-8222-222222222222"
+_OTHER_UC = "33333333-3333-4333-8333-333333333333"
+_LANE_CAMPAIGN = "44444444-4444-4444-8444-444444444444"
+_OTHER_CAMPAIGN = "55555555-5555-4555-8555-555555555555"
+_LANE_PROFILE = "66666666-6666-4666-8666-666666666666"
+_OTHER_PROFILE = "77777777-7777-4777-8777-777777777777"
+_LANE_ORDER = f"ORDER#{_LANE_CAMPAIGN}#a1b2c3d4"
+_OTHER_ORDER = f"ORDER#{_OTHER_CAMPAIGN}#ff00ee11"
+_LANE_CODE = "ABCD1234EFGH5678"
+_OTHER_CODE = "ZZZZ9999YYYY8888"
+_ADMIN_SUB = "sub-admin"
+
+
+def _lane_tokens(mod: ModuleType) -> Dict[str, set[str]]:
+    """The tokens one lane run can honestly name: its own ids, code and DATA_ID."""
+    tokens, problems = mod.parse_lane_tokens(
+        [
+            f"data-id={_LANE}",
+            f"unit={_LANE_UNIT}",
+            f"unit-campaign={_LANE_UC}",
+            f"campaign={_LANE_CAMPAIGN}",
+            f"profile={_LANE_PROFILE}",
+            f"order={_LANE_ORDER}",
+            f"join-code={_LANE_CODE}",
+        ]
+    )
+    assert not problems, problems
+    return tokens
+
+
 def _lane_rows() -> Dict[str, List[Dict[str, Any]]]:
-    """Two acceptance lanes and a third party, on the tables ``sweep`` considers."""
+    """Two lanes' rows and a third party's, in the shapes the Stage 2 lane writes."""
     return {
         "kernelworx-units-ue1-dev": [
             _item(
-                pk="UNIT#u1",
+                pk=f"UNIT#{_LANE_UNIT}",
                 sk="METADATA",
-                createdByAccountId="ACCOUNT#sub-admin",
-                displayName="Stage 2 Pack lane-a",
+                createdByAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+                displayName="Stage 2 Pack stage2-1118140",
             ),
             _item(
-                pk="UNIT#u2",
+                pk=f"UNIT#{_OTHER_UNIT}",
                 sk="METADATA",
-                createdByAccountId="ACCOUNT#sub-admin",
-                displayName="Stage 2 Pack lane-b",
+                createdByAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+                displayName="Stage 2 Pack stage2-1118133",
             ),
-            _item(pk="UNIT#u1", sk="GRANT#ACCOUNT#someone-else"),
+            _item(pk=f"UNIT#{_LANE_UNIT}", sk=f"GRANT#ACCOUNT#{_ADMIN_SUB}"),
+            _item(pk=f"UNIT#{_LANE_UNIT}", sk="GRANT#ACCOUNT#someone-else"),
+            _item(pk=f"UNIT#{_LANE_UNIT}", sk="SOMETHING#ELSE"),
         ],
         "kernelworx-unit-campaigns-ue1-dev": [
             _item(
-                pk="UNIT_CAMPAIGN#c1",
+                pk=f"UNIT_CAMPAIGN#{_LANE_UC}",
                 sk="METADATA",
-                campaignName="Stage 2 Stock lane-a",
-                createdByAccountId="ACCOUNT#sub-admin",
+                campaignName="Stage 2 Stock stage2-1118140",
+                createdByAccountId=f"ACCOUNT#{_ADMIN_SUB}",
             ),
             _item(
-                pk="UNIT_CAMPAIGN#c2",
+                pk=f"UNIT_CAMPAIGN#{_OTHER_UC}",
                 sk="METADATA",
-                campaignName="Stage 2 Stock lane-b",
-                createdByAccountId="ACCOUNT#sub-admin",
+                campaignName="Stage 2 Stock stage2-1118133",
+                createdByAccountId=f"ACCOUNT#{_ADMIN_SUB}",
             ),
-            _item(pk="UNIT_CAMPAIGN#c1", sk="MEMBERSHIP#PROFILE#someone-else"),
+            _item(pk=f"UNIT_CAMPAIGN#{_LANE_UC}", sk=f"MEMBERSHIP#PROFILE#{_LANE_PROFILE}"),
+            _item(pk=f"UNIT_CAMPAIGN#{_LANE_UC}", sk=f"MEMBERSHIP#PROFILE#{_OTHER_PROFILE}"),
+            _item(pk=f"SCOUT_CAMPAIGN#{_LANE_CAMPAIGN}", sk="MEMBERSHIP_GUARD"),
+            _item(pk=f"SCOUT_CAMPAIGN#{_OTHER_CAMPAIGN}", sk="MEMBERSHIP_GUARD"),
+            _item(
+                pk=f"JOIN_CODE#{_LANE_CODE}", sk="POINTER", unitCampaignId=_LANE_UC, createdAt="2026-11-19T00:00:00Z"
+            ),
+            _item(
+                pk=f"JOIN_CODE#{_OTHER_CODE}", sk="POINTER", unitCampaignId=_OTHER_UC, createdAt="2026-11-19T00:00:00Z"
+            ),
+            _item(
+                pk=f"IDEM#{_ADMIN_SUB}#updateUnitCampaign#{_LANE_UC}",
+                sk=f"IDEM#{_LANE}-stock-receipt",
+                resultPayload='{"joinCode": "' + _LANE_CODE + '"}',
+            ),
+            _item(
+                pk=f"IDEM#{_ADMIN_SUB}#joinUnitCampaign#{_LANE_CODE}",
+                sk="IDEM#f4090f4f-1111-4111-8111-111111111111",
+            ),
+            # Another tenant's join attempt on this lane's code: a lane resource names it, so it is
+            # reported — and it stays, because no fixture identity wrote it.
+            _item(
+                pk=f"IDEM#someone-else#joinUnitCampaign#{_LANE_CODE}",
+                sk="IDEM#deadbeef-2222-4222-8222-222222222222",
+            ),
+            # A fixture marker on another run's resource: not this lane's, and not worth a line in the
+            # report — the table holds every earlier run's markers.
+            _item(
+                pk=f"IDEM#{_ADMIN_SUB}#joinUnitCampaign#{_OTHER_CODE}",
+                sk="IDEM#9b1c2d3e-3333-4333-8333-333333333333",
+            ),
+            {
+                # A bool attribute is not something to match an id against: an earlier shape of the
+                # matcher raised TypeError here, which read as a denied table.
+                "pk": _s(f"UNIT_CAMPAIGN#{_OTHER_UC}"),
+                "sk": _s("METADATA"),
+                "isActive": {"BOOL": False},
+                "createdByAccountId": _s(f"ACCOUNT#{_ADMIN_SUB}"),
+            },
         ],
         "kernelworx-inventory-ue1-dev": [
-            _item(pk="INV#c1", sk="BAL#p1", actorAccountId="ACCOUNT#sub-admin"),
-            _item(pk="INV#c2", sk="BAL#p1", actorAccountId="ACCOUNT#sub-admin"),
+            # The two shapes attribution cannot see: no owner attribute anywhere on the row.
+            _item(
+                pk=f"UNIT_CAMPAIGN#{_LANE_UC}",
+                sk="PRODUCT#p1#BALANCE",
+                entityType="InventoryBalance",
+                unitCampaignId=_LANE_UC,
+                productId="PRODUCT#p1",
+            ),
+            _item(
+                pk=f"UNIT_CAMPAIGN#{_LANE_UC}",
+                sk=f"PRODUCT#p1#CUSTODY#PROFILE#{_LANE_PROFILE}",
+                entityType="ScoutCustodyBalance",
+                unitCampaignId=_LANE_UC,
+                productId="PRODUCT#p1",
+                profileId=f"PROFILE#{_LANE_PROFILE}",
+                campaignId=f"CAMPAIGN#{_LANE_CAMPAIGN}",
+            ),
+            _item(
+                pk=f"UNIT_CAMPAIGN#{_LANE_UC}",
+                sk=f"PRODUCT#p1#CUSTODY#PROFILE#{_OTHER_PROFILE}",
+                entityType="ScoutCustodyBalance",
+                unitCampaignId=_LANE_UC,
+                profileId=f"PROFILE#{_OTHER_PROFILE}",
+            ),
+            _item(
+                pk=f"UNIT_CAMPAIGN#{_LANE_UC}",
+                sk="PRODUCT#p1#MOVEMENT#2026-11-19T00:00:00Z#m1",
+                entityType="InventoryMovement",
+                actorAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+            ),
+            _item(
+                pk=f"UNIT_CAMPAIGN#{_LANE_UC}",
+                sk="PRODUCT#p1#MOVEMENT#2026-11-19T00:00:01Z#m2",
+                entityType="InventoryMovement",
+                actorAccountId="ACCOUNT#someone-else",
+            ),
+            _item(pk=f"UNIT_CAMPAIGN#{_OTHER_UC}", sk="PRODUCT#p1#BALANCE", entityType="InventoryBalance"),
         ],
+        "kernelworx-orders-ue1-dev": [
+            _item(
+                campaignId=f"CAMPAIGN#{_LANE_CAMPAIGN}",
+                orderId=_LANE_ORDER,
+                profileId=f"PROFILE#{_LANE_PROFILE}",
+            ),
+            _item(campaignId=f"CAMPAIGN#{_OTHER_CAMPAIGN}", orderId=_OTHER_ORDER),
+        ],
+        "kernelworx-order-fulfillments-ue1-dev": [
+            _item(pk=_LANE_ORDER, sk="FULFILLMENT#2026-11-19T00:00:02Z#f1", campaignId=f"CAMPAIGN#{_LANE_CAMPAIGN}"),
+            _item(pk=_OTHER_ORDER, sk="FULFILLMENT#2026-11-19T00:00:03Z#f2", campaignId=f"CAMPAIGN#{_OTHER_CAMPAIGN}"),
+        ],
+        "kernelworx-accounts-ue1-dev": [_item(accountId=f"ACCOUNT#{_ADMIN_SUB}")],
     }
 
 
-def test_sweep_deletes_only_rows_naming_the_lane_and_a_fixture_identity(mod: ModuleType) -> None:
-    """Both conditions or nothing: the lane's token in the row, a fixture identity in its key or owner."""
+def _survivors(d: StubDynamo) -> set[str]:
+    """Every row still in the stub, addressed by whatever key pair that table uses."""
+    survivors: set[str] = set()
+    for table, items in d.tables.items():
+        for item in items:
+            parts = [
+                value["S"] for name in ("pk", "sk", "campaignId", "orderId", "accountId") if (value := item.get(name))
+            ]
+            survivors.add(f"{table}/{'/'.join(parts)}")
+    return survivors
+
+
+def test_sweep_removes_lane_rows_that_carry_no_fixture_identity(mod: ModuleType) -> None:
+    """The shapes attribution cannot see are the ones a lane leaves behind, so they are swept by rule.
+
+    An inventory balance or custody row names no account at all (only a movement row carries
+    ``actorAccountId``), and a join-code pointer carries only ``unitCampaignId`` and a timestamp.
+    A membership guard carries neither.  Each is removed by the rule for its key shape.
+    """
     d = StubDynamo(_lane_rows())
     out = io.StringIO()
 
-    code = mod.sweep_lane_rows(d, {"sub-admin"}, ("lane-a", "c1"), out)
-    text = out.getvalue()
+    code = mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out)
     deleted = {(t, tuple(sorted(k.items()))) for t, k in d.deleted}
+    text = out.getvalue()
 
     assert code == 0
-    assert ("kernelworx-units-ue1-dev", (("pk", "UNIT#u1"), ("sk", "METADATA"))) in deleted
-    assert ("kernelworx-unit-campaigns-ue1-dev", (("pk", "UNIT_CAMPAIGN#c1"), ("sk", "METADATA"))) in deleted
-    assert ("kernelworx-inventory-ue1-dev", (("pk", "INV#c1"), ("sk", "BAL#p1"))) in deleted
-    assert "swept 3 row(s)" in text
-    assert text.count("plan:") == 1, "the plan is printed before any write"
-    assert text.index("row    ") < text.index("deleted row"), "nothing is deleted before the plan"
+    assert (
+        "kernelworx-inventory-ue1-dev",
+        (("pk", f"UNIT_CAMPAIGN#{_LANE_UC}"), ("sk", "PRODUCT#p1#BALANCE")),
+    ) in deleted
+    assert (
+        "kernelworx-inventory-ue1-dev",
+        (("pk", f"UNIT_CAMPAIGN#{_LANE_UC}"), ("sk", f"PRODUCT#p1#CUSTODY#PROFILE#{_LANE_PROFILE}")),
+    ) in deleted
+    assert (
+        "kernelworx-inventory-ue1-dev",
+        (("pk", f"UNIT_CAMPAIGN#{_LANE_UC}"), ("sk", "PRODUCT#p1#MOVEMENT#2026-11-19T00:00:00Z#m1")),
+    ) in deleted
+    assert ("kernelworx-unit-campaigns-ue1-dev", (("pk", f"JOIN_CODE#{_LANE_CODE}"), ("sk", "POINTER"))) in deleted
+    assert (
+        "kernelworx-unit-campaigns-ue1-dev",
+        (("pk", f"SCOUT_CAMPAIGN#{_LANE_CAMPAIGN}"), ("sk", "MEMBERSHIP_GUARD")),
+    ) in deleted
+    assert (
+        "kernelworx-orders-ue1-dev",
+        (("campaignId", f"CAMPAIGN#{_LANE_CAMPAIGN}"), ("orderId", _LANE_ORDER)),
+    ) in deleted
+    assert (
+        "kernelworx-order-fulfillments-ue1-dev",
+        (("pk", _LANE_ORDER), ("sk", "FULFILLMENT#2026-11-19T00:00:02Z#f1")),
+    ) in deleted
+    assert "inventory InventoryBalance row in lane Unit Campaign" in text
+    assert "join-code pointer for lane Unit Campaign" in text
+    assert "active-join guard" in text
 
 
-def test_sweep_leaves_another_lanes_rows_and_a_third_party_grants(mod: ModuleType) -> None:
-    """The lane token is what keeps one run from sweeping the whole pool.
+def test_sweep_reports_every_lane_token_match_and_deletes_only_its_own(mod: ModuleType) -> None:
+    """A lane token that names a row is never silent: it is either deleted or reported as kept.
 
-    ``lane-b``'s Unit and Unit Campaign belong to the same fixture identities, so attribution alone
-    would take them; ``GRANT#ACCOUNT#someone-else`` and ``MEMBERSHIP#PROFILE#someone-else`` sit on
-    the swept lane's own partitions and are another tenant's data.
+    Third-party rows on a lane partition — another account's Unit Admin grant, another profile's
+    roster membership, another profile's custody, a movement written by an account outside the
+    fixture pool, another run's idempotency marker — survive, and the report says why each survived.
     """
     d = StubDynamo(_lane_rows())
+    out = io.StringIO()
 
-    mod.sweep_lane_rows(d, {"sub-admin"}, ("lane-a", "c1"), io.StringIO())
-    survivors = {
-        f"{table}/{item['pk']['S']}/{item['sk']['S']}" for table, items in d.tables.items() for item in items
+    code = mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out)
+    text = out.getvalue()
+    survivors = _survivors(d)
+
+    assert code == 0
+    assert f"kernelworx-units-ue1-dev/UNIT#{_OTHER_UNIT}/METADATA" in survivors
+    assert f"kernelworx-unit-campaigns-ue1-dev/UNIT_CAMPAIGN#{_OTHER_UC}/METADATA" in survivors
+    assert f"kernelworx-inventory-ue1-dev/UNIT_CAMPAIGN#{_OTHER_UC}/PRODUCT#p1#BALANCE" in survivors
+    assert f"kernelworx-orders-ue1-dev/CAMPAIGN#{_OTHER_CAMPAIGN}/{_OTHER_ORDER}" in survivors
+    assert f"kernelworx-accounts-ue1-dev/ACCOUNT#{_ADMIN_SUB}" in survivors, "identities outlive a lane"
+    assert f"kernelworx-units-ue1-dev/UNIT#{_LANE_UNIT}/GRANT#ACCOUNT#someone-else" in survivors
+    assert (
+        f"kernelworx-unit-campaigns-ue1-dev/UNIT_CAMPAIGN#{_LANE_UC}/MEMBERSHIP#PROFILE#{_OTHER_PROFILE}" in survivors
+    )
+    assert (
+        f"kernelworx-inventory-ue1-dev/UNIT_CAMPAIGN#{_LANE_UC}/PRODUCT#p1#CUSTODY#PROFILE#{_OTHER_PROFILE}"
+        in survivors
+    )
+    assert (
+        f"kernelworx-inventory-ue1-dev/UNIT_CAMPAIGN#{_LANE_UC}/PRODUCT#p1#MOVEMENT#2026-11-19T00:00:01Z#m2"
+        in survivors
+    )
+    assert (
+        f"kernelworx-unit-campaigns-ue1-dev/IDEM#someone-else#joinUnitCampaign#{_LANE_CODE}"
+        "/IDEM#deadbeef-2222-4222-8222-222222222222"
+    ) in survivors
+    assert (
+        f"kernelworx-unit-campaigns-ue1-dev/IDEM#{_ADMIN_SUB}#joinUnitCampaign#{_OTHER_CODE}"
+        "/IDEM#9b1c2d3e-3333-4333-8333-333333333333"
+    ) in survivors
+    assert "kept   units" in text and "not a fixture identity" in text
+    assert "that profile is not this lane" in text
+    assert "written by ACCOUNT#someone-else, not a fixture identity" in text
+    assert "names a lane resource but no fixture identity wrote it" in text
+    assert _OTHER_CODE not in out.getvalue(), "a marker no lane token names is not this sweep's business"
+    assert "row shape 'SOMETHING#ELSE' on lane Unit" in text, "a shape no rule describes is reported, never deleted"
+    assert "6 row(s) a lane token names are deliberately left" in text
+
+
+def test_a_prior_runs_guard_and_roster_row_are_reached_from_its_profile_id(mod: ModuleType) -> None:
+    """A prior lane's Scout Campaign id is not discoverable once its profile is deleted, its profile id is.
+
+    ``_sweep_prior_lanes`` reads the prior run's Unit, Unit Campaigns and seller profiles through the
+    product, so those are the tokens it can honestly name.  ``build_membership_guard_item`` and
+    ``build_membership_item`` both write a ``profileId``, so the guard ``guard_release_action`` leaves
+    behind and the roster row the removal audit keeps are still found — and a guard whose campaign this
+    lane cannot name and whose profile is not the lane's stays untouched.
+    """
+    rows = {
+        "kernelworx-unit-campaigns-ue1-dev": [
+            # ``guard_key`` addresses the Scout Campaign by its stored spelling, prefix included.
+            _item(
+                pk=f"SCOUT_CAMPAIGN#CAMPAIGN#{_OTHER_CAMPAIGN}",
+                sk="MEMBERSHIP_GUARD",
+                campaignId=f"CAMPAIGN#{_OTHER_CAMPAIGN}",
+                profileId=f"PROFILE#{_OTHER_PROFILE}",
+            ),
+            _item(
+                pk=f"SCOUT_CAMPAIGN#CAMPAIGN#{_LANE_CAMPAIGN}",
+                sk="MEMBERSHIP_GUARD",
+                campaignId=f"CAMPAIGN#{_LANE_CAMPAIGN}",
+                profileId=f"PROFILE#{_LANE_PROFILE}",
+            ),
+            _item(
+                pk=f"UNIT_CAMPAIGN#{_OTHER_UC}",
+                sk=f"MEMBERSHIP#PROFILE#{_LANE_PROFILE}",
+                profileId=f"PROFILE#{_LANE_PROFILE}",
+            ),
+        ]
     }
+    d = StubDynamo(rows)
+    tokens, problems = mod.parse_lane_tokens(
+        [f"data-id={_LANE}", f"unit-campaign={_OTHER_UC}", f"profile={_LANE_PROFILE}"]
+    )
+    assert not problems, problems
 
-    assert "kernelworx-units-ue1-dev/UNIT#u2/METADATA" in survivors
-    assert "kernelworx-unit-campaigns-ue1-dev/UNIT_CAMPAIGN#c2/METADATA" in survivors
-    assert "kernelworx-inventory-ue1-dev/INV#c2/BAL#p1" in survivors
-    assert "kernelworx-units-ue1-dev/UNIT#u1/GRANT#ACCOUNT#someone-else" in survivors
-    assert "kernelworx-unit-campaigns-ue1-dev/UNIT_CAMPAIGN#c1/MEMBERSHIP#PROFILE#someone-else" in survivors
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, tokens, io.StringIO()) == 0
+    deleted = {tuple(sorted(k.items())) for _t, k in d.deleted}
+
+    assert (("pk", f"SCOUT_CAMPAIGN#CAMPAIGN#{_LANE_CAMPAIGN}"), ("sk", "MEMBERSHIP_GUARD")) in deleted
+    assert (("pk", f"UNIT_CAMPAIGN#{_OTHER_UC}"), ("sk", f"MEMBERSHIP#PROFILE#{_LANE_PROFILE}")) in deleted
+    assert all(_OTHER_PROFILE not in str(key) for key in deleted), "another run's guard is not this run's"
+
+
+def test_the_lane_grant_and_its_own_membership_are_removed(mod: ModuleType) -> None:
+    """The lane's own fixture grant and membership go; only a foreign principal survives."""
+    d = StubDynamo(_lane_rows())
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), io.StringIO()) == 0
+    deleted = {tuple(sorted(k.items())) for _t, k in d.deleted}
+
+    assert (("pk", f"UNIT#{_LANE_UNIT}"), ("sk", f"GRANT#ACCOUNT#{_ADMIN_SUB}")) in deleted
+    assert (("pk", f"UNIT_CAMPAIGN#{_LANE_UC}"), ("sk", f"MEMBERSHIP#PROFILE#{_LANE_PROFILE}")) in deleted
+
+
+def test_a_token_naming_another_run_matches_nothing_here(mod: ModuleType) -> None:
+    """One run's tokens cannot sweep another's rows, even though both use the same fixture identities."""
+    d = StubDynamo(_lane_rows())
+    other, problems = mod.parse_lane_tokens(
+        [
+            "data-id=stage2-1118133",
+            f"unit={_OTHER_UNIT}",
+            f"unit-campaign={_OTHER_UC}",
+            f"campaign={_OTHER_CAMPAIGN}",
+            f"profile={_OTHER_PROFILE}",
+            f"order={_OTHER_ORDER}",
+            f"join-code={_OTHER_CODE}",
+        ]
+    )
+    assert not problems, problems
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, other, io.StringIO()) == 0
+    deleted_keys = {k["pk"] if "pk" in k else k["campaignId"] for _t, k in d.deleted}
+
+    assert _LANE_UNIT not in deleted_keys
+    assert _LANE_UC not in deleted_keys
+    assert all(_LANE_PROFILE not in str(k) for _t, k in d.deleted)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "stage2-1118140",  # no kind: free text is what the old sweep accepted and what deleted a canary
+        "unit=11111111-1111-4111-8111-11111111",  # a prefix of a real id
+        "unit=111111111111111111111111111111111111",
+        "data-id=ab",
+        "data-id=stage2",
+        "join-code=ABCD1234",
+        "join-code=abcd1234efgh5678",
+        "order=ORDER#44444444-4444-4444-8444-444444444444",
+        "profile=PROFILE#66666666-6666-4666-8666-666666666666",
+        "tenant=66666666-6666-4666-8666-666666666666",
+        "id=x",
+    ],
+)
+def test_an_ambiguous_token_is_refused_before_any_table_is_read(mod: ModuleType, value: str) -> None:
+    """A destructive sweep run with ``--yes`` must not guess what a token meant."""
+    tokens, problems = mod.parse_lane_tokens([value])
+
+    assert problems, f"{value!r} should be refused"
+    assert not any(tokens[kind] for kind in tokens)
+
+
+def test_a_valid_token_set_is_accepted_exactly(mod: ModuleType) -> None:
+    tokens, problems = mod.parse_lane_tokens(
+        [
+            f"data-id={_LANE}",
+            f"unit={_LANE_UNIT}",
+            f"unit-campaign={_LANE_UC}",
+            f"campaign={_LANE_CAMPAIGN}",
+            f"profile={_LANE_PROFILE}",
+            f"order={_LANE_ORDER}",
+            f"join-code={_LANE_CODE}",
+            f"idem={_LANE}-stock-receipt",
+        ]
+    )
+
+    assert not problems
+    assert tokens["data-id"] == {_LANE}
+    assert tokens["idem"] == {f"{_LANE}-stock-receipt"}
+    assert len(tokens["unit"]) == 1
+
+
+def test_a_named_idempotency_key_selects_its_marker_and_no_other(mod: ModuleType) -> None:
+    """``idem`` is the narrowest marker rule: the exact key the caller used."""
+    rows = {
+        "kernelworx-unit-campaigns-ue1-dev": [
+            _item(pk=f"IDEM#{_ADMIN_SUB}#joinUnitCampaign#{_OTHER_CODE}", sk=f"IDEM#{_LANE}-odd-key"),
+            _item(
+                pk=f"IDEM#{_ADMIN_SUB}#joinUnitCampaign#{_OTHER_CODE}", sk="IDEM#deadbeef-2222-4222-8222-222222222222"
+            ),
+        ]
+    }
+    d = StubDynamo(rows)
+    tokens, problems = mod.parse_lane_tokens([f"idem={_LANE}-odd-key"])
+    assert not problems, problems
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, tokens, io.StringIO()) == 0
+    assert [k["sk"] for _t, k in d.deleted] == [f"IDEM#{_LANE}-odd-key"]
+
+
+def test_a_join_code_never_reaches_the_report(mod: ModuleType) -> None:
+    """A pointer row is planned and deleted, and its code is masked in the same breath."""
+    d = StubDynamo(_lane_rows())
+    out = io.StringIO()
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out) == 0
+
+    assert _LANE_CODE not in out.getvalue(), "a live join code must not be pasted into an issue"
+
+
+def test_the_sweep_says_which_tables_it_could_actually_read(mod: ModuleType) -> None:
+    """Coverage is reported, so a sweep that could only see three tables never reads as six."""
+    out = io.StringIO()
+    mod.sweep_lane_rows(StubDynamo(_lane_rows()), {_ADMIN_SUB}, _lane_tokens(mod), out)
+    text = out.getvalue()
+
+    for table in mod.SWEEP_TABLES.values():
+        assert f"reach {table[0]:<34} scanned" in text
+
+
+def test_a_lane_row_the_delete_left_behind_fails_the_sweep(mod: ModuleType) -> None:
+    """``delete_item`` returning without an error is not evidence; the re-scan is."""
+    d = StubDynamo(
+        _lane_rows(),
+        fail_keys={"kernelworx-inventory-ue1-dev": [{"pk": f"UNIT_CAMPAIGN#{_LANE_UC}", "sk": "PRODUCT#p1#BALANCE"}]},
+    )
+    out = io.StringIO()
+
+    code = mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out)
+    text = out.getvalue()
+
+    assert code == 1
+    assert "FAILED row   inventory" in text
+    assert f"LEFT   inventory          UNIT_CAMPAIGN#{_LANE_UC}/PRODUCT#p1#BALANCE" in text
 
 
 def test_a_table_the_identity_cannot_read_is_reported_blocked_and_the_sweep_fails(mod: ModuleType) -> None:
@@ -642,12 +1010,14 @@ def test_a_table_the_identity_cannot_read_is_reported_blocked_and_the_sweep_fail
 
     This is the measured dev state on 2026-11-19: ``kernelworx-qa-ue1-dev`` is denied
     ``dynamodb:Scan`` on the Stage 2 inventory table, so a lane's inventory rows are neither removed
-    nor proven absent.  ``sweep`` says so and exits non-zero rather than reporting a clean sweep.
+    nor proven absent.  ``sweep`` says so and exits non-zero rather than reporting a clean sweep —
+    and the grant that would fix it does not by itself make the sweep correct, which is what the
+    per-shape rules above are for.
     """
     d = DeniedScanDynamo(_lane_rows(), denied=["kernelworx-inventory-ue1-dev"])
     out = io.StringIO()
 
-    code = mod.sweep_lane_rows(d, {"sub-admin"}, ("lane-a", "c1"), out)
+    code = mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out)
     text = out.getvalue()
 
     assert code == 1
@@ -656,36 +1026,48 @@ def test_a_table_the_identity_cannot_read_is_reported_blocked_and_the_sweep_fail
     assert all(table != "kernelworx-inventory-ue1-dev" for table, _key in d.deleted), "a denied table is not swept"
 
 
-def test_a_lane_row_the_delete_left_behind_fails_the_sweep(mod: ModuleType) -> None:
-    """``delete_item`` returning without an error is not evidence; the re-scan is."""
-    d = StubDynamo(
-        _lane_rows(),
-        fail_keys={"kernelworx-unit-campaigns-ue1-dev": [{"pk": "UNIT_CAMPAIGN#c1", "sk": "METADATA"}]},
+def test_the_residue_scan_follows_the_page_token(mod: ModuleType) -> None:
+    """A lane's rows spread over pages must all be seen, not just the first page."""
+
+    class PagedDynamo(StubDynamo):
+        def __init__(self, tables: Dict[str, List[Dict[str, Any]]]) -> None:
+            super().__init__(tables)
+            self.pages = 0
+
+        def scan(self, *, TableName: str, **kwargs: Any) -> Dict[str, Any]:
+            rows = self.tables.get(TableName, [])
+            if not kwargs.get("ExclusiveStartKey"):
+                self.pages += 1
+                return {"Items": rows[:1], "LastEvaluatedKey": {"pk": "next"}} if len(rows) > 1 else {"Items": rows}
+            return {"Items": rows[1:]}
+
+    d = PagedDynamo(
+        {
+            "kernelworx-inventory-ue1-dev": [
+                _item(pk=f"UNIT_CAMPAIGN#{_LANE_UC}", sk="PRODUCT#p1#BALANCE"),
+                _item(pk=f"UNIT_CAMPAIGN#{_LANE_UC}", sk="PRODUCT#p2#BALANCE"),
+            ]
+        }
     )
     out = io.StringIO()
 
-    code = mod.sweep_lane_rows(d, {"sub-admin"}, ("lane-a", "c1"), out)
-    text = out.getvalue()
-
-    assert code == 1
-    assert "FAILED row   unit-campaigns     UNIT_CAMPAIGN#c1/METADATA" in text
-    assert "LEFT   kernelworx-unit-campaigns-ue1-dev/UNIT_CAMPAIGN#c1" in text
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out) == 0
+    assert len(d.deleted) == 2, "both pages are swept, not only the first"
 
 
 def test_sweep_refuses_an_unbounded_run_and_a_run_that_deletes_nothing(mod: ModuleType) -> None:
     """No token means no lane, and no lane means an unbounded sweep across another run's rows."""
     d = StubDynamo(_lane_rows())
     out = io.StringIO()
+    empty_tokens = {kind: set() for kind in mod.TOKEN_SHAPES}
 
-    assert mod.sweep_lane_rows(d, {"sub-admin"}, (), out) == 1
-    assert "refusing to run without a --lane token" in out.getvalue()
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, empty_tokens, out) == 1
+    assert "refusing to run without a typed --lane" in out.getvalue()
     assert d.deleted == []
 
-    empty = StubDynamo(_lane_rows())
     again = io.StringIO()
-    assert mod.sweep_lane_rows(empty, set(), ("lane-a",), again) == 1
+    assert mod.sweep_lane_rows(StubDynamo(_lane_rows()), set(), _lane_tokens(mod), again) == 1
     assert "no fixture subs" in again.getvalue()
-    assert empty.deleted == []
 
 
 def test_sweep_never_touches_an_identity(mod: ModuleType) -> None:
@@ -702,14 +1084,70 @@ def test_sweep_never_touches_an_identity(mod: ModuleType) -> None:
     assert "c" not in signature.parameters, "the sweeper holds no Cognito client"
 
 
-def test_the_sweep_cli_requires_a_lane_token_and_yes(mod: ModuleType) -> None:
-    """``sweep`` deletes rows, so it is never interactive and never unbounded."""
+def test_the_lane_token_kinds_are_the_sweepers_token_kinds(mod: ModuleType) -> None:
+    """The lane's token vocabulary and the sweeper's token shapes are one list, not two that drifted.
+
+    A kind the lane emits and the sweeper does not know is a refused run; a shape the sweeper accepts
+    and the lane never emits is a class of row nobody names, which is how a sweep quietly stops being
+    one.
+    """
+    from tests.e2e.utils import show_sell_stage2_support as stage2
+
+    assert set(stage2.LANE_TOKEN_KINDS) <= set(mod.TOKEN_SHAPES), "the lane names a kind the sweeper refuses"
+    assert set(mod.TOKEN_SHAPES) - set(stage2.LANE_TOKEN_KINDS) == {"idem"}, (
+        "idem is the hand-run's narrowest form: a lane reaches its own markers through the DATA_ID every "
+        "key it sends is prefixed with, so a new kind the lane must name belongs in LANE_TOKEN_KINDS too"
+    )
+
+
+def test_another_tenants_lane_shaped_marker_key_is_refused(mod: ModuleType) -> None:
+    """A key that looks like this lane's is not this lane's unless a fixture identity wrote it.
+
+    The ``DATA_ID`` branch of the marker rule is a prefix test, so it is the actor that keeps it
+    honest: ``IDEM#someone-else#…/IDEM#stage2-1118140-try-again`` is another account's mutation.
+    """
+    rows = {
+        "kernelworx-unit-campaigns-ue1-dev": [
+            _item(pk=f"IDEM#someone-else#joinUnitCampaign#{_LANE_CODE}", sk=f"IDEM#{_LANE}-try-again"),
+            _item(pk=f"IDEM#{_ADMIN_SUB}#joinUnitCampaign#{_LANE_CODE}", sk=f"IDEM#{_LANE}-mine"),
+        ]
+    }
+    d = StubDynamo(rows)
+    out = io.StringIO()
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), out) == 0
+    assert [k["sk"] for _t, k in d.deleted] == [f"IDEM#{_LANE}-mine"]
+    assert "names a lane resource but no fixture identity wrote it" in out.getvalue()
+
+
+def test_a_marker_key_segment_escaped_by_the_application_still_matches(mod: ModuleType) -> None:
+    """``_escape_key_segment`` writes ``%23`` for a ``#`` inside a scope, so a prefixed id survives matching."""
+    rows = {
+        "kernelworx-unit-campaigns-ue1-dev": [
+            _item(
+                pk=f"IDEM#{_ADMIN_SUB}#createOrder#CAMPAIGN%23{_LANE_CAMPAIGN}",
+                sk="IDEM#f4090f4f-1111-4111-8111-111111111111",
+            ),
+        ]
+    }
+    d = StubDynamo(rows)
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _lane_tokens(mod), io.StringIO()) == 0
+    assert [k["sk"] for _t, k in d.deleted] == ["IDEM#f4090f4f-1111-4111-8111-111111111111"]
+
+
+def test_the_sweep_cli_requires_a_typed_lane_token_and_yes(mod: ModuleType) -> None:
+    """``sweep`` deletes rows, so it is never interactive, never unbounded, and never free-text."""
     without_token = io.StringIO()
     assert mod.main(["qa_fixture.py", "sweep", "--yes"], out=without_token) == 2
     assert "at least one --lane" in without_token.getvalue()
 
+    ambiguous = io.StringIO()
+    assert mod.main(["qa_fixture.py", "sweep", "--lane", "stage2-1118140", "--yes"], out=ambiguous) == 2
+    assert "refused" in ambiguous.getvalue()
+
     without_yes = io.StringIO()
-    assert mod.main(["qa_fixture.py", "sweep", "--lane", "lane-a"], out=without_yes) == 2
+    assert mod.main(["qa_fixture.py", "sweep", "--lane", f"unit={_LANE_UNIT}"], out=without_yes) == 2
     assert "--yes" in without_yes.getvalue()
 
 

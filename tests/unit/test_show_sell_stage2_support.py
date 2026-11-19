@@ -253,7 +253,11 @@ def test_the_lane_carries_a_document_for_every_record_it_has_to_take_back() -> N
     than a mutation that returned ``true``.
     """
     documents = stage2.STAGE_TWO_SUPPORT_DOCUMENTS
-    removals = {"deleteCampaign": "deleteCampaign", "deleteProfile": "deleteSellerProfile", "deleteOrder": "deleteOrder"}
+    removals = {
+        "deleteCampaign": "deleteCampaign",
+        "deleteProfile": "deleteSellerProfile",
+        "deleteOrder": "deleteOrder",
+    }
     for key, field in removals.items():
         assert field in documents[key], f"{key} does not send {field}"
         assert documents[key].lstrip().startswith("mutation"), f"{key} is not a mutation"
@@ -442,7 +446,11 @@ def test_the_trail_holds_each_expected_movement_exactly_once() -> None:
     ]
     expected = [
         {"movementType": "RECEIPT", "kernelPhysicalDelta": 8, "productId": "CATALOG#lane#prod-2"},
-        {"movementType": "STOCK_ADJUSTMENT", "kernelPhysicalDelta": 2, "reason": "Trade with Troop 7150; money settled outside app"},
+        {
+            "movementType": "STOCK_ADJUSTMENT",
+            "kernelPhysicalDelta": 2,
+            "reason": "Trade with Troop 7150; money settled outside app",
+        },
         {"movementType": "STOCK_ADJUSTMENT", "kernelPhysicalDelta": -1, "reason": "Gift to outgoing volunteer"},
     ]
     assert stage2.movement_trail_violations(trail, expected) == []
@@ -452,7 +460,9 @@ def test_a_write_that_ran_twice_is_reported_as_running_twice() -> None:
     """The duplicate a replayed mutation would leave behind is the trail's own evidence."""
     trail = [_movement(), _movement(movementId="Movement#2")]
     violations = stage2.movement_trail_violations(trail, [{"movementType": "RECEIPT", "kernelPhysicalDelta": 8}])
-    assert violations == ["2 movements match {'movementType': 'RECEIPT', 'kernelPhysicalDelta': 8}: the write ran twice"], violations
+    assert violations == [
+        "2 movements match {'movementType': 'RECEIPT', 'kernelPhysicalDelta': 8}: the write ran twice"
+    ], violations
 
 
 def test_an_expected_movement_the_trail_does_not_hold_is_named() -> None:
@@ -472,7 +482,13 @@ def test_a_leftover_movement_naming_no_actor_or_no_reason_is_a_trail_gap() -> No
     """SS-SM-03 step 7 and step 8: history identifies who acted and why."""
     trail = [
         _movement(),
-        _movement(movementId="Movement#2", movementType="STOCK_ADJUSTMENT", kernelPhysicalDelta=1, actorAccountId=None, reason="x"),
+        _movement(
+            movementId="Movement#2",
+            movementType="STOCK_ADJUSTMENT",
+            kernelPhysicalDelta=1,
+            actorAccountId=None,
+            reason="x",
+        ),
         _movement(movementId="Movement#3", movementType="STOCK_ADJUSTMENT", kernelPhysicalDelta=1, reason=None),
     ]
     violations = stage2.movement_trail_violations(trail, [{"movementType": "RECEIPT", "kernelPhysicalDelta": 8}])
@@ -657,7 +673,9 @@ def test_a_failed_cleanup_step_fails_the_run() -> None:
     The lane calls :func:`~tests.e2e.utils.show_sell_stage2_support.assert_cleanup_clean` after it
     writes its evidence, so a failed teardown leaves both a record and a red run.
     """
-    rows = [stage2.cleanup_row("§2.8.7 teardown / AUTH-P", "revokeShare refused: Forbidden", result=stage2.CLEANUP_FAILED)]
+    rows = [
+        stage2.cleanup_row("§2.8.7 teardown / AUTH-P", "revokeShare refused: Forbidden", result=stage2.CLEANUP_FAILED)
+    ]
 
     with pytest.raises(stage2.StageTwoCleanupError) as caught:
         stage2.assert_cleanup_clean(rows)
@@ -797,6 +815,134 @@ def test_the_lane_sweeps_tables_through_the_fixture_script_and_never_through_aws
     assert "--lane" in support, "each sweep is narrowed by the lane's own tokens"
 
 
+def test_the_lane_names_its_rows_by_kind_never_by_free_text() -> None:
+    """A destructive sweep runs with ``--yes`` already given, so free text is not a scoping mechanism.
+
+    ``scripts/qa_fixture.py sweep`` refuses a token that does not name its kind, and the refusal is
+    worthless if the caller that builds the tokens hands over a bare ``DATA_ID``.  So the lane's token
+    builder is pinned to the kinds its rows are actually keyed on, which is also the list that closes
+    the attribution gap: a balance or custody row names a Unit Campaign and a product, a join-code
+    pointer names a campaign id and a code, and a roster or guard row names a profile.
+    """
+    builder = next(
+        node
+        for node in ast.walk(_spec_tree())
+        if isinstance(node, ast.FunctionDef) and node.name == "_lane_sweep_tokens"
+    )
+    kinds = {
+        node.value
+        for node in ast.walk(builder)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in stage2.LANE_TOKEN_KINDS
+    }
+
+    assert "data-id" in kinds, "the run's own DATA_ID is a kind, not a bare string"
+    assert kinds >= set(stage2.LANE_TOKEN_KINDS), f"the lane stops naming part of what it wrote: {sorted(kinds)}"
+    for call in ast.walk(builder):
+        if isinstance(call, ast.Call) and getattr(call.func, "attr", "") == "append":
+            first = call.args[0] if call.args else None
+            assert isinstance(first, ast.JoinedStr), "every token is kind=value"
+
+
+def test_the_lane_deactivates_only_the_campaigns_it_created() -> None:
+    """A Unit this run reused can carry another run's Campaigns, and they are not this run's to switch off.
+
+    Lane construction reuses a Unit that already answers this run's tenant key (``unitCreation`` says
+    which happened), so the Unit's campaign list is not the same set as the campaigns this run created.
+    The teardown therefore names its own campaign ids — the one it built plus the move leg's
+    destination — and reports what it left alone.
+    """
+    teardown = next(
+        node for node in ast.walk(_spec_tree()) if isinstance(node, ast.FunctionDef) and node.name == "_teardown_lane"
+    )
+    deactivate = next(
+        node
+        for node in ast.walk(teardown)
+        if isinstance(node, ast.FunctionDef) and node.name == "deactivate_lane_campaigns"
+    )
+
+    created_binding = next(
+        node
+        for node in ast.walk(deactivate)
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "created"
+    )
+    assert "extraCampaignIds" in ast.unparse(created_binding), (
+        "the move leg's destination Campaign is part of what this run created"
+    )
+    guards = [ast.unparse(node.test) for node in ast.walk(deactivate) if isinstance(node, ast.If)]
+    assert any("created" in test for test in guards), (
+        f"deactivateUnitCampaign runs without a lane-created check: {guards}"
+    )
+    writes = [
+        node
+        for node in ast.walk(deactivate)
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "deactivate_unit_campaign_input"
+    ]
+    assert writes, "the teardown still deactivates the lane's Unit Campaigns"
+    assert "not_ours" in ast.unparse(deactivate), "what it left alone has to be in the record, not inferred"
+
+
+def test_every_field_the_canary_snapshot_reads_is_one_its_query_selects() -> None:
+    """A field the document never asks for reads as missing, and ``or 0`` turns that into a number.
+
+    The first version of the canary snapshot summed ``totalQuantity``: the shipped ``Order`` type has no
+    such field, so the sum was always 0 and the attached record said "0 units ordered" about a canary
+    that had a sale.  The snapshot now walks the line quantities the selection carries, and refuses an
+    Order that answers none.  The Unit Campaign's ``isActive`` is part of the snapshot for the same
+    reason — the teardown's last GraphQL step is a deactivation, and a canary that was switched off
+    would otherwise still answer identical balances.
+    """
+    document = stage2.STAGE_TWO_DOCUMENTS["unitScoutCampaignOrders"]
+    snapshot = next(
+        node for node in ast.walk(_spec_tree()) if isinstance(node, ast.FunctionDef) and node.name == "_lane_snapshot"
+    )
+
+    def selected(field: str) -> bool:
+        return any(line.strip().rstrip("{").strip() == field for line in document.splitlines())
+
+    def keys_read_from(loop: ast.For) -> set[str]:
+        name = getattr(loop.target, "id", "")
+        reads: set[str] = set()
+        for node in ast.walk(loop):
+            if (
+                isinstance(node, ast.Subscript)
+                and getattr(node.value, "id", "") == name
+                and isinstance(node.slice, ast.Constant)
+            ):
+                reads.add(str(node.slice.value))
+            if (
+                isinstance(node, ast.Call)
+                and getattr(node.func, "attr", "") == "get"
+                and getattr(node.func.value, "id", "") == name
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+            ):
+                reads.add(str(node.args[0].value))
+        return reads
+
+    order_loops = [
+        node
+        for node in ast.walk(snapshot)
+        if isinstance(node, ast.For) and "orders" in ast.unparse(node.iter) and getattr(node.target, "id", "") == "row"
+    ]
+    assert order_loops, "the snapshot walks the Orders the read answered"
+    reads = set().union(*(keys_read_from(loop) for loop in order_loops))
+    assert {"orderId", "lineItems"} <= reads
+    for field in reads:
+        assert selected(field), f"unitScoutCampaignOrders does not select {field!r}"
+    line_loops = [
+        node for node in ast.walk(snapshot) if isinstance(node, ast.For) and getattr(node.iter, "id", "") == "lines"
+    ]
+    assert line_loops, "the snapshot sums line quantities, not an Order-level total"
+    assert any(
+        isinstance(node, ast.Assign) and "lineItems" in ast.unparse(node.value) for node in ast.walk(snapshot)
+    ), "the lines being summed come from the selection's lineItems"
+    for loop in line_loops:
+        for field in keys_read_from(loop):
+            assert selected(field), f"the lineItems selection does not carry {field!r}"
+    assert "unitCampaignActive" in ast.unparse(snapshot)
+    assert "totalQuantity" not in _sdl() and "totalQuantity" not in _spec_source()
+
+
 def test_the_sweeper_is_wired_into_the_runbook_the_lane_is_run_from() -> None:
     """A cleanup path nobody can run is a cleanup path nobody runs."""
     runbook = (REPO_ROOT / "tests" / "e2e" / "README.md").read_text(encoding="utf-8")
@@ -814,9 +960,7 @@ def test_every_stage_two_screenshot_masks_the_join_code() -> None:
             f"page.screenshot at line {call.lineno} has no mask"
         )
     signature = next(
-        node
-        for node in ast.walk(_spec_tree())
-        if isinstance(node, ast.FunctionDef) and node.name == "_screenshot"
+        node for node in ast.walk(_spec_tree()) if isinstance(node, ast.FunctionDef) and node.name == "_screenshot"
     )
     assert not signature.args.kw_defaults or all(default is None for default in signature.args.kw_defaults), (
         "_screenshot's masks argument gained a default, which is how a mask gets dropped silently"
