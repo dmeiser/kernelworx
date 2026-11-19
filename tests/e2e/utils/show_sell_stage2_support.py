@@ -24,8 +24,12 @@ Two rules the whole module follows:
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 __all__ = [
@@ -35,15 +39,29 @@ __all__ = [
     "STAGE_TWO_SUPPORT_DOCUMENTS",
     "STAGE_TWO_WRITES",
     "adjust_input",
+    "assert_cleanup_clean",
+    "assert_cleanup_clean",
     "council_need_positions",
     "council_on_order_input",
     "custody_by_product",
+    "fixture_sweep",
+    "run_cleanup_step",
+    "CLEANUP_BLOCKED",
+    "CLEANUP_FAILED",
+    "CLEANUP_OBSERVED",
+    "STRICT_CLEANUP",
+    "cleanup_blocked",
+    "cleanup_failures",
+    "cleanup_problems",
+    "CleanupBlocked",
+    "cleanup_row",
     "custody_sale_input",
     "fulfill_input",
     "issue_input",
     "missing_stage_two_endpoints",
     "movement_trail_violations",
     "position_arithmetic_violations",
+    "StageTwoCleanupError",
     "receipt_input",
     "remove_membership_input",
     "return_input",
@@ -309,6 +327,152 @@ def deactivate_unit_campaign_input(unit_campaign_id: str, version: int, *, idemp
         "version": {"expectedVersion": version},
         "idempotency": _idempotency(idempotency_key),
     }
+
+
+# ---------------------------------------------------------------------------
+# Cleanup: what counts as a cleanup failure, and the fixture sweep that finishes the job
+# ---------------------------------------------------------------------------
+
+
+#: Set ``SS_STRICT_CLEANUP=1`` to make an environment-blocked cleanup step fail the run as well.
+#: That is the state the gate reaches when the Stage 2 table grant lands for
+#: ``kernelworx-qa-ue1-dev``; until then the blocked rows are reported, not passed over.
+STRICT_CLEANUP = os.environ.get("SS_STRICT_CLEANUP", "").strip() not in ("", "0", "false", "no")
+
+CLEANUP_OBSERVED = "observed"
+CLEANUP_BLOCKED = "blocked"
+CLEANUP_FAILED = "failed"
+
+#: The one sanctioned path to a fixture row on the deployed stack.  Project memory (AGENTS.md,
+#: "Show & Sell QA login fixture on the dev pool") is explicit that the acceptance harness holds no
+#: AWS credentials and never provisions or repairs an identity, so the live lane holds no AWS SDK
+#: client of its own: it runs this script and reads its report.  The script owns the attribution rule (a row is
+#: fixture-owned only when its own key or owner attribute spells a fixture ``sub`` or fixture
+#: address), and ``sweep`` narrows that rule by a lane token so one run can never take another
+#: lane's rows.
+QA_FIXTURE_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "qa_fixture.py"
+
+
+class StageTwoCleanupError(AssertionError):
+    """A §2.8.7 cleanup step did not do what its own read-back says it did.
+
+    It subclasses ``AssertionError`` on purpose: a cleanup failure is a failed acceptance claim, and
+    pytest has to report it as a failure rather than a pass with a note in the record.
+    """
+
+
+def cleanup_row(acceptance: str, summary: str, result: str = CLEANUP_OBSERVED) -> dict[str, str]:
+    """One cleanup observation: what was attempted, what happened, and whether it counts."""
+    assert result in (CLEANUP_OBSERVED, CLEANUP_BLOCKED, CLEANUP_FAILED), f"unknown cleanup result {result!r}"
+    return {"acceptance": acceptance, "result": result, "summary": summary}
+
+
+def cleanup_failures(rows: Iterable[Mapping[str, str]]) -> list[str]:
+    """The cleanup rows that mean the lane did not finish the job: refusals and unmet read-backs.
+
+    These are the lane's own failures, and they always cost the run.  A row whose result string is
+    missing counts here too — a teardown step that reports nothing is not evidence that it removed
+    something.
+    """
+    return [f"{row.get('acceptance', '?')}: {row.get('summary', '')}" for row in rows if row.get("result") == CLEANUP_FAILED]
+
+
+def cleanup_problems(rows: Iterable[Mapping[str, str]]) -> list[str]:
+    """Every cleanup row that is not a completed, read-back-verified removal.
+
+    Anything not marked ``observed`` is a problem: a refused mutation, an unmet read-back, or a step
+    the environment made impossible (``blocked``).  A teardown step that reports nothing at all is a
+    problem too — silence is not evidence that something was removed.
+    """
+    return [
+        f"{row.get('acceptance', '?')}: {row.get('summary', '')}"
+        for row in rows
+        if row.get("result") != CLEANUP_OBSERVED
+    ]
+
+
+def cleanup_blocked(rows: Iterable[Mapping[str, str]]) -> list[str]:
+    """The cleanup rows the environment made impossible, each carrying the error that says why.
+
+    Reported apart because it is an owner or infrastructure decision rather than a lane defect —
+    ``dynamodb:Scan`` on the Stage 2 inventory table is denied to the QA identity, for instance.
+    Still counted by :func:`cleanup_problems`, so it never passes for a removal.
+    """
+    return [f"{row.get('acceptance', '?')}: {row.get('summary', '')}" for row in rows if row.get("result") == CLEANUP_BLOCKED]
+
+
+class CleanupBlocked(RuntimeError):
+    """A cleanup step the environment made impossible rather than refused.
+
+    Raised by a step that cannot run at all — a table the fixture identity is denied ``Scan`` on,
+    for example — so the verdict says "not met, and here is the error" instead of either passing for
+    a removal or failing the lane for something its own code did wrong.
+    """
+
+
+def run_cleanup_step(acceptance: str, action: Callable[[], str]) -> dict[str, str]:
+    """Run one cleanup step and turn every refusal or unmet read-back into a verdict.
+
+    This is the whole reason a teardown can be trusted.  A step that raises — a mutation the server
+    refused, a read-back that still answers the row it was supposed to remove, a canary the sweep
+    disturbed — comes back as ``failed``; a step the environment made impossible comes back as
+    ``blocked``.  Neither is an ordinary observation, and :func:`assert_cleanup_clean` turns either
+    into a failed run once the evidence is on disk.
+    """
+    try:
+        return cleanup_row(acceptance, action())
+    except CleanupBlocked as exc:
+        return cleanup_row(acceptance, f"{type(exc).__name__}: {exc}", result=CLEANUP_BLOCKED)
+    except Exception as exc:  # noqa: BLE001 - a failed cleanup step is a verdict, never a crash mid-teardown
+        return cleanup_row(acceptance, f"{type(exc).__name__}: {exc}", result=CLEANUP_FAILED)
+
+
+def assert_cleanup_clean(rows: Iterable[Mapping[str, str]], *, strict: bool | None = None) -> None:
+    """Fail the run when a cleanup step failed, and when ``strict`` also when one was blocked.
+
+    The lane writes its evidence before it calls this, so the record of a failed teardown exists and
+    the run still turns red.  Before this shape a refused ``deleteOrder`` or a disturbed canary was
+    filed as an observation and pytest exited 0, which is how a mandatory cleanup gate stops
+    meaning anything.
+
+    ``failed`` is always fatal: it is the lane's own work not done.  ``blocked`` is fatal only under
+    ``SS_STRICT_CLEANUP=1``: it means the environment refused the step — ``dynamodb:Scan`` denied on a
+    Stage 2 table, for instance — which the lane cannot fix by writing different code.  Either way the
+    row is in the record, so a cleanup the run did not achieve is never presented as one it achieved.
+    """
+    if strict is None:
+        strict = STRICT_CLEANUP
+    failures = cleanup_failures(rows)
+    blocked = cleanup_blocked(rows) if strict else []
+    problems = failures + blocked
+    if problems:
+        raise StageTwoCleanupError(f"{len(problems)} §2.8.7 cleanup step(s) not met: " + "; ".join(problems))
+
+
+def fixture_sweep(tokens: Sequence[str]) -> tuple[int, list[str], list[str]]:
+    """Run the sanctioned fixture sweeper over these lane tokens and split its report.
+
+    The lane names the rows only it created: its ``DATA_ID`` (carried in the Unit display name and in
+    every Unit Campaign name it made) and the Unit and Unit Campaign ids it was answered.  The
+    sweeper then decides whether a matching row is also fixture-attributed, and deletes only the rows
+    that pass both tests.  Nothing here removes a row directly: the attribution rule, the plan, the
+    per-table failure reporting and the re-scan read-back all live in ``scripts/qa_fixture.py``.
+
+    Returns:
+        ``(exit code, blocked lines, report lines)``.  Exit code 0 means every selected row was
+        deleted and the re-scan found none of them left.  A ``BLOCKED`` line names a table the
+        fixture identity cannot read — measured on dev on 2026-11-19, ``kernelworx-inventory-ue1-dev``,
+        ``kernelworx-orders-ue1-dev`` and ``kernelworx-order-fulfillments-ue1-dev`` all deny
+        ``dynamodb:Scan`` to ``kernelworx-qa-ue1-dev`` — which is an owner or infrastructure
+        decision, not something the lane can code around.
+    """
+    argv = [sys.executable, str(QA_FIXTURE_SCRIPT), "sweep", "--yes"]
+    for token in tokens:
+        argv += ["--lane", token]
+    done = subprocess.run(argv, capture_output=True, text=True, check=False)
+    lines = [line.strip() for line in (done.stdout + done.stderr).splitlines() if line.strip()]
+    blocked = [line for line in lines if line.startswith("BLOCKED")]
+    return done.returncode, blocked, lines
 
 
 # ---------------------------------------------------------------------------

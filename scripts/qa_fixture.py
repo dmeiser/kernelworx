@@ -5,6 +5,8 @@
     uv run python scripts/qa_fixture.py up            # create/refresh the four identities
     uv run python scripts/qa_fixture.py down          # delete them and sweep their rows
     uv run python scripts/qa_fixture.py down --yes    # ...without the confirmation prompt
+    uv run python scripts/qa_fixture.py sweep \
+        --lane stage2-1118107 --lane UNIT#<id> --yes  # one acceptance lane's rows, users kept
 
 Why this exists
 ---------------
@@ -44,6 +46,22 @@ application row by ``Username``, or that assumes the stored ``Username`` is an
 address, silently matches nothing. Join on ``sub`` or ``email``;
 :func:`pool_users` keys by address for exactly this reason.
 
+``sweep`` is the same rule narrowed to one acceptance lane. An acceptance run
+creates rows the product cannot delete — the SDL carries no ``deleteUnit`` and
+no ``deleteUnitCampaign`` — and those rows outlive every GraphQL teardown the
+run performs. ``sweep`` deletes a row only when BOTH hold: the row passes the
+attribution rule above (so it belongs to a fixture identity and not to a third
+party sharing a partition), AND it names one of the lane tokens the caller
+supplies (the run's ``DATA_ID``, which is in the Unit display name and every
+Unit Campaign name it made, plus the Unit and Unit Campaign ids that run was
+answered). A run therefore cannot take another run's rows, and a token naming
+nothing deletes nothing. It never touches the identities, because the next run
+needs them. Tables the IAM identity cannot read are reported as ``BLOCKED``
+with the error, not treated as empty: on dev on 2026-11-19
+``kernelworx-qa-ue1-dev`` is denied ``dynamodb:Scan`` on the Stage 2 inventory,
+orders and order-fulfillment tables, so those rows are a named finding until a
+grant lands. See ``docs/QA_FIXTURE_RUNBOOK.md``.
+
 Teardown is deliberate: ``down`` prints its full plan first, asks before it
 writes, deletes the rows before the identities, and deletes nothing it cannot
 attribute to a fixture ``sub``. The plan names the evidence for every row — the
@@ -60,6 +78,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import secrets
 import string
 import sys
@@ -94,6 +113,21 @@ TABLES: dict[str, tuple[str, tuple[str, ...], str]] = {
     "units": ("kernelworx-units-ue1-dev", ("pk", "sk"), "createdByAccountId"),
     "unit-campaigns": ("kernelworx-unit-campaigns-ue1-dev", ("pk", "sk"), "createdByAccountId"),
 }
+
+# Tables an acceptance lane writes that ``down`` does not reach by identity alone:
+# the rows are keyed on resource ids (``INV#<unitCampaignId>``, ``CAMPAIGN#…/ORDER#…``)
+# rather than on a fixture ``sub``, so ``sweep`` narrows them by lane token as well.
+# Key shapes and owner attributes come from ``tofu/application/modules/dynamodb/main.tf``,
+# ``src/utils/inventory_models.py`` (``actorAccountId`` on a movement row) and
+# ``src/utils/order_fulfillment_models.py``.
+LANE_TABLES: dict[str, tuple[str, tuple[str, ...], str]] = {
+    "inventory": ("kernelworx-inventory-ue1-dev", ("pk", "sk"), "actorAccountId"),
+    "orders": ("kernelworx-orders-ue1-dev", ("campaignId", "orderId"), "createdByAccountId"),
+    "order-fulfillments": ("kernelworx-order-fulfillments-ue1-dev", ("pk", "sk"), "createdByAccountId"),
+}
+
+# Everything a lane sweep may consider, in one place.
+SWEEP_TABLES: dict[str, tuple[str, tuple[str, ...], str]] = {**TABLES, **LANE_TABLES}
 
 # Rows the pool should never accumulate: per-run sign-ups that were created and
 # then abandoned without ever being confirmed. ``status`` counts them so a new
@@ -312,6 +346,65 @@ def _owner_ids(value: str) -> set[str]:
     return embedded | set(parts)
 
 
+def _attribution(
+    item: dict[str, Any], key_names: tuple[str, ...], owner_attr: str, wanted: set[str], mails: set[str]
+) -> tuple[dict[str, str], str] | None:
+    """Why this row belongs to a fixture identity, or ``None`` if nothing says so.
+
+    One rule, used by ``down`` and by ``sweep`` alike: a key part that is a fixture address, a key
+    part that is a fixture ``sub``, or the table's owner attribute naming one. Sharing a partition
+    key with a fixture row is not attribution.
+    """
+    flat = _flatten(item)
+    # These tables key on strings, and every owner attribute this script reads is a string; a bool
+    # (``isActive``) or a number is not something to search, so it is skipped rather than matched.
+    key_vals = {k: str(flat.get(k, "")) for k in key_names}
+    parts = {p for v in key_vals.values() for p in _segments(v)}
+    owner_value = flat.get(owner_attr, "")
+    owners = _owner_ids(owner_value) if isinstance(owner_value, str) else set()
+    if parts & mails:
+        return key_vals, "key names a fixture address"
+    if parts & wanted:
+        return key_vals, "key names a fixture sub"
+    if owners & wanted:
+        return key_vals, f"{owner_attr} names a fixture sub"
+    return None
+
+
+def _mask_lane_evidence(match: str) -> str:
+    """Keep a lane-match reason short enough to read, and never carry a payload with it.
+
+    An idempotency marker's ``resultPayload`` is the whole response the write answered, join code and
+    all. The row is identified by its key in the same line, so echoing the payload buys nothing and
+    would put a live join code in a report a person pastes into an issue.
+    """
+    name, _, value = match.partition("=")
+    if len(value) > 40:
+        return f"{name} (value not echoed)"
+    return f"{name}={re.sub(r'[A-Z0-9]{16}', '*' * 16, value)}"
+
+
+def _names_lane(item: dict[str, Any], tokens: tuple[str, ...]) -> str | None:
+    """The lane token this row names, or ``None`` when it names none of them.
+
+    Matched against every scalar attribute, not just the key: a Unit row spells its lane in
+    ``displayName`` and its Unit Campaign rows in ``campaignName``, and an inventory row spells the
+    lane's Unit Campaign id in ``pk``. A token is a whole attribute value or a substring of one —
+    the tokens are chosen by the run to be unique to it (a timestamped ``DATA_ID``, a fresh uuid).
+    """
+    if not tokens:
+        return None
+    for name, value in _flatten(item).items():
+        # ``_flatten`` hands back whatever a scalar attribute holds, and ``isActive`` holds a bool:
+        # ``token in True`` is a TypeError, which would read as a denied table.
+        if not isinstance(value, str):
+            continue
+        for token in tokens:
+            if token in value:
+                return f"{name}={value}"
+    return None
+
+
 def owned_rows(
     d: Any, subs: Iterable[str]
 ) -> tuple[list[tuple[str, str, dict[str, str], str]], list[tuple[str, str]]]:
@@ -344,18 +437,12 @@ def owned_rows(
         while True:
             page = d.scan(**scan_kw)
             for item in page.get("Items", []):
-                flat = _flatten(item)
-                key_vals = {k: flat.get(k, "") for k in key_names}
-                parts = {p for v in key_vals.values() for p in _segments(v)}
-                owners = _owner_ids(flat.get(owner_attr, ""))
-                if parts & mails:
-                    rows.append((key_vals, "key names a fixture address"))
-                elif parts & wanted:
-                    rows.append((key_vals, "key names a fixture sub"))
-                elif owners & wanted:
-                    rows.append((key_vals, f"{owner_attr} names a fixture sub"))
+                found = _attribution(item, key_names, owner_attr, wanted, mails)
+                if found is None:
+                    flat = _flatten(item)
+                    skipped.append((label, "/".join(flat.get(k, "") for k in key_names)))
                 else:
-                    skipped.append((label, "/".join(key_vals.values())))
+                    rows.append(found)
             if "LastEvaluatedKey" not in page:
                 break
             scan_kw["ExclusiveStartKey"] = page["LastEvaluatedKey"]
@@ -464,15 +551,136 @@ def apply_down(
     return 0
 
 
+def sweep_lane_rows(
+    d: Any, subs: Iterable[str], tokens: tuple[str, ...], out: TextIO
+) -> int:
+    """Delete one acceptance lane's fixture-owned rows, then prove they went. Non-zero if not.
+
+    Two conditions per row, and both are the point: the row must pass the attribution rule (it
+    belongs to a fixture identity, never to a third party on the same partition), and it must name
+    one of the caller's lane tokens (so this lane cannot reach another lane's rows). A table the
+    identity cannot read is printed as ``BLOCKED`` with the error — a denied scan is a finding, not
+    an empty table — and leaves the exit code non-zero. The identities are never touched: a lane
+    sweep runs with its users still in place, and the next run needs them.
+    """
+    wanted = {s for s in subs if s}
+    mails = set(emails().values())
+    if not wanted:
+        print("sweep: no fixture subs to attribute rows to; nothing deleted", file=out)
+        return 1
+    if not tokens:
+        print(
+            "sweep: refusing to run without a --lane token; an unbounded sweep would reach "
+            "another run's rows",
+            file=out,
+        )
+        return 1
+
+    plan: list[tuple[str, str, dict[str, str], str]] = []
+    left_behind: list[str] = []
+    blocked: list[str] = []
+    for label, (table, key_names, owner_attr) in SWEEP_TABLES.items():
+        try:
+            found = _scan_lane_rows(d, table, key_names, owner_attr, wanted, mails, tokens)
+        except Exception as exc:  # noqa: BLE001 - a denied scan is reported, never treated as empty
+            blocked.append(f"BLOCKED {table}: {type(exc).__name__}: {exc}")
+            continue
+        for key_vals, why, lane_match in found:
+            plan.append((label, "/".join(key_vals.get(k, "") for k in key_names), dict(key_vals), f"{why}; {lane_match}"))
+
+    print(f"plan: sweep {len(tokens)} lane token(s) over {len(SWEEP_TABLES)} table(s)", file=out)
+    for line in blocked:
+        print(f"  {line}", file=out)
+    for label, key, _key_doc, reason in plan:
+        print(f"  row    {label:<18} {key}  [{reason}]", file=out)
+    if not plan:
+        print("  row    (no fixture-owned row names any of these lane tokens)", file=out)
+
+    failures = 0
+    for label, key, key_doc, _reason in plan:
+        table = SWEEP_TABLES[label][0]
+        try:
+            d.delete_item(TableName=table, Key={k: {"S": v} for k, v in key_doc.items()})
+            print(f"  deleted row  {label:<18} {key}", file=out)
+        except Exception as exc:  # noqa: BLE001 - report each row, keep sweeping the rest
+            failures += 1
+            print(f"  FAILED row   {label:<18} {key}  {type(exc).__name__}", file=out)
+
+    # Read-back: a delete_item that returned without error is not evidence on its own.
+    for label, (table, key_names, owner_attr) in SWEEP_TABLES.items():
+        if any(line.startswith(f"BLOCKED {table}") for line in blocked):
+            continue
+        try:
+            still = _scan_lane_rows(d, table, key_names, owner_attr, wanted, mails, tokens)
+        except Exception as exc:  # noqa: BLE001 - the read-back failed, which is a finding too
+            failures += 1
+            print(f"  FAILED scan  {table}  {type(exc).__name__}", file=out)
+            continue
+        for key_vals, _why, _lane_match in still:
+            failures += 1
+            left_behind.append(f"{table}/{key_vals.get(key_names[0], '')}")
+    if left_behind:
+        for item in left_behind:
+            print(f"  LEFT   {item}", file=out)
+    if blocked:
+        print(
+            f"  {len(blocked)} table(s) could not be read by this identity: their lane rows are "
+            "neither removed nor proven absent",
+            file=out,
+        )
+    if failures or blocked:
+        return 1
+    print(f"  swept {len(plan)} row(s); a re-scan finds no fixture row naming these tokens", file=out)
+    return 0
+
+
+def _scan_lane_rows(
+    d: Any,
+    table: str,
+    key_names: tuple[str, ...],
+    owner_attr: str,
+    wanted: set[str],
+    mails: set[str],
+    tokens: tuple[str, ...],
+) -> list[tuple[dict[str, str], str, str]]:
+    """Every row in one table that is BOTH fixture-owned and named by a lane token."""
+    hits: list[tuple[dict[str, str], str, str]] = []
+    scan_kw: dict[str, Any] = {"TableName": table, "ConsistentRead": False}
+    while True:
+        page = d.scan(**scan_kw)
+        for item in page.get("Items", []):
+            found = _attribution(item, key_names, owner_attr, wanted, mails)
+            if found is None:
+                continue
+            lane_match = _names_lane(item, tokens)
+            if lane_match is None:
+                continue
+            hits.append((found[0], found[1], f"lane token in {_mask_lane_evidence(lane_match)}"))
+        if "LastEvaluatedKey" not in page:
+            return hits
+        scan_kw["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+
 def main(argv: list[str], out: TextIO = sys.stdout) -> int:
     action = argv[1] if len(argv) > 1 else "status"
-    if action not in {"status", "up", "down"}:
+    if action not in {"status", "up", "down", "sweep"}:
         print(__doc__, file=out)
         return 2
     cognito = cip()
     if action == "status":
         render_status(cognito, out)
         return 0
+    if action == "sweep":
+        tokens = tuple(v for i, v in enumerate(argv) if i > 1 and argv[i - 1] == "--lane" and v)
+        if not tokens:
+            print("sweep: pass at least one --lane <DATA_ID-or-resource-id>", file=out)
+            return 2
+        if "--yes" not in argv:
+            print("sweep: refusing to delete without --yes (this sweep is not interactive)", file=out)
+            return 2
+        have = pool_users(cognito)
+        subs = {s for s in (_attrs(have[m]).get("sub") for m in emails().values() if m in have) if s}
+        return sweep_lane_rows(ddb(), subs, tokens, out)
     if action == "up":
         values = apply_up(cognito, out)
         sign_in_proof(cognito, values, out)

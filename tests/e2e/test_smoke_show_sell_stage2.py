@@ -113,8 +113,8 @@ COUNCIL_FILL = 1
 STOCK_FILL = 2
 
 #: Stock the lane puts on the *other* Unit Campaign before it moves the Scout there, and never
-#: touches again: the canary the teardown has to leave standing.
-CANARY_QTY = 3
+#: touches again: the destination's own balance, which the move must leave alone.
+SECOND_CAMPAIGN_QTY = 3
 
 SCOUT_NAME_TEMPLATE = "Avery Stage2 {data_id}"
 CAMPAIGN_TEMPLATE = "Stage 2 Stock {data_id}"
@@ -132,6 +132,11 @@ def _data_id() -> str:
     if pinned:
         return pinned
     return f"stage2-{datetime.datetime.now(datetime.timezone.utc).strftime('%m%d%H%M%S')}"
+
+
+def _data_digits(data_id: str) -> str:
+    """The digits of a ``DATA_ID``, which is how a sibling lane gets an id that is not a substring of this one."""
+    return "".join(character for character in data_id if character.isdigit()) or "900001"
 
 
 def _unit_number(data_id: str) -> str:
@@ -619,49 +624,97 @@ def _sale_line(sale: dict[str, Any], product_id: str, ordered: int) -> tuple[str
     return order_id, line_item_id
 
 
-def _teardown_lane(lane_key: str, built: dict[str, Any], identities: dict[str, dict[str, str]]) -> list[tuple[str, str]]:
-    """Take back every record this lane created that the product lets a caller take back.
+def _lane_table_sweep(label: str, tokens: list[str]) -> list[dict[str, str]]:
+    """Remove one lane's rows through the sanctioned fixture sweeper, and record what it reported.
+
+    The product gives a caller nothing here: the SDL carries no ``deleteUnit`` and no
+    ``deleteUnitCampaign``, so the Unit and its Unit Campaign rows outlive every GraphQL teardown.
+    ``scripts/qa_fixture.py sweep`` is the sanctioned path for exactly those rows.  The lane holds no
+    AWS client of its own — project memory (AGENTS.md, "Show & Sell QA login fixture on the dev pool")
+    says the acceptance harness has no AWS credentials, and a second path to a fixture row is a path
+    that drifts.  So the lane names the rows only it created (its ``DATA_ID``, which the Unit display name
+    and every Unit Campaign name carry, plus the Unit and Unit Campaign ids it was answered) and the
+    sweeper decides whether each matching row is also fixture-attributed, then re-scans to prove the
+    delete landed.
+
+    A table the fixture identity cannot read is a ``blocked`` row carrying the sweeper's own
+    ``BLOCKED <table>: <error>`` line: on dev the QA identity is denied ``dynamodb:Scan`` on the Stage
+    2 inventory, orders and order-fulfillment tables, so those rows are neither removed nor proven
+    absent.  That is reported as a gate that is *not met* rather than as a cleanup that succeeded.
+    """
+    argv_tail = " ".join(tokens)
+    code, blocked, lines = stage2.fixture_sweep(tokens)
+    deleted = sum(1 for line in lines if line.startswith("deleted row"))
+    left = [line for line in lines if line.startswith("LEFT")]
+    failed_rows = [line for line in lines if line.startswith("FAILED")]
+    counts = f"{deleted} row(s) deleted, {len(left)} left, {len(failed_rows)} delete(s) failed, {len(blocked)} table(s) unreadable"
+    if code == 0 and not blocked:
+        return [
+            stage2.cleanup_row(
+                f"§2.8.7 fixture sweep / {label}",
+                f"scripts/qa_fixture.py sweep --lane {argv_tail} exited 0: {counts}; the re-scan finds no "
+                "fixture row naming this lane (its report lines are not echoed here: an idempotency "
+                "marker's key carries a join code, and the sweeper masks payloads for the same reason)",
+            )
+        ]
+    detail = "; ".join([*(line[:160] for line in (left + failed_rows)[:4]), *(line[:200] for line in blocked)])
+    return [
+        stage2.cleanup_row(
+            f"§2.8.7 fixture sweep / {label}",
+            f"scripts/qa_fixture.py sweep --lane {argv_tail} exited {code}: {counts}" + (f" — {detail}" if detail else ""),
+            result=stage2.CLEANUP_BLOCKED if blocked else stage2.CLEANUP_FAILED,
+        )
+    ]
+
+
+def _teardown_lane(lane_key: str, built: dict[str, Any], identities: dict[str, dict[str, str]]) -> list[dict[str, str]]:
+    """Take back every record this lane created, and return one row per step with its verdict.
 
     This runs in the journey's ``finally``: the run that stopped halfway is the one that most needs
     its rows gone, and a lane that only cleans up on the happy path is a lane that litters the
     deployed stack whenever it fails.  Every removal is read back through the same endpoint the
     acceptance assertions use, because a mutation that answered ``true`` is not evidence that a row
-    is gone.  Each step is independent — one refusal gets recorded and the rest still run.
+    is gone.  Each step is independent — one refusal does not stop the rest — but a refusal is
+    recorded as ``failed``, and :func:`tests.e2e.utils.show_sell_stage2_support.assert_cleanup_clean`
+    turns any such row into a failed run once the evidence is on disk.  A cleanup gate that can be
+    satisfied by writing down a refusal is not a gate.
 
-    What gets removed is exactly what the shipped schema allows: the Orders (whose delete takes the
-    Order's whole fulfillment partition with it, ``src/handlers/campaign_operations.py``), the Scout
-    Campaign and the seller profile, which cascade their Orders, the roster membership, the READ
-    share the lane granted, and every balance the lane put on its Unit Campaign — zeroed, because
-    ``inventoryMovements`` is append-only and the only correction the inventory model allows is the
-    compensating row.
-
-    What cannot be removed is the Unit and its Unit Campaigns: the SDL carries no ``deleteUnit`` and
-    no ``deleteUnitCampaign``, so no caller — not an admin, not the creator — has a path to those
-    rows.  The lane deactivates its own Unit Campaign, which is what takes it out of every picker,
-    and records the rest as left on the stack rather than claiming a teardown it cannot perform.
+    What the product path removes: the Orders (whose delete takes the Order's whole fulfillment
+    partition with it, ``src/handlers/campaign_operations.py``), the Scout Campaign and the seller
+    profile, which cascade their Orders, the roster membership, the READ share the lane granted, and
+    every balance the lane put on its Unit Campaign — zeroed, because ``inventoryMovements`` is
+    append-only and the only correction the inventory model allows is the compensating row.  What it
+    cannot remove — the Unit, the Unit Campaign rows, and the Stage 2 inventory partitions including
+    the history — is the fixture sweep's job (``_lane_table_sweep``), and that sweep reports which
+    tables it could actually read.
     """
     unit_campaign_id = str(built.get("unitCampaignId") or "")
     if not unit_campaign_id:
-        return [("§2.8.7 teardown", "nothing to take back: the lane never reached a Unit Campaign")]
+        return [
+            stage2.cleanup_row(
+                "§2.8.7 teardown",
+                "nothing to take back: the lane never reached a Unit Campaign",
+                result=stage2.CLEANUP_FAILED,
+            )
+        ]
 
     admin_token = _token_for(identities["admin"])
     scout_token = _token_for(identities["scout"])
     scout_profile_id = str(built.get("scoutProfileId") or "")
     scout_campaign_id = str(built.get("scoutCampaignId") or "")
     documents = stage2.STAGE_TWO_SUPPORT_DOCUMENTS
-    observations: list[tuple[str, str]] = []
+    rows: list[dict[str, str]] = []
 
     def step(acceptance: str, action: Callable[[], str]) -> None:
-        """Run one teardown step, recording a refusal instead of letting it end the teardown."""
-        try:
-            observations.append((acceptance, action()))
-        except api.GraphQLError as exc:
-            observations.append((acceptance, f"refused {exc.codes}: {exc}"))
+        """Run one teardown step; a refusal or an unmet read-back is a failed step, never a note.
+
+        The verdict is the support module's (:func:`tests.e2e.utils.show_sell_stage2_support.run_cleanup_step`),
+        so the rule that makes cleanup a gate is one rule, testable without a deployed stack, and a
+        step that raises cannot leave the teardown early or the run green.
+        """
+        rows.append(stage2.run_cleanup_step(acceptance, action))
 
     def return_custody() -> str:
-        # Held stock is read from the balance rows, the same source the acceptance assertions use.
-        # ``scoutCustodyBalances`` is recorded next to it and can answer differently; a teardown that
-        # trusted only that read could report "nothing held" while a balance row still carries stock.
         held = _campaign_custody(admin_token, unit_campaign_id)
         if not held:
             return "no position row on this Unit Campaign carries withScoutQty"
@@ -721,8 +774,7 @@ def _teardown_lane(lane_key: str, built: dict[str, Any], identities: dict[str, d
         assert not standing, f"the lane left a balance standing: {standing}"
         return (
             f"zeroed kernelPhysicalQty and councilOnOrderQty on {len(cleared)} product row(s) of "
-            f"{unit_campaign_id}; every position that Unit Campaign owns now reads 0, and the movements "
-            "that got it there are untouched"
+            f"{unit_campaign_id}; every position that Unit Campaign owns now reads 0"
         )
 
     def delete_orders() -> str:
@@ -764,7 +816,7 @@ def _teardown_lane(lane_key: str, built: dict[str, Any], identities: dict[str, d
         return f"revoked the READ share on {account_id}; listSharesByProfile answers none"
 
     def leave_roster() -> str:
-        where = str(built.get("canaryCampaignId") or unit_campaign_id)
+        where = str(built.get("movedCampaignId") or unit_campaign_id)
         roster_row = _roster_row(admin_token, where, scout_profile_id)
         removed = api.gql(
             admin_token,
@@ -789,65 +841,46 @@ def _teardown_lane(lane_key: str, built: dict[str, Any], identities: dict[str, d
         gone = api.gql(scout_token, documents["scoutCampaign"], {"campaignId": scout_campaign_id}).get("getCampaign")
         assert gone is None, f"getCampaign still answers the deleted Scout Campaign: {gone!r}"
         listed = api.gql(scout_token, documents["scoutCampaigns"], {"profileId": scout_profile_id})
-        rows = (listed.get("listCampaignsByProfile") or {}).get("campaigns") or []
-        assert scout_campaign_id not in {str(row.get("campaignId")) for row in rows}, rows
+        rows_listed = (listed.get("listCampaignsByProfile") or {}).get("campaigns") or []
+        assert scout_campaign_id not in {str(row.get("campaignId")) for row in rows_listed}, rows_listed
         return f"deleted Scout Campaign {scout_campaign_id}; getCampaign answers null and the profile lists none"
 
     def delete_profile() -> str:
         answered = api.gql(scout_token, documents["deleteProfile"], {"profileId": scout_profile_id})
-        assert answered.get("deleteSellerProfile") is True, f"deleteSellerProfile answered {answered!r}"
+        assert answered.get("deleteProfile") is True or answered.get("deleteSellerProfile") is True, answered
         profiles = api.gql(scout_token, documents["profiles"], {"limit": 200}).get("listMyProfiles") or {}
         names = [str(row.get("sellerName")) for row in profiles.get("profiles") or []]
-        assert str(built.get("scoutName") or "") not in names, f"the profile is still listed: {names}"
+        assert str(built.get("scoutName") or "") not in names, f"profile {built.get('scoutName')} is still listed: {names}"
         return f"deleted seller profile {scout_profile_id} and with it the Campaigns and Orders under it; listMyProfiles no longer lists it"
 
-    def deactivate_lane_campaign() -> str:
-        rows = (
+    def deactivate_lane_campaigns() -> str:
+        rows_read = (
             api.gql(admin_token, documents["unitCampaigns"], {"unitId": str(built.get("unitId") or "")})
             .get("unitCampaigns") or {}
         ).get("items") or []
-        lane_row = next((row for row in rows if str(row.get("unitCampaignId")) == unit_campaign_id), None)
-        assert lane_row, f"unitCampaigns(unitId={built.get('unitId')}) no longer answers {unit_campaign_id}"
-        updated = api.gql(
-            admin_token,
-            documents["deactivateUnitCampaign"],
-            {
-                "input": stage2.deactivate_unit_campaign_input(
-                    unit_campaign_id, int(lane_row.get("version") or 1), idempotency_key=f"{lane_key}-teardown-deactivate"
-                )
-            },
-        ).get("updateUnitCampaign") or {}
-        assert updated.get("isActive") is False, updated
+        off = 0
+        for row in rows_read:
+            if not row.get("isActive"):
+                continue
+            api.gql(
+                admin_token,
+                documents["deactivateUnitCampaign"],
+                {
+                    "input": stage2.deactivate_unit_campaign_input(
+                        str(row["unitCampaignId"]),
+                        int(row.get("version") or 1),
+                        idempotency_key=f"{lane_key}-teardown-deactivate-{off}",
+                    )
+                },
+            )
+            off += 1
+        still_on = [
+            str(row.get("unitCampaignId")) for row in (_read_unit_campaigns(admin_token, built)) if row.get("isActive")
+        ]
+        assert not still_on, f"the lane left an active Unit Campaign behind: {still_on}"
         return (
-            f"deactivated Unit Campaign {unit_campaign_id} (now v{updated.get('version')}); the Unit itself and "
-            "the Unit Campaign row have no delete mutation in the SDL, so those two rows and the append-only "
-            "inventory history stay on the stack"
-        )
-
-    def canary_survives() -> str:
-        canary_id = str(built.get("canaryCampaignId") or "")
-        if not canary_id:
-            return "the lane created no canary campaign"
-        position = _positions(admin_token, canary_id).get(str(built.get("productId") or ""))
-        assert position, f"the canary campaign answers no position: {canary_id}"
-        assert int(position["kernelPhysicalQty"]) == CANARY_QTY, (
-            f"the teardown disturbed the canary campaign's stock: {position}"
-        )
-        rows = (
-            api.gql(admin_token, documents["unitCampaigns"], {"unitId": str(built.get("unitId") or "")})
-            .get("unitCampaigns") or {}
-        ).get("items") or []
-        canary_row = next((row for row in rows if str(row.get("unitCampaignId")) == canary_id), None)
-        assert canary_row and canary_row.get("isActive") is True, f"the canary campaign is not standing: {canary_row}"
-        catalog_id = str(built.get("catalogId") or "")
-        catalogs = api.gql(admin_token, documents["managedCatalogs"], {}).get("listManagedCatalogs") or []
-        assert catalog_id in {str(row.get("catalogId")) for row in catalogs}, (
-            f"the lane touched the shared managed catalog {catalog_id}"
-        )
-        return (
-            f"canary Unit Campaign {canary_id} still answers kernelPhysicalQty "
-            f"{position['kernelPhysicalQty']} for {built.get('product')} and isActive true, and the shared "
-            f"catalog {catalog_id} is untouched"
+            f"deactivated {off} Unit Campaign(s) on Unit {built.get('unitId')} so nothing here can be picked "
+            "up by another lane; the rows themselves go in the table sweep"
         )
 
     def history_is_immutable() -> str:
@@ -866,54 +899,251 @@ def _teardown_lane(lane_key: str, built: dict[str, Any], identities: dict[str, d
     step("§2.8.7 teardown / API-FIX-02", leave_roster)
     step("§2.8.7 teardown / API-FIX-01-02", delete_scout_campaign)
     step("§2.8.7 teardown / API-FIX-01", delete_profile)
-    step("§2.8.7 teardown / §2.6.1", deactivate_lane_campaign)
-    step("§2.8.7 canary", canary_survives)
+    step("§2.8.7 teardown / §2.6.1", deactivate_lane_campaigns)
     step("§2.8.7 audit immutability", history_is_immutable)
-    return observations
+    return rows
+
+
+def _read_unit_campaigns(admin_token: str, built: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every Unit Campaign row the finished lane owns."""
+    return list(
+        (
+            api.gql(admin_token, stage2.STAGE_TWO_SUPPORT_DOCUMENTS["unitCampaigns"], {"unitId": str(built.get("unitId") or "")})
+            .get("unitCampaigns") or {}
+        ).get("items")
+        or []
+    )
+
+
+def _lane_row_ids(built: dict[str, Any]) -> list[str]:
+    """The ids a finished lane's rows are keyed on: its Unit and each Unit Campaign it made."""
+    ids = [str(built.get("unitId") or ""), str(built.get("unitCampaignId") or "")]
+    ids += [str(item) for item in built.get("extraCampaignIds") or []]
+    return [item for item in ids if item]
+
+
+def _build_lane_records(
+    browser: Browser,
+    identities: dict[str, dict[str, str]],
+    evidence_dir: Path,
+    codes: list[str],
+    names: dict[str, str],
+    catalog_name: str,
+    tag: str,
+) -> dict[str, Any]:
+    """Build one lane's records through the product's own screens: Unit, Unit Campaign, profile, join.
+
+    Both the acceptance lane and the canary lane are built here, which is the point: the canary is
+    not a lighter thing the lane creates for show, it is the same construction under a different
+    ``DATA_ID``, so "the teardown left the other lane alone" is a claim about a real lane.
+
+    Args:
+        tag: prefix for this lane's persona labels.
+
+    Returns:
+        ``unitId``, ``unitCampaignId``, ``joinCode``, ``scoutProfileId``, ``scoutCampaignId``,
+        ``scoutName``, ``unitCreation``.
+    """
+    admin_token = _token_for(identities["admin"])
+    with _persona_session(browser, f"{tag}-admin", identities["admin"], evidence_dir) as (admin_page, _):
+        admin = ShowSellPage(admin_page)
+        admin.goto_units()
+        existing = _unit_for_key(admin_token, names["unit_number"])
+        if existing:
+            unit_id, unit_creation = existing, "reused"
+        else:
+            unit_id, duplicate_confirm = admin.create_unit(
+                unit_type=UNIT_TYPE,
+                unit_number=names["unit_number"],
+                city=UNIT_CITY,
+                state=UNIT_STATE,
+                display_name=names["unit_display_name"],
+            )
+            unit_creation = "separate-duplicate" if duplicate_confirm else "created"
+        admin.goto_unit(unit_id)
+        admin.open_tab("tab-campaigns")
+        campaign_id, join_code = admin.create_campaign(
+            name=names["campaign_name"], year=CAMPAIGN_YEAR, catalog_name=catalog_name
+        )
+        codes.append(join_code)
+
+    with _persona_session(browser, f"{tag}-scout", identities["scout"], evidence_dir) as (scout_page, scout_token):
+        _ensure_scout_profile(scout_page, names["scout_name"])
+        scout_profile_id = _profile_id_for(scout_token, names["scout_name"])
+        campaigns = CampaignPage(scout_page)
+        campaigns.goto(scout_profile_id)
+        if not campaigns.has_campaign(names["campaign_name"]):
+            campaigns.create_campaign_on_catalog(
+                names["campaign_name"], profile_id=scout_profile_id, catalog_name=catalog_name
+            )
+        scout_campaign_id = _scout_campaign_id_for(scout_token, scout_profile_id, names["campaign_name"])
+
+    with _persona_session(browser, f"{tag}-scout-join", identities["scout"], evidence_dir) as (scout_page, _):
+        scout = ShowSellPage(scout_page)
+        scout.goto_join()
+        scout.join_unit_campaign(join_code, scout_profile_id)
+
+    return {
+        "unitId": unit_id,
+        "unitCampaignId": campaign_id,
+        "joinCode": join_code,
+        "scoutProfileId": scout_profile_id,
+        "scoutCampaignId": scout_campaign_id,
+        "scoutName": names["scout_name"],
+        "unitCreation": unit_creation,
+    }
+
+
+def _seed_records(data_id: str, built: dict[str, Any], identities: dict[str, dict[str, str]], quantity: int) -> None:
+    """Put stock, custody and one sale on a finished lane, so its rows are the shape the sweep must find."""
+    admin_token = _token_for(identities["admin"])
+    campaign_id = str(built["unitCampaignId"])
+    products = _catalog_product_ids(admin_token, campaign_id)
+    product_id = products[_traded_product(products)]
+    built["productId"] = product_id
+    _write(
+        admin_token,
+        "recordInventoryReceipt",
+        {"input": stage2.receipt_input(campaign_id, product_id, quantity, idempotency_key=f"{data_id}-seed-receipt")},
+    )
+    _write(
+        admin_token,
+        "issueStockToScout",
+        {
+            "input": stage2.issue_input(
+                campaign_id,
+                str(built["scoutCampaignId"]),
+                str(built["scoutProfileId"]),
+                product_id,
+                2,
+                idempotency_key=f"{data_id}-seed-issue",
+            )
+        },
+    )
+    sale = _write(
+        admin_token,
+        "createOrder",
+        {
+            "input": stage2.custody_sale_input(
+                str(built["scoutProfileId"]),
+                str(built["scoutCampaignId"]),
+                product_id,
+                1,
+                "Canary Door",
+                idempotency_key=f"{data_id}-seed-sale",
+            )
+        },
+    )
+    built["orderIds"] = [str(sale["orderId"])]
+
+
+def _lane_snapshot(built: dict[str, Any], identities: dict[str, dict[str, str]]) -> dict[str, Any]:
+    """Everything another lane's teardown could disturb, in one comparable value."""
+    admin_token = _token_for(identities["admin"])
+    campaign_id = str(built["unitCampaignId"])
+    positions = {
+        product_id: {key: value for key, value in row.items() if key not in ("updatedAt", "version")}
+        for product_id, row in _positions(admin_token, campaign_id).items()
+    }
+    orders = _scout_orders(admin_token, campaign_id, str(built["scoutCampaignId"]))
+    fulfillments = []
+    for row in orders:
+        fulfillments.extend(_fulfillments(admin_token, str(row["orderId"])))
+    return {
+        "unitCampaignId": campaign_id,
+        "positions": positions,
+        "custody": stage2.custody_by_product(_custody(admin_token, campaign_id)),
+        "movementRows": len(_trail(admin_token, campaign_id)),
+        "orders": sorted(str(row["orderId"]) for row in orders),
+        "orderedQty": sum(int(row.get("totalQuantity") or 0) for row in orders),
+        "fulfillmentRows": len(fulfillments),
+        "rosterStatus": str(_roster_row(admin_token, campaign_id, str(built["scoutProfileId"])).get("status")),
+    }
+
+
+def _canary_survived(
+    before: dict[str, Any], after: dict[str, Any], canary: dict[str, Any], identities: dict[str, dict[str, str]]
+) -> dict[str, str]:
+    """Compare the canary lane with itself, before the lane's teardown and after it."""
+    changed = {key: (before[key], after[key]) for key in before if before[key] != after[key]}
+    if changed:
+        return stage2.cleanup_row(
+            "§2.8.7 independent lane survived",
+            f"the teardown disturbed the canary lane {canary['data_id']}: "
+            + "; ".join(f"{key}: {value[0]!r} became {value[1]!r}" for key, value in sorted(changed.items())),
+            result=stage2.CLEANUP_FAILED,
+        )
+    return stage2.cleanup_row(
+        "§2.8.7 independent lane survived",
+        f"canary lane {canary['data_id']} (Unit {canary['unitId']}, Unit Campaign {canary['unitCampaignId']}) "
+        f"answers the same {len(before['positions'])} position row(s), {before['movementRows']} movement row(s), "
+        f"{len(before['orders'])} Order(s) totalling {before['orderedQty']} units, "
+        f"{before['fulfillmentRows']} fulfillment record(s) and roster status {before['rosterStatus']} after the "
+        "lane's teardown as it did before it",
+    )
 
 
 def _sweep_prior_lanes(
     identities: dict[str, dict[str, str]],
     prior_ids: list[str],
     keep: str,
-) -> list[tuple[str, str]]:
-    """Remove what earlier runs of this lane left, by attribution, and never a stranger's rows.
+) -> list[dict[str, str]]:
+    """Take back what earlier runs of this lane left, by attribution, and prove each one is gone.
 
-    The lane creates Units and Unit Campaigns it cannot delete, but everything hanging off them —
-    the seller profile, the Scout Campaign and the Orders — is removable, and leaving seven runs'
-    worth of Scout profiles on the deployed stack is not "canary-safe", it is a mess the next reader
-    has to step over.  Selection is by the lane's own naming templates for the named ``DATA_ID``s, so
-    a row the lane did not create cannot be caught by it; the current run's id is excluded by the
-    caller and again here.
+    A prior ``DATA_ID`` names the rows its run created: the Unit number is derived from its digits,
+    and its Unit Campaign and seller profile carry the id in their names, so the sweep looks for
+    exactly those shapes and cannot catch a row it did not create.  Each named id is reported in one
+    of three honest forms — *removed* (found, taken back, and gone on the re-read), *already gone*
+    (nothing in ``myUnits``, the Unit Campaign list or ``listMyProfiles`` names it: verified by
+    reading, not assumed), or *failed* (it is still there).  A bare "deactivated 0, deleted 0" is not
+    one of them: that is how a sweep that found nothing could once pass for a sweep that cleaned
+    something.
+
+    The product path reaches the seller profile (whose cascade takes the Scout Campaign and its
+    Orders) and can only deactivate a Unit Campaign; the Unit and Unit Campaign rows themselves go
+    through the fixture sweep, which is why the verification read comes after it.
     """
     admin_token = _token_for(identities["admin"])
     scout_token = _token_for(identities["scout"])
     documents = stage2.STAGE_TWO_SUPPORT_DOCUMENTS
     wanted = [item for item in prior_ids if item and item != keep]
     if not wanted:
-        return [("§2.8.7 prior-lane sweep", "no earlier DATA_IDs named, nothing to sweep")]
+        return [stage2.cleanup_row("§2.8.7 prior-lane sweep", "no earlier DATA_IDs named, nothing to sweep")]
 
-    units = {
-        int(row.get("unitNumber") or 0): str(row.get("unitId"))
-        for row in (api.gql(admin_token, documents["myUnits"], {"page": {"limit": 100}}).get("myUnits") or {}).get("items")
-        or []
-    }
-    profiles = [
-        (str(row.get("profileId")), str(row.get("sellerName")))
-        for row in (api.gql(scout_token, documents["profiles"], {"limit": 200}).get("listMyProfiles") or {}).get("profiles")
-        or []
-    ]
-    observations: list[tuple[str, str]] = []
+    def unit_rows() -> dict[int, str]:
+        return {
+            int(row.get("unitNumber") or 0): str(row.get("unitId"))
+            for row in (api.gql(admin_token, documents["myUnits"], {"page": {"limit": 100}}).get("myUnits") or {}).get(
+                "items"
+            )
+            or []
+        }
+
+    def scout_names() -> list[str]:
+        listed = api.gql(scout_token, documents["profiles"], {"limit": 200}).get("listMyProfiles") or {}
+        return [str(row.get("sellerName")) for row in listed.get("profiles") or []]
+
+    rows: list[dict[str, str]] = []
     for data_id in wanted:
         number = int(_unit_number(data_id))
-        unit_id = units.get(number)
-        campaigns_off = 0
+        wanted_name = SCOUT_NAME_TEMPLATE.format(data_id=data_id)
+        campaign_prefix = CAMPAIGN_TEMPLATE.format(data_id=data_id)
+
+        unit_id = unit_rows().get(number)
+        lane_ids: list[str] = []
+        found_campaigns = 0
+        active_off = 0
         if unit_id:
-            rows = (api.gql(admin_token, documents["unitCampaigns"], {"unitId": unit_id}).get("unitCampaigns") or {}).get(
-                "items"
-            ) or []
-            for row in rows:
-                if str(row.get("campaignName")) != CAMPAIGN_TEMPLATE.format(data_id=data_id) or not row.get("isActive"):
+            lane_ids.append(unit_id)
+            campaign_rows = (
+                api.gql(admin_token, documents["unitCampaigns"], {"unitId": unit_id}).get("unitCampaigns") or {}
+            ).get("items") or []
+            for row in campaign_rows:
+                if not str(row.get("campaignName") or "").startswith(campaign_prefix):
+                    continue
+                found_campaigns += 1
+                lane_ids.append(str(row["unitCampaignId"]))
+                if not row.get("isActive"):
                     continue
                 api.gql(
                     admin_token,
@@ -926,28 +1156,66 @@ def _sweep_prior_lanes(
                         )
                     },
                 )
-                campaigns_off += 1
-        wanted_name = SCOUT_NAME_TEMPLATE.format(data_id=data_id)
-        profiles_gone = 0
-        for profile_id, seller_name in profiles:
-            if seller_name != wanted_name:
-                continue
-            api.gql(scout_token, documents["deleteProfile"], {"profileId": profile_id})
-            profiles_gone += 1
-        remaining = [
-            str(row.get("sellerName"))
-            for row in (api.gql(scout_token, documents["profiles"], {"limit": 200}).get("listMyProfiles") or {}).get("profiles")
+                active_off += 1
+        profiles = [
+            (str(row.get("profileId")), str(row.get("sellerName")))
+            for row in (api.gql(scout_token, documents["profiles"], {"limit": 200}).get("listMyProfiles") or {}).get(
+                "profiles"
+            )
             or []
         ]
-        assert wanted_name not in remaining, f"the sweep left {wanted_name} listed"
-        observations.append(
-            (
+        profiles_found = [profile_id for profile_id, seller_name in profiles if seller_name == wanted_name]
+        for profile_id in profiles_found:
+            api.gql(scout_token, documents["deleteProfile"], {"profileId": profile_id})
+
+        swept = _lane_table_sweep(f"prior lane {data_id}", [data_id, *lane_ids]) if lane_ids else []
+        if swept and any(row["result"] != stage2.CLEANUP_OBSERVED for row in swept):
+            rows.append(
+                stage2.cleanup_row(
+                    "§2.8.7 prior-lane sweep",
+                    f"{data_id}: Unit {unit_id} carried {found_campaigns} Unit Campaign(s) and {len(profiles_found)} "
+                    "seller profile(s); the fixture sweep did not finish",
+                    result=stage2.CLEANUP_FAILED,
+                )
+            )
+            rows.extend(swept)
+            continue
+        rows.extend(swept)
+
+        unit_after = unit_rows().get(number)
+        name_after = wanted_name in scout_names()
+        if unit_after or name_after:
+            rows.append(
+                stage2.cleanup_row(
+                    "§2.8.7 prior-lane sweep",
+                    f"{data_id}: still present after the sweep — Unit number {number} answers "
+                    f"{unit_after or 'nothing'} and listMyProfiles answers "
+                    f"{wanted_name if name_after else 'no such seller name'}",
+                    result=stage2.CLEANUP_FAILED,
+                )
+            )
+            continue
+        if not unit_id and not found_campaigns and not profiles_found:
+            rows.append(
+                stage2.cleanup_row(
+                    "§2.8.7 prior-lane sweep",
+                    f"{data_id}: nothing to remove — no Unit row for number {number}, no Unit Campaign named "
+                    f"{campaign_prefix!r}, no seller profile named {wanted_name!r}, and the re-read confirms all "
+                    "three are still absent (this lane's rows were taken back earlier, and that is verified, not assumed)",
+                )
+            )
+            continue
+        rows.append(
+            stage2.cleanup_row(
                 "§2.8.7 prior-lane sweep",
-                f"{data_id}: deactivated {campaigns_off} Unit Campaign(s) on Unit {unit_id or 'not found'} and deleted "
-                f"{profiles_gone} seller profile(s) named {wanted_name} with their Campaigns and Orders",
+                f"{data_id}: found {found_campaigns} Unit Campaign(s) on Unit {unit_id or 'no row for number ' + str(number)} "
+                f"({active_off} deactivated, the rest already inactive) and {len(profiles_found)} seller profile(s) "
+                f"named {wanted_name}; the profile delete cascaded that Scout Campaign and its Orders, the fixture "
+                "sweep took the Unit and Unit Campaign rows, and the re-read answers no Unit for that number and no "
+                "such seller name",
             )
         )
-    return observations
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -969,6 +1237,13 @@ def test_show_sell_stage2_journey(
     on.  The scope-retention and authorization legs come last, because they read a lane that has
     already done everything.
 
+    Two fixtures frame the journey.  An **independent canary lane** — its own Unit, Unit Campaign,
+    seller profile, Scout Campaign and roster join under its own ``DATA_ID`` — is built before this
+    lane writes a single row, and the record proves the lane's teardown left it standing, then takes
+    it down with the same teardown so nothing is left behind.  And the **cleanup gate** is a gate:
+    every teardown step reports a verdict, the evidence is written before any of it is judged, and a
+    refused deletion or a disturbed canary fails the run rather than being filed as an observation.
+
     Args:
         browser: the session Playwright browser.
         identities: the standing fixture identities.
@@ -976,10 +1251,13 @@ def test_show_sell_stage2_journey(
         evidence_dir: artifact directory for this run.
     """
     steps: list[dict[str, Any]] = []
+    cleanup: list[dict[str, str]] = []
     codes: list[str] = []
     passwords: list[str] = [identity["password"] for identity in identities.values()]
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     built: dict[str, Any] = {}
+    canary: dict[str, Any] = {}
+    canary_before: dict[str, Any] = {}
 
     def record(acceptance: str, summary: str, result: str = "observed") -> None:
         """Append one acceptance observation to the record."""
@@ -997,50 +1275,60 @@ def test_show_sell_stage2_journey(
         built["sharedCatalog"] = shared
         record("UNIT-06 / shared catalog", f"{shared['catalogId']} ({catalog_name}) offers {shared['products']}")
 
+        # --- A second lane, standing on its own, before this one writes anything ---
+        #
+        # Acceptance item 5 asks for a canary that proves *another lane's* data is untouched.  A
+        # second Unit Campaign inside this lane proves nothing of the kind: it is this lane's row,
+        # made by this run, and this run's sweep is free to define it out of the set.  So the canary
+        # is built the same way a lane is built — its own Unit, Unit Campaign, seller profile, Scout
+        # Campaign, roster join — under its own DATA_ID, seeded with a receipt, a custody issue and a
+        # sale, then snapshotted.  The teardown later has to leave that snapshot standing, and the
+        # canary is then torn down by the same teardown so the record can also show the sweep takes
+        # its own lane's rows when it is pointed at them.
+        # The canary's id must not contain the lane's id as a substring: the fixture sweep narrows by
+        # token with a substring match, and an id like ``<data_id>-can`` would be swept by the lane's
+        # own sweep.  That is not a hypothetical — the first run of this shape deleted its own canary
+        # and the survival read answered ``Unit Campaign not found``, which is the gate working.
+        canary_id = f"stage2can-{_data_digits(lane['data_id'])}"
+        canary_names = {
+            "data_id": canary_id,
+            "unit_number": str(int(lane["unit_number"]) + 1),
+            "unit_display_name": f"Stage 2 Pack {canary_id}",
+            "campaign_name": CAMPAIGN_TEMPLATE.format(data_id=canary_id),
+            "scout_name": SCOUT_NAME_TEMPLATE.format(data_id=canary_id),
+        }
+        canary.update(_build_lane_records(browser, identities, evidence_dir, codes, canary_names, catalog_name, "00-canary"))
+        canary["data_id"] = canary_names["data_id"]
+        _seed_records(canary_names["data_id"], canary, identities, 4)
+        canary_before = _lane_snapshot(canary, identities)
+        built["canaryLane"] = {key: canary.get(key, "") for key in ("data_id", "unitId", "unitCampaignId", "scoutProfileId")}
+        record(
+            "§2.8.7 independent lane standing",
+            f"canary lane {canary['data_id']}: Unit {canary['unitId']}, Unit Campaign {canary['unitCampaignId']}, "
+            f"Scout Campaign {canary['scoutCampaignId']}; seeded with a receipt, a custody issue and one sale — "
+            f"{canary_before['movementRows']} movement row(s), {canary_before['orderedQty']} unit(s) ordered",
+        )
+
         # --- The lane: Unit, Unit Campaign, Scout profile, Scout Campaign, join ---
-
-        with _persona_session(browser, "02-admin", identities["admin"], evidence_dir) as (admin_page, _):
-            admin = ShowSellPage(admin_page)
-            admin.goto_units()
-            existing = _unit_for_key(admin_token, lane["unit_number"])
-            if existing:
-                unit_id, unit_creation = existing, "reused"
-            else:
-                unit_id, duplicate_confirm = admin.create_unit(
-                    unit_type=UNIT_TYPE,
-                    unit_number=lane["unit_number"],
-                    city=UNIT_CITY,
-                    state=UNIT_STATE,
-                    display_name=lane["unit_display_name"],
-                )
-                unit_creation = "separate-duplicate" if duplicate_confirm else "created"
-            admin.open_unit(unit_id)
-            admin.open_tab("tab-campaigns")
-            campaign_id, join_code = admin.create_campaign(
-                name=lane["campaign_name"], year=CAMPAIGN_YEAR, catalog_name=catalog_name
-            )
-            codes.append(join_code)
-            built.update({"unitId": unit_id, "unitCampaignId": campaign_id, "unitCreation": unit_creation})
-            record("API-FIX-01", f"{UNIT_TYPE} {lane['unit_number']} → Unit {unit_id}, Unit Campaign {campaign_id}")
-
-        with _persona_session(browser, "01-scout", identities["scout"], evidence_dir) as (scout_page, scout_token):
-            _ensure_scout_profile(scout_page, lane["scout_name"])
-            scout_profile_id = _profile_id_for(scout_token, lane["scout_name"])
-            campaigns = CampaignPage(scout_page)
-            campaigns.goto(scout_profile_id)
-            if not campaigns.has_campaign(lane["campaign_name"]):
-                campaigns.create_campaign_on_catalog(
-                    lane["campaign_name"], profile_id=scout_profile_id, catalog_name=catalog_name
-                )
-            scout_campaign_id = _scout_campaign_id_for(scout_token, scout_profile_id, lane["campaign_name"])
-            built.update({"scoutProfileId": scout_profile_id, "scoutCampaignId": scout_campaign_id, "scoutName": lane["scout_name"]})
-            record("API-FIX-01/02", f"Scout profile {scout_profile_id} holds campaign {scout_campaign_id}")
-
-        with _persona_session(browser, "03-scout-join", identities["scout"], evidence_dir) as (scout_page, _):
-            scout = ShowSellPage(scout_page)
-            scout.goto_join()
-            scout.join_unit_campaign(join_code, scout_profile_id)
-            record("API-FIX-02", f"Scout Campaign {scout_campaign_id} joined Unit Campaign {campaign_id}")
+        built.update(_build_lane_records(browser, identities, evidence_dir, codes, lane, catalog_name, "01-lane"))
+        unit_id = str(built["unitId"])
+        campaign_id = str(built["unitCampaignId"])
+        scout_profile_id = str(built["scoutProfileId"])
+        scout_campaign_id = str(built["scoutCampaignId"])
+        scout_token = _token_for(identities["scout"])
+        record(
+            "API-FIX-01",
+            f"{UNIT_TYPE} {lane['unit_number']} → Unit {unit_id}, Unit Campaign {campaign_id} ({built['unitCreation']})",
+        )
+        record(
+            "API-FIX-01/02",
+            f"Scout profile {scout_profile_id} holds campaign {scout_campaign_id}",
+        )
+        record(
+            "API-FIX-02",
+            f"Scout Campaign {scout_campaign_id} joined Unit Campaign {campaign_id} on the roster screen using "
+            f"join code {built['joinCode']} (this record is redacted before it is written)",
+        )
 
         # --- Gate 2: both Campaigns sell from one catalog -------------------------
         unit_catalog = _campaign_identities(admin_token, campaign_id)
@@ -1749,9 +2037,10 @@ def test_show_sell_stage2_journey(
         # fulfillment, and Council demand retain the original scope", so the live leg moves the Scout
         # Campaign to a second Unit Campaign on the same Unit rather than rejoining the one it left —
         # a rejoin of the same campaign would pass even if scope followed the membership.  The
-        # destination carries a receipt of its own before the move and is never touched again, so it
-        # doubles as the canary the teardown has to leave standing.
-        canary_name = f"{CAMPAIGN_TEMPLATE.format(data_id=lane['data_id'])} B"
+        # destination carries a receipt of its own before the move, so the leg can show the move put
+        # no demand, no custody and no history into it.  It is a campaign of this lane, not a canary:
+        # the independent canary lane is the one built at the top of the run.
+        moved_name = f"{CAMPAIGN_TEMPLATE.format(data_id=lane['data_id'])} B"
         with _persona_session(browser, "06-admin-second-campaign", identities["admin"], evidence_dir) as (admin_page, _):
             admin = ShowSellPage(admin_page)
             # ``goto_unit`` rather than a click on the Unit list: that list is a paged ``myUnits``
@@ -1759,21 +2048,22 @@ def test_show_sell_stage2_journey(
             # runs left behind.  The workspace route is the direct, page-independent way in.
             admin.goto_unit(unit_id)
             admin.open_tab("tab-campaigns")
-            canary_id, canary_join_code = admin.create_campaign(
-                name=canary_name, year=CAMPAIGN_YEAR, catalog_name=catalog_name
+            moved_id, moved_join_code = admin.create_campaign(
+                name=moved_name, year=CAMPAIGN_YEAR, catalog_name=catalog_name
             )
-            codes.append(canary_join_code)
-            built["canaryCampaignId"] = canary_id
-        canary_receipt = _write(
+            codes.append(moved_join_code)
+            built["movedCampaignId"] = moved_id
+            built["extraCampaignIds"] = [moved_id]
+        moved_receipt = _write(
             admin_token,
             "recordInventoryReceipt",
             {
                 "input": stage2.receipt_input(
-                    canary_id, product_id, CANARY_QTY, idempotency_key=f"{lane['data_id']}-canary-receipt"
+                    moved_id, product_id, SECOND_CAMPAIGN_QTY, idempotency_key=f"{lane['data_id']}-second-campaign-receipt"
                 )
             },
         )
-        assert canary_receipt["kernelPhysicalQty"] == CANARY_QTY, canary_receipt
+        assert moved_receipt["kernelPhysicalQty"] == SECOND_CAMPAIGN_QTY, moved_receipt
 
         # What the Scout is holding at the moment of the move is not a guess: the side product was
         # issued SIDE_ISSUE_QTY and never sold or returned, and every unit of the traded product's
@@ -1804,7 +2094,7 @@ def test_show_sell_stage2_journey(
         with _persona_session(browser, "07-scout-moves", identities["scout"], evidence_dir) as (scout_page, _):
             scout = ShowSellPage(scout_page)
             scout.goto_join()
-            scout.join_unit_campaign(canary_join_code, scout_profile_id)
+            scout.join_unit_campaign(moved_join_code, scout_profile_id)
 
         still_there = _scout_orders(admin_token, campaign_id, scout_campaign_id)
         assert sorted(str(row["orderId"]) for row in still_there) == sorted(
@@ -1824,12 +2114,12 @@ def test_show_sell_stage2_journey(
         assert [row for row in still_linked if str(row.get("orderId") or "") == first_order_id], (
             "the sale's movements stopped answering the Unit Campaign they were written under"
         )
-        moved_orders = _scout_orders(admin_token, canary_id, scout_campaign_id)
-        assert not moved_orders, f"the sales moved with the membership into {canary_id}: {moved_orders}"
-        assert not _custody(admin_token, canary_id), f"custody moved into {canary_id}"
-        canary_positions = _positions(admin_token, canary_id)
-        assert int(canary_positions[product_id]["kernelPhysicalQty"]) == CANARY_QTY, canary_positions[product_id]
-        assert int(canary_positions[product_id]["withScoutQty"]) == 0, canary_positions[product_id]
+        moved_orders = _scout_orders(admin_token, moved_id, scout_campaign_id)
+        assert not moved_orders, f"the sales moved with the membership into {moved_id}: {moved_orders}"
+        assert not _custody(admin_token, moved_id), f"custody moved into {moved_id}"
+        moved_positions = _positions(admin_token, moved_id)
+        assert int(moved_positions[product_id]["kernelPhysicalQty"]) == SECOND_CAMPAIGN_QTY, moved_positions[product_id]
+        assert int(moved_positions[product_id]["withScoutQty"]) == 0, moved_positions[product_id]
         custody_after_move = _campaign_custody(admin_token, campaign_id)
         custody_read_after = stage2.custody_by_product(_custody(admin_token, campaign_id))
         assert custody_after_move == expected_custody_at_move, (
@@ -1839,16 +2129,16 @@ def test_show_sell_stage2_journey(
             "the custody balances followed the membership into the new Unit Campaign instead of "
             "staying on the one that issued them"
         )
-        assert all(int(row["withScoutQty"] or 0) == 0 for row in canary_positions.values()), (
-            f"the move put custody on the destination campaign: {canary_positions}"
+        assert all(int(row["withScoutQty"] or 0) == 0 for row in moved_positions.values()), (
+            f"the move put custody on the destination campaign: {moved_positions}"
         )
         record(
             "ORD-API-02-04 / API-FIX-05",
-            f"removed from {campaign_id} and joined {canary_id}: the three Orders, their {len(history)} "
+            f"removed from {campaign_id} and joined {moved_id}: the three Orders, their {len(history)} "
             f"fulfillment record(s) and {FIRST_SALE_QTY + SECOND_SALE_QTY + DEMAND_SALE_QTY} of demand still "
             f"answer {campaign_id}, its trail still names the sale and its custody balances "
             f"{custody_before_move} are untouched, while the new campaign answers 0 Orders, no custody and "
-            f"only its own {CANARY_QTY} Kernels; ``scoutCustodyBalances`` answered {custody_read_before} "
+            f"only its own {SECOND_CAMPAIGN_QTY} Kernels; ``scoutCustodyBalances`` answered {custody_read_before} "
             "before the removal and "
             f"{custody_read_after} after it",
         )
@@ -1869,15 +2159,40 @@ def test_show_sell_stage2_journey(
 
         built["finished"] = True
     finally:
+        # Cleanup runs whether the journey finished or not, and it is a gate rather than a log:
+        # every step reports a verdict, the evidence is written first so a failed teardown still
+        # leaves a record, and only then does a failed step turn the run red.  Before this shape, a
+        # refused ``deleteOrder`` or a disturbed canary was recorded as an observation and pytest
+        # exited 0 — which is exactly how a cleanup gate stops meaning anything.
         try:
-            for acceptance, summary in _teardown_lane(lane["data_id"], built, identities):
-                record(acceptance, summary)
-        except Exception as exc:  # noqa: BLE001 - a teardown that throws must not cost the evidence
-            record("§2.8.7 teardown", f"stopped: {type(exc).__name__}: {exc}", result="blocked")
+            cleanup.extend(_teardown_lane(lane["data_id"], built, identities))
+        except Exception as exc:  # noqa: BLE001 - a teardown that dies mid-step must still cost the run nothing but its verdict
+            cleanup.append(
+                stage2.cleanup_row("§2.8.7 teardown", f"stopped: {type(exc).__name__}: {exc}", result=stage2.CLEANUP_FAILED)
+            )
+        if built.get("unitCampaignId"):
+            cleanup.extend(_lane_table_sweep(lane["data_id"], [lane["data_id"], *_lane_row_ids(built)]))
+        if canary_before and canary.get("unitCampaignId"):
+            try:
+                cleanup.append(_canary_survived(canary_before, _lane_snapshot(canary, identities), canary, identities))
+            except Exception as exc:  # noqa: BLE001 - an unreadable canary is a failed canary
+                cleanup.append(
+                    stage2.cleanup_row(
+                        "§2.8.7 independent lane survived", f"{type(exc).__name__}: {exc}", result=stage2.CLEANUP_FAILED
+                    )
+                )
         sweep_ids = [item.strip() for item in os.environ.get("SS_SWEEP_PRIOR", "").split(",") if item.strip()]
         if sweep_ids:
-            for acceptance, summary in _sweep_prior_lanes(identities, sweep_ids, lane["data_id"]):
-                record(acceptance, summary)
+            cleanup.extend(_sweep_prior_lanes(identities, sweep_ids, lane["data_id"]))
+        if canary.get("unitCampaignId"):
+            # The canary's own turn: the same teardown, pointed at the canary's ids, proves the sweep
+            # removes a whole lane's rows when it is told to — and leaves no fixture behind.
+            cleanup.extend(_teardown_lane(str(canary["data_id"]), canary, identities))
+            cleanup.extend(
+                _lane_table_sweep(f"canary lane {canary['data_id']}", [str(canary["data_id"]), *_lane_row_ids(canary)])
+            )
+        for row in cleanup:
+            record(row["acceptance"], row["summary"], result=row["result"])
         _write_evidence(
             evidence_dir,
             {
@@ -1892,9 +2207,15 @@ def test_show_sell_stage2_journey(
                 },
                 "stoppedEarly": not built.get("finished", False),
                 "teardown": "always",
+                "cleanupRows": len(cleanup),
+                "cleanupNotMet": stage2.cleanup_problems(cleanup),
+                    "cleanupBlocked": stage2.cleanup_blocked(cleanup),
                 **{key: value for key, value in built.items() if key not in ("finished", "steps")},
             },
             steps,
             passwords,
             codes,
         )
+        # Written first, then judged: the record of a failed cleanup is what a reviewer reads, and
+        # the run still has to fail.
+        stage2.assert_cleanup_clean(cleanup)

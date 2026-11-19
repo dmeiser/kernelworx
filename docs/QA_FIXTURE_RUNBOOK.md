@@ -104,10 +104,10 @@ pins that half.
 
 `down` sweeps `accounts`, `units` and `unit-campaigns`, and its plan prints
 `sweep tables: …` so the coverage is visible at teardown rather than discovered
-later. As the later Show & Sell stages land, fixture rows will also appear in
-`kernelworx-inventory-ue1-dev`, `kernelworx-order-fulfillments-ue1-dev` and
-`kernelworx-show-and-sells-ue1-dev`, and `down` will report success while leaving
-them. `TABLES` in the script is the one place to extend.
+later. Fixture rows also appear in `kernelworx-inventory-ue1-dev`,
+`kernelworx-orders-ue1-dev` and `kernelworx-order-fulfillments-ue1-dev` once a
+Show & Sell Stage 2 lane runs; those are in `SWEEP_TABLES`, which `sweep` uses,
+and `down` still leaves them. `TABLES` in the script is the one place to extend.
 
 The reach is bounded by the IAM identity, not just by `TABLES`: measured on
 2026-11-16, `kernelworx-qa-ue1-dev` is denied `dynamodb:Scan` on
@@ -116,6 +116,49 @@ The reach is bounded by the IAM identity, not just by `TABLES`: measured on
 `tokens` (dev suffixes). Closing the gap therefore needs a table read grant
 first — an owner action outside this card's no-IAM-change boundary — before a
 `TABLES` entry would do anything but fail.
+
+### `sweep`: one acceptance lane's rows, identities kept
+
+`down` removes the pool and everything attributable to it. `sweep` removes one
+acceptance lane's rows and keeps the pool, because a Stage 2 run leaves rows the
+product cannot delete: the SDL carries no `deleteUnit` and no
+`deleteUnitCampaign`, so the Unit and its Unit Campaign rows outlive every
+GraphQL teardown the run performs.
+
+```bash
+uv run python scripts/qa_fixture.py sweep --lane stage2-1118107 \
+    --lane <unitId> --lane <unitCampaignId> --yes
+```
+
+A row is deleted only when **both** conditions hold:
+
+1. it passes the attribution rule above, so it belongs to a fixture identity and
+   not to a third party sharing its partition, and
+2. it names one of the caller's lane tokens — the run's `DATA_ID` (which the
+   Unit display name and every Unit Campaign name it made carry), or the Unit
+   and Unit Campaign ids that run was answered.
+
+Condition 2 is what stops one run sweeping the whole pool: another lane's Unit
+on the same fixture admin is attributed but not named, so it is left. Condition
+1 is what stops a lane reaching into a tenant that happens to sit on its own
+partition key. A sweep with no `--lane` token refuses to run.
+
+`sweep` then re-scans and prints `LEFT <table>/<key>` for anything still naming
+those tokens, because a `delete_item` that returned without an error is not
+evidence, and prints `BLOCKED <table>: <error>` for a table the identity cannot
+read — a denied scan is reported, never treated as an empty table. Any `LEFT`
+or `BLOCKED` line makes the exit code non-zero. The identities are never
+touched: `sweep_lane_rows` is not even given the Cognito client.
+
+Measured again on 2026-11-19 with the Stage 2 lane tables added to
+`SWEEP_TABLES`: `accounts`, `units` and `unit-campaigns` read and delete;
+`kernelworx-inventory-ue1-dev`, `kernelworx-orders-ue1-dev` and
+`kernelworx-order-fulfillments-ue1-dev` answer `AccessDeniedException` on
+`Scan` and on `DeleteItem`. So a Stage 2 lane's inventory rows — the zeroed
+balances and the append-only movement history — are a named finding until the
+table grant lands. `tests/e2e/test_smoke_show_sell_stage2.py` calls this
+command in its teardown and records what it reported, so a lane cannot claim a
+clean sweep it did not get.
 
 ### AWS identity
 

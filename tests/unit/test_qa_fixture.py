@@ -536,6 +536,183 @@ def test_sweep_without_a_sub_touches_nothing(mod: ModuleType) -> None:
     assert "no fixture-owned rows found" in out.getvalue()
 
 
+# --------------------------------------------------------------------------- #
+# sweep — one acceptance lane's rows, by lane token, identities kept
+# --------------------------------------------------------------------------- #
+
+
+class DeniedScanDynamo(StubDynamo):
+    """A table the IAM identity cannot read at all, which is how dev answers today."""
+
+    def __init__(self, tables: Dict[str, List[Dict[str, Any]]], denied: List[str]) -> None:
+        super().__init__(tables)
+        self.denied = set(denied)
+
+    def scan(self, *, TableName: str, **_: Any) -> Dict[str, Any]:
+        if TableName in self.denied:
+            raise ScanRejected("AccessDeniedException")
+        return super().scan(TableName=TableName, **_)
+
+
+class ScanRejected(RuntimeError):
+    """Stand-in for the ``AccessDeniedException`` dev answers on a denied table."""
+
+
+def _lane_rows() -> Dict[str, List[Dict[str, Any]]]:
+    """Two acceptance lanes and a third party, on the tables ``sweep`` considers."""
+    return {
+        "kernelworx-units-ue1-dev": [
+            _item(
+                pk="UNIT#u1",
+                sk="METADATA",
+                createdByAccountId="ACCOUNT#sub-admin",
+                displayName="Stage 2 Pack lane-a",
+            ),
+            _item(
+                pk="UNIT#u2",
+                sk="METADATA",
+                createdByAccountId="ACCOUNT#sub-admin",
+                displayName="Stage 2 Pack lane-b",
+            ),
+            _item(pk="UNIT#u1", sk="GRANT#ACCOUNT#someone-else"),
+        ],
+        "kernelworx-unit-campaigns-ue1-dev": [
+            _item(
+                pk="UNIT_CAMPAIGN#c1",
+                sk="METADATA",
+                campaignName="Stage 2 Stock lane-a",
+                createdByAccountId="ACCOUNT#sub-admin",
+            ),
+            _item(
+                pk="UNIT_CAMPAIGN#c2",
+                sk="METADATA",
+                campaignName="Stage 2 Stock lane-b",
+                createdByAccountId="ACCOUNT#sub-admin",
+            ),
+            _item(pk="UNIT_CAMPAIGN#c1", sk="MEMBERSHIP#PROFILE#someone-else"),
+        ],
+        "kernelworx-inventory-ue1-dev": [
+            _item(pk="INV#c1", sk="BAL#p1", actorAccountId="ACCOUNT#sub-admin"),
+            _item(pk="INV#c2", sk="BAL#p1", actorAccountId="ACCOUNT#sub-admin"),
+        ],
+    }
+
+
+def test_sweep_deletes_only_rows_naming_the_lane_and_a_fixture_identity(mod: ModuleType) -> None:
+    """Both conditions or nothing: the lane's token in the row, a fixture identity in its key or owner."""
+    d = StubDynamo(_lane_rows())
+    out = io.StringIO()
+
+    code = mod.sweep_lane_rows(d, {"sub-admin"}, ("lane-a", "c1"), out)
+    text = out.getvalue()
+    deleted = {(t, tuple(sorted(k.items()))) for t, k in d.deleted}
+
+    assert code == 0
+    assert ("kernelworx-units-ue1-dev", (("pk", "UNIT#u1"), ("sk", "METADATA"))) in deleted
+    assert ("kernelworx-unit-campaigns-ue1-dev", (("pk", "UNIT_CAMPAIGN#c1"), ("sk", "METADATA"))) in deleted
+    assert ("kernelworx-inventory-ue1-dev", (("pk", "INV#c1"), ("sk", "BAL#p1"))) in deleted
+    assert "swept 3 row(s)" in text
+    assert text.count("plan:") == 1, "the plan is printed before any write"
+    assert text.index("row    ") < text.index("deleted row"), "nothing is deleted before the plan"
+
+
+def test_sweep_leaves_another_lanes_rows_and_a_third_party_grants(mod: ModuleType) -> None:
+    """The lane token is what keeps one run from sweeping the whole pool.
+
+    ``lane-b``'s Unit and Unit Campaign belong to the same fixture identities, so attribution alone
+    would take them; ``GRANT#ACCOUNT#someone-else`` and ``MEMBERSHIP#PROFILE#someone-else`` sit on
+    the swept lane's own partitions and are another tenant's data.
+    """
+    d = StubDynamo(_lane_rows())
+
+    mod.sweep_lane_rows(d, {"sub-admin"}, ("lane-a", "c1"), io.StringIO())
+    survivors = {
+        f"{table}/{item['pk']['S']}/{item['sk']['S']}" for table, items in d.tables.items() for item in items
+    }
+
+    assert "kernelworx-units-ue1-dev/UNIT#u2/METADATA" in survivors
+    assert "kernelworx-unit-campaigns-ue1-dev/UNIT_CAMPAIGN#c2/METADATA" in survivors
+    assert "kernelworx-inventory-ue1-dev/INV#c2/BAL#p1" in survivors
+    assert "kernelworx-units-ue1-dev/UNIT#u1/GRANT#ACCOUNT#someone-else" in survivors
+    assert "kernelworx-unit-campaigns-ue1-dev/UNIT_CAMPAIGN#c1/MEMBERSHIP#PROFILE#someone-else" in survivors
+
+
+def test_a_table_the_identity_cannot_read_is_reported_blocked_and_the_sweep_fails(mod: ModuleType) -> None:
+    """A denied ``Scan`` is a finding, not an empty table.
+
+    This is the measured dev state on 2026-11-19: ``kernelworx-qa-ue1-dev`` is denied
+    ``dynamodb:Scan`` on the Stage 2 inventory table, so a lane's inventory rows are neither removed
+    nor proven absent.  ``sweep`` says so and exits non-zero rather than reporting a clean sweep.
+    """
+    d = DeniedScanDynamo(_lane_rows(), denied=["kernelworx-inventory-ue1-dev"])
+    out = io.StringIO()
+
+    code = mod.sweep_lane_rows(d, {"sub-admin"}, ("lane-a", "c1"), out)
+    text = out.getvalue()
+
+    assert code == 1
+    assert "BLOCKED kernelworx-inventory-ue1-dev: ScanRejected" in text
+    assert "1 table(s) could not be read by this identity" in text
+    assert all(table != "kernelworx-inventory-ue1-dev" for table, _key in d.deleted), "a denied table is not swept"
+
+
+def test_a_lane_row_the_delete_left_behind_fails_the_sweep(mod: ModuleType) -> None:
+    """``delete_item`` returning without an error is not evidence; the re-scan is."""
+    d = StubDynamo(
+        _lane_rows(),
+        fail_keys={"kernelworx-unit-campaigns-ue1-dev": [{"pk": "UNIT_CAMPAIGN#c1", "sk": "METADATA"}]},
+    )
+    out = io.StringIO()
+
+    code = mod.sweep_lane_rows(d, {"sub-admin"}, ("lane-a", "c1"), out)
+    text = out.getvalue()
+
+    assert code == 1
+    assert "FAILED row   unit-campaigns     UNIT_CAMPAIGN#c1/METADATA" in text
+    assert "LEFT   kernelworx-unit-campaigns-ue1-dev/UNIT_CAMPAIGN#c1" in text
+
+
+def test_sweep_refuses_an_unbounded_run_and_a_run_that_deletes_nothing(mod: ModuleType) -> None:
+    """No token means no lane, and no lane means an unbounded sweep across another run's rows."""
+    d = StubDynamo(_lane_rows())
+    out = io.StringIO()
+
+    assert mod.sweep_lane_rows(d, {"sub-admin"}, (), out) == 1
+    assert "refusing to run without a --lane token" in out.getvalue()
+    assert d.deleted == []
+
+    empty = StubDynamo(_lane_rows())
+    again = io.StringIO()
+    assert mod.sweep_lane_rows(empty, set(), ("lane-a",), again) == 1
+    assert "no fixture subs" in again.getvalue()
+    assert empty.deleted == []
+
+
+def test_sweep_never_touches_an_identity(mod: ModuleType) -> None:
+    """A lane sweep runs with its fixture users still in place — the next run needs them.
+
+    ``sweep_lane_rows`` is not even given the Cognito client, so it cannot delete a user by
+    accident the way a shared teardown function could.
+    """
+    import inspect
+
+    signature = inspect.signature(mod.sweep_lane_rows)
+
+    assert [p.name for p in signature.parameters.values()][:2] == ["d", "subs"]
+    assert "c" not in signature.parameters, "the sweeper holds no Cognito client"
+
+
+def test_the_sweep_cli_requires_a_lane_token_and_yes(mod: ModuleType) -> None:
+    """``sweep`` deletes rows, so it is never interactive and never unbounded."""
+    without_token = io.StringIO()
+    assert mod.main(["qa_fixture.py", "sweep", "--yes"], out=without_token) == 2
+    assert "at least one --lane" in without_token.getvalue()
+
+    without_yes = io.StringIO()
+    assert mod.main(["qa_fixture.py", "sweep", "--lane", "lane-a"], out=without_yes) == 2
+    assert "--yes" in without_yes.getvalue()
+
+
 def test_down_asks_before_writing_and_aborts_on_any_answer_but_yes(mod: ModuleType) -> None:
     c = StubCognito(users=_fixture_users(mod))
     d = StubDynamo(_rows())

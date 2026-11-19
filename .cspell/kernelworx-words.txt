@@ -132,6 +132,7 @@ endswith
 env
 errorMessage
 esac
+finalbody
 isinstance
 jank
 metas

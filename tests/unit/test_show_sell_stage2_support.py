@@ -592,6 +592,219 @@ def test_the_stage_two_lane_holds_no_aws_or_cognito_admin_path() -> None:
     assert not offenders, f"the Stage 2 lane reaches for provisioning: {offenders}"
 
 
+# ---------------------------------------------------------------------------
+# Cleanup is a gate: a failed or blocked step fails the run
+# ---------------------------------------------------------------------------
+
+
+def test_a_teardown_step_that_raises_comes_back_as_a_failed_verdict() -> None:
+    """A refused mutation or an unmet read-back is a verdict, not a note in the record.
+
+    Before this shape the lane caught ``GraphQLError`` in its teardown and appended an ordinary
+    observation, so a refused ``deleteOrder`` left pytest green.  The verdict rule now lives in the
+    support module, where a lane defect cannot hide behind a deployed stack.
+    """
+    for exc in (
+        RuntimeError("deleteOrder refused: Forbidden"),
+        AssertionError("custody balances still hold stock"),
+        KeyError("unitScoutCampaignOrders"),
+    ):
+
+        def action(exc: BaseException = exc) -> str:
+            raise exc
+
+        row = stage2.run_cleanup_step("§2.8.7 teardown / ORD-API", action)
+        assert row["result"] == stage2.CLEANUP_FAILED, exc
+        assert type(exc).__name__ in row["summary"], row
+        assert row["acceptance"] == "§2.8.7 teardown / ORD-API"
+
+
+def test_a_step_the_environment_made_impossible_is_blocked_and_still_not_clean() -> None:
+    """``blocked`` names a step the environment refused, and it never counts as cleanup done.
+
+    The dev case is real: ``kernelworx-qa-ue1-dev`` is denied ``dynamodb:Scan`` on the Stage 2
+    inventory table, so those rows are neither removed nor proven absent.  That belongs in the record
+    as a gate that is not met.
+    """
+
+    def blocked() -> str:
+        raise stage2.CleanupBlocked("BLOCKED kernelworx-inventory-ue1-dev: AccessDeniedException")
+
+    rows = [
+        stage2.cleanup_row("§2.8.7 teardown / INV-M-05", "returned 3 units, no custody row stands"),
+        stage2.run_cleanup_step("§2.8.7 fixture sweep / lane", blocked),
+    ]
+
+    assert rows[1]["result"] == stage2.CLEANUP_BLOCKED
+    assert stage2.cleanup_blocked(rows) == [
+        "§2.8.7 fixture sweep / lane: CleanupBlocked: BLOCKED kernelworx-inventory-ue1-dev: AccessDeniedException"
+    ]
+    assert stage2.cleanup_problems(rows) == stage2.cleanup_blocked(rows)
+
+
+def test_a_cleanup_gate_with_only_observations_is_clean() -> None:
+    rows = [
+        stage2.cleanup_row("§2.8.7 teardown / ORD-API", "deleted 3 Orders; none answer the campaign"),
+        stage2.cleanup_row("§2.8.7 independent lane survived", "the canary lane answers the same rows"),
+    ]
+    stage2.assert_cleanup_clean(rows)
+    assert stage2.cleanup_problems(rows) == []
+
+
+def test_a_failed_cleanup_step_fails_the_run() -> None:
+    """This is the regression the review asked for: cleanup failure and green cannot coexist.
+
+    The lane calls :func:`~tests.e2e.utils.show_sell_stage2_support.assert_cleanup_clean` after it
+    writes its evidence, so a failed teardown leaves both a record and a red run.
+    """
+    rows = [stage2.cleanup_row("§2.8.7 teardown / AUTH-P", "revokeShare refused: Forbidden", result=stage2.CLEANUP_FAILED)]
+
+    with pytest.raises(stage2.StageTwoCleanupError) as caught:
+        stage2.assert_cleanup_clean(rows)
+    assert "1 §2.8.7 cleanup step(s) not met" in str(caught.value)
+    assert "revokeShare refused: Forbidden" in str(caught.value)
+
+
+def test_a_blocked_cleanup_step_is_reported_and_fatal_only_under_the_strict_gate() -> None:
+    """A step the environment refused is not the lane's failure, and it is never passed over.
+
+    The lane reports it in ``cleanup.json`` as ``blocked`` with the error, and
+    ``SS_STRICT_CLEANUP=1`` (``stage2.STRICT_CLEANUP``) turns it fatal — the state the gate reaches
+    when the Stage 2 table grant lands for the QA identity.
+    """
+    rows = [
+        stage2.cleanup_row(
+            "§2.8.7 fixture sweep / lane",
+            "BLOCKED kernelworx-inventory-ue1-dev: AccessDeniedException",
+            result=stage2.CLEANUP_BLOCKED,
+        )
+    ]
+    stage2.assert_cleanup_clean(rows)
+    with pytest.raises(stage2.StageTwoCleanupError) as caught:
+        stage2.assert_cleanup_clean(rows, strict=True)
+    assert "BLOCKED kernelworx-inventory-ue1-dev" in str(caught.value)
+    assert stage2.cleanup_failures(rows) == []
+    assert stage2.cleanup_problems(rows) == stage2.cleanup_blocked(rows)
+
+
+def test_the_strict_cleanup_gate_is_an_environment_switch_not_a_code_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flipping it has to be a runbook decision a reviewer can see, not an edit."""
+    monkeypatch.delenv("SS_STRICT_CLEANUP", raising=False)
+    assert stage2.STRICT_CLEANUP is False
+    monkeypatch.setattr(stage2, "STRICT_CLEANUP", True)
+    with pytest.raises(stage2.StageTwoCleanupError):
+        stage2.assert_cleanup_clean(
+            [stage2.cleanup_row("§2.8.7 fixture sweep / lane", "BLOCKED …", result=stage2.CLEANUP_BLOCKED)]
+        )
+    monkeypatch.setattr(stage2, "STRICT_CLEANUP", False)
+    with pytest.raises(stage2.StageTwoCleanupError):
+        stage2.assert_cleanup_clean(
+            [stage2.cleanup_row("§2.8.7 teardown / ORD-API", "deleteOrder refused", result=stage2.CLEANUP_FAILED)]
+        )
+
+
+def test_an_unrecognized_cleanup_verdict_is_refused_at_the_row() -> None:
+    """There is no third verdict that means "fine, move on"."""
+    with pytest.raises(AssertionError, match="unknown cleanup result"):
+        stage2.cleanup_row("§2.8.7 teardown", "something happened", result="blocked-then-retried")
+
+
+def test_the_journey_judges_cleanup_after_it_has_written_the_evidence() -> None:
+    """The record of a failed teardown is what a reviewer reads, and the run still has to fail."""
+    tree = _spec_tree()
+    test = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "test_show_sell_stage2_journey"
+    )
+    journey_try = next(node for node in ast.walk(test) if isinstance(node, ast.Try) and node.finalbody)
+    final = journey_try.finalbody
+    calls = [
+        (ast.unparse(node.func), node.lineno)
+        for node in ast.walk(ast.Module(body=final, type_ignores=[]))
+        if isinstance(node, ast.Call)
+    ]
+    written = [line for name, line in calls if "_write_evidence" in name]
+    judged = [line for name, line in calls if "assert_cleanup_clean" in name]
+    assert written and judged, f"the finally block must write evidence and then judge cleanup: {calls}"
+    assert written[0] < judged[0], "evidence first, verdict second"
+    assert stage2.assert_cleanup_clean, "the gate is the support module's, so the unit suite can execute it"
+
+
+def test_the_journey_records_every_cleanup_row_with_its_own_verdict() -> None:
+    """A cleanup row is recorded with ``result=row["result"]``, never with the default."""
+    tree = _spec_tree()
+    test = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "test_show_sell_stage2_journey"
+    )
+    journey_try = next(node for node in ast.walk(test) if isinstance(node, ast.Try) and node.finalbody)
+    final = journey_try.finalbody
+    records = [
+        node
+        for node in ast.walk(ast.Module(body=final, type_ignores=[]))
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "record"
+    ]
+    assert records, "the finally block records the cleanup rows"
+    for call in records:
+        kwargs = {keyword.arg for keyword in call.keywords}
+        assert "result" in kwargs, f"record at line {call.lineno} drops the verdict and defaults to observed"
+
+
+def test_every_teardown_step_reports_through_the_verdict_helper() -> None:
+    """One verdict rule, so a step cannot invent a friendlier outcome than the gate has."""
+    tree = _spec_tree()
+    teardown = next(
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_teardown_lane"
+    )
+    appended = [
+        (ast.unparse(call.func), ast.unparse(call.args[0]) if call.args else "")
+        for call in ast.walk(teardown)
+        if isinstance(call, ast.Call) and getattr(call.func, "attr", "") == "append"
+    ]
+    verdicts = [expr for target, expr in appended if target == "rows.append"]
+    assert verdicts, "the teardown collects a verdict per step"
+    assert all("run_cleanup_step" in expr for expr in verdicts), (
+        f"every verdict comes from stage2.run_cleanup_step: {verdicts}"
+    )
+    assert any("run_cleanup_step" in ast.unparse(call) for call in ast.walk(teardown) if isinstance(call, ast.Call)), (
+        "the teardown must decide each verdict with stage2.run_cleanup_step"
+    )
+    assert not any(isinstance(node, ast.Try) for node in ast.walk(teardown) if node is not teardown), (
+        "the teardown has no local try/except left to downgrade a refusal into an observation"
+    )
+
+
+def test_the_lane_sweeps_tables_through_the_fixture_script_and_never_through_aws() -> None:
+    """The Unit and Unit Campaign rows go through ``scripts/qa_fixture.py sweep``.
+
+    Project memory (AGENTS.md, "Show & Sell QA login fixture on the dev pool") says the acceptance
+    harness holds no AWS credentials: a second path to a fixture row is a path that drifts.  So the
+    lane names its own tokens and the sanctioned sweeper decides what is fixture-owned, and the
+    support module reaches it by subprocess, not by boto3.
+    """
+    support = Path(stage2.__file__).read_text(encoding="utf-8")
+    spec_source = _spec_source()
+
+    assert '"sweep"' in support and "subprocess.run" in support, "the lane must call the sanctioned sweeper"
+    assert "qa_fixture.py" in str(stage2.QA_FIXTURE_SCRIPT) and stage2.QA_FIXTURE_SCRIPT.is_file()
+    for needle in ("boto3", 'client("dynamodb")'):
+        assert needle not in support and needle not in spec_source, f"the lane reaches for AWS directly: {needle}"
+    assert "_lane_table_sweep" in spec_source and "fixture_sweep" in spec_source
+    assert "--lane" in support, "each sweep is narrowed by the lane's own tokens"
+
+
+def test_the_sweeper_is_wired_into_the_runbook_the_lane_is_run_from() -> None:
+    """A cleanup path nobody can run is a cleanup path nobody runs."""
+    runbook = (REPO_ROOT / "tests" / "e2e" / "README.md").read_text(encoding="utf-8")
+    assert "qa_fixture.py sweep" in runbook or "qa_fixture.py\n    sweep" in runbook, (
+        "tests/e2e/README.md must carry the sweep command the lane calls"
+    )
+
+
 def test_every_stage_two_screenshot_masks_the_join_code() -> None:
     """A Stage 2 tab is a Unit Campaign page, and it renders the live join code like the others."""
     for call in ast.walk(_spec_tree()):
