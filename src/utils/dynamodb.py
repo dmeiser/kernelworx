@@ -306,6 +306,20 @@ class TableAccessor:
         return self._get_table("inventory")
 
     @property
+    def show_and_sells(self) -> "Table":
+        """Get the Show & Sell event table instance (data model §6.4).
+
+        One partition per event (``SHOW_AND_SELL#<showAndSellId>``) holds the event
+        aggregate at ``METADATA`` plus its slots (``SLOT#``), signups (``SIGNUP#``),
+        sales (``SALE#``), We Owe obligations (``WE_OWE#``) and finalization records
+        (``FINALIZATION#``/``CREDIT#``) — the whole event reads back in one partition,
+        and the event row's ``version`` is what every one of those writes conditions
+        on. ``unitCampaignId-startAt-index`` is how a campaign's schedule is discovered;
+        it is never the authority for what a write does.
+        """
+        return self._get_table("show_and_sells")
+
+    @property
     def order_fulfillments(self) -> "Table":
         """Get the individual-Order fulfillment table instance (data model §6.5).
 

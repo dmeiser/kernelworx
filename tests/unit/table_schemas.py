@@ -605,6 +605,88 @@ def create_order_fulfillments_table_schema() -> dict[str, Any]:
     }
 
 
+def create_show_and_sells_table_schema() -> dict[str, Any]:
+    """
+    Schema for the Show & Sell event aggregate table (data model §5.10, §6.4, §8.9).
+
+    One partition per event (`SHOW_AND_SELL#<showAndSellId>`) holds the event's
+    `METADATA` row plus its `SLOT#` and `SIGNUP#` rows, so the aggregate is the
+    serialization point every later stage conditions on. The five GSIs are discovery
+    and lookup paths only — the schedule read re-reads each row through its own key,
+    and an allocation is found through the event's `productIds` rather than through
+    an index — so no read of record depends on an index being current.
+
+    TTL is the shared seven-day idempotency-marker horizon (`expiresAtEpoch`, §8.9):
+    the marker for a Show & Sell mutation rides the table that mutation writes, and
+    event, slot, and signup rows never carry an expiry.
+
+    Not part of ``get_all_table_schemas``/``create_all_tables``: the 10-table fixture
+    count stays exact, and the Stage 3.1 event tests create this table explicitly
+    (WORK-163, checklist §3.1).
+    """
+    return {
+        "TableName": "kernelworx-show-and-sells-ue1-dev",
+        "KeySchema": [
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ],
+        "AttributeDefinitions": [
+            {"AttributeName": "pk", "AttributeType": "S"},
+            {"AttributeName": "sk", "AttributeType": "S"},
+            {"AttributeName": "unitCampaignId", "AttributeType": "S"},
+            {"AttributeName": "startAt", "AttributeType": "S"},
+            {"AttributeName": "saleId", "AttributeType": "S"},
+            {"AttributeName": "weOweId", "AttributeType": "S"},
+            {"AttributeName": "campaignId", "AttributeType": "S"},
+            {"AttributeName": "status", "AttributeType": "S"},
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "GlobalSecondaryIndexes": [
+            {
+                "IndexName": "unitCampaignId-startAt-index",
+                "KeySchema": [
+                    {"AttributeName": "unitCampaignId", "KeyType": "HASH"},
+                    {"AttributeName": "startAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "saleId-index",
+                "KeySchema": [{"AttributeName": "saleId", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "weOweId-index",
+                "KeySchema": [{"AttributeName": "weOweId", "KeyType": "HASH"}],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "campaignId-status-index",
+                "KeySchema": [
+                    {"AttributeName": "campaignId", "KeyType": "HASH"},
+                    {"AttributeName": "status", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+            {
+                "IndexName": "unitCampaignId-status-index",
+                "KeySchema": [
+                    {"AttributeName": "unitCampaignId", "KeyType": "HASH"},
+                    {"AttributeName": "status", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            },
+        ],
+        "TimeToLiveSpecification": {"AttributeName": "expiresAtEpoch", "Enabled": True},
+    }
+    """
+    Get all table schemas as a list.
+
+    Returns:
+        List of table schema dictionaries suitable for dynamodb.create_table(**schema),
+        in table order: accounts, catalogs, profiles, campaigns, orders,
+        shares, invites, shared_campaigns, units, unit_campaigns.
+    """
 def get_all_table_schemas() -> list[dict[str, Any]]:
     """
     Get all table schemas as a list.
