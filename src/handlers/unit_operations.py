@@ -44,6 +44,7 @@ from botocore.exceptions import ClientError
 
 try:  # pragma: no cover
     from utils import (
+        allocation_models,
         inventory_models,
         order_fulfillment_models,
         show_and_sell_models,
@@ -54,6 +55,7 @@ try:  # pragma: no cover
     from utils.import_fallback import import_from_utils
 except ModuleNotFoundError:  # pragma: no cover
     from ..utils import (
+        allocation_models,
         inventory_models,
         order_fulfillment_models,
         show_and_sell_models,
@@ -78,6 +80,7 @@ get_logger = import_from_utils("logging", "get_logger")
 (
     BOOTSTRAP_SCOPE,
     IdempotentMutationRunner,
+    MAX_TRANSACTION_ACTIONS,
     WritePlan,
     marker_keys,
     normalized_fingerprint,
@@ -88,6 +91,7 @@ get_logger = import_from_utils("logging", "get_logger")
     "mutations",
     "BOOTSTRAP_SCOPE",
     "IdempotentMutationRunner",
+    "MAX_TRANSACTION_ACTIONS",
     "WritePlan",
     "marker_keys",
     "normalized_fingerprint",
@@ -147,6 +151,10 @@ UNIT_CAMPAIGN_OPPORTUNITIES_FIELD = "unitCampaignOpportunities"
 SHOW_AND_SELL_OPPORTUNITY_FIELD = "showAndSellOpportunity"
 SHOW_AND_SELL_ID_ARGUMENT = "showAndSellId"
 
+# Stage 3.2 — event stock assignment and the raw allocation read (§3.2.3-§3.2.4).
+ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD = "assignShowAndSellInventory"
+EVENT_INVENTORY_ALLOCATIONS_FIELD = "eventInventoryAllocations"
+
 # Argument names that carry no write intent, so they stay out of the writable-field
 # check.  ``idempotency`` and ``version`` are the mutation contract's own envelopes and
 # ``showAndSellId`` names the row being addressed; every other name in the input is a
@@ -167,6 +175,9 @@ _MOVEMENT_FILTER_ORDER: tuple[str, ...] = (
     "startAt",
     "endAt",
 )
+# The filter set that pins an ``eventInventoryAllocations`` cursor to the read it came
+# from (PAGE-01): the same rule as the movement read, over this read's three filters.
+_ALLOCATION_FILTER_ORDER: tuple[str, ...] = ("productId", "showAndSellId", "status")
 # The §6.6 counter contract on the existing throttle table: its own key prefix
 # and window bucket keep it apart from public-order share-token throttling.
 _THROTTLE_KEY_PREFIX = "UNIT_INVITE_REDEMPTION"
@@ -2029,6 +2040,14 @@ def _catalog_product_ids(catalog: Mapping[str, Any]) -> set[str]:
     return {str(item["productId"]) for item in products if isinstance(item, Mapping) and item.get("productId")}
 
 
+def _catalog_or_not_found(campaign: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The campaign's own catalog row, or the same ``NOT_FOUND`` a missing catalog answers."""
+    catalog = cast(Optional[Mapping[str, Any]], unit_campaign_models.read_catalog(str(campaign["catalogId"])))
+    if catalog is None:
+        raise AppError(ErrorCode.NOT_FOUND, "The campaign's catalog could not be loaded")
+    return catalog
+
+
 def _require_catalog_product(campaign: Mapping[str, Any], product_id: str) -> None:
     """Require a receipt's product to be one this campaign sells (§2.2.1).
 
@@ -2042,11 +2061,28 @@ def _require_catalog_product(campaign: Mapping[str, Any], product_id: str) -> No
     to count them out. Refusing the adjustment would strand the stock in a balance
     no one may correct.
     """
-    catalog = unit_campaign_models.read_catalog(str(campaign["catalogId"]))
-    if catalog is None:
-        raise AppError(ErrorCode.NOT_FOUND, "The campaign's catalog could not be loaded")
+    catalog = _catalog_or_not_found(campaign)
     if product_id not in _catalog_product_ids(catalog):
         raise AppError(ErrorCode.INVALID_INPUT, "productId is not a product of this campaign's catalog")
+
+
+def _require_catalog_products(campaign: Mapping[str, Any], product_ids: Sequence[str]) -> None:
+    """Require every product of one batch to be one this campaign sells (§2.2.1, EVT-M-04).
+
+    The same allowlist as :func:`_require_catalog_product`, applied once per batch: the
+    catalog named on the campaign row is the allowlist and the caller does not choose it,
+    and an assignment for a product the campaign cannot sell is stock nothing can account
+    for at finalization. It names every product it refused rather than the first, because
+    a Kernel correcting a 16-line entry should not have to discover the second bad id on
+    the next attempt.
+    """
+    offered = _catalog_product_ids(_catalog_or_not_found(campaign))
+    missing = sorted({product_id for product_id in product_ids if product_id not in offered})
+    if missing:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "productId is not a product of this campaign's catalog: " + ", ".join(missing),
+        )
 
 
 def _balance_quantity(existing: Optional[Mapping[str, Any]], attribute: str) -> int:
@@ -4672,6 +4708,430 @@ def _show_and_sell_opportunity(event: Dict[str, Any], caller_id: str) -> Dict[st
     return _opportunity_answer(event_row, timezone_name=timezone_name, signups=signups)
 
 
+# --- Event stock assignment (§3.2.3) ---------------------------------------------
+
+
+def _assignment_targets(payload: Mapping[str, Any]) -> List[allocation_models.AllocationTarget]:
+    """This batch's per-product stock targets, validated (§6.2 ``AllocationTargetInput``).
+
+    The quantity is the event's whole target for that product, never an amount to add:
+    two Kernels both reading 3 and both typing 5 must not produce 8. §3.2.1's target-not-
+    delta rule is enforced by the planner, which turns a target into the one delta a
+    movement is allowed to report.
+    """
+    return cast(
+        List[allocation_models.AllocationTarget],
+        allocation_models.normalize_allocation_targets(payload.get("items")),
+    )
+
+
+def _assignment_sections(
+    unit_campaign_id: str, product_ids: Sequence[str]
+) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+    """Every row each addressed product's position is made of, in one consistent read each.
+
+    The balance and the campaign's allocation rows for that product must come from the
+    same read (§8.4): the concurrent-overlap rule compares a candidate target against the
+    campaign's other commitments of that product, and a balance read from a different
+    moment than the allocations that compete with it is the bug where four boxes carry
+    three to each of two events. Reading per product rather than the whole campaign
+    partition is what keeps a two-product save cheap on a campaign with a long history,
+    and it keys every product the caller named: one with no rows at all answers with an
+    empty section, so a caller never has to guess whether a missing key means "not
+    stocked" or "not asked for".
+    """
+    return dict(inventory_models.campaign_product_sections(unit_campaign_id, product_ids))
+
+
+def _section_balance(section: Mapping[str, List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
+    """One product's ``InventoryBalance`` row, or ``None`` before the first receipt."""
+    return section["balance"][0] if section["balance"] else None
+
+
+def _event_allocation_row(allocations: Sequence[Mapping[str, Any]], event_id: str) -> Optional[Dict[str, Any]]:
+    """This event's allocation row for one product, out of that product's allocation rows."""
+    for row in allocations:
+        if str(row.get(show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE) or "") == event_id:
+            return cast(Dict[str, Any], row)
+    return None
+
+
+def _refuse_concurrent_over_assignment(conflict: allocation_models.ConcurrentConflict) -> None:
+    """Refuse an assignment that over-assigns at a shared instant, and say where (ALLOC-02).
+
+    The refusal carries the four numbers AC-09 asks the screen to be able to state — the
+    product, the stock that is really there, the assigned total, and the overage — plus
+    the instant they collide at, which is the fact a sampled check would have to guess.
+    """
+    raise AppError(
+        ErrorCode.CONFLICT,
+        allocation_models.conflict_message(conflict),
+        details={
+            "subcode": allocation_models.CONCURRENT_OVER_ASSIGNMENT,
+            "productId": conflict.product_id,
+            "currentStockQty": conflict.current_stock_qty,
+            "assignedQty": conflict.assigned_qty,
+            "overageQty": conflict.overage_qty,
+            "at": conflict.at,
+        },
+    )
+
+
+def _plan_live_assignments(
+    event_row: Mapping[str, Any],
+    targets: Sequence[allocation_models.AllocationTarget],
+    sections: Mapping[str, Mapping[str, List[Dict[str, Any]]]],
+    event_id: str,
+) -> List[allocation_models.AllocationChange]:
+    """Plan every product in the batch and refuse the batch if any of it collides (§8.4).
+
+    All of the planning happens before any of the staging, because a request that is
+    refused must change nothing: with the writes staged first, a product accepted early
+    in the batch would already be in the transaction when a later product's target turned
+    out to over-assign. The concurrency rule is evaluated on the campaign's other open
+    allocations for that product, with this event's own row excluded — the candidate
+    replaces it, it does not stack on top of it.
+
+    A target that restates what the row already carries yields no change and is simply
+    absent from the plan: it spends no movement and no allocation write, while the request
+    still commits its marker and moves the event version.
+    """
+    existing_by_product = {
+        target.product_id: _event_allocation_row(
+            sections[target.product_id]["allocations"],
+            event_id,
+        )
+        for target in targets
+    }
+    changes: List[allocation_models.AllocationChange] = allocation_models.plan_allocation_targets(
+        event_row, targets, existing_by_product
+    )
+    for change in changes:
+        section = sections[change.product_id]
+        existing = existing_by_product[change.product_id]
+        conflict = allocation_models.concurrent_conflict(
+            product_id=change.product_id,
+            sellable_qty=inventory_models.sellable_kernel_qty(_section_balance(section)),
+            start_at=change.start_at,
+            end_at=change.end_at,
+            remaining_qty=change.remaining_qty,
+            other_allocations=[row for row in section["allocations"] if row is not existing],
+            current_remaining_qty=int(existing.get(inventory_models.REMAINING_QTY) or 0) if existing else 0,
+        )
+        if conflict is not None:
+            _refuse_concurrent_over_assignment(conflict)
+    return changes
+
+
+def _stage_assignment_writes(
+    plan: Any,
+    event_row: Mapping[str, Any],
+    changes: Sequence[allocation_models.AllocationChange],
+    sections: Mapping[str, Mapping[str, List[Dict[str, Any]]]],
+    *,
+    event_id: str,
+    product_ids: Sequence[str],
+    expected_version: int,
+    caller_id: str,
+    idempotency_key: str,
+    now_iso: str,
+) -> None:
+    """Stage §3.2.3's live-state write plan: allocations, movements, balance versions, event row.
+
+    One product's three writes and their order:
+
+    - the balance row's ``version`` moves with no quantity changed. §3.2.3 names balance
+      versions, and it is what a position reader needs: ``assignedOpenQty`` is derived
+      from allocation rows (§7), so without the version moving, a caller holding a
+      position could not tell that the number they derived had changed underneath them.
+      ``kernelPhysicalQty`` is not touched, which is EVT-M-04's "physical stock never
+      changes" as a property of the staged writes rather than of the planner alone.
+    - the allocation row, a conditional ``Put`` when the event holds this product for the
+      first time and a versioned ``Update`` otherwise — one row per (campaign, product,
+      event) is §5.11's uniqueness, and the condition is what enforces it under a
+      concurrent assignment of the same product to the same event.
+    - the movement, whose ``assignedDelta`` is what this request moved and whose
+      ``inventoryVersion`` names the balance version the bump just produced.
+
+    A product the campaign has never received has no balance row to bump, so its movement
+    names no ``inventoryVersion`` — SDL §5.8 makes that field non-null exactly when a
+    position row moved, and none did. The event row is staged last and carries the
+    cumulative ``productIds`` plus ``version``: the locator and the rows it points at
+    commit together, so an allocation can never be unreachable (§8.4).
+    """
+    for change in changes:
+        section = sections[change.product_id]
+        balance = _section_balance(section)
+        balance_version: Optional[int] = None
+        if balance is not None:
+            balance_expected_version = _number(balance[inventory_models.VERSION_ATTRIBUTE])
+            balance_version = balance_expected_version + 1
+            plan.add(
+                *inventory_models.inventory_balance_delta_action(
+                    unit_campaign_id=change.unit_campaign_id,
+                    product_id=change.product_id,
+                    existing=balance,
+                    expected_version=balance_expected_version,
+                    now_iso=now_iso,
+                )
+            )
+        if change.creates_row:
+            plan.add(
+                *show_and_sell_models.put_allocation_action(
+                    inventory_models.build_event_inventory_allocation_item(
+                        unit_campaign_id=change.unit_campaign_id,
+                        product_id=change.product_id,
+                        show_and_sell_id=change.show_and_sell_id,
+                        start_at=change.start_at,
+                        end_at=change.end_at,
+                        allocated_qty=change.allocated_qty,
+                        status=change.status,
+                        sold_qty=change.sold_qty,
+                        released_qty=change.released_qty,
+                        now_iso=now_iso,
+                    )
+                )
+            )
+        else:
+            existing = _event_allocation_row(section["allocations"], event_id)
+            if existing is None:  # pragma: no cover - the planner only answers "update" for a row it read
+                raise AppError(
+                    ErrorCode.INTERNAL_ERROR,
+                    f"{change.product_id} allocation row disappeared between this request's read and its write",
+                )
+            plan.add(
+                *show_and_sell_models.assignment_allocation_action(
+                    allocation=existing,
+                    allocated_qty=change.allocated_qty,
+                    remaining_qty=change.remaining_qty,
+                    updated_at=now_iso,
+                )
+            )
+        plan.add(
+            *show_and_sell_models.event_assignment_movement_action(
+                event=event_row,
+                product_id=change.product_id,
+                movement_type=change.movement_type,
+                assigned_delta=change.assigned_delta,
+                inventory_version=balance_version,
+                actor_account_id=caller_id,
+                occurred_at=now_iso,
+                idempotency_key=idempotency_key,
+            )
+        )
+    plan.add(
+        *show_and_sell_models.assignment_event_action(
+            show_and_sell_id=event_id,
+            expected_version=expected_version,
+            product_ids=product_ids,
+            updated_by_account_id=caller_id,
+            updated_at=now_iso,
+        )
+    )
+
+
+def _assignment_answer(event_row: Mapping[str, Any]) -> Dict[str, Any]:
+    """The assignment result: the event's allocations, positions, and warnings (§6.2).
+
+    Everything is read back from rows rather than assembled from the plan, for the reason
+    :func:`_once` states — the stored replay answer and the answer the caller received
+    have to be one answer — and because the warnings are a fact about the campaign's
+    allocation rows as this write leaves them (ALLOC-03). A product the event lists but
+    has no rows for answers at zero, and an over-assignment that is sequential rather than
+    concurrent is reported here, with the product, the current stock, the assigned total
+    and the overage, exactly as AC-10 requires the screen to state them.
+    """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    unit_campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    product_ids = show_and_sell_models.normalize_product_ids(event_row.get(show_and_sell_models.PRODUCT_IDS_ATTRIBUTE))
+    sections = inventory_models.campaign_product_sections(unit_campaign_id, product_ids)
+    allocations: List[Dict[str, Any]] = []
+    positions: List[Dict[str, Any]] = []
+    warnings: List[Dict[str, Any]] = []
+    for product_id in product_ids:
+        section = sections[product_id]
+        allocations.extend(
+            show_and_sell_models.allocation_payload(row)
+            for row in section["allocations"]
+            if str(row.get(show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE) or "") == event_id
+        )
+        positions.append(_position_payload(unit_campaign_id, product_id, section))
+        warning = allocation_models.sequential_warning(
+            product_id=product_id,
+            sellable_qty=inventory_models.sellable_kernel_qty(_section_balance(section)),
+            allocations=section["allocations"],
+        )
+        if warning is not None:
+            warnings.append(warning)
+    return {"allocations": allocations, "inventoryPositions": positions, "warnings": warnings}
+
+
+def _load_assignment_answer(stored_id: str) -> Dict[str, Any]:
+    """Rebuild an assignment answer from the stored event row, for a marker with no payload."""
+    return _assignment_answer(show_and_sell_models.load_show_and_sell_or_not_found(stored_id))
+
+
+def _assign_show_and_sell_inventory(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Set a live event's stock target per product (§3.2.3, EVT-M-04, SS-API-01).
+
+    The gate order is the one every Show & Sell write uses, and for the same reasons: the
+    event row is the tenancy answer (``unitId`` comes from the row, never from the caller,
+    so a cross-Unit event id is ``NOT_FOUND`` — AUTH-U), replay is consulted before the
+    version and state guards because the first attempt's own write moved both, the caller's
+    version must equal the row just read (``_require_read_version``), and the state must be
+    one §3.5 allows an assignment in.
+
+    Two write shapes, decided by that state:
+
+    - ``SCHEDULED``/``ACTIVE``/``ENDED`` write the stock answer — allocation rows, one
+      ``EVENT_ASSIGN``/``EVENT_MANUAL_REDUCE`` movement each, a balance version bump, the
+      cumulative ``productIds``, and the event version — in one transaction, with the
+      concurrent-overlap refusal and the finalization-feasibility preflight both evaluated
+      before a single action is staged.
+    - ``REOPENED`` writes the admin's inputs only: the draft target map, the cumulative
+      ``productIds``, and the version. No allocation, movement, or balance row moves,
+      because a reopened event's approved stock answer is the finalization that was
+      suspended, and §8.6 gives re-finalization the job of validating and applying what
+      was entered meanwhile.
+
+    A batch that changes no allocation still commits its marker and moves the event
+    version: the caller asked for a save, and the version is that save's receipt.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    event_id = _resource_id(payload, SHOW_AND_SELL_ID_ARGUMENT)
+    expected_version = _expected_version(payload)
+    targets = _assignment_targets(payload)
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(
+        caller_id=caller_id,
+        operation=ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD,
+        scope=event_id,
+        idempotency_key=key,
+    )
+    replayed = _replay(runner, keys, fingerprint, ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD, _load_assignment_answer)
+    if replayed is not None:
+        return replayed
+
+    # After replay for the reason _update_show_and_sell states: this request's own write
+    # moved the version, so a retry that re-ran the guard would answer CONFLICT about a
+    # request it already completed.
+    _require_read_version(event_row, expected_version)
+    state = show_and_sell_models.require_editable(event_row)
+    reopened = state == show_and_sell_models.STATUS_REOPENED
+    campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    campaign = unit_campaign_models.load_unit_campaign_or_not_found(campaign_id)
+    _require_catalog_products(campaign, [target.product_id for target in targets])
+    sections = _assignment_sections(campaign_id, [target.product_id for target in targets])
+    now_iso = utc_now_iso()
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=event_id)
+    if reopened:
+        product_ids = allocation_models.draft_product_ids(event_row, targets)
+        allocation_models.require_finalization_feasible(len(product_ids), MAX_TRANSACTION_ACTIONS)
+        plan.add(
+            *show_and_sell_models.assignment_draft_action(
+                show_and_sell_id=event_id,
+                expected_version=expected_version,
+                product_ids=product_ids,
+                draft=allocation_models.draft_allocation_targets(event_row, targets),
+                updated_by_account_id=caller_id,
+                updated_at=now_iso,
+            )
+        )
+        changes: List[allocation_models.AllocationChange] = []
+    else:
+        changes = _plan_live_assignments(event_row, targets, sections, event_id)
+        product_ids = allocation_models.planned_product_ids(event_row, changes)
+        allocation_models.require_finalization_feasible(len(product_ids), MAX_TRANSACTION_ACTIONS)
+        _stage_assignment_writes(
+            plan,
+            event_row,
+            changes,
+            sections,
+            event_id=event_id,
+            product_ids=product_ids,
+            expected_version=expected_version,
+            caller_id=caller_id,
+            idempotency_key=key,
+            now_iso=now_iso,
+        )
+
+    build_result = _once(lambda: _load_assignment_answer(event_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD,
+        fingerprint=fingerprint,
+        result_id=event_id,
+        load_result=_load_assignment_answer,
+        result_payload=build_result,
+    )
+    answer = build_result()
+    log.info(
+        "Show & Sell inventory assigned",
+        show_and_sell_id=event_id,
+        caller_id=caller_id,
+        products=len(changes),
+        warnings=len(answer["warnings"]),
+        draft_only=reopened,
+    )
+    return answer
+
+
+# --- Raw allocation read (§3.2.4) ------------------------------------------------
+
+
+def _allocation_filters(event: Dict[str, Any]) -> Dict[str, Any]:
+    """The validated ``eventInventoryAllocations`` filter set."""
+    values: Dict[str, Any] = {}
+    for name in ("productId", "showAndSellId"):
+        raw = _optional_argument(event, name)
+        values[name] = None if raw is None else inventory_models.normalize_inventory_id(raw, name)
+    raw_status = _optional_argument(event, "status")
+    values["status"] = None if raw_status is None else inventory_models.normalize_allocation_status(raw_status)
+    return values
+
+
+def _event_inventory_allocations(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One campaign's allocation intervals, raw and paginated, with no aggregation (§3.2.4).
+
+    The answer is the rows: ``allocatedQty``/``soldQty``/``releasedQty``/``remainingQty``,
+    status, ``version``, and the denormalized interval each row competes on. Assigned,
+    unassigned and overage totals are NOT computed here — §9 and AC-36 put that arithmetic
+    in the browser over exactly these fields, so a report view and the inventory board
+    cannot drift apart by deriving the same number twice, and a saved report keeps
+    reconciling after the campaign's stock moves (DATA-Q-03).
+
+    Every filter is part of the cursor scope, so a cursor from a product-filtered page
+    cannot walk the campaign's whole allocation set (PAGE-01). The read is the consistent
+    campaign partition read rather than a GSI, which is what lets a caller read back the
+    rows a mutation just committed and reconcile against them.
+    """
+    campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
+    unit_campaign_id = str(campaign["unitCampaignId"])
+    filters = _allocation_filters(event)
+    rows = inventory_models.campaign_allocation_rows(
+        unit_campaign_id,
+        product_id=filters["productId"],
+        show_and_sell_id=filters["showAndSellId"],
+        status=filters["status"],
+    )
+    token = "#".join("" if filters[name] is None else str(filters[name]) for name in _ALLOCATION_FILTER_ORDER)
+    page = dict(
+        paginate_page(rows, f"{EVENT_INVENTORY_ALLOCATIONS_FIELD}#{unit_campaign_id}#{token}", _page_argument(event))
+    )
+    page["items"] = [show_and_sell_models.allocation_payload(row) for row in page["items"]]
+    return page
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -4715,6 +5175,8 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     SHOW_AND_SELLS_FIELD: _show_and_sells,
     UNIT_CAMPAIGN_OPPORTUNITIES_FIELD: _unit_campaign_opportunities,
     SHOW_AND_SELL_OPPORTUNITY_FIELD: _show_and_sell_opportunity,
+    ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD: _assign_show_and_sell_inventory,
+    EVENT_INVENTORY_ALLOCATIONS_FIELD: _event_inventory_allocations,
 }
 
 

@@ -155,6 +155,54 @@ export type GqlAllocationStatus =
   /** Released by finalization. */
   | 'RELEASED';
 
+/** One product's stock target for one event (checklist §3.2.1). A target, not a delta: the request says how many the event should hold, and the resolver works out what that changes. */
+export type GqlAllocationTargetInput = {
+  /** The catalog product being assigned; it must be a product of this campaign's catalog. */
+  productId: Scalars['ID']['input'];
+  /** How many the event should hold after this write (>= 0). Zero releases the remainder this event still holds. */
+  quantity: Scalars['Int']['input'];
+};
+
+/** A save that was allowed and said: the campaign holds less than its open allocations promise. Reported, never clamped, and never a refusal — a campaign may hold a morning and an afternoon event against the same four Kernels (spec ALLOC-03). */
+export type GqlAllocationWarning = {
+  __typename?: 'AllocationWarning';
+  /** What every open allocation of this campaign holds for that product, this write included. */
+  assignedQty: Scalars['Int']['output'];
+  /** What the warning is: `SEQUENTIAL_OVER_ASSIGNMENT`. */
+  code: Scalars['String']['output'];
+  /** Sellable Kernel stock for that product right now. */
+  currentStockQty: Scalars['Int']['output'];
+  /** The sentence for the tooltip, carrying the product, the stock, the assigned total, and the overage. */
+  message: Scalars['String']['output'];
+  /** assignedQty - currentStockQty. */
+  overageQty: Scalars['Int']['output'];
+  /** The product the warning is about. */
+  productId: Scalars['ID']['output'];
+};
+
+/** Input for assignShowAndSellInventory. A batch is one atomic save: at most one target per product, no product-wide cap, and the batch is refused before any write when its computed plan could no longer be finalized (§8.10). */
+export type GqlAssignShowAndSellInventoryInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Non-empty, at most one entry per product. A product left out keeps whatever it already holds. */
+  items: Array<GqlAllocationTargetInput>;
+  /** The event whose stock is being set. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The event version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
+};
+
+/** What one assignment save did: the event's allocations, each product's position, and any over-assignment it is warning about (§6.2). */
+export type GqlAssignShowAndSellInventoryPayload = {
+  __typename?: 'AssignShowAndSellInventoryPayload';
+  /** This event's allocation rows after the write, for the products the event lists. */
+  allocations: Array<GqlShowAndSellAllocation>;
+  /** The position for each of those products, with the assigned/unassigned/overage quantities the save moved. */
+  inventoryPositions: Array<GqlInventoryPosition>;
+  /** One warning per product whose open allocations now exceed sellable stock; empty when nothing is over-assigned. */
+  warnings: Array<GqlAllocationWarning>;
+};
+
 /** A fundraising campaign owned by a seller profile, tied to a catalog for a season. */
 export type GqlCampaign = {
   __typename?: 'Campaign';
@@ -490,6 +538,15 @@ export type GqlDateRangeFilter = {
   startAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
 };
 
+/** A page of raw allocation facts for one Unit Campaign (data query §6.2, DATA-Q-03). It carries rows and never a total: assigned, unassigned, and overage totals are the browser's arithmetic, over every page it fetched. */
+export type GqlEventInventoryAllocationConnection = {
+  __typename?: 'EventInventoryAllocationConnection';
+  /** The allocation rows on this page, ordered by product then event. */
+  items: Array<GqlShowAndSellAllocation>;
+  /** Cursor state for this page. */
+  pageInfo: GqlPageInfo;
+};
+
 /** Input for fulfillIndividualOrderLine. Fills part or all of one individual Order line from a Kernel-chosen source. */
 export type GqlFulfillIndividualOrderLineInput = {
   /** The Order.fulfillmentVersion this caller read. A stale value conflicts instead of double-fulfilling one line. */
@@ -756,6 +813,8 @@ export type GqlMutation = {
   adminResetUserPassword: Scalars['Boolean']['output'];
   /** Set or clear a campaign's sharedCampaignCode, associating it with a shared campaign (admin only). Returns the updated campaign. */
   adminUpdateCampaignSharedCode: GqlCampaign;
+  /** Set how many Kernels a live event holds, per product, as one atomic save: the allocation rows, one movement each, the balance versions, the event's cumulative productIds, and the event version — while the event is reopened, only the admin's draft inputs, because a reopened event's stock answer belongs to re-finalization. A product left out keeps what it holds; a target of zero releases that product's remainder; what the event already sold is never taken back. Assigning more than the campaign holds at a shared instant is refused and writes nothing, and assigning more than it holds across events that never overlap saves with a warning naming the product, the stock, the assigned total, and the overage. Physical stock never moves. Unit Admin for the event's Unit. */
+  assignShowAndSellInventory: GqlAssignShowAndSellInventoryPayload;
   /** Cancel an event before it starts, in one atomic workflow: the event goes CANCELLED with its reason and actor, every open allocation is cancelled with its remainder released, signups and their commitment projections are cancelled, slot counters go to zero, and each Scout's commitment guard moves. An event that has started is finished by finalizing it, not by cancelling it. Unit Admin for the event's Unit. */
   cancelShowAndSell: GqlCancelShowAndSellPayload;
   /** Confirm a QR code upload for a payment method after the S3 upload completes. Returns the updated payment method. */
@@ -911,6 +970,11 @@ export type GqlMutation_AdminResetUserPasswordArgs = {
 export type GqlMutation_AdminUpdateCampaignSharedCodeArgs = {
   campaignId: Scalars['ID']['input'];
   sharedCampaignCode?: InputMaybe<Scalars['String']['input']>;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_AssignShowAndSellInventoryArgs = {
+  input: GqlAssignShowAndSellInventoryInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1578,6 +1642,8 @@ export type GqlQuery = {
   adminListUsers: GqlAdminUserConnection;
   /** Search users by email, name, or accountId (admin only). */
   adminSearchUser: Array<GqlAdminUser>;
+  /** One Unit Campaign's allocation rows, product then event: the interval each was decided on, and allocated/sold/released/remaining quantities with the row's version. Raw facts only — no assigned/unassigned/overage total is computed here, because the browser fetches every page and adds them up itself (DATA-Q-03). Unit Admin for the campaign's Unit. */
+  eventInventoryAllocations: GqlEventInventoryAllocationConnection;
   /** Find active shared campaigns that exactly match the given unit and season (unitType, unitNumber, city, state, campaignName, and campaignYear). Inactive shared campaigns are excluded. */
   findSharedCampaigns: Array<GqlSharedCampaign>;
   /** Fetch a single campaign by ID. Returns the campaign if the caller has read access to its profile, otherwise null. */
@@ -1698,6 +1764,15 @@ export type GqlQuery_AdminListUsersArgs = {
 /** The root query object for the KernelWorx API. */
 export type GqlQuery_AdminSearchUserArgs = {
   query: Scalars['String']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_EventInventoryAllocationsArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  showAndSellId?: InputMaybe<Scalars['ID']['input']>;
+  status?: InputMaybe<GqlAllocationStatus>;
+  unitCampaignId: Scalars['ID']['input'];
 };
 
 /** The root query object for the KernelWorx API. */

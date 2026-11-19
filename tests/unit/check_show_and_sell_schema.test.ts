@@ -1207,3 +1207,157 @@ describe("Show & Sell Stage 3.1 event SDL (schema.graphql)", () => {
     }
   });
 });
+
+// --- Wave 4.2: event stock assignment (§3.2.3) and the raw allocation read (§3.2.4) ---
+
+const SS32_QUERY_FIELDS: string[] = ["eventInventoryAllocations"];
+
+const SS32_MUTATION_FIELDS: string[] = ["assignShowAndSellInventory"];
+
+const SS32_INPUTS: string[] = ["AssignShowAndSellInventoryInput", "AllocationTargetInput"];
+
+const SS32_OUTPUT_TYPES: string[] = [
+  "AssignShowAndSellInventoryPayload",
+  "AllocationWarning",
+  "EventInventoryAllocationConnection",
+];
+
+/**
+ * The exact field set of each §3.2 type, in declaration order.
+ *
+ * The warning carries the four numbers AC-10 asks the screen to state, because a
+ * sentence a Kernel cannot act on is not a warning. The connection re-uses
+ * `ShowAndSellAllocation` rather than minting a report shape: §3.2.4's whole point is
+ * that the browser gets the rows and does its own arithmetic.
+ */
+const SS32_TYPE_FIELDS: Record<string, string[]> = {
+  AssignShowAndSellInventoryInput: ["showAndSellId", "items", "version", "idempotency"],
+  AllocationTargetInput: ["productId", "quantity"],
+  AssignShowAndSellInventoryPayload: ["allocations", "inventoryPositions", "warnings"],
+  AllocationWarning: ["code", "productId", "currentStockQty", "assignedQty", "overageQty", "message"],
+  EventInventoryAllocationConnection: ["items", "pageInfo"],
+};
+
+describe("Show & Sell Stage 3.2 stock-assignment SDL (schema.graphql)", () => {
+  test("every §3.2 type and input is present with exactly the contract fields", () => {
+    for (const name of [...SS32_OUTPUT_TYPES, ...SS32_INPUTS]) {
+      const def = definition(name);
+      expect(["type", "input"].includes(def.kind), `${name} must be a type or input`).toBe(true);
+    }
+    for (const [name, expected] of Object.entries(SS32_TYPE_FIELDS)) {
+      expect([...fieldNameSet(definition(name))], `${name} fields`).toEqual(expected);
+    }
+  });
+
+  test("one save names a batch of absolute targets, is versioned and idempotent, and edits no immutable fact", () => {
+    const field = rootFieldByName("Mutation", "assignShowAndSellInventory");
+    expect(field, "Mutation.assignShowAndSellInventory is missing").toBeDefined();
+    expect(field!.text, "the mutation takes one input").toMatch(/input\s*:\s*AssignShowAndSellInventoryInput!/);
+    expect(field!.text, "and answers a non-null result").toMatch(/\):\s*AssignShowAndSellInventoryPayload!/);
+
+    const input = fieldsOf(definition("AssignShowAndSellInventoryInput"));
+    expect(input.find((f) => f.name === "showAndSellId")!.text).toMatch(/showAndSellId\s*:\s*ID!/);
+    // The batch is required and its element type is non-null: an empty or nullable list
+    // would make "save nothing" a request the resolver has to guess the meaning of.
+    expect(input.find((f) => f.name === "items")!.text, "items is a non-empty list of non-null targets").toMatch(
+      /items\s*:\s*\[AllocationTargetInput!\]!/,
+    );
+    expect(returnTypeName(input.find((f) => f.name === "version")!.text)).toBe("VersionedInput");
+    expect(input.find((f) => f.name === "version")!.text).toMatch(/version\s*:\s*VersionedInput!/);
+    expect(input.find((f) => f.name === "idempotency")!.text).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
+
+    // A target, not a delta: the request states what the event should hold, so two
+    // clients that both read the same snapshot cannot compound a change by each sending
+    // "more". And no stock field is an input, because an assignment never moves physical
+    // stock, sold quantity, or what a cancellation already released.
+    const target = fieldsOf(definition("AllocationTargetInput"));
+    expect(target.find((f) => f.name === "productId")!.text).toMatch(/productId\s*:\s*ID!/);
+    expect(target.find((f) => f.name === "quantity")!.text).toMatch(/quantity\s*:\s*Int!/);
+    const names = fieldNameSet(definition("AssignShowAndSellInventoryInput"));
+    names.forEach((name) => expect(name, "the input block carries no quantity").not.toMatch(/Qty$|quantity/i));
+    for (const forbidden of [
+      "deltaQty",
+      "changeQty",
+      "kernelPhysicalQty",
+      "soldQty",
+      "releasedQty",
+      "status",
+      "startAt",
+      "endAt",
+      "unitCampaignId",
+      "profileId",
+    ]) {
+      expect(names.has(forbidden), `AssignShowAndSellInventoryInput.${forbidden} would let a caller move what only a workflow moves`).toBe(false);
+    }
+    expect(fieldNameSet(definition("AllocationTargetInput")).has("status"), "an assignment cannot close or re-open a row").toBe(false);
+  });
+
+  test("the answer is the event's rows, its positions, and its warnings — never a verdict or a total", () => {
+    const payload = fieldsOf(definition("AssignShowAndSellInventoryPayload"));
+    expect(payload.find((f) => f.name === "allocations")!.text).toMatch(/:\s*\[ShowAndSellAllocation!\]!/);
+    expect(payload.find((f) => f.name === "inventoryPositions")!.text).toMatch(/:\s*\[InventoryPosition!\]!/);
+    expect(payload.find((f) => f.name === "warnings")!.text).toMatch(/:\s*\[AllocationWarning!\]!/);
+
+    // An over-assignment saves and says. There is deliberately no boolean success/allowed
+    // flag and no severity: the list being empty is the only "no warning" the caller needs,
+    // and a severity ranking would invite the browser to hide the one it rates lower.
+    const warning = fieldsOf(definition("AllocationWarning"));
+    for (const [name, pattern] of [
+      ["productId", /productId\s*:\s*ID!/],
+      ["currentStockQty", /currentStockQty\s*:\s*Int!/],
+      ["assignedQty", /assignedQty\s*:\s*Int!/],
+      ["overageQty", /overageQty\s*:\s*Int!/],
+      ["message", /message\s*:\s*String!/],
+      ["code", /code\s*:\s*String!/],
+    ] as const) {
+      expect(warning.find((f) => f.name === name)!.text, `AllocationWarning.${name}`).toMatch(pattern);
+    }
+    for (const forbidden of ["severity", "allowed", "ok", "isWarning", "clamped"]) {
+      expect(fieldNameSet(definition("AllocationWarning")).has(forbidden), `${forbidden} would grade a warning the caller must state`).toBe(false);
+    }
+  });
+
+  test("the allocation read is raw rows with its three filters and paging, and no server-side aggregate", () => {
+    const query = rootFieldByName("Query", "eventInventoryAllocations");
+    expect(query, "Query.eventInventoryAllocations is missing").toBeDefined();
+    for (const arg of [
+      "unitCampaignId: ID!",
+      "productId: ID",
+      "showAndSellId: ID",
+      "status: AllocationStatus",
+      "page: PageInput",
+    ]) {
+      expect(query!.text, `eventInventoryAllocations(${arg}) is missing`).toContain(arg);
+    }
+    expect(query!.text).toMatch(/\):\s*EventInventoryAllocationConnection!/);
+    // One value per filter, never a list: the read answers the rows a screen renders, and
+    // a multi-state filter has no defined order against rows a workflow moves.
+    for (const name of ["productId", "showAndSellId", "status"]) {
+      expect(query!.text, `eventInventoryAllocations.${name} filters to one value`).not.toMatch(new RegExp(`${name}:\\s*\\[`));
+    }
+    // The caller names the campaign, never the tenant: tenancy comes from the event row.
+    expect(query!.text, "the caller does not choose the Unit").not.toMatch(/unitId\s*:/);
+    expect(query!.text, "the caller does not choose a Scout").not.toMatch(/profileId\s*:/);
+
+    const connection = fieldsOf(definition("EventInventoryAllocationConnection"));
+    expect(connection.find((f) => f.name === "items")!.text).toMatch(/:\s*\[ShowAndSellAllocation!\]!/);
+    expect(returnTypeName(connection.find((f) => f.name === "pageInfo")!.text)).toBe("PageInfo");
+    // DATA-Q-03: assigned/unassigned/overage totals are the browser's, over every page it
+    // fetched. A total on this type would be a report the server built.
+    const aggregate = [...fieldNameSet(definition("EventInventoryAllocationConnection"))].filter((name) =>
+      /total|summary|report|count|assigned|overage/i.test(name),
+    );
+    expect(aggregate, "the allocation connection carries no aggregate").toEqual([]);
+  });
+
+  test("AUTH: no §3.2 type, input, or root field carries an auth directive", () => {
+    for (const name of [...SS32_OUTPUT_TYPES, ...SS32_INPUTS]) {
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+    }
+    for (const name of [...SS32_QUERY_FIELDS, ...SS32_MUTATION_FIELDS]) {
+      const field = rootFieldByName("Query", name) ?? rootFieldByName("Mutation", name);
+      expect(field, `${name} is missing`).toBeDefined();
+      expect(field!.directives, `${name} must be directive-free (Cognito-only)`).toEqual([]);
+    }
+  });
+});
