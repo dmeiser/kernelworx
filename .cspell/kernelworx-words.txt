@@ -188,6 +188,7 @@ GraphQL
 GraphQLAPIId
 Grotesque
 gstatic
+hana
 hashable
 hashlib
 HMAC
@@ -308,9 +309,11 @@ noreferrer
 nosniff
 nosuchkey
 noto
+recognises
 Ñuñez
 octokit
 officedocument
+okafor
 oklch
 Okonkwo
 OLDCODE
@@ -329,6 +332,7 @@ passwordless
 pathlib
 paymentMethod
 paymentMethods
+pickable
 picklist
 pipefail
 pkeys
@@ -450,6 +454,7 @@ submenu
 summarizer
 superadmin
 svgIcon
+sweepable
 tabIndex
 tableName
 TabPanel
@@ -496,6 +501,7 @@ unconfigured
 unfollow
 unhit
 unindexed
+unitcamp
 unmigrated
 unitNumber
 unittype
@@ -537,6 +543,7 @@ venmo
 venmotom
 venv
 Vercel
+vevents
 viewports
 Vite
 vitejs
