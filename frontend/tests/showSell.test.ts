@@ -49,6 +49,7 @@ import {
   intervalsOverlap,
   isCancellable,
   isSignupConflictError,
+  isSlotAvailable,
   icsUtc,
   minutesBetween,
   minutesUntil,
@@ -66,6 +67,8 @@ import {
   productQuantityOf,
   reportWriteFailure,
   signupForSlot,
+  showAndSellStatusLabel,
+  splitMethodLabel,
   slotAvailabilityLabel,
   slotIntervalOf,
   slotNameOf,
@@ -718,6 +721,80 @@ describe('the SS-SM-06 fixture shape', () => {
     expect(collidingCommitments(slots[0], [slots[1]])).toHaveLength(0);
     // Full Booth overlaps both, which is what step 5 refuses.
     expect(collidingCommitments(slots[2], [slots[0], slots[1]])).toHaveLength(2);
+  });
+});
+
+// --- the answers that only appear when something else went wrong ------------
+//
+// Every case here is a path a screen takes only when the row, the zone or the
+// server's answer is not what the happy path assumes. They are tested because a
+// label that prints `undefined`, or a stamp that prints `Invalid Date`, is a
+// screen that lies about a Scout's money and time.
+
+describe('degenerate answers', () => {
+  it('labels a status or split method the client has never seen, instead of blanking it', () => {
+    expect(showAndSellStatusLabel('SCHEDULED')).toBe('Scheduled');
+    expect(showAndSellStatusLabel('NOT_IN_THE_CLIENT_ENUM' as never)).toBe('NOT_IN_THE_CLIENT_ENUM');
+    expect(splitMethodLabel('EQUAL')).toBe('Split equally');
+    expect(splitMethodLabel('NOT_IN_THE_CLIENT_ENUM' as never)).toBe('NOT_IN_THE_CLIENT_ENUM');
+  });
+
+  it('reads a wall clock that carries seconds, and refuses an instant that is not a real date', () => {
+    expect(zonedWallClockToUtc('2026-03-14T09:00:30', ZONE)?.toISOString()).toBe('2026-03-14T15:00:30.000Z');
+    // Shaped like a stored instant, but no such month: the field refuses it rather
+    // than sending an instant the server can only answer INVALID_INPUT for.
+    expect(parseInterval('2026-13-45T00:00:00Z', '2026-03-14T18:30:00Z', ZONE).error).toContain('Enter a start and an end');
+    expect(minutesUntil('not a time')).toBeNull();
+  });
+
+  it('settles a wall clock that falls on the daylight-saving boundary itself', () => {
+    // 2026-03-08 is when Denver jumps from UTC-7 to UTC-6. 02:30 that morning never
+    // happens, and 01:30 happens twice: the two-pass conversion is what keeps the
+    // answer on one side of the jump rather than inventing an hour.
+    const spring = zonedWallClockToUtc('2026-03-08T02:30', ZONE);
+    expect(spring).not.toBeNull();
+    expect(zoneOffsetMinutes(spring as Date, ZONE)).toBe(-360);
+    const autumn = zonedWallClockToUtc('2026-11-01T01:30', ZONE);
+    expect(autumn).not.toBeNull();
+    const again = zonedWallClockToUtc('2026-11-01T01:30:00', ZONE);
+    expect(again?.toISOString()).toBe(autumn?.toISOString());
+  });
+
+  it('refuses a slot whose two boxes are not dates at all', () => {
+    const event = { startAt: '2026-03-21T15:00:00.000Z', endAt: '2026-03-21T18:30:00.000Z' };
+    const parsed = parseSlotInterval({ label: 'First Sales', startAt: 'March 21', endAt: 'later', capacity: '4' }, event, ZONE);
+    expect(parsed.error).toContain('Enter a start and an end');
+  });
+
+  it('treats a product the event does not hold as holding nothing', () => {
+    const targets = allocationTargets(new Map(), new Map([['PROD#caramel', '3']]));
+    expect(targets).toEqual([{ productId: 'PROD#caramel', quantity: 3 } satisfies AllocationTarget]);
+  });
+
+  it('offers a place only while the event takes places and the slot has room', () => {
+    const slot = { slotId: 'SLOT#first', startAt: '2026-03-21T15:00:00.000Z', endAt: '2026-03-21T16:30:00.000Z', capacity: 2, openCapacity: 2 };
+    expect(isSlotAvailable(slot, 'SCHEDULED')).toBe(true);
+    expect(isSlotAvailable({ ...slot, openCapacity: 0 }, 'SCHEDULED')).toBe(false);
+    expect(isSlotAvailable(slot, 'ACTIVE')).toBe(false);
+  });
+
+  it('never writes an Invalid Date stamp, and names the Unit when its display name is missing', () => {
+    const broken = buildInvite(inviteData, new Date('not a time'));
+    expect(broken).toContain('DTSTAMP:19700101T000000Z');
+    const anonymous = buildInvite({ ...inviteData, unitDisplayName: null, slotLabel: null }, new Date('2026-03-21T12:00:00.000Z'));
+    const description = anonymous.split('\r\n ').join('').split('\r\n').find((line) => line.startsWith('DESCRIPTION:')) ?? '';
+    expect(description).toContain('Unit: UNIT#pack-3149');
+    expect(description).not.toContain('Slot:');
+  });
+
+  it('only calls a refusal a signup conflict when the code and the sentence both say so', () => {
+    const overlap = new GraphQLError('This Scout already holds a place in an overlapping slot', {
+      extensions: { errorCode: 'CONFLICT' },
+    });
+    expect(isSignupConflictError(overlap)).toBe(true);
+    expect(isSignupConflictError({ message: undefined, extensions: { errorCode: 'CONFLICT' } })).toBe(false);
+    expect(isSignupConflictError(new GraphQLError('The row already moved', { extensions: { errorCode: 'CONFLICT' } }))).toBe(false);
+    expect(isSignupConflictError(undefined)).toBe(false);
   });
 });
 

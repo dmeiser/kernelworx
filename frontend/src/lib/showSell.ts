@@ -886,7 +886,9 @@ export function icsUtc(instant: string): string {
  */
 export function buildInvite(data: GqlCalendarInviteData, generatedAt: Date = new Date()): string {
   const description = inviteDescription(data);
-  const stamp = icsUtc(generatedAt.toISOString()) || '19700101T000000Z';
+  // An unusable clock still has to produce a file: RFC 5545 requires DTSTAMP, so
+  // the epoch is written rather than letting `toISOString` throw the download away.
+  const stamp = (Number.isNaN(generatedAt.getTime()) ? '' : icsUtc(generatedAt.toISOString())) || '19700101T000000Z';
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
