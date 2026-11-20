@@ -22,7 +22,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from '@testing-library/react';
-import { render, fireEvent, screen } from '@testing-library/react';
+import { render, fireEvent, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { GraphQLError } from 'graphql';
@@ -393,10 +393,14 @@ describe('SignupWorkBoard', () => {
 
     await screen.findAllByTestId(/^signup-row-/);
     // A crowd this big is fixture, not behavior: the rows are filled with one
-    // synthetic change each, and the behavior under test is the refusal.
-    for (const signup of crowd) {
-      fireEvent.change(screen.getByTestId(`work-minutes-${workRowKey('SLOT#first', signup.profileId)}`), { target: { value: '10' } });
-    }
+    // synthetic change each, and the behavior under test is the refusal. The 101
+    // changes go in one act() so the board re-renders once rather than 101 times —
+    // otherwise the fixture's size, not the rule, decides how long this takes.
+    act(() => {
+      for (const signup of crowd) {
+        fireEvent.change(screen.getByTestId(`work-minutes-${workRowKey('SLOT#first', signup.profileId)}`), { target: { value: '10' } });
+      }
+    });
     fireEvent.click(screen.getByTestId('save-work'));
 
     expect(await screen.findByText('Save at most 100 work rows at a time.')).toBeInTheDocument();
