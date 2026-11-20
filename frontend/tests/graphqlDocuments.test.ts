@@ -65,6 +65,43 @@ const selectedFields = (doc: DocumentNode): Set<string> => {
   return fields;
 };
 
+/** One browser document by the name it is exported under. */
+const documentNamed = (name: string): DocumentNode =>
+  namedDocuments.find((entry) => entry.name === name)?.doc as DocumentNode;
+
+// The Stage 3 participant surface: the only documents a Scout's screen sends.
+const PARTICIPANT_DOCUMENTS = [
+  'SIGNUP_SCOUT_FOR_SHOW_AND_SELL_SLOT',
+  'CANCEL_SHOW_AND_SELL_SIGNUP',
+  'LIST_UNIT_CAMPAIGN_OPPORTUNITIES',
+  'GET_SHOW_AND_SELL_OPPORTUNITY',
+  'LIST_MY_SCOUT_COMMITMENTS',
+  'GET_SIGNUP_CALENDAR_DATA',
+];
+
+// Fields that exist to answer "who did this to whom, and against how much stock".
+// SEC-04 keeps them off the participant projections entirely.
+const ADMINISTRATOR_ONLY_FIELDS = [
+  'signedUpByAccountId',
+  'confirmedByAccountId',
+  'confirmedAt',
+  'cancelledByAccountId',
+  'cancellationReason',
+  'createdByAccountId',
+  'updatedByAccountId',
+  'allocations',
+  'productIds',
+  'activeSignupCount',
+];
+
+const ADMINISTRATOR_FRAGMENTS = [
+  'ShowAndSellSignupFields',
+  'ShowAndSellAdminFields',
+  'ShowAndSellAllocationFields',
+  'ShowAndSellSlotFields',
+  'ShowAndSellWorkPreviewFields',
+];
+
 describe('browser GraphQL documents against the served SDL', () => {
   it('finds the Show & Sell documents to guard', () => {
     const names = namedDocuments.map((entry) => entry.name);
@@ -91,6 +128,24 @@ describe('browser GraphQL documents against the served SDL', () => {
       'RECORD_CUSTODY_SALE',
       'FULFILL_INDIVIDUAL_ORDER_LINE',
       'REVERSE_INDIVIDUAL_ORDER_FULFILLMENT',
+      'GET_SHOW_AND_SELL',
+      'LIST_SHOW_AND_SELLS',
+      'CREATE_SHOW_AND_SELL',
+      'UPDATE_SHOW_AND_SELL',
+      'CANCEL_SHOW_AND_SELL',
+      'ASSIGN_SHOW_AND_SELL_INVENTORY',
+      'LIST_EVENT_INVENTORY_ALLOCATIONS',
+      'UPSERT_SHOW_AND_SELL_SLOT',
+      'DELETE_SHOW_AND_SELL_SLOT',
+      'LIST_SHOW_AND_SELL_SIGNUPS',
+      'SIGNUP_SCOUT_FOR_SHOW_AND_SELL_SLOT',
+      'CANCEL_SHOW_AND_SELL_SIGNUP',
+      'CONFIRM_SHOW_AND_SELL_WORK',
+      'LIST_UNIT_CAMPAIGN_OPPORTUNITIES',
+      'GET_SHOW_AND_SELL_OPPORTUNITY',
+      'LIST_MY_SCOUT_COMMITMENTS',
+      'GET_SIGNUP_CALENDAR_DATA',
+      'LIST_SCOUT_CAMPAIGN_JOINS',
     ]) {
       expect(names).toContain(required);
     }
@@ -113,6 +168,13 @@ describe('browser GraphQL documents against the served SDL', () => {
       'OrderFulfillmentFields',
       'UnitOrderFields',
       'OrderWriteState',
+      'ShowAndSellAdminFields',
+      'ShowAndSellAllocationFields',
+      'ShowAndSellSlotFields',
+      'ShowAndSellSignupFields',
+      'ShowAndSellWorkPreviewFields',
+      'ShowAndSellOpportunityFields',
+      'ParticipantSignupFields',
     ]) {
       expect(attached).toContain(fragment);
     }
@@ -144,6 +206,31 @@ describe('browser GraphQL documents against the served SDL', () => {
     }
     for (const notNeeded of ['customerPhone', 'address', 'notes']) {
       expect(writeState.has(notNeeded), `OrderWriteState.${notNeeded} is not part of fulfilling`).toBe(false);
+    }
+  });
+
+  it.each(PARTICIPANT_DOCUMENTS)('%s selects no administrative field and spreads no administrative fragment (SEC-04)', (name) => {
+    const fields = selectedFields(documentNamed(name));
+    const spread = collectFragmentNames(documentNamed(name));
+    for (const field of ADMINISTRATOR_ONLY_FIELDS) {
+      expect(fields.has(field), `${name} selects ${field}`).toBe(false);
+    }
+    for (const fragment of ADMINISTRATOR_FRAGMENTS) {
+      expect(spread.includes(fragment), `${name} spreads ${fragment}`).toBe(false);
+    }
+  });
+
+  it('names the actors only in the administrative signup reads', () => {
+    // The audit half of §3.4: who placed a place and who confirmed the work is a
+    // Unit Admin's record. The participant's own writes answer `ParticipantSignup`,
+    // which carries the version they need next and nobody's account id.
+    for (const name of ['LIST_SHOW_AND_SELL_SIGNUPS', 'CONFIRM_SHOW_AND_SELL_WORK']) {
+      const fields = selectedFields(documentNamed(name));
+      expect(fields).toContain('signedUpByAccountId');
+      expect(fields).toContain('confirmedByAccountId');
+    }
+    for (const name of ['SIGNUP_SCOUT_FOR_SHOW_AND_SELL_SLOT', 'CANCEL_SHOW_AND_SELL_SIGNUP']) {
+      expect(selectedFields(documentNamed(name))).toContain('signupVersion');
     }
   });
 
