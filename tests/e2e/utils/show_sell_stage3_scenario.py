@@ -109,6 +109,25 @@ def graphql_transport(token: str) -> Transport:
     return call
 
 
+def recording_transport(transport: Transport, ledger: stage_three.WriteLedger, *, actor: str) -> Transport:
+    """Wrap one identity's transport so every accepted mutation lands in the lane's write ledger.
+
+    The record is made **after** the answer, and only for an answer that carried data: a refused write
+    writes no idempotency marker, so a lane that cleaned for it would read back a true absence from a row
+    that never existed.  The actor is named where the transport is built, because that is where the lane
+    knows which identity's token is inside it — a Scout's signup marker belongs to the Scout's account, and
+    inferring it from a fixture tree is not evidence.
+    """
+
+    def call(field: str, variables: Mapping[str, Any]) -> dict[str, Any]:
+        body = transport(field, variables)
+        if field in stage_three.MARKER_SCOPE_ARGUMENT and succeeded(body, field):
+            ledger.record(field=field, actor=actor, variables=variables)
+        return body
+
+    return call
+
+
 def data_of(body: Mapping[str, Any], field: str) -> Any:
     """The ``data`` answer for ``field``, or ``None`` when the body answered none."""
     return (body.get("data") or {}).get(field)
@@ -974,7 +993,13 @@ def _state_fixture_plan(
     state: str,
     finalization_id: str | None,
 ) -> dict[str, Any]:
-    """The write plan one fixture state needs, with its attestation."""
+    """The write plan one fixture state needs, with its attestation.
+
+    ``conditionVersion`` and the version in ``changes`` are what the lane expects the row to be at, taken
+    from the ids it holds.  They are provisional: :func:`apply_state_fixture` re-reads the row and derives
+    both the condition **and** the version it writes from that read, because a row the lane has not read
+    may have moved.
+    """
     version = int(ids.get(f"version.{event_ref}", "1")) + 1
     key = show_and_sell_models.event_metadata_key(lane_id(ids, f"event.{event_ref}"))
     return {
@@ -1077,15 +1102,20 @@ def apply_state_fixture(
                 f"the row at {plan['key']} carries no {show_and_sell_models.VERSION_ATTRIBUTE}, so the fixture "
                 "has no version to condition on and would be writing blind"
             )
-        conditioned = dict(plan, conditionVersion=int(read_version))
+        # The version the fixture writes is derived from the row it read, exactly like the version it
+        # conditions on.  A plan built before the read cannot know where the row is: if the SET carried the
+        # plan's own guess, a fixture would condition on version 12 and write version 2, moving the event's
+        # optimistic-locking history backwards and leaving every later version check in the lane bogus.
+        next_version = int(read_version) + 1
+        changes = dict(plan["changes"], **{show_and_sell_models.VERSION_ATTRIBUTE: next_version})
         try:
             client.update_item(
                 TableName=table,
                 Key=key,
-                UpdateExpression=_update_expression(plan["changes"]),
-                ExpressionAttributeNames=_expression_names(plan["changes"]),
+                UpdateExpression=_update_expression(changes),
+                ExpressionAttributeNames=_expression_names(changes),
                 ConditionExpression="#version = :expected",
-                ExpressionAttributeValues=_condition_values(conditioned),
+                ExpressionAttributeValues=_condition_values(changes, int(read_version)),
             )
         except Exception as exc:  # noqa: BLE001
             if is_access_denied(exc):
@@ -1109,9 +1139,15 @@ def apply_state_fixture(
         violations = show_and_sell_models.event_invariant_violations(written)
         if violations:
             raise AssertionError(f"the fixture row breaks the model's invariants: {'; '.join(violations)}")
+        written_version = written.get(show_and_sell_models.VERSION_ATTRIBUTE)
+        if int(written_version) != next_version:
+            raise AssertionError(
+                f"the read-back version is {written_version!r}; the fixture read version {read_version} and "
+                f"had to write {next_version}, so the event's version history is not intact"
+            )
         return (
             f"{plan['state']} written and read back at {table}/{plan['key']['pk']}/{plan['key']['sk']}, "
-            f"conditioned on version {read_version}; {plan['attestation']}"
+            f"version {read_version} -> {written_version}; {plan['attestation']}"
         )
 
     return stage_two.run_cleanup_step(f"API-FIX-01 {plan['state']} fixture", action)
@@ -1158,11 +1194,15 @@ def _expression_names(changes: Mapping[str, Any]) -> dict[str, str]:
     return {f"#{name}": name for name in changes}
 
 
-def _condition_values(plan: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    """The values for the write *and* its version condition: the condition is on the version the
-    read answered, so a concurrent write makes this fixture stale rather than quietly overwritten."""
-    values = _expression_values(plan["changes"])
-    values[":expected"] = {"N": str(plan["conditionVersion"])}
+def _condition_values(changes: Mapping[str, Any], read_version: int) -> dict[str, dict[str, Any]]:
+    """The values for the write **and** its version condition, both taken from the row that was read.
+
+    The condition is the version the consistent read answered, so a concurrent write makes this fixture
+    stale rather than quietly overwritten; the written version is that same answer plus one, so the
+    fixture can never move an event's version backwards.
+    """
+    values = _expression_values(changes)
+    values[":expected"] = {"N": str(read_version)}
     return values
 
 
@@ -1194,6 +1234,10 @@ def run_stage_three_cleanup(
     sweep_tokens: Sequence[str] = (),
     sweep_report: Sequence[str] | None = None,
     sweep_exit_code: int | None = None,
+    sweep_runner: Callable[[Sequence[str]], tuple[int, list[str], list[str]]] | None = None,
+    proven_residue: Mapping[str, str] | None = None,
+    ledger: stage_three.WriteLedger | None = None,
+    ids: Mapping[str, str] | None = None,
 ) -> list[dict[str, str]]:
     """Delete every row this lane planned, read each one back, and prove another lane's canary survived.
 
@@ -1214,17 +1258,45 @@ def run_stage_three_cleanup(
         Cleanup-vocabulary rows, one per planned row plus the canary step and the sweep row.
     """
     rows: list[dict[str, str]] = []
+    sweep = next((row for row in plan if str(row.get("kind") or "") == "sweep"), None)
+    seen: set[tuple[str, str, str]] = set()
+
+    def address(row: Mapping[str, Any]) -> tuple[str, str, str]:
+        key = dict(row.get("key") or {})
+        return (str(row.get("table") or ""), str(key.get("pk", "")), str(key.get("sk", "")))
+
+    sent = set(ledger.keys()) if ledger is not None else None
     for planned in plan:
-        kind = str(planned.get("kind") or "")
-        if kind == "sweep":
-            rows.append(_sweep_row(planned, tokens=sweep_tokens, report=sweep_report, exit_code=sweep_exit_code))
+        if str(planned.get("kind") or "") == "sweep":
             continue
-        rows.append(
-            stage_two.run_cleanup_step(str(planned.get("acceptance") or kind), _delete_step(client, lane, planned))
-        )
+        seen.add(address(planned))
+        step = _delete_step(client, lane, planned)
+        if str(planned.get("kind") or "") == "marker" and sent is not None:
+            step = _require_recorded(planned, sent, step)
+        rows.append(stage_two.run_cleanup_step(str(planned.get("acceptance") or ""), step))
+
+    # Whatever this lane actually wrote, whether or not the plan foresaw it.  The version-advancing slot
+    # write and the winner of each race barrier are the cases: they are real accepted mutations whose
+    # markers are real rows, and a plan read off the fixture tree does not name them.
+    if ledger is not None:
+        for recorded in ledger.marker_rows(dict(ids or {})):
+            if address(recorded) in seen:
+                continue
+            seen.add(address(recorded))
+            rows.append(stage_two.run_cleanup_step(str(recorded["acceptance"]), _delete_step(client, lane, recorded)))
 
     rows.append(
         stage_two.run_cleanup_step(str(canary.get("acceptance") or "canary"), _canary_step(client, lane, canary))
+    )
+    rows.append(
+        _sweep_row(
+            sweep or {"acceptance": "§2.8.7"},
+            tokens=sweep_tokens,
+            report=sweep_report,
+            exit_code=sweep_exit_code,
+            runner=sweep_runner,
+            proven_residue=proven_residue,
+        )
     )
     return rows
 
@@ -1238,32 +1310,45 @@ SWEEP_CLASSES: tuple[tuple[str, str], ...] = (
 
 
 def _sweep_row(
-    planned: Mapping[str, Any], *, tokens: Sequence[str], report: Sequence[str] | None, exit_code: int | None
+    planned: Mapping[str, Any],
+    *,
+    tokens: Sequence[str],
+    report: Sequence[str] | None,
+    exit_code: int | None,
+    runner: Callable[[Sequence[str]], tuple[int, list[str], list[str]]] | None = None,
+    proven_residue: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """The sweep step, judged by the Stage 2 sweep contract rather than by the plan that promised it.
+    """The residue sweep, taken by running the sanctioned sweeper and judged by its own report.
 
-    A plan row saying *run the typed-token sweep* is an intention.  The verdict comes from the sweeper's
-    own report, through :func:`tests.e2e.utils.show_sell_stage2_support.sweep_verdict`: ``LEFT``,
-    ``FAILED`` and ``UNKNOWN`` are fatal, ``HISTORY`` and ``BLOCKED`` are the residues Amendment B accepts
-    when they are named with the table and the denied action, and a non-zero exit that no class explains is
-    a report this lane does not understand.  A report that was never taken blocks the row: naming a sweep
-    in a plan is not evidence that a residue was swept.
+    Three rules make this step impossible to satisfy by writing about it:
+
+    * the sweep is **always** accounted for.  A lane whose plan omits the row still owes the evidence, so
+      dropping the row from the plan is not a way to skip the gate;
+    * when the caller supplies no report, the sanctioned sweeper is run here
+      (:func:`tests.e2e.utils.show_sell_stage2_support.fixture_sweep` is the only supported way to delete
+      fixture residue), and a lane with no typed tokens cannot run it, so it blocks;
+    * the verdict is :func:`tests.e2e.utils.show_sell_stage2_support.sweep_verdict` over the report's own
+      classes, including its ``unproven`` input: a table this identity cannot read is accepted residue
+      only when the record names the application read that proves the rows are still standing
+      (:data:`tests.e2e.utils.show_sell_stage3_support.STAGE_THREE_RESIDUE_PROOF`).  An unreadable table
+      with no such read is not clean, whatever the exit code says.
     """
     acceptance = str(planned.get("acceptance") or "§2.8.7")
     if report is None or exit_code is None:
-        return stage_two.cleanup_row(
-            acceptance,
-            f"scripts/qa_fixture.py sweep --lane {' '.join(tokens)} was never run, so cleanup is not complete",
-            stage_two.CLEANUP_BLOCKED,
-        )
-    if not tokens:
-        return stage_two.cleanup_row(
-            acceptance,
-            "the typed-token sweep has no lane tokens, so it cannot name what it would delete",
-            stage_two.CLEANUP_BLOCKED,
-        )
+        if not tokens:
+            return stage_two.cleanup_row(
+                acceptance,
+                "the typed-token sweep has no lane tokens, so the sanctioned sweeper cannot be run for this lane",
+                stage_two.CLEANUP_BLOCKED,
+            )
+        exit_code, _blocked_lines, report = (runner or stage_two.fixture_sweep)(list(tokens))
     classes = {name: [line for line in report if line.startswith(prefix)] for prefix, name in SWEEP_CLASSES}
     blocked = [line for line in report if line.startswith("BLOCKED")]
+    proof = dict(stage_three.STAGE_THREE_RESIDUE_PROOF if proven_residue is None else proven_residue)
+    unproven = [line for line in blocked if _blocked_table(line) not in proof]
+    proven = [
+        f"{_blocked_table(line)} by {proof[_blocked_table(line)]}" for line in blocked if _blocked_table(line) in proof
+    ]
     kept = [line for line in report if line.startswith("kept")]
     deleted = sum(1 for line in report if line.startswith("deleted row"))
     counted = "; ".join(f"{name}={len(lines)}" for name, lines in classes.items() if lines)
@@ -1271,8 +1356,9 @@ def _sweep_row(
         "acceptance": acceptance,
         "summary": (
             f"scripts/qa_fixture.py sweep --lane {' '.join(tokens)} exited {exit_code}: deleted={deleted}, "
-            f"kept={len(kept)}, {counted or 'no surviving class'}; the sweeper's own re-scan and classes "
-            "decide this row, and every token is a bound id of its kind"
+            f"kept={len(kept)}, {counted or 'no surviving class'}"
+            + (f"; blocked residue proven by a product read: {'; '.join(proven)}" if proven else "")
+            + (f"; blocked residue no product read proves: {'; '.join(unproven)}" if unproven else "")
         ),
         "result": stage_two.sweep_verdict(
             left=classes["left"],
@@ -1280,9 +1366,37 @@ def _sweep_row(
             unknown=classes["unknown"],
             history=classes["history"],
             blocked=blocked,
+            unproven=unproven,
             exit_code=exit_code,
         ),
     }
+
+
+def _blocked_table(line: str) -> str:
+    """The table one ``BLOCKED <table>: <action> …`` report line names."""
+    parts = line.removeprefix("BLOCKED").strip().split(":", 1)
+    return parts[0].strip()
+
+
+def _require_recorded(planned: Mapping[str, Any], sent: set[str], step: Callable[[], str]) -> Callable[[], str]:
+    """A marker row is only this lane's to clean if the lane recorded sending the write that wrote it.
+
+    A marker for a key that was never sent is a row that does not exist, and a read-back confirming an
+    absence is not evidence of a cleanup — it is the false clean this gate exists to prevent.  So a planned
+    marker whose key is absent from the ledger blocks the step and names the key, and the lane either
+    recorded the write or it did not.
+    """
+    key = str(planned.get("idempotencyKey") or planned.get("key", {}).get("sk", ""))
+
+    def action() -> str:
+        if key not in sent:
+            raise stage_two.CleanupBlocked(
+                f"marker {key}: the lane recorded no accepted write with this key, so there is no marker "
+                "here to clean and an absent read-back would prove nothing"
+            )
+        return step()
+
+    return action
 
 
 def _delete_step(client: Any, lane: str, planned: Mapping[str, Any]) -> Callable[[], str]:

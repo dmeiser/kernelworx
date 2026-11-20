@@ -145,6 +145,11 @@ __all__ = [
     "stage_three_lane_tokens",
     "stage_three_sweep_tokens",
     "stage_three_write_steps",
+    "STAGE_THREE_RESIDUE_PROOF",
+    "unit_campaigns_table",
+    "MARKER_TABLE_KEY",
+    "MARKER_SCOPE_ARGUMENT",
+    "WriteLedger",
     "SWEEP_TOKEN_ID_FIELDS",
     "stage_three_ttl_expectation",
     "stock_snapshot",
@@ -2445,6 +2450,8 @@ def stage_three_cleanup_plan(
         )
     for step in stage_three_write_steps(fixture, lane):
         rows.append(_marker_row(step, lane=lane, table=table, resolve=resolve))
+    # A lane that has already run also has the ledger; the runner unions the two so a write the tree never
+    # named is still cleaned.  The rows built here are the *planned* ones, marked so a reader can tell.
     rows.append(
         {
             "acceptance": "§2.8.7",
@@ -2644,7 +2651,7 @@ SWEEP_TOKEN_REF_KINDS: tuple[tuple[str, str], ...] = (("profile", "profile."), (
 
 
 def stage_three_lane_tokens(
-    fixture: Mapping[str, Any], ids: Mapping[str, str], steps: Sequence[Mapping[str, str]] = ()
+    fixture: Mapping[str, Any], ids: Mapping[str, str], keys: Sequence[str] = ()
 ) -> tuple[str, ...]:
     """The ``kind=value`` tokens one finished Stage 3 lane can honestly name.
 
@@ -2663,7 +2670,7 @@ def stage_three_lane_tokens(
             f"{kind}={_require_sweep_value(ids.get(entry['ref'], ''), entry['ref'])}"
             for entry in _refs_with_prefix(fixture, prefix)
         ]
-    tokens += [f"idem={step['idempotencyKey']}" for step in steps]
+    tokens += [f"idem={key}" for key in keys]
     return tuple(dict.fromkeys(tokens))
 
 
@@ -2717,6 +2724,181 @@ def ttl_gate_violations(rows: Iterable[Mapping[str, Any]]) -> list[str]:
         if row_class == "marker" and expiry is None:
             problems.append(f"{row_class}: no {MARKER_TTL_ATTRIBUTE}, the row will never sweep")
     return problems
+
+
+# ------------------------------------------------------------------
+# 10b. The write ledger: what this lane actually wrote
+# ------------------------------------------------------------------
+#
+# A cleanup plan built by reading the fixture tree is a prediction: it says what a lane of this shape
+# *should* have sent.  The lanes also send writes the tree never names — the slot write that advances a
+# version so a stale fixture can be built, the winner of each race barrier — and a marker row for a write
+# that never happened is a delete that reads back a comfortable absence.  So every accepted mutation is
+# recorded at the shared transport path, with the identity that signed it, the scope the payload addressed
+# and the key the caller sent, and cleanup derives its marker addresses from that record.
+
+
+#: Which input field scopes one mutation's marker.  These are the ``scope=`` arguments the handlers pass to
+#: ``marker_keys`` in ``src/handlers/unit_operations.py``: an event write scopes to the event it writes, a
+#: create has no event id yet and scopes to the Unit Campaign, and a membership removal scopes to the
+#: Unit Campaign whose roster changed.
+MARKER_SCOPE_ARGUMENT: dict[str, str] = {
+    "createShowAndSell": "unitCampaignId",
+    "updateShowAndSell": "showAndSellId",
+    "cancelShowAndSell": "showAndSellId",
+    "assignShowAndSellInventory": "showAndSellId",
+    "upsertShowAndSellSlot": "showAndSellId",
+    "deleteShowAndSellSlot": "showAndSellId",
+    "signupScoutForShowAndSellSlot": "showAndSellId",
+    "cancelShowAndSellSignup": "showAndSellId",
+    "confirmShowAndSellWork": "showAndSellId",
+    "removeUnitCampaignMembership": "unitCampaignId",
+}
+
+#: Which logical table one mutation's marker rides: ``_show_and_sell_marker`` writes the event aggregate
+#: table, ``_campaign_marker`` the campaign aggregate table (§8.9).
+MARKER_TABLE_KEY: dict[str, str] = {
+    **dict.fromkeys(STAGE_THREE_WRITES, "show_and_sells"),
+    "removeUnitCampaignMembership": "unit_campaigns",
+}
+
+#: The physical name of each marker table, resolved the way the app resolves them: the Lambda environment
+#: first, the dev stack's name as the lane's own answer.
+DEV_UNIT_CAMPAIGNS_TABLE = "kernelworx-unit-campaigns-ue1-dev"
+
+
+def unit_campaigns_table() -> str:
+    """The physical ``unit_campaigns`` table this lane's campaign markers live in."""
+    return os.environ.get("UNIT_CAMPAIGNS_TABLE_NAME") or DEV_UNIT_CAMPAIGNS_TABLE
+
+
+MARKER_TABLE_NAMES: dict[str, Callable[[], str]] = {
+    "show_and_sells": show_and_sells_table,
+    "unit_campaigns": unit_campaigns_table,
+}
+
+#: The residue a Stage 3 lane may leave standing, and the application read that proves it is standing.
+#: Amendment B (checklist §2.8.7) accepts an inventory balance and an append-only ``InventoryMovement``
+#: history on shared ``dev`` only when the record can name the rows, and names them through a product read
+#: rather than a Scan the fixture identity does not hold.  A blocked table that is not here is residue
+#: nobody can prove, and stays non-clean.
+STAGE_THREE_RESIDUE_PROOF: dict[str, str] = {
+    "kernelworx-inventory-ue1-dev": "inventoryPositions",
+    "kernelworx-inventory-movements-ue1-dev": "inventoryMovements",
+}
+
+
+class WriteLedger:
+    """Every mutation this lane sent **and the server accepted**, with what addresses its marker.
+
+    Records are added at the shared transport path by
+    :func:`tests.e2e.utils.show_sell_stage3_scenario.recording_transport`, after the answer arrives, so a
+    refused write — every §3.6.2 collision, the removed-member signup — is absent: a rejected mutation
+    writes no marker, and a cleanup row for it deletes nothing and proves nothing.
+
+    Each record carries the actor ref the lane authenticated as, the scope value the payload itself
+    addressed, and the idempotency key the caller sent.  Those three, plus the operation, are exactly what
+    :func:`src.utils.mutations.marker_keys` needs, so the address cleanup names is the address production wrote.
+    """
+
+    def __init__(self, lane: str) -> None:
+        self.lane = lane
+        self.records: list[dict[str, str]] = []
+
+    def record(self, *, field: str, actor: str, variables: Mapping[str, Any]) -> None:
+        """Note one accepted mutation: its operation, the identity that signed it, and its payload."""
+        if field not in MARKER_SCOPE_ARGUMENT:
+            raise ValueError(f"{field}: not a Stage 3 idempotent write, so it has no marker to clean")
+        if not actor:
+            raise ValueError(f"{field}: the lane recorded a write with no identity behind it")
+        payload = dict(variables.get("input") or {})
+        scope_argument = MARKER_SCOPE_ARGUMENT[field]
+        scope = str(payload.get(scope_argument) or "")
+        if not scope:
+            raise ValueError(f"{field}: the payload sent no {scope_argument}, so its marker has no scope")
+        key = _idempotency_key_of(payload)
+        if not key:
+            raise ValueError(f"{field}: the lane sent an idempotent write with no idempotencyKey")
+        mutations.marker_sort_key(key)
+        self.records.append(
+            {
+                "operation": field,
+                "actor": actor,
+                "scope": scope,
+                "idempotencyKey": key,
+                "tableKey": MARKER_TABLE_KEY[field],
+            }
+        )
+
+    def keys(self) -> tuple[str, ...]:
+        """Every idempotency key this lane sent, in send order, for the ``idem`` sweep tokens."""
+        return tuple(record["idempotencyKey"] for record in self.records)
+
+    def marker_rows(self, ids: Mapping[str, str]) -> list[dict[str, Any]]:
+        """One cleanup row per recorded write, addressed by :func:`src.utils.mutations.marker_keys`.
+
+        ``ids`` resolves the actor ref to the account id the lane signed in as; a ref the lane never bound
+        keeps its placeholder so the runner refuses the delete rather than addressing a marker it cannot name.
+        """
+        rows: list[dict[str, Any]] = []
+        for record in self.records:
+            actor_ref = record["actor"]
+            actor = str(ids.get(actor_ref, "")) or f"<{actor_ref}>"
+            rows.append(
+                _marker_row_from_record(
+                    record,
+                    lane=self.lane,
+                    actor=actor,
+                    table=MARKER_TABLE_NAMES[record["tableKey"]](),
+                )
+            )
+        return rows
+
+
+def _idempotency_key_of(payload: Mapping[str, Any]) -> str:
+    """The key one mutation input carries, in either shape the documents send it in.
+
+    The input objects carry it as a nested ``idempotency`` block (the GraphQL ``IdempotencyInput``); a flat
+    ``idempotencyKey`` is what the API accepts at the input level.  Both are read so the ledger describes the
+    write the lane really sent rather than the shape this module happens to build.
+    """
+    nested = payload.get("idempotency")
+    if isinstance(nested, Mapping):
+        return str(nested.get("idempotencyKey") or "")
+    return str(payload.get("idempotencyKey") or "")
+
+
+def _marker_row_from_record(record: Mapping[str, str], *, lane: str, actor: str, table: str) -> dict[str, Any]:
+    """One recorded write, in the cleanup vocabulary, with its production-derived marker address."""
+    operation, key, scope = record["operation"], record["idempotencyKey"], record["scope"]
+    if UNBOUND_KEY_MARKER in actor:
+        address = {"pk": f"IDEM#{actor}#{operation}#{scope}", "sk": f"IDEM#{key}"}
+    else:
+        marker = mutations.marker_keys(
+            table_key=record["tableKey"],
+            table_name=table,
+            actor_id=actor,
+            operation=operation,
+            scope=scope,
+            idempotency_key=key,
+        )
+        address = {"pk": marker.pk, "sk": marker.sk}
+    return {
+        "acceptance": "API-FIX-03",
+        "summary": (
+            f"delete the {operation} marker this lane wrote with key {key}; the table's TTL would sweep it "
+            f"after {MARKER_TTL_SECONDS // 3600} hours, and a lane that waits for the TTL has not cleaned"
+        ),
+        "lane": lane,
+        "kind": "marker",
+        "table": table,
+        "key": address,
+        "idempotencyKey": key,
+        "operation": operation,
+        "actorField": record["actor"],
+        "scopeField": scope,
+        "recorded": True,
+    }
 
 
 # ------------------------------------------------------------------

@@ -1231,6 +1231,56 @@ def test_the_ttl_expectation_is_seven_days_from_minting() -> None:
     assert expectation["expiresAtEpoch"] == 1_000 + mutations.MARKER_TTL_SECONDS == 1_000 + stage3.MARKER_TTL_SECONDS
 
 
+def test_the_ledger_addresses_a_campaign_marker_on_the_campaign_table() -> None:
+    """``removeUnitCampaignMembership`` writes its marker on the campaign aggregate table, not the event one.
+
+    The handler chooses the table the mutation writes (``_campaign_marker`` versus ``_show_and_sell_marker``),
+    so a lane that cleaned every marker on ``show_and_sells`` would leave that row under the TTL and report
+    a clean teardown it did not have.
+    """
+    ledger = stage3.WriteLedger(stage3.lane_token(9001))
+    ledger.record(
+        field="removeUnitCampaignMembership",
+        actor="account.admin",
+        variables={
+            "input": {
+                "unitCampaignId": "22222222-2222-4222-8222-222222222222",
+                "profileId": "PROFILE#devon",
+                "idempotency": {"idempotencyKey": "stage3-9001-remove-devon"},
+            }
+        },
+    )
+    (row,) = ledger.marker_rows({"account.admin": "ACCOUNT#qa-admin"})
+    assert row["table"] == stage3.unit_campaigns_table() == stage3.DEV_UNIT_CAMPAIGNS_TABLE
+    assert row["key"]["pk"].startswith("IDEM#ACCOUNT%23qa-admin#removeUnitCampaignMembership#22222222")
+    assert row["key"]["sk"] == "IDEM#stage3-9001-remove-devon"
+    assert stage3.MARKER_TABLE_KEY["removeUnitCampaignMembership"] == "unit_campaigns"
+    assert stage3.MARKER_SCOPE_ARGUMENT["removeUnitCampaignMembership"] == "unitCampaignId"
+
+
+def test_the_ledger_refuses_a_write_it_cannot_address() -> None:
+    """A missing scope, a missing key, or a query recorded as a write is a lane bug, named at once."""
+    ledger = stage3.WriteLedger(stage3.lane_token(9001))
+    for variables, reason in (
+        ({"input": {"idempotencyKey": "stage3-9001-upsert-x"}}, "no scope"),
+        ({"input": {"showAndSellId": "SSE#1"}}, "no idempotencyKey"),
+    ):
+        with pytest.raises(ValueError) as error:
+            ledger.record(field="upsertShowAndSellSlot", actor="account.admin", variables=variables)
+        assert reason in str(error.value), reason
+    with pytest.raises(ValueError) as error:
+        ledger.record(field="showAndSell", actor="account.admin", variables={"showAndSellId": "SSE#1"})
+    assert "not a Stage 3 idempotent write" in str(error.value)
+    with pytest.raises(ValueError) as error:
+        ledger.record(
+            field="upsertShowAndSellSlot",
+            actor="",
+            variables={"input": {"showAndSellId": "SSE#1", "idempotencyKey": "stage3-9001-upsert-x"}},
+        )
+    assert "no identity behind it" in str(error.value)
+    assert ledger.records == []
+
+
 def test_sweep_tokens_are_typed_and_add_only_idem() -> None:
     """Stage 3 sweeps with Stage 2's tokens plus ``idem`` — no free text."""
     tokens = stage3.stage_three_sweep_tokens("ab12")

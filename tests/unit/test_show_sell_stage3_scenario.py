@@ -409,6 +409,25 @@ def test_a_signup_the_removed_member_is_allowed_fails_the_lane() -> None:
 # ---------------------------------------------------------------------------
 
 
+class OutcomeServer:
+    """A stack that answers one thread: the write lands, or the recorded refusal does.
+
+    :class:`LastPlaceServer` decides by arrival order; this one decides by which thread the lane named,
+    because the winner of a race is not always the thread that arrived first and a lane that assumed which
+    side won would clean the wrong Scout's marker.
+    """
+
+    def __init__(self, *, accepted: bool, refusal: str) -> None:
+        self._accepted = accepted
+        self._refusal = refusal
+        self.calls = 0
+
+    def __call__(self, field: str, variables: Mapping[str, Any]) -> dict[str, Any]:
+        del variables
+        self.calls += 1
+        return _success_body(field) if self._accepted else _refusal_body(self._refusal)
+
+
 class LastPlaceServer:
     """A slot with one place left: the first write lands, every later one earns the recorded refusal.
 
@@ -647,7 +666,7 @@ def test_the_cleanup_run_reads_back_every_row_it_deleted() -> None:
     )
     assert stage2.cleanup_problems(rows) == []
     assert stage2.cleanup_failures(rows) == []
-    assert len(rows) == len(plan) + 1
+    assert len(rows) == len(plan) + 2  # the canary step and the sweep step
     assert client.deleted == [(row["table"], row["key"]["pk"], row["key"]["sk"]) for row in plan]
     for index, planned in enumerate(plan):
         assert client.reads[index] == client.deleted[index], f"no read-back after the {planned['kind']} delete"
@@ -703,8 +722,8 @@ def test_a_denied_delete_reports_blocked_naming_the_action() -> None:
     plan = [row for row in _plan(clock, fixture, ids=_ids(fixture)) if row["kind"] == "slot"][:2]
     client = ScriptedDynamo(_seeds([*plan, _canary()]), deny="DeleteItem")
     rows = scenario.run_stage_three_cleanup(client, lane=clock.token, plan=plan, canary=_canary())
-    blocked = stage2.cleanup_blocked(rows)
-    assert len(blocked) == 2
+    blocked = [line for line in stage2.cleanup_blocked(rows) if "DeleteItem" in line]
+    assert len(blocked) == 2, stage2.cleanup_blocked(rows)
     assert all("dynamodb:DeleteItem" in line for line in blocked), blocked
 
 
@@ -745,9 +764,8 @@ def _sweep_ids(fixture: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _sweep_tokens(clock: stage3.ScenarioClock, fixture: Mapping[str, Any]) -> tuple[str, ...]:
-    return stage3.stage_three_lane_tokens(
-        fixture, _sweep_ids(fixture), stage3.stage_three_write_steps(fixture, clock.token)
-    )
+    keys = [step["idempotencyKey"] for step in stage3.stage_three_write_steps(fixture, clock.token)]
+    return stage3.stage_three_lane_tokens(fixture, _sweep_ids(fixture), keys)
 
 
 def test_the_lane_s_tokens_are_the_typed_tokens_the_sweeper_accepts() -> None:
@@ -772,6 +790,7 @@ def test_the_lane_s_tokens_are_the_typed_tokens_the_sweeper_accepts() -> None:
     )
     marker_keys = [token.split("=", 1)[1] for token in tokens if token.startswith("idem=")]
     assert marker_keys == [step["idempotencyKey"] for step in stage3.stage_three_write_steps(fixture, clock.token)]
+    assert len(set(marker_keys)) == len(marker_keys), "one key never covers two writes"
 
 
 def test_an_unbound_lane_cannot_build_a_sweep_token_out_of_a_placeholder() -> None:
@@ -791,13 +810,8 @@ def test_a_sweep_that_has_not_been_run_keeps_cleanup_blocked() -> None:
     assert len(sweep_rows) == 1
     client = ScriptedDynamo(_seeds([_canary()]))
     rows = scenario.run_stage_three_cleanup(client, lane=clock.token, plan=sweep_rows, canary=_canary())
-    assert [row["result"] for row in rows] == [stage2.CLEANUP_BLOCKED, stage2.CLEANUP_OBSERVED]
-    assert "was never run" in rows[0]["summary"]
-    rows = scenario.run_stage_three_cleanup(
-        client, lane=clock.token, plan=sweep_rows, canary=_canary(), sweep_report=("deleted row x",), sweep_exit_code=0
-    )
-    assert rows[0]["result"] == stage2.CLEANUP_BLOCKED
-    assert "no lane tokens" in rows[0]["summary"]
+    assert [row["result"] for row in rows] == [stage2.CLEANUP_OBSERVED, stage2.CLEANUP_BLOCKED]
+    assert "no lane tokens" in rows[-1]["summary"]
     assert client.deleted == []
 
 
@@ -855,6 +869,212 @@ def test_the_plan_addresses_the_markers_production_writes_by_the_writer_s_own_fu
     }, "the lane deletes exactly the markers the writes produced, and reads each one back"
 
 
+def test_a_planned_marker_the_lane_never_recorded_blocks_instead_of_reading_back_absent() -> None:
+    """A marker for a key the lane never sent is a row that does not exist, and its absence proves nothing.
+
+    The ledger is the evidence of what the lane wrote.  A planned marker whose key is not in it blocks,
+    naming the key, instead of deleting nothing and reporting the tidy table as cleanup.
+    """
+    clock = _clock()
+    fixture = _fixture(clock)
+    ids = _ids(fixture)
+    plan = [row for row in _plan(clock, fixture, ids=ids) if row["kind"] == "marker"]
+    assert plan
+    ledger = stage3.WriteLedger(clock.token)
+    ledger.record(
+        field="upsertShowAndSellSlot",
+        actor="account.admin",
+        variables={"input": {"showAndSellId": ids["event.future"], "idempotencyKey": plan[0]["idempotencyKey"]}},
+    )
+    client = ScriptedDynamo(_seeds([*plan, _canary()]))
+    rows = scenario.run_stage_three_cleanup(
+        client,
+        lane=clock.token,
+        plan=plan,
+        canary=_canary(),
+        ledger=ledger,
+        ids=ids,
+        sweep_tokens=_sweep_tokens(clock, fixture),
+        sweep_report=("deleted row  marker IDEM#x",),
+        sweep_exit_code=0,
+    )
+    blocked = stage2.cleanup_blocked(rows)
+    assert len(blocked) == len(plan) - 1, blocked
+    assert all("recorded no accepted write with this key" in line for line in blocked), blocked
+    planned_address = (plan[0]["table"], plan[0]["key"]["pk"], plan[0]["key"]["sk"])
+    assert planned_address in client.deleted, "the one planned marker the ledger does cover is deleted and read back"
+    assert len(client.deleted) == 2, f"planned-and-recorded plus the ledger's own row, nothing else: {client.deleted}"
+
+
+def test_cleanup_owes_the_sweep_even_when_the_plan_omits_the_sweep_row() -> None:
+    """Leaving the sweep out of the plan is not a way through the gate: the evidence is owed either way.
+
+    The row is appended whether or not the plan asked for it, and when no report was taken the sanctioned
+    sweeper is run here — the test's stub stands in for ``scripts/qa_fixture.py`` and shows the lane handed
+    the same typed tokens it would have sent on ``dev``.
+    """
+    clock = _clock()
+    fixture = _fixture(clock)
+    plan = [row for row in _plan(clock, fixture, ids=_ids(fixture)) if row["kind"] != "sweep"]
+    assert plan and all(row["kind"] != "sweep" for row in plan)
+    client = ScriptedDynamo(_seeds([*plan, _canary()]))
+    rows = scenario.run_stage_three_cleanup(client, lane=clock.token, plan=plan, canary=_canary())
+    assert rows[-1]["result"] == stage2.CLEANUP_BLOCKED
+    assert "no lane tokens" in rows[-1]["summary"]
+
+    handed: list[list[str]] = []
+
+    def runner(tokens: Sequence[str]) -> tuple[int, list[str], list[str]]:
+        handed.append(list(tokens))
+        return 0, [], ["deleted row  marker IDEM#x"]
+
+    tokens = _sweep_tokens(clock, fixture)
+    rows = scenario.run_stage_three_cleanup(
+        client, lane=clock.token, plan=plan, canary=_canary(), sweep_tokens=tokens, sweep_runner=runner
+    )
+    assert handed == [list(tokens)], "the lane runs the sweeper rather than describing one it meant to run"
+    assert rows[-1]["result"] == stage2.CLEANUP_OBSERVED
+    assert stage2.cleanup_problems(rows) == []
+    assert len(rows) == len(plan) + 2
+
+
+def test_a_blocked_table_no_product_read_proves_stays_non_clean() -> None:
+    """Amendment B accepts a named residue only when the record names the read that proves it.
+
+    A table the fixture identity cannot read is not thereby clean: the acceptance is for the two residues
+    the application itself keeps, proved through ``inventoryPositions`` and ``inventoryMovements``.  Any
+    other unreadable table is residue nobody can account for, and the step stays blocked.
+    """
+    clock = _clock()
+    fixture = _fixture(clock)
+    sweep_rows = [row for row in _plan(clock, fixture, ids=_ids(fixture)) if row["kind"] == "sweep"]
+    tokens = _sweep_tokens(clock, fixture)
+    client = ScriptedDynamo(_seeds([_canary()]))
+
+    def sweep(report: Sequence[str]) -> dict[str, str]:
+        return scenario.run_stage_three_cleanup(
+            client,
+            lane=clock.token,
+            plan=sweep_rows,
+            canary=_canary(),
+            sweep_tokens=tokens,
+            sweep_report=report,
+            sweep_exit_code=1,
+        )[-1]
+
+    unproven = sweep(("BLOCKED kernelworx-orders-ue1-dev: dynamodb:Scan is not granted to this identity",))
+    assert unproven["result"] == stage2.CLEANUP_BLOCKED
+    assert "no product read proves" in unproven["summary"]
+    proven = sweep(("BLOCKED kernelworx-inventory-movements-ue1-dev: dynamodb:Scan is not granted to this identity",))
+    assert proven["result"] == stage2.CLEANUP_OBSERVED
+    assert "kernelworx-inventory-movements-ue1-dev by inventoryMovements" in proven["summary"]
+    assert stage3.STAGE_THREE_RESIDUE_PROOF["kernelworx-inventory-movements-ue1-dev"] == "inventoryMovements"
+    assert stage3.STAGE_THREE_RESIDUE_PROOF["kernelworx-inventory-ue1-dev"] == "inventoryPositions"
+
+
+def test_the_ledger_records_the_write_the_lane_actually_sent_and_not_the_refusal() -> None:
+    """``API-FIX-03``'s advancing slot write is a real accepted mutation the fixture tree never planned.
+
+    The stale fixture needs a legal write at the version the read answered; that write produced a marker,
+    and the submit that was refused did not.  Recording at the transport path is what tells the two apart.
+    """
+    clock = _clock()
+    ids = _ids(_fixture(clock))
+    ledger = stage3.WriteLedger(clock.token)
+    api = ScriptedApi(
+        [
+            {"data": {"showAndSell": {"showAndSellId": ids["event.future"], "version": 7}}},
+            _success_body("upsertShowAndSellSlot", {"slotId": "SLOT#advanced"}),
+            _refusal_body("stale-event-version"),
+        ]
+    )
+    steps = scenario.run_stale_version_lane(
+        scenario.recording_transport(api, ledger, actor="account.admin"), clock, ids
+    )
+    assert scenario.stale_version_problems(steps) == []
+    assert [(row["operation"], row["idempotencyKey"], row["actor"]) for row in ledger.records] == [
+        (
+            "upsertShowAndSellSlot",
+            stage3.idempotency_key_for("upsertShowAndSellSlot", clock.token, "advance-version"),
+            "account.admin",
+        )
+    ], "the accepted write is recorded, the refused submit is not"
+    row = ledger.marker_rows(ids)[0]
+    assert row["kind"] == "marker" and row["table"] == stage3.show_and_sells_table()
+    assert (
+        row["key"]["sk"]
+        == f"IDEM#{stage3.idempotency_key_for('upsertShowAndSellSlot', clock.token, 'advance-version')}"
+    )
+    assert ledger.keys() == (row["idempotencyKey"],)
+
+
+def test_the_ledger_cleans_the_winner_of_each_race_whichever_side_won() -> None:
+    """A race winner's marker is a real row whichever thread won, and cleanup has to address it.
+
+    Both directions are run, because the lane cannot know in advance which Scout lands: each side is
+    recorded with its own account id and its own ``race-*`` key, and the marker deleted is the one the
+    winner's write produced — computed here from ``mutations.marker_keys`` rather than copied from a plan.
+    """
+    clock = _clock()
+    ids = _ids(_fixture(clock))
+    calls = scenario.RACE_BARRIER_CALLS["capacity"](clock, ids)
+    profiles = ["avery", "blake"]
+    for winner in (0, 1):
+        ledgers = [stage3.WriteLedger(clock.token) for _ in calls]
+        transports = [
+            scenario.recording_transport(
+                OutcomeServer(accepted=index == winner, refusal="capacity-full"),
+                ledgers[index],
+                actor=f"account.{profiles[index]}",
+            )
+            for index in range(len(calls))
+        ]
+        result = scenario.run_race_barrier(transports, calls, refusal="capacity-full")
+        assert result["violations"] == []
+        assert sum(len(ledger.records) for ledger in ledgers) == 1, "only the write that landed has a marker"
+        won = ledgers[winner].records[0]
+        assert won["actor"] == f"account.{profiles[winner]}"
+        assert won["operation"] == "signupScoutForShowAndSellSlot"
+        assert won["scope"] == ids["event.future"]
+        loser = [ledger for ledger in ledgers if ledger.records == []]
+        assert len(loser) == 1, "the losing thread recorded nothing"
+
+        marker = mutations.marker_keys(
+            table_key="show_and_sells",
+            table_name=stage3.show_and_sells_table(),
+            actor_id=ids[f"account.{profiles[winner]}"],
+            operation="signupScoutForShowAndSellSlot",
+            scope=ids["event.future"],
+            idempotency_key=won["idempotencyKey"],
+        )
+        client = ScriptedDynamo(
+            [
+                {
+                    "table": marker.table_name,
+                    "key": {"pk": marker.pk, "sk": marker.sk},
+                    "item": {"entityType": "marker"},
+                },
+                _canary(),
+            ]
+        )
+        rows = scenario.run_stage_three_cleanup(
+            client,
+            lane=clock.token,
+            plan=[],
+            canary=_canary(),
+            ledger=ledgers[winner],
+            ids=ids,
+            sweep_tokens=_sweep_tokens(clock, _fixture(clock)),
+            sweep_report=("deleted row  marker IDEM#x",),
+            sweep_exit_code=0,
+        )
+        assert stage2.cleanup_problems(rows) == []
+        assert client.deleted == [(marker.table_name, marker.pk, marker.sk)], "the winner's marker, and only it"
+        assert len(rows) == 3, "the recorded marker, the canary, and the sweep"
+        assert rows[0]["summary"].startswith("marker ")
+        assert "%23" in marker.pk, "the actor segment is escaped the way marker_partition_key escapes it"
+
+
 def test_the_sweep_verdict_comes_from_the_report_classes_not_from_the_plan() -> None:
     """The sweeper's own classes decide the row: a residue fails, an unnamed table blocks, and only a clean re-scan observes."""
     clock = _clock()
@@ -872,7 +1092,7 @@ def test_the_sweep_verdict_comes_from_the_report_classes_not_from_the_plan() -> 
             sweep_tokens=tokens,
             sweep_report=report,
             sweep_exit_code=code,
-        )[0]
+        )[-1]
 
     clean = sweep(("deleted row  event  SSE#x", "kept  membership  SSE#y (another tenant)"), 0)
     assert clean["result"] == stage2.CLEANUP_OBSERVED
@@ -881,8 +1101,9 @@ def test_the_sweep_verdict_comes_from_the_report_classes_not_from_the_plan() -> 
     residue = sweep(("LEFT event SSE#x",), 1)
     assert residue["result"] == stage2.CLEANUP_FAILED
     assert "left=1" in residue["summary"]
-    unreadable = sweep(("BLOCKED kernelworx-orders-ue1-dev: dynamodb:Scan is not granted to this identity",), 1)
-    assert unreadable["result"] == stage2.CLEANUP_OBSERVED, "Amendment B accepts a residue the report names"
+    unreadable = sweep(("BLOCKED kernelworx-inventory-ue1-dev: dynamodb:Scan is not granted to this identity",), 1)
+    assert unreadable["result"] == stage2.CLEANUP_OBSERVED, "Amendment B accepts residue a product read proves"
+    assert "proven by a product read: kernelworx-inventory-ue1-dev by inventoryPositions" in unreadable["summary"]
     unexplained = sweep(("some line this parser does not know",), 1)
     assert unexplained["result"] == stage2.CLEANUP_FAILED, "a non-zero exit no class explains is not a clean sweep"
 
@@ -949,7 +1170,7 @@ def test_api_fix_01_finalized_is_a_builder_fixture_the_read_back_confirms() -> N
     verdict = scenario.apply_state_fixture(client, plan, on_read=before.append)
     assert verdict["result"] == stage2.CLEANUP_OBSERVED
     assert "documented Stage 3 fixture builder" in verdict["summary"]
-    assert f"conditioned on version {read_version}" in verdict["summary"]
+    assert f"version {read_version} -> {read_version + 1}" in verdict["summary"]
     assert before[0][show_and_sell_models.STATUS_ATTRIBUTE] == show_and_sell_models.STATUS_SCHEDULED
     assert client.updated[0]["ConditionExpression"] == "#version = :expected"
     assert client.updated[0]["ExpressionAttributeValues"][":expected"] == {"N": str(read_version)}
@@ -1007,7 +1228,8 @@ def test_api_fix_01_conditions_on_the_version_the_read_answered_not_the_plan_s_g
     verdict = scenario.apply_state_fixture(client, plan)
     assert verdict["result"] == stage2.CLEANUP_OBSERVED
     assert client.updated[0]["ExpressionAttributeValues"][":expected"] == {"N": "12"}
-    assert "conditioned on version 12" in verdict["summary"]
+    assert "version 12 -> 13" in verdict["summary"]
+    assert client.row_at(seed)[show_and_sell_models.VERSION_ATTRIBUTE] == 13
 
 
 class RacingDynamo(ScriptedDynamo):
@@ -1025,6 +1247,31 @@ class RacingDynamo(ScriptedDynamo):
             address = (call["TableName"], *self._wire(call["Key"]))
             self._rows[address][show_and_sell_models.VERSION_ATTRIBUTE] = mutations.wire_value(self._bump)
         return answer
+
+
+def test_api_fix_01_the_fixture_writes_the_read_version_plus_one_never_the_version_it_guessed() -> None:
+    """A fixture that moves a version backwards would break the optimistic locking it is meant to prove.
+
+    The plan is built before the row is read, so its own idea of the version (here, 2) is only a guess.
+    Both halves of the write come from the read: the condition is version 12, and the value written is 13.
+    """
+    clock = _clock()
+    ids = _ids(_fixture(clock))
+    plan = scenario.finalize_event_fixture_writes(clock, ids)
+    assert plan["conditionVersion"] == 1 and plan["changes"][show_and_sell_models.VERSION_ATTRIBUTE] == 2
+    seed = _stored_event(clock, ids, "finalized", version=12)
+    client = ScriptedDynamo([seed])
+    verdict = scenario.apply_state_fixture(client, plan)
+    assert verdict["result"] == stage2.CLEANUP_OBSERVED
+    update = client.updated[0]
+    assert update["ConditionExpression"] == "#version = :expected"
+    assert update["ExpressionAttributeValues"][":expected"] == {"N": "12"}
+    assert update["ExpressionAttributeValues"][f":{show_and_sell_models.VERSION_ATTRIBUTE}"] == {"N": "13"}, (
+        "the SET carries the version derived from the before-image, not the plan's precomputed one"
+    )
+    after = client.row_at(seed)
+    assert after[show_and_sell_models.VERSION_ATTRIBUTE] == 13
+    assert after[show_and_sell_models.STATUS_ATTRIBUTE] == show_and_sell_models.STATUS_FINALIZED
 
 
 def test_api_fix_01_a_row_that_moved_under_the_fixture_is_a_failed_fixture() -> None:
