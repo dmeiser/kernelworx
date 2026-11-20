@@ -536,7 +536,15 @@ const QR_GET_NAMES = new Set(["qrCodeUrl", "unitPaymentMethodQrDownloadUrl"]);
  * and `showAndSellSignupCalendarFile` remain offenders, and a URL added to the exempt shape is
  * still caught by the AWSURL seam below.
  */
-const CALENDAR_DATA_NAMES = new Set(["showAndSellSignupCalendarData", "CalendarInviteData"]);
+const CALENDAR_DATA_NAMES = new Set([
+  "showAndSellSignupCalendarData",
+  "CalendarInviteData",
+  // The browser's own operation for that same exempt read (WORK-167 §3.5.4). It is
+  // named here exactly, like the field and type above: adding it does not widen the
+  // rule to a `calendar` substring, and the AWSURL seam below still catches a URL
+  // added to the shape.
+  "GetSignupCalendarData",
+]);
 
 function isReportArtifact(name: string): boolean {
   if (LEGACY_REPORT_NAMES.has(name) || QR_GET_NAMES.has(name)) {
