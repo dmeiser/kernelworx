@@ -151,14 +151,20 @@ def collect_lane_ids(fixture: Mapping[str, Any], answers: Mapping[str, str]) -> 
 
 
 def fixture_refs(fixture: Mapping[str, Any]) -> tuple[str, ...]:
-    """Every ``ref`` the fixture tree names, in a stable order."""
+    """Every ``ref`` the fixture tree names, in a stable order.
+
+    The refs come back exactly as the payloads and the cleanup plan look them up — ``event.future``,
+    ``slot.midday``, ``profile.avery``, ``campaign.avery``, ``product.p01`` — because that is the key
+    :func:`collect_lane_ids` binds and :func:`lane_id` reads.  A stripped ref would be a ref the lane
+    could bind and still send a ``<placeholder>`` for.
+    """
     refs: list[str] = ["unit", "unit-campaign"]
     refs += [f"event.{name}" for name in sorted(fixture["events"])]
     refs += [f"slot.{name}" for name in sorted(fixture["slots"])]
-    refs += [entry["ref"].removeprefix("profile.") for entry in fixture["profiles"].values()]
-    refs += [entry["ref"].removeprefix("campaign.") for entry in fixture["campaigns"].values()]
-    refs += [entry["ref"].removeprefix("product.") for entry in fixture["products"].values()]
-    refs += [f"slot.{slot['ref'].removeprefix('slot.')}" for slot in fixture["bigSlots"]]
+    refs += [entry["ref"] for entry in fixture["profiles"].values()]
+    refs += [entry["ref"] for entry in fixture["campaigns"].values()]
+    refs += [entry["ref"] for entry in fixture["products"].values()]
+    refs += [slot["ref"] for slot in fixture["bigSlots"]]
     return tuple(dict.fromkeys(refs))
 
 
@@ -210,14 +216,21 @@ def _slot_upsert(
     capacity: int,
     step: str,
     slot_id: str | None = None,
+    version: int | None = None,
 ) -> _LaneCall:
+    """A colliding slot write.
+
+    ``version`` is the event version to condition on.  A fixture that is about to move the row past a
+    version it just read has to name *that* version, or the advancing write is refused for the wrong
+    reason and the lane never builds the stale fixture it set out to build.
+    """
     start_at, end_at = clock.unit_window(day_offset, "09:00", "10:00")
     return (
         "upsertShowAndSellSlot",
         {
             "input": stage_three.upsert_slot_input(
                 lane_id(ids, f"event.{event}"),
-                int(ids.get(f"version.{event}", "1")),
+                version if version is not None else int(ids.get(f"version.{event}", "1")),
                 start_at,
                 end_at,
                 capacity,
@@ -527,7 +540,7 @@ def conflict_lane_problems(verdicts: Sequence[ConflictVerdict]) -> list[str]:
     problems: list[str] = []
     for verdict in verdicts:
         if verdict.result != RESULT_REFUSED:
-            problems.append(f"{verdict.acceptance[0]} {verdict.refusal} ({verdict.field}): {verdict.result}")
+            problems.append(f"{', '.join(verdict.acceptance)}: {verdict.refusal} ({verdict.field}) {verdict.result}")
             problems.extend(verdict.problems)
     return problems
 
@@ -588,7 +601,7 @@ def run_stale_version_lane(
     read_version = int(answered["version"])
 
     advance_field, advance_variables = _slot_upsert(
-        clock, ids, event_ref, day_offset=7, capacity=1, step="advance-version"
+        clock, ids, event_ref, day_offset=7, capacity=1, step="advance-version", version=read_version
     )
     advanced = transport(advance_field, advance_variables)
     if not succeeded(advanced, advance_field):
@@ -655,7 +668,7 @@ def run_removed_member_lane(
     before = transport(roster_field, variables)
     row = _roster_row(before, lane_id(ids, f"profile.{profile_ref}"))
     expected_first = _step_expectation(entry, 0)
-    if expected_first.get("absent"):
+    if (expected_first.get("expect") or {}).get("absent"):
         if row is not None:
             steps.append(_failed("roster-before", roster_field, f"{profile_ref} is already on the roster: {row}"))
             return steps
@@ -668,7 +681,7 @@ def run_removed_member_lane(
             return steps
         steps.append(_passed("roster-before", roster_field, f"{profile_ref} is {row.get('status')}"))
 
-    if _status_of(entry, 1) is not None:
+    if str(_step_expectation(entry, 1).get("write") or "") == "removeUnitCampaignMembership":
         if row is None or row.get("version") is None or row.get("guardVersion") is None:
             steps.append(
                 _blocked("remove", "removeUnitCampaignMembership", "the roster row carries no version to condition on")
@@ -691,7 +704,7 @@ def run_removed_member_lane(
 
         after = transport(roster_field, variables)
         row_after = _roster_row(after, lane_id(ids, f"profile.{profile_ref}"))
-        want = str(_step_expectation(entry, 2).get("status") or unit_campaign_models.MEMBERSHIP_STATUS_REMOVED)
+        want = str(_status_of(entry, 2) or unit_campaign_models.MEMBERSHIP_STATUS_REMOVED)
         if row_after is None or str(row_after.get("status")) != want:
             steps.append(
                 _failed("roster-after", roster_field, f"the roster answers {row_after!r}, expected status {want!r}")

@@ -1037,9 +1037,7 @@ def stage_three_fixture(clock: ScenarioClock) -> dict[str, Any]:
                 _fixture_slot(morning_start, _add_minutes(morning_start, 180), "Morning", 4), ref="slot.morning"
             ),
             "afternoon": dict(
-                _fixture_slot(
-                    afternoon_start, _add_minutes(afternoon_start, 180), "Afternoon", 4
-                ),
+                _fixture_slot(afternoon_start, _add_minutes(afternoon_start, 180), "Afternoon", 4),
                 ref="slot.afternoon",
             ),
         }

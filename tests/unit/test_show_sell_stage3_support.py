@@ -38,11 +38,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SDL_PATH = REPO_ROOT / "tofu" / "application" / "schema" / "schema.graphql"
 FIXTURES_DIR = REPO_ROOT / "tests" / "e2e" / "fixtures"
 
-#: A scenario setup time in a year no fixture in this repository was ever written for, used to prove the
-#: tree follows the clock rather than a calendar.  No assertion below quotes a date from the module
-#: under test: they are all about offsets and spreads.
-OTHER_YEAR_T0 = datetime(2031, 1, 10, 14, 0, tzinfo=timezone.utc)
+#: The scenario setup time the walkthroughs are written against.
 DEFAULT_T0 = datetime(2026, 11, 15, 14, 30, tzinfo=timezone.utc)
+
+#: A ``T0`` five years on, in a year no fixture in this repository was ever written for, used to prove the
+#: tree follows the clock rather than a calendar.  It reads the *same Unit wall clock* as
+#: :data:`DEFAULT_T0` (07:30 MST, standard time in both Nov and Jan) on purpose: a fixture anchored on a
+#: day offset and a wall clock then has to move by exactly the ``T0`` shift, so an exact comparison is the
+#: right one and a copied date shows up as a path that did not move.  No assertion below quotes a date
+#: from the module under test: they are all about offsets and spreads.
+OTHER_YEAR_T0 = datetime(2031, 1, 10, 14, 30, tzinfo=timezone.utc)
 
 
 def _sdl() -> str:
@@ -286,20 +291,28 @@ def test_two_scenarios_with_different_t0_values_get_the_same_offsets() -> None:
     """Two clocks, two ``T0``s, identical offsets: the tree is relative, not scheduled.
 
     The comparison is between the two trees, so a literal date anywhere in the builder would move one
-    tree and not the other, and this would fail with the offending path named.
+    tree and not the other, and this would fail with the offending path named.  The one family that must
+    *not* move by the shift is the DST pair, which is anchored on each clock's own spring-forward rather
+    than on ``T0`` — and that is proven here, not excused: both pairs still straddle a real boundary, and
+    the boundaries are different dates in different years.
     """
-    early = _clock(datetime(2026, 11, 15, 14, 30, tzinfo=timezone.utc))
+    early = _clock(DEFAULT_T0)
     late = _clock(OTHER_YEAR_T0)
     first, second = stage3.stage_three_fixture(early), stage3.stage_three_fixture(late)
     shift = (late.t0 - early.t0).total_seconds()
     first_times, second_times = _fixture_instants(first), _fixture_instants(second)
     assert len(first_times) > 60, f"only {len(first_times)} instants found: the walk stopped seeing the tree"
     assert set(first_times) == set(second_times)
-    moved = {
-        path: round((second_times[path] - first_times[path]).total_seconds() - shift, 6) for path in first_times
-    }
-    stuck = {path: value for path, value in moved.items() if value != 0.0}
+    moved = {path: round((second_times[path] - first_times[path]).total_seconds() - shift, 6) for path in first_times}
+    stuck = {path: value for path, value in moved.items() if value != 0.0 and "dst" not in path}
     assert not stuck, f"{len(stuck)} fixture instants did not move with T0: {sorted(stuck)[:5]}"
+    dst_only = {path for path in moved if "dst" in path}
+    assert dst_only, "the tree carries no DST family, so the exclusion above would hide anything"
+    assert all(moved[path] != 0.0 for path in dst_only), (
+        "the DST pair moved with T0, so it is no longer anchored on a boundary"
+    )
+    assert first["dst"]["boundary"] != second["dst"]["boundary"]
+    assert stage3.validate_dst_pair(first["dst"]) == () and stage3.validate_dst_pair(second["dst"]) == ()
     assert first["t0"] == early.iso() and second["t0"] == late.iso()
     assert first["t0Epoch"] == int(early.t0.timestamp())
 
@@ -355,14 +368,14 @@ def test_the_lane_token_and_data_id_carry_every_part_setup_hands_over() -> None:
 def test_from_run_id_takes_t0_from_the_run_identifier_and_a_supplied_t0_wins() -> None:
     """§3.1 spells ``RUN_ID`` as epoch seconds plus a short UUID, so the clock never needs a literal."""
     t0 = datetime(2027, 4, 30, 9, 15, tzinfo=timezone.utc)
-    derived = stage3.ScenarioClock.from_run_id(f"{int(t0.timestamp())}-c0ffee", "SS-SM-11", "L03", "a1")
+    derived = stage3.ScenarioClock.from_run_id(f"{int(t0.timestamp())}-beef", "SS-SM-11", "L03", "a1")
     assert derived.t0 == t0
     explicit = stage3.ScenarioClock.from_run_id(
-        f"{int(t0.timestamp())}-c0ffee", "SS-SM-11", "L03", "a1", t0=t0 - timedelta(days=2)
+        f"{int(t0.timestamp())}-beef", "SS-SM-11", "L03", "a1", t0=t0 - timedelta(days=2)
     )
     assert explicit.t0 == t0 - timedelta(days=2)
     with pytest.raises(ValueError, match="epoch seconds"):
-        stage3.ScenarioClock.from_run_id("pr-969-c0ffee", "SS-SM-11", "L03", "a1")
+        stage3.ScenarioClock.from_run_id("pr-969-beef", "SS-SM-11", "L03", "a1")
 
 
 def test_a_naive_t0_and_an_unusable_identity_part_are_refused() -> None:
@@ -376,7 +389,7 @@ def test_a_naive_t0_and_an_unusable_identity_part_are_refused() -> None:
             attempt_id="a1",
         )
     for field, bad in (("lane_id", ""), ("lane_id", "L 01"), ("attempt_id", "a/1")):
-        with pytest.raises(ValueError, match=field):
+        with pytest.raises(ValueError, match=field.upper()):
             stage3.ScenarioClock(
                 t0=DEFAULT_T0,
                 run_id="1794753000-a1b2c3",
@@ -387,11 +400,17 @@ def test_a_naive_t0_and_an_unusable_identity_part_are_refused() -> None:
 
 
 def test_the_offsets_are_counted_in_the_units_own_calendar_not_in_utc() -> None:
-    """A scenario set up at 04:00 UTC still gets its ``tomorrow 09:00`` on the Unit's tomorrow."""
+    """A scenario set up at 04:00 UTC still gets its ``tomorrow 09:00`` on the Unit's tomorrow.
+
+    ``T0`` here is 21:00 on the Unit's own wall clock, so counting a day off the UTC date would put the
+    "tomorrow" event a day late — a whole day of drift, only visible in the Unit's zone.
+    """
     clock = _clock(datetime(2026, 11, 15, 4, 0, tzinfo=timezone.utc))
+    assert clock.t0.date() == date(2026, 11, 15), "the UTC calendar day, which is not the Unit's"
+    assert clock.local_date(0) == date(2026, 11, 14), "04:00Z is 21:00 the night before in the Unit zone"
     start, end = clock.unit_window(1, "09:00", "10:00")
     local = _instant(start).astimezone(ZoneInfo(stage3.UNIT_TIMEZONE))
-    assert local.strftime("%Y-%m-%d %H:%M") == "2026-11-16 09:00"
+    assert local.strftime("%Y-%m-%d %H:%M") == "2026-11-15 09:00"
     assert _minutes(start, end) == 60
     assert _instant(start) > clock.t0
 
@@ -443,12 +462,21 @@ def test_a_dst_pair_that_does_not_straddle_anything_is_named() -> None:
     """The check is not vacuous: a pair copied from last year's calendar fails it, by name."""
     clock = _clock(datetime(2027, 1, 10, 14, 0, tzinfo=timezone.utc))
     pair = clock.dst_pair()
-    stale = dict(pair, boundary="2026-03-08")
-    assert any("second Sunday" in line for line in stage3.validate_dst_pair(stale))
-    shifted = dict(pair, mondayStartAt=_instant(pair["mondayStartAt"]) + timedelta(hours=1))
+    copied = dict(pair, boundary="2026-03-08")
+    problems = stage3.validate_dst_pair(copied)
+    assert any("is not the day before the boundary" in line for line in problems), problems
+    assert any("does not fall between the two instants" in line for line in problems), problems
+    third_sunday = dict(pair, boundary=(clock.spring_forward() + timedelta(days=7)).isoformat())
+    assert any("second Sunday" in line for line in stage3.validate_dst_pair(third_sunday)), third_sunday
+    shifted = dict(
+        pair,
+        mondayStartAt=(_instant(pair["mondayStartAt"]) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
     problems = stage3.validate_dst_pair(shifted)
     assert any("47 hours" in line or "one hour" in line for line in problems), problems
-    assert stage3.validate_dst_pair(pair) == (), "the untampered pair must pass what the tampered one fails"
+    spelled = dict(pair, mondayStartAt=_instant(pair["mondayStartAt"]))
+    assert any("explicit Z" in line for line in stage3.validate_dst_pair(spelled)), spelled
+    assert stage3.validate_dst_pair(pair) == (), "the pair nobody changed must pass what the changed one fails"
 
 
 def test_the_dst_fixture_pair_sits_inside_its_event_and_uses_both_offsets() -> None:
@@ -471,7 +499,12 @@ def test_a_wall_clock_inside_the_spring_forward_gap_has_no_answer_and_says_so() 
     day_offset = (clock.spring_forward() - clock.local_date()).days
     with pytest.raises(ValueError, match="does not exist"):
         clock.at_unit_wall_clock(day_offset, "02:30")
-    assert clock.at_unit_wall_clock(day_offset, "09:00").strftime("%H:%M %Z") == "09:00 MDT"
+    morning = clock.at_unit_wall_clock(day_offset, "09:00")
+    assert morning.astimezone(ZoneInfo(stage3.UNIT_TIMEZONE)).strftime("%H:%M %Z") == "09:00 MDT"
+    assert morning.strftime("%H:%M") == "15:00", "the answer is persisted in UTC, where 09:00 MDT is 15:00"
+    before = clock.at_unit_wall_clock(day_offset - 1, "09:00")
+    assert before.astimezone(ZoneInfo(stage3.UNIT_TIMEZONE)).strftime("%H:%M %Z") == "09:00 MST"
+    assert (morning - before) == timedelta(hours=23), "the same wall clock, an hour earlier in UTC"
 
 
 # ---------------------------------------------------------------------------
@@ -516,7 +549,12 @@ def test_every_slot_and_event_runs_forward_and_sits_inside_its_own_event() -> No
 
 
 def test_the_four_box_triple_is_a_morning_an_afternoon_and_an_overlap() -> None:
-    """§3.6.2's four-box fixture: two back-to-back events and a third whose assignment is refused."""
+    """§3.6.2's four-box fixture, in ALLOC-04's two halves.
+
+    Morning and afternoon do not overlap, so assigning three of four boxes to each is allowed with the
+    four-box warning; the third event sits *inside* the morning, so assigning three there is the hard
+    block (``CONCURRENT_OVER_ASSIGNMENT``).  A fixture that mixed the two cases would evidence neither.
+    """
     fixture = _fixture()
     morning = fixture["events"]["four-box.morning"]
     afternoon = fixture["events"]["four-box.afternoon"]
@@ -525,12 +563,14 @@ def test_the_four_box_triple_is_a_morning_an_afternoon_and_an_overlap() -> None:
     for name in ("four-box.morning", "four-box.afternoon", "four-box.overlap"):
         setup = fixture["events"][name]["setup"]
         assert setup["how"] == "mutation" and setup["op"] == "createShowAndSell", name
-    assert _instant(morning["endAt"]) <= _instant(afternoon["startAt"]), "the pair must be sequential"
-    assert _instant(overlap["startAt"]) < _instant(morning["endAt"]), "the overlap must overlap to collide"
-    assert _instant(afternoon["startAt"]) < _instant(overlap["endAt"]) <= _instant(afternoon["endAt"])
-    for name in ("four-box.morning", "four-box.afternoon", "four-box.overlap"):
-        targets = fixture["allocations"][name]
-        assert targets and all(quantity <= stage3.FOUR_BOX_QUANTITY for _p, _product, quantity in targets)
+    assert _instant(morning["endAt"]) <= _instant(afternoon["startAt"]), "the warning case must not overlap"
+    assert _instant(morning["startAt"]) < _instant(overlap["startAt"]), "the block case must be inside the morning"
+    assert _instant(overlap["endAt"]) <= _instant(morning["endAt"]), "the block case must be inside the morning"
+    names = ("four-box.morning", "four-box.afternoon", "four-box.overlap")
+    plans = {name: [quantity for _profile, _product, quantity in fixture["allocations"][name]] for name in names}
+    assert all(plan == [stage3.FOUR_BOX_QUANTITY - 1] for plan in plans.values()), plans
+    assigned = sum(plan[0] for plan in plans.values())
+    assert assigned > stage3.FOUR_BOX_QUANTITY, "the overage is what earns the refusal"
     assert fixture["slots"]["morning"]["capacity"] == fixture["slots"]["afternoon"]["capacity"]
 
 
@@ -548,13 +588,19 @@ def test_the_catalog_carries_sixteen_products_and_every_target_names_one() -> No
 
 
 def test_the_slots_are_ninety_one_twenty_and_one_hundred_eighty_minutes_at_capacity_one_and_hundred() -> None:
-    """SS-SM-05's walkthrough shape, with both capacity bounds carried by real slots."""
+    """SS-SM-05's walkthrough shape, with both capacity bounds carried by real slots.
+
+    ``full-booth`` is the one the Full Booth case fills — capacity 1, so a second SCHEDULED signup earns
+    ``SLOT_CAPACITY`` — while ``wide-booth`` carries the other bound, ``MAX_SLOT_CAPACITY``.
+    """
     slots = _fixture()["slots"]
     assert _minutes(slots["first-sales"]["startAt"], slots["first-sales"]["endAt"]) == 90
     assert _minutes(slots["midday"]["startAt"], slots["midday"]["endAt"]) == 120
     assert _minutes(slots["full-booth"]["startAt"], slots["full-booth"]["endAt"]) == 180
+    assert _minutes(slots["wide-booth"]["startAt"], slots["wide-booth"]["endAt"]) == 180
     assert slots["first-sales"]["capacity"] == 1 == stage3.MIN_SLOT_CAPACITY
-    assert slots["full-booth"]["capacity"] == 100 == stage3.MAX_SLOT_CAPACITY
+    assert slots["full-booth"]["capacity"] == 1, "the Full Booth case has to be a slot that can actually fill"
+    assert slots["wide-booth"]["capacity"] == 100 == stage3.MAX_SLOT_CAPACITY
 
 
 def test_twenty_slots_is_the_boundary_and_the_twenty_first_is_refused() -> None:
@@ -829,7 +875,8 @@ def test_a_dto_the_browser_cannot_turn_into_an_invite_is_named() -> None:
     assert any("slotStartAt" in line for line in stage3.calendar_dto_violations(_dto(slotStartAt="")))
     dto = _dto()
     assert any(
-        "does not run after" in line for line in stage3.calendar_dto_violations({**dto, "slotEndAt": dto["slotStartAt"]})
+        "does not run after" in line
+        for line in stage3.calendar_dto_violations({**dto, "slotEndAt": dto["slotStartAt"]})
     )
 
 
@@ -937,7 +984,9 @@ def test_a_tzid_without_a_vtimezone_is_named_as_the_hour_out_invite() -> None:
 
 
 def test_a_vtimezone_block_is_refused_because_the_emitter_writes_no_zone_definitions() -> None:
-    body = _invite(replace=(("BEGIN:VEVENT", "BEGIN:VTIMEZONE\r\nTZID:America/Denver\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT"),))
+    body = _invite(
+        replace=(("BEGIN:VEVENT", "BEGIN:VTIMEZONE\r\nTZID:America/Denver\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT"),)
+    )
     problems = stage3.validate_ics(body, _synthetic_uid())
     assert any("VTIMEZONE" in line for line in problems), problems
 
