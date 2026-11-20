@@ -5997,6 +5997,18 @@ def _signup_scout_for_show_and_sell_slot(event: Dict[str, Any], caller_id: str) 
     existing = show_and_sell_models.read_signup(event_id, slot_id, profile_id)
     _refuse_existing_signup(event_row, slot_id, profile_id, existing)
     _refuse_signup_capacity(slot_row)
+    # The guard is read BEFORE the commitment snapshot, and that order is the whole
+    # serialization argument, not a style point. A competing signup for one Scout can land at
+    # one Show & Sell while this one is being decided at another, and no event-version
+    # condition can see it because the two plans condition on two different events. The pin
+    # catches it only if it was taken before the set it protects: a competing commit that
+    # lands before the guard read shows up in the snapshot taken after it, so the overlap
+    # guard refuses; one that lands after bumps the guard past the pinned version, so the
+    # write condition refuses. Read the guard after the snapshot and the middle case is
+    # invisible — this request validates against a set that never held the other place, pins
+    # the version the other plan just wrote, and both ACTIVE overlapping commitments stand
+    # (AC-14).
+    guard = show_and_sell_models.read_commitment_guard(profile_id)
     commitments = show_and_sell_models.commitment_rows(profile_id)
     _refuse_signup_overlap(event_row, slot_row, commitments)
     _refuse_signup_budget(event_row, show_and_sell_models.active_signups(event_id), profile_id)
@@ -6021,7 +6033,6 @@ def _signup_scout_for_show_and_sell_slot(event: Dict[str, Any], caller_id: str) 
         now_iso=now_iso,
         version=int(signup_item[show_and_sell_models.VERSION_ATTRIBUTE]),
     )
-    guard = show_and_sell_models.read_commitment_guard(profile_id)
     slot_count = int(slot_row.get(show_and_sell_models.ACTIVE_SIGNUP_COUNT_ATTRIBUTE) or 0)
 
     plan = WritePlan()
@@ -6419,7 +6430,6 @@ def _confirm_show_and_sell_work(event: Dict[str, Any], caller_id: str) -> Dict[s
 
     event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
     unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
-    show_and_sell_models.require_work_confirmable(event_row)
 
     runner = IdempotentMutationRunner()
     keys = _show_and_sell_marker(caller_id=caller_id, operation=CONFIRM_WORK_FIELD, scope=event_id, idempotency_key=key)
@@ -6433,6 +6443,13 @@ def _confirm_show_and_sell_work(event: Dict[str, Any], caller_id: str) -> Dict[s
     if replayed is not None:
         return replayed
 
+    # After replay, for the reason the slot path names plus one of its own: the state window
+    # closes when a later workflow finalizes or cancels the event, and §8.9 requires the
+    # identical retry of a confirmation that already committed to answer the result it already
+    # returned. A guard about whether a NEW confirmation is allowed cannot be allowed to
+    # reject a save the caller was already given — that retry would claim the work was never
+    # confirmed on an event whose credit already counts it.
+    show_and_sell_models.require_work_confirmable(event_row)
     _require_read_version(event_row, expected_event_version)
     targets = _work_row_targets(event_row, rows)
     _refuse_work_budget(event_row, rows)

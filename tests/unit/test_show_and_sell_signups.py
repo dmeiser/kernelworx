@@ -791,6 +791,73 @@ def test_an_overlapping_commitment_anywhere_refuses_the_signup(world: Dict[str, 
     _nothing_written(world, slot_id="slot-2")
 
 
+def test_the_guard_is_read_before_the_commitment_snapshot_it_validates_against(
+    world: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC-14's protection is the read ORDER, not only the pinned version.
+
+    Two signups for one Scout, one at each of two Show & Sells, condition on two different event
+    rows, so the only thing that can serialize them is the Scout's own guard. That works one way
+    only: the guard is read first, so a competing commit either lands before that read — and then
+    appears in the commitment snapshot taken after it, where the overlap guard sees it — or it
+    lands after, and bumps the guard past the version this plan pins. Read the guard second and
+    the middle case is invisible: the request validates against a set that never held the other
+    place, pins the version the other plan just wrote, and both overlapping commitments commit.
+    """
+    reads: List[str] = []
+    real_guard = ssm.read_commitment_guard
+    real_rows = ssm.commitment_rows
+
+    def guard(profile_id: str) -> Optional[Dict[str, Any]]:
+        reads.append("guard")
+        return real_guard(profile_id)
+
+    def rows(profile_id: str) -> List[Dict[str, Any]]:
+        reads.append("commitments")
+        return real_rows(profile_id)
+
+    monkeypatch.setattr(ssm, "read_commitment_guard", guard)
+    monkeypatch.setattr(ssm, "commitment_rows", rows)
+    _ok(_signup("Avery"))
+    assert reads == ["guard", "commitments"], "the pin must be taken before the set it protects"
+
+
+def test_a_signup_validated_against_a_stale_guard_loses_its_whole_plan(
+    world: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pinned guard is what refuses a signup whose overlap read went stale (AC-14, SIGN-M-01).
+
+    Storage already holds the competing place — an ACTIVE commitment for this Scout at another
+    Show & Sell, at hours ``slot-2`` would also occupy, with its guard bump landed. The request is
+    handed the view it validated against: no commitment at all, and the guard as it stood before
+    that commit. The overlap read therefore passes, and only the guard condition can stop it.
+    """
+    _seed_slot(world["show_and_sells"], slot_id="slot-2", start_at=OVERLAP_START, end_at=OVERLAP_END)
+    _seed_commitment(
+        world["unit_campaigns"],
+        OTHER_EVENT,
+        "slot-x",
+        start_at=OVERLAP_START,
+        end_at=OVERLAP_END,
+        unit_campaign_id=OTHER_CAMPAIGN,
+    )
+    _seed_guard(world["unit_campaigns"], version=4)
+    stale = ssm.build_commitment_guard_item(
+        profile_id=_profile("Devon"), commitment_version=3, now_iso=str(EVENT_START)
+    )
+    monkeypatch.setattr(ssm, "read_commitment_guard", lambda profile_id: dict(stale))
+    monkeypatch.setattr(ssm, "commitment_rows", lambda profile_id: [])
+
+    _refusal(_signup("Avery", slot_id="slot-2", key="signup-stale-guard"), "CONFLICT")
+    projections = _commitment_rows(world["unit_campaigns"])
+    assert len(projections) == 1 and projections[0][ssm.SHOW_AND_SELL_ID_ATTRIBUTE] == OTHER_EVENT, (
+        "no second ACTIVE commitment joins the one that was already there"
+    )
+    assert _stored_signup(world["show_and_sells"], slot_id="slot-2") is None
+    assert _guard_version(world["unit_campaigns"]) == 4, "the winner's guard bump stands"
+    assert _marker_rows(world["show_and_sells"]) == []
+
+
 def test_a_removed_roster_entry_cannot_take_a_new_place(world: Dict[str, Any]) -> None:
     """SIGN-M-01-03: §5.6's removal keeps existing signups and blocks new ones."""
     _seed_membership(world["unit_campaigns"], persona="Emery")
@@ -1199,6 +1266,38 @@ def test_a_confirmation_replays_once(world: Dict[str, Any]) -> None:
     again = _ok(_confirm("Avery"))
     assert again == first
     assert int(_stored_event(world["show_and_sells"])[ssm.VERSION_ATTRIBUTE]) == 2
+
+
+@pytest.mark.parametrize("closing_state", [ssm.STATUS_FINALIZED, ssm.STATUS_CANCELLED])
+def test_a_confirmation_retry_survives_the_event_closing_after_it(world: Dict[str, Any], closing_state: str) -> None:
+    """§8.9: an identical retry answers the confirmation it already returned, whatever did since.
+
+    The state window is a rule about a NEW confirmation. Once the save committed and a later
+    workflow finalized or cancelled the event, the retry of a completed request must still answer
+    the rows it already returned — a refusal there tells a caller its confirmed minutes are not
+    confirmed on an event whose credit already counts them.
+    """
+    _seed_signup(world["show_and_sells"])
+    _seed_event(world["show_and_sells"], status=ssm.STATUS_REOPENED)
+    first = _ok(_confirm("Avery"))
+
+    sets = "#status = :closing"
+    names = {"#status": "status"}
+    values = {":closing": closing_state}
+    if closing_state == ssm.STATUS_FINALIZED:
+        sets += ", #fin = :fin"
+        names["#fin"] = ssm.APPROVED_FINALIZATION_ID_ATTRIBUTE
+        values[":fin"] = f"FIN#{EVENT}"
+    world["show_and_sells"].update_item(
+        Key=ssm.event_metadata_key(EVENT),
+        UpdateExpression=f"SET {sets}",
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values,
+    )
+
+    assert _ok(_confirm("Avery")) == first, "the retry answers the stored result, not the closed window"
+    assert _stored_signup(world["show_and_sells"])[ssm.ACTUAL_MINUTES_ATTRIBUTE] == 75
+    assert int(_stored_event(world["show_and_sells"])[ssm.VERSION_ATTRIBUTE]) == 2, "the retry wrote nothing"
 
 
 def test_a_stale_event_version_or_a_missing_event_is_refused(world: Dict[str, Any]) -> None:
