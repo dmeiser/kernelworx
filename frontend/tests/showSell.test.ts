@@ -762,7 +762,14 @@ describe('degenerate answers', () => {
     // answer on one side of the jump rather than inventing an hour.
     const spring = zonedWallClockToUtc('2026-03-08T02:30', ZONE);
     expect(spring).not.toBeNull();
-    expect(zoneOffsetMinutes(spring as Date, ZONE)).toBe(-360);
+    // Which real side of the jump the host's own parser reaches first is not
+    // ours to promise — 01:30 MST and 03:30 MDT are both honest answers. What
+    // the two-pass conversion must never do is hand back the hour that does
+    // not exist: the resolved instant has to carry a real offset for the zone
+    // and print back as a real wall clock.
+    const springOffset = zoneOffsetMinutes(spring as Date, ZONE);
+    expect([-420, -360]).toContain(springOffset);
+    expect(utcToZonedWallClock((spring as Date).toISOString(), ZONE)).not.toBe('2026-03-08T02:30');
     const autumn = zonedWallClockToUtc('2026-11-01T01:30', ZONE);
     expect(autumn).not.toBeNull();
     const again = zonedWallClockToUtc('2026-11-01T01:30:00', ZONE);
