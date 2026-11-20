@@ -45,6 +45,15 @@ export const MAX_SLOT_CAPACITY = 100;
 /** Work rows one confirmation batch may carry (§3.4.3). */
 export const MAX_WORK_LINES_PER_BATCH = 100;
 
+/**
+ * The largest quantity one product may be assigned at one event.
+ *
+ * This is the server's own bound (`MAX_QUANTITY` in `src/utils/inventory_models.py`,
+ * enforced by `normalize_allocation_targets`), named here so the box refuses the
+ * number in the field instead of accepting a batch the write must refuse.
+ */
+export const MAX_ALLOCATION_QUANTITY = 1_000_000;
+
 /** Field lengths the server applies to the same strings (API contract §3.4). */
 export const MAX_LOCATION_NAME_LENGTH = 100;
 export const MAX_ADDRESS_LENGTH = 500;
@@ -117,8 +126,8 @@ export function acceptsEventEdits(status: GqlShowAndSellStatus): boolean {
 
 // --- interval and duration ---------------------------------------------------
 
-/** A `<input type="datetime-local">` value: wall-clock time with no zone of its own. */
-const LOCAL_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
+/** A `<input type="datetime-local">` value, with its fields named so each can be checked as a number. */
+const LOCAL_DATE_TIME_FIELDS = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
 const UTC_ISO_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
 export interface IntervalParse {
@@ -164,36 +173,76 @@ export function zoneOffsetMinutes(instant: Date, timeZone: string): number {
  * because a zone's offset changes across a daylight-saving boundary, and the
  * first guess can land on the wrong side of it.
  *
- * A zone the browser cannot name falls back to the browser's own zone rather
- * than throwing: the field then behaves like an ordinary `datetime-local`, and
- * the server still refuses an interval it cannot use.
+ * A zone the browser cannot name is read as UTC, in both directions, rather than
+ * throwing: the box keeps what the admin typed and the pair still round-trips, so an
+ * event whose Unit's zone is unreadable does not move depending on the laptop it was
+ * opened on. The server still refuses an interval whose zone it cannot name.
  */
 export function zonedWallClockToUtc(wallClock: string, timeZone: string): Date | null {
   const text = wallClock.trim();
-  if (!LOCAL_DATE_TIME_PATTERN.test(text)) return null;
-  const naive = new Date(text.length === 16 ? `${text}:00` : text);
-  if (Number.isNaN(naive.getTime())) return null;
+  const fields = LOCAL_DATE_TIME_FIELDS.exec(text);
+  if (fields === null) return null;
+  const naive = naiveCalendarOf(fields);
+  if (naive === null) return null;
   const guess = guessZonedInstant(naive, timeZone);
-  return Number.isNaN(guess.getTime()) ? null : guess;
+  if (Number.isNaN(guess.getTime())) return null;
+  // The instant has to say the same wall clock back. A date the calendar does not
+  // have (`2026-02-30`) and an hour the zone skips (the spring-forward gap in
+  // America/Denver) both convert to *something* if they are not checked, and an
+  // event whose stored time is not the time the admin typed cannot be corrected
+  // afterwards, because the interval is immutable once written (SSE-07).
+  if (utcToZonedWallClock(guess.toISOString(), timeZone) !== text.slice(0, 16)) return null;
+  return guess;
 }
 
 /**
- * The same wall-clock text, with the zone's offset re-read after the first guess.
+ * The typed fields as a real calendar moment, held as if it were UTC.
  *
- * A zone's offset changes across a daylight-saving boundary, so the offset taken
- * at the naive instant can be the wrong side of the change; the re-read settles it.
+ * `new Date('2026-02-30T09:00')` rolls over into March and `new Date(text)` reads a
+ * bare wall clock in the *browser's* zone, so neither is used: the numbers are read
+ * out of the match and the calendar is checked against itself. A moment the calendar
+ * does not contain returns null.
+ */
+function naiveCalendarOf(fields: RegExpExecArray): Date | null {
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText = '00'] = fields;
+  const typed = [yearText, monthText, dayText, hourText, minuteText, secondText].map(Number);
+  const naive = new Date(Date.UTC(typed[0], typed[1] - 1, typed[2], typed[3], typed[4], typed[5]));
+  return readsBackTheSame(naive, typed) ? naive : null;
+}
+
+/**
+ * Whether the calendar handed back the numbers it was given.
+ *
+ * `Date.UTC` rolls a month 13 into next year and February 30 into March, so the
+ * rollover is the check: a moment the calendar does not contain cannot survive being
+ * built and read back.
+ */
+function readsBackTheSame(naive: Date, typed: number[]): boolean {
+  const givenBack = [
+    naive.getUTCFullYear(),
+    naive.getUTCMonth() + 1,
+    naive.getUTCDate(),
+    naive.getUTCHours(),
+    naive.getUTCMinutes(),
+    naive.getUTCSeconds(),
+  ];
+  return givenBack.every((part, index) => part === typed[index]);
+}
+
+/**
+ * The same wall-clock moment, with the zone's offset applied.
+ *
+ * A zone's offset changes across a daylight-saving boundary, so the offset taken at
+ * the calendar moment can be the wrong side of the change; the re-read settles it.
+ * Nothing here consults the browser's own zone, so the answer is the same in Denver,
+ * Kolkata or UTC — which is the point: the Unit's zone is the one the Kernel stands in.
  */
 function guessZonedInstant(naive: Date, timeZone: string): Date {
   try {
-    // `new Date(text)` reads a bare `YYYY-MM-DDTHH:mm` in the *browser's* zone, so the
-    // browser's offset has to come back out before the Unit zone's goes in. Adding it
-    // instead would shift the instant twice and only look right on a machine already set
-    // to UTC — which is how a Unit's event lands eight hours off.
-    const asUtc = new Date(naive.getTime() - naive.getTimezoneOffset() * 60_000);
-    const offset = zoneOffsetMinutes(asUtc, timeZone);
-    const first = new Date(asUtc.getTime() - offset * 60_000);
+    const offset = zoneOffsetMinutes(naive, timeZone);
+    const first = new Date(naive.getTime() - offset * 60_000);
     const corrected = zoneOffsetMinutes(first, timeZone);
-    return corrected === offset ? first : new Date(asUtc.getTime() - corrected * 60_000);
+    return corrected === offset ? first : new Date(naive.getTime() - corrected * 60_000);
   } catch {
     return naive;
   }
@@ -236,7 +285,9 @@ function instantOf(raw: string): Date | null {
 export function parseInterval(startRaw: string, endRaw: string, timeZone: string): IntervalParse {
   const start = readIntervalInstant(startRaw, timeZone);
   const end = readIntervalInstant(endRaw, timeZone);
-  if (start === null || end === null) return intervalRefused('Enter a start and an end as a date and a time.');
+  if (start === null || end === null) {
+    return intervalRefused(intervalRefusalSentence(startRaw, endRaw, start === null, timeZone));
+  }
   if (end.getTime() <= start.getTime()) {
     return intervalRefused('The end must be after the start — an event cannot end before it begins.');
   }
@@ -246,6 +297,30 @@ export function parseInterval(startRaw: string, endRaw: string, timeZone: string
 /** A box's text, read as the Unit's zone first and as a stored instant second. */
 function readIntervalInstant(raw: string, timeZone: string): Date | null {
   return zonedWallClockToUtc(raw, timeZone) ?? instantOf(raw);
+}
+
+/**
+ * The sentence for a refused interval box.
+ *
+ * A box that is blank or garbled gets the ordinary sentence. A box that names a
+ * moment this zone does not have gets its own, because the admin did type a date and a
+ * time — the calendar skipped it (the spring-forward hour) or the date does not exist.
+ * Saying only "enter a date and a time" there sends them back to the box they already
+ * filled in, and accepting the value instead would store an interval the event can
+ * never show again: the times are immutable once written (SSE-07).
+ */
+function intervalRefusalSentence(startRaw: string, endRaw: string, startRefused: boolean, timeZone: string): string {
+  const raw = (startRefused ? startRaw : endRaw).trim();
+  if (isExistingCalendarMoment(raw)) {
+    return `“${raw}” is not a time in ${timeZone}: that moment does not exist in that zone. Choose a time before or after it.`;
+  }
+  return 'Enter a start and an end as a date and a time.';
+}
+
+/** Whether the text is a wall clock whose date and time are real, whatever the zone. */
+function isExistingCalendarMoment(text: string): boolean {
+  const fields = LOCAL_DATE_TIME_FIELDS.exec(text);
+  return fields !== null && naiveCalendarOf(fields) !== null;
 }
 
 function intervalRefused(error: string): IntervalParse {
@@ -568,30 +643,84 @@ export function openAllocationsByProduct(
  * - A product the event holds and the admin cleared to zero IS sent, because
  *   target zero is how the remainder goes back on the shelf.
  */
-export function allocationTargets(
+/**
+ * The batch the save would send, or the reason it cannot be sent.
+ *
+ * Three rules, and the first is the one a mixed batch teaches:
+ *
+ * - **One bad box refuses the whole batch.** A draft that is not a whole number, or
+ *   is outside the quantity the API takes, is refused here rather than dropped, so
+ *   an admin who typed nine boxes and left one as `12abc` does not watch eight
+ *   products move while the ninth silently did nothing. The batch is one atomic save
+ *   on the server too; the browser refuses for the same reason the server would.
+ * - A product whose draft matches what it holds is left out: a save that writes
+ *   nothing for it is the difference between "nothing changed" and an event that
+ *   suddenly has a zero row nobody asked for.
+ * - A product the event holds and the admin cleared to zero IS sent, because target
+ *   zero is how the remainder goes back on the shelf.
+ */
+export interface AllocationPlan {
+  /** The rows to send, empty when nothing the admin typed changes anything. */
+  targets: AllocationTarget[];
+  /** The sentence for the first box that cannot be saved, or null when the batch is sound. */
+  error: string | null;
+}
+
+export function allocationPlan(
   held: ReadonlyMap<string, GqlShowAndSellAllocationFieldsFragment>,
   drafts: ReadonlyMap<string, string>,
-): AllocationTarget[] {
+): AllocationPlan {
   const targets: AllocationTarget[] = [];
   for (const [productId, raw] of drafts) {
     const target = allocationTargetOf(productId, raw, held.get(productId));
+    if (typeof target === 'string') return { targets: [], error: target };
     if (target !== null) targets.push(target);
   }
-  return targets;
+  return { targets, error: null };
 }
 
-/** One row's target, or null when the draft leaves the product as it stands. */
+/** One row's target, a refusal sentence, or null when the draft leaves the product as it stands. */
 function allocationTargetOf(
   productId: string,
   raw: string,
   current?: GqlShowAndSellAllocationFieldsFragment,
-): AllocationTarget | null {
+): AllocationTarget | string | null {
   const text = raw.trim();
-  if (!WHOLE_NUMBER_PATTERN.test(text)) return null;
+  if (text === '') return null;
+  if (!WHOLE_NUMBER_PATTERN.test(text)) return notAQuantity(productId);
   const quantity = Number(text);
+  if (quantity > MAX_ALLOCATION_QUANTITY) return tooMany(productId, quantity);
+  return keepsTheSameHold(quantity, current) ? null : { productId, quantity };
+}
+
+/**
+ * Whether a box still holds the number the event already holds.
+ *
+ * An unchanged row is not a change: the server's save is a replace of every row it is
+ * given, so resending a row the event already has would bump its version for nothing.
+ * A zero that replaces a non-zero hold is a real change, so only a positive hold that
+ * matches is skipped.
+ */
+function keepsTheSameHold(quantity: number, current?: GqlShowAndSellAllocationFieldsFragment): boolean {
   const holds = allocatedQtyOf(current);
-  if (quantity === holds && holds > 0) return null;
-  return { productId, quantity };
+  return quantity === holds && holds > 0;
+}
+
+/** A box holding something that is not a count of Kernels. */
+function notAQuantity(productId: string): string {
+  return `Enter a whole number of Kernels for every product, or leave a product's box empty. ${productName(
+    productId,
+  )} is not a quantity.`;
+}
+
+/** A count past the bound the server's own `MAX_QUANTITY` takes. */
+function tooMany(productId: string, quantity: number): string {
+  return `A product can be assigned at most ${MAX_ALLOCATION_QUANTITY} at one event. ${productName(productId)} asks for ${quantity}.`;
+}
+
+/** A product id is opaque; the sentence names it rather than pretending to know its name. */
+function productName(productId: string): string {
+  return productId.includes('#') ? `Product ${productId}` : productId;
 }
 
 function allocatedQtyOf(current?: GqlShowAndSellAllocationFieldsFragment): number {
@@ -603,17 +732,22 @@ export function hasAllocationChanges(
   held: ReadonlyMap<string, GqlShowAndSellAllocationFieldsFragment>,
   drafts: ReadonlyMap<string, string>,
 ): boolean {
-  return allocationTargets(held, drafts).length > 0;
+  const plan = allocationPlan(held, drafts);
+  // A batch with a bad box is still a change the admin has to be able to act on: the
+  // Save stays live so the refusal sentence appears where they were about to press it.
+  return plan.error !== null || plan.targets.length > 0;
 }
 
 /**
  * What every OPEN allocation of this campaign holds, per product.
  *
- * §3.2.4 says this total is the browser's arithmetic, over every page it fetched —
- * the server hands back raw rows precisely so a reader cannot be shown a total the
- * audit trail does not support. A RELEASED or CANCELLED row is excluded because it
- * no longer reserves anything, and a caller that stopped at page one would understate
- * the total, which is why the screens that use this drain the connection first.
+ * This is the server's own `assigned_open_qty` (`src/utils/inventory_models.py`): the
+ * sum of **`remainingQty`** over OPEN rows, not of `allocatedQty`. A product that has
+ * sold 6 of its 10 no longer has 10 of the campaign's stock committed to it — counting
+ * the sold half is how the screen claims stock the Kernel can still hand to another
+ * event. A RELEASED or CANCELLED row is excluded because it no longer reserves
+ * anything, and a caller that stopped at page one would understate the total, which is
+ * why the screens that use this drain the connection first (§3.2.4, DATA-Q-03).
  */
 export function productQuantityOf(
   allocations: readonly GqlShowAndSellAllocationFieldsFragment[],
@@ -621,7 +755,7 @@ export function productQuantityOf(
   const totals = new Map<string, number>();
   for (const allocation of allocations) {
     if (allocation.status !== 'OPEN') continue;
-    totals.set(allocation.productId, (totals.get(allocation.productId) ?? 0) + allocation.allocatedQty);
+    totals.set(allocation.productId, (totals.get(allocation.productId) ?? 0) + allocation.remainingQty);
   }
   return totals;
 }
@@ -856,13 +990,20 @@ function foldIcsLine(line: string): string {
   return `${head}\r\n ${foldIcsLine(line.slice(head.length))}`;
 }
 
-/** RFC 5545 escaping: backslashes, semicolons, commas and newlines. */
+/**
+ * RFC 5545 escaping: backslashes, semicolons, commas and newlines.
+ *
+ * A lone carriage return is escaped too. `\r\n` and `\n` both mean a line break, but
+ * a bare `\r` inside a text value is not a break this client can see, and an ICS
+ * reader that does honour one would split a property mid-line — so every carriage
+ * return, paired or not, becomes the `\n` the standard asks for.
+ */
 function escapeIcsText(value: string): string {
   return value
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
-    .replace(/\r?\n/g, '\\n');
+    .replace(/\r\n|\r|\n/g, '\\n');
 }
 
 /**

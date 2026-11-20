@@ -49,7 +49,7 @@ import {
 import {
   SHOW_AND_SELL_PAGE_SIZE,
   acceptsAllocationEdits,
-  allocationTargets,
+  allocationPlan,
   describeShowAndSellFailure,
   hasAllocationChanges,
   openAllocationsByProduct,
@@ -134,8 +134,16 @@ export const AllocationEditor: React.FC<{
     drafts.get(productId) ?? String(held.get(productId)?.allocatedQty ?? '');
 
   const save = async () => {
-    const merged = mergeDrafts(rows, held, drafts);
-    const items = allocationTargets(held, merged);
+    const plan = allocationPlan(held, mergeDrafts(rows, held, drafts));
+    if (plan.error !== null) {
+      // One box that is not a quantity refuses the whole batch, and the drafts stay
+      // exactly as they were typed. This save is one atomic write on the server, so a
+      // batch that sent the eight sound rows and dropped the ninth would leave the
+      // event holding a plan nobody approved — and the dropped row looks saved.
+      setError(plan.error);
+      return;
+    }
+    const items = plan.targets;
     try {
       const result = await assignInventory({
         variables: {
@@ -152,7 +160,14 @@ export const AllocationEditor: React.FC<{
     } catch (mutationError) {
       setError(describeShowAndSellFailure(mutationError, 'Could not save the stock assigned to this event.'));
     }
+    // Both reads behind this screen are re-read: the event (its version, its
+    // allocations and its cumulative products) and the campaign's allocation rows,
+    // which are what the "assigned across all events" column adds up. A save that
+    // refreshed only the event would leave the column showing the totals the batch
+    // just replaced, and an admin would then re-enter numbers against a stock answer
+    // that no longer exists.
     await refreshQuery(onChanged);
+    await refreshQuery(() => allocations.refetch());
   };
 
   const dirty = hasAllocationChanges(held, mergeDrafts(rows, held, drafts));

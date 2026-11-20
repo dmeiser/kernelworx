@@ -9,6 +9,17 @@
  * `openCapacity` the server computed, not a capacity the browser subtracted
  * (SEC-05).
  *
+ * The list answers *which events are on offer*; it cannot answer *what the Scout
+ * in the picker holds*, because one account may reach a campaign with several
+ * Scouts and `unitCampaignOpportunities` gathers the signups of every roster
+ * profile the caller can read. So each event card asks the per-Scout question it
+ * needs — `showAndSellOpportunity(showAndSellId, profileId)` — and the Take, Give
+ * back, and calendar controls are built from that answer alone. A row whose
+ * per-Scout read has not arrived offers nothing yet, and one the server refused
+ * (a Scout who is not on this roster) shows why rather than falling back to the
+ * mixed list, where another Scout's place would otherwise decide this one's
+ * buttons and address a write to the wrong profile.
+ *
  * Four refusals are shown as facts about the Scout's standing rather than as
  * generic errors:
  *
@@ -27,7 +38,7 @@
  * (CAL-01, CAL-02).
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useApolloClient, useMutation, useQuery } from '@apollo/client/react';
 import { useParams } from 'react-router-dom';
 import {
@@ -45,6 +56,7 @@ import {
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import {
   CANCEL_SHOW_AND_SELL_SIGNUP,
+  GET_SHOW_AND_SELL_OPPORTUNITY,
   GET_SIGNUP_CALENDAR_DATA,
   LIST_MY_PROFILES,
   LIST_MY_SCOUT_COMMITMENTS,
@@ -76,6 +88,7 @@ import { PageHeader } from '../components/PageHeader';
 import { QueryGate } from '../components/QueryGate';
 import { useCompleteConnection } from '../hooks/useCompleteConnection';
 import type {
+  GqlGetShowAndSellOpportunityQuery,
   GqlGetSignupCalendarDataQuery,
   GqlListMyProfilesQuery,
   GqlListMyScoutCommitmentsQuery,
@@ -195,6 +208,11 @@ const ScoutWorkspace: React.FC<{
   const [pendingInvite, setPendingInvite] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped whenever a write may have changed what the picked Scout holds, so every
+  // event card re-asks its per-Scout question. The offer list re-reads too, because
+  // `openCapacity` is the other half of the row, but the list alone can never answer
+  // this question: its signups belong to every readable roster profile.
+  const [scoutViewToken, setScoutViewToken] = useState(0);
   const intent = React.useRef(createWriteIntent());
   const [signupScout, { loading: signingUp }] = useMutation(SIGNUP_SCOUT_FOR_SHOW_AND_SELL_SLOT);
   const [cancelSignup] = useMutation(CANCEL_SHOW_AND_SELL_SIGNUP);
@@ -214,6 +232,10 @@ const ScoutWorkspace: React.FC<{
       setPendingInvite(null);
     }
     await refreshQuery(opportunities.refetch);
+    // The place just taken is a commitment too: it is what the next row's overlap
+    // warning is computed against, and what the Places-you-hold panel lists.
+    await refreshQuery(commitments.refetch);
+    setScoutViewToken((token) => token + 1);
   };
 
   const give = async (showAndSellId: string, signup: GqlParticipantSignupFieldsFragment) => {
@@ -233,6 +255,7 @@ const ScoutWorkspace: React.FC<{
     }
     await refreshQuery(opportunities.refetch);
     await refreshQuery(commitments.refetch);
+    setScoutViewToken((token) => token + 1);
   };
 
   const invite = async (showAndSellId: string, slotId: string) => {
@@ -273,6 +296,8 @@ const ScoutWorkspace: React.FC<{
       >
         <OpportunityList
           items={items}
+          profileId={profileId}
+          scoutViewToken={scoutViewToken}
           canSignup={canSignup}
           signingUp={signingUp}
           pendingInvite={pendingInvite}
@@ -357,6 +382,8 @@ const SignupNotice: React.FC<{ message: string | null }> = ({ message }) => {
 /** The offers, or the reason there are none. */
 const OpportunityList: React.FC<{
   items: Opportunity[];
+  profileId: string;
+  scoutViewToken: number;
   canSignup: boolean;
   signingUp: boolean;
   pendingInvite: string | null;
@@ -364,7 +391,7 @@ const OpportunityList: React.FC<{
   onTake: (event: Opportunity, slotId: string) => void;
   onGive: (event: Opportunity, signup: GqlParticipantSignupFieldsFragment) => void;
   onInvite: (event: Opportunity, slotId: string) => void;
-}> = ({ items, canSignup, signingUp, pendingInvite, commitments, onTake, onGive, onInvite }) => {
+}> = ({ items, profileId, scoutViewToken, canSignup, signingUp, pendingInvite, commitments, onTake, onGive, onInvite }) => {
   if (items.length === 0) {
     return (
       <EmptyState
@@ -379,6 +406,8 @@ const OpportunityList: React.FC<{
         <OpportunityCard
           key={event.showAndSellId}
           event={event}
+          profileId={profileId}
+          scoutViewToken={scoutViewToken}
           canSignup={canSignup}
           signingUp={signingUp}
           inviteKey={pendingInvite}
@@ -392,9 +421,19 @@ const OpportunityList: React.FC<{
   );
 };
 
-/** A card per event: what it is, when it runs, and the slots with room left. */
+/**
+ * A card per event: what it is, when it runs, and the slots with room left.
+ *
+ * The event's own facts come from the offer list; the Scout's places come from the
+ * per-Scout read, because the list's `mySignups` covers every roster profile the
+ * caller can read. Taking that shortcut is how one Scout's held place hides another
+ * Scout's Take button, and how a Give back or a calendar invite ends up addressed to
+ * a profile the reader was not looking at.
+ */
 const OpportunityCard: React.FC<{
   event: Opportunity;
+  profileId: string;
+  scoutViewToken: number;
   canSignup: boolean;
   signingUp: boolean;
   inviteKey: string | null;
@@ -402,45 +441,100 @@ const OpportunityCard: React.FC<{
   onTake: (slotId: string) => void;
   onGive: (signup: GqlParticipantSignupFieldsFragment) => void;
   onInvite: (slotId: string) => void;
-}> = ({ event, canSignup, signingUp, inviteKey, commitments, onTake, onGive, onInvite }) => (
-  <Card variant="outlined" data-testid={`opportunity-${event.showAndSellId}`}>
-    <CardContent>
-      <Stack spacing={1}>
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Typography variant="h6" data-testid={`opportunity-location-${event.showAndSellId}`}>
-            {event.locationName}
+}> = ({ event, profileId, scoutViewToken, canSignup, signingUp, inviteKey, commitments, onTake, onGive, onInvite }) => {
+  const scoutView = useQuery<GqlGetShowAndSellOpportunityQuery>(GET_SHOW_AND_SELL_OPPORTUNITY, {
+    variables: { showAndSellId: event.showAndSellId, profileId },
+    skip: profileId === '',
+  });
+  useScoutViewRefresh(scoutView, scoutViewToken);
+  const view = scoutView.data?.showAndSellOpportunity ?? null;
+  const shown = view ?? event;
+  return (
+    <Card variant="outlined" data-testid={`opportunity-${event.showAndSellId}`}>
+      <CardContent>
+        <Stack spacing={1}>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Typography variant="h6" data-testid={`opportunity-location-${event.showAndSellId}`}>
+              {shown.locationName}
+            </Typography>
+            <Chip
+              size="small"
+              label={showAndSellStatusLabel(shown.status)}
+              data-testid={`opportunity-status-${event.showAndSellId}`}
+            />
+            <WeOweChip event={shown} />
+          </Stack>
+          <Typography color="text.secondary" data-testid={`opportunity-when-${event.showAndSellId}`}>
+            {intervalLabel(shown.startAt, shown.endAt, shown.timezone)}
           </Typography>
-          <Chip
-            size="small"
-            label={showAndSellStatusLabel(event.status)}
-            data-testid={`opportunity-status-${event.showAndSellId}`}
-          />
-          <WeOweChip event={event} />
+          <OpportunityAddress event={shown} />
+          <NoSlotsNote event={shown} />
+          <ScoutViewNotice showAndSellId={event.showAndSellId} view={view} loading={scoutView.loading} />
+          {shown.slots.map((slot) => (
+            <SlotOfferRow
+              key={slot.slotId}
+              slot={slot}
+              event={shown}
+              signup={view ? signupForSlot(view.mySignups, slot.slotId) : undefined}
+              actionsKnown={view !== null}
+              collisions={collidingCommitments(slot, otherActivePlaces(commitments, slot.slotId))}
+              canSignup={canSignup}
+              signingUp={signingUp}
+              inviteRequested={inviteKey === `${event.showAndSellId}:${slot.slotId}`}
+              onTake={onTake}
+              onGive={onGive}
+              onInvite={onInvite}
+            />
+          ))}
         </Stack>
-        <Typography color="text.secondary" data-testid={`opportunity-when-${event.showAndSellId}`}>
-          {intervalLabel(event.startAt, event.endAt, event.timezone)}
-        </Typography>
-        <OpportunityAddress event={event} />
-        <NoSlotsNote event={event} />
-        {event.slots.map((slot) => (
-          <SlotOfferRow
-            key={slot.slotId}
-            slot={slot}
-            event={event}
-            signup={signupForSlot(event.mySignups, slot.slotId)}
-            collisions={collidingCommitments(slot, otherActivePlaces(commitments, slot.slotId))}
-            canSignup={canSignup}
-            signingUp={signingUp}
-            inviteRequested={inviteKey === `${event.showAndSellId}:${slot.slotId}`}
-            onTake={onTake}
-            onGive={onGive}
-            onInvite={onInvite}
-          />
-        ))}
-      </Stack>
-    </CardContent>
-  </Card>
-);
+      </CardContent>
+    </Card>
+  );
+};
+
+/**
+ * Re-ask the per-Scout question after a write.
+ *
+ * The card's own query answers from the cache, so a place taken or given back would
+ * leave this row showing the buttons it had when the page loaded — a Take that is
+ * really a duplicate, or a Give back for a place that is already gone. The token is
+ * the force that re-runs the request the card already made; token 0 is the mount.
+ */
+function useScoutViewRefresh(scoutView: { refetch: () => unknown }, token: number): void {
+  const seen = useRef(0);
+  useEffect(() => {
+    if (token === seen.current) return;
+    seen.current = token;
+    void scoutView.refetch();
+  }, [scoutView, token]);
+}
+
+/**
+ * Whether this card knows what the picked Scout holds.
+ *
+ * Two states, each said plainly: the read is in flight, or it answered nothing —
+ * refused because this Scout has no standing on this event. Neither state falls back
+ * to the offer list's signups, because those belong to other Scouts as well.
+ */
+const ScoutViewNotice: React.FC<{ showAndSellId: string; view: Opportunity | null; loading: boolean }> = ({
+  showAndSellId,
+  view,
+  loading,
+}) => {
+  if (view !== null) return null;
+  if (loading) {
+    return (
+      <Typography variant="body2" color="text.secondary" data-testid={`scout-view-loading-${showAndSellId}`}>
+        Checking which places this Scout already holds…
+      </Typography>
+    );
+  }
+  return (
+    <Typography variant="body2" color="text.secondary" data-testid={`scout-view-refused-${showAndSellId}`}>
+      This Scout cannot be offered this Show &amp; Sell, so no places are shown for it.
+    </Typography>
+  );
+};
 
 const WeOweChip: React.FC<{ event: Opportunity }> = ({ event }) => {
   if (!event.weOweEnabled) return null;
@@ -478,6 +572,7 @@ const SlotOfferRow: React.FC<{
   slot: OpportunitySlot;
   event: Opportunity;
   signup?: GqlParticipantSignupFieldsFragment;
+  actionsKnown: boolean;
   collisions: readonly unknown[];
   canSignup: boolean;
   signingUp: boolean;
@@ -485,8 +580,19 @@ const SlotOfferRow: React.FC<{
   onTake: (slotId: string) => void;
   onGive: (signup: GqlParticipantSignupFieldsFragment) => void;
   onInvite: (slotId: string) => void;
-}> = ({ slot, event, signup, collisions, canSignup, signingUp, inviteRequested, onTake, onGive, onInvite }) => {
-  const held = signup !== undefined && signup.status === 'ACTIVE';
+}> = ({
+  slot,
+  event,
+  signup,
+  actionsKnown,
+  collisions,
+  canSignup,
+  signingUp,
+  inviteRequested,
+  onTake,
+  onGive,
+  onInvite,
+}) => {
   const open = acceptsSignups(event.status) && openPlaces(slot) > 0;
   return (
     <Stack
@@ -507,17 +613,50 @@ const SlotOfferRow: React.FC<{
         </Typography>
         <SlotConflictNote slot={slot} collisions={collisions} />
       </Box>
-      {held ? (
-        <HeldPlaceActions slot={slot} signup={signup} event={event} onGive={onGive} onInvite={onInvite} />
-      ) : (
-        <>
-          <TakePlaceButton slotId={slot.slotId} blocked={takeBlocked(open, canSignup, signingUp)} onTake={onTake} />
-          <NewPlaceInvite requested={inviteRequested} slotId={slot.slotId} onInvite={onInvite} />
-        </>
-      )}
+      {slotActions({ slot, event, signup, actionsKnown, open, canSignup, signingUp, inviteRequested, onTake, onGive, onInvite })}
     </Stack>
   );
 };
+
+/**
+ * The controls for one slot, or none while this Scout's places are unknown.
+ *
+ * A Take button that does not know this Scout already holds the place offers a
+ * duplicate write, and a Give back whose signup came from the shared offer list is a
+ * write addressed to whichever profile the caller happens to have picked. So the
+ * controls appear only once `showAndSellOpportunity` has answered for the picked
+ * Scout — the same answer the row's held/cancelled sentence is read from.
+ */
+function slotActions(args: {
+  slot: OpportunitySlot;
+  event: Opportunity;
+  signup?: GqlParticipantSignupFieldsFragment;
+  actionsKnown: boolean;
+  open: boolean;
+  canSignup: boolean;
+  signingUp: boolean;
+  inviteRequested: boolean;
+  onTake: (slotId: string) => void;
+  onGive: (signup: GqlParticipantSignupFieldsFragment) => void;
+  onInvite: (slotId: string) => void;
+}): React.ReactNode {
+  if (!args.actionsKnown) return null;
+  if (args.signup !== undefined && args.signup.status === 'ACTIVE') {
+    return (
+      <HeldPlaceActions slot={args.slot} signup={args.signup} event={args.event} onGive={args.onGive} onInvite={args.onInvite} />
+    );
+  }
+  return (
+    <>
+      <TakePlaceButton
+        slotId={args.slot.slotId}
+        blocked={takeBlocked(args.open, args.canSignup, args.signingUp)}
+        onTake={args.onTake}
+      />
+      <NewPlaceInvite requested={args.inviteRequested} slotId={args.slot.slotId} onInvite={args.onInvite} />
+    </>
+  );
+}
 
 /** The invite offered straight after a place was taken, before the row re-reads. */
 const NewPlaceInvite: React.FC<{ requested: boolean; slotId: string; onInvite: (slotId: string) => void }> = ({

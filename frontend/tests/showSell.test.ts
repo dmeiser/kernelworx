@@ -21,6 +21,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphQLError } from 'graphql';
 import {
+  MAX_ALLOCATION_QUANTITY,
   MAX_LOCATION_NAME_LENGTH,
   MAX_SLOT_CAPACITY,
   MAX_SLOT_LABEL_LENGTH,
@@ -31,7 +32,7 @@ import {
   acceptsSignups,
   acceptsSlotEdits,
   acceptsWorkConfirmation,
-  allocationTargets,
+  allocationPlan,
   buildInvite,
   changedWorkLines,
   collidingCommitments,
@@ -93,6 +94,28 @@ const ZONE = 'America/Denver';
 /** An instant in the Unit's zone, written the way the boxes carry it. */
 const wall = (day: string, time: string) => `${day}T${time}`;
 
+/** Zones a Kernel's laptop might be set to, including one that has no DST at all. */
+const BROWSER_ZONES = ['UTC', 'America/Denver', 'Asia/Kolkata', 'Pacific/Kiritimati'];
+
+/**
+ * Runs the block with the host's own zone set to `zone`, then puts it back.
+ *
+ * A Unit's interval is decided in the Unit's zone and read on a machine that may be
+ * set anywhere, so a conversion that consulted the browser's zone would shift the
+ * event by hours the moment the two disagreed — and the interval could not be
+ * corrected afterwards, because it is immutable once written.
+ */
+function withBrowserZone<T>(zone: string, run: () => T): T {
+  const previous = process.env.TZ;
+  process.env.TZ = zone;
+  try {
+    return run();
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+}
+
 // --- status and state gates -------------------------------------------------
 
 describe('Show & Sell state gates', () => {
@@ -145,17 +168,20 @@ describe('zoned wall clock', () => {
     expect(utcToZonedWallClock('not a time', ZONE)).toBe('');
   });
 
-  it('falls back to the text itself for a zone the browser cannot name', () => {
+  it('reads a zone the browser cannot name as plain UTC, never as the laptop’s zone', () => {
     // A Unit created with a typo'd zone must not blank the screen: the box keeps the
-    // value, and the server still refuses an interval it cannot use.
+    // value, and the server still refuses an interval whose zone it cannot name.
     expect(utcToZonedWallClock('2026-03-14T15:00:00.000Z', 'Mars/Olympus_Mons')).toBe('2026-03-14T15:00');
     expect(formatInstant('2026-03-14T15:00:00.000Z', 'Mars/Olympus_Mons')).toContain('UTC');
-    // The same rule on the way in: the text is kept, not dropped, so the admin can
-    // see what the box holds and fix the Unit's zone. The kept value is the box read
-    // in the browser's own zone, which is what an ordinary `datetime-local` means.
-    expect(zonedWallClockToUtc('2026-03-14T09:00', 'Mars/Olympus_Mons')?.toISOString()).toBe(
-      new Date('2026-03-14T09:00').toISOString(),
-    );
+    // The same rule on the way in, and it has to be UTC rather than the browser's own
+    // zone: the pair still round-trips what the admin typed, and an event whose zone
+    // is unreadable does not move depending on where the screen was opened.
+    for (const browser of BROWSER_ZONES) {
+      withBrowserZone(browser, () => {
+        expect(zonedWallClockToUtc('2026-03-14T09:00', 'Mars/Olympus_Mons')?.toISOString()).toBe('2026-03-14T09:00:00.000Z');
+        expect(utcToZonedWallClock('2026-03-14T09:00:00.000Z', 'Mars/Olympus_Mons')).toBe('2026-03-14T09:00');
+      });
+    }
   });
 });
 
@@ -404,26 +430,55 @@ describe('allocation editor arithmetic', () => {
   });
 
   it('sends an unchanged blank as nothing and a cleared field as target zero', () => {
-    const targets = allocationTargets(held, new Map([['PROD#caramel', '']]));
-    expect(targets).toEqual([]);
-    const released = allocationTargets(held, new Map([['PROD#caramel', '0']]));
-    expect(released).toEqual<AllocationTarget[]>([{ productId: 'PROD#caramel', quantity: 0 }]);
+    expect(allocationPlan(held, new Map([['PROD#caramel', '']])).targets).toEqual([]);
+    const released = allocationPlan(held, new Map([['PROD#caramel', '0']]));
+    expect(released.error).toBeNull();
+    expect(released.targets).toEqual<AllocationTarget[]>([{ productId: 'PROD#caramel', quantity: 0 }]);
   });
 
   it('leaves a product the admin did not touch out of the write', () => {
-    expect(allocationTargets(held, new Map([['PROD#caramel', '4']]))).toEqual([]);
+    expect(allocationPlan(held, new Map([['PROD#caramel', '4']])).targets).toEqual([]);
     expect(hasAllocationChanges(held, new Map([['PROD#caramel', '4']]))).toBe(false);
     expect(hasAllocationChanges(held, new Map([['PROD#caramel', '5']]))).toBe(true);
   });
 
-  it('refuses to build a plan out of text that is not a number', () => {
-    expect(allocationTargets(held, new Map([['PROD#caramel', 'four']]))).toEqual([]);
-    expect(allocationTargets(held, new Map([['PROD#caramel', '-1']]))).toEqual([]);
+  it('refuses the whole batch when one box is not a quantity the API takes', () => {
+    // This save is one atomic write on the server. Dropping the unreadable row and
+    // sending the rest is how an event ends up holding a plan nobody approved, with
+    // the dropped row looking saved: the batch is refused and nothing moves.
+    for (const text of ['four', '-1', '1.5', '12abc']) {
+      const refused = allocationPlan(held, new Map([['PROD#caramel', text]]));
+      expect(refused.targets).toEqual([]);
+      expect(refused.error).toContain('whole number');
+    }
+    const mixed = allocationPlan(held, new Map([['PROD#caramel', '7'], ['PROD#butter', '12abc']]));
+    expect(mixed.targets).toEqual([]);
+    expect(mixed.error).toContain('PROD#butter');
+    // A storage id is named as `Product <id>`; anything else is quoted as it stands,
+    // because a bare id has no prefix to explain.
+    expect(allocationPlan(held, new Map([['legacy-7', 'x']])).error).toContain('legacy-7 is not a quantity');
+    // The Save stays live so the sentence appears where the admin was about to press it.
+    expect(hasAllocationChanges(held, new Map([['PROD#butter', '12abc']]))).toBe(true);
   });
 
-  it('sums a product across every event of the campaign, over all pages', () => {
+  it('refuses a quantity above the bound the server enforces, per box', () => {
+    const oversized = allocationPlan(held, new Map([['PROD#caramel', '1000001']]));
+    expect(oversized.targets).toEqual([]);
+    expect(oversized.error).toContain(`${MAX_ALLOCATION_QUANTITY}`);
+    expect(oversized.error).toContain('1000001');
+    // The bound is inclusive: the largest legal target is sent.
+    const legal = allocationPlan(held, new Map([['PROD#caramel', `${MAX_ALLOCATION_QUANTITY}`]]));
+    expect(legal.error).toBeNull();
+    expect(legal.targets).toEqual([{ productId: 'PROD#caramel', quantity: MAX_ALLOCATION_QUANTITY }]);
+  });
+
+  it('sums what the campaign still has committed, which is remainingQty not allocatedQty', () => {
+    // §7's `assigned_open_qty` is the sum of `remainingQty` over OPEN rows. Six of the
+    // ten this event was assigned has sold, so only four of the campaign's stock is
+    // still committed to it: counting the sold half is how the screen claims stock the
+    // Kernel can still assign to another event.
     const totals = productQuantityOf([
-      allocation('PROD#caramel', 4),
+      allocation('PROD#caramel', 10, { soldQty: 6, remainingQty: 4 }),
       allocation('PROD#caramel', 3, { showAndSellId: 'SSE#2' }),
       allocation('PROD#caramel', 5, { showAndSellId: 'SSE#3', status: 'RELEASED', remainingQty: 0 }),
     ] as never);
@@ -657,6 +712,17 @@ describe('the calendar invite', () => {
     for (const line of ics.split('\r\n')) expect(line.length).toBeLessThanOrEqual(75);
   });
 
+  it('escapes a lone carriage return, which a calendar app may read as a line break', () => {
+    // `\r\n` and `\n` are both breaks to this writer, and both become the `\n` RFC 5545
+    // asks for. A bare carriage return is not one, but a reader that honours it would
+    // split the property mid-line and lose the rest of the address, so it is escaped
+    // too — and nothing but a line ending may leave a raw CR in the file.
+    const ics = buildInvite({ ...inviteData, locationName: 'Library\rMain' }, new Date('2026-03-21T12:00:00.000Z'));
+    expect(ics).toContain('LOCATION:Library\\nMain');
+    expect(ics).not.toContain('Library\rMain');
+    expect(ics.split('\r\n').join('')).not.toContain('\r');
+  });
+
   it('folds by octets, which is what a calendar app counts', () => {
     // An em dash is three octets, so a name measured in characters can still put a
     // line over the limit the format allows.
@@ -756,24 +822,38 @@ describe('degenerate answers', () => {
     expect(minutesUntil('not a time')).toBeNull();
   });
 
-  it('settles a wall clock that falls on the daylight-saving boundary itself', () => {
-    // 2026-03-08 is when Denver jumps from UTC-7 to UTC-6. 02:30 that morning never
-    // happens, and 01:30 happens twice: the two-pass conversion is what keeps the
-    // answer on one side of the jump rather than inventing an hour.
-    const spring = zonedWallClockToUtc('2026-03-08T02:30', ZONE);
-    expect(spring).not.toBeNull();
-    // Which real side of the jump the host's own parser reaches first is not
-    // ours to promise — 01:30 MST and 03:30 MDT are both honest answers. What
-    // the two-pass conversion must never do is hand back the hour that does
-    // not exist: the resolved instant has to carry a real offset for the zone
-    // and print back as a real wall clock.
-    const springOffset = zoneOffsetMinutes(spring as Date, ZONE);
-    expect([-420, -360]).toContain(springOffset);
-    expect(utcToZonedWallClock((spring as Date).toISOString(), ZONE)).not.toBe('2026-03-08T02:30');
+  it('refuses a wall clock the Unit zone does not contain, from any browser zone', () => {
+    // 2026-03-08 is when Denver jumps from UTC-7 to UTC-6 at 02:00, so 02:30 that
+    // morning never happens. Resolving it to a neighboring hour would store an
+    // interval the event can never show back — event times are immutable once written
+    // (SSE-07) — so the field refuses it and names the zone that has no such time.
+    for (const browser of BROWSER_ZONES) {
+      withBrowserZone(browser, () => {
+        expect(zonedWallClockToUtc('2026-03-08T02:30', ZONE)).toBeNull();
+        expect(parseInterval('2026-03-08T02:30', '2026-03-08T04:30', ZONE).error).toContain('does not exist in that zone');
+        // A date the calendar does not have is refused too, instead of rolling over
+        // into the next month and being stored as an event nobody scheduled.
+        expect(zonedWallClockToUtc('2026-02-30T09:00', ZONE)).toBeNull();
+        // The Unit's zone is the one that decides, so the same wall clock converts to
+        // the same instant on a laptop set anywhere else in the world.
+        expect(zonedWallClockToUtc('2026-03-14T09:00', ZONE)?.toISOString()).toBe('2026-03-14T15:00:00.000Z');
+        expect(zonedWallClockToUtc('2026-11-14T09:00', ZONE)?.toISOString()).toBe('2026-11-14T16:00:00.000Z');
+        expect(utcToZonedWallClock('2026-03-14T15:00:00.000Z', ZONE)).toBe('2026-03-14T09:00');
+      });
+    }
+  });
+
+  it('settles the hour the autumn change-back repeats, and keeps the round trip honest', () => {
+    // 01:30 on 2026-11-01 happens twice in Denver. Both readings are real instants;
+    // what the conversion must never do is hand back a moment the zone does not have.
     const autumn = zonedWallClockToUtc('2026-11-01T01:30', ZONE);
     expect(autumn).not.toBeNull();
+    expect([-420, -360]).toContain(zoneOffsetMinutes(autumn as Date, ZONE));
     const again = zonedWallClockToUtc('2026-11-01T01:30:00', ZONE);
     expect(again?.toISOString()).toBe(autumn?.toISOString());
+    // The instant has to print back as the text that was typed, which is the check
+    // that the stored interval is the interval the admin meant.
+    expect(utcToZonedWallClock((autumn as Date).toISOString(), ZONE)).toBe('2026-11-01T01:30');
   });
 
   it('refuses a slot whose two boxes are not dates at all', () => {
@@ -783,8 +863,9 @@ describe('degenerate answers', () => {
   });
 
   it('treats a product the event does not hold as holding nothing', () => {
-    const targets = allocationTargets(new Map(), new Map([['PROD#caramel', '3']]));
-    expect(targets).toEqual([{ productId: 'PROD#caramel', quantity: 3 } satisfies AllocationTarget]);
+    const plan = allocationPlan(new Map(), new Map([['PROD#caramel', '3']]));
+    expect(plan.error).toBeNull();
+    expect(plan.targets).toEqual([{ productId: 'PROD#caramel', quantity: 3 } satisfies AllocationTarget]);
   });
 
   it('offers a place only while the event takes places and the slot has room', () => {

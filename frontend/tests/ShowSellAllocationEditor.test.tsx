@@ -209,14 +209,16 @@ describe('AllocationEditor', () => {
   it('ALLOC-01: each row carries the four numbers — what this event holds, sold, still unsold, and assigned across the campaign', async () => {
     renderEditor([catalogQuery(), allocationsQuery(CAMPAIGN_ROWS)]);
 
-    // Caramel: the event holds four, sold one, has three unsold, and the
-    // campaign's OPEN allocations total six across every event. The RELEASED
-    // seven is not counted: it reserves nothing any more.
+    // Caramel: the event holds four, sold one, has three unsold, and the campaign
+    // still has five committed to it across every event — the sum of `remainingQty`
+    // over OPEN rows, which is the same `assignedOpenQty` the server computes and
+    // names in an overage sentence (§7). One sold Kernel is no longer reserved for
+    // this campaign's events, and the RELEASED seven reserves nothing at all.
     const target = await screen.findByTestId(`allocation-target-${CARAMEL}`);
     expect(target).toHaveValue('4');
     expect(screen.getByTestId(`allocation-sold-${CARAMEL}`)).toHaveTextContent('1');
     expect(screen.getByTestId(`allocation-remaining-${CARAMEL}`)).toHaveTextContent('3');
-    expect(screen.getByTestId(`allocation-assigned-${CARAMEL}`)).toHaveTextContent('6');
+    expect(screen.getByTestId(`allocation-assigned-${CARAMEL}`)).toHaveTextContent('5');
 
     // Butter: its only allocation for this event was released, so the target
     // box starts blank and the sold/unsold numbers are the server's zeroes.
@@ -363,8 +365,74 @@ describe('AllocationEditor', () => {
 
     await clearAndType(`allocation-target-${CARAMEL}`, 'nine', user);
     await clearAndType(`allocation-target-${BUTTER}`, '-1', user);
-    expect(await screen.findByTestId('save-allocations')).toBeDisabled();
+
+    // The Save is not greyed out — an unreadable box would otherwise be a silent
+    // nothing-happens button — and pressing it refuses the batch without sending a
+    // request, naming the first box that cannot be saved.
+    await user.click(await screen.findByTestId('save-allocations'));
+    expect((await screen.findByText(/is not a quantity/)).textContent).toContain('PROD#caramel');
     expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it('§3.5.2: one box that is not a quantity refuses the whole batch, and the sound row is not saved either', async () => {
+    const user = userEvent.setup();
+    // No write mock in this test: this save must not reach the server at all. Half a
+    // plan written is worse than none — the admin would watch eight products move and
+    // the ninth look saved, and the event would end up holding a batch nobody approved.
+    const onChanged = renderEditor([catalogQuery(), allocationsQuery(CAMPAIGN_ROWS)]);
+
+    await clearAndType(`allocation-target-${CARAMEL}`, '9', user);
+    await clearAndType(`allocation-target-${BUTTER}`, '12abc', user);
+
+    const save = await screen.findByTestId('save-allocations');
+    // The Save stays live rather than greyed out: the refusal has to appear where the
+    // admin was about to press it.
+    expect(save).toBeEnabled();
+    await user.click(save);
+
+    const refusal = await screen.findByText(/is not a quantity/);
+    expect(refusal.textContent).toContain('PROD#butter');
+    expect(onChanged).not.toHaveBeenCalled();
+    // Nothing was thrown away: both boxes still hold what was typed.
+    expect(screen.getByTestId(`allocation-target-${CARAMEL}`)).toHaveValue('9');
+    expect(screen.getByTestId(`allocation-target-${BUTTER}`)).toHaveValue('12abc');
+  });
+
+  it('§3.5.2: a target past the quantity the API takes is refused here, not by a failed write', async () => {
+    const user = userEvent.setup();
+    const onChanged = renderEditor([catalogQuery(), allocationsQuery(CAMPAIGN_ROWS)]);
+
+    await clearAndType(`allocation-target-${CARAMEL}`, '1000001', user);
+    await user.click(await screen.findByTestId('save-allocations'));
+
+    // The bound is the server's own (`MAX_QUANTITY`, enforced by
+    // `normalize_allocation_targets`); refusing it in the box is what keeps the
+    // sentence next to the field that caused it.
+    expect((await screen.findByText(/at most 1000000/)).textContent).toContain('1000001');
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it('§3.5.2: after a save the assigned column is re-read, not left at the numbers the batch replaced', async () => {
+    const user = userEvent.setup();
+    const onChanged = renderEditor([
+      catalogQuery(),
+      allocationsQuery(CAMPAIGN_ROWS),
+      // The campaign's rows as they stand once this batch landed. Only a screen that
+      // re-reads this connection can show them: an admin working from the totals the
+      // batch just replaced re-enters numbers against stock that no longer exists.
+      allocationsQuery([
+        allocFixture(CARAMEL, SSE, 9, { soldQty: 1, remainingQty: 8 }),
+        allocFixture(CARAMEL, 'SSE#grove', 2),
+        allocFixture(BUTTER, 'SSE#grove', 5),
+      ]),
+      assignMock([{ productId: CARAMEL, quantity: 9 }]),
+    ]);
+
+    await clearAndType(`allocation-target-${CARAMEL}`, '9', user);
+    await user.click(await screen.findByTestId('save-allocations'));
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId(`allocation-assigned-${CARAMEL}`)).toHaveTextContent('10'));
   });
 
   it('§3.5.2: the editor is inert once the event is finalized', async () => {

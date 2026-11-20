@@ -663,7 +663,12 @@ describe('SSE-07, §6.1: the dialogs the header opens', () => {
     expect(screen.getByTestId('recreate-note').textContent).toContain('stays cancelled');
     expect(screen.getByTestId('event-location-input')).toHaveValue('Library on Main');
     expect(screen.getByTestId('event-address-input')).toHaveValue('200 Main St');
-    expect(checkboxInside(screen.getByTestId('event-we-owe-switch'))).toBeChecked();
+    // Only the words carry over. We Owe starts back at off and the split at *Inherit
+    // the Unit default*: the replacement's money rules are a new decision, and
+    // prefilling the cancelled event's would leave this event quietly running the rules
+    // of one that was cancelled — with the admin's first save looking like it changed
+    // nothing, because the form already held those values (§6.1).
+    expect(checkboxInside(screen.getByTestId('event-we-owe-switch'))).not.toBeChecked();
     // A prefilled interval would invite a save that rebuilds the event at the very
     // moment it was cancelled for, so the times come back blank and editable.
     expect(screen.getByTestId('event-start-input')).toHaveValue('');

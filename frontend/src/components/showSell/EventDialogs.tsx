@@ -102,22 +102,68 @@ export const EventActionDialogs: React.FC<{
   onClose: () => void;
   onRefresh: () => Promise<unknown> | void;
   onCancelled: (summary: CancelSummary) => void;
-}> = ({ pending, context, onClose, onRefresh, onCancelled }) => (
-  <>
-    <EventCreateDialog pending={createPending(pending)} unit={context} onClose={onClose} onCreated={onRefresh} />
-    <EventEditDialog pending={editPending(pending)} unit={context} onClose={onClose} onSaved={onRefresh} />
-    <EventCancelDialog
-      pending={cancelPending(pending)}
-      unit={context}
-      onClose={onClose}
-      onRefresh={onRefresh}
-      onCancel={(summary) => {
-        onCancelled(summary);
-        return onRefresh();
-      }}
-    />
-  </>
-);
+  /**
+   * Looks the event up in the page's own refreshed reads, by id.
+   *
+   * A dialog is opened for a row the admin was looking at, but that row can move
+   * while the dialog is open — another Kernel edits it, or this same write is
+   * refused as stale and the page re-reads it. The pending action carries the row as
+   * it was when the button was pressed, so a retry from that object would resend the
+   * version the server already refused and be refused again forever. Every edit and
+   * cancel dialog therefore works from whatever this resolver answers now, which is
+   * the refreshed row the page is holding.
+   */
+  liveEvent?: (showAndSellId: string) => GqlShowAndSellAdminFieldsFragment | null;
+}> = ({ pending, context, onClose, onRefresh, onCancelled, liveEvent }) => {
+  const current = refreshedPending(pending, liveEvent);
+  return (
+    <>
+      <EventCreateDialog pending={createPending(current)} unit={context} onClose={onClose} onCreated={onRefresh} />
+      <EventEditDialog pending={editPending(current)} unit={context} onClose={onClose} onSaved={onRefresh} />
+      <EventCancelDialog
+        pending={cancelPending(current)}
+        unit={context}
+        onClose={onClose}
+        onRefresh={onRefresh}
+        onCancel={(summary) => {
+          onCancelled(summary);
+          return onRefresh();
+        }}
+      />
+    </>
+  );
+};
+
+/**
+ * The pending action, addressed to the row as the page reads it now.
+ *
+ * A create and a recreate have no row to refresh, so they pass through: a recreate
+ * is a new event, and the cancelled one it was opened from is history by design.
+ */
+function refreshedPending(
+  pending: PendingEventAction,
+  liveEvent?: (id: string) => GqlShowAndSellAdminFieldsFragment | null,
+): PendingEventAction {
+  if (!pending || (pending.kind !== 'edit' && pending.kind !== 'cancel')) return pending;
+  const fresh = movedRow(pending.event, liveEvent);
+  return fresh === null ? pending : { ...pending, event: fresh };
+}
+
+/**
+ * The row the page holds now, when it is not the one the button was pressed on.
+ *
+ * `null` means nothing moved: the page has no newer answer than the captured row, so
+ * the dialog keeps what it was given rather than addressing a write at a version it
+ * never read.
+ */
+function movedRow(
+  event: GqlShowAndSellAdminFieldsFragment,
+  liveEvent?: (id: string) => GqlShowAndSellAdminFieldsFragment | null,
+): GqlShowAndSellAdminFieldsFragment | null {
+  if (!liveEvent) return null;
+  const fresh = liveEvent(event.showAndSellId);
+  return fresh === null || fresh === event ? null : fresh;
+}
 
 function createPending(pending: PendingEventAction) {
   if (pending?.kind === 'create' || pending?.kind === 'recreate') return pending;
@@ -144,13 +190,21 @@ function firstFieldError(...errors: (string | null)[]): string | null {
   return errors.find((error) => error !== null) ?? null;
 }
 
-/** The form a create starts with: a cancelled event's words, never its times. */
+/** The form a create starts with: a cancelled event's words, never its settings or times. */
 function formSeedFor(
   pending: Extract<PendingEventAction, { kind: 'create' } | { kind: 'recreate' }> | null,
-  timezone: string,
 ): FormValues {
   if (pending?.kind !== 'recreate') return emptyForm();
-  return { ...formOf(pending.from, timezone), startAt: '', endAt: '' };
+  const words = pending.from;
+  // Only the words carry over. The split and We Owe of a replacement event are a new
+  // decision, and copying them would leave a new event quietly running the settings of
+  // one that was cancelled — while its own first save looks like it changed nothing
+  // because the form already held those values (§6.1).
+  return {
+    ...emptyForm(),
+    locationName: words.locationName,
+    address: words.address ?? '',
+  };
 }
 
 /** An empty create form: We Owe off, split inherited, no times. */
@@ -197,10 +251,17 @@ export const EventCreateDialog: React.FC<{
   const [createEvent, { loading }] = useMutation<GqlCreateShowAndSellMutation>(CREATE_SHOW_AND_SELL);
 
   useEffect(() => {
-    setForm(formSeedFor(pending, unit.timezone));
+    setForm(formSeedFor(pending));
     setError(null);
     setFormError(null);
-  }, [pending, unit.timezone]);
+    // A fresh write intent for every time this dialog is opened. The dialog stays
+    // mounted while the screen is up, so an intent kept for the mount's lifetime
+    // would give a second, deliberate create the same idempotency key as the first:
+    // an admin who creates one event and then opens the dialog again to create a
+    // second one with the same words and times would get the first event back, not a
+    // new id. Within one attempt a retry still replays its own write.
+    intent.current = createWriteIntent();
+  }, [pending]);
 
   const save = async () => {
     const location = parseLocationName(form.locationName);
@@ -404,13 +465,28 @@ export const EventEditDialog: React.FC<{
   const [form, setForm] = useState<FormValues>(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  // Which event this dialog has been seeded for, so a re-read of the same event does
+  // not re-seed the form. See the effect below.
+  const seededFor = React.useRef<string | null>(null);
   const intent = React.useRef(createWriteIntent());
   const [updateEvent, { loading }] = useMutation(UPDATE_SHOW_AND_SELL);
 
   useEffect(() => {
-    if (event) setForm(formOf(event, unit.timezone));
+    if (event === null) {
+      seededFor.current = null;
+      return;
+    }
+    // Seeded once per event, not once per read: a stale-row reload hands this dialog a
+    // new object for the same event, and re-seeding then would throw away what the
+    // admin typed and the refusal sentence they are reading. The version the next write
+    // carries comes from the live object, so the retry is still addressed to the row as
+    // it is now.
+    if (seededFor.current === event.showAndSellId) return;
+    seededFor.current = event.showAndSellId;
+    setForm(formOf(event, unit.timezone));
     setError(null);
     setFormError(null);
+    intent.current = createWriteIntent();
   }, [event, unit.timezone]);
 
   const save = async () => {
@@ -421,7 +497,7 @@ export const EventEditDialog: React.FC<{
       return;
     }
     setFormError(null);
-    const body = editBody(event, form);
+    const body = editBody(unit, event, form);
     try {
       await updateEvent({ variables: { input: withIdempotency(body, intent.current) } });
     } catch (mutationError) {
@@ -509,16 +585,30 @@ const EditEventTimes: React.FC<{
 };
 
 /** The edit write: everything except the times, which the input cannot carry (EVT-M-02-01). */
-function editBody(event: GqlShowAndSellAdminFieldsFragment, form: FormValues) {
+function editBody(unit: EventUnitContext, event: GqlShowAndSellAdminFieldsFragment, form: FormValues) {
   return {
     showAndSellId: event.showAndSellId,
     locationName: form.locationName.trim(),
     // `null` clears the address; leaving the key out would leave it alone.
     address: trimmedOrNull(form.address),
-    splitMethod: splitOverride(form.splitMethod),
+    splitMethod: editSplitMethod(form.splitMethod, unit.splitDefault),
     weOweEnabled: form.weOweEnabled,
     version: { expectedVersion: event.version },
   };
+}
+
+/**
+ * The split an edit write carries.
+ *
+ * `UpdateShowAndSellInput.splitMethod` is an optional field, and the resolver reads a
+ * null as "the caller wants nothing changed" (`_event_update_changes` in
+ * `src/handlers/unit_operations.py`). So the edit form's *Inherit the Unit default*
+ * cannot be sent as null: that would report a saved change while the event kept the
+ * split it already had. The choice is resolved to the Unit's current default, which is
+ * what inheriting means, and the write then says so.
+ */
+function editSplitMethod(value: GqlSplitMethod | '', unitDefault: GqlSplitMethod): GqlSplitMethod {
+  return value === '' ? unitDefault : value;
 }
 
 /** Whether this event's state still accepts the edit write. */
@@ -550,13 +640,23 @@ export const EventCancelDialog: React.FC<{
   // One key per cancellation intent: a retry of the same reason replays the write,
   // and an admin who changes the words after a failure is making a different write.
   const intent = React.useRef(createWriteIntent());
+  // Which event this dialog was seeded for, so a reload of the same event keeps the
+  // reason that was typed and the sentence that explains the refusal.
+  const seededFor = React.useRef<string | null>(null);
   const [cancelEvent, { loading }] = useMutation(CANCEL_SHOW_AND_SELL);
 
   useEffect(() => {
+    if (event === null) {
+      seededFor.current = null;
+      return;
+    }
+    if (seededFor.current === event.showAndSellId) return;
+    seededFor.current = event.showAndSellId;
     setReason('');
     setError(null);
     setReasonError(null);
-  }, [pending]);
+    intent.current = createWriteIntent();
+  }, [event]);
 
   const confirm = async () => {
     if (event === null) return;

@@ -155,6 +155,7 @@ const EventDetailBody: React.FC<{
         onClose={() => setPending(null)}
         onRefresh={onChanged}
         onCancelled={(summary) => setNotice(cancelledSentence(summary))}
+        liveEvent={(target) => (target === event.showAndSellId ? event : null)}
       />
     </>
   );

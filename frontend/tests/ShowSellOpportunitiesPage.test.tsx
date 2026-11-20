@@ -32,6 +32,7 @@ import { GraphQLError, print } from 'graphql';
 import { ShowSellOpportunitiesPage } from '../src/pages/ShowSellOpportunitiesPage';
 import {
   CANCEL_SHOW_AND_SELL_SIGNUP,
+  GET_SHOW_AND_SELL_OPPORTUNITY,
   GET_SIGNUP_CALENDAR_DATA,
   LIST_MY_PROFILES,
   LIST_MY_SCOUT_COMMITMENTS,
@@ -253,9 +254,118 @@ const CALENDAR_DATA = {
   slotEndAt: '2026-03-28T16:30:00.000Z',
 };
 
+/** One mocked read in this file's shape. */
+type Mock = {
+  request: { query: unknown; variables?: Record<string, unknown> };
+  result?: { data?: Record<string, unknown> };
+  error?: unknown;
+};
+
+/**
+ * Every event on the offer list is also read once per Scout this account may act as.
+ *
+ * The page's action state comes from `showAndSellOpportunity(showAndSellId,
+ * profileId)`, not from the offer list's `mySignups`: that list gathers the signups of
+ * every roster profile the caller can read, so answering the row's buttons from it is
+ * how one Scout's held place hides another Scout's Take, and how a give-back or a
+ * calendar read ends up addressed to a profile the reader was not looking at. A test
+ * that mocked only the list would be testing a screen whose per-Scout read never
+ * lands, so the pair is mocked here. Twice each: the first answer is the mount, the
+ * second is the re-read a take or a give-back asks for. A test that wants its own
+ * per-Scout answer mocks it explicitly, and that mock wins.
+ */
+function withScoutViews(mocks: Mock[]): Mock[] {
+  const explicit = explicitViewKeys(mocks);
+  const scouts = scoutIdsOf(mocks);
+  const views: Mock[] = [];
+  for (const mock of mocks) views.push(...viewMocksFor(mock, scouts, explicit));
+  return [...views, ...mocks];
+}
+
+/**
+ * The per-Scout answers one offer-list mock implies.
+ *
+ * A test that mocked its own answer for a Scout keeps that mock and gets no
+ * automatic one, which is how a test states that the per-Scout read, not the list,
+ * decides what the row offers.
+ */
+function viewMocksFor(mock: Mock, scouts: string[], explicit: Set<string>): Mock[] {
+  const views: Mock[] = [];
+  for (const event of eventsOf(mock)) {
+    for (const profileId of scouts) {
+      if (!explicit.has(viewKey(event.showAndSellId, profileId))) {
+        views.push(scoutViewQuery(event.showAndSellId, profileId, event));
+      }
+    }
+  }
+  return views;
+}
+
+/** The events one mock answers, whatever list it is. */
+function eventsOf(mock: Mock): { showAndSellId: string }[] {
+  if (mock.request.query !== LIST_UNIT_CAMPAIGN_OPPORTUNITIES) return [];
+  const connection = dataOf(mock).unitCampaignOpportunities as { items?: { showAndSellId: string }[] };
+  return connection?.items ?? [];
+}
+
+/** The `data` a mock answers with; an error mock answers with nothing. */
+function dataOf(mock: Mock): Record<string, unknown> {
+  return mock.result?.data ?? {};
+}
+
+function viewKey(showAndSellId: unknown, profileId: unknown): string {
+  return `${String(showAndSellId)}|${String(profileId)}`;
+}
+
+function explicitViewKeys(mocks: Mock[]): Set<string> {
+  const keys = new Set<string>();
+  for (const mock of mocks) {
+    if (mock.request.query === GET_SHOW_AND_SELL_OPPORTUNITY) {
+      keys.add(viewKey(mock.request.variables?.showAndSellId, mock.request.variables?.profileId));
+    }
+  }
+  return keys;
+}
+
+/** The Scouts this account can write as, in the order the picker is built. */
+function scoutIdsOf(mocks: Mock[]): string[] {
+  const ids: string[] = [];
+  for (const mock of mocks) ids.push(...scoutIdsIn(mock));
+  return [...new Set(ids)];
+}
+
+/** The Scout ids one read answers: owned profiles, and shares that carry WRITE. */
+function scoutIdsIn(mock: Mock): string[] {
+  const idsOf = SCOUT_READERS.get(mock.request.query);
+  return idsOf === undefined ? [] : idsOf(dataOf(mock));
+}
+
+/** Which reader answers which list, keyed by the query the mock carries. */
+const SCOUT_READERS = new Map<unknown, (data: Record<string, unknown>) => string[]>([
+  [LIST_MY_PROFILES, ownedScoutIds],
+  [LIST_MY_SHARES, sharedScoutIds],
+]);
+
+function ownedScoutIds(data: Record<string, unknown>): string[] {
+  const connection = data.listMyProfiles as { profiles?: { profileId: string }[] };
+  return (connection?.profiles ?? []).map((profile) => profile.profileId);
+}
+
+function sharedScoutIds(data: Record<string, unknown>): string[] {
+  const shares = (data.listMyShares ?? []) as { profileId: string; permissions?: string[] }[];
+  return shares.filter((share) => (share.permissions ?? []).includes('WRITE')).map((share) => share.profileId);
+}
+
+function scoutViewQuery(showAndSellId: string, profileId: string, event: unknown): Mock {
+  return {
+    request: { query: GET_SHOW_AND_SELL_OPPORTUNITY, variables: { showAndSellId, profileId } },
+    result: { data: { showAndSellOpportunity: event } },
+  };
+}
+
 function renderPage(mocks: unknown[]) {
   render(
-    <MockedProvider mocks={mocks as never}>
+    <MockedProvider mocks={withScoutViews(mocks as Mock[]) as never}>
       {/* A fresh router instance per test: the shared ParamsStore would otherwise
           replay a previous test's params and every read would go out with the wrong
           Unit Campaign. */}
@@ -284,6 +394,18 @@ async function enabledTake(slotId: string) {
   const button = await screen.findByTestId(`take-${slotId}`);
   await waitFor(() => expect(button).toBeEnabled());
   return button;
+}
+
+/**
+ * Waits for a card's per-Scout read to answer.
+ *
+ * Until it does, the card states the offer and offers no control: the offer list
+ * cannot say which places *this* Scout holds, and an action built from its mixed
+ * signups is an action addressed to whichever profile the caller happens to have
+ * picked. Every test that asserts a control therefore waits for this first.
+ */
+async function scoutViewReady(showAndSellId: string) {
+  await waitFor(() => expect(screen.queryByTestId(`scout-view-loading-${showAndSellId}`)).toBeNull());
 }
 
 describe('ShowSellOpportunitiesPage', () => {
@@ -315,6 +437,7 @@ describe('ShowSellOpportunitiesPage', () => {
     // successful read back to every later read of it — so the page state
     // asserted below, not a roster alert, is what proves the join read landed.
     const library = await screen.findByTestId(`opportunity-${SSE}`);
+    await scoutViewReady(SSE);
     expect(within(library).getByTestId(`opportunity-location-${SSE}`)).toHaveTextContent('Library on Main');
     expect(within(library).getByTestId(`opportunity-we-owe`)).toBeInTheDocument();
     expect(within(library).getByTestId('opportunity-address')).toHaveTextContent('200 Main St');
@@ -365,6 +488,7 @@ describe('ShowSellOpportunitiesPage', () => {
     expect(await screen.findByTestId(`commitment-${SSE_GROVE}-SLOT#grove-am`)).toBeInTheDocument();
     expect(screen.getByTestId(`commitment-${SSE_GROVE}-SLOT#grove-pm`)).toBeInTheDocument();
 
+    await scoutViewReady(SSE);
     const booth = screen.getByTestId('slot-offer-SLOT#booth');
     expect(within(booth).getByTestId('slot-conflict-SLOT#booth')).toHaveTextContent(
       'This overlaps a place you already hold (2 commitments), at this or another Show & Sell.',
@@ -409,6 +533,7 @@ describe('ShowSellOpportunitiesPage', () => {
       opportunitiesQuery([opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 0 })] })]),
     ]);
 
+    await scoutViewReady(SSE);
     await user.click(await enabledTake('SLOT#first'));
 
     // No stack trace, no raw error text: the stale-refusal sentence, and the
@@ -451,9 +576,54 @@ describe('ShowSellOpportunitiesPage', () => {
       },
     ]);
 
+    await scoutViewReady(SSE);
     await user.click(await screen.findByTestId('give-SLOT#first'));
     expect(await screen.findByText('You gave this place back. Anyone else may now take it.')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('slot-availability-SLOT#first')).toHaveTextContent('You gave this place back'));
+  });
+
+  it('VER-01: a give-back the server refuses says why, keeps the place, and re-reads what it showed', async () => {
+    const user = userEvent.setup();
+    const held = opportunityFixture({
+      slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 0 })],
+      mySignups: [participantSignup('SLOT#first', { signupVersion: 4 })],
+    });
+    renderPage([
+      profilesQuery([profileFixture()]),
+      sharesQuery([]),
+      joinsQuery(AVERY, [campaignJoin()]),
+      commitmentsQuery(AVERY, []),
+      opportunitiesQuery([held]),
+      {
+        request: {
+          query: CANCEL_SHOW_AND_SELL_SIGNUP,
+          variables: {
+            input: { showAndSellId: SSE, slotId: 'SLOT#first', profileId: AVERY, version: { expectedVersion: 4 }, idempotency: { idempotencyKey: 'test-idem-1' } },
+          },
+        },
+        error: new GraphQLError('the signup moved', { extensions: { code: 'CONFLICT', errorCode: 'CONFLICT' } }),
+      },
+      // The refusal still re-reads: the version the row would next cancel with is the
+      // one the server holds, and the Scout has to be able to retry against it.
+      {
+        request: { query: LIST_UNIT_CAMPAIGN_OPPORTUNITIES, variables: OPPORTUNITY_READ },
+        result: { data: { unitCampaignOpportunities: { __typename: 'ShowAndSellOpportunityConnection', items: [held], pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false } } } },
+      },
+      {
+        request: { query: LIST_MY_SCOUT_COMMITMENTS, variables: { profileId: AVERY, includeCancelled: false, page: { limit: SHOW_AND_SELL_PAGE_SIZE } } },
+        result: { data: { myScoutCommitments: { __typename: 'ParticipantCommitmentConnection', items: [commitmentFixture(SSE, 'SLOT#first', { signupVersion: 4 })], pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false } } } },
+      },
+    ]);
+
+    await scoutViewReady(SSE);
+    await user.click(await screen.findByTestId('give-SLOT#first'));
+
+    expect(await screen.findByText(STALE_SENTENCE)).toBeInTheDocument();
+    expect(screen.queryByTestId('signup-notice')).toBeNull();
+    // The place is still the Scout's, and the row still offers to give it back — with
+    // the version the re-read answered, which the retry mock above is the only way to
+    // satisfy.
+    expect(await screen.findByTestId('give-SLOT#first')).toBeEnabled();
   });
 
   it('CAL-01/CAL-02: a place just taken offers an invite this browser built itself — no server URL anywhere', async () => {
@@ -565,6 +735,7 @@ describe('ShowSellOpportunitiesPage', () => {
     ]);
 
     const first = await screen.findByTestId('slot-offer-SLOT#first');
+    await scoutViewReady(SSE);
     // Only what Avery's own signups answer: full is stated, and nobody else is
     // named, profile id or otherwise.
     expect(within(first).getByTestId('slot-availability-SLOT#first')).toHaveTextContent('You gave this place back');
@@ -737,6 +908,180 @@ describe('ShowSellOpportunitiesPage', () => {
     expect(within(offer).getByTestId('slot-offer-label-SLOT#anon')).toHaveTextContent('Slot');
     // An unnamed slot is still a place a Scout can take: the name is cosmetic, the
     // interval and the open count are what the write is addressed by.
-    expect(within(offer).getByTestId('take-SLOT#anon')).toBeEnabled();
+    expect(await within(offer).findByTestId('take-SLOT#anon')).toBeEnabled();
+  });
+
+  it('§3.5.3: two Scouts on one roster — one Scout’s place does not decide the other’s controls', async () => {
+    const user = userEvent.setup();
+    const both = opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 2, openCapacity: 1 })] });
+    renderPage([
+      profilesQuery([profileFixture()]),
+      sharesQuery([shareFixture()]),
+      joinsQuery(AVERY, [campaignJoin()]),
+      joinsQuery(SHARED, [campaignJoin({ campaignId: 'CAMP#shared-fall', campaignName: 'Shared 2026' })]),
+      commitmentsQuery(AVERY, []),
+      commitmentsQuery(SHARED, [commitmentFixture(SSE, 'SLOT#first', { signupVersion: 8 })]),
+      opportunitiesQuery([
+        {
+          ...both,
+          // The offer list gathers the signups of every roster profile the caller can
+          // read, and `ParticipantSignup` carries no profile id: this row cannot say
+          // whose place it is. Answering the controls from it is the defect — Shared's
+          // held place hid Avery's Take, and a give-back then went to the wrong profile.
+          mySignups: [participantSignup('SLOT#first', { signupVersion: 8 })],
+        },
+      ]),
+      // The per-Scout answer, which is what the row's controls are built from.
+      scoutViewQuery(SSE, AVERY, { ...both, mySignups: [] }),
+      scoutViewQuery(SSE, SHARED, { ...both, mySignups: [participantSignup('SLOT#first', { signupVersion: 8 })] }),
+      scoutViewQuery(SSE, SHARED, {
+        ...both,
+        slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 2, openCapacity: 2 })],
+        mySignups: [participantSignup('SLOT#first', { status: 'CANCELLED', signupVersion: 9 })],
+      }),
+      {
+        request: {
+          query: CANCEL_SHOW_AND_SELL_SIGNUP,
+          variables: {
+            input: { showAndSellId: SSE, slotId: 'SLOT#first', profileId: SHARED, version: { expectedVersion: 8 }, idempotency: { idempotencyKey: 'test-idem-1' } },
+          },
+        },
+        result: { data: { cancelShowAndSellSignup: participantSignup('SLOT#first', { status: 'CANCELLED', signupVersion: 9 }) } },
+      },
+    ]);
+
+    // Avery is the default pick: nothing here is held by Avery, so the row offers a
+    // place and states the offer — never "you already hold this".
+    await screen.findByTestId('slot-offer-SLOT#first');
+    await scoutViewReady(SSE);
+    expect(screen.getByTestId('slot-availability-SLOT#first')).toHaveTextContent('1 place left');
+    expect(await screen.findByTestId('take-SLOT#first')).toBeEnabled();
+    expect(screen.queryByTestId('give-SLOT#first')).toBeNull();
+
+    // Picking the other Scout changes whose places the row answers for. The give-back
+    // mock above matched only with `profileId: SHARED` and Shared's own signup version,
+    // so the write is proven to be addressed to the Scout the screen is showing.
+    await user.click(await findOption('profile-picker', 'Shared Scout', user));
+    await scoutViewReady(SSE);
+    expect(await screen.findByTestId('give-SLOT#first')).toBeEnabled();
+    expect(screen.queryByTestId('take-SLOT#first')).toBeNull();
+
+    await user.click(screen.getByTestId('give-SLOT#first'));
+    expect(await screen.findByText('You gave this place back. Anyone else may now take it.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('slot-availability-SLOT#first')).toHaveTextContent('You gave this place back'));
+  });
+
+  it('§3.5.3: a Scout the campaign cannot be offered to gets a closed row, not another Scout’s actions', async () => {
+    const user = userEvent.setup();
+    const SIBLING = 'PROFILE#sibling';
+    const offered = opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 2, openCapacity: 2 })] });
+    renderPage([
+      profilesQuery([profileFixture(), profileFixture({ profileId: SIBLING, sellerName: 'Sibling Scout' })]),
+      sharesQuery([]),
+      joinsQuery(AVERY, [campaignJoin()]),
+      joinsQuery(SIBLING, []),
+      commitmentsQuery(AVERY, []),
+      commitmentsQuery(SIBLING, []),
+      opportunitiesQuery([offered]),
+      scoutViewQuery(SSE, AVERY, offered),
+      {
+        // The server answers NOT_FOUND for a Scout with no standing on the event, and
+        // the row does not fall back to the offer list's signups: falling back is how
+        // the sibling would be shown another Scout's place and offered its actions.
+        request: { query: GET_SHOW_AND_SELL_OPPORTUNITY, variables: { showAndSellId: SSE, profileId: SIBLING } },
+        error: new GraphQLError('no standing here', { extensions: { code: 'NOT_FOUND', errorCode: 'NOT_FOUND' } }),
+      },
+    ]);
+
+    await scoutViewReady(SSE);
+    expect(await screen.findByTestId('take-SLOT#first')).toBeEnabled();
+
+    await user.click(await findOption('profile-picker', 'Sibling Scout', user));
+    expect(await screen.findByTestId(`scout-view-refused-${SSE}`)).toHaveTextContent(
+      'This Scout cannot be offered this Show & Sell, so no places are shown for it.',
+    );
+    expect(screen.queryByTestId('take-SLOT#first')).toBeNull();
+    expect(screen.queryByTestId('give-SLOT#first')).toBeNull();
+    expect(screen.getByTestId('not-on-roster')).toBeInTheDocument();
+  });
+
+  it('§3.5.3: a place held by a READ-only shared Scout is stated, never made actionable', async () => {
+    const user = userEvent.setup();
+    const READ_ONLY = 'PROFILE#read-only';
+    const offered = opportunityFixture({
+      slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 2, openCapacity: 1 })],
+      // The offer list gathers signups for every roster profile the caller can read,
+      // and `ParticipantSignup` names no profile: this row is a place *someone* holds,
+      // and reading it as Avery's would put a give-back on the row that cancels another
+      // family's Scout, or hide the place Avery could still take.
+      mySignups: [participantSignup('SLOT#first', { signupVersion: 3 })],
+    });
+    renderPage([
+      profilesQuery([profileFixture()]),
+      sharesQuery([shareFixture({ profileId: READ_ONLY, sellerName: 'Read-only Scout', permissions: ['READ'] })]),
+      joinsQuery(AVERY, [campaignJoin()]),
+      commitmentsQuery(AVERY, []),
+      opportunitiesQuery([offered]),
+      // Avery's own answer, which says plainly that Avery holds nothing here. Mocked
+      // explicitly so the automatic copy of the list row cannot be mistaken for it.
+      scoutViewQuery(SSE, AVERY, { ...offered, mySignups: [] }),
+      // No per-Scout read is mocked for the READ-only profile, and none goes out: a
+      // share that cannot write cannot address a signup, so the profile is not in the
+      // picker at all and the row is never read as that Scout's.
+    ]);
+
+    const first = await screen.findByTestId('slot-offer-SLOT#first');
+    await scoutViewReady(SSE);
+    // The place is offered as the server counts it — one of two taken — and the action
+    // on the row is Avery's own: take, never give back.
+    expect(within(first).getByTestId('slot-availability-SLOT#first')).toHaveTextContent('1 place left');
+    expect(await within(first).findByTestId('take-SLOT#first')).toBeEnabled();
+    expect(screen.queryByTestId('give-SLOT#first')).toBeNull();
+    expect(screen.queryByTestId('invite-new-SLOT#first')).toBeNull();
+
+    // The picker lists the Scouts this account may act as, and the read-only share is
+    // not one of them.
+    await findOption('profile-picker', 'Avery Scout', user);
+    expect(screen.queryByRole('option', { name: 'Read-only Scout' })).toBeNull();
+  });
+
+  it('SS-SM-06 step 5: the overlapping Take is really submitted, and the server’s refusal is what closes it', async () => {
+    const user = userEvent.setup();
+    renderPage([
+      profilesQuery([profileFixture()]),
+      sharesQuery([]),
+      joinsQuery(AVERY, [campaignJoin()]),
+      commitmentsQuery(AVERY, [commitmentFixture(SSE_GROVE, 'SLOT#grove-pm', { startAt: '2026-03-28T16:30:00.000Z', endAt: '2026-03-28T18:00:00.000Z' })]),
+      opportunitiesQuery([
+        opportunityFixture({
+          slots: [opportunitySlot('SLOT#booth', { label: 'Full Booth', startAt: '2026-03-28T15:00:00.000Z', endAt: '2026-03-28T18:00:00.000Z', capacity: 3, openCapacity: 2 })],
+        }),
+      ]),
+      {
+        // The write goes out. The screen warns about the overlap it can see, but the
+        // collision rule is the server's, across every Unit Campaign (SLOT-04): a
+        // screen that quietly withheld the button would hide the refusal's own words,
+        // and a Scout would never learn which place is in the way.
+        request: {
+          query: SIGNUP_SCOUT_FOR_SHOW_AND_SELL_SLOT,
+          variables: { input: { showAndSellId: SSE, slotId: 'SLOT#booth', campaignId: CAMP_AVERY, profileId: AVERY, idempotency: { idempotencyKey: 'test-idem-1' } } },
+        },
+        error: new GraphQLError('SLOT#grove-pm overlaps a signup this Scout already holds', {
+          extensions: { code: 'CONFLICT', errorCode: 'CONFLICT' },
+        }),
+      },
+    ]);
+
+    await scoutViewReady(SSE);
+    const take = await enabledTake('SLOT#booth');
+    expect(screen.getByTestId('slot-conflict-SLOT#booth')).toHaveTextContent('This overlaps a place you already hold (1 commitment)');
+
+    await user.click(take);
+
+    expect(await screen.findByText(STALE_SENTENCE)).toBeInTheDocument();
+    expect(screen.queryByTestId('signup-notice')).toBeNull();
+    // The reason stays on the row after the refusal, so the Scout can see which of
+    // their own places is the one in the way.
+    expect(screen.getByTestId('slot-conflict-SLOT#booth')).toBeInTheDocument();
   });
 });

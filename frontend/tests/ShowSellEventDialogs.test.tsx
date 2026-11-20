@@ -10,6 +10,7 @@
  * reschedule button exists is a test that fails.
  */
 
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -22,7 +23,10 @@ import {
   type PendingEventAction,
 } from '../src/components/showSell/EventDialogs';
 import { CANCEL_SHOW_AND_SELL, CREATE_SHOW_AND_SELL, UPDATE_SHOW_AND_SELL } from '../src/lib/graphql';
+import type { GqlShowAndSellAdminFieldsFragment } from '../src/types/graphql-generated';
 import { chooseOption, clearAndType, clearField, typeInto } from './helpers/unitUi';
+
+type User = ReturnType<typeof userEvent.setup>;
 
 const UC = 'UNITCAMP#pack-3149-fall';
 const SSE = 'SSE#library';
@@ -36,7 +40,7 @@ const UNIT: EventUnitContext = {
 
 // The SS-SM-06 event: T0 + 14 days, 09:00–12:30 in the Unit zone. Its version is
 // the one every write below is expected to carry.
-function eventFixture(overrides: Record<string, unknown> = {}) {
+function eventFixture(overrides: Partial<GqlShowAndSellAdminFieldsFragment> = {}): GqlShowAndSellAdminFieldsFragment {
   return {
     __typename: 'ShowAndSellAdmin',
     showAndSellId: SSE,
@@ -61,7 +65,7 @@ function eventFixture(overrides: Record<string, unknown> = {}) {
     cancelledAt: null,
     cancellationReason: null,
     ...overrides,
-  } as never;
+  };
 }
 
 /** The one idempotency key the first write from a freshly mounted dialog carries. */
@@ -74,7 +78,11 @@ beforeEach(() => {
   vi.stubGlobal('crypto', { randomUUID: () => `test-idem-${++keySequence}` });
 });
 
-function renderDialogs(pending: PendingEventAction, mocks: MockedResponse[] = []) {
+function renderDialogs(
+  pending: PendingEventAction,
+  mocks: MockedResponse[] = [],
+  liveEvent?: (showAndSellId: string) => never,
+) {
   const harness = { onClose: vi.fn(), onRefresh: vi.fn(), onCancelled: vi.fn() };
   render(
     <MockedProvider mocks={mocks}>
@@ -84,6 +92,7 @@ function renderDialogs(pending: PendingEventAction, mocks: MockedResponse[] = []
         onClose={harness.onClose}
         onRefresh={harness.onRefresh}
         onCancelled={harness.onCancelled}
+        liveEvent={liveEvent}
       />
     </MockedProvider>,
   );
@@ -227,7 +236,8 @@ describe('EVT-M-01: creating an event', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('names the zone the times are entered in, because a wrong-zone reading moves the event', () => {    renderDialogs({ kind: 'create' });
+  it('names the zone the times are entered in, because a wrong-zone reading moves the event', () => {
+    renderDialogs({ kind: 'create' });
     expect(screen.getByTestId('event-timezone-note')).toHaveTextContent('Times are entered in America/Denver');
   });
 
@@ -321,6 +331,39 @@ describe('EVT-M-02: editing an event', () => {
     // A stale version is reported only after the read behind the screen is reloaded.
     await waitFor(() => expect(harness.onRefresh).toHaveBeenCalledTimes(1));
     expect(harness.onClose).not.toHaveBeenCalled();
+  });
+
+  it('sends the Unit’s current default when the admin chooses “inherit”', async () => {
+    const user = userEvent.setup();
+    // The event was created when this Unit split by worked time; it now splits equally.
+    // *Inherit the Unit default* has to be answered by sending EQUAL, because the
+    // update resolver reads a null splitMethod as "the caller asked for nothing"
+    // (`_event_update_changes`): the old write reported a saved change while the
+    // event kept the split it already had.
+    const harness = renderDialogs({ kind: 'edit', event: eventFixture({ splitMethod: 'TIME_WORKED' }) }, [
+      {
+        request: {
+          query: UPDATE_SHOW_AND_SELL,
+          variables: {
+            input: {
+              showAndSellId: SSE,
+              locationName: 'Library on Main',
+              address: '200 Main St',
+              splitMethod: 'EQUAL',
+              weOweEnabled: true,
+              version: { expectedVersion: 3 },
+              idempotency: { idempotencyKey: FIRST_KEY },
+            },
+          },
+        },
+        result: { data: { updateShowAndSell: eventFixture({ splitMethod: 'EQUAL' }) } },
+      },
+    ]);
+
+    await chooseOption('event-split-select', 'Inherit the Unit default', user);
+    await user.click(screen.getByTestId('submit-edit-event'));
+
+    await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1));
   });
 
   it('offers nothing on an event that is finalized or cancelled', () => {
@@ -470,6 +513,259 @@ describe('EVT-M-03: cancelling an event', () => {
   });
 });
 
+/**
+ * The list page's contract with its dialogs, in miniature: the page holds the rows,
+ * its refetch replaces them, and the dialog is pointed at whatever the page holds
+ * now. The pending action still carries the row as it was when the button was
+ * pressed — which is exactly the object a retry must not resend after a CONFLICT.
+ */
+function renderLiveRows(
+  pending: PendingEventAction,
+  refreshed: GqlShowAndSellAdminFieldsFragment,
+  mocks: MockedResponse[],
+) {
+  const harness = { onClose: vi.fn(), onRefresh: vi.fn(), onCancelled: vi.fn() };
+  const Host = () => {
+    const [rows, setRows] = useState<GqlShowAndSellAdminFieldsFragment[]>([rowOf(pending)]);
+    const refresh = async () => {
+      harness.onRefresh();
+      setRows([refreshed]);
+    };
+    return (
+      <MockedProvider mocks={mocks}>
+        <EventActionDialogs
+          pending={pending}
+          context={UNIT}
+          onClose={harness.onClose}
+          onRefresh={refresh}
+          onCancelled={harness.onCancelled}
+          liveEvent={(target) => rows.find((row) => idOf(row) === target) ?? null}
+        />
+      </MockedProvider>
+    );
+  };
+  render(<Host />);
+  return harness;
+}
+
+function rowOf(pending: PendingEventAction): GqlShowAndSellAdminFieldsFragment {
+  return (pending && 'event' in pending ? pending.event : eventFixture()) as GqlShowAndSellAdminFieldsFragment;
+}
+
+/** The option a split control has chosen, read from the menu the admin would see. */
+function selectedOptionName(): string | null {
+  const chosen = screen.getAllByRole('option').find((option) => option.getAttribute('aria-selected') === 'true');
+  return chosen?.textContent ?? null;
+}
+
+function idOf(row: GqlShowAndSellAdminFieldsFragment): string {
+  return row.showAndSellId;
+}
+
+describe('EVT-M-02/03: a stale write is retried against the row the page re-read', () => {
+  it('saves on the second attempt, with the version the reload brought back', async () => {
+    const user = userEvent.setup();
+    const harness = renderLiveRows({ kind: 'edit', event: eventFixture() }, eventFixture({ version: 7 }), [
+      {
+        request: {
+          query: UPDATE_SHOW_AND_SELL,
+          variables: {
+            input: {
+              showAndSellId: SSE,
+              locationName: 'Library on Main',
+              address: '210 Main St',
+              splitMethod: 'EQUAL',
+              weOweEnabled: true,
+              version: { expectedVersion: 3 },
+              idempotency: { idempotencyKey: FIRST_KEY },
+            },
+          },
+        },
+        error: new GraphQLError('The row already moved.', { extensions: { errorCode: 'CONFLICT' } }),
+      },
+      {
+        // The retry: the version the reload answered, and a new key, because the
+        // payload is a different write. Only this mock can satisfy the second save,
+        // so a dialog that resent version 3 would fail here rather than pass quietly.
+        request: {
+          query: UPDATE_SHOW_AND_SELL,
+          variables: {
+            input: {
+              showAndSellId: SSE,
+              locationName: 'Library on Main',
+              address: '210 Main St',
+              splitMethod: 'EQUAL',
+              weOweEnabled: true,
+              version: { expectedVersion: 7 },
+              idempotency: { idempotencyKey: 'test-idem-2' },
+            },
+          },
+        },
+        result: { data: { updateShowAndSell: eventFixture({ version: 7, address: '210 Main St' }) } },
+      },
+    ]);
+
+    await clearAndType('event-address-input', '210 Main St', user);
+    await user.click(screen.getByTestId('submit-edit-event'));
+    await screen.findByText(/already moved/);
+
+    // The refusal does not empty the form: the words that were typed are still there
+    // to retry with.
+    expect(screen.getByLabelText('Address')).toHaveValue('210 Main St');
+    await user.click(screen.getByTestId('submit-edit-event'));
+
+    await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1));
+    expect(harness.onRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels on the second attempt, with the version the reload brought back', async () => {
+    const user = userEvent.setup();
+    const harness = renderLiveRows({ kind: 'cancel', event: eventFixture() }, eventFixture({ version: 9 }), [
+      {
+        request: {
+          query: CANCEL_SHOW_AND_SELL,
+          variables: {
+            input: {
+              showAndSellId: SSE,
+              reason: 'Store closed for the holiday',
+              version: { expectedVersion: 3 },
+              idempotency: { idempotencyKey: FIRST_KEY },
+            },
+          },
+        },
+        error: new GraphQLError('The row already moved.', { extensions: { errorCode: 'CONFLICT' } }),
+      },
+      {
+        request: {
+          query: CANCEL_SHOW_AND_SELL,
+          variables: {
+            input: {
+              showAndSellId: SSE,
+              reason: 'Store closed for the holiday',
+              version: { expectedVersion: 9 },
+              idempotency: { idempotencyKey: 'test-idem-2' },
+            },
+          },
+        },
+        result: {
+          data: {
+            cancelShowAndSell: {
+              __typename: 'CancelShowAndSellResult',
+              event: eventFixture({ version: 9, status: 'CANCELLED' }),
+              releasedAllocations: [],
+              cancelledSignups: [],
+            },
+          },
+        },
+      },
+    ]);
+
+    await typeInto('cancellation-reason-input', 'Store closed for the holiday', user);
+    await user.click(screen.getByTestId('submit-cancel-event'));
+    await screen.findByText(/already moved/);
+    expect(screen.getByLabelText('Why is it being cancelled')).toHaveValue('Store closed for the holiday');
+
+    await user.click(screen.getByTestId('submit-cancel-event'));
+    await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1));
+    expect(harness.onCancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a create alone: a replacement event has no row to re-read', async () => {
+    const user = userEvent.setup();
+    const from = eventFixture({ status: 'CANCELLED' });
+    const harness = renderLiveRows({ kind: 'recreate', from }, eventFixture({ version: 7 }), [
+      {
+        request: {
+          query: CREATE_SHOW_AND_SELL,
+          variables: {
+            input: {
+              unitCampaignId: UC,
+              locationName: 'Library on Main',
+              address: '200 Main St',
+              startAt: '2026-04-04T15:00:00.000Z',
+              endAt: '2026-04-04T18:30:00.000Z',
+              splitMethod: null,
+              weOweEnabled: false,
+              idempotency: { idempotencyKey: FIRST_KEY },
+            },
+          },
+        },
+        result: { data: { createShowAndSell: eventFixture({ showAndSellId: 'SSE#makeup' }) } },
+      },
+    ]);
+
+    await typeInto('event-start-input', '2026-04-04T09:00', user);
+    await typeInto('event-end-input', '2026-04-04T12:30', user);
+    await user.click(screen.getByTestId('submit-create-event'));
+
+    await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('EVT-M-01: two events that look alike are still two events', () => {
+  it('starts a new write intent every time the create dialog is opened', async () => {
+    const user = userEvent.setup();
+    const harness = { onClose: vi.fn(), onRefresh: vi.fn(), onCancelled: vi.fn() };
+    const body = (idempotencyKey: string) => ({
+      unitCampaignId: UC,
+      locationName: 'Library on Main',
+      address: '200 Main St',
+      startAt: '2026-03-28T15:00:00.000Z',
+      endAt: '2026-03-28T18:30:00.000Z',
+      splitMethod: null,
+      weOweEnabled: false,
+      idempotency: { idempotencyKey },
+    });
+    const Host = () => {
+      const [pending, setPending] = useState<PendingEventAction>(null);
+      return (
+        <>
+          <button type="button" data-testid="open-create" onClick={() => setPending({ kind: 'create' })}>
+            Create a Show &amp; Sell
+          </button>
+          <MockedProvider
+            mocks={[
+              {
+                request: { query: CREATE_SHOW_AND_SELL, variables: { input: body(FIRST_KEY) } },
+                result: { data: { createShowAndSell: eventFixture() } },
+              },
+              {
+                // The same words and the same times, typed again on purpose: the Unit
+                // is holding two sessions at the same place. A key reused from the
+                // first create makes the server replay that one, and the admin gets
+                // the first event back instead of a new id.
+                request: { query: CREATE_SHOW_AND_SELL, variables: { input: body('test-idem-2') } },
+                result: { data: { createShowAndSell: eventFixture({ showAndSellId: 'SSE#second' }) } },
+              },
+            ]}
+          >
+            <EventActionDialogs
+              pending={pending}
+              context={UNIT}
+              onClose={() => setPending(null)}
+              onRefresh={harness.onRefresh}
+              onCancelled={harness.onCancelled}
+            />
+          </MockedProvider>
+        </>
+      );
+    };
+    render(<Host />);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await user.click(screen.getByTestId('open-create'));
+      await typeInto('event-location-input', 'Library on Main', user);
+      await typeInto('event-address-input', '200 Main St', user);
+      await typeInto('event-start-input', '2026-03-28T09:00', user);
+      await typeInto('event-end-input', '2026-03-28T12:30', user);
+      await user.click(screen.getByTestId('submit-create-event'));
+      await waitFor(() => expect(screen.queryByTestId('submit-create-event')).toBeNull());
+    }
+
+    expect(harness.onRefresh).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('SS-SM-11: the cancel path, and the seat it is refused from', () => {
   it('SS-SM-11: a Scout who is not a Unit Admin is refused the cancel, and the event stays where it was', async () => {
     const user = userEvent.setup();
@@ -524,8 +820,8 @@ describe('§6.1: the replacement event is a new event', () => {
               address: '200 Main St',
               startAt: '2026-04-04T15:00:00.000Z',
               endAt: '2026-04-04T18:30:00.000Z',
-              splitMethod: 'EQUAL',
-              weOweEnabled: true,
+              splitMethod: null,
+              weOweEnabled: false,
               idempotency: { idempotencyKey: FIRST_KEY },
             },
           },
@@ -544,6 +840,14 @@ describe('§6.1: the replacement event is a new event', () => {
     // The words carry over so the admin is not retyping them; the times are blank.
     expect(screen.getByLabelText('Where is it')).toHaveValue('Library on Main');
     expect(screen.getByLabelText('Starts')).toHaveValue('');
+    // So is every money rule: the replacement starts back at *Inherit the Unit
+    // default* with We Owe off. Copying the cancelled event's split and We Owe would
+    // start a new event on one that was cancelled, and the admin's first save would
+    // look like it changed nothing because the form already held those values (§6.1).
+    await user.click(screen.getByRole('combobox', { name: 'Earnings split' }));
+    expect(selectedOptionName()).toBe('Inherit the Unit default');
+    await user.keyboard('{Escape}');
+    expect(screen.getByTestId('event-we-owe-switch')).not.toHaveAttribute('aria-checked', 'true');
 
     await clearAndType('event-location-input', 'Library on Main (makeup)', user);
     await typeInto('event-start-input', '2026-04-04T09:00', user);
@@ -553,5 +857,239 @@ describe('§6.1: the replacement event is a new event', () => {
     // Only CREATE is mocked: a dialog that tried to restore the cancelled row, or
     // to copy its allocations, would die here on the missing mock.
     await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1));
+  });
+});
+
+// --- the same four workflows without a pointer, at a phone's width -----------
+//
+// A Kernel runs a Show & Sell from the sales floor with a phone in one hand, and an
+// admin who cannot use a pointer has to reach every one of these writes with the
+// keyboard alone. Both are claims about the same markup: every control sits inside the
+// dialog, in a walkable order, visible at a narrow width, and none of them appears
+// only on hover. The writes are driven with real keystrokes and `{Enter}`, so a
+// control that only answers a mouse click fails here.
+
+describe('§3.5.1: keyboard-only and phone-width runs of the four workflows', () => {
+  /**
+   * Renders and drives the block with the browser reporting a `width`-pixel viewport.
+   *
+   * MUI asks `matchMedia` how wide the window is; the stub answers the min/max-width
+   * queries the dialogs actually use, so the paper is laid out for a phone rather than
+   * for the desktop default.
+   */
+  async function withViewport<T>(width: number, run: () => Promise<T>): Promise<T> {
+    const kept = ['innerWidth', 'outerWidth', 'matchMedia'].map((key) => [key, Object.getOwnPropertyDescriptor(window, key)] as const);
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    Object.defineProperty(window, 'outerWidth', { configurable: true, value: width });
+    Object.defineProperty(window, 'matchMedia', { configurable: true, writable: true, value: responsiveMedia(width) });
+    try {
+      return await run();
+    } finally {
+      for (const [key, descriptor] of kept) {
+        if (descriptor) Object.defineProperty(window, key, descriptor);
+      }
+    }
+  }
+
+  /** Answers the min/max-width queries MUI asks, measured against `width`. */
+  function responsiveMedia(width: number) {
+    return (query: string) => {
+      const max = /max-width:\s*(\d+)px/.exec(query);
+      const min = /min-width:\s*(\d+)px/.exec(query);
+      const matches = (max === null || width <= Number(max[1])) && (min === null || width >= Number(min[1]));
+      return {
+        matches,
+        media: query,
+        onchange: null,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        dispatchEvent: () => true,
+      };
+    };
+  }
+
+  /** The paper as MUI lays it out: a phone gets the full width, not a fixed column. */
+  function expectPhonePaper(): void {
+    const paper = document.querySelector('.MuiDialog-paper') as HTMLElement;
+    expect(paper).toHaveClass('MuiDialog-paperFullWidth');
+  }
+
+  /**
+   * Tabs until the named control has focus.
+   *
+   * The walk is the assertion: a control that is `display: none` at this width, or
+   * outside the dialog's focus trap, is never reached and the loop throws.
+   */
+  async function focusByTab(element: HTMLElement, user: User): Promise<void> {
+    for (let step = 0; step < 15; step += 1) {
+      if (document.activeElement === element) return;
+      await user.tab();
+    }
+    throw new Error(`Tab never reached ${element.getAttribute('data-testid') ?? element.getAttribute('aria-label')}`);
+  }
+
+  it('creates an event by Tab and Enter, on a 390-pixel viewport', async () => {
+    const user = userEvent.setup();
+    await withViewport(390, async () => {
+      const harness = renderDialogs(
+        { kind: 'create' },
+        [
+          {
+            request: {
+              query: CREATE_SHOW_AND_SELL,
+              variables: {
+                input: {
+                  unitCampaignId: UC,
+                  locationName: 'Library on Main',
+                  address: '200 Main St',
+                  startAt: '2026-03-28T15:00:00.000Z',
+                  endAt: '2026-03-28T18:30:00.000Z',
+                  splitMethod: null,
+                  weOweEnabled: false,
+                  idempotency: { idempotencyKey: FIRST_KEY },
+                },
+              },
+            },
+            result: { data: { createShowAndSell: eventFixture() } },
+          },
+        ],
+      );
+      expectPhonePaper();
+
+      await focusByTab(screen.getByTestId('event-location-input'), user);
+      await user.keyboard('Library on Main');
+      await focusByTab(screen.getByTestId('event-address-input'), user);
+      await user.keyboard('200 Main St');
+      await focusByTab(screen.getByTestId('event-start-input'), user);
+      await user.keyboard('2026-03-28T09:00');
+      await focusByTab(screen.getByTestId('event-end-input'), user);
+      await user.keyboard('2026-03-28T12:30');
+      // The split control is on the way to the write, so a keyboard admin can see what
+      // the event will inherit before pressing Create.
+      await focusByTab(screen.getByRole('combobox', { name: 'Earnings split' }), user);
+      await focusByTab(screen.getByTestId('submit-create-event'), user);
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  it('edits an event by Tab and Enter, on a 390-pixel viewport', async () => {
+    const user = userEvent.setup();
+    await withViewport(390, async () => {
+      const harness = renderDialogs({ kind: 'edit', event: eventFixture() }, [
+        {
+          request: {
+            query: UPDATE_SHOW_AND_SELL,
+            variables: {
+              input: {
+                showAndSellId: SSE,
+                locationName: 'Library on Main',
+                address: '212 Main St',
+                splitMethod: 'EQUAL',
+                weOweEnabled: true,
+                version: { expectedVersion: 3 },
+                idempotency: { idempotencyKey: FIRST_KEY },
+              },
+            },
+          },
+          result: { data: { updateShowAndSell: eventFixture({ address: '212 Main St' }) } },
+        },
+      ]);
+      expectPhonePaper();
+      // The locked fields are still in the walk: an admin reads the interval the event
+      // cannot change, and Tab does not skip past it into the actions.
+      const starts = screen.getByLabelText('Starts');
+      expect(starts).toBeDisabled();
+      expect(screen.getByTestId('times-immutable-note')).toBeVisible();
+
+      await focusByTab(screen.getByTestId('event-address-input'), user);
+      await user.clear(document.activeElement as HTMLElement);
+      await user.keyboard('212 Main St');
+      await focusByTab(screen.getByTestId('submit-edit-event'), user);
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  it('cancels an event by Tab and Enter, on a 390-pixel viewport', async () => {
+    const user = userEvent.setup();
+    await withViewport(390, async () => {
+      const harness = renderDialogs({ kind: 'cancel', event: eventFixture() }, [
+        {
+          request: {
+            query: CANCEL_SHOW_AND_SELL,
+            variables: {
+              input: {
+                showAndSellId: SSE,
+                reason: 'Store closed',
+                version: { expectedVersion: 3 },
+                idempotency: { idempotencyKey: FIRST_KEY },
+              },
+            },
+          },
+          result: {
+            data: {
+              cancelShowAndSell: {
+                __typename: 'CancelShowAndSellResult',
+                event: eventFixture({ status: 'CANCELLED' }),
+                releasedAllocations: [],
+                cancelledSignups: [],
+              },
+            },
+          },
+        },
+      ]);
+      expectPhonePaper();
+      expect(screen.getByTestId('cancel-consequence')).toBeVisible();
+
+      await focusByTab(screen.getByTestId('cancellation-reason-input'), user);
+      await user.keyboard('Store closed');
+      await focusByTab(screen.getByTestId('submit-cancel-event'), user);
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(harness.onCancelled).toHaveBeenCalledTimes(1));
+    });
+  });
+
+  it('creates the replacement event by Tab and Enter, on a 390-pixel viewport', async () => {
+    const user = userEvent.setup();
+    await withViewport(390, async () => {
+      const harness = renderDialogs({ kind: 'recreate', from: eventFixture({ status: 'CANCELLED' }) }, [
+        {
+          request: {
+            query: CREATE_SHOW_AND_SELL,
+            variables: {
+              input: {
+                unitCampaignId: UC,
+                locationName: 'Library on Main',
+                address: '200 Main St',
+                startAt: '2026-04-04T15:00:00.000Z',
+                endAt: '2026-04-04T18:30:00.000Z',
+                splitMethod: null,
+                weOweEnabled: false,
+                idempotency: { idempotencyKey: FIRST_KEY },
+              },
+            },
+          },
+          result: { data: { createShowAndSell: eventFixture({ showAndSellId: 'SSE#makeup' }) } },
+        },
+      ]);
+      expectPhonePaper();
+      // The words are already there; only the new interval has to be typed.
+      expect(screen.getByTestId('event-location-input')).toHaveValue('Library on Main');
+
+      await focusByTab(screen.getByTestId('event-start-input'), user);
+      await user.keyboard('2026-04-04T09:00');
+      await focusByTab(screen.getByTestId('event-end-input'), user);
+      await user.keyboard('2026-04-04T12:30');
+      await focusByTab(screen.getByTestId('submit-create-event'), user);
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1));
+    });
   });
 });

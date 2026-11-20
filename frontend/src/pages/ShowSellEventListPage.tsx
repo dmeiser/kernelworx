@@ -192,6 +192,7 @@ const EventListBody: React.FC<{ unit: Unit; unitId: string; unitCampaignId: stri
         onClose={() => setPending(null)}
         onRefresh={() => eventsQuery.refetch()}
         onCancelled={setCancelled}
+        liveEvent={(target) => events.items.find((item) => item.showAndSellId === target) ?? null}
       />
     </>
   );
