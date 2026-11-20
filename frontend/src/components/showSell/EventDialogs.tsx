@@ -256,7 +256,7 @@ export const EventCreateDialog: React.FC<{
   );
 };
 
-/** What the dialog is called: a replacement event is a new event, not an undelete. */
+/** What the dialog is called: a replacement event is a new event, not an undo. */
 function createTitle(pending: Extract<PendingEventAction, { kind: 'create' } | { kind: 'recreate' }> | null): string {
   return pending?.kind === 'recreate' ? 'Create the replacement event' : 'New Show & Sell';
 }

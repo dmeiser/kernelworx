@@ -696,7 +696,7 @@ describe('failure copy', () => {
     expect(describeShowAndSellFailure(undefined, 'fallback')).toBe('fallback');
   });
 
-  it('recognises the cross-event commitment collision as distinct from a version conflict', () => {
+  it('recognizes the cross-event commitment collision as distinct from a version conflict', () => {
     const overlap = new GraphQLError('This slot overlaps a place this Scout already holds', {
       extensions: { errorCode: 'CONFLICT' },
     });

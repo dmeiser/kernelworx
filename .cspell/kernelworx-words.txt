@@ -606,3 +606,10 @@ libx
 movflags
 faststart
 timespec
+vtimezone
+prodid
+calscale
+vevent
+dtstamp
+dtstart
+dtend

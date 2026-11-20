@@ -269,7 +269,7 @@ describe('EVT-M-02: editing an event', () => {
     expect(harness.onClose).not.toHaveBeenCalled();
   });
 
-  it('offers nothing on an event that is finalised or cancelled', () => {
+  it('offers nothing on an event that is finalized or cancelled', () => {
     renderDialogs({ kind: 'edit', event: eventFixture({ status: 'FINALIZED' }) });
 
     // The state gate locks every field the edit write could carry; the screen never

@@ -985,7 +985,7 @@ export function describeShowAndSellFailure(error: unknown, fallback: string): st
   return failureMessage(error) || fallback;
 }
 
-/** The transport's own words, when the refusal carried no code we recognise. */
+/** The transport's own words, when the refusal carried no code this client knows. */
 function failureMessage(error: unknown): string {
   return String((error as { message?: string } | undefined)?.message ?? '');
 }

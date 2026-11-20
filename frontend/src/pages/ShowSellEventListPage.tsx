@@ -242,7 +242,7 @@ const EventFilterTabs: React.FC<{ status: GqlShowAndSellStatus | ''; onChange: (
  * The row's own standing, in one chip and one sentence.
  *
  * The countdown is a display aid for the admin deciding whether to cancel; the
- * server decides cancellability from the stored interval, not from this number.
+ * server decides whether the event can still be cancelled from the stored interval, not from this number.
  */
 const EventStanding: React.FC<{ event: Event }> = ({ event }) => {
   const until = minutesUntil(event.startAt);
