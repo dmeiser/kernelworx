@@ -238,6 +238,12 @@ kaushan
 kernelworx
 KernelWorx
 KHTML
+Kiritimati
+Kolkata
+valarm
+vjournal
+vtodo
+yyyymmddthhmmssz
 keyId
 keyout
 keypair
@@ -619,5 +625,6 @@ prodid
 calscale
 vevent
 dtstamp
+dtstamps
 dtstart
 dtend
