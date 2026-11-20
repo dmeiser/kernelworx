@@ -470,6 +470,46 @@ describe('EVT-M-03: cancelling an event', () => {
   });
 });
 
+describe('SS-SM-11: the cancel path, and the seat it is refused from', () => {
+  it('SS-SM-11: a Scout who is not a Unit Admin is refused the cancel, and the event stays where it was', async () => {
+    const user = userEvent.setup();
+    const harness = renderDialogs({ kind: 'cancel', event: eventFixture() }, [
+      {
+        request: {
+          query: CANCEL_SHOW_AND_SELL,
+          variables: {
+            input: {
+              showAndSellId: SSE,
+              reason: 'Try it from the wrong seat',
+              version: { expectedVersion: 3 },
+              idempotency: { idempotencyKey: FIRST_KEY },
+            },
+          },
+        },
+        error: new GraphQLError('not an admin', { extensions: { errorCode: 'FORBIDDEN' } }),
+      },
+    ]);
+
+    await typeInto('cancellation-reason-input', 'Try it from the wrong seat', user);
+    await user.click(screen.getByTestId('submit-cancel-event'));
+
+    // The refusal is the role sentence, and nothing about the event changed: the
+    // dialog stays open with what was typed, and no release is reported.
+    await screen.findByText('Only a Unit Admin of this Unit can make this change.');
+    expect(harness.onCancelled).not.toHaveBeenCalled();
+    expect(harness.onClose).not.toHaveBeenCalled();
+  });
+
+  it('SS-SM-11 step 3: the cancel dialog offers no way to move the event', async () => {
+    renderDialogs({ kind: 'cancel', event: eventFixture() });
+
+    // There is no reschedule operation to find (SSE-07). The only path to a new time
+    // runs through Create another, which is a different dialog on a cancelled row.
+    expect(screen.queryByRole('button', { name: /reschedule|move this event/i })).toBeNull();
+    expect(screen.queryByTestId('event-start-input')).toBeNull();
+  });
+});
+
 describe('§6.1: the replacement event is a new event', () => {
   it('prefills the words, never the times, and carries nothing over', async () => {
     const user = userEvent.setup();
