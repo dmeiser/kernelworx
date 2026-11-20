@@ -28,8 +28,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { waitFor } from '@testing-library/react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { GraphQLError } from 'graphql';
@@ -328,7 +327,7 @@ describe('AllocationEditor', () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 
-  it('SS-SM-05 step 3: the overage help opens by keyboard, and the sentence it explains is already readable without hover', async () => {
+  it('SS-SM-05 step 3: the overage help opens by keyboard and by touch hold, and its sentence is readable without hover', async () => {
     const caramelWarning = {
       __typename: 'AllocationWarning',
       code: 'ASSIGNMENT_OVERAGE',
@@ -381,14 +380,40 @@ describe('AllocationEditor', () => {
       'Only 4 Caramel Corn are in stock right now',
     );
 
-    // Touch/mobile half: the same control answers a touch pointer, and the sentence
-    // it explains is still the plain text underneath it — closing the disclosure
-    // loses nothing, because the numbers were never inside it alone.
-    const touch = userEvent.setup();
-    await touch.pointer({ target: help, keys: '[TouchPointerDown][TouchPointerUp]' });
-    expect(help).toBeEnabled();
+    // Dismissing it is a keyboard act too: moving focus out closes the disclosure,
+    // and the sentence it was explaining is still on the page.
     await user.tab();
     await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+    expect(screen.getByTestId(`overage-sentence-${CARAMEL}`)).toBeVisible();
+
+    // Touch/mobile half: the same disclosure answers a touch hold. A control that only
+    // reacts to hover is dead on a phone, so the gesture is performed and each observable
+    // result is asserted on its own — nothing at the instant of the press, the disclosed
+    // numbers once the hold lands, the tooltip withdrawn after the release, and the
+    // plain-text sentence through all of it. MUI arms a touch tooltip after its 700 ms
+    // enter delay and closes it 1500 ms after touchend, and both waits below assert that
+    // timing rather than assuming an instant response.
+    // The press and the release are dispatched as the DOM touch events the control
+    // listens for, which is what a finger sends.
+    fireEvent.touchStart(help);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.getByTestId(`overage-sentence-${CARAMEL}`)).toBeVisible();
+
+    await waitFor(
+      () => {
+        const touched = screen.getByRole('tooltip');
+        expect(touched.textContent).toContain('Only 4 Caramel Corn are in stock right now');
+        expect(touched.textContent).toContain('overage of 2');
+      },
+      { timeout: 2000 },
+    );
+    expect(document.getElementById(help.getAttribute('aria-describedby') as string)).toHaveTextContent(
+      'overage of 2',
+    );
+
+    fireEvent.touchEnd(help);
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByTestId(`overage-sentence-${CARAMEL}`)).toBeVisible();
   });
 

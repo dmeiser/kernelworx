@@ -86,6 +86,15 @@ def _shift(hours: float) -> str:
 
 BOARD_START, BOARD_END = _shift(72), _shift(84)
 SLOT_START, SLOT_END = _shift(73), _shift(75)
+#: ``slot-1`` holds the setup signup, so it is never the place a delete or a fresh
+#: signup aims at: a delete there answers the "slot still holds signups" guard and a
+#: signup there answers the duplicate guard, either of which would hide the
+#: authorization result the sweep is about. These two slots give each of those
+#: requests a place where the request is otherwise valid.
+EMPTY_SLOT = "slot-empty"
+EMPTY_SLOT_START, EMPTY_SLOT_END = _shift(76), _shift(77)
+OPEN_SLOT = "slot-open"
+OPEN_SLOT_START, OPEN_SLOT_END = _shift(78), _shift(79)
 
 
 def _profile(persona: str) -> str:
@@ -158,18 +167,21 @@ def _seed_slot(
     slot_id: str = "slot-1",
     *,
     capacity: int = 4,
+    start_at: str = SLOT_START,
+    end_at: str = SLOT_END,
+    label: str = "Door",
 ) -> None:
     stored = show_and_sells_table.get_item(Key=ssm.event_metadata_key(event_id)).get("Item")
     show_and_sells_table.put_item(
         Item=ssm.build_show_and_sell_slot_item(
             event=dict(stored) if stored else {},
             slot_id=slot_id,
-            start_at=SLOT_START,
-            end_at=SLOT_END,
+            start_at=start_at,
+            end_at=end_at,
             capacity=capacity,
             active_signup_count=0,
             version=1,
-            label="Door",
+            label=label,
             now_iso=BOARD_START,
         )
     )
@@ -203,7 +215,9 @@ def board(
 
     The setup signup (Avery signing Devon into ``slot-1``) is a real handler call, so the
     calendar read, the signup cancellation, and the participant allowlist all walk over a
-    committed aggregate rather than a hand-stamped row.
+    committed aggregate rather than a hand-stamped row. Two more places are seeded empty
+    — ``slot-empty`` for the delete request and ``slot-open`` for the signup request — so
+    the positive control below can succeed on the exact block each denial sends.
     """
     seed_show_sell_fixtures(
         units_table,
@@ -217,6 +231,22 @@ def board(
     for event_id in (BOARD, EDIT_EVENT, CANCEL_EVENT):
         _seed_event(show_and_sells_table, event_id)
     _seed_slot(show_and_sells_table)
+    _seed_slot(
+        show_and_sells_table,
+        slot_id=EMPTY_SLOT,
+        capacity=1,
+        start_at=EMPTY_SLOT_START,
+        end_at=EMPTY_SLOT_END,
+        label="Empty",
+    )
+    _seed_slot(
+        show_and_sells_table,
+        slot_id=OPEN_SLOT,
+        capacity=2,
+        start_at=OPEN_SLOT_START,
+        end_at=OPEN_SLOT_END,
+        label="Open",
+    )
     _ok(
         _call(
             SIGNUP_SCOUT_FIELD,
@@ -264,8 +294,13 @@ def _snapshot(world: Dict[str, Any]) -> Counter:
 def _field_calls(caller: Optional[str], world: Dict[str, Any]) -> Dict[str, Callable[[], Any]]:
     """Every Stage 3 field, one callable each, built from one shared board state.
 
-    The blocks are the shape the authorized caller sends: a real ``expectedVersion`` read
-    from the row, the roster identity pair for the Scout fields, and the real ``slotId``.
+    These blocks are the whole matrix: the control test runs each one as the caller it
+    belongs to and it succeeds, then the sweeps run the identical block as a caller with
+    no standing and it is refused. A block is therefore only evidence of an authorization
+    refusal if the same bytes succeed on the same board a line earlier, so each one aims
+    at a place or a row that is valid on this board: a real ``expectedVersion`` read from
+    the row, the roster identity pair for the Scout fields, the delete at an empty slot,
+    and the signup at a place that neither duplicates Devon's place nor conflicts with it.
     """
     signup_identity = {"campaignId": _scout_campaign("Devon"), "profileId": _profile("Devon")}
     return {
@@ -331,8 +366,8 @@ def _field_calls(caller: Optional[str], world: Dict[str, Any]) -> Dict[str, Call
             mutation={
                 "showAndSellId": BOARD,
                 "label": "Sweep",
-                "startAt": _shift(76),
-                "endAt": _shift(77),
+                "startAt": _shift(80),
+                "endAt": _shift(81),
                 "capacity": 1,
                 **_version(_event_version(world, BOARD)),
                 **_idem("sweep-slot"),
@@ -343,7 +378,7 @@ def _field_calls(caller: Optional[str], world: Dict[str, Any]) -> Dict[str, Call
             caller,
             mutation={
                 "showAndSellId": BOARD,
-                "slotId": "slot-1",
+                "slotId": EMPTY_SLOT,
                 **_version(_event_version(world, BOARD)),
                 **_idem("sweep-delete"),
             },
@@ -351,7 +386,7 @@ def _field_calls(caller: Optional[str], world: Dict[str, Any]) -> Dict[str, Call
         SIGNUP_SCOUT_FIELD: lambda: _call(
             SIGNUP_SCOUT_FIELD,
             caller,
-            mutation={"showAndSellId": BOARD, "slotId": "slot-1", **signup_identity, **_idem("sweep-signup")},
+            mutation={"showAndSellId": BOARD, "slotId": OPEN_SLOT, **signup_identity, **_idem("sweep-signup")},
         ),
         CANCEL_SIGNUP_FIELD: lambda: _call(
             CANCEL_SIGNUP_FIELD,
@@ -400,7 +435,6 @@ SWEEP_DENIALS = [
 # Unit and no share on the profile is refused FORBIDDEN, and the Unit-admin-only surfaces
 # answer the Scout identity with NOT_FOUND. Everything else hides the tenant behind NOT_FOUND.
 _FORBIDDEN_FIELDS = {SIGNUP_SCOUT_FIELD, CANCEL_SIGNUP_FIELD, SIGNUP_CALENDAR_FIELD, MY_COMMITMENTS_FIELD}
-_NOT_FOUND_CONFIRM = {CONFIRM_WORK_FIELD}
 
 SWEEP_FIELDS = sorted(
     {
@@ -428,68 +462,60 @@ SWEEP_FIELDS = sorted(
 def _expected_code(field: str, caller: str) -> str:
     if field in _FORBIDDEN_FIELDS:
         return "FORBIDDEN"
-    if field in _NOT_FOUND_CONFIRM:
-        return "NOT_FOUND"
     return "NOT_FOUND"
 
 
-def test_the_control_board_answers_every_stage_three_field_to_its_authorized_caller(
+#: Who is authorized for each block: the Unit's own Admin for the Unit surfaces, the
+#: caller holding WRITE on the Scout's Profile for the profile-scoped writes (Taylor
+#: holds WRITE on Devon), and the Scout for the participant reads.
+AUTHORIZED_CALLER: Dict[str, str] = {
+    CREATE_SHOW_AND_SELL_FIELD: "Avery",
+    UPDATE_SHOW_AND_SELL_FIELD: "Avery",
+    CANCEL_SHOW_AND_SELL_FIELD: "Avery",
+    SHOW_AND_SELL_FIELD: "Avery",
+    SHOW_AND_SELLS_FIELD: "Avery",
+    UNIT_CAMPAIGN_OPPORTUNITIES_FIELD: "Devon",
+    SHOW_AND_SELL_OPPORTUNITY_FIELD: "Devon",
+    ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD: "Avery",
+    EVENT_INVENTORY_ALLOCATIONS_FIELD: "Avery",
+    UPSERT_SLOT_FIELD: "Avery",
+    DELETE_SLOT_FIELD: "Avery",
+    SIGNUP_SCOUT_FIELD: "Taylor",
+    CANCEL_SIGNUP_FIELD: "Taylor",
+    CONFIRM_WORK_FIELD: "Avery",
+    SHOW_AND_SELL_SIGNUPS_FIELD: "Avery",
+    MY_COMMITMENTS_FIELD: "Devon",
+    SIGNUP_CALENDAR_FIELD: "Avery",
+}
+
+#: The one field whose valid block does not commit on this board, documented rather than
+#: papered over: ``confirmShowAndSellWork`` is legal only on an ACTIVE/ENDED/REOPENED
+#: event, and this board is SCHEDULED, so the Admin's otherwise valid block reaches that
+#: business guard (``CONFLICT``) — which still proves it cleared authorization, because a
+#: caller with no standing is refused before any business rule is consulted.
+BUSINESS_GUARD_FIELD = CONFIRM_WORK_FIELD
+
+
+@pytest.mark.parametrize("field", SWEEP_FIELDS)
+def test_the_control_board_answers_the_same_block_to_its_authorized_caller(
+    field: str,
     board: Dict[str, Any],
 ) -> None:
-    """The control half of the matrix: each block SUCCEEDS for the caller it belongs to.
+    """The control half of the matrix: each block below SUCCEEDS as the caller it belongs to.
 
-    ``confirmShowAndSellWork`` is the documented exception: on a SCHEDULED board the Admin's
-    valid block reaches the business guard (``CONFLICT`` — a scheduled event has no work to
-    confirm), which still proves the Admin passed authorization and every denial below fails
-    before any business rule is consulted.
+    One field per case, each block built by the same ``_field_calls`` the denials use,
+    against a freshly seeded board. That is what makes the sweep mean something: a block
+    that only looks valid — a delete aimed at a slot that still holds signups, a signup
+    that duplicates a place the Scout already has, an ``expectedVersion`` the row does not
+    carry — fails here instead of letting a denial pass for a business rule that has
+    nothing to do with standing.
     """
     world = board
-    _ok(_call(UPDATE_SHOW_AND_SELL_FIELD, "Avery", mutation={
-        "showAndSellId": EDIT_EVENT, "locationName": "Renamed lot",
-        **_version(_event_version(world, EDIT_EVENT)), **_idem("control-update")}))
-    _ok(_call(CANCEL_SHOW_AND_SELL_FIELD, "Avery", mutation={
-        "showAndSellId": CANCEL_EVENT, **_version(_event_version(world, CANCEL_EVENT)),
-        "reason": "control", **_idem("control-cancel")}))
-    _ok(_call(ASSIGN_SHOW_AND_SELL_INVENTORY_FIELD, "Avery", mutation={
-        "showAndSellId": BOARD, "items": [{"productId": PRODUCT, "quantity": 1}],
-        **_version(_event_version(world, BOARD)), **_idem("control-assign")}))
-    slot = _ok(_call(UPSERT_SLOT_FIELD, "Avery", mutation={
-        "showAndSellId": BOARD, "label": "Control", "startAt": _shift(76), "endAt": _shift(77),
-        "capacity": 1, **_version(_event_version(world, BOARD)), **_idem("control-slot")}))
-    _refusal(_call(CONFIRM_WORK_FIELD, "Avery", mutation={
-        "showAndSellId": BOARD,
-        "work": [{"slotId": "slot-1", "profileId": _profile("Devon"), "actualMinutes": 30}],
-        **_version(_event_version(world, BOARD)), **_idem("control-confirm")}), "CONFLICT")
-    _ok(_call(DELETE_SLOT_FIELD, "Avery", mutation={
-        "showAndSellId": BOARD, "slotId": slot["slotId"],
-        **_version(_event_version(world, BOARD)), **_idem("control-delete")}))
-    for field, arguments in (
-        (SHOW_AND_SELL_FIELD, {"showAndSellId": BOARD}),
-        (SHOW_AND_SELLS_FIELD, {"unitCampaignId": CAMPAIGN}),
-        (EVENT_INVENTORY_ALLOCATIONS_FIELD, {"unitCampaignId": CAMPAIGN}),
-        (SHOW_AND_SELL_SIGNUPS_FIELD, {"showAndSellId": BOARD}),
-        (SIGNUP_CALENDAR_FIELD, {"showAndSellId": BOARD, "slotId": "slot-1", "profileId": _profile("Devon")}),
-    ):
-        _ok(_call(field, "Avery", arguments=arguments))
-    # myScoutCommitments is the participant surface: the Scout's own read, not the Admin's
-    # (the Admin's full board is ``showAndSellSignups``, proved on the line above).
-    _ok(_call(MY_COMMITMENTS_FIELD, "Devon", arguments={"profileId": _profile("Devon")}))
-    for field, arguments in (
-        (UNIT_CAMPAIGN_OPPORTUNITIES_FIELD, {"unitCampaignId": CAMPAIGN}),
-        (SHOW_AND_SELL_OPPORTUNITY_FIELD, {"showAndSellId": BOARD, "profileId": _profile("Devon")}),
-    ):
-        _ok(_call(field, "Devon", arguments=arguments))
-    # Taylor holds WRITE on Devon's profile: the owner-side half of signup standing.
-    # A second slot, so the duplicate guard cannot mask the authorization result.
-    second = _ok(_call(UPSERT_SLOT_FIELD, "Avery", mutation={
-        "showAndSellId": BOARD, "label": "Second", "startAt": _shift(78), "endAt": _shift(79),
-        "capacity": 2, **_version(_event_version(world, BOARD)), **_idem("control-slot-2")}))
-    _ok(_call(SIGNUP_SCOUT_FIELD, "Taylor", mutation={
-        "showAndSellId": BOARD, "slotId": second["slotId"], "campaignId": _scout_campaign("Devon"),
-        "profileId": _profile("Devon"), **_idem("control-signup")}))
-    _ok(_call(CANCEL_SIGNUP_FIELD, "Taylor", mutation={
-        "showAndSellId": BOARD, "slotId": second["slotId"], "profileId": _profile("Devon"),
-        **_version(1), **_idem("control-cancel-signup")}))
+    payload = _field_calls(AUTHORIZED_CALLER[field], world)[field]()
+    if field == BUSINESS_GUARD_FIELD:
+        _refusal(payload, "CONFLICT")
+        return
+    _ok(payload)
 
 
 @pytest.mark.parametrize("field", SWEEP_FIELDS)
@@ -553,7 +579,7 @@ def test_an_unjoined_or_removed_scout_takes_no_place_on_this_board(board: Dict[s
                 "Avery",
                 mutation={
                     "showAndSellId": BOARD,
-                    "slotId": "slot-1",
+                    "slotId": OPEN_SLOT,
                     "campaignId": _scout_campaign(persona),
                     "profileId": _profile(persona),
                     **_idem(f"sweep-{persona}"),
