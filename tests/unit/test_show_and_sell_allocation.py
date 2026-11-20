@@ -54,6 +54,10 @@ OTHER_PRODUCT = f"{CATALOG_ID}#prod-2"
 NESTED_PRODUCT = f"{PRODUCT}#nested"
 MORNING = "SSE#morning"
 AFTERNOON = "SSE#afternoon"
+#: The three-interval chain: ``MIDDAY`` starts when ``MORNING`` ends, and ``BRIDGE``
+#: straddles the seam, so it overlaps both of them.
+MIDDAY = "SSE#midday"
+BRIDGE = "SSE#bridge"
 LOCATION = "Aurora armory lot"
 
 
@@ -454,6 +458,50 @@ def test_evt_m_04_01_a_released_allocation_frees_the_instant_for_another_event(
     assert morning[ssm.STATUS_ATTRIBUTE] == inv.ALLOCATION_OPEN, "a manual reduce is not a §9.2 RELEASED row"
 
 
+def test_evt_m_04_01_three_events_on_one_product_refuse_only_where_the_intervals_overlap(
+    world: Dict[str, Any],
+) -> None:
+    """EVT-M-01, ALLOC-02-ALLOC-04 at three intervals: the rule counts instants, not event pairs.
+
+    Morning (72h-76h) and Midday (76h-80h) share no instant, so both may hold three of
+    four boxes and the second write answers the sequential-overage warning. A third event
+    straddles both, so every instant it owns would carry six boxes against four. The
+    refusal is the whole-transaction one: no allocation row, no movement, no idempotency
+    marker, and neither neighbour moves by one attribute.
+    """
+    _seed_event(world["show_and_sells"], MORNING)
+    _seed_event(world["show_and_sells"], MIDDAY, start_at=ADJACENT_START, end_at=ADJACENT_END)
+    _seed_event(world["show_and_sells"], BRIDGE, start_at=OVERLAP_START, end_at=OVERLAP_END)
+    _seed_balance(world["inventory"], PRODUCT, physical=4)
+
+    _ok(_assign(event_id=MORNING, items=[_target(3)], key="assign-morning"))
+    answer = _ok(_assign(event_id=MIDDAY, items=[_target(3)], key="assign-midday"))
+    assert [(w["code"], w["assignedQty"], w["overageQty"]) for w in answer["warnings"]] == [
+        (am.SEQUENTIAL_OVER_ASSIGNMENT, 6, 2)
+    ], "the two neighbours are allowed because no instant holds both of them"
+
+    before = {str(row["sk"]): dict(row) for row in _allocations(world["inventory"])}
+    error = assert_is_error(_assign(event_id=BRIDGE, items=[_target(3)], key="assign-bridge"), "CONFLICT")
+    for fact in (PRODUCT, "4", "6", "2"):
+        assert fact in error["message"], f"the refusal states the numbers: {error['message']}"
+
+    assert _stored_allocation(world["inventory"], BRIDGE) is None
+    assert {str(row["sk"]): dict(row) for row in _allocations(world["inventory"])} == before, (
+        "the two accepted intervals stand exactly as they were, versions included"
+    )
+    assert len(_movements(world["inventory"])) == 2, "no audit row for a request that was refused"
+    assert [row for row in _marker_rows(world["show_and_sells"]) if "bridge" in str(row["pk"])] == []
+    assert _stored_event(world["show_and_sells"], BRIDGE)[ssm.VERSION_ATTRIBUTE] == 1
+    assert (
+        _stored_event(world["show_and_sells"], MORNING)[ssm.VERSION_ATTRIBUTE],
+        _stored_event(world["show_and_sells"], MIDDAY)[ssm.VERSION_ATTRIBUTE],
+    ) == (2, 2)
+    balance = _stored_balance(world["inventory"])
+    assert (balance[inv.KERNEL_PHYSICAL_QTY], balance[inv.VERSION_ATTRIBUTE]) == (4, 3), (
+        "the stock two accepted batches already moved stays where they left it"
+    )
+
+
 # --- EVT-M-04-02: target zero, omitted products, manual adjustment ----------------
 
 
@@ -686,6 +734,54 @@ def test_evt_m_04_03_a_sixteenth_product_is_allowed_and_the_plan_fits_the_budget
     # And the finalization this assignment makes possible still fits its own budget:
     # 3 baseline writes + 4 per touched product = 67 (§9).
     assert 3 + 4 * 16 == 67 <= MAX_TRANSACTION_ACTIONS
+
+
+def test_evt_m_04_03_a_sixteenth_product_assigned_in_a_second_batch_leaves_the_first_fifteen_alone(
+    world: Dict[str, Any],
+) -> None:
+    """§8.10 the ceiling is a computed action count, so products may arrive in separate batches.
+
+    Fifteen products in one batch is 47 actions and the sixteenth in its own batch is
+    five more. The second commit must add exactly its own allocation, movement, balance
+    version, event version and ``productIds`` entry, and leave all fifteen rows the first
+    batch wrote byte-identical — the drift a single oversized batch would hide, and the
+    reason a caller is never forced to stage every product at once.
+    """
+    products = _offer_products(world["catalogs"], 16)
+    _seed_event(world["show_and_sells"], MORNING)
+    for product_id in products:
+        _seed_balance(world["inventory"], product_id, physical=2)
+
+    first_fifteen, sixteenth = products[:15], products[15]
+    assert 2 + 3 * len(first_fifteen) <= MAX_TRANSACTION_ACTIONS
+    assert 2 + 3 * 1 <= MAX_TRANSACTION_ACTIONS
+
+    _ok(_assign(items=[_target(1, product_id) for product_id in first_fifteen], key="assign-15"))
+    before_allocations = {str(row["sk"]): dict(row) for row in _allocations(world["inventory"])}
+    before_balance_versions = {
+        product_id: _stored_balance(world["inventory"], product_id)[inv.VERSION_ATTRIBUTE]
+        for product_id in first_fifteen
+    }
+    assert len(before_allocations) == 15 and len(_movements(world["inventory"])) == 15
+
+    answer = _ok(_assign(items=[_target(1, sixteenth)], version=2, key="assign-16"))
+
+    answer_rows = {str(row["productId"]): row for row in answer["allocations"]}
+    assert set(answer_rows) == set(products), "the answer restates the event's rows, one per product"
+    assert answer_rows[sixteenth]["allocatedQty"] == 1, "the sixteenth product arrived in its own batch"
+    assert len(_allocations(world["inventory"])) == 16
+    assert len(_movements(world["inventory"])) == 16
+    for sk, row in before_allocations.items():
+        current = next(item for item in _allocations(world["inventory"]) if str(item["sk"]) == sk)
+        assert current == row, f"the second batch moved a row it never named: {sk}"
+    for product_id in first_fifteen:
+        assert _stored_balance(world["inventory"], product_id)[inv.VERSION_ATTRIBUTE] == before_balance_versions[
+            product_id
+        ], f"the second batch re-touched {product_id}'s balance"
+
+    stored = _stored_event(world["show_and_sells"])
+    assert sorted(stored[ssm.PRODUCT_IDS_ATTRIBUTE]) == sorted(products)
+    assert stored[ssm.VERSION_ATTRIBUTE] == 3, "each batch moves the event version once"
 
 
 def test_21_allocated_products_are_the_most_the_event_can_still_finalize(world: Dict[str, Any]) -> None:
