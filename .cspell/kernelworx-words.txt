@@ -139,6 +139,7 @@ isinstance
 jank
 metas
 mockqr
+multiset
 neighbour
 neighbours
 prin

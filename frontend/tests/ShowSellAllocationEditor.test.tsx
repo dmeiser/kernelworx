@@ -18,6 +18,9 @@
  *   server's warning sentence rendered as written — never clamped down to
  *   stock, because a campaign may legitimately hold a morning and an afternoon
  *   event against the same four Kernels (ALLOC-03, ALLOC-04).
+ * - That sentence is readable before anything is hovered, and its help button
+ *   is a focusable control whose disclosure is announced (SS-SM-05 step 3): a
+ *   warning only legible on hover is unreadable by keyboard and by touch.
  * - A plan that is not a whole number is refused before any write exists, and
  *   the save button itself is dead while there is nothing to save (ALLOC-08).
  * - A finalized or cancelled event cannot change its allocations; a reopened
@@ -25,8 +28,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { waitFor } from '@testing-library/react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { GraphQLError } from 'graphql';
@@ -323,6 +325,96 @@ describe('AllocationEditor', () => {
     // only reachable by hover is unreadable by keyboard and by touch.
     expect(screen.getByRole('button', { name: `Why this product is over-assigned: ${CARAMEL}` })).toBeInTheDocument();
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it('SS-SM-05 step 3: the overage help opens by keyboard and by touch hold, and its sentence is readable without hover', async () => {
+    const caramelWarning = {
+      __typename: 'AllocationWarning',
+      code: 'ASSIGNMENT_OVERAGE',
+      productId: CARAMEL,
+      currentStockQty: 4,
+      assignedQty: 6,
+      overageQty: 2,
+      message: 'Only 4 Caramel Corn are in stock right now; 6 are assigned across this campaign’s events, an overage of 2.',
+    };
+    const user = userEvent.setup();
+    renderEditor([
+      catalogQuery(),
+      allocationsQuery(CAMPAIGN_ROWS),
+      assignMock([{ productId: CARAMEL, quantity: 6 }], [caramelWarning]),
+    ]);
+
+    await clearAndType(`allocation-target-${CARAMEL}`, '6', user);
+    await waitFor(() => expect(screen.getByTestId('save-allocations')).toBeEnabled());
+    await user.click(screen.getByTestId('save-allocations'));
+
+    // Nothing has been hovered, focused, or tapped yet, and step 3's two facts are
+    // already on the page: the help identifies Caramel, and it names the actual
+    // quantity 4. A warning whose numbers lived only in a hover layer would fail
+    // here — the phone user never hovers anything.
+    const sentence = await screen.findByTestId(`overage-sentence-${CARAMEL}`);
+    expect(sentence).toBeVisible();
+    expect(sentence.textContent).toContain('Caramel Corn');
+    expect(sentence.textContent).toContain('4 Caramel Corn');
+    expect(screen.getAllByText(sentence.textContent ?? '')).toHaveLength(1);
+
+    // Keyboard half: the help beside the sentence is a real control in the tab
+    // order rather than a CSS :hover affordance, so a keyboard admin can reach it.
+    const help = screen.getByTestId(`overage-help-${CARAMEL}`);
+    let tabs = 0;
+    while (document.activeElement !== help && tabs < 40) {
+      await user.tab();
+      tabs += 1;
+    }
+    expect(document.activeElement).toBe(help);
+    expect(help).toHaveAccessibleName(`Why this product is over-assigned: ${CARAMEL}`);
+
+    // Enter opens the disclosure, and it is announced: the button points at the
+    // tooltip through aria-describedby, and the tooltip repeats the same numbers.
+    await user.keyboard('{Enter}');
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip.textContent).toContain('4 Caramel Corn');
+    const describedBy = help.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy as string)).toHaveTextContent(
+      'Only 4 Caramel Corn are in stock right now',
+    );
+
+    // Dismissing it is a keyboard act too: moving focus out closes the disclosure,
+    // and the sentence it was explaining is still on the page.
+    await user.tab();
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+    expect(screen.getByTestId(`overage-sentence-${CARAMEL}`)).toBeVisible();
+
+    // Touch/mobile half: the same disclosure answers a touch hold. A control that only
+    // reacts to hover is dead on a phone, so the gesture is performed and each observable
+    // result is asserted on its own — nothing at the instant of the press, the disclosed
+    // numbers once the hold lands, the tooltip withdrawn after the release, and the
+    // plain-text sentence through all of it. MUI arms a touch tooltip after its 700 ms
+    // enter delay and closes it 1500 ms after touchend, and both waits below assert that
+    // timing rather than assuming an instant response.
+    // The press and the release are dispatched as the DOM touch events the control
+    // listens for, which is what a finger sends.
+    fireEvent.touchStart(help);
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.getByTestId(`overage-sentence-${CARAMEL}`)).toBeVisible();
+
+    await waitFor(
+      () => {
+        const touched = screen.getByRole('tooltip');
+        expect(touched.textContent).toContain('Only 4 Caramel Corn are in stock right now');
+        expect(touched.textContent).toContain('overage of 2');
+      },
+      { timeout: 2000 },
+    );
+    expect(document.getElementById(help.getAttribute('aria-describedby') as string)).toHaveTextContent(
+      'overage of 2',
+    );
+
+    fireEvent.touchEnd(help);
+    expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByTestId(`overage-sentence-${CARAMEL}`)).toBeVisible();
   });
 
   it('§3.2.4: 16 products past the page size are all fetched before the totals are shown', async () => {
