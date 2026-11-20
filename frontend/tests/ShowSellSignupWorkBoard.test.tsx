@@ -15,6 +15,10 @@
  *   other rows the admin typed are not thrown away by a batch-wide server
  *   refusal; entering 0 IS a write, because un-confirming is not deleting.
  * - A batch over 100 rows is refused at the ceiling before anything is sent.
+ * - A save moves the row and the preview together (§3.5.4): the board re-reads its
+ *   own signup query after a write, and while that read is in flight the row holds
+ *   the after-image the write itself answered, so the minutes and the Confirmed by
+ *   cell cannot sit at the pre-save number beside a picture that already moved.
  * - The calendar button reads the authorized invite fields and hands the
  *   browser a file it assembled itself — object URL minted here, revoked here,
  *   no server artifact anywhere (CAL-01, CAL-02).
@@ -188,6 +192,45 @@ function rosterQuery(items: unknown[]) {
   };
 }
 
+interface WorkPreviewFixture {
+  eventVersion: number;
+  totalConfirmedMinutes: number;
+  confirmedWorkRows: number;
+  confirmedParticipants: number;
+  minimumFinalizationActions: number;
+}
+
+/**
+ * One saved batch, stated once: the after-image the server answers for the rows it
+ * wrote, the lines that were sent to get there, and the pending picture that same
+ * write computed. The lines are read out of the answer, so a test cannot ask for a
+ * write the mock does not recognize.
+ */
+function workSaved(answered: GqlShowAndSellSignupFieldsFragment[], preview: WorkPreviewFixture | null = null) {
+  return {
+    request: {
+      query: CONFIRM_SHOW_AND_SELL_WORK,
+      variables: {
+        input: {
+          showAndSellId: SSE,
+          work: answered.map(({ slotId, profileId, actualMinutes }) => ({ slotId, profileId, actualMinutes })),
+          version: { expectedVersion: 7 },
+          idempotency: { idempotencyKey: 'test-idem-1' },
+        },
+      },
+    },
+    result: {
+      data: {
+        confirmShowAndSellWork: {
+          __typename: 'ConfirmShowAndSellWorkPayload',
+          work: answered,
+          ...(preview === null ? {} : { preview: { __typename: 'ShowAndSellWorkPreview', ...preview } }),
+        },
+      },
+    },
+  };
+}
+
 function renderBoard(mocks: unknown[], event = eventFixture()) {
   const onChanged = vi.fn(async () => undefined);
   render(
@@ -310,6 +353,24 @@ describe('SignupWorkBoard', () => {
           },
         },
       },
+      // The board's own signup read, run again after the save. Blake's row is
+      // untouched: an empty row that was never sent stays empty.
+      signupsQuery([
+        signupFixture({
+          actualMinutes: 75,
+          confirmedByAccountId: 'ACCOUNT#casey',
+          confirmedAt: '2026-03-28T19:00:00.000Z',
+          version: 3,
+        }),
+        signupFixture({
+          slotId: 'SLOT#midday',
+          actualMinutes: 115,
+          confirmedByAccountId: 'ACCOUNT#casey',
+          confirmedAt: '2026-03-28T19:00:00.000Z',
+          version: 3,
+        }),
+        signupFixture({ profileId: BLAKE }),
+      ]),
     ]);
 
     // Blake's row is deliberately left blank: an untouched row is not a zero.
@@ -374,6 +435,8 @@ describe('SignupWorkBoard', () => {
           },
         },
       },
+      // And the read that follows it: the confirmation is gone, the signup is not.
+      signupsQuery([signupFixture({ actualMinutes: 0, confirmedByAccountId: null, confirmedAt: null, version: 3 })]),
     ]);
 
     await clearAndType(`work-minutes-${workRowKey('SLOT#first', AVERY)}`, '0', user);
@@ -385,6 +448,130 @@ describe('SignupWorkBoard', () => {
     expect(screen.getByTestId(`signup-row-${workRowKey('SLOT#first', AVERY)}`)).toBeInTheDocument();
     expect(screen.getByTestId('work-saved-count')).toHaveTextContent('1 work row saved.');
     expect(screen.getByTestId('work-preview-empty')).toBeInTheDocument();
+  });
+
+  it('§3.5.4 (QA on dev at 357230d): a saved confirmation shows in the row it changed, not only in the preview', async () => {
+    const user = userEvent.setup();
+    const rowKey = workRowKey('SLOT#first', AVERY);
+    const confirmed = signupFixture({
+      actualMinutes: 75,
+      confirmedByAccountId: 'ACCOUNT#casey',
+      confirmedAt: '2026-03-28T19:00:00.000Z',
+      version: 3,
+    });
+    const onChanged = renderBoard([
+      signupsQuery([signupFixture()]),
+      rosterQuery([rosterFixture()]),
+      workSaved([confirmed], {
+        eventVersion: 8,
+        totalConfirmedMinutes: 75,
+        confirmedWorkRows: 1,
+        confirmedParticipants: 1,
+        minimumFinalizationActions: 2,
+      }),
+      // The board's own re-read of its signup query, which is what carries the
+      // saved number into the table without a page reload.
+      signupsQuery([confirmed]),
+    ]);
+
+    await screen.findByTestId(`signup-confirmed-by-${rowKey}`);
+    expect(screen.getByTestId(`signup-confirmed-by-${rowKey}`)).toHaveTextContent('Not confirmed');
+    expect(screen.getByTestId(`work-minutes-${rowKey}`)).toHaveValue('0');
+
+    await clearAndType(`work-minutes-${rowKey}`, '75', user);
+    await user.click(await screen.findByTestId('save-work'));
+
+    expect(await screen.findByTestId('preview-minutes')).toHaveTextContent('75 confirmed minutes');
+    // The row and the picture beside it are the same write's answer, so neither is
+    // left behind: 75 worked minutes, confirmed, in the row that just saved.
+    expect(screen.getByTestId(`work-minutes-${rowKey}`)).toHaveValue('75');
+    expect(screen.getByTestId(`signup-confirmed-by-${rowKey}`)).toHaveTextContent('Kernel');
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it('§3.5.4: saving 0 moves the row back to unconfirmed too, so it agrees with a preview of zero', async () => {
+    const user = userEvent.setup();
+    const rowKey = workRowKey('SLOT#first', AVERY);
+    const takenBack = signupFixture({
+      actualMinutes: 0,
+      confirmedByAccountId: null,
+      confirmedAt: null,
+      version: 4,
+    });
+    const onChanged = renderBoard([
+      signupsQuery([
+        signupFixture({
+          actualMinutes: 75,
+          confirmedByAccountId: 'ACCOUNT#casey',
+          confirmedAt: '2026-03-28T19:00:00.000Z',
+          version: 3,
+        }),
+      ]),
+      rosterQuery([rosterFixture()]),
+      workSaved([takenBack], {
+        eventVersion: 9,
+        totalConfirmedMinutes: 0,
+        confirmedWorkRows: 0,
+        confirmedParticipants: 0,
+        minimumFinalizationActions: 1,
+      }),
+      signupsQuery([takenBack]),
+    ]);
+
+    await clearAndType(`work-minutes-${rowKey}`, '0', user);
+    await user.click(await screen.findByTestId('save-work'));
+
+    expect(await screen.findByTestId('preview-minutes')).toHaveTextContent('0 confirmed minutes');
+    // The same problem in the other direction is still the same problem: a row that
+    // goes on showing 75 worked minutes and a confirmer beside a picture of zero is
+    // two answers to one write.
+    expect(screen.getByTestId(`work-minutes-${rowKey}`)).toHaveValue('0');
+    expect(screen.getByTestId(`signup-confirmed-by-${rowKey}`)).toHaveTextContent('Not confirmed');
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it('§3.5.4: the board re-reads its own rows after a save, and a newer read replaces the write’s answer', async () => {
+    const user = userEvent.setup();
+    const rowKey = workRowKey('SLOT#first', AVERY);
+    const movedOn = signupFixture({
+      actualMinutes: 80,
+      confirmedByAccountId: 'ACCOUNT#admin2',
+      confirmedAt: '2026-03-28T19:05:00.000Z',
+      version: 4,
+    });
+    const onChanged = renderBoard([
+      signupsQuery([signupFixture()]),
+      rosterQuery([rosterFixture()]),
+      workSaved(
+        [
+          signupFixture({
+            actualMinutes: 75,
+            confirmedByAccountId: 'ACCOUNT#casey',
+            confirmedAt: '2026-03-28T19:00:00.000Z',
+            version: 3,
+          }),
+        ],
+        {
+          eventVersion: 8,
+          totalConfirmedMinutes: 75,
+          confirmedWorkRows: 1,
+          confirmedParticipants: 1,
+          minimumFinalizationActions: 2,
+        },
+      ),
+      signupsQuery([movedOn]),
+    ]);
+
+    await clearAndType(`work-minutes-${rowKey}`, '75', user);
+    await user.click(await screen.findByTestId('save-work'));
+
+    expect(await screen.findByTestId('preview-minutes')).toHaveTextContent('75 confirmed minutes');
+    // 80 at version 4 can only be the board's second read of showAndSellSignups: it
+    // is newer than the version the write answered, so the read wins and the table
+    // catches up on its own instead of waiting for a page reload.
+    await waitFor(() => expect(screen.getByTestId(`work-minutes-${rowKey}`)).toHaveValue('80'));
+    expect(screen.getByTestId(`signup-confirmed-by-${rowKey}`)).toHaveTextContent('Kernel');
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 
   it('§3.4.3: a batch over 100 rows is refused with the ceiling sentence, and nothing is sent', async () => {
