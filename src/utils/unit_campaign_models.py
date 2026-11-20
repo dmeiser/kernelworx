@@ -829,6 +829,35 @@ def remove_membership_action(
     )
 
 
+def active_membership_check_action(*, unit_campaign_id: str, profile_id: str, expected_version: int) -> Action:
+    """A ``ConditionCheck`` that the roster row is still ACTIVE at the read version (§5.6, §8.3).
+
+    Signup eligibility is a fact about a row another mutation may move: §1.4.3's removal
+    sets ``REMOVED`` and bumps the version in one write, and data model §8.3 requires a
+    signup to condition on ``membership.version`` with ``status = ACTIVE`` precisely so a
+    removal that lands after the eligibility read makes the signup fail whole instead of
+    committing a place for a Scout who is no longer on the roster (SIGN-M-01-03).
+
+    It is a check and not a write because the roster row belongs to the join/removal
+    owner: a signup that edited membership would be a second writer of the participation
+    history §5.6 keeps single.
+    """
+    return (
+        "ConditionCheck",
+        {
+            "TableName": tables.unit_campaigns.table_name,
+            "Key": wire_key(membership_key(unit_campaign_id, profile_id)),
+            "ConditionExpression": "#version = :version AND #status = :active",
+            "ExpressionAttributeNames": {"#version": "version", "#status": "status"},
+            "ExpressionAttributeValues": {
+                ":version": wire_value(expected_version),
+                ":active": wire_value(MEMBERSHIP_STATUS_ACTIVE),
+            },
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
 def guard_claim_action(
     *,
     campaign_id: str,

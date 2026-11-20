@@ -159,6 +159,14 @@ EVENT_INVENTORY_ALLOCATIONS_FIELD = "eventInventoryAllocations"
 UPSERT_SLOT_FIELD = "upsertShowAndSellSlot"
 DELETE_SLOT_FIELD = "deleteShowAndSellSlot"
 
+# Stage 3.4 — signups, confirmed work, and the read surfaces over them (§3.4.1-§3.4.5).
+SIGNUP_SCOUT_FIELD = "signupScoutForShowAndSellSlot"
+CANCEL_SIGNUP_FIELD = "cancelShowAndSellSignup"
+CONFIRM_WORK_FIELD = "confirmShowAndSellWork"
+SHOW_AND_SELL_SIGNUPS_FIELD = "showAndSellSignups"
+MY_COMMITMENTS_FIELD = "myScoutCommitments"
+SIGNUP_CALENDAR_FIELD = "showAndSellSignupCalendarData"
+
 # Argument names that carry no write intent, so they stay out of the writable-field
 # check.  ``idempotency`` and ``version`` are the mutation contract's own envelopes and
 # ``showAndSellId`` names the row being addressed; every other name in the input is a
@@ -5758,6 +5766,922 @@ def _delete_show_and_sell_slot(event: Dict[str, Any], caller_id: str) -> bool:
     return True
 
 
+# --- Show & Sell signups, confirmed work, and the reads over them (§3.4) ---------
+
+
+def _signup_profile_id(payload: Mapping[str, Any]) -> str:
+    """The Scout a signup request names, normalized before it can be used as a key."""
+    return str(
+        show_and_sell_models.normalize_event_id(payload.get("profileId"), show_and_sell_models.PROFILE_ID_ATTRIBUTE)
+    )
+
+
+def _signup_scout_identity(payload: Mapping[str, Any], event_row: Mapping[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The Scout and roster row a signup is written for (§3.4.1, SIGN-M-01-03).
+
+    Three facts decide it, each read from the row that owns it:
+
+    - the caller is a Unit Admin of the event's Unit, or holds Owner/WRITE on the
+      Scout's own profile (AUTH-U, AUTH-P-05) — an admin of another Unit reaches
+      neither half of that and is refused here, not by a filter later;
+    - the Scout holds ACTIVE membership of the event's Unit Campaign, because a
+      REMOVED Scout keeps their existing signups, credit and custody but takes no
+      new place (§5.6, AC-47);
+    - the ``campaignId`` is the one on that roster row: a Scout joined through a
+      different Scout Campaign is a different Scout for this write, and credit and
+      Orders keep the scope the roster names (§2.3.1's identity rule, applied to
+      signups).
+    """
+    profile_id = _signup_profile_id(payload)
+    campaign_id = unit_campaign_models.normalize_campaign_id(payload.get("campaignId"), "campaignId")
+    unit_campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    if not unit_auth.is_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE])):
+        require_profile_access(caller_id, profile_id, "WRITE")
+    membership = unit_campaign_models.read_membership(unit_campaign_id, profile_id)
+    if membership is None:
+        raise AppError(ErrorCode.NOT_FOUND, "This Scout is not on this event's Unit Campaign roster")
+    if str(membership["status"]) != unit_campaign_models.MEMBERSHIP_STATUS_ACTIVE:
+        raise AppError(
+            ErrorCode.CONFLICT, "This Scout's roster entry is REMOVED; rejoin before taking a place in a slot"
+        )
+    if str(membership["campaignId"]) != campaign_id:
+        raise AppError(ErrorCode.CONFLICT, "This Scout's roster entry belongs to a different Scout Campaign")
+    return dict(membership)
+
+
+def _refuse_existing_signup(
+    event_row: Mapping[str, Any], slot_id: str, profile_id: str, existing: Optional[Mapping[str, Any]]
+) -> None:
+    """Refuse a signup for a place this Scout already holds or already gave back (§3.4.1, SLOT-02).
+
+    The signup's sort key IS ``(slotId, profileId)``, so the conditional insert below is
+    what actually settles two concurrent requests for one Scout in one slot — this read
+    only turns that lost condition into a sentence the caller can act on. A CANCELLED row
+    refuses too, and is not an oversight: §9.3 makes a cancellation terminal, and §5.13
+    keeps the row as the history of who held the place, so re-taking the same slot would
+    rewrite an audit row a cancellation closed. The Scout takes another slot, or the
+    Kernel cancels the event and recreates it.
+    """
+    if existing is None:
+        return
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    if str(existing.get(show_and_sell_models.STATUS_ATTRIBUTE) or "") == show_and_sell_models.SIGNUP_ACTIVE:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "This Scout already holds a place in this slot.",
+            details={
+                "subcode": "SIGNUP_DUPLICATE",
+                "showAndSellId": event_id,
+                "slotId": slot_id,
+                "profileId": profile_id,
+            },
+        )
+    raise AppError(
+        ErrorCode.CONFLICT,
+        "This Scout's place in this slot was cancelled, and a cancelled signup stays history. Choose another slot.",
+        details={
+            "subcode": "SIGNUP_CANCELLED",
+            "showAndSellId": event_id,
+            "slotId": slot_id,
+            "profileId": profile_id,
+        },
+    )
+
+
+def _refuse_signup_capacity(slot_row: Mapping[str, Any]) -> None:
+    """Refuse a signup when the slot has no place left (§3.4.1, AC-13, SLOT-02-02).
+
+    Decided on the slot's own ``activeSignupCount``, which is the counter the write below
+    pins: the read answers "is there room" and the condition answers "was there room when
+    this committed". Two concurrent signups for the last place both read one place left,
+    and the one that loses the counter condition fails whole rather than admitting a Scout
+    past capacity.
+    """
+    capacity = int(slot_row.get(show_and_sell_models.CAPACITY_ATTRIBUTE) or 0)
+    active = int(slot_row.get(show_and_sell_models.ACTIVE_SIGNUP_COUNT_ATTRIBUTE) or 0)
+    if active < capacity:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        f"This slot is full: {active} of {capacity} places are taken. Choose another slot.",
+        details={
+            "subcode": "SLOT_CAPACITY",
+            "slotId": str(slot_row[show_and_sell_models.SLOT_ID_ATTRIBUTE]),
+            "capacity": capacity,
+            "activeSignupCount": active,
+        },
+    )
+
+
+def _refuse_signup_overlap(
+    event_row: Mapping[str, Any], slot_row: Mapping[str, Any], commitments: Sequence[Mapping[str, Any]]
+) -> None:
+    """Refuse a signup whose hours the Scout is already somewhere else (§3.4.1, AC-14, SIGN-M-01-01).
+
+    The commitment projection is the authoritative answer and it is read from the Scout's
+    own partition, which is what makes the rule span Unit Campaigns: the other Show & Sell
+    may belong to a Unit this caller cannot see at all, so the refusal names the overlap
+    and nothing about the commitment that caused it (INV-Q-06-03). Adjacent slots are not
+    an overlap — :func:`show_and_sell_models.intervals_overlap` is the one rule that says
+    so, the same one §3.3's revalidation uses.
+    """
+    overlap = show_and_sell_models.overlapping_commitment(
+        commitments,
+        start_at=str(slot_row[show_and_sell_models.START_AT_ATTRIBUTE]),
+        end_at=str(slot_row[show_and_sell_models.END_AT_ATTRIBUTE]),
+    )
+    if overlap is None:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        (
+            "This Scout is already committed to another Show & Sell at these hours, and one Scout may not "
+            "hold two overlapping places. Cancel that commitment first."
+        ),
+        details={
+            "subcode": "COMMITMENT_OVERLAP",
+            "showAndSellId": str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+            "slotId": str(slot_row[show_and_sell_models.SLOT_ID_ATTRIBUTE]),
+            "overlap": True,
+        },
+    )
+
+
+def _refuse_signup_budget(event_row: Mapping[str, Any], signups: Sequence[Mapping[str, Any]], profile_id: str) -> None:
+    """Refuse a signup this event could no longer finalize inside one transaction (§8.10).
+
+    "Every source mutation that increases signups … also preflights the minimum resulting
+    finalization write set." The signup is the mutation that knows what it adds — one
+    participating Scout, and one row that may later carry confirmed work — so it supplies
+    those counts to the one estimate finalization is planned against, rather than keeping a
+    second arithmetic of its own that could disagree.
+    """
+    profiles = {str(row.get(show_and_sell_models.PROFILE_ID_ATTRIBUTE) or "") for row in signups}
+    profiles.add(profile_id)
+    confirmed = sum(1 for row in signups if int(row.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0) > 0)
+    allocation_models.require_finalization_feasible(
+        len(show_and_sell_models.event_allocations(event_row)),
+        MAX_TRANSACTION_ACTIONS,
+        confirmed_work_rows=confirmed,
+        participating_scouts=len(profiles),
+    )
+
+
+def _load_signup_answer(event_id: str, slot_id: str, profile_id: str) -> Dict[str, Any]:
+    """The participant answer for one signup, read back after the commit or on a replay.
+
+    The slot row comes along because §5.13 gives the signup no interval of its own — a
+    signup runs when its slot runs — and the participant shape is defined by that interval.
+    """
+    signup = show_and_sell_models.read_signup(event_id, slot_id, profile_id)
+    if signup is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell signup not found")
+    slot_row = show_and_sell_models.load_slot_or_not_found(event_id, slot_id)
+    return dict(show_and_sell_models.signup_summary_payload(signup, slot_row))
+
+
+def _signup_scout_for_show_and_sell_slot(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Take one Scout's place in one slot (§3.4.1, SIGN-M-01).
+
+    Sequence §3's aggregate commit, in one plan: the signup row, its cross-campaign
+    commitment projection, the slot's active counter, the Scout's commitment guard, and the
+    event version. The event version moving is not decoration — it is what stops
+    finalization from approving a work and sale set measured against a signup that was not
+    there when the Kernel opened the preview, and it is the serialization point every other
+    write on this event shares.
+
+    Order of the guards, and why:
+
+    - Identity and roster before anything else, so a caller with no standing here never
+      learns which slots exist (AUTH-U, AUTH-P-02).
+    - Replay second, and before the state rule below: the attempt that completed already
+      moved the slot counter and the event version, so a retry that re-ran those guards
+      would answer ``CONFLICT`` about a request it finished.
+    - The signup window third: only a ``SCHEDULED`` event takes places, and
+      :func:`show_and_sell_models.require_signup_window` is the same state rule §3.3 puts
+      on the slot board.
+    - Duplicate, capacity, overlap and the finalization budget before anything is staged, so
+      a refusal writes nothing at all.
+
+    The plan pins four numbers to what this request read: the membership row's version and
+    ``status = ACTIVE`` (a §1.4.3 removal that lands after the eligibility read fails the
+    plan rather than committing a place for a Scout who left the roster — SIGN-M-01-03), the
+    slot's version and its counter together (a version alone would let a racing signup be
+    counted away, AC-13), the guard version (the only condition that reaches across events
+    for one Scout), and the event version.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    event_id = _resource_id(payload, SHOW_AND_SELL_ID_ARGUMENT)
+    slot_id = show_and_sell_models.normalize_slot_id(payload.get("slotId"))
+    profile_id = _signup_profile_id(payload)
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    membership = _signup_scout_identity(payload, event_row, caller_id)
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(caller_id=caller_id, operation=SIGNUP_SCOUT_FIELD, scope=event_id, idempotency_key=key)
+    replayed = _replay(
+        runner, keys, fingerprint, SIGNUP_SCOUT_FIELD, lambda stored: _load_signup_answer(event_id, slot_id, profile_id)
+    )
+    if replayed is not None:
+        return replayed
+
+    # After replay, for the reason the slot path names: the attempt that completed moved the
+    # slot counter and the event version, and an event that started since then must still be
+    # answered with the signup it already granted.
+    show_and_sell_models.require_signup_window(event_row)
+    slot_row = show_and_sell_models.load_slot_or_not_found(event_id, slot_id)
+    existing = show_and_sell_models.read_signup(event_id, slot_id, profile_id)
+    _refuse_existing_signup(event_row, slot_id, profile_id, existing)
+    _refuse_signup_capacity(slot_row)
+    # The guard is read BEFORE the commitment snapshot, and that order is the whole
+    # serialization argument, not a style point. A competing signup for one Scout can land at
+    # one Show & Sell while this one is being decided at another, and no event-version
+    # condition can see it because the two plans condition on two different events. The pin
+    # catches it only if it was taken before the set it protects: a competing commit that
+    # lands before the guard read shows up in the snapshot taken after it, so the overlap
+    # guard refuses; one that lands after bumps the guard past the pinned version, so the
+    # write condition refuses. Read the guard after the snapshot and the middle case is
+    # invisible — this request validates against a set that never held the other place, pins
+    # the version the other plan just wrote, and both ACTIVE overlapping commitments stand
+    # (AC-14).
+    guard = show_and_sell_models.read_commitment_guard(profile_id)
+    commitments = show_and_sell_models.commitment_rows(profile_id)
+    _refuse_signup_overlap(event_row, slot_row, commitments)
+    _refuse_signup_budget(event_row, show_and_sell_models.active_signups(event_id), profile_id)
+
+    now_iso = utc_now_iso()
+    unit_campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    signup_item = show_and_sell_models.build_show_and_sell_signup_item(
+        event=event_row,
+        slot_id=slot_id,
+        profile_id=profile_id,
+        campaign_id=str(membership["campaignId"]),
+        signed_up_by_account_id=caller_id,
+        now_iso=now_iso,
+    )
+    commitment_item = show_and_sell_models.build_scout_commitment_item(
+        profile_id=profile_id,
+        unit_campaign_id=unit_campaign_id,
+        show_and_sell_id=event_id,
+        slot_id=slot_id,
+        start_at=str(slot_row[show_and_sell_models.START_AT_ATTRIBUTE]),
+        end_at=str(slot_row[show_and_sell_models.END_AT_ATTRIBUTE]),
+        now_iso=now_iso,
+        version=int(signup_item[show_and_sell_models.VERSION_ATTRIBUTE]),
+    )
+    slot_count = int(slot_row.get(show_and_sell_models.ACTIVE_SIGNUP_COUNT_ATTRIBUTE) or 0)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=slot_id)
+    plan.add(*show_and_sell_models.put_signup_action(item=signup_item))
+    plan.add(*show_and_sell_models.put_commitment_action(item=commitment_item))
+    if guard is None:
+        # The Scout's first place anywhere: the guard is written by the first signup
+        # (§5.13), and the conditional insert is what makes two first-ever signups settle
+        # on one guard instead of two writers each believing their own version serialized.
+        plan.add(
+            *show_and_sell_models.put_commitment_guard_action(
+                item=show_and_sell_models.build_commitment_guard_item(
+                    profile_id=profile_id, commitment_version=1, now_iso=now_iso
+                )
+            )
+        )
+    else:
+        plan.add(
+            *show_and_sell_models.bump_commitment_guard_action(
+                profile_id=profile_id,
+                updated_at=now_iso,
+                expected_commitment_version=_number(guard[show_and_sell_models.COMMITMENT_VERSION_ATTRIBUTE]),
+            )
+        )
+    plan.add(
+        *show_and_sell_models.slot_signup_count_action(
+            show_and_sell_id=event_id,
+            slot_id=slot_id,
+            expected_version=show_and_sell_models.normalize_required_version(slot_row.get("version", 1)),
+            expected_count=slot_count,
+            new_count=slot_count + 1,
+            updated_at=now_iso,
+        )
+    )
+    plan.add(
+        *unit_campaign_models.active_membership_check_action(
+            unit_campaign_id=unit_campaign_id,
+            profile_id=profile_id,
+            expected_version=show_and_sell_models.normalize_required_version(membership.get("version", 1)),
+        )
+    )
+    plan.add(
+        *show_and_sell_models.signup_event_version_action(
+            show_and_sell_id=event_id,
+            expected_version=show_and_sell_models.normalize_required_version(
+                event_row.get(show_and_sell_models.VERSION_ATTRIBUTE, 1)
+            ),
+            updated_at=now_iso,
+        )
+    )
+
+    build_result = _once(lambda: _load_signup_answer(event_id, slot_id, profile_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=SIGNUP_SCOUT_FIELD,
+        fingerprint=fingerprint,
+        result_id=slot_id,
+        load_result=lambda stored: _load_signup_answer(event_id, slot_id, profile_id),
+        result_payload=build_result,
+    )
+    answer = build_result()
+    log.info(
+        "Show & Sell signup created",
+        show_and_sell_id=event_id,
+        slot_id=slot_id,
+        profile_id=profile_id,
+        caller_id=caller_id,
+        signup_version=answer["signupVersion"],
+    )
+    return answer
+
+
+def _cancel_show_and_sell_signup(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Release one Scout's place (§3.4.2, SIGN-M-02).
+
+    The state matrix is role-shaped, and :func:`show_and_sell_models.require_signup_cancellable`
+    owns it: while the event is ``SCHEDULED`` the Scout may give the place back, and from
+    the start onwards only the event's Kernel may correct the record, because after the
+    shift ran the row is evidence about work rather than a place to release. ``CANCELLED``
+    and ``FINALIZED`` are refused outright — the first already released its signups, and the
+    second approved credit over them, so the only way to change what was approved is §5's
+    reopen.
+
+    Cancellation deliberately asks nothing about the roster (EVT-M-04's historical cleanup,
+    SIGN-M-03): a Scout removed from membership still has a place to give back, and a
+    Kernel correcting an old event's records must not be blocked by a Scout who is no longer
+    on the roster. Nothing is deleted: the signup row and its commitment projection both go
+    ``CANCELLED`` and keep their audit (§9.3), while the slot's counter decrements and the
+    guard and event version move — the same aggregate the signup wrote, released whole.
+
+    The commitment's version is written to the number its signup moves to, because §5.13
+    defines the two as matching, and the write is still conditioned on the commitment's own
+    read version. A signup whose projection is already missing releases the signup anyway:
+    there is nothing at that interval to release, §3.1.4's event cancellation releases only
+    the commitments it finds, and refusing here would strand a Scout who is trying to give
+    a place back.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    event_id = _resource_id(payload, SHOW_AND_SELL_ID_ARGUMENT)
+    slot_id = show_and_sell_models.normalize_slot_id(payload.get("slotId"))
+    profile_id = _signup_profile_id(payload)
+    expected_signup_version = _expected_version(payload)
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    is_admin = unit_auth.is_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+    if not is_admin:
+        require_profile_access(caller_id, profile_id, "WRITE")
+    signup_row = show_and_sell_models.read_signup(event_id, slot_id, profile_id)
+    if signup_row is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell signup not found")
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(
+        caller_id=caller_id, operation=CANCEL_SIGNUP_FIELD, scope=event_id, idempotency_key=key
+    )
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        CANCEL_SIGNUP_FIELD,
+        lambda stored: _load_signup_answer(event_id, slot_id, profile_id),
+    )
+    if replayed is not None:
+        return replayed
+
+    # After replay for the reason the slot path names: the completed attempt moved this
+    # signup's own version and the event's, and an event that finalized since then must still
+    # be answered with the cancellation it already granted.
+    _require_read_version(signup_row, expected_signup_version, noun="signup")
+    show_and_sell_models.require_signup_cancellable(event_row, admin=is_admin)
+    if str(signup_row.get(show_and_sell_models.STATUS_ATTRIBUTE) or "") == show_and_sell_models.SIGNUP_CANCELLED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "This signup is already cancelled; a cancelled place stays history.",
+            details={"subcode": "SIGNUP_STATE", "slotId": slot_id, "profileId": profile_id},
+        )
+
+    now_iso = utc_now_iso()
+    signup_version = show_and_sell_models.normalize_required_version(
+        signup_row.get(show_and_sell_models.VERSION_ATTRIBUTE, 1)
+    )
+    slot_row = show_and_sell_models.load_slot_or_not_found(event_id, slot_id)
+    commitment = show_and_sell_models.active_commitment_for(
+        show_and_sell_models.commitment_rows(profile_id), event_id, slot_id
+    )
+    guard = show_and_sell_models.read_commitment_guard(profile_id)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=slot_id)
+    plan.add(
+        *show_and_sell_models.cancel_signup_action(
+            show_and_sell_id=event_id,
+            slot_id=slot_id,
+            profile_id=profile_id,
+            expected_version=signup_version,
+            new_version=signup_version + 1,
+            updated_at=now_iso,
+        )
+    )
+    plan.add(
+        *show_and_sell_models.slot_signup_count_action(
+            show_and_sell_id=event_id,
+            slot_id=slot_id,
+            expected_version=show_and_sell_models.normalize_required_version(slot_row.get("version", 1)),
+            expected_count=int(slot_row.get(show_and_sell_models.ACTIVE_SIGNUP_COUNT_ATTRIBUTE) or 0),
+            new_count=int(slot_row.get(show_and_sell_models.ACTIVE_SIGNUP_COUNT_ATTRIBUTE) or 0) - 1,
+            updated_at=now_iso,
+        )
+    )
+    if commitment is not None:
+        plan.add(
+            *show_and_sell_models.cancel_commitment_action(
+                commitment=commitment, new_version=signup_version + 1, updated_at=now_iso
+            )
+        )
+    if guard is not None:
+        plan.add(
+            *show_and_sell_models.bump_commitment_guard_action(
+                profile_id=profile_id,
+                updated_at=now_iso,
+                expected_commitment_version=_number(guard[show_and_sell_models.COMMITMENT_VERSION_ATTRIBUTE]),
+            )
+        )
+    plan.add(
+        *show_and_sell_models.signup_correction_event_version_action(
+            show_and_sell_id=event_id,
+            expected_version=show_and_sell_models.normalize_required_version(
+                event_row.get(show_and_sell_models.VERSION_ATTRIBUTE, 1)
+            ),
+            updated_at=now_iso,
+        )
+    )
+
+    build_result = _once(lambda: _load_signup_answer(event_id, slot_id, profile_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=CANCEL_SIGNUP_FIELD,
+        fingerprint=fingerprint,
+        result_id=slot_id,
+        load_result=lambda stored: _load_signup_answer(event_id, slot_id, profile_id),
+        result_payload=build_result,
+    )
+    answer = build_result()
+    log.info(
+        "Show & Sell signup cancelled",
+        show_and_sell_id=event_id,
+        slot_id=slot_id,
+        profile_id=profile_id,
+        caller_id=caller_id,
+        admin=is_admin,
+        signup_version=answer["signupVersion"],
+    )
+    return answer
+
+
+def _work_rows(payload: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    """The confirmed work rows this batch carries, normalized and refused if not unique (§3.4.3).
+
+    Uniqueness of ``(slotId, profileId)`` is a request-shape rule, not a data rule: the key
+    already guarantees one signup per pair, so two rows naming the same pair are two
+    different answers about one row's minutes, and which of them wins would depend on the
+    order the caller happened to send them in. Batch size is §3.4.3's 1-100, the smaller of
+    the two ceilings that bound this mutation's plan.
+    """
+    raw = payload.get("work")
+    if not isinstance(raw, list) or not raw:
+        raise AppError(ErrorCode.INVALID_INPUT, "work must carry at least one slot/Scout row")
+    if len(raw) > show_and_sell_models.MAX_WORK_LINES:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            f"work carries {len(raw)} rows; at most {show_and_sell_models.MAX_WORK_LINES} may be confirmed at once.",
+        )
+    rows: List[Dict[str, Any]] = []
+    seen: set[Tuple[str, str]] = set()
+    for entry in raw:
+        if not isinstance(entry, Mapping):
+            raise AppError(ErrorCode.INVALID_INPUT, "each work row must name a slotId, profileId and actualMinutes")
+        row = {
+            "slotId": show_and_sell_models.normalize_slot_id(entry.get("slotId")),
+            "profileId": show_and_sell_models.normalize_event_id(
+                entry.get("profileId"), show_and_sell_models.PROFILE_ID_ATTRIBUTE
+            ),
+            "actualMinutes": show_and_sell_models.normalize_actual_minutes(entry.get("actualMinutes")),
+        }
+        pair = (str(row["slotId"]), str(row["profileId"]))
+        if pair in seen:
+            raise AppError(
+                ErrorCode.INVALID_INPUT,
+                f"work names slot {pair[0]} for one Scout twice; confirm each Scout's slot once.",
+            )
+        seen.add(pair)
+        rows.append(row)
+    return rows
+
+
+def _work_row_targets(
+    event_row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]
+) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """``(row, signup row)`` for each work row, refused against the rows that own it (§3.4.3).
+
+    The minutes ceiling is the slot's own stored duration, computed from the interval rather
+    than assumed: a slot may run 90, 120 or 180 minutes (SSE-03), and confirming more hours
+    than the shift existed for is not a Kernel mis-remembering, it is a record finalization
+    will pay credit against. The signup must exist, because §3.4.3 confirms work someone
+    actually did in a place someone held — and it is read once here and conditioned on there,
+    so the version the plan pins is the version this request validated.
+    """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    targets: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+    for row in rows:
+        slot_row = show_and_sell_models.load_slot_or_not_found(event_id, str(row["slotId"]))
+        minutes = int(row["actualMinutes"])
+        duration = show_and_sell_models.slot_duration_minutes(slot_row)
+        if minutes > duration:
+            raise AppError(
+                ErrorCode.INVALID_INPUT,
+                (
+                    f"{minutes} minutes is longer than this slot runs ({duration} minutes). "
+                    "Confirm only the work that happened in this slot."
+                ),
+                details={
+                    "subcode": "WORK_OVER_DURATION",
+                    "slotId": str(row["slotId"]),
+                    "actualMinutes": minutes,
+                    "slotDurationMinutes": duration,
+                },
+            )
+        signup = show_and_sell_models.read_signup(event_id, str(row["slotId"]), str(row["profileId"]))
+        if signup is None:
+            raise AppError(
+                ErrorCode.NOT_FOUND, "This Scout has no signup for this slot, so there is no work here to confirm."
+            )
+        targets.append(({**row}, {**signup}))
+    return targets
+
+
+def _work_preview(event_row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """The pending work picture after this batch, computed and never approved (§3.4.3).
+
+    The preview is the same arithmetic the preflight below refuses on, run over the rows as
+    this batch leaves them: a Kernel who sees a budget number in the answer can trust it is
+    the number the next write was checked against. ``minimumFinalizationActions`` is a
+    lower bound, and the answer says nothing about credit — approving credit is
+    finalization's decision, not this read's.
+    """
+    batch = {(str(row["slotId"]), str(row["profileId"])): int(row["actualMinutes"]) for row in rows}
+    total_minutes = 0
+    confirmed_rows = 0
+    scouts: set[str] = set()
+    for signup in show_and_sell_models.active_signups(str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])):
+        key_pair = (
+            str(signup[show_and_sell_models.SLOT_ID_ATTRIBUTE]),
+            str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE]),
+        )
+        minutes = batch.get(key_pair, int(signup.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0))
+        total_minutes += minutes
+        if minutes > 0:
+            confirmed_rows += 1
+            scouts.add(key_pair[1])
+    return {
+        # The row this preview was computed against, already at the version this batch leaves
+        # the event at: the caller's next read names the number it must send back.
+        "eventVersion": show_and_sell_models.normalize_required_version(
+            event_row.get(show_and_sell_models.VERSION_ATTRIBUTE, 1)
+        ),
+        "totalConfirmedMinutes": total_minutes,
+        "confirmedWorkRows": confirmed_rows,
+        "confirmedParticipants": len(scouts),
+        "minimumFinalizationActions": allocation_models.minimum_finalization_action_count(
+            len(show_and_sell_models.event_allocations(event_row)),
+            confirmed_work_rows=confirmed_rows,
+            participating_scouts=len(scouts),
+        ),
+    }
+
+
+def _refuse_work_budget(event_row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> None:
+    """Refuse a confirmation this event could no longer finalize inside one transaction (§8.10).
+
+    The budget is the reason ``actualMinutes = 0`` is a real operation rather than a no-op:
+    clearing a row takes a work snapshot out of finalization's write set, so a Kernel who is
+    refused for budget has a lever they can pull on the same screen. Same estimate, same
+    subcode, same remedy as §3.2's assignment guard, because a Kernel refused for this
+    reason has to know which number moved.
+    """
+    preview = _work_preview(event_row, rows)
+    allocation_models.require_finalization_feasible(
+        len(show_and_sell_models.event_allocations(event_row)),
+        MAX_TRANSACTION_ACTIONS,
+        confirmed_work_rows=int(preview["confirmedWorkRows"]),
+        participating_scouts=int(preview["confirmedParticipants"]),
+    )
+
+
+def _work_answer(event_id: str, rows: Sequence[Mapping[str, Any]], event_row: Mapping[str, Any]) -> Dict[str, Any]:
+    """Rebuild the confirmation answer: the administrative rows it wrote, and the preview."""
+    items = []
+    for row in rows:
+        signup = show_and_sell_models.read_signup(event_id, str(row["slotId"]), str(row["profileId"]))
+        if signup is None:  # pragma: no cover - the rows were read back after a commit that wrote them
+            raise AppError(ErrorCode.NOT_FOUND, "Show & Sell signup not found")
+        items.append(show_and_sell_models.signup_admin_payload(signup))
+    return {"work": items, "preview": _work_preview(event_row, rows)}
+
+
+def _confirm_show_and_sell_work(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Confirm or clear the work a Kernel saw (§3.4.3, SIGN-M-03).
+
+    Unit Admin only: the minutes are what the Kernel watched, and the confirmation audit
+    names them, so a Scout cannot confirm their own work (AUTH-U). The state window is
+    ``ACTIVE``/``ENDED``/``REOPENED`` — a ``SCHEDULED`` event has produced nothing to
+    confirm, and a ``CANCELLED`` or ``FINALIZED`` one is closed over the signup set it
+    already accounted for; a reopened event is back in the window precisely because the
+    correction is what reopening is for.
+
+    One batch is one atomic save. Each row conditions on the signup's own version, and the
+    whole batch conditions on the event version, so a cancellation, a second confirmation,
+    or another Kernel's overlapping save fails the plan rather than interleaving with it —
+    and a signup whose confirmation raced a cancellation is refused by the write condition
+    on the row itself, not by a read that could have gone stale between the two.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    event_id = _resource_id(payload, SHOW_AND_SELL_ID_ARGUMENT)
+    expected_event_version = _expected_version(payload)
+    rows = _work_rows(payload)
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(caller_id=caller_id, operation=CONFIRM_WORK_FIELD, scope=event_id, idempotency_key=key)
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        CONFIRM_WORK_FIELD,
+        lambda stored: _work_answer(event_id, rows, show_and_sell_models.load_show_and_sell_or_not_found(event_id)),
+    )
+    if replayed is not None:
+        return replayed
+
+    # After replay, for the reason the slot path names plus one of its own: the state window
+    # closes when a later workflow finalizes or cancels the event, and §8.9 requires the
+    # identical retry of a confirmation that already committed to answer the result it already
+    # returned. A guard about whether a NEW confirmation is allowed cannot be allowed to
+    # reject a save the caller was already given — that retry would claim the work was never
+    # confirmed on an event whose credit already counts it.
+    show_and_sell_models.require_work_confirmable(event_row)
+    _require_read_version(event_row, expected_event_version)
+    targets = _work_row_targets(event_row, rows)
+    _refuse_work_budget(event_row, rows)
+
+    now_iso = utc_now_iso()
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=event_id)
+    for row, signup in targets:
+        plan.add(
+            *show_and_sell_models.confirm_signup_work_action(
+                show_and_sell_id=event_id,
+                slot_id=str(row["slotId"]),
+                profile_id=str(row["profileId"]),
+                expected_version=show_and_sell_models.normalize_required_version(
+                    signup.get(show_and_sell_models.VERSION_ATTRIBUTE, 1)
+                ),
+                actual_minutes=int(row["actualMinutes"]),
+                confirmed_by_account_id=caller_id,
+                updated_at=now_iso,
+            )
+        )
+    plan.add(
+        # Not §3.3's slot-board bump: that one pins the stored state to SCHEDULED, and the
+        # whole point of confirming work is that the event has already started.
+        *show_and_sell_models.signup_correction_event_version_action(
+            show_and_sell_id=event_id,
+            expected_version=expected_event_version,
+            updated_at=now_iso,
+        )
+    )
+
+    answer_event_row = dict(event_row)
+    answer_event_row[show_and_sell_models.VERSION_ATTRIBUTE] = expected_event_version + 1
+    build_result = _once(lambda: _work_answer(event_id, rows, answer_event_row))
+    runner.execute(
+        keys,
+        plan,
+        operation=CONFIRM_WORK_FIELD,
+        fingerprint=fingerprint,
+        result_id=event_id,
+        load_result=lambda stored: _work_answer(event_id, rows, answer_event_row),
+        result_payload=build_result,
+    )
+    answer = build_result()
+    log.info(
+        "Show & Sell work confirmed",
+        show_and_sell_id=event_id,
+        caller_id=caller_id,
+        work_rows=len(rows),
+        total_confirmed_minutes=answer["preview"]["totalConfirmedMinutes"],
+    )
+    return answer
+
+
+# --- Signup read surfaces (§3.4.4, §3.4.5) ---------------------------------------
+
+
+def _show_and_sell_signups(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One event's signup board, with the full work and actor audit (§3.4.4, EVT-Q-05).
+
+    Unit Admin for the event's Unit, and nothing is filtered out by default: §5.13 keeps a
+    cancelled signup as the history of who held the place, and the board a Kernel reads to
+    correct a record has to show the places that were given back as well as the ones that
+    are held. ``status`` is a presentation filter, and the cursor is pinned to it so a page
+    token from the ACTIVE board cannot be replayed against the full history (PAGE-01).
+
+    The actor fields live here and only here: SEC-04 keeps ``signedUpByAccountId`` and
+    ``confirmedByAccountId`` off the participant projections, which is why
+    :func:`show_and_sell_models.signup_admin_payload` and
+    :func:`show_and_sell_models.signup_summary_payload` are two functions rather than one
+    with a flag.
+    """
+    event_row = _event_admin_guard(event, caller_id)
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    raw_status = _optional_argument(event, "status")
+    status = None if raw_status is None else show_and_sell_models.normalize_signup_status(raw_status)
+    rows = [
+        row
+        for row in show_and_sell_models.event_signup_rows(event_id)
+        if status is None or str(row.get(show_and_sell_models.STATUS_ATTRIBUTE) or "") == status
+    ]
+    rows.sort(
+        key=lambda row: (
+            str(row.get(show_and_sell_models.SLOT_ID_ATTRIBUTE) or ""),
+            str(row.get(show_and_sell_models.PROFILE_ID_ATTRIBUTE) or ""),
+        )
+    )
+    return dict(
+        paginate_page(
+            [show_and_sell_models.signup_admin_payload(row) for row in rows],
+            f"{SHOW_AND_SELL_SIGNUPS_FIELD}#{event_id}#{status or 'ALL'}",
+            _page_argument(event),
+        )
+    )
+
+
+def _commitment_read_scope(caller_id: str, profile_id: str, unit_id: Any) -> Optional[set[str]]:
+    """Which Unit Campaigns this caller may read this Scout's commitments in (INV-Q-06-02).
+
+    Two authorizations, never merged into one super-user path:
+
+    - no ``unitId``: the caller must hold READ on the profile, and the answer spans every
+      Unit Campaign, because the commitment row is the Scout's own fact and the rule that
+      refuses their next overlapping signup spans campaigns too (INV-Q-06-01);
+    - a ``unitId``: a caller without profile access must administer that Unit, and the
+      answer is filtered to that Unit's Unit Campaigns — so the endpoint is never a window
+      onto another Unit's schedule (AUTH-U). A Scout who does hold the profile may name a
+      Unit simply to narrow their own read.
+
+    ``None`` means "every campaign", which is why the filter and the authorization branch on
+    the same value: a scope that was not applied must not be representable as an empty set
+    that silently answers nothing.
+    """
+    if unit_id is None:
+        require_profile_access(caller_id, profile_id, "READ")
+        return None
+    if not check_profile_access(caller_id, profile_id, "READ"):
+        unit_auth.require_unit_admin(caller_id, str(unit_id))
+    return {
+        str(campaign[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+        for campaign in unit_campaign_models.list_unit_campaigns(str(unit_id))
+    }
+
+
+def _visible_commitments(
+    profile_id: str, campaign_ids: Optional[set[str]], include_cancelled: bool
+) -> List[Dict[str, Any]]:
+    """The commitment rows this read may answer, soonest first (§3.4.4).
+
+    The read is the Scout's own partition — the same authoritative set a signup is refused
+    against — so what a Scout sees here and what blocks their next signup cannot disagree
+    (SEC-06). Cancelled rows stay only when asked: only an ACTIVE commitment blocks a signup,
+    and the cancelled ones are history the caller chooses to look at.
+    """
+    rows = [
+        row
+        for row in show_and_sell_models.commitment_rows(profile_id)
+        if (
+            include_cancelled
+            or str(row.get(show_and_sell_models.STATUS_ATTRIBUTE) or "") == show_and_sell_models.SIGNUP_ACTIVE
+        )
+        and (
+            campaign_ids is None or str(row.get(show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE) or "") in campaign_ids
+        )
+    ]
+    rows.sort(
+        key=lambda row: (
+            str(row.get(show_and_sell_models.START_AT_ATTRIBUTE) or ""),
+            str(row.get(show_and_sell_models.SLOT_ID_ATTRIBUTE) or ""),
+        )
+    )
+    return rows
+
+
+def _my_scout_commitments(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One Scout's commitments, across every Unit Campaign (§3.4.4, INV-Q-06, AUTH-P).
+
+    The projection carries no actor, no account, and no other Unit's bookkeeping: a Scout
+    refused for an overlap learns that they are already somewhere else, not which other
+    Kernel's event that is (INV-Q-06-03). The cursor is pinned to the profile, the Unit
+    filter, and the cancelled choice, so a page token from one answer cannot be replayed
+    against a wider one (PAGE-01).
+    """
+    profile_id = show_and_sell_models.normalize_event_id(
+        _query_argument(event, "profileId"), show_and_sell_models.PROFILE_ID_ATTRIBUTE
+    )
+    unit_id = _optional_argument(event, "unitId")
+    campaign_ids = _commitment_read_scope(caller_id, profile_id, unit_id)
+    include_cancelled = bool(_optional_boolean(event, "includeCancelled"))
+    return dict(
+        paginate_page(
+            [
+                show_and_sell_models.participant_commitment_payload(row)
+                for row in _visible_commitments(profile_id, campaign_ids, include_cancelled)
+            ],
+            f"{MY_COMMITMENTS_FIELD}#{profile_id}#{unit_id or 'ALL'}#{'ALL' if include_cancelled else 'ACTIVE'}",
+            _page_argument(event),
+        )
+    )
+
+
+def _show_and_sell_signup_calendar_data(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The authorized facts one browser needs to build one slot's invite itself (§3.4.5, DATA-Q-05).
+
+    Data, never an artifact: no serialized VEVENT, no download URL, no notification, and no
+    timestamp of its own — ``DTSTAMP`` belongs to the moment the browser generated the file,
+    which is a fact about the download (CAL-01, CAL-02, RPT-00). The identity fields are what
+    make the ICS UID stable across downloads of one signup, so a re-download updates the
+    calendar entry instead of adding a second one.
+
+    Authorization is exact, and the cross-Scout case is the reason it has to be: a Unit Admin
+    of this event's Unit, or Owner/WRITE for this Scout — no other combination. A Unit Admin
+    of a different Unit is refused before the signup is read, so one caller cannot walk slot
+    and profile ids to learn another Unit's schedule (AUTH-P-02).
+
+    The signup must exist. A cancelled signup still answers, because the Scout's calendar
+    keeps the entry until it is removed and the caller has to be able to see what they hold;
+    a signup that never existed is ``NOT_FOUND``, and there is no empty-but-successful answer
+    here to confuse with one.
+    """
+    log = get_logger(__name__)
+    event_id = _query_argument(event, SHOW_AND_SELL_ID_ARGUMENT)
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    slot_id = show_and_sell_models.normalize_slot_id(_query_argument(event, "slotId"))
+    profile_id = show_and_sell_models.normalize_event_id(
+        _query_argument(event, "profileId"), show_and_sell_models.PROFILE_ID_ATTRIBUTE
+    )
+    if not unit_auth.is_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE])):
+        require_profile_access(caller_id, profile_id, "WRITE")
+    signup = show_and_sell_models.read_signup(event_id, slot_id, profile_id)
+    if signup is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell signup not found")
+    slot_row = show_and_sell_models.load_slot_or_not_found(event_id, slot_id)
+    unit_row = unit_models.load_unit_or_not_found(str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+    campaign_row = unit_campaign_models.load_unit_campaign_or_not_found(
+        str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    )
+
+    log.info(
+        "Show & Sell calendar data read",
+        show_and_sell_id=str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+        slot_id=slot_id,
+        profile_id=profile_id,
+        caller_id=caller_id,
+    )
+    return dict(
+        show_and_sell_models.calendar_invite_payload(
+            event_row=event_row, slot_row=slot_row, signup_row=signup, unit_row=unit_row, unit_campaign_row=campaign_row
+        )
+    )
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -5805,6 +6729,12 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     EVENT_INVENTORY_ALLOCATIONS_FIELD: _event_inventory_allocations,
     UPSERT_SLOT_FIELD: _upsert_show_and_sell_slot,
     DELETE_SLOT_FIELD: _delete_show_and_sell_slot,
+    SIGNUP_SCOUT_FIELD: _signup_scout_for_show_and_sell_slot,
+    CANCEL_SIGNUP_FIELD: _cancel_show_and_sell_signup,
+    CONFIRM_WORK_FIELD: _confirm_show_and_sell_work,
+    SHOW_AND_SELL_SIGNUPS_FIELD: _show_and_sell_signups,
+    MY_COMMITMENTS_FIELD: _my_scout_commitments,
+    SIGNUP_CALENDAR_FIELD: _show_and_sell_signup_calendar_data,
 }
 
 

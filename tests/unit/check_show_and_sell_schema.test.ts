@@ -995,7 +995,9 @@ const SS31_TYPE_FIELDS: Record<string, string[]> = {
     "weOweEnabled", "timezone", "eventVersion", "slots", "mySignups",
   ],
   ShowAndSellOpportunitySlot: ["slotId", "label", "startAt", "endAt", "capacity", "openCapacity"],
-  ParticipantSignup: ["showAndSellId", "slotId", "startAt", "endAt", "status", "actualMinutes"],
+  // `signupVersion` joins the participant projection in §3.4: it is the caller's own
+  // concurrency token, and a Scout who cannot read it cannot cancel their own place.
+  ParticipantSignup: ["showAndSellId", "slotId", "startAt", "endAt", "status", "actualMinutes", "signupVersion"],
   ShowAndSellOpportunityConnection: ["items", "pageInfo"],
   CancelShowAndSellPayload: ["event", "releasedAllocations", "cancelledSignups"],
   // §5.11-§5.13 rows as §3.1 reads them. The allocation is addressed by the campaign
@@ -1470,6 +1472,221 @@ describe("Show & Sell Stage 3.3 slot-board SDL (schema.graphql)", () => {
     }
     for (const name of SS33_MUTATION_FIELDS) {
       const field = rootFieldByName("Mutation", name);
+      expect(field, `${name} is missing`).toBeDefined();
+      expect(field!.directives, `${name} must be directive-free (Cognito-only)`).toEqual([]);
+    }
+  });
+});
+
+// --- Wave 4.4: signups, work, and the reads over them (§3.4.1-§3.4.5) -----------
+
+const SS34_QUERY_FIELDS: string[] = [
+  "showAndSellSignups",
+  "myScoutCommitments",
+  "showAndSellSignupCalendarData",
+];
+
+const SS34_MUTATION_FIELDS: string[] = [
+  "signupScoutForShowAndSellSlot",
+  "cancelShowAndSellSignup",
+  "confirmShowAndSellWork",
+];
+
+const SS34_INPUTS: string[] = [
+  "SignupShowAndSellSlotInput",
+  "CancelShowAndSellSignupInput",
+  "ConfirmShowAndSellWorkInput",
+  "ConfirmShowAndSellWorkLineInput",
+];
+
+const SS34_OUTPUT_TYPES: string[] = [
+  "ParticipantCommitment",
+  "ParticipantCommitmentConnection",
+  "ShowAndSellSignupConnection",
+  "ShowAndSellWorkPreview",
+  "ConfirmShowAndSellWorkPayload",
+  "CalendarInviteData",
+];
+
+/**
+ * The exact field set of each new §3.4 type, in declaration order.
+ *
+ * The split is SEC-04's: `ShowAndSellSignup` carries the actor and confirmation audit and
+ * `ParticipantSignup` / `ParticipantCommitment` carry none of it, which is why a Scout can
+ * be answered for their own schedule without the identity of who placed or confirmed each
+ * row ever reaching them. `signupVersion` is the exception that proves the rule: it is not
+ * an audit field but the caller's own concurrency token, and a cancellation that cannot
+ * name a version cannot be honored. `ParticipantCommitment` carries no work minutes on
+ * purpose — minutes belong to the signup, and a projection that repeated them would be a
+ * second number to disagree with.
+ */
+const SS34_TYPE_FIELDS: Record<string, string[]> = {
+  SignupShowAndSellSlotInput: ["showAndSellId", "slotId", "campaignId", "profileId", "idempotency"],
+  CancelShowAndSellSignupInput: ["showAndSellId", "slotId", "profileId", "version", "idempotency"],
+  ConfirmShowAndSellWorkInput: ["showAndSellId", "work", "version", "idempotency"],
+  ConfirmShowAndSellWorkLineInput: ["slotId", "profileId", "actualMinutes"],
+  ParticipantCommitment: ["showAndSellId", "slotId", "startAt", "endAt", "status", "signupVersion"],
+  ShowAndSellWorkPreview: [
+    "eventVersion",
+    "totalConfirmedMinutes",
+    "confirmedWorkRows",
+    "confirmedParticipants",
+    "minimumFinalizationActions",
+  ],
+  ConfirmShowAndSellWorkPayload: ["work", "preview"],
+  CalendarInviteData: [
+    "unitId",
+    "unitDisplayName",
+    "unitCampaignId",
+    "unitCampaignName",
+    "showAndSellId",
+    "slotId",
+    "profileId",
+    "slotLabel",
+    "locationName",
+    "address",
+    "timezone",
+    "slotStartAt",
+    "slotEndAt",
+  ],
+};
+
+describe("Show & Sell Stage 3.4 signup and work SDL (schema.graphql)", () => {
+  test("every §3.4 type and input is present with exactly the contract fields", () => {
+    for (const name of SS34_INPUTS) {
+      expect(definition(name).kind, `${name} must be an input`).toBe("input");
+    }
+    for (const name of SS34_OUTPUT_TYPES) {
+      expect(definition(name).kind, `${name} must be an object type`).toBe("type");
+    }
+    for (const [name, expected] of Object.entries(SS34_TYPE_FIELDS)) {
+      expect([...fieldNameSet(definition(name))], `${name} fields`).toEqual(expected);
+    }
+  });
+
+  test("a signup names event, slot, Scout Campaign and Scout, and never a Unit", () => {
+    const input = fieldsOf(definition("SignupShowAndSellSlotInput"));
+    expect(input.find((f) => f.name === "showAndSellId")!.text).toMatch(/showAndSellId\s*:\s*ID!/);
+    expect(input.find((f) => f.name === "slotId")!.text).toMatch(/slotId\s*:\s*ID!/);
+    // The pair the roster keys on: the joined Scout Campaign is a consistency check against
+    // the roster row, never the basis of access (§3.1 SEC-01).
+    expect(input.find((f) => f.name === "campaignId")!.text).toMatch(/campaignId\s*:\s*ID!/);
+    expect(input.find((f) => f.name === "profileId")!.text).toMatch(/profileId\s*:\s*ID!/);
+    expect(input.find((f) => f.name === "idempotency")!.text).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
+    // No event version: the signup's serialization point is the row the server reads — the
+    // slot counter and the event version — and a caller cannot hold a number for a board it
+    // is about to change.
+    const names = fieldNameSet(definition("SignupShowAndSellSlotInput"));
+    for (const forbidden of ["unitId", "unitCampaignId", "version", "capacity", "signedUpByAccountId", "status"]) {
+      expect(names.has(forbidden), `SignupShowAndSellSlotInput.${forbidden} would move a fact only the server owns`).toBe(false);
+    }
+  });
+
+  test("a cancellation carries the signup version, and a work row the slot and Scout it belongs to", () => {
+    const cancel = fieldsOf(definition("CancelShowAndSellSignupInput"));
+    expect(cancel.find((f) => f.name === "version")!.text, "the caller names the signup version it read").toMatch(
+      /version\s*:\s*VersionedInput!/,
+    );
+    for (const forbidden of ["slotVersion", "reason", "force", "unitId"]) {
+      expect(fieldNameSet(definition("CancelShowAndSellSignupInput")).has(forbidden)).toBe(false);
+    }
+
+    const line = fieldsOf(definition("ConfirmShowAndSellWorkLineInput"));
+    expect(line.find((f) => f.name === "actualMinutes")!.text).toMatch(/actualMinutes\s*:\s*Int!/);
+    const batch = fieldsOf(definition("ConfirmShowAndSellWorkInput"));
+    expect(batch.find((f) => f.name === "work")!.text, "one batch is a list of non-null rows").toMatch(
+      /work\s*:\s*\[ConfirmShowAndSellWorkLineInput!\]!/,
+    );
+    expect(batch.find((f) => f.name === "version")!.text).toMatch(/version\s*:\s*VersionedInput!/);
+  });
+
+  test("the two reads answer connections on the shared pagination contract", () => {
+    const connections: Record<string, string> = {
+      ShowAndSellSignupConnection: "ShowAndSellSignup",
+      ParticipantCommitmentConnection: "ParticipantCommitment",
+    };
+    for (const [connection, element] of Object.entries(connections)) {
+      const item = fieldsOf(definition(connection)).find((f) => f.name === "items")!;
+      expect(item.text, `${connection}.items`).toMatch(new RegExp(`items\\s*:\\s*\\[${element}!\\]!`));
+      expect(fieldsOf(definition(connection)).find((f) => f.name === "pageInfo")!.text).toMatch(/pageInfo\s*:\s*PageInfo!/);
+    }
+    for (const name of ["showAndSellSignups", "myScoutCommitments"]) {
+      const field = rootFieldByName("Query", name);
+      expect(field, `Query.${name} is missing`).toBeDefined();
+      expect(field!.text, `${name} takes the shared page input`).toMatch(/page\s*:\s*PageInput/);
+    }
+  });
+
+  test("the calendar-data answer is facts only: no file, URL, artifact, or timestamp of its own", () => {
+    // CAL-01/CAL-02 with RPT-00: the browser assembles, serializes and downloads the ICS
+    // itself. DTSTAMP is a fact about the download, and an artifact or a pre-signed URL in
+    // this answer is the server path the Stage 1 guard rejects at every seam.
+    const calendar = definition("CalendarInviteData");
+    for (const field of fieldsOf(calendar)) {
+      expect(field.text, `CalendarInviteData.${field.name} must not be a URL scalar`).not.toMatch(/AWSURL/);
+    }
+    for (const forbidden of [
+      "url",
+      "downloadUrl",
+      "fileUrl",
+      "ics",
+      "vevent",
+      "content",
+      "body",
+      "bytes",
+      "fileName",
+      "mimeType",
+      "attachment",
+      "dtStamp",
+      "generatedAt",
+      "sentAt",
+      "notification",
+      "message",
+    ]) {
+      expect(fieldNameSet(calendar).has(forbidden), `CalendarInviteData.${forbidden} would be a server artifact`).toBe(false);
+    }
+    // The identity fields are what make the ICS UID stable across re-downloads (CAL-01), and
+    // the IANA timezone is what makes the UTC interval displayable locally.
+    for (const required of ["unitId", "unitCampaignId", "showAndSellId", "slotId", "profileId", "timezone", "slotStartAt", "slotEndAt"]) {
+      expect(fieldNameSet(calendar).has(required), `CalendarInviteData.${required} is part of the stable identity`).toBe(true);
+    }
+    expect(rootFieldByName("Query", "showAndSellSignupCalendarData")!.text).toMatch(/\):\s*CalendarInviteData!/);
+  });
+
+  test("the work preview is computed and never approved: no credit or sale fields", () => {
+    const preview = fieldNameSet(definition("ShowAndSellWorkPreview"));
+    for (const forbidden of ["credit", "creditCents", "approval", "approvedAt", "sales", "revenue", "weOwe"]) {
+      expect(preview.has(forbidden), `ShowAndSellWorkPreview.${forbidden} would approve what only finalization approves`).toBe(false);
+    }
+    const payload = fieldsOf(definition("ConfirmShowAndSellWorkPayload"));
+    expect(payload.find((f) => f.name === "work")!.text, "the rows it wrote, with their audit").toMatch(/work\s*:\s*\[ShowAndSellSignup!\]!/);
+    expect(payload.find((f) => f.name === "preview")!.text).toMatch(/preview\s*:\s*ShowAndSellWorkPreview!/);
+  });
+
+  test("the participant answers carry no actor, account, or Unit-bookkeeping field", () => {
+    for (const name of ["ParticipantSignup", "ParticipantCommitment"]) {
+      const names = fieldNameSet(definition(name));
+      for (const forbidden of [
+        "signedUpByAccountId",
+        "confirmedByAccountId",
+        "confirmedAt",
+        "updatedByAccountId",
+        "unitId",
+        "unitName",
+        "allocatedProductCount",
+        "actualMinutesOnEvent",
+      ]) {
+        expect(names.has(forbidden), `${name}.${forbidden} would leak the administrative surface (SEC-04)`).toBe(false);
+      }
+    }
+  });
+
+  test("AUTH: no §3.4 type, input, or root field carries an auth directive", () => {
+    for (const name of [...SS34_INPUTS, ...SS34_OUTPUT_TYPES]) {
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+    }
+    for (const name of [...SS34_QUERY_FIELDS, ...SS34_MUTATION_FIELDS]) {
+      const field = rootFieldByName("Query", name) ?? rootFieldByName("Mutation", name);
       expect(field, `${name} is missing`).toBeDefined();
       expect(field!.directives, `${name} must be directive-free (Cognito-only)`).toEqual([]);
     }

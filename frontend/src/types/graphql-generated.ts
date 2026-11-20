@@ -203,6 +203,37 @@ export type GqlAssignShowAndSellInventoryPayload = {
   warnings: Array<GqlAllocationWarning>;
 };
 
+/** The data one browser needs to generate a slot's calendar invite itself: stable identity for the Unit/Campaign/event/slot/signup, the location and address, the Unit's IANA timezone, and the slot's UTC interval. It contains no generated file, no download URL, and no notification. */
+export type GqlCalendarInviteData = {
+  __typename?: 'CalendarInviteData';
+  /** Optional address. */
+  address?: Maybe<Scalars['String']['output']>;
+  /** Required short name of where the event is. */
+  locationName: Scalars['String']['output'];
+  /** The Scout holding the signup; part of the stable UID identity. */
+  profileId: Scalars['ID']['output'];
+  /** The event. */
+  showAndSellId: Scalars['ID']['output'];
+  /** Slot end, UTC; any duration — no hour or half-hour is assumed. */
+  slotEndAt: Scalars['AWSDateTime']['output'];
+  /** The slot; part of the stable UID identity. */
+  slotId: Scalars['ID']['output'];
+  /** Display label; absent when the Kernel never named the slot. */
+  slotLabel?: Maybe<Scalars['String']['output']>;
+  /** Slot start, UTC. */
+  slotStartAt: Scalars['AWSDateTime']['output'];
+  /** The Unit's IANA timezone, so the browser converts the UTC interval to local time. */
+  timezone: Scalars['String']['output'];
+  /** The Unit Campaign the event belongs to. */
+  unitCampaignId: Scalars['ID']['output'];
+  /** The Unit Campaign's name, for the description. */
+  unitCampaignName: Scalars['String']['output'];
+  /** The Unit's display name, for the description; absent when the Unit was never given one, in which case the caller composes its own label from the ids. */
+  unitDisplayName?: Maybe<Scalars['String']['output']>;
+  /** The owning Unit; identity for the invite description. */
+  unitId: Scalars['ID']['output'];
+};
+
 /** A fundraising campaign owned by a seller profile, tied to a catalog for a season. */
 export type GqlCampaign = {
   __typename?: 'Campaign';
@@ -306,6 +337,20 @@ export type GqlCancelShowAndSellPayload = {
   releasedAllocations: Array<GqlShowAndSellAllocation>;
 };
 
+/** Input for cancelShowAndSellSignup. The version is the signup's own, which the participant reads back as `signupVersion` on its own signup or commitment. */
+export type GqlCancelShowAndSellSignupInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The Scout whose signup is being cancelled. */
+  profileId: Scalars['ID']['input'];
+  /** The event the signup belongs to. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The slot the Scout holds (or held). */
+  slotId: Scalars['ID']['input'];
+  /** The signup version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
+};
+
 /**
  * A catalog of products that campaigns sell from.
  *
@@ -337,6 +382,37 @@ export type GqlCatalogType =
   | 'ADMIN_MANAGED'
   /** A catalog created by a regular user for use in their own campaigns. */
   | 'USER_CREATED';
+
+/** Input for confirmShowAndSellWork. One batch is one atomic save: 1-100 rows, unique (slotId, profileId) pairs, and the event version every prior read was taken against. */
+export type GqlConfirmShowAndSellWorkInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The event whose work is being confirmed. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The event version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
+  /** The work rows: unique Scout/slot pairs with their confirmed minutes. */
+  work: Array<GqlConfirmShowAndSellWorkLineInput>;
+};
+
+/** One Scout's confirmed work in one slot (checklist §3.4.3). `actualMinutes = 0` un-confirms; 1 through the slot's duration confirms. */
+export type GqlConfirmShowAndSellWorkLineInput = {
+  /** Minutes actually worked; 0 un-confirms the row. */
+  actualMinutes: Scalars['Int']['input'];
+  /** The Scout who worked. */
+  profileId: Scalars['ID']['input'];
+  /** The slot the work happened in. */
+  slotId: Scalars['ID']['input'];
+};
+
+/** What a confirmation batch did: the administrative signup rows it wrote, and the recomputed pending preview. */
+export type GqlConfirmShowAndSellWorkPayload = {
+  __typename?: 'ConfirmShowAndSellWorkPayload';
+  /** The pending work picture across the event after this batch — computed, not approved. */
+  preview: GqlShowAndSellWorkPreview;
+  /** The signup rows this batch confirmed or un-confirmed, with their full audit. */
+  work: Array<GqlShowAndSellSignup>;
+};
 
 /** Primary presentation basis for a unit's needs report. */
 export type GqlCouncilNeedBasis =
@@ -829,8 +905,12 @@ export type GqlMutation = {
   assignShowAndSellInventory: GqlAssignShowAndSellInventoryPayload;
   /** Cancel an event before it starts, in one atomic workflow: the event goes CANCELLED with its reason and actor, every open allocation is cancelled with its remainder released, signups and their commitment projections are cancelled, slot counters go to zero, and each Scout's commitment guard moves. An event that has started is finished by finalizing it, not by cancelling it. Unit Admin for the event's Unit. */
   cancelShowAndSell: GqlCancelShowAndSellPayload;
+  /** Release a Scout's place: the signup and its commitment projection go CANCELLED, the slot's counter decrements, and the guard and event version move, all in one transaction. Owner/WRITE for the Scout may cancel while the event is scheduled; a Unit Admin may also correct records while the event is active, ended, or reopened, including after the Scout's membership was removed — historical cleanup deliberately does not require an ACTIVE roster row. A finalized event must be reopened first. */
+  cancelShowAndSellSignup: GqlParticipantSignup;
   /** Confirm a QR code upload for a payment method after the S3 upload completes. Returns the updated payment method. */
   confirmPaymentMethodQRCodeUpload: GqlPaymentMethod;
+  /** Confirm (or un-confirm) the work Kernel actually saw, one atomic batch of unique Scout/slot rows: `actualMinutes = 0` clears the confirmation and frees the finalization write set, 1 through the slot's duration confirms it. Allowed while the event is active, ended, or reopened; the batch preflights the event's minimum finalization write set so a confirmed board can never grow past what one transaction can finalize. Returns the administrative rows it wrote and the recomputed pending preview — computed, never approved credit. */
+  confirmShowAndSellWork: GqlConfirmShowAndSellWorkPayload;
   /** Create a new active campaign on a profile the caller has write access to. Returns the created campaign. */
   createCampaign: GqlCampaign;
   /** Create a catalog owned by the caller. Returns the created catalog. */
@@ -905,6 +985,8 @@ export type GqlMutation = {
   revokeUnitInvite: Scalars['Boolean']['output'];
   /** Share a profile the caller owns directly with another account by email. Returns the created share. */
   shareProfileDirect: GqlShare;
+  /** Take a Scout's place in one slot of a scheduled event. The whole aggregate commits at once — signup, cross-campaign commitment projection, slot counter, the Scout's commitment guard, and the event version — so the row the next overlap check reads is never behind the signup it should block. Unit Admin of the event's Unit, or Owner/WRITE for that Scout; the Scout must hold ACTIVE membership of the event's Unit Campaign. A duplicate in the slot, a full slot, or a time that overlaps any commitment the Scout already holds — including at another Show & Sell — is refused and writes nothing (SLOT-02, SLOT-04). */
+  signupScoutForShowAndSellSlot: GqlParticipantSignup;
   /** Transfer a profile's ownership to an account that already has a share (the caller must be the owner or an admin). Returns the updated profile. */
   transferProfileOwnership: GqlSellerProfile;
   /** Update a campaign on a profile the caller has write access to. Only provided fields change. Returns the updated campaign. */
@@ -999,9 +1081,19 @@ export type GqlMutation_CancelShowAndSellArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CancelShowAndSellSignupArgs = {
+  input: GqlCancelShowAndSellSignupInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_ConfirmPaymentMethodQrCodeUploadArgs = {
   paymentMethodName: Scalars['String']['input'];
   s3Key: Scalars['String']['input'];
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_ConfirmShowAndSellWorkArgs = {
+  input: GqlConfirmShowAndSellWorkInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1183,6 +1275,11 @@ export type GqlMutation_RevokeUnitInviteArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_ShareProfileDirectArgs = {
   input: GqlShareProfileDirectInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_SignupScoutForShowAndSellSlotArgs = {
+  input: GqlSignupShowAndSellSlotInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1407,6 +1504,32 @@ export type GqlPageInput = {
   limit?: InputMaybe<Scalars['Int']['input']>;
 };
 
+/** One commitment as the Scout who holds it sees it: the interval it blocks, the event it belongs to, and the signup version its cancellation conditions on. It carries no actor, no account, and no other Unit's bookkeeping — a cross-Unit commitment list must not disclose which Unit owns the other one (INV-Q-06). Confirmed work minutes are deliberately absent: they belong to the signup, and a Scout reads them on `ParticipantSignup`. */
+export type GqlParticipantCommitment = {
+  __typename?: 'ParticipantCommitment';
+  /** The interval's end. */
+  endAt: Scalars['AWSDateTime']['output'];
+  /** The event the commitment belongs to. */
+  showAndSellId: Scalars['ID']['output'];
+  /** The signup version; the caller's own cancellation conditions on it. */
+  signupVersion: Scalars['Int']['output'];
+  /** The slot the commitment was written for. */
+  slotId: Scalars['ID']['output'];
+  /** The interval's start, as the commitment projection stores it. */
+  startAt: Scalars['AWSDateTime']['output'];
+  /** ACTIVE or CANCELLED — only ACTIVE commitments block a new signup. */
+  status: GqlSignupStatus;
+};
+
+/** A page of one Scout's commitments. */
+export type GqlParticipantCommitmentConnection = {
+  __typename?: 'ParticipantCommitmentConnection';
+  /** The commitments on this page, soonest first. */
+  items: Array<GqlParticipantCommitment>;
+  /** Cursor state for this page. */
+  pageInfo: GqlPageInfo;
+};
+
 /** The participant-safe projection of an OrderFulfillment (§10.2): the custody/quantity history of the caller's own Order lines, with no actor account, no inventory movement id, and no other administrative audit. The full audit is served only by the Unit-Admin `orderFulfillments` query. */
 export type GqlParticipantOrderFulfillment = {
   __typename?: 'ParticipantOrderFulfillment';
@@ -1437,7 +1560,7 @@ export type GqlParticipantOrderFulfillmentConnection = {
   pageInfo: GqlPageInfo;
 };
 
-/** One signup as the Scout who holds it sees it: which slot, whether it is still active, and how much work was confirmed. The actor fields are administrative and appear on `ShowAndSellSignup` instead. */
+/** One signup as the Scout who holds it sees it: which slot, whether it is still active, how much work was confirmed, and the signup version `cancelShowAndSellSignup` conditions on. The actor fields are administrative and appear on `ShowAndSellSignup` instead. */
 export type GqlParticipantSignup = {
   __typename?: 'ParticipantSignup';
   /** Confirmed work minutes; 0 means the work is not confirmed yet. */
@@ -1446,6 +1569,8 @@ export type GqlParticipantSignup = {
   endAt: Scalars['AWSDateTime']['output'];
   /** The event signed up for. */
   showAndSellId: Scalars['ID']['output'];
+  /** The signup version; the caller's own cancellation conditions on it. */
+  signupVersion: Scalars['Int']['output'];
   /** The slot signed up for. */
   slotId: Scalars['ID']['output'];
   /** When the slot runs. */
@@ -1714,6 +1839,8 @@ export type GqlQuery = {
   listSharesByProfile: Array<GqlShare>;
   /** The payment methods available to the caller: the caller's stored custom methods plus the built-in "Cash" and "Check" methods, sorted by name. */
   myPaymentMethods: Array<GqlPaymentMethod>;
+  /** One Scout's commitments across every Unit Campaign, soonest first, with no actor or account field. Profile READ/Owner/WRITE for that Scout; a Unit Admin must supply an authorized `unitId` and then sees only that Unit's commitments, so the endpoint is never a window onto another Unit's schedule (INV-Q-06). */
+  myScoutCommitments: GqlParticipantCommitmentConnection;
   /** One Scout's own custody in one Unit Campaign. Profile Owner/WRITE/READ for that Scout, or Unit Admin for the parent Unit; never another Scout's rows. */
   myScoutCustody: Array<GqlScoutCustodyBalance>;
   /** The Units on which the caller holds a Unit Admin grant. No cross-Unit data. */
@@ -1732,6 +1859,10 @@ export type GqlQuery = {
   showAndSell: GqlShowAndSellAdmin;
   /** One event's participant view for one Scout: the slots and that Scout's commitments. Profile Owner/WRITE or READ for that Scout, or a Unit Admin for the event's Unit. An unjoined Scout, another Unit's event, or a Scout the caller cannot read returns `NOT_FOUND`, and no administrative field is present. */
   showAndSellOpportunity: GqlShowAndSellOpportunity;
+  /** The authorized facts one browser needs to generate a slot's calendar invite itself: identity, location, IANA timezone, and UTC times. Data only — no server generates, stores, or emails a file, and the READ-only collaborator's read surface stops short of it (CAL-01, AUTH-P-02). Unit Admin, or Profile Owner/WRITE for that exact Scout. */
+  showAndSellSignupCalendarData: GqlCalendarInviteData;
+  /** An event's signups with the full actor and confirmation audit: who placed each, who confirmed the work, and the version each cancellation or confirmation conditions on. Unit Admin for the event's Unit. */
+  showAndSellSignups: GqlShowAndSellSignupConnection;
   /** A Unit Campaign's events, soonest first, with optional state and date-window filters. Unit Admin for the campaign's Unit. */
   showAndSells: GqlShowAndSellAdminConnection;
   /** The unit's settings and admin count. Unit Admin for that Unit. */
@@ -1901,6 +2032,14 @@ export type GqlQuery_ListSharesByProfileArgs = {
 };
 
 /** The root query object for the KernelWorx API. */
+export type GqlQuery_MyScoutCommitmentsArgs = {
+  includeCancelled?: InputMaybe<Scalars['Boolean']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+  profileId: Scalars['ID']['input'];
+  unitId?: InputMaybe<Scalars['ID']['input']>;
+};
+
+/** The root query object for the KernelWorx API. */
 export type GqlQuery_MyScoutCustodyArgs = {
   profileId: Scalars['ID']['input'];
   unitCampaignId: Scalars['ID']['input'];
@@ -1952,6 +2091,20 @@ export type GqlQuery_ShowAndSellArgs = {
 export type GqlQuery_ShowAndSellOpportunityArgs = {
   profileId: Scalars['ID']['input'];
   showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellSignupCalendarDataArgs = {
+  profileId: Scalars['ID']['input'];
+  showAndSellId: Scalars['ID']['input'];
+  slotId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellSignupsArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  showAndSellId: Scalars['ID']['input'];
+  status?: InputMaybe<GqlSignupStatus>;
 };
 
 /** The root query object for the KernelWorx API. */
@@ -2502,6 +2655,15 @@ export type GqlShowAndSellSignup = {
   version: Scalars['Int']['output'];
 };
 
+/** A page of an event's signups with their work and audit (checklist §3.4.4). */
+export type GqlShowAndSellSignupConnection = {
+  __typename?: 'ShowAndSellSignupConnection';
+  /** The signup rows on this page, by slot then Scout. */
+  items: Array<GqlShowAndSellSignup>;
+  /** Cursor state for this page. */
+  pageInfo: GqlPageInfo;
+};
+
 /** One working slot of an event (data model §5.12): an arbitrary interval inside the event's immutable interval, a capacity, and the counter every signup write maintains transactionally. */
 export type GqlShowAndSellSlot = {
   __typename?: 'ShowAndSellSlot';
@@ -2541,6 +2703,35 @@ export type GqlShowAndSellStatus =
   | 'REOPENED'
   /** Before its startAt; cancellable by a Unit Admin. */
   | 'SCHEDULED';
+
+/** The pending work picture after a confirmation batch, computed and never approved: the minutes Kernels have confirmed and the minimum finalization write set that picture implies (§8.10). Approving credit is finalization's job, not this read's. */
+export type GqlShowAndSellWorkPreview = {
+  __typename?: 'ShowAndSellWorkPreview';
+  /** Distinct Scouts behind those rows. */
+  confirmedParticipants: Scalars['Int']['output'];
+  /** Signup rows carrying confirmed work (actualMinutes > 0). */
+  confirmedWorkRows: Scalars['Int']['output'];
+  /** The event version this preview was computed against, moved by this batch. */
+  eventVersion: Scalars['Int']['output'];
+  /** The minimum actions finalization will need for this event's product and work set; the feasibility answer this same batch checks before it stages a write. */
+  minimumFinalizationActions: Scalars['Int']['output'];
+  /** Confirmed minutes across the whole event, all Scouts summed. */
+  totalConfirmedMinutes: Scalars['Int']['output'];
+};
+
+/** Input for signupScoutForShowAndSellSlot. The Scout's identity arrives as the pair the roster keys on — the joined Scout Campaign and the SellerProfile — and both are consistency checks against the roster row, never the basis of access (§3.1 SEC-01). */
+export type GqlSignupShowAndSellSlotInput = {
+  /** The Scout Campaign whose roster membership carries the signup; it must be the Campaign joined to the event's Unit Campaign. */
+  campaignId: Scalars['ID']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The Scout taking the place. */
+  profileId: Scalars['ID']['input'];
+  /** The event being signed up for; it must still be scheduled. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The slot to take a place in. */
+  slotId: Scalars['ID']['input'];
+};
 
 /** A Scout's signup for one slot: ACTIVE holds a place and counts against capacity, CANCELLED is history that is never deleted (data model §9.3, spec SSE-05). */
 export type GqlSignupStatus =
