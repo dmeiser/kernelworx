@@ -97,6 +97,18 @@ CONCURRENT_OVER_ASSIGNMENT = "CONCURRENT_OVER_ASSIGNMENT"
 FINALIZATION_OVERHEAD_ACTIONS = 3
 FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT = 4
 
+#: The participant-side terms of the same estimate, for the mutations that grow them
+#: (§8.10: "every source mutation that increases signups, confirmed participants, sales,
+#: products, or later-event adjustments also preflights the minimum resulting finalization
+#: write set"). §8.7 step 4 lists what finalization writes, and each participant row is one
+#: of them: a per-slot work snapshot for every signup whose work was confirmed, and a credit
+#: record plus its Scout-total projection for every Scout the event counts. The signup and
+#: work-confirmation resolvers own the two counts; this module owns the arithmetic, so the
+#: preflight a Kernel is refused by and the budget finalization is planned against are one
+#: formula rather than two that happen to agree today.
+FINALIZATION_ACTIONS_PER_CONFIRMED_SIGNUP = 1
+FINALIZATION_ACTIONS_PER_PARTICIPATING_SCOUT = 2
+
 #: The movement type a target change of this sign is audited as (§5.8): an increase is an
 #: assignment, a decrease is a manual reduction. A zero delta writes nothing, so it has
 #: no type.
@@ -598,42 +610,76 @@ def sequential_warning(
 # --- Finalization feasibility (§8.10) ---------------------------------------------
 
 
-def minimum_finalization_action_count(allocated_product_count: int) -> int:
+def minimum_finalization_action_count(
+    allocated_product_count: int,
+    *,
+    confirmed_work_rows: int = 0,
+    participating_scouts: int = 0,
+) -> int:
     """The smallest write set the finalization of this event will need (§8.10).
 
     The arithmetic is §9's first-finalization estimate, with the terms this mutation
-    cannot influence left at zero — no sale snapshot (``S``), work snapshot (``W``),
-    credit or Scout-total projection (``2C``), later-event reduction (``2L``) or affected
-    later event (``E``). What is left is the estimate's floor: the ``3`` baseline writes
-    (marker + event/status/version + finalization metadata) plus ``4P``, one return
-    snapshot, allocation release, balance, and movement for every touched product — ``P``
-    counting every product finalization touches, exactly as §9 states. Every term the
-    estimate leaves out can only add actions, so this is a true lower bound: an event
-    whose floor already busts the budget has no finalization that fits it.
+    cannot influence left at zero — no sale snapshot (``S``), credit or Scout-total
+    projection (``2C``), later-event reduction (``2L``) or affected later event (``E``).
+    What is left is the estimate's floor: the ``3`` baseline writes (marker +
+    event/status/version + finalization metadata) plus ``4P``, one return snapshot,
+    allocation release, balance, and movement for every touched product — ``P`` counting
+    every product finalization touches, exactly as §9 states. Every term the estimate
+    leaves out can only add actions, so this is a true lower bound: an event whose floor
+    already busts the budget has no finalization that fits it.
+
+    The two participant terms are supplied by the callers that move them, because they are
+    domain facts rather than allocation arithmetic: ``confirmed_work_rows`` is the signups
+    whose work a Kernel confirmed (each becomes one per-slot work snapshot) and
+    ``participating_scouts`` is the distinct Scouts the event counts (each becomes a credit
+    record and a Scout-total projection). Both default to zero, which is exactly what the
+    §3.2 assignment mutation may assume — an assignment adds stock, not participants — and
+    what keeps its call byte-identical to the estimate it was written against.
     """
-    return FINALIZATION_OVERHEAD_ACTIONS + FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT * allocated_product_count
+    return (
+        FINALIZATION_OVERHEAD_ACTIONS
+        + FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT * allocated_product_count
+        + FINALIZATION_ACTIONS_PER_CONFIRMED_SIGNUP * confirmed_work_rows
+        + FINALIZATION_ACTIONS_PER_PARTICIPATING_SCOUT * participating_scouts
+    )
 
 
-def require_finalization_feasible(allocated_product_count: int, max_actions: int) -> None:
+def require_finalization_feasible(
+    allocated_product_count: int,
+    max_actions: int,
+    *,
+    confirmed_work_rows: int = 0,
+    participating_scouts: int = 0,
+) -> None:
     """Refuse a write that would leave an event no longer finalizable inside the budget.
 
     Same verdict and subcode as the plan-size guard, and the same remedy named in the
     message, because a Kernel who is refused for this reason has to know which lever to
-    pull: remove allocations for enough products that finalization fits again.
+    pull: remove allocations for enough products that finalization fits again. The
+    participant-side levers §8.10 names — clearing a signup's confirmed work, releasing a
+    sale — are the caller's to mention, so this one stays about products.
     """
-    planned = minimum_finalization_action_count(allocated_product_count)
+    planned = minimum_finalization_action_count(
+        allocated_product_count,
+        confirmed_work_rows=confirmed_work_rows,
+        participating_scouts=participating_scouts,
+    )
     if planned <= max_actions:
         return
     raise AppError(
         ErrorCode.CONFLICT,
         (
-            f"{allocated_product_count} allocated products would need {planned} actions to finalize, "
-            f"over the {max_actions} a single transaction allows. Reduce this event's allocations."
+            f"{allocated_product_count} allocated product(s) and this event's participant set would need "
+            f"{planned} actions to finalize, over the {max_actions} a single transaction allows. Reduce this "
+            "event's allocations, or clear confirmed work and signups that will not be needed."
         ),
         details={
             "subcode": ErrorCode.OPERATION_TOO_LARGE,
             "plannedActions": planned,
             "maxActions": max_actions,
+            "allocatedProductCount": allocated_product_count,
+            "confirmedWorkRows": confirmed_work_rows,
+            "participatingScouts": participating_scouts,
             "reduction": "remove allocated products from this event until finalization fits",
         },
     )

@@ -853,6 +853,54 @@ def require_slots_writable(item: Mapping[str, Any], now_iso: Optional[str] = Non
     return state
 
 
+def read_signup(show_and_sell_id: str, slot_id: str, profile_id: str) -> Optional[Dict[str, Any]]:
+    """One Scout's signup row for one slot, read consistently.
+
+    The key is fully determined by the three ids (§6.4's ``SIGNUP#<slotId>#<profileId>``), so
+    a cancellation or a work confirmation never has to scan the event's signup partition to
+    find the row it was asked about — and the consistent read is what lets the request that
+    just committed a signup be handed its own row.
+    """
+    response = tables.show_and_sells.get_item(
+        Key={"pk": show_and_sell_pk(show_and_sell_id), "sk": signup_sk(slot_id, profile_id)}, ConsistentRead=True
+    )
+    item = response.get("Item")
+    return dict(item) if isinstance(item, dict) else None
+
+
+def require_signup_window(item: Mapping[str, Any], *, now_iso: Optional[str] = None) -> str:
+    """Require the event to still be taking signups (§3.4.1).
+
+    The state is the same SCHEDULED requirement §3.3 puts on the slot board, and it is worth
+    its own sentence: a Scout refused here has not done anything wrong, and "the shift board
+    is closed" is not the answer to "may I still take this place". Once the event starts its
+    slots are the hours people showed up for, so the place is taken or released against them,
+    never granted — and ``REOPENED`` is closed too, because what a reopened event edits is
+    the finalization drafts.
+    """
+    state = derive_event_status(item, now_iso)
+    if state != STATUS_SCHEDULED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            f"Signups close when the event starts. This event is {state}, so its slots are no longer places to take.",
+            details={"subcode": "EVENT_STATE", "status": state},
+        )
+    return state
+
+
+def slot_duration_minutes(slot_row: Mapping[str, Any]) -> int:
+    """One whole slot's length in minutes, as its own stored interval says (§5.12).
+
+    The upper bound for a confirmed work row, because §3.4.3 caps ``actualMinutes`` at the
+    duration of the slot the work happened in. It is computed from the slot rather than
+    stored on it: a slot may run any duration (SSE-03), and the only number a Kernel may
+    confirm against is the one the row itself describes.
+    """
+    start = datetime.fromisoformat(str(slot_row[START_AT_ATTRIBUTE]).replace("Z", "+00:00"))
+    end = datetime.fromisoformat(str(slot_row[END_AT_ATTRIBUTE]).replace("Z", "+00:00"))
+    return int((end - start).total_seconds() // 60)
+
+
 def we_owe_disable_blocked(obligations: Iterable[Mapping[str, Any]]) -> bool:
     """Whether turning We Owe off would strand an obligation that is still open.
 
@@ -1190,6 +1238,7 @@ def _conditioned_update(
     sets: Mapping[str, Any],
     extra_conditions: Sequence[Tuple[str, str, Any]] = (),
     version_attribute: str = VERSION_ATTRIBUTE,
+    removes: Sequence[str] = (),
 ) -> Tuple[str, Dict[str, Any]]:
     """One versioned update: ``version = expected`` plus the caller's extra guards.
 
@@ -1207,6 +1256,9 @@ def _conditioned_update(
             the condition, each with its own value placeholder. Any ``#alias`` an
             expression uses is registered in the names map, whether or not the write
             also sets that attribute.
+        removes: Attribute names to ``REMOVE`` in the same expression. A field that
+            stopped describing the row is removed rather than nulled, so "never
+            happened" and "happened and is now empty" stay distinguishable on the read.
     """
     names: Dict[str, str] = {"#version": VERSION_ATTRIBUTE}
     values: Dict[str, Any] = {":expectedVersion": expected_version}
@@ -1215,6 +1267,11 @@ def _conditioned_update(
         names[f"#{attribute}"] = attribute
         values[f":{attribute}"] = value
         set_parts.append(f"#{attribute} = :{attribute}")
+    update_expression = "SET " + ", ".join(set_parts)
+    if removes:
+        for attribute in removes:
+            names[f"#{attribute}"] = attribute
+        update_expression += " REMOVE " + ", ".join(f"#{attribute}" for attribute in removes)
     condition_parts: List[str] = ["#version = :expectedVersion"]
     for placeholder, expression, value in extra_conditions:
         _register_aliases(names, expression)
@@ -1225,7 +1282,7 @@ def _conditioned_update(
         {
             "TableName": table_name,
             "Key": wire_key(key),
-            "UpdateExpression": "SET " + ", ".join(set_parts),
+            "UpdateExpression": update_expression,
             "ConditionExpression": " AND ".join(condition_parts),
             "ExpressionAttributeNames": names,
             "ExpressionAttributeValues": {name: wire_value(value) for name, value in values.items()},
@@ -1595,6 +1652,27 @@ def assignment_draft_action(
             VERSION_ATTRIBUTE: expected_version + 1,
             UPDATED_BY_ATTRIBUTE: updated_by_account_id,
             UPDATED_AT_ATTRIBUTE: updated_at,
+        },
+    )
+
+
+def put_signup_action(*, item: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Insert one signup row: the conditional insert IS the duplicate guard (§5.13, SLOT-02).
+
+    A signup's sort key is ``SIGNUP#<slotId>#<profileId>``, so a second ACTIVE place for one
+    Scout in one slot is not a second row that a check might miss — it is the same row, and
+    ``attribute_not_exists`` is what turns "no duplicate signup" from a read that races into
+    a condition that loses. Two concurrent signups of one Scout to one slot therefore
+    resolve to one signup plus one ``CONFLICT``, whichever request reaches DynamoDB second.
+    """
+    return (
+        "Put",
+        {
+            "TableName": tables.show_and_sells.table_name,
+            "Item": wire_item(item),
+            "ConditionExpression": "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
+            "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
         },
     )
 
@@ -2704,6 +2782,318 @@ def opportunity_payload(
         "eventVersion": normalize_required_version(event.get(VERSION_ATTRIBUTE, 1)),
         "slots": [slot_opportunity_payload(slot) for slot in slots],
         "mySignups": [signup_summary_payload(signup, _slot_for(slots, signup)) for signup in signups],
+    }
+
+
+# --- The signup aggregate: state rules, writes, and reads (data model §5.13, §8.3; §3.4) ---
+
+#: §6.4's batch size for ``confirmShowAndSellWork``: one atomic save of between these
+#: many Scout/slot rows. The ceiling is a transaction-size decision, not UI convenience
+#: — each row is a conditional write, and the plan's 90-action ceiling is what actually
+#: bounds a save, so the SDL's own 100-row maximum is the outer one.
+MIN_WORK_LINES = 1
+MAX_WORK_LINES = 100
+
+#: The event states whose work a Kernel may confirm (§3.4.3): the shift is running, ran,
+#: or was reopened for correction. ``SCHEDULED`` has produced nothing to confirm, and
+#: ``CANCELLED``/``FINALIZED`` are closed over the participant set they approved.
+WORK_CONFIRMABLE_STATUSES: frozenset[str] = frozenset({STATUS_ACTIVE, STATUS_ENDED, STATUS_REOPENED})
+
+
+def require_signup_cancellable(item: Mapping[str, Any], *, admin: bool, now_iso: Optional[str] = None) -> str:
+    """Require the event to be in a state that still accepts a signup cancellation (§3.4.2).
+
+    The caller's role is part of the answer, which is why this takes ``admin`` rather than
+    a state list: while the event is scheduled, the Scout who holds the place may give it
+    back; from the start onwards only the event's Kernel may correct the record, because
+    after the shift ran the row is evidence about work, not a place to release. The
+    corrected half deliberately has no membership requirement — §5.6's removal leaves
+    signups Kernel-manageable on purpose, and a Scout removed from the roster still has a
+    place to give back (SIGN-M-02-01).
+
+    ``FINALIZED`` is refused because approved credit and a finalization snapshot already
+    describe this signup; the only way to change what was approved is §5's reopen, which
+    is also what the API contract says.
+    """
+    state = derive_event_status(item, now_iso)
+    if state == STATUS_CANCELLED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "This event was cancelled, and that cancellation already released its signups.",
+            details={"subcode": "EVENT_STATE", "status": state},
+        )
+    if state == STATUS_FINALIZED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "This event is finalized. Reopen it before correcting a signup, so the approved set is never changed underneath itself.",
+            details={"subcode": "EVENT_STATE", "status": state},
+        )
+    if not admin and state != STATUS_SCHEDULED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "This event has already started, so only its Kernel can correct a signup record.",
+            details={"subcode": "SIGNUP_WINDOW_CLOSED", "status": state},
+        )
+    return state
+
+
+def require_work_confirmable(item: Mapping[str, Any], *, now_iso: Optional[str] = None) -> str:
+    """Require the event to be one whose work can be confirmed now (§3.4.3, SIGN-M-03).
+
+    Work is what a Kernel saw happen, so the window opens at the start (``ACTIVE``), stays
+    open while the event is being read as ended (``ENDED``), and re-opens with
+    ``REOPENED``; a ``SCHEDULED`` event has produced nothing to confirm yet, and a
+    ``CANCELLED`` or ``FINALIZED`` one is closed over a signup the admin cannot silently
+    rewrite.
+    """
+    state = derive_event_status(item, now_iso)
+    if state not in WORK_CONFIRMABLE_STATUSES:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "Work can only be confirmed while the event is active, ended, or reopened. This event is "
+            f"{state}, so there is no shift here that a Kernel could have watched.",
+            details={"subcode": "EVENT_STATE", "status": state},
+        )
+    return state
+
+
+def overlapping_commitment(
+    commitments: Sequence[Mapping[str, Any]], *, start_at: str, end_at: str
+) -> Optional[Dict[str, Any]]:
+    """The Scout's first ACTIVE commitment the offered interval would overlap (§6.2, AC-14).
+
+    The projection is the authoritative answer, read from the Scout's own partition: the
+    rule spans Unit Campaigns, so no per-event check can see it. Cancelled rows are
+    skipped because §5.13 keeps them as history and only an ACTIVE commitment holds a
+    Scout somewhere else.
+    """
+    for commitment in commitments:
+        if str(commitment.get(STATUS_ATTRIBUTE) or "") != SIGNUP_ACTIVE:
+            continue
+        if intervals_overlap(start_at, end_at, str(commitment[START_AT_ATTRIBUTE]), str(commitment[END_AT_ATTRIBUTE])):
+            return dict(commitment)
+    return None
+
+
+def slot_signup_count_action(
+    *,
+    show_and_sell_id: str,
+    slot_id: str,
+    expected_version: int,
+    expected_count: int,
+    new_count: int,
+    updated_at: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """Move one slot's active-signup counter, pinned to the counter this request read.
+
+    Both numbers are pinned — the version, and the counter itself. The version alone is
+    not enough: §5.12 keeps ``activeSignupCount`` as the projection capacity is decided
+    against, so a plan that computed ``read + 1`` while a competing signup had already
+    moved the counter would write a count that lost one signup, and the slot would then
+    admit one Scout more than its capacity (AC-13). Pinning the counter makes that plan
+    cancel instead, exactly like a stale ``expectedVersion`` does.
+
+    ``new_count`` is supplied rather than computed by the expression, so the row that
+    lands is the number this request reasoned about; a negative result is refused here
+    rather than stored, because a counter below zero is an aggregate this write did not
+    create and §3.7's reconciliation owns.
+    """
+    if new_count < 0:
+        raise _invalid(ACTIVE_SIGNUP_COUNT_ATTRIBUTE, "cannot fall below zero")
+    return _conditioned_update(
+        slot_key(show_and_sell_id, slot_id),
+        tables.show_and_sells.table_name,
+        expected_version=expected_version,
+        sets={
+            ACTIVE_SIGNUP_COUNT_ATTRIBUTE: new_count,
+            VERSION_ATTRIBUTE: expected_version + 1,
+            UPDATED_AT_ATTRIBUTE: updated_at,
+        },
+        extra_conditions=((":countCondition", "#activeSignupCount = :countCondition", expected_count),),
+    )
+
+
+def put_commitment_guard_action(*, item: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Create the one-row-per-Scout commitment guard (§5.13).
+
+    The guard is written by the first signup a Scout ever holds, so this is the branch
+    that makes "no guard yet" a real state rather than an error. The conditional insert
+    is also the race guard: two first-ever signups for one Scout each read no guard, and
+    the one that loses this condition fails its whole plan instead of quietly replacing
+    the winner's row with a guard whose version neither of them validated against.
+    """
+    return (
+        "Put",
+        {
+            "TableName": tables.unit_campaigns.table_name,
+            "Item": wire_item(item),
+            "ConditionExpression": "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
+            "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def signup_event_version_action(
+    *, show_and_sell_id: str, expected_version: int, updated_at: str
+) -> Tuple[str, Dict[str, Any]]:
+    """Move the event version because its participant set just grew (§8.3).
+
+    "Signup creation … write[s] source signup, commitment projection, slot counter, guard
+    version, and an incremented event version together", and the increment is not
+    decoration: it is what stops finalization from approving a sale and work set measured
+    against a signup that was not there when the Kernel opened the preview.
+
+    ``updatedByAccountId`` is left alone on purpose. That field records who edited the
+    event, and the account that placed a signup — often the Scout's own — is not an editor
+    of it. The SCHEDULED condition is §3.4's state rule re-checked at commit: an event
+    cancelled or moved into a terminal workflow between this read and this write fails the
+    plan rather than gaining a signup behind the workflow.
+    """
+    return _conditioned_update(
+        event_metadata_key(show_and_sell_id),
+        tables.show_and_sells.table_name,
+        expected_version=expected_version,
+        sets={VERSION_ATTRIBUTE: expected_version + 1, UPDATED_AT_ATTRIBUTE: updated_at},
+        extra_conditions=((":stateCondition", "#status = :stateCondition", STATUS_SCHEDULED),),
+    )
+
+
+def signup_correction_event_version_action(
+    *, show_and_sell_id: str, expected_version: int, updated_at: str
+) -> Tuple[str, Dict[str, Any]]:
+    """Move the event version because a signup row it counts was corrected (§8.3).
+
+    The create, the cancellation and the work confirmation all move the same counter; what
+    differs is the state they are legal in. A correction runs while the event is scheduled,
+    active, ended, or reopened, and the two states that close it are the ones no signup
+    correction may touch. ``ACTIVE``/``ENDED`` are derived from the clock and are never
+    stored, so the condition names the two stored states that must NOT be reached — which is
+    the strongest statement a DynamoDB condition can make here. :func:`bump_event_version_action`
+    pins the stored state to ``SCHEDULED`` for §3.3's slot board, so it cannot carry a
+    correction that happens after the event started.
+    """
+    return _conditioned_update(
+        event_metadata_key(show_and_sell_id),
+        tables.show_and_sells.table_name,
+        expected_version=expected_version,
+        sets={VERSION_ATTRIBUTE: expected_version + 1, UPDATED_AT_ATTRIBUTE: updated_at},
+        extra_conditions=(
+            (":notCancelled", "#status <> :notCancelled", STATUS_CANCELLED),
+            (":notFinalized", "#status <> :notFinalized", STATUS_FINALIZED),
+        ),
+    )
+
+
+def confirm_signup_work_action(
+    *,
+    show_and_sell_id: str,
+    slot_id: str,
+    profile_id: str,
+    expected_version: int,
+    actual_minutes: int,
+    confirmed_by_account_id: str,
+    updated_at: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """Confirm or clear one Scout's worked minutes in one slot (§3.4.3, §5.13).
+
+    The confirmation audit is written with the minutes, never after, and clearing the
+    minutes clears the audit with it: §5.13's invariant is that confirmed work names its
+    confirmer, and a row saying ``actualMinutes = 0`` while still naming who confirmed it
+    is a record of a confirmation that no longer stands. So ``actual_minutes == 0`` REMOVES
+    ``confirmedAt``/``confirmedByAccountId`` rather than nulling them — the field is
+    absent, which is what "never confirmed" looks like on the admin read.
+
+    The version rides to ``expected_version + 1`` and the signup must not be CANCELLED: a
+    released place is history (§9.3), and confirming work on it would rewrite an audit row
+    that the cancellation closed. The version condition is what makes a second confirmation
+    of the same row, or a cancellation racing this batch, cancel the whole save.
+    """
+    sets: Dict[str, Any] = {
+        ACTUAL_MINUTES_ATTRIBUTE: normalize_actual_minutes(actual_minutes),
+        VERSION_ATTRIBUTE: expected_version + 1,
+        UPDATED_AT_ATTRIBUTE: updated_at,
+    }
+    condition_parts: List[Tuple[str, str, Any]] = [(":notCancelled", "#status <> :notCancelled", SIGNUP_CANCELLED)]
+    removes: List[str] = []
+    if actual_minutes > 0:
+        sets[CONFIRMED_BY_ATTRIBUTE] = normalize_event_id(confirmed_by_account_id, CONFIRMED_BY_ATTRIBUTE)
+        sets[CONFIRMED_AT_ATTRIBUTE] = normalize_moment(updated_at, CONFIRMED_AT_ATTRIBUTE)
+    else:
+        removes = [CONFIRMED_BY_ATTRIBUTE, CONFIRMED_AT_ATTRIBUTE]
+    return _conditioned_update(
+        {"pk": show_and_sell_pk(show_and_sell_id), "sk": signup_sk(slot_id, profile_id)},
+        tables.show_and_sells.table_name,
+        expected_version=expected_version,
+        sets=sets,
+        extra_conditions=condition_parts,
+        removes=removes,
+    )
+
+
+def participant_commitment_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One commitment as the Scout who holds it sees it (§5.13, INV-Q-06).
+
+    Seven facts, and each is the Scout's own: which event and slot the place was for, the
+    interval it blocks, whether it is still held, and the version the Scout's own
+    cancellation conditions on. ``signupVersion`` is the commitment's own ``version``
+    because §5.13 defines that version as matching its source signup's, so a Scout who
+    reads this row holds the exact number ``cancelShowAndSellSignup`` asks for — and no
+    read of the event's signup partition is needed to hand it to them.
+
+    No actor, no account, no Unit identity, no inventory: INV-Q-06's answer is the Scout's
+    own schedule, and a list that named the other Unit would be a window onto a tenant the
+    caller was never shown.
+    """
+    return {
+        SHOW_AND_SELL_ID_ATTRIBUTE: str(row[SHOW_AND_SELL_ID_ATTRIBUTE]),
+        SLOT_ID_ATTRIBUTE: str(row[SLOT_ID_ATTRIBUTE]),
+        START_AT_ATTRIBUTE: str(row[START_AT_ATTRIBUTE]),
+        END_AT_ATTRIBUTE: str(row[END_AT_ATTRIBUTE]),
+        STATUS_ATTRIBUTE: str(row.get(STATUS_ATTRIBUTE) or ""),
+        "signupVersion": normalize_required_version(row.get(VERSION_ATTRIBUTE, 1)),
+    }
+
+
+def calendar_invite_payload(
+    *,
+    event_row: Mapping[str, Any],
+    slot_row: Mapping[str, Any],
+    signup_row: Mapping[str, Any],
+    unit_row: Mapping[str, Any],
+    unit_campaign_row: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """The authorized inputs one browser needs to build a slot's ICS itself (§12.1, CAL-01).
+
+    This is data, never an artifact: no serialized VEVENT, no download URL, no notification,
+    and no timestamp of its own — ``DTSTAMP`` is the moment the browser generated the file,
+    which is a fact about the download, not about this row (CAL-02). The interval is the
+    slot's stored UTC pair, passed through unchanged, because a slot may run any duration
+    and rounding it here would be the hour-grid assumption SSE-03 refuses.
+
+    The identity fields are not decoration. CAL-01 asks for a *stable* UID, and the only
+    stable identity for one Scout's place in one slot is this
+    ``(unitCampaignId, showAndSellId, slotId, profileId)`` tuple — the signup's own sort
+    key — so re-downloading the same signup yields the same VEVENT identity and the
+    browser's calendar updates the entry instead of adding a duplicate.
+    """
+    return {
+        UNIT_ID_ATTRIBUTE: str(unit_row["unitId"]),
+        "unitDisplayName": unit_row.get("displayName"),
+        UNIT_CAMPAIGN_ID_ATTRIBUTE: str(event_row[UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+        "unitCampaignName": str(unit_campaign_row["campaignName"]),
+        SHOW_AND_SELL_ID_ATTRIBUTE: str(event_row[SHOW_AND_SELL_ID_ATTRIBUTE]),
+        SLOT_ID_ATTRIBUTE: str(slot_row[SLOT_ID_ATTRIBUTE]),
+        PROFILE_ID_ATTRIBUTE: str(signup_row[PROFILE_ID_ATTRIBUTE]),
+        # Named ``slotLabel`` rather than the row's ``label`` because this projection also
+        # carries the Scout and event identity, and one flat invite object has to say which
+        # of its names belongs to which thing (CAL-01).
+        "slotLabel": slot_row.get(LABEL_ATTRIBUTE),
+        LOCATION_NAME_ATTRIBUTE: str(event_row[LOCATION_NAME_ATTRIBUTE]),
+        ADDRESS_ATTRIBUTE: event_row.get(ADDRESS_ATTRIBUTE),
+        "timezone": str(unit_row["timezone"]),
+        "slotStartAt": str(slot_row[START_AT_ATTRIBUTE]),
+        "slotEndAt": str(slot_row[END_AT_ATTRIBUTE]),
     }
 
 
