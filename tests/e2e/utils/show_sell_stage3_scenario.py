@@ -1235,7 +1235,7 @@ def run_stage_three_cleanup(
     sweep_report: Sequence[str] | None = None,
     sweep_exit_code: int | None = None,
     sweep_runner: Callable[[Sequence[str]], tuple[int, list[str], list[str]]] | None = None,
-    proven_residue: Mapping[str, str] | None = None,
+    residue_census: Mapping[str, str] | None = None,
     ledger: stage_three.WriteLedger | None = None,
     ids: Mapping[str, str] | None = None,
 ) -> list[dict[str, str]]:
@@ -1252,7 +1252,20 @@ def run_stage_three_cleanup(
       answer nothing, or the row is ``failed`` (the same rule ``scripts/qa_fixture.py`` applies when it
       prints ``LEFT``);
     * an ``AccessDeniedException`` is ``blocked`` naming the action, never an empty table;
-    * the canary must still be present afterwards, or the whole teardown is ``failed``.
+    * the canary must still be present afterwards, or the whole teardown is ``failed``;
+    * a planned marker row is deleted only when the ledger recorded an accepted write whose
+      production-derived address — table, partition key and sort key — is that row (see
+      :func:`_require_recorded`);
+    * the residue sweep is always accounted for, and a ``BLOCKED`` table counts as accepted residue only
+        against ``residue_census``: the answers of :func:`tests.e2e.utils.show_sell_stage3_support.stage_three_residue_census`,
+        which a lane takes **before** this teardown, while the reads that name its rows still answer them.
+
+    Args:
+        residue_census: the measured census from :func:`tests.e2e.utils.show_sell_stage3_support.stage_three_residue_census`,
+            keyed by the physical swept-table name the report names.  There is no default that proves
+            anything: omitted or empty, every blocked table is unproven and the step stays non-clean.
+        ledger: what this lane actually sent and the server accepted.  A marker row cannot be cleaned, or
+            authorized, without it.
 
     Returns:
         Cleanup-vocabulary rows, one per planned row plus the canary step and the sweep row.
@@ -1262,17 +1275,16 @@ def run_stage_three_cleanup(
     seen: set[tuple[str, str, str]] = set()
 
     def address(row: Mapping[str, Any]) -> tuple[str, str, str]:
-        key = dict(row.get("key") or {})
-        return (str(row.get("table") or ""), str(key.get("pk", "")), str(key.get("sk", "")))
+        return stage_three.plan_row_address(row)
 
-    sent = set(ledger.keys()) if ledger is not None else None
+    recorded = _recorded_addresses(ledger, ids)
     for planned in plan:
         if str(planned.get("kind") or "") == "sweep":
             continue
         seen.add(address(planned))
         step = _delete_step(client, lane, planned)
-        if str(planned.get("kind") or "") == "marker" and sent is not None:
-            step = _require_recorded(planned, sent, step)
+        if str(planned.get("kind") or "") == "marker":
+            step = _require_recorded(planned, recorded, step)
         rows.append(stage_two.run_cleanup_step(str(planned.get("acceptance") or ""), step))
 
     # Whatever this lane actually wrote, whether or not the plan foresaw it.  The version-advancing slot
@@ -1295,7 +1307,7 @@ def run_stage_three_cleanup(
             report=sweep_report,
             exit_code=sweep_exit_code,
             runner=sweep_runner,
-            proven_residue=proven_residue,
+            residue_census=residue_census,
         )
     )
     return rows
@@ -1316,7 +1328,7 @@ def _sweep_row(
     report: Sequence[str] | None,
     exit_code: int | None,
     runner: Callable[[Sequence[str]], tuple[int, list[str], list[str]]] | None = None,
-    proven_residue: Mapping[str, str] | None = None,
+    residue_census: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """The residue sweep, taken by running the sanctioned sweeper and judged by its own report.
 
@@ -1328,10 +1340,13 @@ def _sweep_row(
       (:func:`tests.e2e.utils.show_sell_stage2_support.fixture_sweep` is the only supported way to delete
       fixture residue), and a lane with no typed tokens cannot run it, so it blocks;
     * the verdict is :func:`tests.e2e.utils.show_sell_stage2_support.sweep_verdict` over the report's own
-      classes, including its ``unproven`` input: a table this identity cannot read is accepted residue
-      only when the record names the application read that proves the rows are still standing
-      (:data:`tests.e2e.utils.show_sell_stage3_support.STAGE_THREE_RESIDUE_PROOF`).  An unreadable table
-      with no such read is not clean, whatever the exit code says.
+      classes, including its ``unproven`` input: a table this identity cannot read is accepted residue only
+      when ``residue_census`` carries a **measured** entry for it — the answer of a product read taken while
+      the lane's rows could still be read, in the shape
+      :func:`tests.e2e.utils.show_sell_stage3_support.stage_three_residue_census` emits.  There is no
+      static table of allowed residue: a blocked line with no census entry, an entry that is empty because
+      the read was refused or answered ``NOT_FOUND``, and an entry that is not a read answer at all are each
+      carried into ``unproven``, and the step stays non-clean whatever the exit code says.
     """
     acceptance = str(planned.get("acceptance") or "§2.8.7")
     if report is None or exit_code is None:
@@ -1344,11 +1359,27 @@ def _sweep_row(
         exit_code, _blocked_lines, report = (runner or stage_two.fixture_sweep)(list(tokens))
     classes = {name: [line for line in report if line.startswith(prefix)] for prefix, name in SWEEP_CLASSES}
     blocked = [line for line in report if line.startswith("BLOCKED")]
-    proof = dict(stage_three.STAGE_THREE_RESIDUE_PROOF if proven_residue is None else proven_residue)
-    unproven = [line for line in blocked if _blocked_table(line) not in proof]
-    proven = [
-        f"{_blocked_table(line)} by {proof[_blocked_table(line)]}" for line in blocked if _blocked_table(line) in proof
-    ]
+    census = dict(residue_census or {})
+    unproven: list[str] = []
+    proven: list[str] = []
+    for line in blocked:
+        table = _blocked_table(line)
+        action = _blocked_action(line)
+        answer = str(census.get(table) or "")
+        if not stage_three._swept_table_key(table):
+            unproven.append(f"{table} ({action}): no product read enumerates this table for a Stage 3 lane")
+        elif not answer:
+            unproven.append(
+                f"{table} ({action}): the residue census carries no answer for it, so no product read taken "
+                "before the teardown proved what this lane left there"
+            )
+        elif not stage_three.is_census_statement(answer):
+            unproven.append(
+                f"{table} ({action}): {answer!r} is not a read answer of the form "
+                f"{stage_three.CENSUS_STATEMENT.pattern!r}, so it is a claim about residue rather than a census"
+            )
+        else:
+            proven.append(f"{table} ({action}) by {answer}")
     kept = [line for line in report if line.startswith("kept")]
     deleted = sum(1 for line in report if line.startswith("deleted row"))
     counted = "; ".join(f"{name}={len(lines)}" for name, lines in classes.items() if lines)
@@ -1357,8 +1388,12 @@ def _sweep_row(
         "summary": (
             f"scripts/qa_fixture.py sweep --lane {' '.join(tokens)} exited {exit_code}: deleted={deleted}, "
             f"kept={len(kept)}, {counted or 'no surviving class'}"
-            + (f"; blocked residue proven by a product read: {'; '.join(proven)}" if proven else "")
-            + (f"; blocked residue no product read proves: {'; '.join(unproven)}" if unproven else "")
+            + (
+                f"; blocked residue counted by a product read taken before the teardown: {'; '.join(proven)}"
+                if proven
+                else ""
+            )
+            + (f"; residue no product read proves: {'; '.join(unproven)}" if unproven else "")
         ),
         "result": stage_two.sweep_verdict(
             left=classes["left"],
@@ -1378,21 +1413,71 @@ def _blocked_table(line: str) -> str:
     return parts[0].strip()
 
 
-def _require_recorded(planned: Mapping[str, Any], sent: set[str], step: Callable[[], str]) -> Callable[[], str]:
-    """A marker row is only this lane's to clean if the lane recorded sending the write that wrote it.
+def _blocked_action(line: str) -> str:
+    """The action the sweeper was denied in one ``BLOCKED <table>: <action> …`` line, for the record."""
+    _table, sep, rest = line.removeprefix("BLOCKED").strip().partition(":")
+    return rest.strip().split(" is not granted")[0] if sep else "read failed"
 
-    A marker for a key that was never sent is a row that does not exist, and a read-back confirming an
-    absence is not evidence of a cleanup — it is the false clean this gate exists to prevent.  So a planned
-    marker whose key is absent from the ledger blocks the step and names the key, and the lane either
-    recorded the write or it did not.
+
+def _recorded_addresses(
+    ledger: stage_three.WriteLedger | None, ids: Mapping[str, str] | None
+) -> dict[str, list[tuple[str, str, str]]]:
+    """Every marker address this lane's own accepted writes produced, keyed by the key that wrote it.
+
+    The address is recomputed through :func:`tests.e2e.utils.show_sell_stage3_support.derived_marker_address`
+    from the recorded actor, operation and scope, which is the same thing ``marker_rows`` uses — so the
+    comparison below is between two production-derived addresses, not between a plan and a guess.  A key
+    the lane never sent has no entry at all.
     """
-    key = str(planned.get("idempotencyKey") or planned.get("key", {}).get("sk", ""))
+    if ledger is None:
+        return {}
+    known: dict[str, list[tuple[str, str, str]]] = {}
+    for record in ledger.records:
+        row = {
+            "operation": record["operation"],
+            "actorField": record["actor"],
+            "scopeField": record["scope"],
+            "idempotencyKey": record["idempotencyKey"],
+        }
+        try:
+            known.setdefault(record["idempotencyKey"], []).append(
+                stage_three.derived_marker_address(row, ids=dict(ids or {}))
+            )
+        except ValueError:
+            continue
+    return known
+
+
+def _require_recorded(
+    planned: Mapping[str, Any],
+    recorded: Mapping[str, list[tuple[str, str, str]]],
+    step: Callable[[], str],
+) -> Callable[[], str]:
+    """A planned marker is only this lane's to clean when a recorded write addressed **that** address.
+
+    Two refusals, both before any delete is sent:
+
+    * no recorded write carries the key at all — the marker was never written, so a read-back confirming an
+      absence would be the false clean this gate exists to prevent;
+    * a recorded write carries the key but addressed a different table, partition key or sort key — a
+      different actor, a different scope, or a different operation.  The planned address is then a row this
+      lane has no evidence of writing, and deleting it would take something the lane never made while its
+      empty read-back read as a successful cleanup.
+    """
+    key = str(planned.get("idempotencyKey") or "")
+    planned_address = stage_three.plan_row_address(planned)
 
     def action() -> str:
-        if key not in sent:
+        matches = recorded.get(key) or []
+        if not matches:
             raise stage_two.CleanupBlocked(
                 f"marker {key}: the lane recorded no accepted write with this key, so there is no marker "
                 "here to clean and an absent read-back would prove nothing"
+            )
+        if planned_address not in matches:
+            raise stage_two.CleanupBlocked(
+                f"marker {key}: the lane recorded that write at {['/'.join(item) for item in matches]}, not at "
+                f"{'/'.join(planned_address)}, so the planned row is not the marker this lane wrote"
             )
         return step()
 

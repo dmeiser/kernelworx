@@ -145,7 +145,14 @@ __all__ = [
     "stage_three_lane_tokens",
     "stage_three_sweep_tokens",
     "stage_three_write_steps",
-    "STAGE_THREE_RESIDUE_PROOF",
+    "CENSUS_STATEMENT",
+    "STAGE_THREE_RESIDUE_READS",
+    "STAGE_THREE_RESIDUE_TABLES",
+    "derived_marker_address",
+    "plan_row_address",
+    "is_census_statement",
+    "stage_three_residue_census",
+    "stage_three_residue_probe",
     "unit_campaigns_table",
     "MARKER_TABLE_KEY",
     "MARKER_SCOPE_ARGUMENT",
@@ -2777,15 +2784,181 @@ MARKER_TABLE_NAMES: dict[str, Callable[[], str]] = {
     "unit_campaigns": unit_campaigns_table,
 }
 
-#: The residue a Stage 3 lane may leave standing, and the application read that proves it is standing.
-#: Amendment B (checklist §2.8.7) accepts an inventory balance and an append-only ``InventoryMovement``
-#: history on shared ``dev`` only when the record can name the rows, and names them through a product read
-#: rather than a Scan the fixture identity does not hold.  A blocked table that is not here is residue
-#: nobody can prove, and stays non-clean.
-STAGE_THREE_RESIDUE_PROOF: dict[str, str] = {
-    "kernelworx-inventory-ue1-dev": "inventoryPositions",
-    "kernelworx-inventory-movements-ue1-dev": "inventoryMovements",
+#: The two swept tables a Stage 3 fixture identity cannot read, and the product reads that enumerate this
+#: lane's rows in each.  Amendment B (checklist §2.8.7) accepts such a table only as residue that is
+#: *named and provable*, and the naming is done by **reading** — this map says only which read to run, and
+#: carries no verdict of its own.  A blocked table that is not here cannot be proven either way and stays
+#: non-clean, exactly as the Stage 2 lane's ``_RESIDUE_READS`` does for its three.
+STAGE_THREE_RESIDUE_READS: dict[str, tuple[str, ...]] = {
+    "inventory": ("inventoryPositions", "scoutCustodyBalances"),
+    "inventory-movements": ("inventoryMovements",),
 }
+
+#: One census entry as the lane states it: the document, and how many rows it answered for this lane.
+#: Anything else in a census is not evidence, so :func:`is_census_statement` refuses it.
+CENSUS_STATEMENT = re.compile(r"^(?P<document>[A-Za-z][A-Za-z0-9]*) answered (?P<rows>\d+) row\(s\)")
+
+
+def is_census_statement(statement: str) -> bool:
+    """Whether one census value came from a read that ran, rather than from prose about a read.
+
+    The shape is emitted by :func:`stage_three_residue_census` alone, so a caller cannot pre-load a census
+    with a sentence and have a blocked table read as proven residue.
+    """
+    return bool(CENSUS_STATEMENT.match(str(statement or "")))
+
+
+def _swept_table_key(table: str) -> str:
+    """Which entry of :data:`STAGE_THREE_RESIDUE_READS` one ``BLOCKED <table>`` line names, or ``""``.
+
+    The sweeper prints the physical name with its environment suffix, so the match is on the logical key,
+    longest first so ``inventory-movements`` never falls into ``inventory``.  An unrecognized name is not
+    guessed at: it becomes residue the record cannot prove.
+    """
+    name = str(table).lower()
+    for key in sorted(STAGE_THREE_RESIDUE_READS, key=len, reverse=True):
+        if key in name:
+            return key
+    return ""
+
+
+def stage_three_residue_probe(
+    transport: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
+    unit_campaign_ids: Sequence[str],
+    *,
+    documents: Mapping[str, str] | None = None,
+    reads: Mapping[str, tuple[str, ...]] | None = None,
+    error_summaries: Callable[[Mapping[str, Any]], Sequence[str]] | None = None,
+) -> Callable[[str], str]:
+    """A read that answers one lane's rows in each table the sweep could not scan.
+
+    Scoped to the ids this lane was answered, never a whole-table read: what matters is what *this* lane
+    left behind, and a read spanning the stack would report another tenant's rows as this lane's residue.
+    A read that is refused, errors, or cannot run answers **nothing** rather than inventing an answer —
+    leaving that table unproven instead of proven absent.  ``NOT_FOUND`` on a Campaign-keyed query means
+    the Campaign row is gone, which says nothing about the rows sharing its partition key, so it too
+    answers nothing here.
+    """
+    units = [str(item) for item in unit_campaign_ids if item]
+    documents = dict(stage_two.STAGE_TWO_DOCUMENTS if documents is None else documents)
+    reads = dict(STAGE_THREE_RESIDUE_READS if reads is None else reads)
+    summarize = error_summaries or show_sell_graphql.error_summaries
+
+    def read_rows(document: str, variables: Mapping[str, Any]) -> str:
+        try:
+            body = transport(document, variables)
+        except Exception:  # noqa: BLE001 - a probe that cannot run proves nothing, and must not invent it
+            return ""
+        if summarize(body):
+            return ""
+        data = (dict(body.get("data") or {})).get(document)
+        items = data.get("items") if isinstance(data, Mapping) else data
+        rows = [row for row in (items or []) if isinstance(row, Mapping)]
+        return f"{document} answered {len(rows)} row(s)"
+
+    def probe(table: str) -> str:
+        key = _swept_table_key(table)
+        if not key:
+            return ""
+        answers: list[str] = []
+        for document in reads[key]:
+            for unit in units:
+                statement = read_rows(document, {"unitCampaignId": unit})
+                if statement:
+                    answers.append(f"{statement} for {unit}")
+        return "; ".join(answers)
+
+    return probe
+
+
+def stage_three_residue_census(
+    transport: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
+    unit_campaign_ids: Sequence[str],
+    *,
+    documents: Mapping[str, str] | None = None,
+    reads: Mapping[str, tuple[str, ...]] | None = None,
+    error_summaries: Callable[[Mapping[str, Any]], Sequence[str]] | None = None,
+) -> dict[str, str]:
+    """What this lane leaves in each unreadable swept table, **read** while a read still answers it.
+
+    The window is before the teardown, not after the sweep: the sweep deletes the Unit and Unit Campaign
+    rows these reads are keyed on, and afterwards ``inventoryPositions`` answers ``NOT_FOUND`` for the
+    Campaign, which proves the Campaign is gone and says nothing at all about the append-only movement rows
+    under its partition key.  Each answer is keyed by the swept table's physical name so the sweep step can
+    look up exactly what its own ``BLOCKED`` line named.  A probe that failed contributes an empty answer,
+    and an empty answer leaves that table unproven.
+    """
+    probe = stage_three_residue_probe(
+        transport,
+        unit_campaign_ids,
+        documents=documents,
+        reads=reads,
+        error_summaries=error_summaries,
+    )
+    census: dict[str, str] = {}
+    for key, tables in STAGE_THREE_RESIDUE_TABLES.items():
+        for table in tables:
+            census[table] = probe(key)
+    return census
+
+
+#: The physical tables the Stage 3 lane expects the sweeper to report as ``BLOCKED`` for this identity,
+#: per logical key.  The census is keyed by these names because the sweep line names them.
+STAGE_THREE_RESIDUE_TABLES: dict[str, tuple[str, ...]] = {
+    "inventory": ("kernelworx-inventory-ue1-dev",),
+    "inventory-movements": ("kernelworx-inventory-movements-ue1-dev",),
+}
+
+
+def plan_row_address(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    """The ``(table, pk, sk)`` one cleanup plan row names, in the same shape the ledger derives.
+
+    Both sides of the runner's authorization check are read this way, so the comparison is apples to
+    apples: the plan's address comes from the row it wrote, the recorded address comes from
+    :func:`derived_marker_address`, and neither is assembled by hand.
+    """
+    key = dict(row.get("key") or {})
+    return (str(row.get("table") or ""), str(key.get("pk", "")), str(key.get("sk", "")))
+
+
+def derived_marker_address(row: Mapping[str, Any], *, ids: Mapping[str, str]) -> tuple[str, str, str]:
+    """The address production wrote for one marker row, recomputed from the row's own actor and scope.
+
+    Both the planned row (from :func:`stage_three_write_steps`) and the recorded row (from
+    :class:`WriteLedger`) carry ``operation``, ``actorField`` and ``scopeField``, so this is the one place
+    that turns either into the ``(table, pk, sk)`` :func:`src.utils.mutations.marker_keys` produces.  The
+    cleanup runner compares planned and recorded through it, which is why an ``idempotencyKey`` match alone
+    cannot authorize a delete of an address the lane never wrote.
+
+    Raises:
+        ValueError: the row names no operation, or its actor or scope ref is unbound — in either case the
+            lane cannot name the marker, and an address must not be guessed at.
+    """
+    operation = str(row.get("operation") or "")
+    if operation not in MARKER_TABLE_KEY:
+        raise ValueError(f"{operation or '<no operation>'}: not a Stage 3 idempotent write, so no marker address")
+    table_key = MARKER_TABLE_KEY[operation]
+    actor_ref = str(row.get("actorField") or "")
+    scope = str(row.get("scopeField") or "")
+    actor = str(ids.get(actor_ref, ""))
+    if not actor:
+        raise ValueError(f"marker {row.get('idempotencyKey')}: actor ref {actor_ref or '<none>'!r} is unbound")
+    if not scope:
+        raise ValueError(f"marker {row.get('idempotencyKey')}: no scope to address the marker with")
+    if UNBOUND_KEY_MARKER in scope:
+        raise ValueError(f"marker {row.get('idempotencyKey')}: scope {scope!r} is a placeholder, not an id")
+    key = str(row.get("idempotencyKey") or "")
+    if not key:
+        raise ValueError(f"{operation}: no idempotencyKey to address the marker with")
+    marker = mutations.marker_keys(
+        table_key=table_key,
+        table_name=MARKER_TABLE_NAMES[table_key](),
+        actor_id=actor,
+        operation=operation,
+        scope=scope,
+        idempotency_key=key,
+    )
+    return (marker.table_name, marker.pk, marker.sk)
 
 
 class WriteLedger:

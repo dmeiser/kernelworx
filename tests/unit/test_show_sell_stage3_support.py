@@ -1258,6 +1258,133 @@ def test_the_ledger_addresses_a_campaign_marker_on_the_campaign_table() -> None:
     assert stage3.MARKER_SCOPE_ARGUMENT["removeUnitCampaignMembership"] == "unitCampaignId"
 
 
+def test_the_census_reads_only_the_product_reads_that_name_a_lane_s_rows() -> None:
+    """The census is a set of reads, not a list of permissions: it asks the API, never DynamoDB.
+
+    Stage 3's fixture identity holds no ``Scan`` on the two swept tables, so the census goes through the
+    application's own queries — scoped to the Unit Campaigns this lane was answered — which is the only
+    way Amendment B lets an unreadable table count as named residue.
+    """
+    assert stage3.STAGE_THREE_RESIDUE_READS == {
+        "inventory": ("inventoryPositions", "scoutCustodyBalances"),
+        "inventory-movements": ("inventoryMovements",),
+    }
+    for documents in stage3.STAGE_THREE_RESIDUE_READS.values():
+        for document in documents:
+            assert document in stage2.STAGE_TWO_DOCUMENTS, f"{document} is not a document the lane can send"
+    assert stage3.STAGE_THREE_RESIDUE_TABLES == {
+        "inventory": ("kernelworx-inventory-ue1-dev",),
+        "inventory-movements": ("kernelworx-inventory-movements-ue1-dev",),
+    }
+    # The table the sweep reports is matched on its logical key, longest first, so the movements table
+    # never falls into the balance entry and gets an answer that does not describe it.
+    assert stage3._swept_table_key("kernelworx-inventory-movements-ue1-dev") == "inventory-movements"
+    assert stage3._swept_table_key("kernelworx-inventory-ue1-dev") == "inventory"
+    assert stage3._swept_table_key("kernelworx-orders-ue1-dev") == ""
+    assert stage3._swept_table_key("") == ""
+
+
+def test_the_residue_census_answers_only_reads_that_ran() -> None:
+    """A census entry is what a read answered; a refused, missing or broken read answers nothing.
+
+    The three shapes that must **not** produce an answer are the ones a lane reaches for when it wants a
+    clean teardown: an ``AccessDenied`` it reads as "nothing there", a ``NOT_FOUND`` on the Campaign after
+    the teardown took the row the read is keyed on, and an exception from a transport that never connected.
+    Each leaves its table unproven, which keeps the sweep step non-clean.
+    """
+    rows = {"inventoryPositions": 2, "scoutCustodyBalances": 1, "inventoryMovements": 5}
+
+    def answering(field: str, variables: dict[str, Any]) -> dict[str, Any]:
+        assert variables == {"unitCampaignId": "UC#1"}, "the census is scoped to the ids this lane was answered"
+        return {"data": {field: {"items": [{}] * rows[field]}}}
+
+    census = stage3.stage_three_residue_census(answering, ["UC#1"])
+    assert set(census) == {"kernelworx-inventory-ue1-dev", "kernelworx-inventory-movements-ue1-dev"}
+    assert census["kernelworx-inventory-ue1-dev"] == (
+        "inventoryPositions answered 2 row(s) for UC#1; scoutCustodyBalances answered 1 row(s) for UC#1"
+    )
+    assert census["kernelworx-inventory-movements-ue1-dev"] == "inventoryMovements answered 5 row(s) for UC#1"
+    assert all(stage3.is_census_statement(answer) for answer in census.values())
+
+    def refused(field: str, variables: dict[str, Any]) -> dict[str, Any]:
+        return {"errors": [{"code": "AccessDenied", "message": f"dynamodb:Scan on {field} is not granted"}]}
+
+    assert all(answer == "" for answer in stage3.stage_three_residue_census(refused, ["UC#1"]).values())
+
+    def not_found(field: str, variables: dict[str, Any]) -> dict[str, Any]:
+        return {"errors": [{"code": "NOT_FOUND", "message": "the Unit Campaign is gone"}]}
+
+    assert all(answer == "" for answer in stage3.stage_three_residue_census(not_found, ["UC#1"]).values())
+
+    def broken(field: str, variables: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("no route to the API")
+
+    assert all(answer == "" for answer in stage3.stage_three_residue_census(broken, ["UC#1"]).values())
+    assert stage3.stage_three_residue_probe(answering, [])("kernelworx-inventory-ue1-dev") == "", (
+        "a census with no ids to scope to is not an empty table, it is a census that was not taken"
+    )
+
+
+def test_a_census_entry_is_only_evidence_in_the_shape_a_read_emits() -> None:
+    """The lane cannot grant itself residue by writing a sentence into the census."""
+    for statement in ("inventoryMovements answered 0 row(s)", "inventoryPositions answered 12 row(s) for UC#1"):
+        assert stage3.is_census_statement(statement)
+    for claim in ("", "the inventory rows are still there", "inventoryMovements answered many rows", "answered 3"):
+        assert not stage3.is_census_statement(claim), claim
+
+
+def test_marker_address_comes_from_the_writer_s_function_not_the_plan_s_strings() -> None:
+    """``derived_marker_address`` recomputes the address production wrote, on the right table.
+
+    A membership removal's marker rides ``unit_campaigns`` (``_campaign_marker``), every other Stage 3 write
+    rides ``show_and_sells``, and the actor segment is escaped the way ``marker_partition_key`` escapes it.
+    Those are the three things a hand-built address gets wrong, and they are why a planned row can only be
+    deleted when this function agrees with it.
+    """
+    row = {
+        "operation": "removeUnitCampaignMembership",
+        "actorField": "account.admin",
+        "scopeField": "22222222-2222-4222-8222-222222222222",
+        "idempotencyKey": "stage3-9001-remove-devon",
+    }
+    table, pk, sk = stage3.derived_marker_address(row, ids={"account.admin": "ACCOUNT#qa-admin"})
+    assert table == stage3.unit_campaigns_table() == stage3.DEV_UNIT_CAMPAIGNS_TABLE
+    assert pk == "IDEM#ACCOUNT%23qa-admin#removeUnitCampaignMembership#22222222-2222-4222-8222-222222222222"
+    assert sk == "IDEM#stage3-9001-remove-devon"
+    assert stage3.plan_row_address({"table": table, "key": {"pk": pk, "sk": sk}}) == (table, pk, sk)
+
+    event_row = {
+        "operation": "signupScoutForShowAndSellSlot",
+        "actorField": "account.avery",
+        "scopeField": "SSE#7",
+        "idempotencyKey": "stage3-9001-race-a",
+    }
+    assert stage3.derived_marker_address(event_row, ids={"account.avery": "ACCOUNT#avery"})[0] == (
+        stage3.show_and_sells_table()
+    )
+
+
+def test_an_address_cannot_be_derived_for_a_write_the_lane_has_not_identified() -> None:
+    """No actor id, no scope, a placeholder scope or an unknown operation: the address is refused, not guessed."""
+    base = {
+        "operation": "upsertShowAndSellSlot",
+        "actorField": "account.admin",
+        "scopeField": "SSE#7",
+        "idempotencyKey": "k" * 12,
+    }
+    bound = {"account.admin": "ACCOUNT#qa-admin"}
+    for row, ids, reason in (
+        (base, {}, "actor ref"),
+        (dict(base, scopeField=""), bound, "no scope"),
+        (dict(base, scopeField="<event.future>"), bound, "placeholder"),
+        (dict(base, operation="showAndSell"), bound, "not a Stage 3 idempotent write"),
+        (dict(base, idempotencyKey=""), bound, "no idempotencyKey"),
+    ):
+        with pytest.raises(ValueError) as error:
+            stage3.derived_marker_address(row, ids=ids)
+        assert reason in str(error.value), reason
+
+
 def test_the_ledger_refuses_a_write_it_cannot_address() -> None:
     """A missing scope, a missing key, or a query recorded as a write is a lane bug, named at once."""
     ledger = stage3.WriteLedger(stage3.lane_token(9001))
