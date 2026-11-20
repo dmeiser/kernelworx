@@ -46,8 +46,10 @@
     "docs/branding/**/*.html",
     "docs/branding/assets/**",
     "claude-fable-review.md",
-    "kimi-not-handling.md"
+    "kimi-not-handling.md",
+    "tests/e2e/fixtures/*.ics"
   ],
+  "_comment_ics_captures": "tests/e2e/fixtures/*.ics are captures of buildInvite's bytes. RFC 5545 folds a property line at a fixed octet budget, which splits words at the seam by design, so spellchecking a physical line of a capture flags fold artifacts rather than typos; the content of those files is checked by the Stage 3 lane's ICS validator in tests/e2e/utils/show_sell_stage3_support.py.",
   "ignoreRegExpList": [
     "https?://[^\\s]+",
     "[a-f0-9]{32,}",

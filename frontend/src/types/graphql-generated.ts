@@ -5808,6 +5808,878 @@ export type GqlReverseIndividualOrderFulfillmentMutation = {
   };
 };
 
+export type GqlShowAndSellAllocationFieldsFragment = {
+  __typename?: 'ShowAndSellAllocation';
+  unitCampaignId: string;
+  productId: string;
+  showAndSellId: string;
+  startAt: string;
+  endAt: string;
+  status: GqlAllocationStatus;
+  allocatedQty: number;
+  soldQty: number;
+  releasedQty: number;
+  remainingQty: number;
+  version: number;
+  createdAt?: string | null | undefined;
+  updatedAt?: string | null | undefined;
+};
+
+export type GqlShowAndSellSlotFieldsFragment = {
+  __typename?: 'ShowAndSellSlot';
+  showAndSellId: string;
+  slotId: string;
+  label?: string | null | undefined;
+  startAt: string;
+  endAt: string;
+  capacity: number;
+  activeSignupCount: number;
+  version: number;
+  createdAt?: string | null | undefined;
+  updatedAt?: string | null | undefined;
+};
+
+export type GqlShowAndSellSignupFieldsFragment = {
+  __typename?: 'ShowAndSellSignup';
+  showAndSellId: string;
+  slotId: string;
+  profileId: string;
+  unitCampaignId: string;
+  campaignId: string;
+  status: GqlSignupStatus;
+  actualMinutes: number;
+  signedUpByAccountId: string;
+  confirmedByAccountId?: string | null | undefined;
+  confirmedAt?: string | null | undefined;
+  version: number;
+  createdAt?: string | null | undefined;
+  updatedAt?: string | null | undefined;
+};
+
+export type GqlShowAndSellAdminFieldsFragment = {
+  __typename?: 'ShowAndSellAdmin';
+  showAndSellId: string;
+  unitId: string;
+  unitCampaignId: string;
+  locationName: string;
+  address?: string | null | undefined;
+  startAt: string;
+  endAt: string;
+  status: GqlShowAndSellStatus;
+  splitMethod: GqlSplitMethod;
+  weOweEnabled: boolean;
+  productIds: Array<string>;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  createdByAccountId: string;
+  updatedByAccountId: string;
+  cancelledByAccountId?: string | null | undefined;
+  cancelledAt?: string | null | undefined;
+  cancellationReason?: string | null | undefined;
+  allocations: Array<{
+    __typename?: 'ShowAndSellAllocation';
+    unitCampaignId: string;
+    productId: string;
+    showAndSellId: string;
+    startAt: string;
+    endAt: string;
+    status: GqlAllocationStatus;
+    allocatedQty: number;
+    soldQty: number;
+    releasedQty: number;
+    remainingQty: number;
+    version: number;
+    createdAt?: string | null | undefined;
+    updatedAt?: string | null | undefined;
+  }>;
+  slots: Array<{
+    __typename?: 'ShowAndSellSlot';
+    showAndSellId: string;
+    slotId: string;
+    label?: string | null | undefined;
+    startAt: string;
+    endAt: string;
+    capacity: number;
+    activeSignupCount: number;
+    version: number;
+    createdAt?: string | null | undefined;
+    updatedAt?: string | null | undefined;
+  }>;
+};
+
+export type GqlShowAndSellWorkPreviewFieldsFragment = {
+  __typename?: 'ShowAndSellWorkPreview';
+  eventVersion: number;
+  totalConfirmedMinutes: number;
+  confirmedWorkRows: number;
+  confirmedParticipants: number;
+  minimumFinalizationActions: number;
+};
+
+export type GqlParticipantSignupFieldsFragment = {
+  __typename?: 'ParticipantSignup';
+  showAndSellId: string;
+  slotId: string;
+  startAt: string;
+  endAt: string;
+  status: GqlSignupStatus;
+  actualMinutes: number;
+  signupVersion: number;
+};
+
+export type GqlGetShowAndSellQueryVariables = Exact<{
+  showAndSellId: Scalars['ID']['input'];
+}>;
+
+export type GqlGetShowAndSellQuery = {
+  __typename?: 'Query';
+  showAndSell: {
+    __typename?: 'ShowAndSellAdmin';
+    showAndSellId: string;
+    unitId: string;
+    unitCampaignId: string;
+    locationName: string;
+    address?: string | null | undefined;
+    startAt: string;
+    endAt: string;
+    status: GqlShowAndSellStatus;
+    splitMethod: GqlSplitMethod;
+    weOweEnabled: boolean;
+    productIds: Array<string>;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    createdByAccountId: string;
+    updatedByAccountId: string;
+    cancelledByAccountId?: string | null | undefined;
+    cancelledAt?: string | null | undefined;
+    cancellationReason?: string | null | undefined;
+    allocations: Array<{
+      __typename?: 'ShowAndSellAllocation';
+      unitCampaignId: string;
+      productId: string;
+      showAndSellId: string;
+      startAt: string;
+      endAt: string;
+      status: GqlAllocationStatus;
+      allocatedQty: number;
+      soldQty: number;
+      releasedQty: number;
+      remainingQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+    slots: Array<{
+      __typename?: 'ShowAndSellSlot';
+      showAndSellId: string;
+      slotId: string;
+      label?: string | null | undefined;
+      startAt: string;
+      endAt: string;
+      capacity: number;
+      activeSignupCount: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+  };
+};
+
+export type GqlListShowAndSellsQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+  status?: InputMaybe<GqlShowAndSellStatus>;
+  dateRange?: InputMaybe<GqlDateRangeFilter>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListShowAndSellsQuery = {
+  __typename?: 'Query';
+  showAndSells: {
+    __typename?: 'ShowAndSellAdminConnection';
+    items: Array<{
+      __typename?: 'ShowAndSellAdmin';
+      showAndSellId: string;
+      unitId: string;
+      unitCampaignId: string;
+      locationName: string;
+      address?: string | null | undefined;
+      startAt: string;
+      endAt: string;
+      status: GqlShowAndSellStatus;
+      splitMethod: GqlSplitMethod;
+      weOweEnabled: boolean;
+      productIds: Array<string>;
+      version: number;
+      createdAt: string;
+      updatedAt: string;
+      createdByAccountId: string;
+      updatedByAccountId: string;
+      cancelledByAccountId?: string | null | undefined;
+      cancelledAt?: string | null | undefined;
+      cancellationReason?: string | null | undefined;
+      allocations: Array<{
+        __typename?: 'ShowAndSellAllocation';
+        unitCampaignId: string;
+        productId: string;
+        showAndSellId: string;
+        startAt: string;
+        endAt: string;
+        status: GqlAllocationStatus;
+        allocatedQty: number;
+        soldQty: number;
+        releasedQty: number;
+        remainingQty: number;
+        version: number;
+        createdAt?: string | null | undefined;
+        updatedAt?: string | null | undefined;
+      }>;
+      slots: Array<{
+        __typename?: 'ShowAndSellSlot';
+        showAndSellId: string;
+        slotId: string;
+        label?: string | null | undefined;
+        startAt: string;
+        endAt: string;
+        capacity: number;
+        activeSignupCount: number;
+        version: number;
+        createdAt?: string | null | undefined;
+        updatedAt?: string | null | undefined;
+      }>;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlCreateShowAndSellMutationVariables = Exact<{
+  input: GqlCreateShowAndSellInput;
+}>;
+
+export type GqlCreateShowAndSellMutation = {
+  __typename?: 'Mutation';
+  createShowAndSell: {
+    __typename?: 'ShowAndSellAdmin';
+    showAndSellId: string;
+    unitId: string;
+    unitCampaignId: string;
+    locationName: string;
+    address?: string | null | undefined;
+    startAt: string;
+    endAt: string;
+    status: GqlShowAndSellStatus;
+    splitMethod: GqlSplitMethod;
+    weOweEnabled: boolean;
+    productIds: Array<string>;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    createdByAccountId: string;
+    updatedByAccountId: string;
+    cancelledByAccountId?: string | null | undefined;
+    cancelledAt?: string | null | undefined;
+    cancellationReason?: string | null | undefined;
+    allocations: Array<{
+      __typename?: 'ShowAndSellAllocation';
+      unitCampaignId: string;
+      productId: string;
+      showAndSellId: string;
+      startAt: string;
+      endAt: string;
+      status: GqlAllocationStatus;
+      allocatedQty: number;
+      soldQty: number;
+      releasedQty: number;
+      remainingQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+    slots: Array<{
+      __typename?: 'ShowAndSellSlot';
+      showAndSellId: string;
+      slotId: string;
+      label?: string | null | undefined;
+      startAt: string;
+      endAt: string;
+      capacity: number;
+      activeSignupCount: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+  };
+};
+
+export type GqlUpdateShowAndSellMutationVariables = Exact<{
+  input: GqlUpdateShowAndSellInput;
+}>;
+
+export type GqlUpdateShowAndSellMutation = {
+  __typename?: 'Mutation';
+  updateShowAndSell: {
+    __typename?: 'ShowAndSellAdmin';
+    showAndSellId: string;
+    unitId: string;
+    unitCampaignId: string;
+    locationName: string;
+    address?: string | null | undefined;
+    startAt: string;
+    endAt: string;
+    status: GqlShowAndSellStatus;
+    splitMethod: GqlSplitMethod;
+    weOweEnabled: boolean;
+    productIds: Array<string>;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+    createdByAccountId: string;
+    updatedByAccountId: string;
+    cancelledByAccountId?: string | null | undefined;
+    cancelledAt?: string | null | undefined;
+    cancellationReason?: string | null | undefined;
+    allocations: Array<{
+      __typename?: 'ShowAndSellAllocation';
+      unitCampaignId: string;
+      productId: string;
+      showAndSellId: string;
+      startAt: string;
+      endAt: string;
+      status: GqlAllocationStatus;
+      allocatedQty: number;
+      soldQty: number;
+      releasedQty: number;
+      remainingQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+    slots: Array<{
+      __typename?: 'ShowAndSellSlot';
+      showAndSellId: string;
+      slotId: string;
+      label?: string | null | undefined;
+      startAt: string;
+      endAt: string;
+      capacity: number;
+      activeSignupCount: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+  };
+};
+
+export type GqlCancelShowAndSellMutationVariables = Exact<{
+  input: GqlCancelShowAndSellInput;
+}>;
+
+export type GqlCancelShowAndSellMutation = {
+  __typename?: 'Mutation';
+  cancelShowAndSell: {
+    __typename?: 'CancelShowAndSellPayload';
+    event: {
+      __typename?: 'ShowAndSellAdmin';
+      showAndSellId: string;
+      unitId: string;
+      unitCampaignId: string;
+      locationName: string;
+      address?: string | null | undefined;
+      startAt: string;
+      endAt: string;
+      status: GqlShowAndSellStatus;
+      splitMethod: GqlSplitMethod;
+      weOweEnabled: boolean;
+      productIds: Array<string>;
+      version: number;
+      createdAt: string;
+      updatedAt: string;
+      createdByAccountId: string;
+      updatedByAccountId: string;
+      cancelledByAccountId?: string | null | undefined;
+      cancelledAt?: string | null | undefined;
+      cancellationReason?: string | null | undefined;
+      allocations: Array<{
+        __typename?: 'ShowAndSellAllocation';
+        unitCampaignId: string;
+        productId: string;
+        showAndSellId: string;
+        startAt: string;
+        endAt: string;
+        status: GqlAllocationStatus;
+        allocatedQty: number;
+        soldQty: number;
+        releasedQty: number;
+        remainingQty: number;
+        version: number;
+        createdAt?: string | null | undefined;
+        updatedAt?: string | null | undefined;
+      }>;
+      slots: Array<{
+        __typename?: 'ShowAndSellSlot';
+        showAndSellId: string;
+        slotId: string;
+        label?: string | null | undefined;
+        startAt: string;
+        endAt: string;
+        capacity: number;
+        activeSignupCount: number;
+        version: number;
+        createdAt?: string | null | undefined;
+        updatedAt?: string | null | undefined;
+      }>;
+    };
+    releasedAllocations: Array<{
+      __typename?: 'ShowAndSellAllocation';
+      unitCampaignId: string;
+      productId: string;
+      showAndSellId: string;
+      startAt: string;
+      endAt: string;
+      status: GqlAllocationStatus;
+      allocatedQty: number;
+      soldQty: number;
+      releasedQty: number;
+      remainingQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+    cancelledSignups: Array<{
+      __typename?: 'ShowAndSellSignup';
+      showAndSellId: string;
+      slotId: string;
+      profileId: string;
+      unitCampaignId: string;
+      campaignId: string;
+      status: GqlSignupStatus;
+      actualMinutes: number;
+      signedUpByAccountId: string;
+      confirmedByAccountId?: string | null | undefined;
+      confirmedAt?: string | null | undefined;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+  };
+};
+
+export type GqlAssignShowAndSellInventoryMutationVariables = Exact<{
+  input: GqlAssignShowAndSellInventoryInput;
+}>;
+
+export type GqlAssignShowAndSellInventoryMutation = {
+  __typename?: 'Mutation';
+  assignShowAndSellInventory: {
+    __typename?: 'AssignShowAndSellInventoryPayload';
+    allocations: Array<{
+      __typename?: 'ShowAndSellAllocation';
+      unitCampaignId: string;
+      productId: string;
+      showAndSellId: string;
+      startAt: string;
+      endAt: string;
+      status: GqlAllocationStatus;
+      allocatedQty: number;
+      soldQty: number;
+      releasedQty: number;
+      remainingQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+    inventoryPositions: Array<{
+      __typename?: 'InventoryPosition';
+      unitCampaignId: string;
+      productId: string;
+      kernelPhysicalQty: number;
+      soldInPossessionQty: number;
+      councilOnOrderQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+      sellableKernelQty: number;
+      assignedOpenQty: number;
+      unassignedKernelQty: number;
+      assignmentOverageQty: number;
+      withScoutQty: number;
+      totalUnitOwnedUndeliveredQty: number;
+    }>;
+    warnings: Array<{
+      __typename?: 'AllocationWarning';
+      code: string;
+      productId: string;
+      currentStockQty: number;
+      assignedQty: number;
+      overageQty: number;
+      message: string;
+    }>;
+  };
+};
+
+export type GqlListEventInventoryAllocationsQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  showAndSellId?: InputMaybe<Scalars['ID']['input']>;
+  status?: InputMaybe<GqlAllocationStatus>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListEventInventoryAllocationsQuery = {
+  __typename?: 'Query';
+  eventInventoryAllocations: {
+    __typename?: 'EventInventoryAllocationConnection';
+    items: Array<{
+      __typename?: 'ShowAndSellAllocation';
+      unitCampaignId: string;
+      productId: string;
+      showAndSellId: string;
+      startAt: string;
+      endAt: string;
+      status: GqlAllocationStatus;
+      allocatedQty: number;
+      soldQty: number;
+      releasedQty: number;
+      remainingQty: number;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlUpsertShowAndSellSlotMutationVariables = Exact<{
+  input: GqlUpsertShowAndSellSlotInput;
+}>;
+
+export type GqlUpsertShowAndSellSlotMutation = {
+  __typename?: 'Mutation';
+  upsertShowAndSellSlot: {
+    __typename?: 'ShowAndSellSlot';
+    showAndSellId: string;
+    slotId: string;
+    label?: string | null | undefined;
+    startAt: string;
+    endAt: string;
+    capacity: number;
+    activeSignupCount: number;
+    version: number;
+    createdAt?: string | null | undefined;
+    updatedAt?: string | null | undefined;
+  };
+};
+
+export type GqlDeleteShowAndSellSlotMutationVariables = Exact<{
+  input: GqlDeleteShowAndSellSlotInput;
+}>;
+
+export type GqlDeleteShowAndSellSlotMutation = { __typename?: 'Mutation'; deleteShowAndSellSlot: boolean };
+
+export type GqlListShowAndSellSignupsQueryVariables = Exact<{
+  showAndSellId: Scalars['ID']['input'];
+  status?: InputMaybe<GqlSignupStatus>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListShowAndSellSignupsQuery = {
+  __typename?: 'Query';
+  showAndSellSignups: {
+    __typename?: 'ShowAndSellSignupConnection';
+    items: Array<{
+      __typename?: 'ShowAndSellSignup';
+      showAndSellId: string;
+      slotId: string;
+      profileId: string;
+      unitCampaignId: string;
+      campaignId: string;
+      status: GqlSignupStatus;
+      actualMinutes: number;
+      signedUpByAccountId: string;
+      confirmedByAccountId?: string | null | undefined;
+      confirmedAt?: string | null | undefined;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlSignupScoutForShowAndSellSlotMutationVariables = Exact<{
+  input: GqlSignupShowAndSellSlotInput;
+}>;
+
+export type GqlSignupScoutForShowAndSellSlotMutation = {
+  __typename?: 'Mutation';
+  signupScoutForShowAndSellSlot: {
+    __typename?: 'ParticipantSignup';
+    showAndSellId: string;
+    slotId: string;
+    startAt: string;
+    endAt: string;
+    status: GqlSignupStatus;
+    actualMinutes: number;
+    signupVersion: number;
+  };
+};
+
+export type GqlCancelShowAndSellSignupMutationVariables = Exact<{
+  input: GqlCancelShowAndSellSignupInput;
+}>;
+
+export type GqlCancelShowAndSellSignupMutation = {
+  __typename?: 'Mutation';
+  cancelShowAndSellSignup: {
+    __typename?: 'ParticipantSignup';
+    showAndSellId: string;
+    slotId: string;
+    startAt: string;
+    endAt: string;
+    status: GqlSignupStatus;
+    actualMinutes: number;
+    signupVersion: number;
+  };
+};
+
+export type GqlConfirmShowAndSellWorkMutationVariables = Exact<{
+  input: GqlConfirmShowAndSellWorkInput;
+}>;
+
+export type GqlConfirmShowAndSellWorkMutation = {
+  __typename?: 'Mutation';
+  confirmShowAndSellWork: {
+    __typename?: 'ConfirmShowAndSellWorkPayload';
+    work: Array<{
+      __typename?: 'ShowAndSellSignup';
+      showAndSellId: string;
+      slotId: string;
+      profileId: string;
+      unitCampaignId: string;
+      campaignId: string;
+      status: GqlSignupStatus;
+      actualMinutes: number;
+      signedUpByAccountId: string;
+      confirmedByAccountId?: string | null | undefined;
+      confirmedAt?: string | null | undefined;
+      version: number;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+    }>;
+    preview: {
+      __typename?: 'ShowAndSellWorkPreview';
+      eventVersion: number;
+      totalConfirmedMinutes: number;
+      confirmedWorkRows: number;
+      confirmedParticipants: number;
+      minimumFinalizationActions: number;
+    };
+  };
+};
+
+export type GqlShowAndSellOpportunityFieldsFragment = {
+  __typename?: 'ShowAndSellOpportunity';
+  showAndSellId: string;
+  locationName: string;
+  address?: string | null | undefined;
+  startAt: string;
+  endAt: string;
+  status: GqlShowAndSellStatus;
+  splitMethod: GqlSplitMethod;
+  weOweEnabled: boolean;
+  timezone: string;
+  eventVersion: number;
+  slots: Array<{
+    __typename?: 'ShowAndSellOpportunitySlot';
+    slotId: string;
+    label?: string | null | undefined;
+    startAt: string;
+    endAt: string;
+    capacity: number;
+    openCapacity: number;
+  }>;
+  mySignups: Array<{
+    __typename?: 'ParticipantSignup';
+    showAndSellId: string;
+    slotId: string;
+    startAt: string;
+    endAt: string;
+    status: GqlSignupStatus;
+    actualMinutes: number;
+    signupVersion: number;
+  }>;
+};
+
+export type GqlListScoutCampaignJoinsQueryVariables = Exact<{
+  profileId: Scalars['ID']['input'];
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+export type GqlListScoutCampaignJoinsQuery = {
+  __typename?: 'Query';
+  listCampaignsByProfile: {
+    __typename?: 'CampaignConnection';
+    nextToken?: string | null | undefined;
+    campaigns: Array<{
+      __typename?: 'Campaign';
+      campaignId: string;
+      campaignName: string;
+      campaignYear: number;
+      isActive: boolean;
+      unitCampaignId?: string | null | undefined;
+    }>;
+  };
+};
+
+export type GqlListUnitCampaignOpportunitiesQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+  includePast?: InputMaybe<Scalars['Boolean']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListUnitCampaignOpportunitiesQuery = {
+  __typename?: 'Query';
+  unitCampaignOpportunities: {
+    __typename?: 'ShowAndSellOpportunityConnection';
+    items: Array<{
+      __typename?: 'ShowAndSellOpportunity';
+      showAndSellId: string;
+      locationName: string;
+      address?: string | null | undefined;
+      startAt: string;
+      endAt: string;
+      status: GqlShowAndSellStatus;
+      splitMethod: GqlSplitMethod;
+      weOweEnabled: boolean;
+      timezone: string;
+      eventVersion: number;
+      slots: Array<{
+        __typename?: 'ShowAndSellOpportunitySlot';
+        slotId: string;
+        label?: string | null | undefined;
+        startAt: string;
+        endAt: string;
+        capacity: number;
+        openCapacity: number;
+      }>;
+      mySignups: Array<{
+        __typename?: 'ParticipantSignup';
+        showAndSellId: string;
+        slotId: string;
+        startAt: string;
+        endAt: string;
+        status: GqlSignupStatus;
+        actualMinutes: number;
+        signupVersion: number;
+      }>;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlGetShowAndSellOpportunityQueryVariables = Exact<{
+  showAndSellId: Scalars['ID']['input'];
+  profileId: Scalars['ID']['input'];
+}>;
+
+export type GqlGetShowAndSellOpportunityQuery = {
+  __typename?: 'Query';
+  showAndSellOpportunity: {
+    __typename?: 'ShowAndSellOpportunity';
+    showAndSellId: string;
+    locationName: string;
+    address?: string | null | undefined;
+    startAt: string;
+    endAt: string;
+    status: GqlShowAndSellStatus;
+    splitMethod: GqlSplitMethod;
+    weOweEnabled: boolean;
+    timezone: string;
+    eventVersion: number;
+    slots: Array<{
+      __typename?: 'ShowAndSellOpportunitySlot';
+      slotId: string;
+      label?: string | null | undefined;
+      startAt: string;
+      endAt: string;
+      capacity: number;
+      openCapacity: number;
+    }>;
+    mySignups: Array<{
+      __typename?: 'ParticipantSignup';
+      showAndSellId: string;
+      slotId: string;
+      startAt: string;
+      endAt: string;
+      status: GqlSignupStatus;
+      actualMinutes: number;
+      signupVersion: number;
+    }>;
+  };
+};
+
+export type GqlParticipantCommitmentFieldsFragment = {
+  __typename?: 'ParticipantCommitment';
+  showAndSellId: string;
+  slotId: string;
+  startAt: string;
+  endAt: string;
+  status: GqlSignupStatus;
+  signupVersion: number;
+};
+
+export type GqlListMyScoutCommitmentsQueryVariables = Exact<{
+  profileId: Scalars['ID']['input'];
+  unitId?: InputMaybe<Scalars['ID']['input']>;
+  includeCancelled?: InputMaybe<Scalars['Boolean']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListMyScoutCommitmentsQuery = {
+  __typename?: 'Query';
+  myScoutCommitments: {
+    __typename?: 'ParticipantCommitmentConnection';
+    items: Array<{
+      __typename?: 'ParticipantCommitment';
+      showAndSellId: string;
+      slotId: string;
+      startAt: string;
+      endAt: string;
+      status: GqlSignupStatus;
+      signupVersion: number;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlGetSignupCalendarDataQueryVariables = Exact<{
+  showAndSellId: Scalars['ID']['input'];
+  slotId: Scalars['ID']['input'];
+  profileId: Scalars['ID']['input'];
+}>;
+
+export type GqlGetSignupCalendarDataQuery = {
+  __typename?: 'Query';
+  showAndSellSignupCalendarData: {
+    __typename?: 'CalendarInviteData';
+    unitId: string;
+    unitDisplayName?: string | null | undefined;
+    unitCampaignId: string;
+    unitCampaignName: string;
+    showAndSellId: string;
+    slotId: string;
+    profileId: string;
+    slotLabel?: string | null | undefined;
+    locationName: string;
+    address?: string | null | undefined;
+    timezone: string;
+    slotStartAt: string;
+    slotEndAt: string;
+  };
+};
+
 export type GqlPublicGetOrderOfferQueryVariables = Exact<{
   campaignId: Scalars['ID']['input'];
   token: Scalars['String']['input'];
