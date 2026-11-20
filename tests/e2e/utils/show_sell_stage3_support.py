@@ -146,7 +146,9 @@ __all__ = [
     "stage_three_sweep_tokens",
     "stage_three_write_steps",
     "CENSUS_STATEMENT",
+    "NO_ORDER_NOTE",
     "STAGE_THREE_RESIDUE_READS",
+    "STAGE_THREE_RESIDUE_SCOPES",
     "STAGE_THREE_RESIDUE_TABLES",
     "derived_marker_address",
     "plan_row_address",
@@ -2784,35 +2786,73 @@ MARKER_TABLE_NAMES: dict[str, Callable[[], str]] = {
     "unit_campaigns": unit_campaigns_table,
 }
 
-#: The two swept tables a Stage 3 fixture identity cannot read, and the product reads that enumerate this
+#: The swept tables a Stage 3 fixture identity cannot read, and the product reads that enumerate this
 #: lane's rows in each.  Amendment B (checklist §2.8.7) accepts such a table only as residue that is
 #: *named and provable*, and the naming is done by **reading** — this map says only which read to run, and
 #: carries no verdict of its own.  A blocked table that is not here cannot be proven either way and stays
-#: non-clean, exactly as the Stage 2 lane's ``_RESIDUE_READS`` does for its three.
+#: non-clean, exactly as the Stage 2 lane's ``_RESIDUE_READS`` does.
+#:
+#: The three keys are the sweeper's own ``LANE_TABLES`` labels in ``scripts/qa_fixture.py`` — the tables
+#: whose rows are keyed on resource ids rather than on a fixture ``sub``, and the three measured on ``dev``
+#: on 2026-11-19 to deny ``dynamodb:Scan`` to ``kernelworx-qa-ue1-dev``.  Movement rows live on the
+#: inventory table itself, which is why there is no fourth entry: a census keyed on a table the sweeper
+#: never scans would leave every real ``BLOCKED`` line unproven.
 STAGE_THREE_RESIDUE_READS: dict[str, tuple[str, ...]] = {
-    "inventory": ("inventoryPositions", "scoutCustodyBalances"),
-    "inventory-movements": ("inventoryMovements",),
+    "inventory": ("inventoryPositions", "scoutCustodyBalances", "inventoryMovements"),
+    "orders": ("unitScoutCampaignOrders",),
+    "order-fulfillments": ("orderFulfillments",),
 }
 
-#: One census entry as the lane states it: the document, and how many rows it answered for this lane.
+#: The physical name the sweeper reports for each key, and the ids each read needs.  ``pairs`` means the
+#: read is keyed on a Unit Campaign *and* the Scout Campaign whose orders it answers; ``orders`` means an
+#: ``Order`` id is the only key the row can have, so those ids come from the Order read first.
+STAGE_THREE_RESIDUE_SCOPES: dict[str, str] = {
+    "inventory": "units",
+    "orders": "pairs",
+    "order-fulfillments": "orders",
+}
+
+#: One census clause as the lane states it: the document, the id it was scoped to, and how many rows it
+#: answered there.
 #: Anything else in a census is not evidence, so :func:`is_census_statement` refuses it.
-CENSUS_STATEMENT = re.compile(r"^(?P<document>[A-Za-z][A-Za-z0-9]*) answered (?P<rows>\d+) row\(s\)")
+CENSUS_STATEMENT = re.compile(
+    r"^(?P<document>[A-Za-z][A-Za-z0-9]*)(?: for (?P<scope>[^;]+))? answered (?P<rows>\d+) row\(s\)"
+)
+
+#: An ``orderFulfillments`` answer when the lane sold no Order: a read ran, and it closed the only key a
+#: fulfillment row can have.  This is an answer, not a silence — an empty lane can and must still be counted.
+NO_ORDER_NOTE = (
+    "unitScoutCampaignOrders answers no Order for this lane, and an Order id is the only key an "
+    "orderFulfillments row can have"
+)
 
 
 def is_census_statement(statement: str) -> bool:
     """Whether one census value came from a read that ran, rather than from prose about a read.
 
-    The shape is emitted by :func:`stage_three_residue_census` alone, so a caller cannot pre-load a census
-    with a sentence and have a blocked table read as proven residue.
+    The shape is emitted by :func:`stage_three_residue_census`, whose answers are one clause per read joined
+    by ``"; "``, and every clause must be a read answer or :data:`NO_ORDER_NOTE` (the answer that lane had
+    no Order to name).  One sentence among them is not evidence: a caller cannot pre-load a census with
+    prose and have a blocked table read as proven residue.
     """
-    return bool(CENSUS_STATEMENT.match(str(statement or "")))
+    text = str(statement or "").strip()
+    if not text:
+        return False
+    clauses = [clause.strip() for clause in text.split(";")]
+    return all(bool(CENSUS_STATEMENT.match(clause)) or clause == NO_ORDER_NOTE for clause in clauses)
+
+
+def _scoped(statement: str, scope: str) -> str:
+    """One read answer, stated with the id it was scoped to, in :data:`CENSUS_STATEMENT`'s shape."""
+    document, _sep, count = statement.partition(" answered ")
+    return f"{document} for {scope} answered {count}"
 
 
 def _swept_table_key(table: str) -> str:
     """Which entry of :data:`STAGE_THREE_RESIDUE_READS` one ``BLOCKED <table>`` line names, or ``""``.
 
     The sweeper prints the physical name with its environment suffix, so the match is on the logical key,
-    longest first so ``inventory-movements`` never falls into ``inventory``.  An unrecognized name is not
+    longest first so ``order-fulfillments`` cannot fall into ``orders``.  An unrecognized name is not
     guessed at: it becomes residue the record cannot prove.
     """
     name = str(table).lower()
@@ -2825,47 +2865,91 @@ def _swept_table_key(table: str) -> str:
 def stage_three_residue_probe(
     transport: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
     unit_campaign_ids: Sequence[str],
+    scout_campaign_ids: Sequence[str] = (),
+    order_ids: Sequence[str] = (),
     *,
     documents: Mapping[str, str] | None = None,
     reads: Mapping[str, tuple[str, ...]] | None = None,
-    error_summaries: Callable[[Mapping[str, Any]], Sequence[str]] | None = None,
+    error_summaries: Callable[[Mapping[str, Any]], Sequence[Any]] | None = None,
 ) -> Callable[[str], str]:
     """A read that answers one lane's rows in each table the sweep could not scan.
 
-    Scoped to the ids this lane was answered, never a whole-table read: what matters is what *this* lane
-    left behind, and a read spanning the stack would report another tenant's rows as this lane's residue.
-    A read that is refused, errors, or cannot run answers **nothing** rather than inventing an answer —
-    leaving that table unproven instead of proven absent.  ``NOT_FOUND`` on a Campaign-keyed query means
-    the Campaign row is gone, which says nothing about the rows sharing its partition key, so it too
-    answers nothing here.
+    Scoped to the ids this lane was answered — its Unit Campaigns, the Scout Campaigns whose Orders it sold,
+    and those Orders themselves — never a whole-table read: what matters is what *this* lane left behind,
+    and a read spanning the stack would report another tenant's rows as this lane's residue.  A read that is
+    refused, errors, or cannot run answers **nothing** rather than inventing an answer, which leaves that
+    table unproven instead of proven absent.  ``NOT_FOUND`` on a Campaign-keyed query means the Campaign row
+    is gone, which says nothing about the rows sharing its partition key, so it too answers nothing here.
+
+    A fulfillment row is partitioned by its Order, so this lane can name one only through an Order read:
+    the Orders it sold, plus any Order its Campaigns still answer.
     """
     units = [str(item) for item in unit_campaign_ids if item]
+    scouts = [str(item) for item in scout_campaign_ids if item]
+    named_orders = sorted({str(item) for item in order_ids if item})
     documents = dict(stage_two.STAGE_TWO_DOCUMENTS if documents is None else documents)
     reads = dict(STAGE_THREE_RESIDUE_READS if reads is None else reads)
     summarize = error_summaries or show_sell_graphql.error_summaries
 
-    def read_rows(document: str, variables: Mapping[str, Any]) -> str:
+    def read_rows(document: str, variables: Mapping[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+        """One product read as the census states it, plus the rows it answered.
+
+        The statement is empty when the read is refused or cannot run: a probe that failed proves nothing,
+        and reporting that silence as an absence is the false clean this gate exists to prevent.
+        """
         try:
             body = transport(document, variables)
         except Exception:  # noqa: BLE001 - a probe that cannot run proves nothing, and must not invent it
-            return ""
+            return "", []
         if summarize(body):
-            return ""
-        data = (dict(body.get("data") or {})).get(document)
+            return "", []
+        data = dict(body.get("data") or {}).get(document)
         items = data.get("items") if isinstance(data, Mapping) else data
-        rows = [row for row in (items or []) if isinstance(row, Mapping)]
-        return f"{document} answered {len(rows)} row(s)"
+        rows = [dict(row) for row in (items or []) if isinstance(row, Mapping)]
+        return f"{document} answered {len(rows)} row(s)", rows
+
+    def order_ids_of(pairs: Sequence[tuple[str, str]]) -> tuple[list[str], bool]:
+        """The Orders this lane can name, and whether a Campaign-level Order read actually ran.
+
+        The ones it recorded, plus the ones its Campaigns still answer.  The second half matters: when no id
+        comes back, the census may only say "there is no Order to name" if a read answered that — if every
+        read was refused, the absence was never measured, and the table stays unproven.
+        """
+        found = list(named_orders)
+        ran = False
+        for unit, scout in pairs:
+            statement, rows = read_rows("unitScoutCampaignOrders", {"unitCampaignId": unit, "campaignId": scout})
+            ran = ran or bool(statement)
+            found += [str(row.get("orderId") or "") for row in rows]
+        return sorted({item for item in found if item}), ran
 
     def probe(table: str) -> str:
         key = _swept_table_key(table)
         if not key:
             return ""
         answers: list[str] = []
+        pairs = [(unit, scout) for unit in units for scout in scouts]
         for document in reads[key]:
-            for unit in units:
-                statement = read_rows(document, {"unitCampaignId": unit})
-                if statement:
-                    answers.append(f"{statement} for {unit}")
+            if STAGE_THREE_RESIDUE_SCOPES[key] == "units":
+                for unit in units:
+                    statement, _rows = read_rows(document, {"unitCampaignId": unit})
+                    if statement:
+                        answers.append(_scoped(statement, unit))
+            elif STAGE_THREE_RESIDUE_SCOPES[key] == "pairs":
+                for unit, scout in pairs:
+                    statement, _rows = read_rows(document, {"unitCampaignId": unit, "campaignId": scout})
+                    if statement:
+                        answers.append(_scoped(statement, f"{unit}/{scout}"))
+            else:
+                ids, ran = order_ids_of(pairs)
+                if not ids:
+                    if not ran:
+                        continue
+                    answers.append(NO_ORDER_NOTE)
+                for order_id in ids:
+                    statement, _rows = read_rows(document, {"orderId": order_id})
+                    if statement:
+                        answers.append(_scoped(statement, f"Order {order_id}"))
         return "; ".join(answers)
 
     return probe
@@ -2874,39 +2958,43 @@ def stage_three_residue_probe(
 def stage_three_residue_census(
     transport: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
     unit_campaign_ids: Sequence[str],
+    scout_campaign_ids: Sequence[str] = (),
+    order_ids: Sequence[str] = (),
     *,
     documents: Mapping[str, str] | None = None,
     reads: Mapping[str, tuple[str, ...]] | None = None,
-    error_summaries: Callable[[Mapping[str, Any]], Sequence[str]] | None = None,
+    error_summaries: Callable[[Mapping[str, Any]], Sequence[Any]] | None = None,
 ) -> dict[str, str]:
     """What this lane leaves in each unreadable swept table, **read** while a read still answers it.
 
     The window is before the teardown, not after the sweep: the sweep deletes the Unit and Unit Campaign
-    rows these reads are keyed on, and afterwards ``inventoryPositions`` answers ``NOT_FOUND`` for the
-    Campaign, which proves the Campaign is gone and says nothing at all about the append-only movement rows
-    under its partition key.  Each answer is keyed by the swept table's physical name so the sweep step can
-    look up exactly what its own ``BLOCKED`` line named.  A probe that failed contributes an empty answer,
-    and an empty answer leaves that table unproven.
+    rows these reads are keyed on, and afterwards ``inventoryPositions`` and ``unitScoutCampaignOrders``
+    answer ``NOT_FOUND`` for the Campaign, which proves the Campaign is gone and says nothing at all about
+    the append-only movement rows or the Order rows under its partition key.  Each answer is keyed by the
+    physical table name so the sweep step can look up exactly what its own ``BLOCKED`` line named, and every
+    table the sweeper scans is present even when its answer is empty — an absent key and an empty answer
+    both leave that table unproven.
     """
     probe = stage_three_residue_probe(
         transport,
         unit_campaign_ids,
+        scout_campaign_ids,
+        order_ids,
         documents=documents,
         reads=reads,
         error_summaries=error_summaries,
     )
-    census: dict[str, str] = {}
-    for key, tables in STAGE_THREE_RESIDUE_TABLES.items():
-        for table in tables:
-            census[table] = probe(key)
-    return census
+    return {table: probe(key) for key, tables in STAGE_THREE_RESIDUE_TABLES.items() for table in tables}
 
 
-#: The physical tables the Stage 3 lane expects the sweeper to report as ``BLOCKED`` for this identity,
-#: per logical key.  The census is keyed by these names because the sweep line names them.
+#: The physical tables the sweeper scans for a lane token, per logical key, taken from
+#: ``LANE_TABLES`` in ``scripts/qa_fixture.py`` (``tests/unit/test_show_sell_stage3_support.py`` fails if
+#: the two ever disagree).  These are exactly the tables whose ``BLOCKED`` lines the lane can meet, and the
+#: only ones a census can answer.
 STAGE_THREE_RESIDUE_TABLES: dict[str, tuple[str, ...]] = {
     "inventory": ("kernelworx-inventory-ue1-dev",),
-    "inventory-movements": ("kernelworx-inventory-movements-ue1-dev",),
+    "orders": ("kernelworx-orders-ue1-dev",),
+    "order-fulfillments": ("kernelworx-order-fulfillments-ue1-dev",),
 }
 
 

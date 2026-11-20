@@ -21,6 +21,7 @@ spec from the unit suite would fail on its ``slow`` marker under the root pytest
 
 from __future__ import annotations
 
+import importlib.util
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -1258,78 +1259,145 @@ def test_the_ledger_addresses_a_campaign_marker_on_the_campaign_table() -> None:
     assert stage3.MARKER_SCOPE_ARGUMENT["removeUnitCampaignMembership"] == "unitCampaignId"
 
 
-def test_the_census_reads_only_the_product_reads_that_name_a_lane_s_rows() -> None:
-    """The census is a set of reads, not a list of permissions: it asks the API, never DynamoDB.
+def _load_qa_fixture() -> Any:
+    """``scripts/qa_fixture.py`` as a module: the sweeper's own table map is the contract here."""
+    script = Path(__file__).resolve().parents[2] / "scripts" / "qa_fixture.py"
+    spec = importlib.util.spec_from_file_location("qa_fixture_contract", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-    Stage 3's fixture identity holds no ``Scan`` on the two swept tables, so the census goes through the
-    application's own queries — scoped to the Unit Campaigns this lane was answered — which is the only
-    way Amendment B lets an unreadable table count as named residue.
+
+def test_the_census_covers_every_table_the_sanctioned_sweeper_scans_for_a_lane() -> None:
+    """The census is keyed on the sweeper's own table labels, not on a table the lane invented.
+
+    ``scripts/qa_fixture.py`` sweeps ``LANE_TABLES`` — inventory, orders and order-fulfillments — and those
+    are the three tables measured on ``dev`` to deny ``dynamodb:Scan`` to the fixture identity.  A census
+    with a name the sweeper never prints (an "inventory-movements" table, say: movement rows live **on** the
+    inventory table) would leave every real ``BLOCKED`` line unproven with no path to prove even an empty
+    lane, which is the failure this test pins shut.
     """
-    assert stage3.STAGE_THREE_RESIDUE_READS == {
-        "inventory": ("inventoryPositions", "scoutCustodyBalances"),
-        "inventory-movements": ("inventoryMovements",),
-    }
+    fixture = _load_qa_fixture()
+    assert set(stage3.STAGE_THREE_RESIDUE_TABLES) == set(fixture.LANE_TABLES), (
+        "every lane-swept table needs a product read, or its residue can never be proven"
+    )
+    for key, tables in stage3.STAGE_THREE_RESIDUE_TABLES.items():
+        assert tables == (fixture.LANE_TABLES[key][0],), key
+    assert set(stage3.STAGE_THREE_RESIDUE_READS) == set(stage3.STAGE_THREE_RESIDUE_TABLES)
+    assert set(stage3.STAGE_THREE_RESIDUE_SCOPES) == set(stage3.STAGE_THREE_RESIDUE_TABLES)
     for documents in stage3.STAGE_THREE_RESIDUE_READS.values():
         for document in documents:
             assert document in stage2.STAGE_TWO_DOCUMENTS, f"{document} is not a document the lane can send"
-    assert stage3.STAGE_THREE_RESIDUE_TABLES == {
-        "inventory": ("kernelworx-inventory-ue1-dev",),
-        "inventory-movements": ("kernelworx-inventory-movements-ue1-dev",),
-    }
-    # The table the sweep reports is matched on its logical key, longest first, so the movements table
-    # never falls into the balance entry and gets an answer that does not describe it.
-    assert stage3._swept_table_key("kernelworx-inventory-movements-ue1-dev") == "inventory-movements"
+    # The movements the amendment keeps are read through the inventory table's own query.
+    assert "inventoryMovements" in stage3.STAGE_THREE_RESIDUE_READS["inventory"]
+    # Longest key first, so a fulfillment line cannot be answered by the Order read.
+    assert stage3._swept_table_key("kernelworx-order-fulfillments-ue1-dev") == "order-fulfillments"
+    assert stage3._swept_table_key("kernelworx-orders-ue1-dev") == "orders"
     assert stage3._swept_table_key("kernelworx-inventory-ue1-dev") == "inventory"
-    assert stage3._swept_table_key("kernelworx-orders-ue1-dev") == ""
+    assert stage3._swept_table_key("kernelworx-units-ue1-dev") == "", "a readable table is not residue"
     assert stage3._swept_table_key("") == ""
 
 
 def test_the_residue_census_answers_only_reads_that_ran() -> None:
     """A census entry is what a read answered; a refused, missing or broken read answers nothing.
 
-    The three shapes that must **not** produce an answer are the ones a lane reaches for when it wants a
-    clean teardown: an ``AccessDenied`` it reads as "nothing there", a ``NOT_FOUND`` on the Campaign after
-    the teardown took the row the read is keyed on, and an exception from a transport that never connected.
-    Each leaves its table unproven, which keeps the sweep step non-clean.
+    Three shapes must **not** produce an answer, because they are what a lane reaches for when it wants a
+    clean teardown: an ``AccessDenied`` it reads as "nothing there", a ``NOT_FOUND`` on the Campaign after the
+    teardown took the row the read is keyed on, and an exception from a transport that never connected. Each
+    leaves its table unproven, which keeps the sweep step non-clean.
     """
-    rows = {"inventoryPositions": 2, "scoutCustodyBalances": 1, "inventoryMovements": 5}
+    rows = {
+        "inventoryPositions": 2,
+        "scoutCustodyBalances": 1,
+        "inventoryMovements": 5,
+        "unitScoutCampaignOrders": 1,
+        "orderFulfillments": 3,
+    }
+    seen: list[tuple[str, dict[str, str]]] = []
 
-    def answering(field: str, variables: dict[str, Any]) -> dict[str, Any]:
-        assert variables == {"unitCampaignId": "UC#1"}, "the census is scoped to the ids this lane was answered"
+    def answering(field: str, variables: dict[str, str]) -> dict[str, Any]:
+        seen.append((field, dict(variables)))
+        if field == "unitScoutCampaignOrders":
+            return {"data": {field: {"items": [{"orderId": "ORDER#answered"}]}}}
         return {"data": {field: {"items": [{}] * rows[field]}}}
 
-    census = stage3.stage_three_residue_census(answering, ["UC#1"])
-    assert set(census) == {"kernelworx-inventory-ue1-dev", "kernelworx-inventory-movements-ue1-dev"}
+    census = stage3.stage_three_residue_census(answering, ["UC#1"], ["SC#1"], ["ORDER#sold"])
+    assert set(census) == {
+        "kernelworx-inventory-ue1-dev",
+        "kernelworx-orders-ue1-dev",
+        "kernelworx-order-fulfillments-ue1-dev",
+    }
     assert census["kernelworx-inventory-ue1-dev"] == (
-        "inventoryPositions answered 2 row(s) for UC#1; scoutCustodyBalances answered 1 row(s) for UC#1"
+        "inventoryPositions for UC#1 answered 2 row(s); scoutCustodyBalances for UC#1 answered 1 row(s); "
+        "inventoryMovements for UC#1 answered 5 row(s)"
     )
-    assert census["kernelworx-inventory-movements-ue1-dev"] == "inventoryMovements answered 5 row(s) for UC#1"
+    assert census["kernelworx-orders-ue1-dev"] == "unitScoutCampaignOrders for UC#1/SC#1 answered 1 row(s)"
+    assert census["kernelworx-order-fulfillments-ue1-dev"] == (
+        "orderFulfillments for Order ORDER#answered answered 3 row(s); "
+        "orderFulfillments for Order ORDER#sold answered 3 row(s)"
+    ), "a fulfillment row is partitioned by its Order, so the ids come from the Order read as well as the lane's own"
     assert all(stage3.is_census_statement(answer) for answer in census.values())
+    assert ("unitScoutCampaignOrders", {"unitCampaignId": "UC#1", "campaignId": "SC#1"}) in seen, (
+        "the Order census is scoped to this lane's Unit and Scout Campaigns, never to the stack"
+    )
+    assert stage3.stage_three_residue_probe(answering, ["UC#1"], ["SC#1"])("kernelworx-orders-ue1-dev") != ""
 
-    def refused(field: str, variables: dict[str, Any]) -> dict[str, Any]:
+    def refused(field: str, variables: dict[str, str]) -> dict[str, Any]:
         return {"errors": [{"code": "AccessDenied", "message": f"dynamodb:Scan on {field} is not granted"}]}
 
-    assert all(answer == "" for answer in stage3.stage_three_residue_census(refused, ["UC#1"]).values())
+    assert all(answer == "" for answer in stage3.stage_three_residue_census(refused, ["UC#1"], ["SC#1"]).values())
 
-    def not_found(field: str, variables: dict[str, Any]) -> dict[str, Any]:
+    def not_found(field: str, variables: dict[str, str]) -> dict[str, Any]:
         return {"errors": [{"code": "NOT_FOUND", "message": "the Unit Campaign is gone"}]}
 
-    assert all(answer == "" for answer in stage3.stage_three_residue_census(not_found, ["UC#1"]).values())
+    assert all(answer == "" for answer in stage3.stage_three_residue_census(not_found, ["UC#1"], ["SC#1"]).values())
 
-    def broken(field: str, variables: dict[str, Any]) -> dict[str, Any]:
+    def broken(field: str, variables: dict[str, str]) -> dict[str, Any]:
         raise RuntimeError("no route to the API")
 
-    assert all(answer == "" for answer in stage3.stage_three_residue_census(broken, ["UC#1"]).values())
+    assert all(answer == "" for answer in stage3.stage_three_residue_census(broken, ["UC#1"], ["SC#1"]).values())
     assert stage3.stage_three_residue_probe(answering, [])("kernelworx-inventory-ue1-dev") == "", (
         "a census with no ids to scope to is not an empty table, it is a census that was not taken"
     )
 
 
+def test_an_empty_lane_is_counted_not_left_unproven() -> None:
+    """A lane that sold nothing still answers the fulfillment table, because the read ran and closed the key.
+
+    ``orderFulfillments`` has no Campaign-level query: an Order id is the only key its rows can have.  When
+    the Order read answers nothing, that absence **is** the measurement, and it is stated in the census in
+    the lane's own words — distinguishable from a failed read, which answers nothing at all.
+    """
+
+    def empty(field: str, variables: dict[str, str]) -> dict[str, Any]:
+        return {"data": {field: {"items": []}}}
+
+    census = stage3.stage_three_residue_census(empty, ["UC#1"], ["SC#1"])
+    assert census["kernelworx-orders-ue1-dev"] == "unitScoutCampaignOrders for UC#1/SC#1 answered 0 row(s)"
+    assert census["kernelworx-order-fulfillments-ue1-dev"] == stage3.NO_ORDER_NOTE
+    assert stage3.is_census_statement(census["kernelworx-order-fulfillments-ue1-dev"])
+    assert stage3.is_census_statement(census["kernelworx-inventory-ue1-dev"]), "three reads ran and each counted zero"
+    assert not stage3.is_census_statement(
+        "inventoryPositions for UC#1 answered 0 row(s); the movements are definitely gone"
+    ), "one clause that is not a read answer invalidates the entry"
+
+
 def test_a_census_entry_is_only_evidence_in_the_shape_a_read_emits() -> None:
     """The lane cannot grant itself residue by writing a sentence into the census."""
-    for statement in ("inventoryMovements answered 0 row(s)", "inventoryPositions answered 12 row(s) for UC#1"):
+    for statement in (
+        "inventoryMovements answered 0 row(s)",
+        "inventoryPositions for UC#1 answered 12 row(s)",
+        "inventoryPositions for UC#1 answered 2 row(s); inventoryMovements for UC#1 answered 1 row(s)",
+    ):
         assert stage3.is_census_statement(statement)
-    for claim in ("", "the inventory rows are still there", "inventoryMovements answered many rows", "answered 3"):
+    for claim in (
+        "",
+        "the inventory rows are still there",
+        "inventoryMovements answered many rows",
+        "answered 3",
+        "inventoryPositions for UC#1 answered 2 row(s); the movements are definitely gone",
+    ):
         assert not stage3.is_census_statement(claim), claim
 
 

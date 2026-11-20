@@ -1090,7 +1090,7 @@ def test_blocked_residue_needs_a_measured_census_not_a_name_on_a_list() -> None:
     tokens = _sweep_tokens(clock, fixture)
     client = ScriptedDynamo(_seeds([_canary()]))
 
-    line = "BLOCKED kernelworx-inventory-movements-ue1-dev: dynamodb:Scan is not granted to this identity"
+    line = "BLOCKED kernelworx-inventory-ue1-dev: dynamodb:Scan is not granted to this identity"
 
     def sweep(report: Sequence[str], code: int, census: Mapping[str, str]) -> dict[str, str]:
         return scenario.run_stage_three_cleanup(
@@ -1104,10 +1104,10 @@ def test_blocked_residue_needs_a_measured_census_not_a_name_on_a_list() -> None:
             residue_census=census,
         )[-1]
 
-    counted = sweep((line,), 1, _census(**{"inventory-movements": "inventoryMovements answered 7 row(s) for UC#1"}))
+    counted = sweep((line,), 1, _census(**{"inventory": "inventoryMovements for UC#1 answered 7 row(s)"}))
     assert counted["result"] == stage2.CLEANUP_OBSERVED, "a census that counted the rows is what Amendment B asks for"
     assert (
-        "kernelworx-inventory-movements-ue1-dev (dynamodb:Scan) by inventoryMovements answered 7 row(s) for UC#1"
+        "kernelworx-inventory-ue1-dev (dynamodb:Scan) by inventoryMovements for UC#1 answered 7 row(s)"
         in counted["summary"]
     )
 
@@ -1115,20 +1115,76 @@ def test_blocked_residue_needs_a_measured_census_not_a_name_on_a_list() -> None:
     assert no_census["result"] == stage2.CLEANUP_BLOCKED
     assert "carries no answer for it" in no_census["summary"]
 
-    failed_read = sweep((line,), 1, _census(**{"inventory-movements": ""}))
+    failed_read = sweep((line,), 1, _census(**{"inventory": ""}))
     assert failed_read["result"] == stage2.CLEANUP_BLOCKED
     assert "no product read taken before the teardown proved" in failed_read["summary"]
 
-    prose = sweep((line,), 1, _census(**{"inventory-movements": "the movements rows are still there, trust me"}))
+    prose = sweep((line,), 1, _census(**{"inventory": "the movements rows are still there, trust me"}))
     assert prose["result"] == stage2.CLEANUP_BLOCKED
     assert "not a read answer" in prose["summary"]
     assert not stage3.is_census_statement("the movements rows are still there, trust me")
 
-    other = sweep(("BLOCKED kernelworx-orders-ue1-dev: dynamodb:Scan is not granted to this identity",), 1, _census())
-    assert other["result"] == stage2.CLEANUP_BLOCKED
-    assert "no product read enumerates this table" in other["summary"]
-    assert set(stage3.STAGE_THREE_RESIDUE_READS) == {"inventory", "inventory-movements"}
-    assert not any(isinstance(v, str) for v in stage3.STAGE_THREE_RESIDUE_READS.values())
+    unreadable_by_this_lane = sweep(
+        ("BLOCKED kernelworx-units-ue1-dev: dynamodb:Scan is not granted to this identity",), 1, _census()
+    )
+    assert unreadable_by_this_lane["result"] == stage2.CLEANUP_BLOCKED
+    assert "no product read enumerates this table" in unreadable_by_this_lane["summary"]
+
+
+def test_a_report_naming_every_denied_swept_table_is_proven_table_by_table() -> None:
+    """The sweeper scans three lane tables and all three deny ``Scan``: a real report names all of them.
+
+    A census that answers only some of them is not a clean sweep — each blocked table stands or falls on its
+    **own** measured answer, in its own words, and the record says which ones failed.  The three names here
+    are the sweeper's own (``LANE_TABLES`` in ``scripts/qa_fixture.py``), because a census keyed on a table
+    it never prints would leave every real report line unprovable.
+    """
+    clock = _clock()
+    fixture = _fixture(clock)
+    sweep_rows = [row for row in _plan(clock, fixture, ids=_ids(fixture)) if row["kind"] == "sweep"]
+    tokens = _sweep_tokens(clock, fixture)
+    client = ScriptedDynamo(_seeds([_canary()]))
+    report = tuple(
+        f"BLOCKED {table}: dynamodb:Scan is not granted to this identity"
+        for tables in stage3.STAGE_THREE_RESIDUE_TABLES.values()
+        for table in tables
+    )
+    assert len(report) == 3, report
+
+    def sweep(census: Mapping[str, str]) -> dict[str, str]:
+        return scenario.run_stage_three_cleanup(
+            client,
+            lane=clock.token,
+            plan=sweep_rows,
+            canary=_canary(),
+            sweep_tokens=tokens,
+            sweep_report=report,
+            sweep_exit_code=1,
+            residue_census=census,
+        )[-1]
+
+    measured = _census(
+        **{
+            "inventory": "inventoryMovements for UC#1 answered 7 row(s)",
+            "orders": "unitScoutCampaignOrders for UC#1/SC#1 answered 2 row(s)",
+            "order-fulfillments": stage3.NO_ORDER_NOTE,
+        }
+    )
+    clean = sweep(measured)
+    assert clean["result"] == stage2.CLEANUP_OBSERVED
+    for tables in stage3.STAGE_THREE_RESIDUE_TABLES.values():
+        assert tables[0] in clean["summary"], tables
+    assert "residue no product read proves" not in clean["summary"]
+
+    partial = dict(measured)
+    del partial["kernelworx-order-fulfillments-ue1-dev"]
+    incomplete = sweep(partial)
+    assert incomplete["result"] == stage2.CLEANUP_BLOCKED
+    assert "kernelworx-order-fulfillments-ue1-dev" in incomplete["summary"]
+    assert "residue no product read proves" in incomplete["summary"]
+    assert "kernelworx-orders-ue1-dev (dynamodb:Scan) by unitScoutCampaignOrders" in incomplete["summary"], (
+        "the tables that were measured are still counted, and named as such"
+    )
 
 
 def test_the_ledger_records_the_write_the_lane_actually_sent_and_not_the_refusal() -> None:
@@ -1242,7 +1298,7 @@ def test_the_sweep_verdict_comes_from_the_report_classes_not_from_the_plan() -> 
     tokens = _sweep_tokens(clock, fixture)
     client = ScriptedDynamo(_seeds([_canary()]))
 
-    census = _census(**{"inventory": "inventoryPositions answered 2 row(s) for UC#1"})
+    census = _census(**{"inventory": "inventoryPositions for UC#1 answered 2 row(s)"})
 
     def sweep(report: Sequence[str], code: int) -> dict[str, str]:
         return scenario.run_stage_three_cleanup(
@@ -1266,7 +1322,7 @@ def test_the_sweep_verdict_comes_from_the_report_classes_not_from_the_plan() -> 
     unreadable = sweep(("BLOCKED kernelworx-inventory-ue1-dev: dynamodb:Scan is not granted to this identity",), 1)
     assert unreadable["result"] == stage2.CLEANUP_OBSERVED, "Amendment B accepts residue a read counted"
     assert "counted by a product read taken before the teardown: kernelworx-inventory-ue1-dev" in unreadable["summary"]
-    assert "inventoryPositions answered 2 row(s)" in unreadable["summary"]
+    assert "inventoryPositions for UC#1 answered 2 row(s)" in unreadable["summary"]
     unexplained = sweep(("some line this parser does not know",), 1)
     assert unexplained["result"] == stage2.CLEANUP_FAILED, "a non-zero exit no class explains is not a clean sweep"
 
