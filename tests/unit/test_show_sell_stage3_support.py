@@ -1,25 +1,30 @@
 """The Stage 3 deployed-stack support module (§3.6.2).
 
-Nothing here talks to AWS.  What it does prove is the part of §3.6.2 that can be proven
-offline: that the Stage 3 suite sends documents and payloads the shipped SDL actually
-accepts (``API-FIX-01``), that its fixtures reproduce themselves and plan an event in
-every derived state (``EVT-M-01/02/03``), that every conflict pair earns a refusal the
-table records with its exact code and sentence (``SS-SM-05/06/11``), that the idempotency
-inputs and replay/fingerprint answers are pinned (``API-FIX-03``), that the ICS validator
-only ever accepts what the browser's own emitter produces (CAL-01/CAL-02), and that the
-cleanup plan speaks the Stage 2 vocabulary with the TTL gate closed.
+Nothing here talks to AWS or to a deployed endpoint.  What this module proves is the part of §3.6.2
+that can be proven offline, and it proves it by executing the layer rather than reading strings out of
+it: that the Stage 3 suite sends documents and payloads the shipped SDL accepts (``API-FIX-01``); that
+every fixture instant is an offset from the ``T0`` setup handed over, in any year, with the DST pair
+computed and *checked* against ``zoneinfo`` (FIX-AC-03, SS-SM-11); that the tree carries every state
+and boundary §3.6.2 names by name — 16 products, four-box events, 90/120/180-minute slots, 20 slots,
+101 work rows, removed members, stale versions, race barriers, and FINALIZED/REOPENED as
+builder-produced states (``EVT-M-01/02/03``); that the refusal table quotes the raising source
+(``SS-SM-05/06/11``); that the ICS validator accepts the bytes ``buildInvite`` really wrote and
+refuses what it did not (CAL-01/CAL-02); and that the cleanup plan names a table and a key per row in
+the Stage 2 verdict vocabulary, TTL gate closed.
 
-The live suite itself is the Stage 3 smoke spec; it is marked ``slow`` and no CI path
-runs it, so these are the only executable checks its contract gets short of a deployed
-run.
+The half that *performs* the work — the transport-driven conflict lane, the stale-version and
+removed-member fixtures, the race barriers, the DynamoDB state-fixture builder, and the
+delete-and-read-back teardown — is exercised in ``tests/unit/test_show_sell_stage3_scenario.py``.
+Both helper modules live under ``tests/e2e/utils`` rather than in a spec, because importing a Stage 3
+spec from the unit suite would fail on its ``slow`` marker under the root pytest configuration.
 """
 
 from __future__ import annotations
 
-import json
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -31,6 +36,13 @@ from tests.e2e.utils import show_sell_stage3_support as stage3
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SDL_PATH = REPO_ROOT / "tofu" / "application" / "schema" / "schema.graphql"
+FIXTURES_DIR = REPO_ROOT / "tests" / "e2e" / "fixtures"
+
+#: A scenario setup time in a year no fixture in this repository was ever written for, used to prove the
+#: tree follows the clock rather than a calendar.  No assertion below quotes a date from the module
+#: under test: they are all about offsets and spreads.
+OTHER_YEAR_T0 = datetime(2031, 1, 10, 14, 0, tzinfo=timezone.utc)
+DEFAULT_T0 = datetime(2026, 11, 15, 14, 30, tzinfo=timezone.utc)
 
 
 def _sdl() -> str:
@@ -38,29 +50,109 @@ def _sdl() -> str:
     return SDL_PATH.read_text(encoding="utf-8")
 
 
+def _clock(
+    t0: datetime = DEFAULT_T0, *, scenario_id: str = "SS-SM-05", lane_id: str = "L02", attempt_id: str = "a9"
+) -> stage3.ScenarioClock:
+    """A clock built the way FIX-AC-03 hands one over: ``T0`` plus the four ``DATA_ID`` parts."""
+    return stage3.ScenarioClock(
+        t0=t0,
+        run_id=f"{int(t0.timestamp())}-ff00aa",
+        scenario_id=scenario_id,
+        lane_id=lane_id,
+        attempt_id=attempt_id,
+    )
+
+
+def _fixture(t0: datetime = DEFAULT_T0) -> dict[str, Any]:
+    return stage3.stage_three_fixture(_clock(t0))
+
+
+def _instant(text: str) -> datetime:
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
 def _minutes(start_at: str, end_at: str) -> int:
-    start = datetime.fromisoformat(start_at.replace("Z", "+00:00"))
-    end = datetime.fromisoformat(end_at.replace("Z", "+00:00"))
-    return int((end - start).total_seconds() // 60)
+    return int((_instant(end_at) - _instant(start_at)).total_seconds() // 60)
 
 
-def _ics(uid: str) -> str:
-    body = [
+def _ics_instant(iso: str) -> str:
+    """The emitter's own ``icsUtc`` rule, so a capture is checkable against the DTO it was built from."""
+    date_part, _, rest = iso.partition("T")
+    clock, _, _zone = rest.partition("Z")
+    return f"{date_part.replace('-', '')}T{clock.split('.')[0].replace(':', '')}Z"
+
+
+def _fixture_instants(node: Any, path: str = "") -> dict[str, datetime]:
+    """Every persisted UTC instant in the tree, keyed by where it was found."""
+    found: dict[str, datetime] = {}
+    if isinstance(node, dict):
+        for key, value in node.items():
+            found.update(_fixture_instants(value, f"{path}.{key}"))
+    elif isinstance(node, (list, tuple)):
+        for index, value in enumerate(node):
+            found.update(_fixture_instants(value, f"{path}[{index}]"))
+    elif isinstance(node, str) and len(node) == 20 and node.endswith("Z"):
+        try:
+            found[path] = _instant(node)
+        except ValueError:
+            pass
+    return found
+
+
+def _capture(name: str) -> str:
+    """One captured ``buildInvite`` download, read with universal newlines switched off.
+
+    ``newline=''`` is not decoration: the CRLF pairs are part of what the validator checks, and a
+    reader that translates them hands the validator a file nobody downloaded.
+    """
+    with (FIXTURES_DIR / name).open(encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def _capture_uid() -> str:
+    """The UID the capture pair must carry, rebuilt from the documented DTO rather than read out of it."""
+    dto = stage3.ICS_CAPTURE_DTO
+    return stage3.calendar_invite_uid(
+        str(dto["unitCampaignId"]), str(dto["showAndSellId"]), str(dto["slotId"]), str(dto["profileId"])
+    )
+
+
+def _synthetic_uid() -> str:
+    """A short identity for the hand-written documents, so their baseline stays inside one line."""
+    return stage3.calendar_invite_uid("UC#x", "S#x", "SL#x", "P#x")
+
+
+def _invite(*, omit: tuple[str, ...] = (), replace: tuple[tuple[str, str], ...] = ()) -> str:
+    """A hand-written invite in the shape ``buildInvite`` writes, with named omissions and replacements.
+
+    The baseline is UTC with an explicit ``Z`` and no ``TZID``, because that is the emitter's output.
+    Every caller below introduces one break the validator has to name.
+    """
+    lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
+        "PRODID:-//KernelWorx//Show and Sell//EN",
         "CALSCALE:GREGORIAN",
-        "PRODID:-//KernelWorx//Show And Sell//EN",
         "METHOD:PUBLISH",
         "BEGIN:VEVENT",
-        f"UID:{uid}",
-        "DTSTART;TZID=America/Denver:20260309T090000",
-        "DTEND;TZID=America/Denver:20260309T103000",
-        "SUMMARY:Show & Sell - Riverside Grange",
-        "LOCATION:Riverside Grange",
+        f"UID:{_synthetic_uid()}",
+        f"DTSTAMP:{_ics_instant(stage3.ICS_CAPTURE_CLOCKS[0])}",
+        "DTSTART:20260328T150000Z",
+        "DTEND:20260328T163000Z",
+        "SUMMARY:Show & Sell: First Sales",
+        "LOCATION:Library on Main",
+        r"DESCRIPTION:Slot: First Sales\nTimes in America/Denver",
         "END:VEVENT",
         "END:VCALENDAR",
     ]
-    return "".join(f"{line}\r\n" for line in body)
+    kept: list[str] = []
+    for line in lines:
+        if line.split(":", 1)[0] in omit:
+            continue
+        for needle, value in replace:
+            line = line.replace(needle, value)
+        kept.append(line)
+    return "".join(f"{line}\r\n" for line in kept)
 
 
 # ---------------------------------------------------------------------------
@@ -147,78 +239,307 @@ def test_the_introspection_gate_reports_what_the_deployed_api_answers() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The two workflow states Stage 3 cannot reach are reported, never faked
-# (EVT-M-02/03)
+# FINALIZED and REOPENED: no mutation in this SDL, so a documented builder (API-FIX-01)
 # ---------------------------------------------------------------------------
 
 
-def test_finalize_and_reopen_are_absent_and_those_states_report_blocked() -> None:
-    """§5's mutations are Stage 5's barrier: the lane blocks FINALIZED/REOPENED by name."""
+def test_finalize_and_reopen_have_no_mutation_and_are_declared_builder_only() -> None:
+    """§5's mutations are Stage 5's barrier, so those two states are builder-produced and labelled.
+
+    The states are not missing from the fixture set — §3.6.2 and API-FIX-01 both require them — and the
+    module says out loud how they were made, which is what lets a reviewer tell a fixture apart from a
+    finalization the product actually ran.
+    """
     sdl = _sdl()
     assert not stage2._field_exists(sdl, "Mutation", "finalizeShowAndSell")
     assert not stage2._field_exists(sdl, "Mutation", "reopenShowAndSell")
-    assert stage3.STAGE_THREE_BLOCKED_STATE_FIXTURES == ("FINALIZED", "REOPENED")
-    for state in stage3.STAGE_THREE_BLOCKED_STATE_FIXTURES:
-        assert state in sdl  # the enum carries the state; only the write is missing
-        assert state not in json.dumps(stage3.stage_three_fixture(0), default=str)
-    assert "never fakes them" in stage3.BLOCKED_STATE_FIXTURE_NOTE
-
-
-# ---------------------------------------------------------------------------
-# The fixture reproduces itself and plans every derived state (EVT-M-01/02/03)
-# ---------------------------------------------------------------------------
-
-
-def test_the_fixture_reproduces_itself_byte_for_byte() -> None:
-    """Same seed, same bytes — ids, names, keys and intervals all pinned by the lane token."""
-    assert json.dumps(stage3.stage_three_fixture(0), sort_keys=True) == json.dumps(
-        stage3.stage_three_fixture(0), sort_keys=True
+    assert stage3.STAGE_THREE_BUILDER_ONLY_STATE_FIXTURES == (
+        show_and_sell_models.STATUS_FINALIZED,
+        show_and_sell_models.STATUS_REOPENED,
     )
-    assert stage3.lane_token(0) == stage3.lane_token(0)
-    assert len(stage3.lane_token(0)) == 12
+    for state in stage3.STAGE_THREE_BUILDER_ONLY_STATE_FIXTURES:
+        assert state in sdl  # the enum carries the state; only the write is missing
+    note = stage3.BUILDER_ONLY_STATE_FIXTURE_NOTE
+    assert "finalizeShowAndSell" in note and "fixture" in note and "§5" in note
 
 
-def test_a_different_seed_moves_the_lane_token_and_therefore_every_key() -> None:
-    assert stage3.lane_token(0) != stage3.lane_token(1)
-    assert stage3.stage_three_fixture(1)["lane"] != stage3.stage_three_fixture(0)["lane"]
+def test_the_tree_holds_an_event_in_each_builder_only_state_and_says_who_wrote_it() -> None:
+    """The FINALIZED/REOPENED fixtures are planned writes with a named builder, never a status string."""
+    fixture = _fixture()
+    for name, state in (
+        ("finalized", show_and_sell_models.STATUS_FINALIZED),
+        ("reopened", show_and_sell_models.STATUS_REOPENED),
+    ):
+        event = fixture["events"][name]
+        assert event["storedStatus"] == state
+        assert event["setup"]["how"] == "fixture-builder"
+        assert event["setup"]["blockedWhenDenied"] is True
+        assert "builder" in event["setup"]["note"]
 
 
-def test_the_fixture_plans_an_event_in_every_derived_state_at_t0() -> None:
-    """ENDED, ACTIVE and SCHEDULED-then-CANCELLED all exist in the tree without a time-travel write."""
-    fixture = stage3.stage_three_fixture(0)
-    t0 = datetime.fromisoformat(stage3.T0_UTC.replace("Z", "+00:00"))
+# ---------------------------------------------------------------------------
+# The clock: every instant is an offset from the scenario's T0 (FIX-AC-03, finding 1)
+# ---------------------------------------------------------------------------
+
+
+def test_two_scenarios_with_different_t0_values_get_the_same_offsets() -> None:
+    """Two clocks, two ``T0``s, identical offsets: the tree is relative, not scheduled.
+
+    The comparison is between the two trees, so a literal date anywhere in the builder would move one
+    tree and not the other, and this would fail with the offending path named.
+    """
+    early = _clock(datetime(2026, 11, 15, 14, 30, tzinfo=timezone.utc))
+    late = _clock(OTHER_YEAR_T0)
+    first, second = stage3.stage_three_fixture(early), stage3.stage_three_fixture(late)
+    shift = (late.t0 - early.t0).total_seconds()
+    first_times, second_times = _fixture_instants(first), _fixture_instants(second)
+    assert len(first_times) > 60, f"only {len(first_times)} instants found: the walk stopped seeing the tree"
+    assert set(first_times) == set(second_times)
+    moved = {
+        path: round((second_times[path] - first_times[path]).total_seconds() - shift, 6) for path in first_times
+    }
+    stuck = {path: value for path, value in moved.items() if value != 0.0}
+    assert not stuck, f"{len(stuck)} fixture instants did not move with T0: {sorted(stuck)[:5]}"
+    assert first["t0"] == early.iso() and second["t0"] == late.iso()
+    assert first["t0Epoch"] == int(early.t0.timestamp())
+
+
+def test_no_date_in_the_tree_is_a_calendar_date_someone_copied() -> None:
+    """A scenario set up in 2031 plans a 2031 tree, and nothing in it predates its own ``T0`` by months.
+
+    §3.1 forbids hardcoded calendar dates in automation.  The enforceable form of that rule is to run
+    the builder with a ``T0`` no fixture was ever written for and measure the spread of what comes back.
+    """
+    tree = stage3.stage_three_fixture(_clock(OTHER_YEAR_T0))
+    moments = _fixture_instants(tree)
+    assert len(moments) > 60
+    deltas = sorted((value - OTHER_YEAR_T0).total_seconds() / 86400 for value in moments.values())
+    assert -30 <= deltas[0] and deltas[-1] <= 120, f"the spread left -30..120 days: {deltas[:5]} {deltas[-5:]}"
+    assert {value.year for value in moments.values()} == {OTHER_YEAR_T0.year}
+
+
+def test_the_lane_token_and_data_id_carry_every_part_setup_hands_over() -> None:
+    """FIX-AC-03's five values are all in the identity: a retry gets a fresh lane, never the old keys."""
+    clock = stage3.ScenarioClock(
+        t0=DEFAULT_T0,
+        run_id="1794753000-a1b2c3",
+        scenario_id="SS-SM-06",
+        lane_id="L01",
+        attempt_id="7d41d8cd",
+    )
+    assert clock.data_id == "-".join((clock.run_id, clock.scenario_id, clock.lane_id, clock.attempt_id))
+    assert len(clock.token) == 12
+    same = stage3.ScenarioClock(
+        t0=clock.t0,
+        run_id=clock.run_id,
+        scenario_id=clock.scenario_id,
+        lane_id=clock.lane_id,
+        attempt_id=clock.attempt_id,
+    )
+    assert same.token == clock.token
+    for field, value in (("run_id", "1794753000-zz9999"), ("attempt_id", "beef0000"), ("lane_id", "L09")):
+        changed = stage3.ScenarioClock(
+            t0=clock.t0,
+            run_id=value if field == "run_id" else clock.run_id,
+            scenario_id=clock.scenario_id,
+            lane_id=value if field == "lane_id" else clock.lane_id,
+            attempt_id=value if field == "attempt_id" else clock.attempt_id,
+        )
+        assert changed.token != clock.token, f"changing {field} left the lane token where it was"
+        first = stage3.stage_three_fixture(clock)
+        second = stage3.stage_three_fixture(changed)
+        assert second["lane"] != first["lane"], f"changing {field} left every fixture name shared"
+        assert second["dataId"] != first["dataId"], f"changing {field} left DATA_ID shared"
+
+
+def test_from_run_id_takes_t0_from_the_run_identifier_and_a_supplied_t0_wins() -> None:
+    """§3.1 spells ``RUN_ID`` as epoch seconds plus a short UUID, so the clock never needs a literal."""
+    t0 = datetime(2027, 4, 30, 9, 15, tzinfo=timezone.utc)
+    derived = stage3.ScenarioClock.from_run_id(f"{int(t0.timestamp())}-c0ffee", "SS-SM-11", "L03", "a1")
+    assert derived.t0 == t0
+    explicit = stage3.ScenarioClock.from_run_id(
+        f"{int(t0.timestamp())}-c0ffee", "SS-SM-11", "L03", "a1", t0=t0 - timedelta(days=2)
+    )
+    assert explicit.t0 == t0 - timedelta(days=2)
+    with pytest.raises(ValueError, match="epoch seconds"):
+        stage3.ScenarioClock.from_run_id("pr-969-c0ffee", "SS-SM-11", "L03", "a1")
+
+
+def test_a_naive_t0_and_an_unusable_identity_part_are_refused() -> None:
+    """A naive ``T0`` is the writer's clock wearing the scenario's clothes."""
+    with pytest.raises(ValueError, match="timezone"):
+        stage3.ScenarioClock(
+            t0=datetime(2026, 11, 15, 14, 30),
+            run_id="1794753000-a1b2c3",
+            scenario_id="S",
+            lane_id="L01",
+            attempt_id="a1",
+        )
+    for field, bad in (("lane_id", ""), ("lane_id", "L 01"), ("attempt_id", "a/1")):
+        with pytest.raises(ValueError, match=field):
+            stage3.ScenarioClock(
+                t0=DEFAULT_T0,
+                run_id="1794753000-a1b2c3",
+                scenario_id="S",
+                lane_id=bad if field == "lane_id" else "L01",
+                attempt_id=bad if field == "attempt_id" else "a1",
+            )
+
+
+def test_the_offsets_are_counted_in_the_units_own_calendar_not_in_utc() -> None:
+    """A scenario set up at 04:00 UTC still gets its ``tomorrow 09:00`` on the Unit's tomorrow."""
+    clock = _clock(datetime(2026, 11, 15, 4, 0, tzinfo=timezone.utc))
+    start, end = clock.unit_window(1, "09:00", "10:00")
+    local = _instant(start).astimezone(ZoneInfo(stage3.UNIT_TIMEZONE))
+    assert local.strftime("%Y-%m-%d %H:%M") == "2026-11-16 09:00"
+    assert _minutes(start, end) == 60
+    assert _instant(start) > clock.t0
+
+
+# ---------------------------------------------------------------------------
+# The DST pair is computed, and checked against zoneinfo, for several years (SS-SM-11)
+# ---------------------------------------------------------------------------
+
+
+def _abbrev(day: date) -> str:
+    """The Unit-zone abbreviation on that date: MST before a spring-forward, MDT after it."""
+    moment = datetime(day.year, day.month, day.day, 9, 0, tzinfo=ZoneInfo(stage3.UNIT_TIMEZONE))
+    return moment.strftime("%Z")
+
+
+def test_the_dst_pair_straddles_a_real_spring_forward_in_every_year_a_scenario_can_run_in() -> None:
+    """The boundary moves; the pair has to move with it.
+
+    It is 2026-03-08 in one year, 2027-03-14 in another and 2028-03-12 in a third.  A pair copied from
+    one of those calendars straddles nothing in the other two, so the check runs for all three plus a
+    year no fixture was written for, and every fact is re-derived from ``zoneinfo`` at call time.
+    """
+    boundaries = {}
+    for year in (2026, 2027, 2028, 2031):
+        boundary = stage3.spring_forward_date(year)
+        boundaries[year] = boundary
+        assert boundary.month == 3 and boundary.weekday() == 6
+        clock = _clock(datetime(year, 1, 10, 14, 0, tzinfo=timezone.utc))
+        assert clock.spring_forward() == boundary
+        pair = clock.dst_pair()
+        assert stage3.validate_dst_pair(pair) == (), f"{year}: {stage3.validate_dst_pair(pair)}"
+        assert pair["boundary"] == boundary.isoformat()
+        assert pair["saturdayDate"] == (boundary - timedelta(days=1)).isoformat()
+        assert pair["mondayDate"] == (boundary + timedelta(days=1)).isoformat()
+        assert pair["saturdayWallClock"].endswith(f"09:00 {_abbrev(boundary - timedelta(days=1))}")
+        assert pair["mondayWallClock"].endswith(f"09:00 {_abbrev(boundary + timedelta(days=1))}")
+    assert {boundaries[year].day for year in (2026, 2027, 2028)} == {8, 14, 12}
+
+
+def test_the_spring_forward_date_is_the_second_sunday_in_march_for_every_year_checked() -> None:
+    """Computed, never copied: the same rule is re-derived here straight from the calendar."""
+    for year in range(2024, 2041):
+        first = date(year, 3, 1)
+        second_sunday = first + timedelta(days=(6 - first.weekday()) % 7, weeks=1)
+        assert stage3.spring_forward_date(year) == second_sunday, year
+
+
+def test_a_dst_pair_that_does_not_straddle_anything_is_named() -> None:
+    """The check is not vacuous: a pair copied from last year's calendar fails it, by name."""
+    clock = _clock(datetime(2027, 1, 10, 14, 0, tzinfo=timezone.utc))
+    pair = clock.dst_pair()
+    stale = dict(pair, boundary="2026-03-08")
+    assert any("second Sunday" in line for line in stage3.validate_dst_pair(stale))
+    shifted = dict(pair, mondayStartAt=_instant(pair["mondayStartAt"]) + timedelta(hours=1))
+    problems = stage3.validate_dst_pair(shifted)
+    assert any("47 hours" in line or "one hour" in line for line in problems), problems
+    assert stage3.validate_dst_pair(pair) == (), "the untampered pair must pass what the tampered one fails"
+
+
+def test_the_dst_fixture_pair_sits_inside_its_event_and_uses_both_offsets() -> None:
+    """The two slots are 09:00 Unit wall clock on the Saturday before and the Monday after the boundary."""
+    fixture = _fixture()
+    pair = fixture["dst"]
+    event = fixture["events"]["dst"]
+    assert stage3.validate_dst_pair(pair) == ()
+    for name in ("dst-saturday", "dst-monday"):
+        slot = fixture["slots"][name]
+        assert event["startAt"] <= slot["startAt"] and slot["endAt"] <= event["endAt"]
+        assert _minutes(slot["startAt"], slot["endAt"]) == 30
+    assert pair["saturdayOffset"] == "-0700" and pair["mondayOffset"] == "-0600"
+    assert pair["elapsedHours"] == 47.0
+
+
+def test_a_wall_clock_inside_the_spring_forward_gap_has_no_answer_and_says_so() -> None:
+    """02:30 on the boundary date never happened; a fixture that asks for it must fail, not shift."""
+    clock = _clock(OTHER_YEAR_T0)
+    day_offset = (clock.spring_forward() - clock.local_date()).days
+    with pytest.raises(ValueError, match="does not exist"):
+        clock.at_unit_wall_clock(day_offset, "02:30")
+    assert clock.at_unit_wall_clock(day_offset, "09:00").strftime("%H:%M %Z") == "09:00 MDT"
+
+
+# ---------------------------------------------------------------------------
+# The fixture tree carries everything §3.6.2 names (EVT-M-01/02/03)
+# ---------------------------------------------------------------------------
+
+
+def test_the_tree_plans_an_event_in_every_state_3_6_2_names() -> None:
+    """past, future, ACTIVE, ENDED, REOPENED, FINALIZED, CANCELLED — and the four-box triple."""
+    fixture = _fixture()
+    t0 = _instant(fixture["t0"])
 
     def window(name: str) -> tuple[datetime, datetime]:
         event = fixture["events"][name]
-        start = datetime.fromisoformat(event["startAt"].replace("Z", "+00:00"))
-        end = datetime.fromisoformat(event["endAt"].replace("Z", "+00:00"))
-        return start, end
+        return _instant(event["startAt"]), _instant(event["endAt"])
 
-    start, end = window("ended")
-    assert end < t0
-    start, end = window("active")
-    assert start < t0 < end
-    for name in ("slots", "cancellation", "four-boxes", "big", "confirm"):
-        start, end = window(name)
-        assert t0 < start
-    assert fixture["t0"] == stage3.T0_UTC
-
-
-def test_the_slots_are_90_120_and_180_minutes_with_capacity_one_and_hundred() -> None:
-    """SS-SM-05 walkthrough shape: 90/120/180-minute slots at capacity 1 and at capacity 100."""
-    slots = stage3.stage_three_fixture(0)["slots"]
-    assert _minutes(slots["first-sales"]["startAt"], slots["first-sales"]["endAt"]) == 90
-    assert _minutes(slots["midday"]["startAt"], slots["midday"]["endAt"]) == 120
-    assert _minutes(slots["full-booth"]["startAt"], slots["full-booth"]["endAt"]) == 180
-    assert slots["first-sales"]["capacity"] == 1 == stage3.MIN_SLOT_CAPACITY
-    assert slots["full-booth"]["capacity"] == 100 == stage3.MAX_SLOT_CAPACITY
+    assert window("ended")[1] < t0
+    active_start, active_end = window("active")
+    assert active_start < t0 < active_end
+    for name in ("future", "big", "confirm", "dst"):
+        assert t0 < window(name)[0]
+    assert fixture["events"]["cancellation"]["storedStatus"] == show_and_sell_models.STATUS_CANCELLED
+    statuses = {event["storedStatus"] for event in fixture["events"].values()}
+    assert set(stage3.STAGE_THREE_BUILDER_ONLY_STATE_FIXTURES) <= statuses
+    assert {"past", "ended", "active", "future", "cancellation", "started", "finalized", "reopened"} <= set(
+        fixture["events"]
+    )
 
 
-def test_the_catalog_products_and_allocation_targets_pin_the_ledger() -> None:
-    """Three products carry cents prices, and each event's targets are a product/quantity list."""
-    fixture = stage3.stage_three_fixture(0)
-    assert len(fixture["products"]) == 3
-    assert all(p["cents"] > 0 for p in fixture["products"].values())
+def test_every_slot_and_event_runs_forward_and_sits_inside_its_own_event() -> None:
+    """A zero-length or backwards slot is a fixture the server refuses, so the tree must never write one."""
+    fixture = _fixture()
+    for name, slot in fixture["slots"].items():
+        assert _instant(slot["startAt"]) < _instant(slot["endAt"]), f"{name} does not run forward"
+        assert stage3.MIN_SLOT_CAPACITY <= slot["capacity"] <= stage3.MAX_SLOT_CAPACITY, name
+        event = fixture["events"][fixture["slotEvents"][name]]
+        assert event["startAt"] <= slot["startAt"] and slot["endAt"] <= event["endAt"], name
+    for slot in fixture["bigSlots"]:
+        assert _instant(slot["startAt"]) < _instant(slot["endAt"])
+    for name, event in fixture["events"].items():
+        assert _instant(event["startAt"]) < _instant(event["endAt"]), name
+
+
+def test_the_four_box_triple_is_a_morning_an_afternoon_and_an_overlap() -> None:
+    """§3.6.2's four-box fixture: two back-to-back events and a third whose assignment is refused."""
+    fixture = _fixture()
+    morning = fixture["events"]["four-box.morning"]
+    afternoon = fixture["events"]["four-box.afternoon"]
+    overlap = fixture["events"]["four-box.overlap"]
+    assert stage3.FOUR_BOX_QUANTITY == 4
+    for name in ("four-box.morning", "four-box.afternoon", "four-box.overlap"):
+        setup = fixture["events"][name]["setup"]
+        assert setup["how"] == "mutation" and setup["op"] == "createShowAndSell", name
+    assert _instant(morning["endAt"]) <= _instant(afternoon["startAt"]), "the pair must be sequential"
+    assert _instant(overlap["startAt"]) < _instant(morning["endAt"]), "the overlap must overlap to collide"
+    assert _instant(afternoon["startAt"]) < _instant(overlap["endAt"]) <= _instant(afternoon["endAt"])
+    for name in ("four-box.morning", "four-box.afternoon", "four-box.overlap"):
+        targets = fixture["allocations"][name]
+        assert targets and all(quantity <= stage3.FOUR_BOX_QUANTITY for _p, _product, quantity in targets)
+    assert fixture["slots"]["morning"]["capacity"] == fixture["slots"]["afternoon"]["capacity"]
+
+
+def test_the_catalog_carries_sixteen_products_and_every_target_names_one() -> None:
+    """§3.6.2 says 16 products; the ledger checks need prices, not placeholders."""
+    fixture = _fixture()
+    assert len(fixture["products"]) == stage3.PRODUCT_CATALOG_SIZE == 16
+    assert {product["catalogIndex"] for product in fixture["products"].values()} == set(range(1, 17))
+    assert all(product["cents"] > 0 for product in fixture["products"].values())
     refs = {product["ref"] for product in fixture["products"].values()}
     for targets in fixture["allocations"].values():
         for _profile, product, quantity in targets:
@@ -226,136 +547,74 @@ def test_the_catalog_products_and_allocation_targets_pin_the_ledger() -> None:
             assert quantity >= 0
 
 
-def test_twenty_slots_is_the_boundary_and_the_21st_is_refused() -> None:
+def test_the_slots_are_ninety_one_twenty_and_one_hundred_eighty_minutes_at_capacity_one_and_hundred() -> None:
+    """SS-SM-05's walkthrough shape, with both capacity bounds carried by real slots."""
+    slots = _fixture()["slots"]
+    assert _minutes(slots["first-sales"]["startAt"], slots["first-sales"]["endAt"]) == 90
+    assert _minutes(slots["midday"]["startAt"], slots["midday"]["endAt"]) == 120
+    assert _minutes(slots["full-booth"]["startAt"], slots["full-booth"]["endAt"]) == 180
+    assert slots["first-sales"]["capacity"] == 1 == stage3.MIN_SLOT_CAPACITY
+    assert slots["full-booth"]["capacity"] == 100 == stage3.MAX_SLOT_CAPACITY
+
+
+def test_twenty_slots_is_the_boundary_and_the_twenty_first_is_refused() -> None:
     """SS-SM-05: the boundary event holds exactly ``MAX_SLOTS_PER_EVENT`` slots; the 21st earns SLOT_LIMIT."""
-    fixture = stage3.stage_three_fixture(0)
+    fixture = _fixture()
     assert len(fixture["bigSlots"]) == stage3.MAX_SLOTS_PER_EVENT == 20
+    assert all(slot["ref"].startswith("slot.big-") for slot in fixture["bigSlots"])
+    events = {fixture["slotEvents"][slot["ref"].removeprefix("slot.")] for slot in fixture["bigSlots"]}
+    assert events == {"big"}
     answer = stage3.stage_three_refusal("slot-limit")
     assert answer["code"] == "CONFLICT"
     assert answer["subcode"] == "SLOT_LIMIT"
 
 
-def test_capacity_zero_and_101_are_refused_by_the_same_table_row() -> None:
-    answer = stage3.stage_three_refusal("capacity-range")
-    assert answer["code"] == "INVALID_INPUT"
-    assert "must be between" in answer["sentence"]
-    assert stage3.MIN_SLOT_CAPACITY == 1
-    assert stage3.MAX_SLOT_CAPACITY == 100
-    assert stage3.stage_three_refusal("work-over-duration")["subcode"] == "WORK_OVER_DURATION"
-
-
-def test_the_model_itself_refuses_capacity_zero_and_101() -> None:
-    """The refusal the table records is the model's own sentence at the boundary."""
-    for bad in (0, 101):
-        with pytest.raises(AppError) as excinfo:
-            show_and_sell_models.normalize_capacity(bad)
-        assert excinfo.value.error_code == "INVALID_INPUT"
-        assert f"must be between {stage3.MIN_SLOT_CAPACITY} and {stage3.MAX_SLOT_CAPACITY}" in excinfo.value.message
-
-
-def test_the_confirm_batch_carries_101_rows_and_the_cap_names_the_refusal() -> None:
-    """SS-SM-06: the fixture plans one row past the 100-row cap, and the table answers the refusal."""
-    fixture = stage3.stage_three_fixture(0)
+def test_the_confirm_plan_carries_one_row_past_the_cap_and_the_cap_names_the_refusal() -> None:
+    """SS-SM-06: the fixture plans 101 rows so the 101st becomes an executed call, not a description."""
+    fixture = _fixture()
     assert fixture["confirmRows"] == stage3.MAX_WORK_LINES + 1 == 101
     answer = stage3.stage_three_refusal("work-batch-cap")
     assert answer["code"] == "INVALID_INPUT"
     assert answer["sentence"] == "may be confirmed at once."
 
 
-def test_zero_minutes_un_confirms_a_work_row() -> None:
-    """``actualMinutes = 0`` is a legal payload — the SDL spells zero the un-confirm."""
-    payload = stage3.confirm_work_input(
-        "SHOW#x",
-        1,
-        [("SLOT#x", "PROFILE#x", 0)],
-        idempotency_key=stage3.idempotency_key_for("confirmShowAndSellWork", "ab"),
-    )
-    assert payload["work"][0]["actualMinutes"] == 0
-    over = stage3.stage_three_refusal("work-over-duration")
-    assert over["subcode"] == "WORK_OVER_DURATION"
+def test_the_tree_plans_removed_members_stale_versions_and_race_barriers_as_steps() -> None:
+    """§3.6.2's last three fixtures are step lists the scenario module can execute."""
+    fixture = _fixture()
+    removed = {row["profile"]: row for row in fixture["removedMembers"]}
+    assert set(removed) == {"profile.devon", "profile.emery"}
+    devon = removed["profile.devon"]["steps"]
+    assert [next(iter(step)) for step in devon] == ["read", "write", "read", "write"]
+    assert devon[0]["expect"]["status"] == "ACTIVE" and devon[2]["expect"]["status"] == "REMOVED"
+    assert devon[1]["write"] == "removeUnitCampaignMembership"
+    assert devon[1]["versionSource"] == "unitCampaignRoster", "the removal must condition on what the read answered"
+    assert devon[3]["refusal"] == "removed-member-signup"
+    assert removed["profile.emery"]["steps"][0]["expect"] == {"absent": True}
+    assert removed["profile.emery"]["steps"][1]["refusal"] == "unjoined-scout-signup"
+
+    for kind, plan in fixture["staleVersions"].items():
+        assert plan["read"] and plan["advance"] and plan["submit"], kind
+        assert len({plan["read"], plan["advance"], plan["submit"]}) == 3, kind
+        assert plan["refusal"] == "stale-event-version", kind
+
+    for name, barrier in fixture["raceBarriers"].items():
+        assert barrier["threadRendezvous"] is True, name
+        assert len(barrier["writes"]) == 2, name
+        assert barrier["refusal"], name
+    assert fixture["profiles"]["devon"]["membership"] == "removed"
+    assert fixture["profiles"]["emery"]["membership"] == "unjoined"
 
 
-def test_the_dst_pair_straddles_the_spring_forward_at_the_same_wall_clock() -> None:
-    """SS-SM-11's calendar facts: 09:00 local on both sides of 2026-03-08, UTC offsets that differ."""
-    assert stage3.DST_SPRING_FORWARD.month == 3 and stage3.DST_SPRING_FORWARD.day == 8
-    saturday = stage3.denver_wall_clock(stage3.DST_SATURDAY_START_UTC)
-    monday = stage3.denver_wall_clock(stage3.DST_MONDAY_START_UTC)
-    assert saturday.endswith("09:00 MST")
-    assert monday.endswith("09:00 MDT")
-    fixture = stage3.stage_three_fixture(0)
-    event = fixture["events"]["dst"]
-    for name in ("dst-saturday", "dst-monday"):
-        slot = fixture["slots"][name]
-        assert event["startAt"] <= slot["startAt"] and slot["endAt"] <= event["endAt"]
-
-
-# ---------------------------------------------------------------------------
-# Idempotency (API-FIX-01/03)
-# ---------------------------------------------------------------------------
-
-
-def test_builders_put_an_idempotency_input_on_every_write() -> None:
-    """Every Stage 3 mutation takes ``IdempotencyInput``; no builder may omit it."""
-    for type_name, sample in stage3._SAMPLES.items():
-        assert "idempotency" in sample, f"{type_name} carries no idempotency input"
-        assert "idempotencyKey" in sample["idempotency"]
-
-
-def test_idempotency_keys_are_deterministic_unique_and_legal() -> None:
-    lane = stage3.lane_token(0)
-    keys = [stage3.idempotency_key_for(op, lane) for op in stage3.STAGE_THREE_WRITES]
-    assert keys == [stage3.idempotency_key_for(op, lane) for op in stage3.STAGE_THREE_WRITES]
-    assert len(set(keys)) == len(keys)
-    assert all(1 <= len(key) <= 128 for key in keys)
-    assert stage3.idempotency_key_for("createShowAndSell", lane, "retry") == f"{keys[0]}-retry"
-
-
-def test_the_replay_and_changed_fingerprint_answers_are_recorded() -> None:
-    """API-FIX-03: a replay returns the recorded answer; a changed body earns the fingerprint refusal."""
-    replay = stage3.stage_three_refusal("idempotency-replayed")
-    assert replay["code"] == "REPLAYED"
-    assert "IDEM-01" in stage3.STAGE_THREE_REFUSALS["idempotency-replayed"]
-    changed = stage3.stage_three_refusal("idempotency-changed")
-    assert changed["code"] == "INVALID_INPUT"
-    assert changed["subcode"] == "IDEMPOTENCY_FINGERPRINT_MISMATCH"
-
-
-# ---------------------------------------------------------------------------
-# Write shapes the SDL pins
-# ---------------------------------------------------------------------------
-
-
-def test_a_signup_names_the_scout_campaign_and_the_profile_and_no_version() -> None:
-    """The signup input carries the roster pair; its version is the aggregate's, not the caller's."""
-    payload = stage3.signup_input("SHOW#x", "SLOT#x", "CAMP#x", "PROFILE#x", idempotency_key="k")
-    assert {"campaignId": "CAMP#x", "profileId": "PROFILE#x"}.items() <= payload.items()
-    assert "version" not in payload
-
-
-def test_an_upsert_edit_names_the_slot_and_its_version_in_nested_shape() -> None:
-    create = stage3.upsert_slot_input("SHOW#x", 1, "A", "B", 2, idempotency_key="k")
-    assert "slotId" not in create and "slotVersion" not in create
-    edit = stage3.upsert_slot_input("SHOW#x", 1, "A", "B", 2, slot_id="SLOT#x", slot_version=2, idempotency_key="k")
-    assert edit["slotVersion"] == {"expectedVersion": 2}
-
-
-def test_cancel_signup_conditions_on_the_signup_version_not_the_event() -> None:
-    payload = stage3.cancel_signup_input("SHOW#x", "SLOT#x", "PROFILE#x", 4, idempotency_key="k")
-    assert payload["version"] == {"expectedVersion": 4}
-    assert payload["profileId"] == "PROFILE#x"
-
-
-def test_a_cancel_event_input_names_the_reason_it_must_give() -> None:
-    payload = stage3.cancel_event_input("SHOW#x", 1, "Vendor conflict", idempotency_key="k")
-    assert payload["reason"] == "Vendor conflict"
-    assert payload["version"] == {"expectedVersion": 1}
-
-
-def test_bind_ids_replaces_placeholders_and_refuses_unbound_ones() -> None:
-    bound = stage3.bind_ids({"event": {"ref": "event.slots"}}, {"event.slots": "SHOW#1"})
-    assert bound["event"]["ref"] == "SHOW#1"
-    with pytest.raises(KeyError, match="event.dst"):
-        stage3.bind_ids({"event": {"ref": "event.dst"}}, {"event.slots": "SHOW#1"})
+def test_the_lane_names_are_data_id_suffixed_so_two_lanes_never_share_a_unit() -> None:
+    fixture = _fixture()
+    data_id = fixture["dataId"]
+    assert data_id in fixture["unit"]["name"] and data_id in fixture["unitCampaign"]["name"]
+    for event in fixture["events"].values():
+        assert data_id in event["locationName"]
+    for profile in fixture["profiles"].values():
+        assert data_id in profile["name"]
+    other_lane = stage3.stage_three_fixture(_clock(DEFAULT_T0, lane_id="L03"))
+    assert other_lane["unit"]["name"] != fixture["unit"]["name"]
 
 
 # ---------------------------------------------------------------------------
@@ -373,11 +632,19 @@ def test_the_conflict_pairs_name_a_recorded_refusal_each() -> None:
         assert row["subcode"] == answer["subcode"]
         assert stage3.STAGE_THREE_REFUSALS[str(row["refusal"])]
     refusals = {str(row["refusal"]) for row in stage3.STAGE_THREE_CONFLICT_PAIRS}
-    for required in ("duplicate-signup", "capacity-full", "cross-campaign-overlap", "concurrent-over-assignment"):
+    for required in (
+        "duplicate-signup",
+        "capacity-full",
+        "cross-campaign-overlap",
+        "concurrent-over-assignment",
+        "removed-member-signup",
+        "unjoined-scout-signup",
+        "stale-event-version",
+    ):
         assert required in refusals
-    joined_acceptance = " ".join(str(row["acceptance"]) for row in stage3.STAGE_THREE_CONFLICT_PAIRS)
+    joined = " ".join(str(row["acceptance"]) for row in stage3.STAGE_THREE_CONFLICT_PAIRS)
     for smoke in ("SS-SM-05", "SS-SM-06", "SS-SM-11"):
-        assert smoke in joined_acceptance
+        assert smoke in joined
 
 
 def test_conflict_row_refuses_an_op_that_is_not_a_stage_three_write() -> None:
@@ -423,29 +690,134 @@ def test_the_error_code_is_read_from_all_four_homes() -> None:
     assert stage3.refusal_violations_from_response("duplicate-signup", payload) == []
 
 
+def test_capacity_zero_and_101_are_refused_by_the_same_table_row() -> None:
+    answer = stage3.stage_three_refusal("capacity-range")
+    assert answer["code"] == "INVALID_INPUT"
+    assert "must be between" in answer["sentence"]
+    assert stage3.MIN_SLOT_CAPACITY == 1
+    assert stage3.MAX_SLOT_CAPACITY == 100
+    assert stage3.stage_three_refusal("work-over-duration")["subcode"] == "WORK_OVER_DURATION"
+
+
+def test_the_model_itself_refuses_capacity_zero_and_101() -> None:
+    """The refusal the table records is the model's own sentence at the boundary."""
+    for bad in (0, 101):
+        with pytest.raises(AppError) as excinfo:
+            show_and_sell_models.normalize_capacity(bad)
+        assert excinfo.value.error_code == "INVALID_INPUT"
+        assert f"must be between {stage3.MIN_SLOT_CAPACITY} and {stage3.MAX_SLOT_CAPACITY}" in excinfo.value.message
+
+
 # ---------------------------------------------------------------------------
-# Calendar data and the browser's ICS (CAL-01/CAL-02)
+# Idempotency (API-FIX-01/03)
+# ---------------------------------------------------------------------------
+
+
+def test_builders_put_an_idempotency_input_on_every_write() -> None:
+    """Every Stage 3 mutation takes ``IdempotencyInput``; no builder may omit it."""
+    for type_name, sample in stage3._SAMPLES.items():
+        assert "idempotency" in sample, f"{type_name} carries no idempotency input"
+        assert "idempotencyKey" in sample["idempotency"]
+
+
+def test_idempotency_keys_are_deterministic_unique_and_legal() -> None:
+    clock = _clock()
+    lane = clock.token
+    keys = [stage3.idempotency_key_for(op, lane) for op in stage3.STAGE_THREE_WRITES]
+    assert keys == [stage3.idempotency_key_for(op, lane) for op in stage3.STAGE_THREE_WRITES]
+    assert len(set(keys)) == len(keys)
+    assert all(1 <= len(key) <= 128 for key in keys)
+    assert stage3.idempotency_key_for(stage3.STAGE_THREE_WRITES[0], lane, "retry").startswith(f"{keys[0]}-")
+    other_lane = _clock(DEFAULT_T0, lane_id="L04").token
+    assert [stage3.idempotency_key_for(op, other_lane) for op in stage3.STAGE_THREE_WRITES] != keys
+
+
+def test_the_replay_and_changed_fingerprint_answers_are_recorded() -> None:
+    """API-FIX-03: a replay returns the recorded answer; a changed body earns the fingerprint refusal."""
+    replay = stage3.stage_three_refusal("idempotency-replayed")
+    assert replay["code"] == "REPLAYED"
+    assert "IDEM-01" in stage3.STAGE_THREE_REFUSALS["idempotency-replayed"]
+    changed = stage3.stage_three_refusal("idempotency-changed")
+    assert changed["code"] == "INVALID_INPUT"
+    assert changed["subcode"] == "IDEMPOTENCY_FINGERPRINT_MISMATCH"
+
+
+# ---------------------------------------------------------------------------
+# Write shapes the SDL pins
+# ---------------------------------------------------------------------------
+
+
+def test_a_signup_names_the_scout_campaign_and_the_profile_and_no_version() -> None:
+    """The signup input carries the roster pair; its version is the aggregate's, not the caller's."""
+    payload = stage3.signup_input("SHOW#x", "SLOT#x", "CAMP#x", "PROFILE#x", idempotency_key="k")
+    assert {"campaignId": "CAMP#x", "profileId": "PROFILE#x"}.items() <= payload.items()
+    assert "version" not in payload
+
+
+def test_an_upsert_edit_names_the_slot_and_its_version_in_nested_shape() -> None:
+    create = stage3.upsert_slot_input("SHOW#x", 1, "A", "B", 2, idempotency_key="k")
+    assert "slotId" not in create and "slotVersion" not in create
+    edit = stage3.upsert_slot_input("SHOW#x", 1, "A", "B", 2, slot_id="SLOT#x", slot_version=2, idempotency_key="k")
+    assert edit["slotVersion"] == {"expectedVersion": 2}
+
+
+def test_cancel_signup_conditions_on_the_signup_version_not_the_event() -> None:
+    payload = stage3.cancel_signup_input("SHOW#x", "SLOT#x", "PROFILE#x", 4, idempotency_key="k")
+    assert payload["version"] == {"expectedVersion": 4}
+    assert payload["profileId"] == "PROFILE#x"
+
+
+def test_a_cancel_event_input_names_the_reason_it_must_give() -> None:
+    payload = stage3.cancel_event_input("SHOW#x", 1, "Vendor conflict", idempotency_key="k")
+    assert payload["reason"] == "Vendor conflict"
+    assert payload["version"] == {"expectedVersion": 1}
+
+
+def test_zero_minutes_un_confirms_a_work_row() -> None:
+    """``actualMinutes = 0`` is a legal payload — the SDL spells zero the un-confirm."""
+    payload = stage3.confirm_work_input(
+        "SHOW#x",
+        1,
+        [("SLOT#x", "PROFILE#x", 0)],
+        idempotency_key=stage3.idempotency_key_for("confirmShowAndSellWork", "ab"),
+    )
+    assert payload["work"][0]["actualMinutes"] == 0
+    over = stage3.stage_three_refusal("work-over-duration")
+    assert over["subcode"] == "WORK_OVER_DURATION"
+
+
+def test_bind_ids_replaces_placeholders_and_refuses_unbound_ones() -> None:
+    bound = stage3.bind_ids({"event": {"ref": "event.slots"}}, {"event.slots": "SHOW#1"})
+    assert bound["event"]["ref"] == "SHOW#1"
+    with pytest.raises(KeyError, match="event.dst"):
+        stage3.bind_ids({"event": {"ref": "event.dst"}}, {"event.slots": "SHOW#1"})
+
+
+# ---------------------------------------------------------------------------
+# The calendar DTO, the captures, and the validator (CAL-01/CAL-02)
 # ---------------------------------------------------------------------------
 
 
 def _dto(**overrides: Any) -> dict[str, Any]:
+    clock = _clock()
     dto = stage3.calendar_invite_dto(
-        unit_id="U#x",
-        unit_campaign_id="UC#x",
-        unit_campaign_name="Avery",
-        show_and_sell_id="S#x",
-        slot_id="SL#x",
-        profile_id="P#x",
-        location_name="Riverside Grange",
-        slot_start_at=stage3.DST_MONDAY_START_UTC,
-        slot_end_at=stage3.DST_MONDAY_END_UTC,
-        slot_label="DST Monday",
+        unit_id="UNIT#pack-3149",
+        unit_campaign_id="UNITCAMP#pack-3149-ss-sm-06-l01",
+        unit_campaign_name="Fall Popcorn 2026",
+        show_and_sell_id="SSE#library-on-main",
+        slot_id="SLOT#first-sales",
+        profile_id="PROFILE#avery-scout",
+        location_name="Library on Main",
+        slot_start_at=clock.iso(days=7, hours=1),
+        slot_end_at=clock.iso(days=7, hours=2, minutes=30),
+        slot_label="First Sales",
     )
     dto.update(overrides)
     return dto
 
 
 def test_the_calendar_dto_shape_matches_the_sdl_type() -> None:
+    """Every field the browser reads out of ``CalendarInviteData`` is declared, and the shape is legal."""
     members = stage2._type_member_map(_sdl())["CalendarInviteData"]
     for field in stage3.CALENDAR_DTO_FIELDS:
         assert field in members, f"CalendarInviteData declares no {field}"
@@ -455,56 +827,188 @@ def test_the_calendar_dto_shape_matches_the_sdl_type() -> None:
 def test_a_dto_the_browser_cannot_turn_into_an_invite_is_named() -> None:
     assert any("timezone" in line for line in stage3.calendar_dto_violations(_dto(timezone="Mars/Phobos")))
     assert any("slotStartAt" in line for line in stage3.calendar_dto_violations(_dto(slotStartAt="")))
+    dto = _dto()
     assert any(
-        "does not run after" in line
-        for line in stage3.calendar_dto_violations(_dto(slotEndAt=stage3.DST_MONDAY_START_UTC))
+        "does not run after" in line for line in stage3.calendar_dto_violations({**dto, "slotEndAt": dto["slotStartAt"]})
     )
 
 
-def test_the_invite_uid_is_the_browser_identity_tuple() -> None:
+def test_the_invite_uid_is_the_browser_identity_tuple_and_carries_no_clock() -> None:
+    """CAL-01's stability comes from the shape: four ids and no timestamp — the stamp is DTSTAMP's job."""
     uid = stage3.calendar_invite_uid("UC#x", "S#x", "SL#x", "P#x")
     assert uid == "kernelworx-show-and-sell-UC#x-S#x-SL#x-P#x@kernelworx.app"
-    assert stage3.calendar_invite_uid("UC#x", "S#x", "SL#x", "P#x") == uid  # stable across downloads
+    assert stage3.calendar_invite_uid("UC#x", "S#x", "SL#x", "P#x") == uid
+    local, domain = uid.split("@")
+    assert domain == "kernelworx.app"
+    assert not any(len(part) >= 14 and part[:8].isdigit() for part in local.split("-")), f"{local} carries a stamp"
 
 
-def _good_uid() -> str:
-    return stage3.calendar_invite_uid("UC#x", "S#x", "SL#x", "P#x")
+def test_the_capture_pair_is_two_downloads_of_the_documented_dto() -> None:
+    """The captures are assertable against a constant, so the file on disk cannot quietly drift.
+
+    The UID is rebuilt from :data:`ICS_CAPTURE_DTO`, the two stamps from :data:`ICS_CAPTURE_CLOCKS`, and
+    the interval from the DTO's own ``slotStartAt``/``slotEndAt``: a hand-written stand-in fails here
+    rather than passing a shape check.
+    """
+    first_name, repeat_name = stage3.ICS_CAPTURE_NAMES
+    first, repeat = _capture(first_name), _capture(repeat_name)
+    uid = _capture_uid()
+    assert stage3.calendar_dto_violations(stage3.ICS_CAPTURE_DTO) == []
+    assert first and repeat and first != repeat, "the pair must differ, and only by the clock"
+    assert stage3.ics_uid(first) == uid == stage3.ics_uid(repeat)
+    stamps = (stage3.ics_property_value(first, "DTSTAMP"), stage3.ics_property_value(repeat, "DTSTAMP"))
+    assert stamps == tuple(_ics_instant(stamp) for stamp in stage3.ICS_CAPTURE_CLOCKS)
+    assert stamps[0] != stamps[1], "two downloads built at one clock prove nothing about a re-download"
+    assert stage3.ics_property_value(first, "DTSTART") == _ics_instant(str(stage3.ICS_CAPTURE_DTO["slotStartAt"]))
+    assert stage3.ics_property_value(first, "DTEND") == _ics_instant(str(stage3.ICS_CAPTURE_DTO["slotEndAt"]))
+    assert _minutes(str(stage3.ICS_CAPTURE_DTO["slotStartAt"]), str(stage3.ICS_CAPTURE_DTO["slotEndAt"])) == 90
 
 
-def test_the_browser_ics_passes_the_validator() -> None:
-    """CAL-01: the validator accepts what ``buildInvite`` actually emits — CRLF, TZID, stable UID."""
-    assert stage3.validate_ics(_ics(_good_uid()), _good_uid()) == ()
+def test_the_capture_dto_is_the_same_scenario_the_tree_plans() -> None:
+    """One scenario, one shape: the capture's Unit and Campaign names are the fixture's, unprefixed."""
+    fixture = _fixture()
+    dto = stage3.ICS_CAPTURE_DTO
+    assert fixture["unit"]["name"].startswith(f"{dto['unitDisplayName']} ")
+    assert fixture["unitCampaign"]["name"].startswith(f"{dto['unitCampaignName']} ")
+    location = str(dto["locationName"]).split(" — ")[0]
+    assert any(event["locationName"].startswith(f"{location} ") for event in fixture["events"].values())
 
 
-def test_an_ics_without_tzid_is_rejected() -> None:
-    """A floating-UTC DTSTART is the failure mode CAL-02 exists to catch."""
-    body = _ics(_good_uid()).replace("DTSTART;TZID=America/Denver:20260309T090000", "DTSTART:20260309T150000")
-    problems = stage3.validate_ics(body, _good_uid())
-    assert any("DTSTART" in line and "TZID" in line for line in problems)
+def test_the_validator_accepts_both_captures_as_the_bytes_the_browser_wrote() -> None:
+    """CAL-02: what passes is what ``buildInvite`` emits — UTC with ``Z``, no TZID, no VTIMEZONE."""
+    uid = _capture_uid()
+    for name in stage3.ICS_CAPTURE_NAMES:
+        text = _capture(name)
+        assert stage3.validate_ics(text, uid) == (), f"{name}: {stage3.validate_ics(text, uid)}"
+        assert "TZID" not in text and "VTIMEZONE" not in text
+        assert stage3.ics_property_value(text, "DTSTART").endswith("Z")
 
 
-def test_an_overlong_line_is_rejected() -> None:
-    """RFC 5545 folding: the browser breaks lines at 73 octets; an unfolded break fails."""
-    long_summary = "SUMMARY:" + "x" * (stage3.ICS_MAX_LINE_OCTETS + 1)
-    body = _ics(_good_uid()).replace("SUMMARY:Show & Sell - Riverside Grange", long_summary)
-    problems = stage3.validate_ics(body, _good_uid())
-    assert any("octets" in line for line in problems)
+def test_the_uid_survives_the_second_download_and_a_moved_uid_is_refused() -> None:
+    """CAL-01: two downloads, one identity — and the validator refuses the file that broke it."""
+    first, repeat = (_capture(name) for name in stage3.ICS_CAPTURE_NAMES)
+    uid = _capture_uid()
+    assert stage3.ics_uid(first) == stage3.ics_uid(repeat) == uid
+    moved = stage3.calendar_invite_uid(
+        str(stage3.ICS_CAPTURE_DTO["unitCampaignId"]),
+        "SSE#another-event",
+        str(stage3.ICS_CAPTURE_DTO["slotId"]),
+        str(stage3.ICS_CAPTURE_DTO["profileId"]),
+    )
+    problems = stage3.validate_ics(repeat, moved)
+    assert any("UID" in line and "CAL-01" in line for line in problems), problems
 
 
-def test_a_uid_that_moves_between_downloads_is_rejected() -> None:
-    """CAL-02: the UID is the signup's identity; a second download with another UID is a different file."""
-    problems = stage3.validate_ics(_ics(_good_uid()), stage3.calendar_invite_uid("UC#y", "S#x", "SL#x", "P#x"))
-    assert any("UID" in line for line in problems)
+def test_a_real_uid_must_be_folded_and_the_capture_folds_it_inside_the_rfc_limit() -> None:
+    """The identity is longer than a line, so folding is not optional — and the capture does it."""
+    first = _capture(stage3.ICS_CAPTURE_NAMES[0])
+    uid = _capture_uid()
+    assert len(f"UID:{uid}") > stage3.ICS_MAX_LINE_OCTETS
+    octets = stage3.ics_physical_line_octets(first)
+    assert all(count <= stage3.ICS_MAX_LINE_OCTETS for count in octets), octets
+    assert "\r\n " in first, "no continuation line, so the identity above could not have fit"
+    assert stage3.ics_uid(first) == uid, "unfolding has to put the folded identity back together"
 
 
-def test_a_calendar_file_without_the_publish_method_is_rejected() -> None:
-    body = _ics(_good_uid()).replace("METHOD:PUBLISH\r\n", "")
-    problems = stage3.validate_ics(body, _good_uid())
-    assert any("METHOD:PUBLISH" in line for line in problems)
+def test_the_captures_widest_line_is_the_emitter_fold_plus_the_continuation_space() -> None:
+    """74, not 73: ``foldIcsLine`` budgets 73 octets per segment and the break adds a leading space.
+
+    This is why the acceptance limit is RFC 5545's 75 and not the emitter's own budget: a limit of 73
+    would reject the file the browser actually downloaded.
+    """
+    first = _capture(stage3.ICS_CAPTURE_NAMES[0])
+    octets = stage3.ics_physical_line_octets(first)
+    widest = max(octets)
+    assert widest == stage3.ICS_FOLD_OCTETS + 1 == 74
+    assert stage3.ICS_MAX_LINE_OCTETS == 75
+    assert widest <= stage3.ICS_MAX_LINE_OCTETS
+    assert sum(1 for count in octets if count > stage3.ICS_FOLD_OCTETS) >= 1
+    assert any("75-octet" in check for check in stage3.ICS_CHECKS)
+
+
+def test_a_tzid_without_a_vtimezone_is_named_as_the_hour_out_invite() -> None:
+    """The old validator demanded a TZID; the emitter deliberately writes none. That is now a rejection."""
+    problems = stage3.validate_ics(
+        _invite(replace=(("DTSTART:20260328T150000Z", "DTSTART;TZID=America/Denver:20260328T090000"),)),
+        _synthetic_uid(),
+    )
+    assert any("TZID" in line and "VTIMEZONE" in line for line in problems), problems
+    assert any("explicit Z" in line for line in problems)
+
+
+def test_a_vtimezone_block_is_refused_because_the_emitter_writes_no_zone_definitions() -> None:
+    body = _invite(replace=(("BEGIN:VEVENT", "BEGIN:VTIMEZONE\r\nTZID:America/Denver\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT"),))
+    problems = stage3.validate_ics(body, _synthetic_uid())
+    assert any("VTIMEZONE" in line for line in problems), problems
+
+
+def test_a_floating_local_datetime_is_refused() -> None:
+    """CAL-02's hour-out failure mode: a date-time with no zone designator at all."""
+    problems = stage3.validate_ics(
+        _invite(replace=(("DTSTART:20260328T150000Z", "DTSTART:20260328T090000"),)), _synthetic_uid()
+    )
+    assert any("DTSTART" in line and "explicit Z" in line for line in problems), problems
+
+
+def test_a_second_vevent_is_refused() -> None:
+    body = _invite(replace=(("END:VEVENT", "END:VEVENT\r\nBEGIN:VEVENT\r\nUID:x\r\nEND:VEVENT"),))
+    problems = stage3.validate_ics(body, _synthetic_uid())
+    assert any("exactly one event" in line for line in problems), problems
+
+
+def test_a_missing_required_property_is_named_per_component() -> None:
+    for omitted, message in (("UID", "no UID"), ("DTSTAMP", "no DTSTAMP"), ("VERSION", "no VERSION:2.0")):
+        problems = stage3.validate_ics(_invite(omit=(omitted,)), _synthetic_uid())
+        assert any(message in line for line in problems), (omitted, problems)
+
+
+def test_an_unbalanced_component_is_refused() -> None:
+    problems = stage3.validate_ics(_invite(omit=("END",)), _synthetic_uid())
+    assert any("left open" in line or "closes" in line for line in problems), problems
+
+
+def test_an_overlong_unfolded_line_is_refused() -> None:
+    problems = stage3.validate_ics(
+        _invite(replace=(("LOCATION:Library on Main", f"LOCATION:{'y' * 90}"),)), _synthetic_uid()
+    )
+    assert any("octets" in line for line in problems), problems
+
+
+def test_bad_text_escapes_are_named_against_what_escape_ics_text_writes() -> None:
+    problems = stage3.validate_ics(
+        _invite(replace=(("LOCATION:Library on Main", "LOCATION:Library\\q on Main"),)), _synthetic_uid()
+    )
+    assert any("is not an escape" in line for line in problems), problems
+    problems = stage3.validate_ics(
+        _invite(replace=(("LOCATION:Library on Main", "LOCATION:Library, Main"),)), _synthetic_uid()
+    )
+    assert any("unescaped" in line for line in problems), problems
+
+
+def test_a_file_that_does_not_use_crlf_is_refused() -> None:
+    """A text-mode read of a capture would produce exactly this file, which is the point of the check."""
+    body = _invite().replace("END:VCALENDAR\r\n", "END:VCALENDAR\n")
+    problems = stage3.validate_ics(body, _synthetic_uid())
+    assert any("CRLF" in line or "bare LF" in line for line in problems), problems
+
+
+def test_a_quoted_parameter_containing_a_colon_and_a_semicolon_is_parsed_not_split() -> None:
+    """The validator is a scanner with a component stack, not a set of greps.
+
+    A regex that split a property on the first ``;`` or ``:`` would report this legal line as broken;
+    the parser reads it as one property and keeps checking the rest of the file.
+    """
+    body = _invite(replace=(("LOCATION:Library on Main", 'LOCATION;X-LOC="Denver; CO":Library on Main'),))
+    assert stage3.validate_ics(body, _synthetic_uid()) == (), stage3.validate_ics(body, _synthetic_uid())
+
+
+def test_a_folded_property_is_unfolded_before_it_is_parsed() -> None:
+    body = _invite(replace=(("SUMMARY:Show & Sell: First Sales", "SUMMARY:Show & Sell:\r\n  First Sales"),))
+    assert stage3.validate_ics(body, _synthetic_uid()) == ()
 
 
 def test_no_server_artifact_is_in_the_checks() -> None:
-    """RPT-00: the checks own only what the browser produces; no download URL is a stage 3 concept."""
+    """RPT-00: the checks own only what the browser produces; no download URL is a Stage 3 concept."""
     assert any("browser" in check for check in stage3.ICS_CHECKS)
     assert any("no server artifact" in check.lower() or "no download URL" in check for check in stage3.ICS_CHECKS)
 
@@ -548,16 +1052,94 @@ def test_the_stock_snapshot_carries_only_the_columns_stage_three_must_not_move()
 
 
 # ---------------------------------------------------------------------------
-# Cleanup (SS-SM-05/06/11 lane cleanup, TTL-gated)
+# The cleanup plan (SS-SM-05/06/11 lane cleanup, TTL-gated)
+#
+# What is executed here is the *plan*.  The delete, the read-back and the canary are executed against a
+# fake DynamoDB in ``tests/unit/test_show_sell_stage3_scenario.py``, because a plan nobody deleted
+# against is only a list.
 # ---------------------------------------------------------------------------
 
 
-def test_the_cleanup_plan_uses_the_stage_two_vocabulary() -> None:
-    plan = stage3.stage_three_cleanup_plan("ab12")
-    assert plan and all({"acceptance", "summary", "result"} <= set(row) for row in plan)
-    assert all(row["result"] == stage2.CLEANUP_OBSERVED for row in plan)
-    joined = " ".join(row["summary"] for row in plan)
-    assert "idem" in joined and str(stage3.MARKER_TTL_SECONDS // 3600) in joined
+def _bound_ids(fixture: dict[str, Any]) -> dict[str, str]:
+    """The ids a lane that ran the whole scenario would have collected."""
+    ids: dict[str, str] = {"actorAccount": "ACCOUNT#qa-admin", "scope": "SS-SM-05"}
+    ids |= {f"event.{name}": f"SSE#{name}" for name in fixture["events"]}
+    ids |= {f"slot.{name}": f"SLOT#{name}" for name in fixture["slots"]}
+    ids |= {f"profile.{name}": f"PROFILE#{name}" for name in fixture["profiles"]}
+    return ids
+
+
+def test_the_cleanup_plan_names_a_table_and_a_key_for_every_row_it_wants_gone() -> None:
+    clock = _clock()
+    fixture = stage3.stage_three_fixture(clock)
+    plan = stage3.stage_three_cleanup_plan(clock, fixture, ids=_bound_ids(fixture))
+    deletable = [row for row in plan if row["kind"] != "sweep"]
+    assert deletable and all(row["table"] == stage3.show_and_sells_table() for row in deletable)
+    assert stage3.show_and_sells_table() == stage3.DEV_SHOW_AND_SELLS_TABLE == "kernelworx-show-and-sells-ue1-dev"
+    for row in deletable:
+        assert {"pk", "sk"} <= set(row["key"]), row
+        assert all(stage3.UNBOUND_KEY_MARKER not in str(cell) for cell in row["key"].values()), row
+    assert {row["kind"] for row in plan} == {"slot", "signup", "event", "marker", "sweep"}
+
+
+def test_an_unbound_lane_keeps_placeholders_in_its_keys_so_no_delete_is_a_guess() -> None:
+    clock = _clock()
+    fixture = stage3.stage_three_fixture(clock)
+    plan = stage3.stage_three_cleanup_plan(clock, fixture)
+    deletable = [row for row in plan if row["kind"] != "sweep"]
+    assert deletable
+    for row in deletable:
+        assert any(stage3.UNBOUND_KEY_MARKER in str(cell) for cell in row["key"].values()), row
+    half = _bound_ids(fixture)
+    half.pop("scope")
+    partial = stage3.stage_three_cleanup_plan(clock, fixture, ids=half)
+    markers = [row for row in partial if row["kind"] == "marker"]
+    assert all("<scope>" in row["key"]["pk"] and "<actorAccount>" not in row["key"]["pk"] for row in markers)
+
+
+def test_the_plan_orders_slots_then_signups_then_events_then_markers_then_the_sweep() -> None:
+    """A row that still holds a signup cannot be deleted first, or the lane learns nothing."""
+    clock = _clock()
+    fixture = stage3.stage_three_fixture(clock)
+    plan = stage3.stage_three_cleanup_plan(clock, fixture, ids=_bound_ids(fixture))
+    kinds = [row["kind"] for row in plan]
+    first_of = {kind: kinds.index(kind) for kind in ("slot", "signup", "event", "marker", "sweep")}
+    assert first_of["slot"] < first_of["signup"] < first_of["event"] < first_of["marker"] < first_of["sweep"]
+    assert plan[-1]["kind"] == "sweep" and plan[-1]["key"] == {}
+    assert "typed token" in plan[-1]["summary"] or "sweep" in plan[-1]["summary"]
+
+
+def test_the_plan_carries_a_marker_row_for_every_write_and_names_the_ttl_it_refuses_to_wait_for() -> None:
+    clock = _clock()
+    fixture = stage3.stage_three_fixture(clock)
+    plan = stage3.stage_three_cleanup_plan(clock, fixture, ids=_bound_ids(fixture))
+    markers = [row for row in plan if row["kind"] == "marker"]
+    assert len(markers) == len(stage3.STAGE_THREE_WRITES)
+    assert all(row["acceptance"] == "API-FIX-03" for row in markers)
+    joined = " ".join(row["summary"] for row in markers)
+    assert str(stage3.MARKER_TTL_SECONDS // 3600) in joined and "TTL" in joined
+    assert all(row["key"]["sk"].startswith("IDEM#") for row in markers)
+
+
+def test_the_plan_covers_every_slot_signup_and_event_the_tree_plans() -> None:
+    clock = _clock()
+    fixture = stage3.stage_three_fixture(clock)
+    plan = stage3.stage_three_cleanup_plan(clock, fixture, ids=_bound_ids(fixture))
+    counts = {kind: sum(1 for row in plan if row["kind"] == kind) for kind in ("slot", "signup", "event")}
+    assert counts["slot"] == len(fixture["slots"])
+    assert counts["signup"] == len(fixture["signups"])
+    assert counts["event"] == len(fixture["events"])
+    assert all(row["lane"] == clock.token for row in plan)
+
+
+def test_the_canary_row_belongs_to_another_lane_token() -> None:
+    clock = _clock()
+    other = _clock(DEFAULT_T0, lane_id="L07")
+    canary = stage3.stage_three_cleanup_canary(other.token)
+    assert canary["kind"] == "canary"
+    assert canary["lane"] == other.token != clock.token
+    assert canary["table"] == stage3.show_and_sells_table()
+    assert {"pk", "sk"} <= set(canary["key"])
 
 
 def test_a_failed_cleanup_row_raises_the_stage_three_error() -> None:

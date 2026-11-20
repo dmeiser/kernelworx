@@ -1,0 +1,21 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//KernelWorx//Show and Sell//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:kernelworx-show-and-sell-UNITCAMP#pack-3149-ss-sm-06-l01-SSE#library-
+ on-main-SLOT#first-sales-PROFILE#avery-scout@kernelworx.app
+DTSTAMP:20260321T150405Z
+DTSTART:20260328T150000Z
+DTEND:20260328T163000Z
+SUMMARY:Show & Sell: First Sales — Library on Main — 200 Main St & El
+ m
+LOCATION:Library on Main — 200 Main St & Elm\, 200 Main St\, Elm Court\
+ , Apt 3
+DESCRIPTION:Slot: First Sales\nUnit: Smoke Pack 3149\nCampaign: Fall Popc
+ orn 2026\nEvent: Library on Main — 200 Main St & Elm\nTimes in America/
+ Denver: Mar 28\, 2026\, 9:00 AM – Mar 28\, 2026\, 10:30 AM\nUTC: Mar 28
+ \, 2026\, 3:00 PM – Mar 28\, 2026\, 4:30 PM
+END:VEVENT
+END:VCALENDAR

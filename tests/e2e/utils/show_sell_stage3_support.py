@@ -3,31 +3,39 @@
 Checklist §3.6.2 is the work order, verbatim: "Add deterministic event/slot/allocation/conflict fixtures
 for ``T0``-relative past/future/ACTIVE/ENDED/REOPENED/FINALIZED/CANCELLED states, four-box events,
 16-product catalog, 90/120/180-minute slots, removed members, stale versions, and race barriers.  Add
-``API-FIX-01/03``, ``SS-SM-05/06/11``, and lane cleanup tests."  In the leaf shape the card names, it is:
-private lane, deterministic fixtures, events/slots/products/allocation, conflict pairs, calendar DTO plus
-ICS validator, refusal assertions, inventory ledger, TTL-gated cleanup.  This module is that list as
-code, so a Stage 3 lane writes its fixtures from one place and the parts that do not need a deployed
-stack are executable by ``tests/unit``.
+``API-FIX-01/03``, ``SS-SM-05/06/11``, and lane cleanup tests."  This module is that list as code: every
+named state and boundary has a fixture, every fixture instant is an offset from the scenario's ``T0``,
+and the parts that do not need a deployed stack are executable by ``tests/unit``.
 
 It lives next to :mod:`tests.e2e.utils.show_sell_graphql`, and for the same reason the evidence helpers
 do — outside the spec, so ``tests/unit`` can execute it.  Importing a Stage 3 spec itself from the unit
-suite would fail on its ``slow`` marker under the root pytest configuration.
+suite would fail on its ``slow`` marker under the root pytest configuration.  The half of the layer that
+*performs* work — the transport-driven conflict lane, the stale-version and removed-member fixtures, the
+race barriers, the FINALIZED/REOPENED DynamoDB fixture builder, and the delete-and-read-back cleanup —
+is :mod:`tests.e2e.utils.show_sell_stage3_scenario`, which imports this one and never the reverse.
 
-Four rules the whole module follows:
+Five rules the whole module follows:
 
+* **Time comes from the scenario, never from a calendar.**  Smoke plan §3.1 says ``T0`` is scenario setup
+  time and "Compute event times relative to ``T0``; do not hardcode calendar dates in automation", and
+  FIX-AC-03 requires setup to hand every scenario ``RUN_ID``, ``LANE_ID``, ``DATA_ID``, ``T0`` and the Unit
+  timezone.  :class:`ScenarioClock` is that hand-off: it is built from a supplied ``t0`` plus the four
+  ``DATA_ID`` parts, and every event, slot and boundary instant in this file is an offset from it.  The
+  DST fixture pair is *computed* from the clock's year — :func:`spring_forward_date` derives the second
+  Sunday in March, and the pair is 09:00 Unit-zone wall clock on the Saturday before and the Monday after
+  — because a copied date proves nothing about a year whose boundary falls elsewhere.
+* **A missing fixture blocks the scenario; it never excuses it.**  ``API-FIX-01`` in
+  ``SHOW_AND_SELL_GRAPHQL_E2E_TEST_DESCRIPTIONS.md`` §1.2 lists ACTIVE/ENDED/REOPENED/FINALIZED/CANCELLED,
+  past and future fixtures as acceptance criteria, and the same section closes with "A missing required
+  fixture makes the scenario blocked; it does not justify skipping its security assertion."  Every state
+  named by §3.6.2 therefore has a fixture here.  Two of them (``FINALIZED``, ``REOPENED``) have no public
+  mutation in this SDL, so the scenario module builds them with an explicit DynamoDB fixture builder and
+  reports ``BLOCKED`` naming the grant it is denied when the QA identity cannot write the row.
 * **A document names the arguments the SDL declares.**  :func:`stage_three_contract_violations` compares
   every document and input builder here against ``tofu/application/schema/schema.graphql``, so a resolver
   rename stops a lane with a named mismatch instead of an AppSync parse error partway through it.  The SDL
   reader is the Stage 2 module's (:mod:`tests.e2e.utils.show_sell_stage2_support`), because a second
   parser is a second thing that can drift.
-* **A fixture reproduces itself, and every write it plans is legal at the moment it is planned.**
-  Determinism lives in the lane token, the entity names, the tenant key, the idempotency keys, and the
-  interval arithmetic — a re-run of the same seed rebuilds the same bytes and recognises the same Unit
-  through the same tenant key.  Entity ids are the *server's*: ``createUnit`` and ``createShowAndSell``
-  mint UUIDs the caller never names, so the fixture carries ``<ref>`` placeholders and the lane binds the
-  ids the answers came back with (:func:`bind_ids`).  States a write cannot produce without bypassing
-  the rule under test (``FINALIZED``, ``REOPENED`` — §5's mutations, absent from this SDL) are reported
-  blocked by :data:`STAGE_THREE_BLOCKED_STATE_FIXTURES`, never faked.
 * **A quantity is checked against the rows it is derived from, never against a stored copy.**  §7
   defines the derived quantities as formulas over balance, allocation and custody rows, computed per
   request by :func:`src.utils.inventory_models.derived_inventory_quantities`; the Stage 2 formula checks
@@ -37,23 +45,31 @@ Four rules the whole module follows:
   stock never changes" claim, measured at the write layer).
 * **The ICS validator validates what the *browser* produces.**  No server generates, stores, or serves a
   calendar file (CAL-01, CAL-02, RPT-00): the browser assembles the invite itself from the authorized
-  ``showAndSellSignupCalendarData`` read (``frontend/src/lib/showSell.ts``'s ``buildInvite``) and
-  downloads it locally.  :func:`validate_ics` is written from RFC 5545 and ``buildInvite``, not from any
-  server artifact, and the lane feeds it the bytes the browser actually downloaded.
+  ``showAndSellSignupCalendarData`` read (``frontend/src/lib/showSell.ts``'s ``buildInvite``) and downloads
+  it locally.  ``buildInvite`` writes UTC with a trailing ``Z`` and deliberately no ``TZID`` and no
+  ``VTIMEZONE``, so :func:`validate_ics` accepts exactly that shape and rejects the opposite: a ``TZID``
+  parameter, a ``VTIMEZONE`` block, a floating date-time, a UID that moves between two downloads of the
+  same signup, an unfolded line over 75 octets, a missing ``METHOD:PUBLISH``/``BEGIN``/``END``, and text
+  the emitter did not escape.  It is a line parser and a component state machine, not a set of regexes
+  over the whole document, and the bytes it is fed in ``tests/unit`` are the captured output of
+  ``buildInvite`` (``tests/e2e/fixtures/show_sell_stage3_invite_build*.ics``), not a hand-written stand-in.
 
 Cleanup reuses the Stage 2 vocabulary (:data:`STRICT_CLEANUP`, ``CLEANUP_OBSERVED/BLOCKED/FAILED``,
 :func:`run_cleanup_step`, :func:`assert_cleanup_clean`, :func:`fixture_sweep`, :func:`sweep_verdict`,
 :class:`CleanupBlocked`, :class:`StageTwoCleanupError`) rather than carrying a second copy of it; the
-Stage 3 additions are the ordered plan, the typed sweep tokens, and the TTL gate.
+Stage 3 additions are the ordered plan with the table and key of every row it names, the typed sweep
+tokens, and the TTL gate.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from datetime import time as wall_clock_time
+from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
 
 from src.utils import show_and_sell_models
@@ -61,11 +77,17 @@ from tests.e2e.utils import show_sell_graphql
 from tests.e2e.utils import show_sell_stage2_support as stage_two
 
 __all__ = [
-    "BLOCKED_STATE_FIXTURE_NOTE",
+    "BUILDER_ONLY_STATE_FIXTURE_NOTE",
     "CALENDAR_DTO_FIELDS",
-    "DST_SPRING_FORWARD",
+    "DATA_ID_PARTS",
+    "DEV_SHOW_AND_SELLS_TABLE",
+    "FOUR_BOX_QUANTITY",
     "ICS_CHECKS",
-    "STAGE_THREE_REFUSAL_ANSWERS",
+    "ICS_CAPTURE_CLOCKS",
+    "ICS_CAPTURE_DTO",
+    "ICS_CAPTURE_NAMES",
+    "ICS_FOLD_OCTETS",
+    "ICS_MAX_LINE_OCTETS",
     "MARKER_TTL_ATTRIBUTE",
     "MARKER_TTL_SECONDS",
     "MAX_SLOT_CAPACITY",
@@ -74,17 +96,23 @@ __all__ = [
     "MIN_SLOT_CAPACITY",
     "MISSING_ENDPOINT_NOTE",
     "NEVER_EXPIRING_ROW_CLASSES",
-    "STAGE_THREE_BLOCKED_STATE_FIXTURES",
+    "PRODUCT_CATALOG_SIZE",
+    "QA_FIXTURE_IDENTITY",
+    "STAGE_THREE_BUILDER_ONLY_STATE_FIXTURES",
     "STAGE_THREE_CLEANUP_READS",
+    "UNBOUND_KEY_MARKER",
+    "STAGE_THREE_CONFLICT_PAIRS",
     "STAGE_THREE_DOCUMENTS",
     "STAGE_THREE_LANE_TOKEN_KINDS",
     "STAGE_THREE_MOVEMENT_TYPES",
     "STAGE_THREE_READS",
     "STAGE_THREE_REFUSALS",
+    "STAGE_THREE_REFUSAL_ANSWERS",
     "STAGE_THREE_STOCK_COLUMNS",
     "STAGE_THREE_SUPPORT_DOCUMENTS",
     "STAGE_THREE_WRITES",
     "UNIT_TIMEZONE",
+    "ScenarioClock",
     "StageThreeCleanupError",
     "assert_stage_three_cleanup_clean",
     "assigned_by_product",
@@ -97,13 +125,19 @@ __all__ = [
     "create_event_input",
     "denver_wall_clock",
     "fixture_sweep",
+    "ics_physical_line_octets",
+    "ics_property_value",
+    "ics_uid",
     "lane_token",
     "missing_stage_three_endpoints",
     "refusal_violations",
+    "show_and_sells_table",
+    "stage_three_cleanup_canary",
     "run_cleanup_step",
+    "sample_clock",
+    "spring_forward_date",
     "stage_three_cleanup_plan",
     "stage_three_contract_violations",
-    "stage_three_fields_in_schema",
     "stage_three_fixture",
     "stage_three_ledger_invariants",
     "stage_three_refusal",
@@ -121,6 +155,7 @@ __all__ = [
     "signup_input",
     "cancel_signup_input",
     "confirm_work_input",
+    "validate_dst_pair",
     "validate_ics",
     # Re-exported Stage 2 cleanup vocabulary — one spelling, one owner (stage_two_support).
     "STRICT_CLEANUP",
@@ -200,11 +235,6 @@ MISSING_ENDPOINT_NOTE = (
 #: and ICS math live here; persisted intervals stay unambiguous UTC.
 UNIT_TIMEZONE = "America/Denver"
 
-#: The spring-forward boundary the calendar assertions pin: 2026-03-08, when Denver moves from
-#: UTC-7 to UTC-6, so 2026-03-07 09:00 local is 16:00 UTC and 2026-03-09 09:00 local is 15:00 UTC
-#: (the frontend suite's own DST pair).
-DST_SPRING_FORWARD = date(2026, 3, 8)
-
 #: Operating limits, read from the model so a change to a limit moves the fixture and the check
 #: together (the lane runs from this tree, and the SDL guard catches a *rename*).  ``20`` slots per
 #: event (§3.3.2), slot ``capacity`` 1-100 (§3.3.2), and a work batch of at most ``100`` rows
@@ -242,6 +272,337 @@ NEVER_EXPIRING_ROW_CLASSES: tuple[str, ...] = (
     "commitment-guard",
     "allocation",
 )
+
+# ---------------------------------------------------------------------------
+# The scenario clock (smoke plan §3.1, FIX-AC-03)
+# ---------------------------------------------------------------------------
+#
+# Nothing below this banner carries a calendar date.  An instant is always
+# ``clock.<something>(days=..., hours=...)``, so the same scenario re-run a year
+# later, or on the other side of a DST boundary, builds the same *relationships*
+# — which is the only thing the acceptance ids assert.
+
+#: The four parts FIX-AC-03 requires setup to provide; ``DATA_ID`` is them joined
+#: with ``-`` in the plan's order, and the fresh ``ATTEMPT_ID`` is what makes a
+#: retry of a failed scenario unable to collide with the attempt it replaces.
+DATA_ID_PARTS: tuple[str, ...] = ("RUN_ID", "SCENARIO_ID", "LANE_ID", "ATTEMPT_ID")
+
+#: The four-box fixture of SS-SM-05: exactly this many Caramel Popcorn units recorded in
+#: the Unit Campaign, assigned 3 + 3 across two sequential events with the third (the
+#: overlapping one) refused.  It is a quantity, not an event count.
+FOUR_BOX_QUANTITY = 4
+
+#: §3.6.2 names a 16-product catalog: allocation has no event-wide product cap (§3.2.1), so
+#: the fixture must reach a 16th product and §3.7.1 runs it in a separate batch.
+PRODUCT_CATALOG_SIZE = 16
+
+_TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+_RUN_EPOCH = re.compile(r"^(\d{9,11})-[0-9a-z]{4,}$")
+
+
+def spring_forward_date(year: int) -> date:
+    """The day America/Denver springs forward in ``year``: the second Sunday in March.
+
+    Computed rather than copied on purpose.  The date moves — 2026-03-08, 2027-03-14 — and
+    a fixture pair pinned to one year's calendar silently stops straddling anything in
+    another.  :func:`validate_dst_pair` (and the unit suite) prove against ``zoneinfo``
+    that the day this returns really is the boundary for the clock's year.
+    """
+    first = date(year, 3, 1)
+    first_sunday = 1 + ((6 - first.weekday()) % 7)
+    return date(year, 3, first_sunday + 7)
+
+
+def denver_wall_clock(iso_utc: str) -> str:
+    """The fixture's display zone for one UTC instant: the local time and the zone abbreviation.
+
+    ``09:00 MST`` on the Saturday before a spring-forward, ``09:00 MDT`` on the Monday after
+    it — the same wall clock, an hour apart in UTC, which is the fact SS-SM-11's calendar
+    assertions pin.
+    """
+    moment = datetime.fromisoformat(iso_utc.replace("Z", "+00:00")).astimezone(ZoneInfo(UNIT_TIMEZONE))
+    return f"{moment:%Y-%m-%d %H:%M} {moment:%Z}"
+
+
+#: The clock's own persisted spelling (§3.1, "persist unambiguously"): ISO with an explicit ``Z``.
+#: Not the same pattern as :data:`_UTC_DATE_TIME`, which is the RFC 5545 ``DTSTAMP`` spelling an
+#: invite carries — two different surfaces, and conflating them is how a DST check silently passes.
+_ISO_Z_INSTANT = re.compile(r"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
+
+
+def validate_dst_pair(pair: Mapping[str, Any]) -> tuple[str, ...]:
+    """Proof that a DST pair really straddles a spring-forward, computed against ``zoneinfo``.
+
+    The point of checking rather than copying is that the boundary moves: it is 2026-03-08 in one
+    scenario's year, 2027-03-14 in another, and a pair pinned to either calendar stops straddling
+    anything in a third.  So every fact here is derived at call time from the dates in ``pair``:
+
+    * the boundary is the second Sunday in March of its own year, and really a Sunday;
+    * the pair is the Saturday before it and the Monday after it — not the same week, not a weekend;
+    * both instants read 09:00 on the Unit's wall clock, which is the walkthrough's wording;
+    * the two wall clocks are one hour apart in UTC offsets and 47 hours apart in real time, which is
+      what "the same 09:00, an hour earlier in UTC" means; and
+    * the boundary falls strictly between the two instants.
+
+    Returns:
+        The problems, empty when the pair straddles the boundary as SS-SM-11 needs it to.
+    """
+    problems: list[str] = []
+    zone = ZoneInfo(UNIT_TIMEZONE)
+
+    def as_date(value: Any) -> date | None:
+        try:
+            return date.fromisoformat(str(value))
+        except ValueError:
+            return None
+
+    def as_instant(value: Any) -> datetime | None:
+        text = str(value or "")
+        if not _ISO_Z_INSTANT.match(text):
+            return None
+        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+    boundary = as_date(pair.get("boundary"))
+    saturday_date = as_date(pair.get("saturdayDate"))
+    monday_date = as_date(pair.get("mondayDate"))
+    if boundary is None:
+        problems.append(f"boundary: {pair.get('boundary')!r} is not an ISO date, so nothing can be straddled")
+    if saturday_date is None or monday_date is None:
+        problems.append(
+            f"saturdayDate/mondayDate: {pair.get('saturdayDate')!r} / {pair.get('mondayDate')!r} are not ISO dates"
+        )
+    if boundary is not None:
+        expected = spring_forward_date(boundary.year)
+        if boundary != expected:
+            problems.append(
+                f"boundary: {boundary} is not the second Sunday in March {boundary.year} ({expected}), "
+                "so the pair around it straddles no spring-forward"
+            )
+        if saturday_date is not None and saturday_date != boundary - timedelta(days=1):
+            problems.append(f"saturdayDate: {saturday_date} is not the day before the boundary {boundary}")
+        if monday_date is not None and monday_date != boundary + timedelta(days=1):
+            problems.append(f"mondayDate: {monday_date} is not the day after the boundary {boundary}")
+
+    saturday = as_instant(pair.get("saturdayStartAt"))
+    monday = as_instant(pair.get("mondayStartAt"))
+    if saturday is None:
+        problems.append(f"saturdayStartAt: {pair.get('saturdayStartAt')!r} is not a UTC instant with an explicit Z")
+    if monday is None:
+        problems.append(f"mondayStartAt: {pair.get('mondayStartAt')!r} is not a UTC instant with an explicit Z")
+    if saturday is not None and monday is not None:
+        for label, moment, day in (("saturday", saturday, saturday_date), ("monday", monday, monday_date)):
+            local = moment.astimezone(zone)
+            if (local.hour, local.minute) != (9, 0):
+                problems.append(f"{label}StartAt: {local:%H:%M} is not 09:00 on the Unit's wall clock")
+            if day is not None and local.date() != day:
+                problems.append(f"{label}StartAt: {local.date()} in {UNIT_TIMEZONE} is not the planned date {day}")
+        for label, moment in (("saturday", saturday), ("monday", monday)):
+            if moment.astimezone(timezone.utc) != moment:
+                problems.append(f"{label}StartAt: not held in UTC")
+        shift = monday.astimezone(zone).utcoffset() - saturday.astimezone(zone).utcoffset()
+        if shift != timedelta(hours=1):
+            problems.append(
+                f"the two 09:00 wall clocks are {shift} apart in UTC offset, not the one hour a "
+                "spring-forward has to move them"
+            )
+        elapsed = monday - saturday
+        if elapsed != timedelta(hours=47):
+            problems.append(
+                f"the pair is {elapsed} apart, not the 47 hours between 09:00 on the Saturday before a "
+                "spring-forward and 09:00 on the Monday after it"
+            )
+        if boundary is not None:
+            boundary_start = datetime.combine(boundary, wall_clock_time(0, 0), timezone.utc)
+            if not saturday < boundary_start < monday:
+                problems.append(f"the boundary {boundary} does not fall between the two instants")
+    return tuple(problems)
+
+
+class ScenarioClock:
+    """Every instant a Stage 3 scenario uses, as an offset from the scenario's ``T0``.
+
+    FIX-AC-03 requires setup to hand each scenario ``RUN_ID``, ``LANE_ID``, ``DATA_ID``, ``T0`` and the
+    Unit timezone; smoke plan §3.1 requires automation to compute event times relative to ``T0`` and to
+    hardcode no calendar date.  This class is that contract in one object, so a fixture cannot reach for
+    a literal even by accident.
+
+    Args:
+        t0: scenario setup time.  Must be timezone-aware; it is stored as UTC.
+        run_id: the run identifier, ``<UTC epoch seconds>-<short uuid>`` (§3.1).
+        scenario_id: the stable scenario identifier, e.g. ``SS-SM-05``.
+        lane_id: the zero-padded lane, e.g. ``L01``.
+        attempt_id: a fresh identifier per attempt, so a retry never reuses the attempt it replaces.
+
+    Raises:
+        ValueError: ``t0`` is naive, or a part is empty or contains whitespace.
+    """
+
+    def __init__(self, *, t0: datetime, run_id: str, scenario_id: str, lane_id: str, attempt_id: str) -> None:
+        if t0.tzinfo is None:
+            raise ValueError(
+                "T0 must carry a timezone; a naive scenario time is a scenario pinned to the writer's clock"
+            )
+        parts = {"RUN_ID": run_id, "SCENARIO_ID": scenario_id, "LANE_ID": lane_id, "ATTEMPT_ID": attempt_id}
+        for name, value in parts.items():
+            if not value or value.strip() != value or any(character in value for character in " \t/"):
+                raise ValueError(f"{name} must be a non-empty token with no whitespace, got {value!r}")
+        self.t0 = t0.astimezone(timezone.utc)
+        self.run_id = run_id
+        self.scenario_id = scenario_id
+        self.lane_id = lane_id
+        self.attempt_id = attempt_id
+        self.timezone_name = UNIT_TIMEZONE
+
+    @classmethod
+    def from_run_id(
+        cls, run_id: str, scenario_id: str, lane_id: str, attempt_id: str, *, t0: datetime | None = None
+    ) -> ScenarioClock:
+        """Build the clock the way §3.1 defines ``RUN_ID``: ``T0`` is the run's own epoch seconds.
+
+        ``RUN_ID`` is "UTC epoch seconds plus a short UUID", so a scenario that is handed only its run
+        identifier already has a scenario setup time and never needs a literal date.  A caller that
+        captured ``T0`` separately (a lane that started setup before it minted the run id) passes it and
+        that value wins.
+
+        Raises:
+            ValueError: ``run_id`` does not start with the epoch seconds §3.1 defines it to carry.
+        """
+        if t0 is not None:
+            return cls(t0=t0, run_id=run_id, scenario_id=scenario_id, lane_id=lane_id, attempt_id=attempt_id)
+        match = _RUN_EPOCH.match(run_id)
+        if match is None:
+            raise ValueError(
+                f"RUN_ID {run_id!r} does not start with the UTC epoch seconds §3.1 defines: 1735420800-a1b2c3"
+            )
+        return cls(
+            t0=datetime.fromtimestamp(int(match.group(1)), timezone.utc),
+            run_id=run_id,
+            scenario_id=scenario_id,
+            lane_id=lane_id,
+            attempt_id=attempt_id,
+        )
+
+    @property
+    def data_id(self) -> str:
+        """The scenario-attempt suffix §3.1 appends to every displayed name."""
+        return "-".join((self.run_id, self.scenario_id, self.lane_id, self.attempt_id))
+
+    @property
+    def token(self) -> str:
+        """Twelve hex characters derived from ``DATA_ID``: the lane token every key, marker and
+        idempotency token this scenario writes derives from."""
+        return _sha256_hex(f"stage3:{self.data_id}")[:12]
+
+    def offset(self, *, days: int = 0, hours: int = 0, minutes: int = 0) -> datetime:
+        """One instant, as an offset from ``T0``.  The only way to name a fixture time."""
+        return self.t0 + timedelta(days=days, hours=hours, minutes=minutes)
+
+    def iso(self, *, days: int = 0, hours: int = 0, minutes: int = 0) -> str:
+        """The offset as the persisted spelling: UTC with an explicit ``Z`` (§3.1, "persist unambiguously")."""
+        return self.offset(days=days, hours=hours, minutes=minutes).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def epoch(self, *, days: int = 0, hours: int = 0, minutes: int = 0) -> int:
+        """The offset as epoch seconds — what a TTL or a marker expiry needs."""
+        return int(self.offset(days=days, hours=hours, minutes=minutes).timestamp())
+
+    def local_date(self, day_offset: int = 0) -> date:
+        """The Unit-zone calendar date ``day_offset`` after ``T0``'s Unit-zone date.
+
+        Offsets are counted in the Unit's own calendar, because that is how the walkthroughs count them
+        ("Tomorrow, 09:00"), and it is what keeps a scenario whose ``T0`` is 04:00 UTC on a November
+        morning from landing a "tomorrow" event on the wrong calendar day.
+        """
+        return (self.t0.astimezone(ZoneInfo(self.timezone_name)) + timedelta(days=day_offset)).date()
+
+    def at_unit_wall_clock(self, day_offset: int, hhmm: str) -> datetime:
+        """The instant the Unit's wall clock reads ``hhmm`` on ``local_date(day_offset)``.
+
+        DST-aware by construction: the wall clock is interpreted in ``self.timezone_name``, so the same
+        ``09:00`` is 16:00 UTC in November MST and 15:00 UTC in July MDT.
+
+        Raises:
+            ValueError: ``hhmm`` is not a wall clock, or that wall clock does not exist in the Unit zone
+                on that date — the spring-forward gap.  Refusing it is the honest answer: a fixture that
+                asked for 02:30 on the spring-forward date is asking for an instant that never happened.
+        """
+        if not _TIME_PATTERN.match(hhmm):
+            raise ValueError(f"{hhmm!r} is not a 24-hour wall clock such as 09:00")
+        day = self.local_date(day_offset)
+        moment = datetime(day.year, day.month, day.day, *_parse_wall_clock(hhmm), tzinfo=ZoneInfo(self.timezone_name))
+        if moment.astimezone(timezone.utc).astimezone(ZoneInfo(self.timezone_name)).replace(
+            tzinfo=None
+        ) != moment.replace(tzinfo=None):
+            raise ValueError(
+                f"{day.isoformat()} {hhmm} does not exist in {self.timezone_name}: the DST gap has no answer"
+            )
+        return moment.astimezone(timezone.utc)
+
+    def unit_window(self, day_offset: int, start: str, end: str) -> tuple[str, str]:
+        """A start/end pair of UTC ISO strings at Unit-zone wall clocks on one local date."""
+        return (
+            self.at_unit_wall_clock(day_offset, start).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            self.at_unit_wall_clock(day_offset, end).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+
+    def spring_forward(self) -> date:
+        """The next spring-forward boundary at or after this scenario's ``T0``."""
+        year = self.local_date().year
+        boundary = spring_forward_date(year)
+        if datetime(boundary.year, boundary.month, boundary.day, tzinfo=timezone.utc) < self.t0:
+            boundary = spring_forward_date(year + 1)
+        return boundary
+
+    def dst_pair(self) -> dict[str, Any]:
+        """The computed DST fixture pair: 09:00 Unit-zone wall clock on the Saturday before the
+        boundary and the Monday after it, with the UTC instants and offsets that prove the straddle.
+
+        Nothing here is copied from a fixture file: the boundary comes from :func:`spring_forward_date`,
+        and the offsets from ``zoneinfo`` for those two dates, so the pair is right for every year the
+        scenario runs in.
+        """
+        boundary = self.spring_forward()
+        saturday_local = datetime.combine(
+            boundary - timedelta(days=1), wall_clock_time(9, 0), ZoneInfo(self.timezone_name)
+        )
+        monday_local = datetime.combine(
+            boundary + timedelta(days=1), wall_clock_time(9, 0), ZoneInfo(self.timezone_name)
+        )
+        saturday = saturday_local.astimezone(timezone.utc)
+        monday = monday_local.astimezone(timezone.utc)
+        return {
+            "boundary": boundary.isoformat(),
+            "saturdayDate": (boundary - timedelta(days=1)).isoformat(),
+            "mondayDate": (boundary + timedelta(days=1)).isoformat(),
+            "saturdayStartAt": saturday.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "mondayStartAt": monday.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "saturdayOffset": saturday_local.strftime("%z"),
+            "mondayOffset": monday_local.strftime("%z"),
+            "saturdayWallClock": denver_wall_clock(saturday.strftime("%Y-%m-%dT%H:%M:%SZ")),
+            "mondayWallClock": denver_wall_clock(monday.strftime("%Y-%m-%dT%H:%M:%SZ")),
+            "elapsedHours": round((monday - saturday).total_seconds() / 3600, 3),
+        }
+
+
+def sample_clock() -> ScenarioClock:
+    """The clock the module-level payload samples are built from.
+
+    A documented scenario, not ``now``: :data:`_SAMPLES` only has to be a contract-shaped payload for the
+    SDL check, so it must reproduce byte for byte between runs.  The dates in it are the *output* of the
+    clock, never an input to a fixture.
+    """
+    return ScenarioClock(
+        t0=datetime(2026, 11, 15, 14, 30, tzinfo=timezone.utc),
+        run_id="1794753000-a1b2c3",
+        scenario_id="SS-SM-06",
+        lane_id="L01",
+        attempt_id="7d41d8cd",
+    )
+
+
+def _parse_wall_clock(hhmm: str) -> tuple[int, int]:
+    hour, _, minute = hhmm.partition(":")
+    return int(hour), int(minute)
+
 
 # ---------------------------------------------------------------------------
 # Refusal table: the exact code and sentence a colliding payload earns, and where it is raised
@@ -373,6 +734,24 @@ STAGE_THREE_REFUSAL_ANSWERS: Mapping[str, Mapping[str, str]] = {
         "sentence": "Show & Sell signup not found",
         "source": "src/handlers/unit_operations.py",
     },
+    "removed-member-signup": {
+        "code": "CONFLICT",
+        "subcode": "MEMBERSHIP_REMOVED",
+        "sentence": "This Scout's roster entry is REMOVED; rejoin before taking a place in a slot",
+        "source": "src/handlers/unit_operations.py",
+    },
+    "unjoined-scout-signup": {
+        "code": "NOT_FOUND",
+        "subcode": "",
+        "sentence": "This Scout is not on this event's Unit Campaign roster",
+        "source": "src/handlers/unit_operations.py",
+    },
+    "cross-campaign-roster": {
+        "code": "CONFLICT",
+        "subcode": "MEMBERSHIP_CAMPAIGN",
+        "sentence": "This Scout's roster entry belongs to a different Scout Campaign",
+        "source": "src/handlers/unit_operations.py",
+    },
 }
 
 #: The acceptance ids each refusal belongs to, keyed the same way.  Kept beside the sentences so a
@@ -381,11 +760,11 @@ STAGE_THREE_REFUSALS: Mapping[str, tuple[str, ...]] = {
     "duplicate-signup": ("SIGN-M-01-02", "SLOT-02", "SS-SM-06 step 3"),
     "capacity-full": ("SIGN-M-01-02", "SLOT-02-02", "SS-SM-06 step 3"),
     "cross-campaign-overlap": ("SIGN-M-01-02", "SLOT-04", "SS-SM-06 step 5"),
-    "stale-event-version": ("VER-01", "EVT-M-02-03", "EVT-M-03-03", "SLOT-M-01-03", "SIGN-M-03-03"),
-    "slot-limit": ("SLOT-M-01-02", "§3.3.2's 20-slot cap"),
+    "stale-event-version": ("VER-01", "EVT-M-02-03", "EVT-M-03-03", "SLOT-M-01-03", "SIGN-M-03-03", "API-FIX-03"),
+    "slot-limit": ("SLOT-M-01-02", "§3.3.2's 20-slot cap", "SS-SM-06 step 5's 20-slot event"),
     "capacity-range": ("SLOT-M-01-01/02", "§3.3.2's 1-100 capacity"),
     "work-over-duration": ("SIGN-M-03-02", "SS-SM-06 step 9's 190 minutes in a 210-minute day"),
-    "work-batch-cap": ("SIGN-M-03-03", "§3.4.3's 1-100 rows"),
+    "work-batch-cap": ("SIGN-M-03-03", "§3.3.3's 1-100 rows", "§3.4.3's 1-100 rows"),
     "work-row-duplicated": ("SIGN-M-03-02", "§3.4.3's unique (slotId, profileId) rows"),
     "slot-board-closed": ("SLOT-M-01-02", "EVT-M-02's state matrix"),
     "signup-window-closed": ("SIGN-M-01-01", "§3.4.1's SCHEDULED requirement"),
@@ -398,176 +777,455 @@ STAGE_THREE_REFUSALS: Mapping[str, tuple[str, ...]] = {
     "idempotency-changed": ("IDEM-01", "§6.3.4's changed-fingerprint INVALID_INPUT"),
     "assignment-empty-items": ("EVT-M-04", "§6.2's non-empty batch"),
     "signup-not-found": ("SIGN-M-03", "§3.4.3's signup-must-exist rule"),
+    "removed-member-signup": ("SIGN-M-01-03", "§3.4.2's after-removal correction", "SS-SM-06 step 7's removal half"),
+    "unjoined-scout-signup": ("SIGN-M-01-03", "SLOT-03", "SS-SM-06 step 7's Emery"),
+    "cross-campaign-roster": ("SIGN-M-01-03", "§3.4.1's roster-Campaign match"),
 }
 
 # ------------------------------------------------------------------
-# 3. Deterministic fixture
+# 2. Deterministic fixture
 # ------------------------------------------------------------------
 #
 # Every id the server will mint is a ``<ref>`` placeholder (``<unit>``,
 # ``<campaign.avery>``, ``<event.slots>``, ``<slot.first-sales>``,
-# ``<profile.hana>``, ``<product.caramel>``).  The live lane binds the ids the
-# answers came back with through :func:`bind_ids` before the first write.
-# Every derived value is computed from T0 and the lane token, so one seed
-# rebuilds the same bytes.
+# ``<profile.avery>``, ``<product.caramel>``).  The live lane binds the ids the
+# answers came back with through :func:`bind_ids` before the first write.  Every
+# derived value is computed from the scenario clock and the lane token, so one
+# DATA_ID rebuilds the same bytes and a re-run recognises the same Unit.
 
-T0_UTC = "2026-11-15T00:00:00Z"
-T0_EPOCH = int(datetime.fromisoformat("2026-11-15T00:00:00+00:00").timestamp())
-
-# The DST fixture pair the checklist pins: 09:00 MDT on both sides of
-# 2026-03-08 — 16:00 UTC the Saturday before (MST, UTC-7) and 15:00 UTC the
-# Monday after (MDT, UTC-6).
-DST_SATURDAY_START_UTC = "2026-03-07T16:00:00Z"
-DST_SATURDAY_END_UTC = "2026-03-07T16:30:00Z"
-DST_MONDAY_START_UTC = "2026-03-09T15:00:00Z"
-DST_MONDAY_END_UTC = "2026-03-09T16:30:00Z"
-
-UNIT_NAME = "Avery Unit"
-CAMPAIGN_NAME = "Avery"
-
-
-def _sha256_hex(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def lane_token(seed: int) -> str:
-    """Twelve hex characters; every fixture key, marker and idempotency token
-    derives from it, so one seed pins the whole tree."""
-    return _sha256_hex(f"stage3:{seed:04d}").rstrip()[:12]
-
-
-def event_time(offset_days: int, hour: int = 0, minute: int = 0) -> str:
-    ts = datetime(2026, 11, 15, tzinfo=timezone.utc) + timedelta(days=offset_days, hours=hour, minutes=minute)
-    return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _fixture_event(start: str, end: str, location: str) -> dict:
-    return {"ref": "event", "locationName": location, "startAt": start, "endAt": end}
-
-
-def _fixture_slot(start: str, end: str, label: str, capacity: int) -> dict:
-    return {"ref": "slot", "label": label, "startAt": start, "endAt": end, "capacity": capacity}
-
-
-#: The rows every derived status must contain at least, as ``(ref, kind, value)``.
-FIXTURE_TREE: tuple[tuple[str, str, object], ...] = (
-    ("unit", "name", UNIT_NAME),
-    ("campaign.avery", "name", CAMPAIGN_NAME),
-    ("event.slots", "locationName", "Slot Showcase"),
-    ("event.slots", "start", "2026-11-22T09:00:00Z"),
-    ("event.slots", "end", "2026-11-22T12:30:00Z"),
-    ("event.active", "start", "2026-11-14T23:00:00Z"),
-    ("event.ended", "start", "2026-11-13T09:00:00Z"),
-    ("event.ended", "end", "2026-11-14T12:00:00Z"),
-    ("event.cancellation", "start", "2026-11-25T16:00:00Z"),
-    ("event.cancellation", "end", "2026-11-25T18:00:00Z"),
-    ("event.four-boxes", "start", "2026-11-23T09:00:00Z"),
-    ("event.four-boxes", "end", "2026-11-23T18:00:00Z"),
-    ("event.big", "start", "2026-11-24T09:00:00Z"),
-    ("event.big", "end", "2026-11-24T10:00:00Z"),
-    ("event.dst", "start", DST_SATURDAY_START_UTC),
-    ("event.dst", "end", DST_MONDAY_END_UTC),
-    ("slot.first-sales", "label", "First Sales"),
-    ("slot.first-sales", "minutes", 90),
-    ("slot.first-sales", "capacity", 1),
-    ("slot.midday", "label", "Midday"),
-    ("slot.midday", "minutes", 120),
-    ("slot.midday", "capacity", 1),
-    ("slot.full-booth", "label", "Full Booth"),
-    ("slot.full-booth", "minutes", 180),
-    ("slot.full-booth", "capacity", 100),
-    ("slot.morning", "minutes", 180),
-    ("slot.afternoon", "minutes", 180),
-    ("slot.overlap", "minutes", 60),
-    ("profile.hana", "name", "Hana Ito"),
-    ("profile.river", "name", "River Okafor"),
-    ("profile.sam", "name", "Sam Whitaker"),
-    ("product.caramel", "name", "Caramel Corn"),
-    ("product.glass", "name", "Glass Jar Set"),
-    ("product.tote", "name", "Canvas Tote"),
+FIXTURE_CATALOG: tuple[tuple[str, int], ...] = (
+    ("Caramel Popcorn", 3000),
+    ("Butter Popcorn", 2000),
+    ("Chocolate Popcorn", 2500),
+    ("Caramel Corn", 350),
+    ("Butter Toffee", 425),
+    ("Chocolate Bar", 175),
+    ("Trail Mix", 600),
+    ("Sunflower Seeds", 250),
+    ("Pumpkin Seeds", 325),
+    ("Caramel Pretzels", 550),
+    ("Cheese Crisps", 480),
+    ("Apple Cider", 400),
+    ("Hot Cocoa Mix", 700),
+    ("Cinnamon Sticks", 150),
+    ("Maple Candy", 800),
+    ("Holiday Tin", 1500),
 )
 
 
-def stage_three_fixture(seed: int = 0) -> dict:
-    """The Stage 3 acceptance tree.
+def _fixture_event(clock: ScenarioClock, *, location: str, day_offset: int, start: str, end: str) -> dict[str, Any]:
+    start_at, end_at = clock.unit_window(day_offset, start, end)
+    return {"ref": "event", "locationName": f"{location} {clock.data_id}", "startAt": start_at, "endAt": end_at}
 
-    One event in each derived state at T0 (``ended`` = ENDED, ``active`` =
-    ACTIVE, ``cancellation`` = SCHEDULED until the lane cancels it, the rest
-    SCHEDULED), the DST straddle, the 20-slot boundary event and the 101-row
-    confirm event.  Pure in ``(seed,)`` — identical output, byte for byte, on
-    every run.
+
+def _fixture_slot(start_at: str, end_at: str, label: str, capacity: int) -> dict[str, dict[str, Any]]:
+    return {"ref": "slot", "label": label, "startAt": start_at, "endAt": end_at, "capacity": capacity}
+
+
+def stage_three_fixture(clock: ScenarioClock) -> dict[str, Any]:
+    """The Stage 3 acceptance tree, every instant an offset from the scenario's ``T0``.
+
+    Every state §3.6.2 names is present and says how it is produced:
+
+    * ``past`` and ``ended`` and ``active`` need no write at all — they are the clock's own answer
+      (:func:`src.utils.show_and_sell_models.derive_event_status`), and the row stores ``SCHEDULED``;
+    * ``future`` and ``cancelled`` come from Stage 3 mutations (``createShowAndSell``,
+      ``cancelShowAndSell`` — §3.5's pre-start-only cancellation);
+    * ``FINALIZED`` and ``REOPENED`` have no mutation in this SDL, so their ``setup`` names
+      ``fixture-builder``: the explicit DynamoDB fixture builder in
+      :mod:`tests.e2e.utils.show_sell_stage3_scenario` (``API-FIX-01``'s "documented test fixture").  It
+      is a real, executable builder, and when the QA identity cannot write the row the scenario is
+      reported **blocked** naming the missing grant — never dropped from the tree.
+
+    Plus the boundaries the same section names: the four-box allocation triple, the 16-product catalog,
+    the 90/120/180-minute slots at capacity 1 and 100, the 20-slot event, the 101-row work batch, the
+    removed member, the stale-version setup, the race barriers, and the computed DST pair.
     """
-    lane = lane_token(seed)
-    events: dict[str, dict] = {
-        "slots": dict(_fixture_event(event_time(7, 9), event_time(7, 12, 30), "Slot Showcase"), ref="event.slots"),
-        "active": dict(_fixture_event(event_time(0, -1), event_time(0, 1), "Live Booth"), ref="event.active"),
-        "ended": dict(_fixture_event(event_time(-2, 9), event_time(-1, 12), "Yesterday's Sale"), ref="event.ended"),
-        "cancellation": dict(
-            _fixture_event(event_time(10, 16), event_time(10, 18), "Cancellation Drill"), ref="event.cancellation"
-        ),
-        "four-boxes": dict(_fixture_event(event_time(8, 9), event_time(8, 18), "Four Boxes"), ref="event.four-boxes"),
-        "big": dict(_fixture_event(event_time(9, 9), event_time(9, 10), "Twenty Slots"), ref="event.big"),
-        "dst": dict(_fixture_event(DST_SATURDAY_START_UTC, DST_MONDAY_END_UTC, "DST Straddle"), ref="event.dst"),
-        "confirm": dict(_fixture_event(event_time(8, 18), event_time(8, 19, 30), "Confirm Rows"), ref="event.confirm"),
+    lane = clock.token
+    dst = clock.dst_pair()
+    events: dict[str, dict[str, Any]] = {}
+
+    def add_event(
+        name: str,
+        *,
+        location: str,
+        day_offset: int,
+        start: str,
+        end: str,
+        stored_status: str,
+        setup: dict[str, Any],
+    ) -> None:
+        event = dict(_fixture_event(clock, location=location, day_offset=day_offset, start=start, end=end))
+        event["ref"] = f"event.{name}"
+        event["storedStatus"] = stored_status
+        event["setup"] = setup
+        events[name] = event
+
+    add_event(
+        "past",
+        location="Yesterday's Sale",
+        day_offset=-3,
+        start="09:00",
+        end="12:00",
+        stored_status=show_and_sell_models.STATUS_SCHEDULED,
+        setup={"how": "clock", "note": "the interval is wholly before T0; the row stores SCHEDULED and reads ENDED"},
+    )
+    add_event(
+        "ended",
+        location="Ended Booth",
+        day_offset=-1,
+        start="09:00",
+        end="12:00",
+        stored_status=show_and_sell_models.STATUS_SCHEDULED,
+        setup={
+            "how": "clock",
+            "note": "ended at T0 and waiting for finalization (SSE-04: an ended event is not a finalized one)",
+        },
+    )
+    add_event(
+        "active",
+        location="Live Booth",
+        day_offset=0,
+        start="00:00",
+        end="23:59",
+        stored_status=show_and_sell_models.STATUS_SCHEDULED,
+        setup={"how": "clock", "note": "T0 falls inside the interval, so the answer is ACTIVE with nothing stored"},
+    )
+    add_event(
+        "future",
+        location="Library on Main",
+        day_offset=7,
+        start="09:00",
+        end="12:30",
+        stored_status=show_and_sell_models.STATUS_SCHEDULED,
+        setup={"how": "mutation", "op": "createShowAndSell", "note": "SS-SM-06's fixture: no address, three slots"},
+    )
+    add_event(
+        "cancellation",
+        location="Park Pavilion",
+        day_offset=10,
+        start="09:00",
+        end="11:00",
+        stored_status=show_and_sell_models.STATUS_CANCELLED,
+        setup={
+            "how": "mutation",
+            "op": "cancelShowAndSell",
+            "reason": "Vendor conflict",
+            "note": "SS-SM-11 steps 2 and 4: cancelled before its start, which is the only state that allows it",
+        },
+    )
+    add_event(
+        "started",
+        location="Started Pavilion",
+        day_offset=-1,
+        start="13:00",
+        end="16:00",
+        stored_status=show_and_sell_models.STATUS_SCHEDULED,
+        setup={"how": "clock", "note": "SS-SM-11 step 5: already started, so cancel must be refused"},
+    )
+    add_event(
+        "finalized",
+        location="Finalized Sale",
+        day_offset=-4,
+        start="09:00",
+        end="12:00",
+        stored_status=show_and_sell_models.STATUS_FINALIZED,
+        setup={
+            "how": "fixture-builder",
+            "builder": "finalize_event_fixture",
+            "blockedWhenDenied": True,
+            "note": "§5's finalizeShowAndSell is not in this SDL; API-FIX-01 still requires the fixture, so the "
+            "scenario writes the row with the documented builder and reports BLOCKED naming the DynamoDB grant "
+            "it is denied",
+        },
+    )
+    add_event(
+        "reopened",
+        location="Reopened Sale",
+        day_offset=-5,
+        start="09:00",
+        end="12:00",
+        stored_status=show_and_sell_models.STATUS_REOPENED,
+        setup={
+            "how": "fixture-builder",
+            "builder": "reopen_event_fixture",
+            "blockedWhenDenied": True,
+            "note": "§5's reopenShowAndSell is not in this SDL; same builder path, and ``approvedFinalizationId`` "
+            "is cleared because the model refuses a REOPENED row that still points at an approved finalization",
+        },
+    )
+    add_event(
+        "four-box.morning",
+        location="Kroger on Monroe",
+        day_offset=-1,
+        start="09:00",
+        end="12:00",
+        stored_status=show_and_sell_models.STATUS_SCHEDULED,
+        setup={"how": "mutation", "op": "createShowAndSell", "note": "SS-SM-05 morning: 3 of the 4 boxes"},
+    )
+    add_event(
+        "four-box.afternoon",
+        location="Kroger on Monroe",
+        day_offset=-1,
+        start="13:00",
+        end="16:00",
+        stored_status=show_and_sell_models.STATUS_SCHEDULED,
+        setup={"how": "mutation", "op": "createShowAndSell", "note": "SS-SM-05 afternoon: sequential over-assignment"},
+    )
+    add_event(
+        "four-box.overlap",
+        location="Kroger on Monroe",
+        day_offset=-1,
+        start="10:00",
+        end="11:00",
+        stored_status=show_and_sell_models.STATUS_SCHEDULED,
+        setup={"how": "mutation", "op": "createShowAndSell", "note": "SS-SM-05 step 4: the assignment here is refused"},
+    )
+    add_event(
+        "big",
+        location="Twenty Slots",
+        day_offset=9,
+        start="09:00",
+        end="10:00",
+        stored_status=show_and_sell_models.STATUS_SCHEDULED,
+        setup={"how": "mutation", "op": "createShowAndSell", "note": "the 20-slot boundary event"},
+    )
+    add_event(
+        "confirm",
+        location="Confirm Rows",
+        day_offset=8,
+        start="18:00",
+        end="19:30",
+        stored_status=show_and_sell_models.STATUS_SCHEDULED,
+        setup={"how": "mutation", "op": "createShowAndSell", "note": "the 101-row confirm batch"},
+    )
+    events["dst"] = {
+        "ref": "event.dst",
+        "locationName": f"DST Straddle {clock.data_id}",
+        "startAt": dst["saturdayStartAt"],
+        "endAt": _add_minutes(dst["mondayStartAt"], 60),
+        "storedStatus": show_and_sell_models.STATUS_SCHEDULED,
+        "setup": {
+            "how": "computed",
+            "dst": dst,
+            "note": "the pair is derived from the clock's own spring-forward date",
+        },
     }
-    slots: dict[str, dict] = {
-        "first-sales": dict(
-            _fixture_slot(event_time(7, 9), event_time(7, 10, 30), "First Sales", 1), ref="slot.first-sales"
-        ),
-        "midday": dict(_fixture_slot(event_time(7, 10, 30), event_time(7, 12, 30), "Midday", 1), ref="slot.midday"),
-        "full-booth": dict(
-            _fixture_slot(event_time(7, 9), event_time(7, 12), "Full Booth", 100), ref="slot.full-booth"
-        ),
-        "morning": dict(_fixture_slot(event_time(8, 9), event_time(8, 12), "Morning", 4), ref="slot.morning"),
-        "afternoon": dict(_fixture_slot(event_time(8, 15), event_time(8, 18), "Afternoon", 4), ref="slot.afternoon"),
-        "overlap": dict(
-            _fixture_slot(event_time(8, 11, 30), event_time(8, 12, 30), "Overlap Hour", 2), ref="slot.overlap"
-        ),
-        "dst-saturday": dict(
-            _fixture_slot(DST_SATURDAY_START_UTC, DST_SATURDAY_END_UTC, "DST Saturday", 1), ref="slot.dst-saturday"
-        ),
-        "dst-monday": dict(
-            _fixture_slot(DST_MONDAY_START_UTC, DST_MONDAY_END_UTC, "DST Monday", 1), ref="slot.dst-monday"
-        ),
-    }
+
+    slots: dict[str, dict[str, Any]] = {}
+    future_start, future_end = events["future"]["startAt"], events["future"]["endAt"]
+    slots.update(
+        {
+            "first-sales": dict(
+                _fixture_slot(future_start, _add_minutes(future_start, 90), "First Sales", 1), ref="slot.first-sales"
+            ),
+            "midday": dict(_fixture_slot(_add_minutes(future_start, 90), future_end, "Midday", 1), ref="slot.midday"),
+            "full-booth": dict(
+                _fixture_slot(future_start, _add_minutes(future_start, 180), "Full Booth", 1), ref="slot.full-booth"
+            ),
+            "wide-booth": dict(
+                _fixture_slot(future_start, _add_minutes(future_start, 180), "Wide Booth", MAX_SLOT_CAPACITY),
+                ref="slot.wide-booth",
+            ),
+        }
+    )
+    morning_start = events["four-box.morning"]["startAt"]
+    afternoon_start = events["four-box.afternoon"]["startAt"]
+    slots.update(
+        {
+            "morning": dict(
+                _fixture_slot(morning_start, _add_minutes(morning_start, 180), "Morning", 4), ref="slot.morning"
+            ),
+            "afternoon": dict(
+                _fixture_slot(
+                    afternoon_start, _add_minutes(afternoon_start, 180), "Afternoon", 4
+                ),
+                ref="slot.afternoon",
+            ),
+        }
+    )
+    confirm_start = events["confirm"]["startAt"]
+    slots["confirm-row"] = dict(_fixture_slot(confirm_start, _add_minutes(confirm_start, 90), "Confirm Row", 100))
+    slots["confirm-row"]["ref"] = "slot.confirm-row"
+    slots["dst-saturday"] = dict(
+        _fixture_slot(dst["saturdayStartAt"], _add_minutes(dst["saturdayStartAt"], 30), "DST Saturday", 1)
+    )
+    slots["dst-saturday"]["ref"] = "slot.dst-saturday"
+    slots["dst-monday"] = dict(
+        _fixture_slot(dst["mondayStartAt"], _add_minutes(dst["mondayStartAt"], 30), "DST Monday", 1)
+    )
+    slots["dst-monday"]["ref"] = "slot.dst-monday"
+    big_start = events["big"]["startAt"]
     big_slots = [
-        dict(_fixture_slot(event_time(9, 9), event_time(9, 10), f"Slot {i + 1}", 1), ref=f"slot.big-{i:02d}")
-        for i in range(20)
+        dict(
+            _fixture_slot(big_start, _add_minutes(big_start, 60), f"Slot {index + 1}", MIN_SLOT_CAPACITY),
+            ref=f"slot.big-{index:02d}",
+        )
+        for index in range(MAX_SLOTS_PER_EVENT)
     ]
-    profiles: dict[str, dict] = {
-        "hana": {"ref": "profile.hana", "name": "Hana Ito", "role": "Lead"},
-        "river": {"ref": "profile.river", "name": "River Okafor", "role": "Steward"},
-        "sam": {"ref": "profile.sam", "name": "Sam Whitaker", "role": "Helper"},
+
+    products: dict[str, dict[str, Any]] = {}
+    for index, (name, cents) in enumerate(FIXTURE_CATALOG, start=1):
+        key = f"p{index:02d}"
+        products[key] = {
+            "ref": f"product.{key}",
+            "name": f"{name} {clock.data_id}",
+            "cents": cents,
+            "catalogIndex": index,
+        }
+
+    profiles: dict[str, dict[str, Any]] = {}
+    for name, role in (
+        ("avery", "joined"),
+        ("blake", "joined"),
+        ("charlie", "joined"),
+        ("devon", "removed"),
+        ("emery", "unjoined"),
+        ("riley", "read-only non-member"),
+    ):
+        profiles[name] = {
+            "ref": f"profile.{name}",
+            "name": f"{name.capitalize()} Scout {clock.data_id}",
+            "membership": role,
+        }
+
+    caramel = products["p01"]["ref"]
+    butter = products["p02"]["ref"]
+    allocations: dict[str, list[tuple[str, str, int]]] = {
+        "four-box.morning": [("profile.avery", caramel, 3)],
+        "four-box.afternoon": [("profile.blake", caramel, 3)],
+        "four-box.overlap": [("profile.charlie", caramel, 3)],
+        "first-sales": [("profile.avery", butter, 1)],
+        "wide-booth": [("profile.avery", butter, MAX_SLOT_CAPACITY)],
     }
-    products: dict[str, dict] = {
-        "caramel": {"ref": "product.caramel", "name": "Caramel Corn", "cents": 350},
-        "glass": {"ref": "product.glass", "name": "Glass Jar Set", "cents": 4800},
-        "tote": {"ref": "product.tote", "name": "Canvas Tote", "cents": 1400},
+    #: Which event each slot belongs to.  The cleanup plan names rows by their partition and sort
+    #: key, and a slot key under the wrong event is a row that survives teardown looking deleted.
+    slot_events = {
+        "first-sales": "future",
+        "midday": "future",
+        "full-booth": "future",
+        "wide-booth": "future",
+        "morning": "four-box.morning",
+        "afternoon": "four-box.afternoon",
+        "confirm-row": "confirm",
+        "dst-saturday": "dst",
+        "dst-monday": "dst",
     }
-    # Allocation targets: which product each event holds, so the ledger math is pinned.
-    allocations = {
-        "first-sales": [("profile.hana", "product.caramel", 12)],
-        "midday": [("profile.river", "product.glass", 1)],
-        "full-booth": [("profile.hana", "product.tote", 40), ("profile.sam", "product.caramel", 100)],
+    slot_events.update({f"big-{index:02d}": "big" for index in range(MAX_SLOTS_PER_EVENT)})
+    #: The signups this scenario holds a row for — the ones the walkthroughs succeed at, not the
+    #: refusals (SS-SM-06 steps 1, 4 and 6; SS-SM-05's four past valid signups).  Cleanup iterates
+    #: this list, so a signup the tree forgot is a row nobody reads back.
+    signups = [
+        {"event": "four-box.morning", "slot": "morning", "profile": "avery"},
+        {"event": "four-box.morning", "slot": "morning", "profile": "blake"},
+        {"event": "four-box.morning", "slot": "morning", "profile": "charlie"},
+        {"event": "four-box.morning", "slot": "morning", "profile": "devon"},
+        {"event": "future", "slot": "first-sales", "profile": "avery"},
+        {"event": "future", "slot": "midday", "profile": "avery"},
+        {"event": "future", "slot": "full-booth", "profile": "charlie"},
+    ]
+    race_barriers = {
+        "allocation": {
+            "threadRendezvous": True,
+            "writes": ["assignShowAndSellInventory", "assignShowAndSellInventory"],
+            "refusal": "concurrent-over-assignment",
+            "note": "SS-SM-05 step 4 / SS-API-01: both threads pass validation, one write plan wins, the other "
+            "is refused, and no partial allocation is saved",
+        },
+        "capacity": {
+            "threadRendezvous": True,
+            "writes": ["signupScoutForShowAndSellSlot", "signupScoutForShowAndSellSlot"],
+            "refusal": "capacity-full",
+            "note": "SLOT-02-02: two signups for the last place in a capacity-1 slot",
+        },
+        "version": {
+            "threadRendezvous": True,
+            "writes": ["updateShowAndSell", "updateShowAndSell"],
+            "refusal": "stale-event-version",
+            "note": "API-FIX-03 / VER-01: two writes that read the same version, one advances it",
+        },
+    }
+    stale_versions = {
+        "event": {
+            "read": "showAndSell",
+            "advance": "upsertShowAndSellSlot",
+            "submit": "deleteShowAndSellSlot",
+            "refusal": "stale-event-version",
+        },
+        "signup": {
+            "read": "showAndSellSignups",
+            "advance": "confirmShowAndSellWork",
+            "submit": "cancelShowAndSellSignup",
+            "refusal": "stale-event-version",
+        },
     }
     return {
-        "seed": seed,
+        "dataId": clock.data_id,
         "lane": lane,
-        "t0": T0_UTC,
-        "t0Epoch": T0_EPOCH,
-        "unit": {"ref": "unit", "name": UNIT_NAME},
-        "campaigns": {"avery": {"ref": "campaign.avery", "name": CAMPAIGN_NAME, "year": 2026}},
+        "timezone": clock.timezone_name,
+        "t0": clock.iso(),
+        "t0Epoch": clock.epoch(),
+        "unit": {"ref": "unit", "name": f"Smoke Pack 3149 {clock.data_id}"},
+        "unitCampaign": {"ref": "unit-campaign", "name": f"Fall Popcorn 2026 {clock.data_id}"},
+        "campaigns": {
+            name: {"ref": f"campaign.{name}", "name": profiles[name]["name"]}
+            for name in ("avery", "blake", "charlie", "devon", "emery")
+        },
         "events": events,
         "slots": slots,
         "bigSlots": big_slots,
         "profiles": profiles,
         "products": products,
         "allocations": allocations,
+        "slotEvents": slot_events,
+        "signups": signups,
+        "fourBoxQuantity": FOUR_BOX_QUANTITY,
+        "removedMembers": _removed_member_setup(clock, profiles),
+        "staleVersions": stale_versions,
+        "raceBarriers": race_barriers,
         "confirmRows": MAX_WORK_LINES + 1,
+        "dst": dst,
     }
 
 
-def bind_ids(payload, ids: Mapping[str, str]):
+def _removed_member_setup(clock: ScenarioClock, profiles: Mapping[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """API-FIX-03's "read and advance versions" applied to the roster: the removal is a real Stage 2
+    mutation, and the signup that follows it is the assertion.  Nothing here edits an expected input —
+    the roster row is removed by the same ``removeUnitCampaignMembership`` the product uses, and its
+    ``guardVersion``/``membershipVersion`` come from the roster read that precedes the write."""
+    return [
+        {
+            "profile": profiles["devon"]["ref"],
+            "campaign": "campaign.devon",
+            "steps": [
+                {"read": "unitCampaignRoster", "expect": {"status": "ACTIVE"}},
+                {
+                    "write": "removeUnitCampaignMembership",
+                    "versionSource": "unitCampaignRoster",
+                    "note": "§3.4.2 keeps the row as removal audit; the status becomes REMOVED",
+                },
+                {"read": "unitCampaignRoster", "expect": {"status": "REMOVED"}},
+                {"write": "signupScoutForShowAndSellSlot", "refusal": "removed-member-signup"},
+            ],
+        },
+        {
+            "profile": profiles["emery"]["ref"],
+            "campaign": "campaign.emery",
+            "steps": [
+                {"read": "unitCampaignRoster", "expect": {"absent": True}},
+                {"write": "signupScoutForShowAndSellSlot", "refusal": "unjoined-scout-signup"},
+            ],
+        },
+    ]
+
+
+def _add_minutes(iso_utc: str, minutes: int) -> str:
+    """One interval endpoint shifted by minutes, in the same persisted spelling."""
+    moment = datetime.strptime(iso_utc, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return (moment + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def bind_ids(payload: Any, ids: Mapping[str, str]) -> Any:
     """Replace the fixture's ``<ref>`` placeholders with the ids the live
     answers came back with.  A string matching an ids key, and a
     ``{"ref": ...}`` cell, are both replaced; an unbound ``{"ref": ...}`` cell
@@ -586,15 +1244,30 @@ def bind_ids(payload, ids: Mapping[str, str]):
     return payload
 
 
+def lane_token(seed: int) -> str:
+    """Twelve hex characters; every fixture key, marker and idempotency token
+    derives from it, so one seed pins the whole tree.
+
+    A scenario that has a :class:`ScenarioClock` uses ``clock.token`` — the same function of its
+    ``DATA_ID`` — and never a bare seed.
+    """
+    return _sha256_hex(f"stage3:{seed:04d}")[:12]
+
+
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest().rstrip()
+
+
 # ------------------------------------------------------------------
-# 4. Input builders -- one per Stage 3 write, keyed by operation
+# 3. Input builders -- one per Stage 3 write, keyed by operation
 # ------------------------------------------------------------------
 #
 # Every builder puts the SDL's ``IdempotencyInput`` and ``VersionedInput`` in
 # nested shape, and the lane derives the key itself: one lane token, one
-# deterministic key per write.
+# deterministic key per write.  The sample payloads below are built from
+# :func:`sample_clock`, so the times in them are clock output too.
 
-_SAMPLE_LANE = "0123456789ab"
+_SAMPLE_CLOCK = sample_clock()
 
 
 def idempotency_key_for(op: str, lane: str, step: str = "") -> str:
@@ -812,56 +1485,67 @@ _SAMPLES: dict[str, dict[str, Any]] = {
     "CreateShowAndSellInput": create_event_input(
         "UC#x",
         "Riverside Grange",
-        event_time(7, 9),
-        event_time(7, 12, 30),
+        _SAMPLE_CLOCK.iso(days=7),
+        _SAMPLE_CLOCK.iso(days=7, hours=3, minutes=30),
         address="14 Grange Way",
         we_owe_enabled=True,
-        idempotency_key=idempotency_key_for("createShowAndSell", _SAMPLE_LANE),
+        idempotency_key=idempotency_key_for("createShowAndSell", _SAMPLE_CLOCK.token),
     ),
     "UpdateShowAndSellInput": update_event_input(
         "SHOW#x",
         1,
         location_name="Riverside Grange",
         we_owe_enabled=False,
-        idempotency_key=idempotency_key_for("updateShowAndSell", _SAMPLE_LANE),
+        idempotency_key=idempotency_key_for("updateShowAndSell", _SAMPLE_CLOCK.token),
     ),
     "CancelShowAndSellInput": cancel_event_input(
-        "SHOW#x", 1, "Vendor conflict", idempotency_key=idempotency_key_for("cancelShowAndSell", _SAMPLE_LANE)
+        "SHOW#x", 1, "Vendor conflict", idempotency_key=idempotency_key_for("cancelShowAndSell", _SAMPLE_CLOCK.token)
     ),
     "AssignShowAndSellInventoryInput": assign_inventory_input(
-        "SHOW#x", [("PROD#x", 12)], 1, idempotency_key=idempotency_key_for("assignShowAndSellInventory", _SAMPLE_LANE)
+        "SHOW#x",
+        [("PROD#x", 12)],
+        1,
+        idempotency_key=idempotency_key_for("assignShowAndSellInventory", _SAMPLE_CLOCK.token),
     ),
     "UpsertShowAndSellSlotInput": upsert_slot_input(
         "SHOW#x",
         1,
-        event_time(7, 9),
-        event_time(7, 10, 30),
+        _SAMPLE_CLOCK.iso(days=7),
+        _SAMPLE_CLOCK.iso(days=7, hours=1, minutes=30),
         2,
         slot_id="SLOT#x",
         label="First Sales",
         slot_version=1,
-        idempotency_key=idempotency_key_for("upsertShowAndSellSlot", _SAMPLE_LANE),
+        idempotency_key=idempotency_key_for("upsertShowAndSellSlot", _SAMPLE_CLOCK.token),
     ),
     "DeleteShowAndSellSlotInput": delete_slot_input(
-        "SHOW#x", "SLOT#x", 1, idempotency_key=idempotency_key_for("deleteShowAndSellSlot", _SAMPLE_LANE)
+        "SHOW#x",
+        "SLOT#x",
+        1,
+        idempotency_key=idempotency_key_for("deleteShowAndSellSlot", _SAMPLE_CLOCK.token),
     ),
     "SignupShowAndSellSlotInput": signup_input(
         "SHOW#x",
         "SLOT#x",
         "CAMP#x",
         "PROFILE#x",
-        idempotency_key=idempotency_key_for("signupScoutForShowAndSellSlot", _SAMPLE_LANE),
+        idempotency_key=idempotency_key_for("signupScoutForShowAndSellSlot", _SAMPLE_CLOCK.token),
     ),
     "CancelShowAndSellSignupInput": cancel_signup_input(
-        "SHOW#x", "SLOT#x", "PROFILE#x", 1, idempotency_key=idempotency_key_for("cancelShowAndSellSignup", _SAMPLE_LANE)
+        "SHOW#x",
+        "SLOT#x",
+        "PROFILE#x",
+        1,
+        idempotency_key=idempotency_key_for("cancelShowAndSellSignup", _SAMPLE_CLOCK.token),
     ),
     "ConfirmShowAndSellWorkInput": confirm_work_input(
         "SHOW#x",
         1,
         [("SLOT#x", "PROFILE#x", 90)],
-        idempotency_key=idempotency_key_for("confirmShowAndSellWork", _SAMPLE_LANE),
+        idempotency_key=idempotency_key_for("confirmShowAndSellWork", _SAMPLE_CLOCK.token),
     ),
 }
+
 
 # ------------------------------------------------------------------
 # 5. Documents -- the field selections the lane sends
@@ -1064,6 +1748,9 @@ STAGE_THREE_CONFLICT_PAIRS: tuple[dict[str, object], ...] = (
     conflict_row("cancelShowAndSell", "cancel-started-event"),
     conflict_row("assignShowAndSellInventory", "concurrent-over-assignment"),
     conflict_row("assignShowAndSellInventory", "assignment-empty-items"),
+    conflict_row("signupScoutForShowAndSellSlot", "removed-member-signup"),
+    conflict_row("signupScoutForShowAndSellSlot", "unjoined-scout-signup"),
+    conflict_row("signupScoutForShowAndSellSlot", "cross-campaign-roster"),
 )
 
 
@@ -1172,19 +1859,58 @@ def stage_three_ledger_invariants(
     return tuple(problems)
 
 
-#: The two workflow states a Stage 3 lane cannot reach: ``finalizeShowAndSell``
-#: and ``reopenShowAndSell`` are absent from this SDL — they are §5's mutations,
-#: Stage 5's barrier.  A lane reports these states *blocked*, never fakes them.
-STAGE_THREE_BLOCKED_STATE_FIXTURES: tuple[str, ...] = ("FINALIZED", "REOPENED")
+# ------------------------------------------------------------------
+# 8. The two workflow states no mutation reaches, and the builder that does
+# ------------------------------------------------------------------
+#
+# §3.6.2 names FINALIZED and REOPENED, and ``API-FIX-01`` makes a fixture for
+# every one of those states an acceptance criterion, with the section closing:
+# "A missing required fixture makes the scenario blocked; it does not justify
+# skipping its security assertion."  ``finalizeShowAndSell`` and
+# ``reopenShowAndSell`` are §5's mutations and are absent from this SDL, so the
+# states cannot be reached through a public write *yet* — which is a reason to
+# build them with the documented fixture builder (smoke plan FIX-AC-04's
+# "documented test fixtures"), never a reason to drop them from the tree.
+#
+# :mod:`tests.e2e.utils.show_sell_stage3_scenario` is that builder: it renders the
+# ``SHOW_AND_SELL#<id>/METADATA`` row with :func:`src.utils.show_and_sell_models.build_show_and_sell_item`
+# (so a row that would break a §5.10 invariant raises instead of landing), reads the
+# row back, and returns a named verdict.  When the QA identity
+# ``kernelworx-qa-ue1-dev`` cannot read or write that row, the verdict is ``blocked``
+# and names the DynamoDB action it is denied — the same way ``scripts/qa_fixture.py``
+# reports ``BLOCKED <table>: <action> is not granted to this identity`` rather than
+# treating a denied scan as an empty table.
 
-BLOCKED_STATE_FIXTURE_NOTE = (
-    "FINALIZED and REOPENED need §5's finalize/reopen mutations, which this SDL does not declare: "
-    "the Stage 3 lane reports these states blocked on the Stage 5 merge, it never fakes them"
+#: The §3.6.2 states this SDL has no public write for.  They are fixture-builder
+#: states, not absent ones: a lane that cannot build one reports it blocked.
+STAGE_THREE_BUILDER_ONLY_STATE_FIXTURES: tuple[str, ...] = (
+    show_and_sell_models.STATUS_FINALIZED,
+    show_and_sell_models.STATUS_REOPENED,
 )
+
+#: Why a builder is needed, in the words the evidence record needs.
+BUILDER_ONLY_STATE_FIXTURE_NOTE = (
+    "FINALIZED and REOPENED need §5's finalizeShowAndSell/reopenShowAndSell, which this SDL does not "
+    "declare: §3.6.2 and API-FIX-01 still require the fixture, so the lane writes the row with the "
+    "documented DynamoDB fixture builder and reports BLOCKED naming the grant it is denied — it never "
+    "fakes the state and never drops it"
+)
+
+#: The aggregate table every Stage 3 row lives in.  The physical name is the
+#: stack's own: ``tofu/application/modules/dynamodb/main.tf`` declares
+#: ``${var.name_prefix}-show-and-sells${local.table_suffix}`` and exports it as
+#: ``show_and_sells_table_name``, each environment feeds it to Lambda as
+#: ``SHOW_AND_SELLS_TABLE_NAME``, and ``tests/unit/conftest.py`` injects the dev value.
+DEV_SHOW_AND_SELLS_TABLE = "kernelworx-show-and-sells-ue1-dev"
+
+
+def show_and_sells_table() -> str:
+    """The physical ``show_and_sells`` table this lane's rows live in."""
+    return os.environ.get("SHOW_AND_SELLS_TABLE_NAME") or DEV_SHOW_AND_SELLS_TABLE
 
 
 # ------------------------------------------------------------------
-# 8. Calendar data and the ICS the browser produces
+# 9. Calendar data and the ICS the browser produces
 # ------------------------------------------------------------------
 #
 # CAL-01/CAL-02/RPT-00: no server generates, stores, or serves a calendar
@@ -1211,13 +1937,336 @@ CALENDAR_DTO_FIELDS: tuple[str, ...] = (
 )
 
 ICS_CHECKS: tuple[str, ...] = (
-    "CAL-01: the file the lane validates is the one the browser produced and downloaded",
-    "CAL-02: one VCALENDAR with CALSCALE:GREGORIAN and METHOD:PUBLISH, one VEVENT, "
-    "a stable UID, TZID-bearing times, and lines folded to at most 73 octets",
+    "CAL-01: the file the lane validates is the one the browser produced and downloaded, and the UID is "
+    "the same on every download of one signup",
+    "CAL-02: one VCALENDAR with CALSCALE:GREGORIAN and METHOD:PUBLISH and exactly one VEVENT, date-times "
+    "in UTC with an explicit Z and no TZID parameter and no VTIMEZONE block (what buildInvite emits), and "
+    "every physical line inside RFC 5545's 75-octet limit",
     "RPT-00: no server artifact — no download URL, no stored file, no notification",
 )
 
-ICS_MAX_LINE_OCTETS = 73
+#: RFC 5545 §3.1: a line is folded to at most 75 octets, excluding the CRLF.  This is
+#: what the validator enforces, because it is the limit a calendar client enforces — and it
+#: is deliberately *not* tightened to the emitter's own budget below, because the emitter's
+#: continuation lines are ``1 + ICS_FOLD_OCTETS`` = 74 octets wide: ``foldIcsLine`` budgets 73
+#: octets for the segment and RFC 5545 folding writes the break as CRLF plus a leading space,
+#: so a real capture's widest physical line is 74.  A limit of 73 would reject the file the
+#: browser actually downloaded, which is the opposite of what this validator is for.
+ICS_MAX_LINE_OCTETS = 75
+
+#: What ``buildInvite`` budgets per folded segment (``ICS_FOLD_OCTETS`` in ``frontend/src/lib/showSell.ts``).
+#: Not an acceptance limit: it is the emitter's own number, used to explain a capture's width.
+ICS_FOLD_OCTETS = 73
+
+#: The two captures of ``buildInvite`` output the validator is fed: the same signup built
+#: twice, so the UID comparison is between two real downloads rather than a claim about one.
+ICS_CAPTURE_NAMES: tuple[str, ...] = ("show_sell_stage3_invite_build.ics", "show_sell_stage3_invite_build_repeat.ics")
+
+#: The ``CalendarInviteData`` answer those two captures were built from, and the two clocks they
+#: were built at — one build, one repeat of the same download.  The pair is what makes CAL-01
+#: executable rather than asserted: the UID is the signup's identity, so two downloads of this
+#: DTO must carry the same UID and different ``DTSTAMP`` values, and :func:`calendar_invite_uid`
+#: rebuilds that UID from these fields and compares it to the bytes on disk.
+#:
+#: Re-cut both files after any change to the emitter, from the repository root:
+#:
+#: .. code-block:: text
+#:
+#:     node_modules/.bin/esbuild frontend/src/lib/showSell.ts --bundle --format=esm \
+#:         --outfile=/tmp/showSell.mjs
+#:
+#: then import ``buildInvite`` from that bundle and write one file per download, exactly one DTO
+#: and one clock each, with the bytes written verbatim (no newline translation):
+#:
+#: .. code-block:: text
+#:
+#:     buildInvite(ICS_CAPTURE_DTO, new Date(ICS_CAPTURE_CLOCKS[0]))  # -> show_sell_stage3_invite_build.ics
+#:     buildInvite(ICS_CAPTURE_DTO, new Date(ICS_CAPTURE_CLOCKS[1]))  # -> ..._invite_build_repeat.ics
+#:
+#: The DTO is the SS-SM-06 lane's own shape — a Unit Campaign, an event whose location name carries
+#: an address with an ``&`` and commas, and a Scout profile — because escaping and folding only get
+#: exercised if the input has something to escape.
+ICS_CAPTURE_DTO: Mapping[str, Any] = {
+    "unitId": "UNIT#pack-3149",
+    "unitDisplayName": "Smoke Pack 3149",
+    "unitCampaignId": "UNITCAMP#pack-3149-ss-sm-06-l01",
+    "unitCampaignName": "Fall Popcorn 2026",
+    "showAndSellId": "SSE#library-on-main",
+    "slotId": "SLOT#first-sales",
+    "profileId": "PROFILE#avery-scout",
+    "slotLabel": "First Sales",
+    "locationName": "Library on Main — 200 Main St & Elm",
+    "address": "200 Main St, Elm Court, Apt 3",
+    "timezone": "America/Denver",
+    "slotStartAt": "2026-03-28T15:00:00.000Z",
+    "slotEndAt": "2026-03-28T16:30:00.000Z",
+}
+
+#: The two ``generatedAt`` clocks behind :data:`ICS_CAPTURE_NAMES`, in that order.
+ICS_CAPTURE_CLOCKS: tuple[str, ...] = ("2026-03-21T15:04:05Z", "2026-03-21T15:09:47Z")
+
+_UTC_DATE_TIME = re.compile(r"\A\d{8}T\d{6}Z\Z")
+_TEXT_PROPERTIES = ("SUMMARY", "LOCATION", "DESCRIPTION", "COMMENT")
+_REQUIRED_VCALENDAR: tuple[tuple[str, str], ...] = (
+    ("VERSION", "2.0"),
+    ("CALSCALE", "GREGORIAN"),
+    ("METHOD", "PUBLISH"),
+)
+_REQUIRED_VEVENT: tuple[str, ...] = ("UID", "DTSTAMP", "DTSTART", "DTEND")
+#: The escape sequences ``escapeIcsText`` can produce: ``\\``, ``\;``, ``\,``, ``\n``.
+_TEXT_ESCAPES = frozenset("\\;,nN")
+#: Components ``buildInvite`` never writes.  ``VTIMEZONE`` is the one that matters for CAL-02:
+#: a ``TZID`` is only meaningful when the same file carries that zone's definitions, and the
+#: browser deliberately writes UTC instead of inventing them.
+_FORBIDDEN_COMPONENTS = ("VTIMEZONE", "VALARM", "VJOURNAL", "VTODO", "STANDARD", "DAYLIGHT")
+
+
+class _IcsLine(NamedTuple):
+    """One unfolded property: its name, its parameters, and everything after the first colon."""
+
+    name: str
+    params: tuple[str, ...]
+    value: str
+
+
+def _physical_lines(text: str) -> tuple[list[str], list[str]]:
+    """The file's physical lines, and every way the line breaks or their length break RFC 5545."""
+    problems: list[str] = []
+    if not text:
+        return [], ["file: empty, so there is no calendar to validate"]
+    if not text.endswith("\r\n"):
+        problems.append("file: does not end with a CRLF line break")
+    body = text[:-2] if text.endswith("\r\n") else text
+    lines = body.split("\r\n")
+    for line in lines:
+        if "\r" in line:
+            problems.append(f"a bare CR inside a line, which ends the property for any reader: {line[:40]!r}")
+        if "\n" in line:
+            problems.append(f"a line ends with a bare LF, not CRLF: {line[:40]!r}")
+        octets = len(line.encode("utf-8"))
+        if octets > ICS_MAX_LINE_OCTETS:
+            problems.append(
+                f"an unfolded line of {octets} octets exceeds RFC 5545's {ICS_MAX_LINE_OCTETS}-octet limit: {line[:32]!r}"
+            )
+    return lines, problems
+
+
+def _unfold(physical: Sequence[str]) -> list[str]:
+    """Join RFC 5545 folding: a physical line starting with a space or tab continues the last one."""
+    logical: list[str] = []
+    for line in physical:
+        if line[:1] in (" ", "\t") and logical:
+            logical[-1] += line[1:]
+        else:
+            logical.append(line)
+    return logical
+
+
+def _parse_property(line: str) -> _IcsLine | None:
+    """Split one logical line into name, parameters and value.
+
+    A character scanner rather than a regex, because the parameter list can quote a value that
+    contains ``;`` and ``:`` (``DTSTART;X-LOC="Denver, CO":…`` is legal), and a regex that splits on
+    the first delimiter mis-reads it as a broken property.
+    """
+    index = 0
+    while index < len(line) and (line[index].isalnum() or line[index] in "-_"):
+        index += 1
+    if index == 0:
+        return None
+    name = line[:index].upper()
+    params: list[str] = []
+    buffer: list[str] = []
+    quoted = False
+    while index < len(line):
+        character = line[index]
+        if quoted:
+            buffer.append(character)
+            if character == '"':
+                quoted = False
+        elif character == '"':
+            buffer.append(character)
+            quoted = True
+        elif character == ";":
+            params.append("".join(buffer))
+            buffer = []
+        elif character == ":":
+            params.append("".join(buffer))
+            return _IcsLine(name, tuple(params), line[index + 1 :])
+        else:
+            buffer.append(character)
+        index += 1
+    return None
+
+
+def _text_problems(name: str, value: str) -> list[str]:
+    """Unescaped delimiters and control characters in a TEXT value.
+
+    ``escapeIcsText`` in ``frontend/src/lib/showSell.ts`` escapes ``\\``, ``;``, ``,``, and every
+    carriage return or line feed.  A value that reaches the validator with a bare ``;`` or ``,``,
+    or with a backslash that escapes nothing, is a file the browser did not produce — and one a
+    reader will parse as fewer properties than the invite holds.
+    """
+    problems: list[str] = []
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if character == "\\":
+            if index + 1 >= len(value):
+                problems.append(f"{name}: a trailing backslash escapes nothing")
+                break
+            following = value[index + 1]
+            if following not in _TEXT_ESCAPES:
+                problems.append(f"{name}: {character!r}{following!r} is not an escape buildInvite writes")
+            index += 2
+            continue
+        if character in ";,":
+            problems.append(f"{name}: an unescaped {character!r} inside a TEXT value")
+        elif character in "\r\n\t":
+            problems.append(f"{name}: a control character inside a TEXT value")
+        index += 1
+    return problems
+
+
+def _parse_utc_date_time(value: str) -> datetime | None:
+    """A UTC date-time as RFC 5545 writes it — ``YYYYMMDDTHHMMSSZ`` — or nothing."""
+    if not _UTC_DATE_TIME.match(value):
+        return None
+    return datetime.strptime(value, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+
+
+def validate_ics(text: str, uid: str) -> tuple[str, ...]:
+    """Validate a browser-produced invite against CAL-01/CAL-02.
+
+    Returns the violated checks — empty when the file is acceptable.  What it accepts is what
+    ``buildInvite`` emits, and what it rejects is the opposite:
+
+    * a ``TZID`` parameter or a ``VTIMEZONE`` block — the invite names UTC with an explicit ``Z``
+      precisely so it never has to invent a ``VTIMEZONE`` it does not own;
+    * a floating (no ``Z``) or date-only date-time, which lands the invite an hour out in every
+      zone but the writer's;
+    * a UID that is not the one this signup's identity produces, which is CAL-01's stability claim;
+    * an unfolded line over RFC 5545's 75 octets, a missing ``BEGIN``/``END``, or a missing
+      ``METHOD:PUBLISH``/``CALSCALE``/``VERSION``;
+    * TEXT the emitter did not escape, which a reader parses as extra properties.
+
+    It is a line parser and a component state machine, so a property that only appears after
+    ``END:VEVENT`` or only inside the wrong component is caught by structure rather than by a
+    whole-document match.
+    """
+    problems: list[str] = []
+    physical, line_problems = _physical_lines(text)
+    problems.extend(line_problems)
+
+    stack: list[str] = []
+    components: list[str] = []
+    event_count = 0
+    counts: dict[str, dict[str, int]] = {}
+    values: dict[tuple[str, str], str] = {}
+
+    for line in _unfold(physical):
+        parsed = _parse_property(line)
+        if parsed is None:
+            problems.append(f"not a property line: {line[:40]!r}")
+            continue
+        name, params, value = parsed
+        for param in params:
+            key = param.split("=", 1)[0].strip().upper()
+            if key == "TZID":
+                problems.append(
+                    f"{name}: a TZID parameter with no VTIMEZONE in this file — buildInvite writes UTC with "
+                    "an explicit Z, and a TZID alone is the hour-out invite CAL-02 exists to catch"
+                )
+        if name == "BEGIN":
+            if value.upper() in _FORBIDDEN_COMPONENTS:
+                problems.append(f"BEGIN:{value} — the browser emits no {value} block in an invite")
+            components.append(value)
+            if value == "VEVENT":
+                event_count += 1
+            stack.append(value)
+            continue
+        if name == "END":
+            if not stack:
+                problems.append(f"END:{value} with no matching BEGIN")
+            elif stack[-1] != value:
+                problems.append(f"END:{value} closes {stack[-1]}, not {value}")
+            else:
+                stack.pop()
+            continue
+        if not stack:
+            problems.append(f"{name} appears outside any component")
+            continue
+        component = stack[-1]
+        per_component = counts.setdefault(component, {})
+        per_component[name] = per_component.get(name, 0) + 1
+        values.setdefault((component, name), value)
+        if name in _TEXT_PROPERTIES:
+            problems.extend(_text_problems(name, value))
+        if name in ("DTSTART", "DTEND", "DTSTAMP") and component == "VEVENT":
+            if _parse_utc_date_time(value) is None:
+                problems.append(f"{name}: {value!r} is not a UTC date-time with an explicit Z (RFC 5545 §3.3.5)")
+
+    if "VCALENDAR" not in components:
+        problems.append("VCALENDAR: no BEGIN:VCALENDAR")
+    if stack:
+        problems.append(f"components left open at the end of the file: {stack}")
+    if event_count != 1:
+        problems.append(f"VEVENT: expected exactly one event, found {event_count}")
+
+    for required_name, required_value in _REQUIRED_VCALENDAR:
+        found = _value_at(values, "VCALENDAR", required_name)
+        if found is None:
+            problems.append(f"VCALENDAR: no {required_name}:{required_value}")
+        elif found != required_value:
+            problems.append(f"VCALENDAR: {required_name} is {found!r}, the invite writes {required_value!r}")
+    for required_name in _REQUIRED_VEVENT:
+        if _value_at(values, "VEVENT", required_name) is None:
+            problems.append(f"VEVENT: no {required_name}")
+    for component, per_component in counts.items():
+        for name, seen in per_component.items():
+            if seen > 1 and (component != "VEVENT" or name in _REQUIRED_VEVENT or name in _TEXT_PROPERTIES):
+                problems.append(f"{component}.{name}: seen {seen} times, an invite carries one")
+
+    found_uid = _value_at(values, "VEVENT", "UID")
+    if found_uid is not None and found_uid != uid:
+        problems.append(
+            f"UID: expected {uid}, the file writes {found_uid} — CAL-01 makes the UID the signup's identity"
+        )
+
+    start = _parse_utc_date_time(_value_at(values, "VEVENT", "DTSTART") or "")
+    end = _parse_utc_date_time(_value_at(values, "VEVENT", "DTEND") or "")
+    if start and end and end <= start:
+        problems.append(f"VEVENT: DTEND {end:%Y%m%dT%H%M%SZ} does not run after DTSTART {start:%Y%m%dT%H%M%SZ}")
+    return tuple(problems)
+
+
+def _value_at(values: Mapping[tuple[str, str], str], component: str, name: str) -> str | None:
+    """The first value of ``name`` seen inside ``component``, or nothing if it never appeared."""
+    return values.get((component, name))
+
+
+def ics_property_value(text: str, name: str) -> str:
+    """The first unfolded value of one property, for a check that needs a value rather than a verdict.
+
+    Folding is undone first, because the property a check wants may be the one line the emitter had
+    to break — the UID of a real signup is 105 characters and never fits in 75 octets.
+    """
+    for line in _unfold(_physical_lines(text)[0]):
+        parsed = _parse_property(line)
+        if parsed is not None and parsed.name.upper() == name.upper():
+            return parsed.value
+    return ""
+
+
+def ics_uid(text: str) -> str:
+    """The UID one invite carries, unfolded first, for the CAL-01 cross-download comparison."""
+    return ics_property_value(text, "UID")
+
+
+def ics_physical_line_octets(text: str) -> tuple[int, ...]:
+    """The octet length of every physical line, so a capture can be checked against the
+    browser's own 73-octet fold rather than only the RFC's 75-octet ceiling."""
+    return tuple(len(line.encode("utf-8")) for line in _physical_lines(text)[0])
 
 
 def calendar_invite_dto(
@@ -1280,88 +2329,23 @@ def calendar_invite_uid(unit_campaign_id: str, show_and_sell_id: str, slot_id: s
     return f"kernelworx-show-and-sell-{unit_campaign_id}-{show_and_sell_id}-{slot_id}-{profile_id}@kernelworx.app"
 
 
-def denver_wall_clock(iso_utc: str) -> str:
-    """The fixture's display zone for one UTC instant: the local time and the
-    zone abbreviation — ``09:00 MST`` before the 2026-03-08 straddle,
-    ``09:00 MDT`` after it."""
-    moment = datetime.fromisoformat(iso_utc.replace("Z", "+00:00")).astimezone(ZoneInfo(UNIT_TIMEZONE))
-    return f"{moment:%Y-%m-%d %H:%M} {moment:%Z}"
-
-
-def unfold_ics(text: str) -> str:
-    """Unfold physical lines (continuations start with a space) into one
-    logical line each."""
-    logical: list[str] = []
-    for physical in text.replace("\r\n", "\n").split("\n"):
-        if physical.startswith(" ") and logical:
-            logical[-1] += physical[1:]
-        else:
-            logical.append(physical)
-    return "\n".join(logical)
-
-
-def validate_ics(text: str, uid: str) -> tuple[str, ...]:
-    """Validate a browser-produced ICS against CAL-01/CAL-02.
-
-    Returns the violated checks — empty when the file is acceptable: one
-    VCALENDAR with ``CALSCALE:GREGORIAN`` and ``METHOD:PUBLISH``, one VEVENT,
-    the stable UID the browser signed it with, TZID-bearing start and end, and
-    every physical line within 73 octets on a CRLF line break.
-    """
-    problems: list[str] = []
-    if not text.endswith("\r\n"):
-        problems.append("file: does not end with a CRLF line break")
-    body: list[str] = []
-    raw_lines = text.split("\n")
-    for index, raw in enumerate(raw_lines):
-        if raw == "" and index == len(raw_lines) - 1:
-            continue
-        if raw.endswith("\r"):
-            body.append(raw[:-1])
-        else:
-            problems.append("file: a line ends with a bare LF, not CRLF")
-            body.append(raw)
-    if not any(line == "BEGIN:VCALENDAR" for line in body):
-        problems.append("VCALENDAR: no BEGIN:VCALENDAR")
-    if not any(line == "END:VCALENDAR" for line in body):
-        problems.append("VCALENDAR: no END:VCALENDAR")
-    if "CALSCALE:GREGORIAN" not in text:
-        problems.append("VCALENDAR: no CALSCALE:GREGORIAN")
-    if "METHOD:PUBLISH" not in text:
-        problems.append("VCALENDAR: no METHOD:PUBLISH")
-    for line in body:
-        if len(line.encode("utf-8")) > ICS_MAX_LINE_OCTETS:
-            problems.append(f"line exceeds {ICS_MAX_LINE_OCTETS} octets: {line[:40]}")
-        if "\t" in line:
-            problems.append(f"tab inside a line: {line[:40]}")
-    unfolded = unfold_ics(text)
-    uid_lines = [line for line in unfolded.splitlines() if line.startswith("UID:")]
-    if len(uid_lines) != 1 or uid_lines[0] != f"UID:{uid}":
-        problems.append(f"UID: expected exactly UID:{uid}, found {uid_lines}")
-    if not re.search(r"^DTSTART;TZID=[^,;\s]+", unfolded, re.MULTILINE):
-        problems.append("DTSTART: no TZID parameter")
-    if not re.search(r"^DTEND;TZID=[^,;\s]+", unfolded, re.MULTILINE):
-        problems.append("DTEND: no TZID parameter")
-    vevents = [line for line in unfolded.splitlines() if line in ("BEGIN:VEVENT", "END:VEVENT")]
-    if vevents.count("BEGIN:VEVENT") != 1 or vevents.count("END:VEVENT") != 1:
-        problems.append(
-            f"VEVENT: expected exactly one event, found {vevents.count('BEGIN:VEVENT')} BEGIN / {vevents.count('END:VEVENT')} END"
-        )
-    return tuple(problems)
-
-
 # ------------------------------------------------------------------
-# 9. Cleanup — TTL-gated, Stage 2 vocabulary
+# 10. Cleanup — plan, delete, read back, prove the canary survived
 # ------------------------------------------------------------------
 #
 # The vocabulary is the Stage 2 module's (:data:`STRICT_CLEANUP`,
 # :func:`run_cleanup_step`, :func:`assert_cleanup_clean`, :func:`fixture_sweep`,
-# :func:`sweep_verdict`), imported, not re-implemented.  The Stage 3
-# additions: the ordered plan, the typed sweep tokens this lane's sweep may
-# name, and the TTL gate that keeps a marker sweepable for seven days and
-# nothing else.
+# :func:`sweep_verdict`), imported, not re-implemented.  What Stage 3 adds is a
+# plan that names the *table and key of every row* it means to remove, so the
+# runner in :mod:`tests.e2e.utils.show_sell_stage3_scenario` can delete each one
+# and ``get_item`` it back: a ``delete_item`` that returned without an error is
+# not evidence, which is the rule ``scripts/qa_fixture.py`` already applies to a
+# sweep (its read-back prints ``LEFT`` for a row the delete did not take).  The
+# plan also carries the lane token that owns each row, because a lane that can
+# name a row is not a lane that may delete another lane's row — and the canary
+# row of a different lane token is what proves the sweep stopped where it should.
 
-#: The reads a cleanup run uses to prove the lane's rows are gone.
+#: The reads a cleanup run uses to prove the lane's rows are gone through the application's own API.
 STAGE_THREE_CLEANUP_READS: tuple[str, ...] = (
     "showAndSells",
     "showAndSellSignups",
@@ -1369,52 +2353,151 @@ STAGE_THREE_CLEANUP_READS: tuple[str, ...] = (
     "myScoutCommitments",
 )
 
+#: A key cell a live lane never bound.  The runner refuses to send a delete whose key still
+#: contains one, rather than deleting whatever a placeholder happens to match.
+UNBOUND_KEY_MARKER = "<"
+
+#: What ``scripts/qa_fixture.py`` measured on dev on 2026-11-19: this identity is denied
+#: ``dynamodb:Scan`` on ``show-and-sells`` (and ``DeleteItem`` on the Stage 2 lane tables).
+#: A fixture builder therefore *measures* its reach with a ``get_item`` and reports the action it
+#: is denied; it never assumes a grant it has not seen.
+QA_FIXTURE_IDENTITY = "kernelworx-qa-ue1-dev"
+
 
 class StageThreeCleanupError(StageTwoCleanupError):
     """A Stage 3 cleanup row that failed, in the Stage 2 vocabulary."""
 
 
-def stage_three_cleanup_plan(lane: str) -> list[dict[str, str]]:
-    """The ordered cleanup plan for one lane: cancel the signups, cancel the
-    event, delete the empty slots, let the idempotency markers ride out their
-    TTL, then sweep by typed token.  Every business row is cleaned by the
-    write that owns it — a row class in :data:`NEVER_EXPIRING_ROW_CLASSES`
-    is never left to the TTL, so "wait for the event to expire" is a
-    violation, not a step."""
-    rows: list[dict[str, str]] = []
-    rows.append(
-        stage_two.cleanup_row("SS-SM-06 step 6", "cancelShowAndSellSignup for every lane signup", CLEANUP_OBSERVED)
-    )
-    rows.append(
-        stage_two.cleanup_row(
-            "SS-SM-11 step 5",
-            "cancelShowAndSell for the lane event, releasing allocations and signups",
-            CLEANUP_OBSERVED,
+def stage_three_cleanup_plan(
+    clock: ScenarioClock,
+    fixture: Mapping[str, Any],
+    *,
+    ids: Mapping[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """The ordered cleanup plan for one scenario: signups, then slots, then events, then the
+    idempotency markers the lane wrote, then the typed-token sweep that catches what the writes missed.
+
+    Each deletable row names its table, its key pair, its row class, and the lane token that owns it.
+    Unbound ids stay ``<ref>`` placeholders and the runner refuses them: an unbound key is a row nobody
+    identified, and a delete against it is the false clean this gate exists to prevent.
+    """
+    table = show_and_sells_table()
+    lane = clock.token
+    rows: list[dict[str, Any]] = []
+    slot_events: Mapping[str, str] = fixture["slotEvents"]
+
+    def resolve(value: str) -> str:
+        """A bound id when the lane supplied one, otherwise the ``<ref>`` placeholder itself.
+
+        A placeholder in a key is not a bug here: it is the honest answer to "which row?", and
+        :func:`tests.e2e.utils.show_sell_stage3_scenario.run_stage_three_cleanup` refuses to send a
+        delete for it, so an unbound lane reports blocked rather than deleting a guess.
+        """
+        key = f"<{value}>"
+        if ids is None:
+            return key
+        return bind_ids(key, {f"<{name}>": bound for name, bound in ids.items()})
+
+    for slot_name in sorted(fixture["slots"]):
+        event_name = slot_events.get(slot_name)
+        if event_name is None:
+            continue
+        rows.append(
+            {
+                "acceptance": "SLOT-M-02",
+                "summary": f"delete the lane's slot {slot_name} once it holds nobody",
+                "lane": lane,
+                "kind": "slot",
+                "table": table,
+                "key": {
+                    "pk": show_and_sell_models.show_and_sell_pk(resolve(f"event.{event_name}")),
+                    "sk": show_and_sell_models.slot_sk(resolve(f"slot.{slot_name}")),
+                },
+            }
         )
-    )
-    rows.append(
-        stage_two.cleanup_row(
-            "SLOT-M-02", "deleteShowAndSellSlot for every lane slot once it holds nobody", CLEANUP_OBSERVED
+    for signup in sorted(fixture["signups"], key=lambda row: (row["event"], row["slot"], row["profile"])):
+        rows.append(
+            {
+                "acceptance": "SS-SM-06 step 6",
+                "summary": f"delete the lane's signup for {signup['slot']} by {signup['profile']}",
+                "lane": lane,
+                "kind": "signup",
+                "table": table,
+                "key": {
+                    "pk": show_and_sell_models.show_and_sell_pk(resolve(f"event.{signup['event']}")),
+                    "sk": show_and_sell_models.signup_sk(
+                        resolve(f"slot.{signup['slot']}"), resolve(f"profile.{signup['profile']}")
+                    ),
+                },
+            }
         )
-    )
-    rows.append(
-        stage_two.cleanup_row(
-            "API-FIX-03",
-            f"no manual delete of the idem marker for lane {lane}: {MARKER_TTL_ATTRIBUTE} lets the table's TTL sweep it after "
-            f"{MARKER_TTL_SECONDS // 3600} hours",
-            CLEANUP_OBSERVED,
+    for event_name in sorted(fixture["events"]):
+        rows.append(
+            {
+                "acceptance": "SS-SM-11 step 2",
+                "summary": f"delete the lane's event {event_name}",
+                "lane": lane,
+                "kind": "event",
+                "table": table,
+                "key": show_and_sell_models.event_metadata_key(resolve(f"event.{event_name}")),
+            }
         )
-    )
-    rows.append(
-        stage_two.cleanup_row(
-            "§2.8.7",
-            "sweep by typed token — "
-            + ", ".join(stage_three_sweep_tokens(lane))
-            + " — refusing free text and reporting every row it refused",
-            CLEANUP_OBSERVED,
+    for operation in STAGE_THREE_WRITES:
+        rows.append(
+            {
+                "acceptance": "API-FIX-03",
+                "summary": (
+                    f"delete the {operation} idempotency marker this lane wrote; the table's TTL would sweep "
+                    f"it after {MARKER_TTL_SECONDS // 3600} hours, and a lane that waits for the TTL has not cleaned"
+                ),
+                "lane": lane,
+                "kind": "marker",
+                "table": table,
+                "key": {
+                    "pk": f"IDEM#{resolve('actorAccount')}#{operation}#{resolve('scope')}",
+                    "sk": f"IDEM#{idempotency_key_for(operation, lane)}",
+                },
+            }
         )
+    rows.append(
+        {
+            "acceptance": "§2.8.7",
+            "summary": (
+                "sweep by typed token — "
+                + ", ".join(stage_three_sweep_tokens(lane))
+                + " — refusing free text and reporting every row it refused"
+            ),
+            "lane": lane,
+            "kind": "sweep",
+            "table": "",
+            "key": {},
+        }
     )
     return rows
+
+
+def stage_three_cleanup_canary(other_lane: str) -> dict[str, Any]:
+    """A row that belongs to a *different* lane token and must still be there afterwards.
+
+    The canary is the half of cleanup that a delete-count cannot give: if a sweep removes a row this
+    lane never planned, the lane's own read-back still looks clean.  ``scripts/qa_fixture.py``'s sweep
+    prints a ``kept`` line for exactly this survivor and treats it as the only survivor that does not
+    fail the sweep, and a Stage 3 lane that cannot show one has not shown its teardown stopped anywhere.
+    """
+    return {
+        "acceptance": "SS-SM-11 lane cleanup canary",
+        "summary": f"the row lane {other_lane} owns must still be present after this lane's teardown",
+        "lane": other_lane,
+        "kind": "canary",
+        "table": show_and_sells_table(),
+        "key": show_and_sell_models.event_metadata_key("canary-event-of-another-lane"),
+    }
+
+
+def stage_three_sweep_tokens(lane: str) -> tuple[str, ...]:
+    """The typed ``kind=value`` tokens a Stage 3 sweep may name for one lane:
+    the lane's own entities plus the ``idem`` marker it wrote."""
+    return tuple(f"{kind}={lane}" for kind in (*stage_two.LANE_TOKEN_KINDS, "idem"))
 
 
 def assert_stage_three_cleanup_clean(rows: Iterable[Mapping[str, str]], *, strict: bool | None = None) -> None:
@@ -1425,12 +2508,6 @@ def assert_stage_three_cleanup_clean(rows: Iterable[Mapping[str, str]], *, stric
         stage_two.assert_cleanup_clean(rows, strict=strict)
     except StageTwoCleanupError as error:
         raise StageThreeCleanupError(str(error)) from error
-
-
-def stage_three_sweep_tokens(lane: str) -> tuple[str, ...]:
-    """The typed ``kind=value`` tokens a Stage 3 sweep may name for one lane:
-    the lane's own entities plus the ``idem`` marker it wrote."""
-    return tuple(f"{kind}={lane}" for kind in (*stage_two.LANE_TOKEN_KINDS, "idem"))
 
 
 def stage_three_ttl_expectation(now_epoch: int) -> dict[str, object]:
@@ -1459,7 +2536,7 @@ def ttl_gate_violations(rows: Iterable[Mapping[str, Any]]) -> list[str]:
 
 
 # ------------------------------------------------------------------
-# 10. The SDL contract
+# 11. The SDL contract
 # ------------------------------------------------------------------
 #
 # The reader is the Stage 2 module's, because a second parser is a second
