@@ -1111,10 +1111,17 @@ def test_the_stock_snapshot_carries_only_the_columns_stage_three_must_not_move()
 
 def _bound_ids(fixture: dict[str, Any]) -> dict[str, str]:
     """The ids a lane that ran the whole scenario would have collected."""
-    ids: dict[str, str] = {"actorAccount": "ACCOUNT#qa-admin", "scope": "SS-SM-05"}
+    ids: dict[str, str] = {
+        "actorAccount": "ACCOUNT#qa-admin",
+        "account.admin": "ACCOUNT#qa-admin",
+        "scope": "SS-SM-05",
+        "unit": "11111111-1111-4111-8111-111111111111",
+        "unit-campaign": "22222222-2222-4222-8222-222222222222",
+    }
     ids |= {f"event.{name}": f"SSE#{name}" for name in fixture["events"]}
     ids |= {f"slot.{name}": f"SLOT#{name}" for name in fixture["slots"]}
     ids |= {f"profile.{name}": f"PROFILE#{name}" for name in fixture["profiles"]}
+    ids |= {f"account.{name}": f"ACCOUNT#{name}" for name in fixture["profiles"]}
     return ids
 
 
@@ -1140,10 +1147,12 @@ def test_an_unbound_lane_keeps_placeholders_in_its_keys_so_no_delete_is_a_guess(
     for row in deletable:
         assert any(stage3.UNBOUND_KEY_MARKER in str(cell) for cell in row["key"].values()), row
     half = _bound_ids(fixture)
-    half.pop("scope")
+    half.pop("unit-campaign")
     partial = stage3.stage_three_cleanup_plan(clock, fixture, ids=half)
     markers = [row for row in partial if row["kind"] == "marker"]
-    assert all("<scope>" in row["key"]["pk"] and "<actorAccount>" not in row["key"]["pk"] for row in markers)
+    creates = [row for row in markers if row["operation"] == "createShowAndSell"]
+    assert creates and all("<unit-campaign>" in row["key"]["pk"] for row in creates), creates
+    assert all("<unit-campaign>" not in row["key"]["pk"] for row in markers if row["operation"] != "createShowAndSell")
 
 
 def test_the_plan_orders_slots_then_signups_then_events_then_markers_then_the_sweep() -> None:
@@ -1163,7 +1172,8 @@ def test_the_plan_carries_a_marker_row_for_every_write_and_names_the_ttl_it_refu
     fixture = stage3.stage_three_fixture(clock)
     plan = stage3.stage_three_cleanup_plan(clock, fixture, ids=_bound_ids(fixture))
     markers = [row for row in plan if row["kind"] == "marker"]
-    assert len(markers) == len(stage3.STAGE_THREE_WRITES)
+    assert len(markers) == len(stage3.stage_three_write_steps(fixture, clock.token)) > len(stage3.STAGE_THREE_WRITES)
+    assert {row["operation"] for row in markers} == set(stage3.STAGE_THREE_WRITES)
     assert all(row["acceptance"] == "API-FIX-03" for row in markers)
     joined = " ".join(row["summary"] for row in markers)
     assert str(stage3.MARKER_TTL_SECONDS // 3600) in joined and "TTL" in joined

@@ -38,7 +38,8 @@ from typing import Any
 
 import pytest
 
-from src.utils import show_and_sell_models
+from scripts import qa_fixture
+from src.utils import mutations, show_and_sell_models
 from src.utils.errors import AppError
 from tests.e2e.utils import show_sell_stage2_support as stage2
 from tests.e2e.utils import show_sell_stage3_scenario as scenario
@@ -72,6 +73,9 @@ def _ids(fixture: Mapping[str, Any], **overrides: str) -> dict[str, str]:
     answers["account.admin"] = "ACCOUNT#fixture-admin"
     answers["actorAccount"] = "ACCOUNT#fixture-admin"
     answers["scope"] = "UNITCAMP#fixture"
+    answers["unit-campaign"] = answers["unit-campaign"]
+    for name in fixture["profiles"]:
+        answers[f"account.{name}"] = f"ACCOUNT#{name}"
     answers.update(overrides)
     return scenario.collect_lane_ids(fixture, answers)
 
@@ -505,11 +509,16 @@ class ConditionalCheckFailed(Exception):
 
 
 class ScriptedDynamo:
-    """A DynamoDB stand-in with the three calls the lane makes, a version condition, and memory.
+    """A DynamoDB stand-in that speaks wire form, which is what a low-level client answers.
 
-    Every call is recorded in order, which is how these tests check the rule a ``delete_item`` return value
-    cannot give: each delete has to be followed by a ``get_item`` of the same key.  Seeded rows are
-    ``{"table": ..., "key": {...}, "item": {...}}`` — the address the lane must use and the row it finds.
+    Rows are stored as ``AttributeValue`` mappings, ``get_item`` answers ``{"Item": {...wire...}}``, and
+    ``update_item`` receives wire ``ExpressionAttributeValues``.  That is deliberate: a fake holding plain
+    Python values hides the encode/decode boundary the fixture has to get right, and a status comparison
+    against ``{"S": "FINALIZED"}`` never matches — the bug the reviewer's probe found.  Every call is
+    recorded in order, which is how these tests check the rule a ``delete_item`` return value cannot give:
+    each delete has to be followed by a consistent ``get_item`` of the same key.  Seeded rows are
+    ``{"table": ..., "key": {...}, "item": {...}}`` — the address the lane must use, and the row in the
+    plain shape the model builds it in, which the fake then encodes the way the client would.
     """
 
     def __init__(
@@ -522,12 +531,15 @@ class ScriptedDynamo:
     ) -> None:
         self._rows: dict[tuple[str, str, str], dict[str, Any]] = {}
         for entry in rows:
-            self._rows[self._address(entry)] = dict(entry.get("item") or {"entityType": "seeded"})
+            item = dict(entry.get("item") or {"entityType": "seeded"})
+            self._rows[self._address(entry)] = {name: _wire(value) for name, value in item.items()}
         self._deny = deny
         self._left_behind = {self._address(row) for row in left_behind}
         self._ignore_update = ignore_update
         self.deleted: list[tuple[str, str, str]] = []
+        self.deleted_calls: list[dict[str, Any]] = []
         self.reads: list[tuple[str, str, str]] = []
+        self.read_calls: list[dict[str, Any]] = []
         self.updated: list[dict[str, Any]] = []
 
     @staticmethod
@@ -540,7 +552,12 @@ class ScriptedDynamo:
         return (str(key["pk"]["S"]), str(key["sk"]["S"]))
 
     def row_at(self, keyed: Mapping[str, Any]) -> dict[str, Any] | None:
-        """The stored row at one address, or ``None`` when the table answers nothing."""
+        """The stored row at one address, decoded to the plain shape the model works in."""
+        stored = self._rows.get(self._address(keyed))
+        return None if stored is None else {name: _plain(value) for name, value in stored.items()}
+
+    def wire_at(self, keyed: Mapping[str, Any]) -> dict[str, Any] | None:
+        """The stored row in the ``AttributeValue`` shape a low-level client answers with."""
         return self._rows.get(self._address(keyed))
 
     def delete_item(self, **call: Any) -> None:
@@ -548,6 +565,7 @@ class ScriptedDynamo:
         if self._deny == "DeleteItem":
             raise AccessDeniedException("User is not authorized to perform: action dynamodb:DeleteItem")
         self.deleted.append(address)
+        self.deleted_calls.append(dict(call))
         if address not in self._left_behind:
             self._rows.pop(address, None)
 
@@ -556,6 +574,7 @@ class ScriptedDynamo:
         if self._deny == "GetItem":
             raise AccessDeniedException("User is not authorized to perform: action dynamodb:GetItem")
         self.reads.append(address)
+        self.read_calls.append(dict(call))
         found = self._rows.get(address)
         return {"Item": dict(found)} if found else {}
 
@@ -569,25 +588,32 @@ class ScriptedDynamo:
             raise ConditionalCheckFailed("no row to condition on")
         names, values = call["ExpressionAttributeNames"], call["ExpressionAttributeValues"]
         condition, _, expected = str(call["ConditionExpression"]).partition(" = ")
-        if row.get(names[condition]) != int(values[expected]["N"]):
-            raise ConditionalCheckFailed(f"the row is not at version {values[expected]['N']}")
+        if row.get(names[condition]) != values[expected]:
+            raise ConditionalCheckFailed("the row is not at the version the write conditioned on")
         if self._ignore_update:
             return
         for clause in str(call["UpdateExpression"]).removeprefix("SET ").split(", "):
             name, _, value = clause.partition(" = ")
-            row[names[name]] = _plain(values[value])
+            row[names[name]] = values[value]
 
 
 def _plain(value: Any) -> Any:
-    """One AttributeValue in the plain shape the model reads its rows in."""
+    """One AttributeValue in the plain shape the model reads its rows in, by the lane's own decoder."""
+    return scenario._python_value(value)
+
+
+def _wire(value: Any) -> dict[str, Any]:
+    """One Python value in the ``AttributeValue`` shape a low-level client sends and answers with.
+
+    ``mutations.wire_value`` covers the scalars, and the event row also holds a list (``productIds``), so
+    the list and map cases are encoded here rather than stringified — a row encoded wrongly is a row the
+    table would never hold, and a fake holding it hides the bug it exists to catch.
+    """
+    if isinstance(value, (list, tuple)):
+        return {"L": [_wire(item) for item in value]}
     if isinstance(value, Mapping):
-        if "NULL" in value:
-            return None
-        if "N" in value:
-            return int(value["N"])
-        if "S" in value:
-            return str(value["S"])
-    return value
+        return {"M": {name: _wire(item) for name, item in value.items()}}
+    return mutations.wire_value(value)
 
 
 def _plan(clock: stage3.ScenarioClock, fixture: Mapping[str, Any], **kwargs: Any) -> list[dict[str, Any]]:
@@ -610,8 +636,15 @@ def test_the_cleanup_run_reads_back_every_row_it_deleted() -> None:
     plan = [row for row in _plan(clock, fixture, ids=_ids(fixture)) if row["kind"] != "sweep"]
     canary = _canary()
     client = ScriptedDynamo(_seeds([*plan, canary]))
-    sweep = stage2.cleanup_row("§2.8.7", "typed-token sweep removed what the writes missed")
-    rows = scenario.run_stage_three_cleanup(client, lane=clock.token, plan=plan, canary=canary, sweep_row=sweep)
+    rows = scenario.run_stage_three_cleanup(
+        client,
+        lane=clock.token,
+        plan=plan,
+        canary=canary,
+        sweep_tokens=_sweep_tokens(clock, fixture),
+        sweep_report=("deleted row  unit_campaign 11111111-1111-4111-8111-111111111111",),
+        sweep_exit_code=0,
+    )
     assert stage2.cleanup_problems(rows) == []
     assert stage2.cleanup_failures(rows) == []
     assert len(rows) == len(plan) + 1
@@ -689,6 +722,67 @@ def test_the_canary_has_to_be_another_lanes_row_and_still_present() -> None:
     assert any("reached outside its own rows" in failure for failure in stage2.cleanup_failures(rows))
 
 
+def _uuid(name: str) -> str:
+    """A shaped id for one ref: the sweeper compares a token's value to the shape that kind stores."""
+    digit = f"{(abs(hash(name)) % 9) + 1}"
+    return f"{digit * 8}-{digit * 4}-4{digit * 3}-8{digit * 3}-{digit * 12}"
+
+
+def _sweep_ids(fixture: Mapping[str, Any]) -> dict[str, str]:
+    """The ids a finished Stage 3 lane really holds: Unit, Unit Campaign, profile and Campaign ids are UUIDs."""
+    ids = {
+        "unit": _uuid("unit"),
+        "unit-campaign": _uuid("unit-campaign"),
+        "actorAccount": "ACCOUNT#qa-admin",
+    }
+    for name in fixture["profiles"]:
+        ids[f"profile.{name}"] = _uuid(f"profile.{name}")
+    for name in fixture["campaigns"]:
+        ids[f"campaign.{name}"] = _uuid(f"campaign.{name}")
+    for name in fixture["events"]:
+        ids[f"event.{name}"] = f"SSE#{_uuid(name)}"
+    return ids
+
+
+def _sweep_tokens(clock: stage3.ScenarioClock, fixture: Mapping[str, Any]) -> tuple[str, ...]:
+    return stage3.stage_three_lane_tokens(
+        fixture, _sweep_ids(fixture), stage3.stage_three_write_steps(fixture, clock.token)
+    )
+
+
+def test_the_lane_s_tokens_are_the_typed_tokens_the_sweeper_accepts() -> None:
+    """Every token is a ``kind=value`` the real parser takes, built from the ids this lane was answered.
+
+    The kinds are checked by ``scripts/qa_fixture.py``'s own parser, not by a copy of its rules: that
+    script is what runs with ``--yes`` and deletes without a prompt, so a token it would refuse is a lane
+    that reports a sweep it never performed.
+    """
+    clock = _clock()
+    fixture = _fixture(clock)
+    tokens = _sweep_tokens(clock, fixture)
+    parsed, refused = qa_fixture.parse_lane_tokens(list(tokens))
+    assert refused == [], refused
+    assert sorted(f"{kind}={value}" for kind, values in parsed.items() for value in values) == sorted(tokens)
+    kinds = {token.split("=", 1)[0] for token in tokens}
+    assert {"unit", "unit-campaign", "profile", "campaign", "idem"} == kinds
+    assert "order" not in kinds and "join-code" not in kinds, "this lane mints neither, so it names neither"
+    assert "data-id" not in kinds, (
+        "the Stage 3 DATA_ID starts with an epoch, which the sweeper's data-id rule refuses; the lane "
+        "names the ids it was answered instead, and tests/unit/test_show_sell_stage3_support.py pins that"
+    )
+    marker_keys = [token.split("=", 1)[1] for token in tokens if token.startswith("idem=")]
+    assert marker_keys == [step["idempotencyKey"] for step in stage3.stage_three_write_steps(fixture, clock.token)]
+
+
+def test_an_unbound_lane_cannot_build_a_sweep_token_out_of_a_placeholder() -> None:
+    """A ``kind=<placeholder>`` token is free text with a kind glued on, and the lane refuses to send one."""
+    clock = _clock()
+    fixture = _fixture(clock)
+    with pytest.raises(ValueError) as error:
+        stage3.stage_three_lane_tokens(fixture, {}, [])
+    assert "no bound value" in str(error.value)
+
+
 def test_a_sweep_that_has_not_been_run_keeps_cleanup_blocked() -> None:
     """The typed-token sweep is part of cleanup: not run, and the lane is blocked, not clean."""
     clock = _clock()
@@ -698,8 +792,99 @@ def test_a_sweep_that_has_not_been_run_keeps_cleanup_blocked() -> None:
     client = ScriptedDynamo(_seeds([_canary()]))
     rows = scenario.run_stage_three_cleanup(client, lane=clock.token, plan=sweep_rows, canary=_canary())
     assert [row["result"] for row in rows] == [stage2.CLEANUP_BLOCKED, stage2.CLEANUP_OBSERVED]
-    assert "typed-token sweep has not been run" in rows[0]["summary"]
+    assert "was never run" in rows[0]["summary"]
+    rows = scenario.run_stage_three_cleanup(
+        client, lane=clock.token, plan=sweep_rows, canary=_canary(), sweep_report=("deleted row x",), sweep_exit_code=0
+    )
+    assert rows[0]["result"] == stage2.CLEANUP_BLOCKED
+    assert "no lane tokens" in rows[0]["summary"]
     assert client.deleted == []
+
+
+def test_the_plan_addresses_the_markers_production_writes_by_the_writer_s_own_function() -> None:
+    """Cleanup's marker keys come from ``mutations.marker_keys``, computed here from the write's own arguments.
+
+    The seed rows are built here, from the actor, operation, scope and key of each planned write, and are
+    *not* copied from the plan.  A plan that hand-assembled ``IDEM#actor#op#scope`` — one generic actor,
+    one generic scope, one base key per operation — would then address a marker that was never written,
+    and the read-back would answer the absence it was looking for.
+    """
+    clock = _clock()
+    fixture = _fixture(clock)
+    ids = _ids(fixture)
+    table = stage3.show_and_sells_table()
+    production: dict[tuple[str, str], str] = {}
+    for step in stage3.stage_three_write_steps(fixture, clock.token):
+        marker = mutations.marker_keys(
+            table_key="show_and_sells",
+            table_name=table,
+            actor_id=ids[step["actor"]],
+            operation=step["op"],
+            scope=ids[step["scopeField"]],
+            idempotency_key=step["idempotencyKey"],
+        )
+        production[(step["op"], step["step"])] = f"{marker.pk}|{marker.sk}"
+    plan = [row for row in _plan(clock, fixture, ids=ids) if row["kind"] == "marker"]
+    assert len(plan) == len(production)
+    assert {f"{row['key']['pk']}|{row['key']['sk']}" for row in plan} == set(production.values())
+    scopes = {row["operation"]: row["scopeField"] for row in plan}
+    assert scopes["createShowAndSell"] == "unit-campaign", "a create has no event id to scope to yet"
+    assert scopes["signupScoutForShowAndSellSlot"].startswith("event.")
+    assert {row["actorField"] for row in plan if row["operation"] == "signupScoutForShowAndSellSlot"} == {
+        f"account.{entry['profile']}" for entry in fixture["signups"]
+    }, "a marker is addressed by the identity that signed the request, and a Scout signs its own signup"
+    client = ScriptedDynamo(
+        [
+            {"table": table, "key": {"pk": pk, "sk": sk}, "item": {"entityType": "marker"}}
+            for pk, sk in (address.split("|") for address in production.values())
+        ]
+        + [_canary()]
+    )
+    rows = scenario.run_stage_three_cleanup(
+        client,
+        lane=clock.token,
+        plan=plan,
+        canary=_canary(),
+        sweep_tokens=_sweep_tokens(clock, fixture),
+        sweep_report=("deleted row  marker IDEM#x",),
+        sweep_exit_code=0,
+    )
+    assert stage2.cleanup_problems(rows) == []
+    assert {(call["Key"]["pk"]["S"], call["Key"]["sk"]["S"]) for call in client.deleted_calls} == {
+        (pk, sk) for pk, sk in (address.split("|") for address in production.values())
+    }, "the lane deletes exactly the markers the writes produced, and reads each one back"
+
+
+def test_the_sweep_verdict_comes_from_the_report_classes_not_from_the_plan() -> None:
+    """The sweeper's own classes decide the row: a residue fails, an unnamed table blocks, and only a clean re-scan observes."""
+    clock = _clock()
+    fixture = _fixture(clock)
+    sweep_rows = [row for row in _plan(clock, fixture, ids=_ids(fixture)) if row["kind"] == "sweep"]
+    tokens = _sweep_tokens(clock, fixture)
+    client = ScriptedDynamo(_seeds([_canary()]))
+
+    def sweep(report: Sequence[str], code: int) -> dict[str, str]:
+        return scenario.run_stage_three_cleanup(
+            client,
+            lane=clock.token,
+            plan=sweep_rows,
+            canary=_canary(),
+            sweep_tokens=tokens,
+            sweep_report=report,
+            sweep_exit_code=code,
+        )[0]
+
+    clean = sweep(("deleted row  event  SSE#x", "kept  membership  SSE#y (another tenant)"), 0)
+    assert clean["result"] == stage2.CLEANUP_OBSERVED
+    assert "deleted=1" in clean["summary"] and "kept=1" in clean["summary"]
+    assert " ".join(tokens) in clean["summary"]
+    residue = sweep(("LEFT event SSE#x",), 1)
+    assert residue["result"] == stage2.CLEANUP_FAILED
+    assert "left=1" in residue["summary"]
+    unreadable = sweep(("BLOCKED kernelworx-orders-ue1-dev: dynamodb:Scan is not granted to this identity",), 1)
+    assert unreadable["result"] == stage2.CLEANUP_OBSERVED, "Amendment B accepts a residue the report names"
+    unexplained = sweep(("some line this parser does not know",), 1)
+    assert unexplained["result"] == stage2.CLEANUP_FAILED, "a non-zero exit no class explains is not a clean sweep"
 
 
 # ---------------------------------------------------------------------------
@@ -715,13 +900,15 @@ def _stored_event(
     version: int,
     status: str = show_and_sell_models.STATUS_SCHEDULED,
     approved: str | None = None,
+    latest: str | None = None,
 ) -> dict[str, Any]:
     """The row the lane's own ``createShowAndSell`` wrote, addressable the way the table holds it.
 
     The row is built by the model — the same builder the create path uses — and a stored state is then
-    applied as a pair, exactly the way the §3.4 writer does it: ``FINALIZED`` only ever arrives together
-    with ``approvedFinalizationId``, and ``REOPENED`` only ever arrives with it cleared.  Building an
-    illegal seed would test a row that cannot exist.
+    applied as the pair the §5 writer applies it in: ``FINALIZED`` only ever arrives together with
+    ``approvedFinalizationId`` and a ``latestFinalizationId`` pointing at it, and ``REOPENED`` only ever
+    arrives with the approved pointer cleared and the latest pointer still standing.  Seeding a row the
+    product could not produce would test a shape that cannot exist.
     """
     row = show_and_sell_models.build_show_and_sell_item(
         show_and_sell_id=ids[f"event.{event_ref}"],
@@ -736,6 +923,7 @@ def _stored_event(
     )
     row[show_and_sell_models.STATUS_ATTRIBUTE] = status
     row[show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE] = approved
+    row[show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE] = latest
     assert show_and_sell_models.event_invariant_violations(row) == [], "the seed row is not a legal event row"
     return {"table": scenario.STATE_FIXTURE_TABLE, "key": {"pk": row["pk"], "sk": row["sk"]}, "item": row}
 
@@ -749,6 +937,10 @@ def test_api_fix_01_finalized_is_a_builder_fixture_the_read_back_confirms() -> N
     assert plan["table"] == scenario.STATE_FIXTURE_TABLE == stage3.show_and_sells_table()
     assert plan["requiredActions"] == scenario.STATE_FIXTURE_REQUIRED_ACTIONS
     assert plan["changes"][show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE]
+    assert (
+        plan["changes"][show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE]
+        == plan["changes"][show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE]
+    ), "a first finalization sets both pointers, which is what §5.2.1 writes"
     assert plan["note"] == stage3.BUILDER_ONLY_STATE_FIXTURE_NOTE
     read_version = plan["conditionVersion"]
     seed = _stored_event(clock, ids, "finalized", version=read_version)
@@ -757,13 +949,114 @@ def test_api_fix_01_finalized_is_a_builder_fixture_the_read_back_confirms() -> N
     verdict = scenario.apply_state_fixture(client, plan, on_read=before.append)
     assert verdict["result"] == stage2.CLEANUP_OBSERVED
     assert "documented Stage 3 fixture builder" in verdict["summary"]
+    assert f"conditioned on version {read_version}" in verdict["summary"]
     assert before[0][show_and_sell_models.STATUS_ATTRIBUTE] == show_and_sell_models.STATUS_SCHEDULED
     assert client.updated[0]["ConditionExpression"] == "#version = :expected"
     assert client.updated[0]["ExpressionAttributeValues"][":expected"] == {"N": str(read_version)}
+    assert all(call.get("ConsistentRead") is True for call in client.read_calls), client.read_calls
+    assert len(client.read_calls) == 2, "the fixture reads before it writes and again to prove the write landed"
     after = client.row_at(seed)
     assert after is not None
     assert after[show_and_sell_models.STATUS_ATTRIBUTE] == show_and_sell_models.STATUS_FINALIZED
     assert show_and_sell_models.event_invariant_violations(after) == []
+
+
+def test_api_fix_01_the_read_back_judges_the_wire_form_a_low_level_client_answers() -> None:
+    """The fixture compares decoded values, not the ``AttributeValue`` container they arrive in.
+
+    A real ``get_item`` answers ``{"S": "FINALIZED"}``.  A fixture that compared that to the state string
+    fails *after* the write landed, which is the worst possible place to discover it: the row is FINALIZED
+    on the stack and the lane reports the fixture as failed.
+    """
+    clock = _clock()
+    ids = _ids(_fixture(clock))
+    plan = scenario.finalize_event_fixture_writes(clock, ids)
+    seed = _stored_event(clock, ids, "finalized", version=plan["conditionVersion"])
+    client = ScriptedDynamo([seed])
+    verdict = scenario.apply_state_fixture(client, plan)
+    assert verdict["result"] == stage2.CLEANUP_OBSERVED
+    stored = client.wire_at(seed)
+    assert stored is not None
+    assert stored[show_and_sell_models.STATUS_ATTRIBUTE] == {"S": show_and_sell_models.STATUS_FINALIZED}
+    assert stored[show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE] == {
+        "S": plan["changes"][show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE]
+    }
+
+
+def test_api_fix_01_a_read_back_that_still_answers_the_old_status_names_the_decoded_value() -> None:
+    """An update that was accepted but did not land is caught by the read-back, and reported readably."""
+    clock = _clock()
+    ids = _ids(_fixture(clock))
+    plan = scenario.finalize_event_fixture_writes(clock, ids)
+    seed = _stored_event(clock, ids, "finalized", version=plan["conditionVersion"])
+    client = ScriptedDynamo([seed], ignore_update=True)
+    verdict = scenario.apply_state_fixture(client, plan)
+    assert verdict["result"] == stage2.CLEANUP_FAILED
+    assert f"read-back status is {show_and_sell_models.STATUS_SCHEDULED!r}" in verdict["summary"]
+    assert "{'S':" not in verdict["summary"], "the report quotes the value the table holds, not its container"
+
+
+def test_api_fix_01_conditions_on_the_version_the_read_answered_not_the_plan_s_guess() -> None:
+    """The condition is the before-image's version, so a row that moved is refused rather than overwritten."""
+    clock = _clock()
+    ids = _ids(_fixture(clock))
+    plan = scenario.finalize_event_fixture_writes(clock, ids)
+    assert plan["conditionVersion"] == 1
+    seed = _stored_event(clock, ids, "finalized", version=12)
+    client = ScriptedDynamo([seed])
+    verdict = scenario.apply_state_fixture(client, plan)
+    assert verdict["result"] == stage2.CLEANUP_OBSERVED
+    assert client.updated[0]["ExpressionAttributeValues"][":expected"] == {"N": "12"}
+    assert "conditioned on version 12" in verdict["summary"]
+
+
+class RacingDynamo(ScriptedDynamo):
+    """A table that moves the row between the read and the write — the race the version condition is for."""
+
+    def __init__(self, rows: Iterable[Mapping[str, Any]], *, bumped_version: int) -> None:
+        super().__init__(rows)
+        self._bump = bumped_version
+        self._bumped = False
+
+    def get_item(self, **call: Any) -> dict[str, Any]:
+        answer = super().get_item(**call)
+        if answer.get("Item") is not None and not self._bumped:
+            self._bumped = True
+            address = (call["TableName"], *self._wire(call["Key"]))
+            self._rows[address][show_and_sell_models.VERSION_ATTRIBUTE] = mutations.wire_value(self._bump)
+        return answer
+
+
+def test_api_fix_01_a_row_that_moved_under_the_fixture_is_a_failed_fixture() -> None:
+    """The row advances after the read: the write is refused by the condition, and the lane says failed."""
+    clock = _clock()
+    ids = _ids(_fixture(clock))
+    plan = scenario.finalize_event_fixture_writes(clock, ids)
+    seed = _stored_event(clock, ids, "finalized", version=plan["conditionVersion"])
+    bumped = plan["conditionVersion"] + 4
+    client = RacingDynamo([seed], bumped_version=bumped)
+    verdict = scenario.apply_state_fixture(client, plan)
+    assert verdict["result"] == stage2.CLEANUP_FAILED
+    assert "ConditionalCheckFailed" in verdict["summary"]
+    assert client.updated[0]["ExpressionAttributeValues"][":expected"] == {"N": str(plan["conditionVersion"])}, (
+        "the fixture conditions on the version its own read answered, and the table refuses the stale write"
+    )
+    assert client.row_at(seed)[show_and_sell_models.STATUS_ATTRIBUTE] == show_and_sell_models.STATUS_SCHEDULED
+    assert client.row_at(seed)[show_and_sell_models.VERSION_ATTRIBUTE] == bumped
+
+
+def test_api_fix_01_a_row_with_no_version_refuses_to_write_blind() -> None:
+    """A row the read answers without a version cannot be conditioned on, and that is a failure."""
+    clock = _clock()
+    ids = _ids(_fixture(clock))
+    plan = scenario.finalize_event_fixture_writes(clock, ids)
+    seed = _stored_event(clock, ids, "finalized", version=plan["conditionVersion"])
+    seed["item"].pop(show_and_sell_models.VERSION_ATTRIBUTE)
+    client = ScriptedDynamo([seed])
+    verdict = scenario.apply_state_fixture(client, plan)
+    assert verdict["result"] == stage2.CLEANUP_FAILED
+    assert "no version to condition on" in verdict["summary"]
+    assert client.updated == []
 
 
 def test_api_fix_01_the_builder_touches_the_event_row_and_writes_no_finalization_row() -> None:
@@ -788,29 +1081,52 @@ def test_api_fix_01_the_builder_touches_the_event_row_and_writes_no_finalization
     }, "a state fixture that rewrites the interval or the identity is a different row, not a state"
 
 
-def test_api_fix_01_reopened_clears_the_pointer_the_model_refuses() -> None:
-    """§5.10 refuses a REOPENED row that still points at an approved finalization, so the builder clears it."""
+def test_api_fix_01_reopened_clears_the_approved_pointer_and_keeps_the_history_pointer() -> None:
+    """§5.3.1 reopens by clearing ``approvedFinalizationId`` **while retaining** ``latestFinalizationId``.
+
+    Both halves are asserted on exact values: the approved pointer is gone, and the latest pointer is
+    still the one the row arrived with.  A fixture that cleared it would hand a REOPENED event no
+    finalization history, which is a row the product cannot produce and which every later reopening or
+    re-finalization scenario would then read as if it were real.
+    """
     clock = _clock()
     ids = _ids(_fixture(clock))
     plan = scenario.reopen_event_fixture_writes(clock, ids)
     assert plan["state"] == show_and_sell_models.STATUS_REOPENED
     assert plan["changes"][show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE] is None
+    assert show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE not in plan["changes"], (
+        "clearing the latest pointer is not part of reopening: the update must say nothing about it"
+    )
+    approved = f"FINAL#{clock.token}-first"
+    latest = f"FINAL#{clock.token}-first"
     seed = _stored_event(
         clock,
         ids,
         "reopened",
         version=plan["conditionVersion"],
         status=show_and_sell_models.STATUS_FINALIZED,
-        approved=f"FINAL#{clock.token}-finalized",
+        approved=approved,
+        latest=latest,
     )
+    update_expression = scenario._update_expression(plan["changes"])
+    assert f"#{show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE}" not in update_expression
     client = ScriptedDynamo([seed])
     verdict = scenario.apply_state_fixture(client, plan)
     assert verdict["result"] == stage2.CLEANUP_OBSERVED
     after = client.row_at(seed)
-    assert after is not None and show_and_sell_models.event_invariant_violations(after) == []
-    uncleared = dict(after, status=show_and_sell_models.STATUS_REOPENED, approvedFinalizationId="FINAL#kept")
+    assert after is not None
+    assert after[show_and_sell_models.STATUS_ATTRIBUTE] == show_and_sell_models.STATUS_REOPENED
+    assert after[show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE] is None
+    assert after[show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE] == latest
+    assert show_and_sell_models.event_invariant_violations(after) == []
+    uncleared = dict(after, approvedFinalizationId="FINAL#kept")
     problems = show_and_sell_models.event_invariant_violations(uncleared)
     assert any("approvedFinalizationId cleared" in problem for problem in problems), problems
+    no_history = dict(after, latestFinalizationId=None)
+    assert no_history[show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE] is None, (
+        "a REOPENED row with no history pointer is legal to store, which is why the fixture has to be "
+        "asserted against the value it arrived with rather than against legality alone"
+    )
 
 
 def test_api_fix_01_a_denied_read_reports_blocked_naming_the_action() -> None:
@@ -826,28 +1142,14 @@ def test_api_fix_01_a_denied_read_reports_blocked_naming_the_action() -> None:
     assert client.updated == [], "a denied read stops the fixture before any write"
 
 
-def test_api_fix_01_a_missing_row_or_a_stale_condition_is_a_failed_fixture() -> None:
-    """No row to transition, and a version condition that did not hold, are both failures."""
+def test_api_fix_01_a_missing_row_is_a_failed_fixture() -> None:
+    """Nothing at that key means the lane's own create never landed, and the fixture says so."""
     clock = _clock()
     ids = _ids(_fixture(clock))
     plan = scenario.finalize_event_fixture_writes(clock, ids)
-    assert "no event row to transition" in scenario.apply_state_fixture(ScriptedDynamo(), plan)["summary"]
-    raced = _stored_event(clock, ids, "finalized", version=plan["conditionVersion"] + 5)
-    verdict = scenario.apply_state_fixture(ScriptedDynamo([raced]), plan)
+    verdict = scenario.apply_state_fixture(ScriptedDynamo(), plan)
     assert verdict["result"] == stage2.CLEANUP_FAILED
-    assert "ConditionalCheckFailed" in verdict["summary"]
-
-
-def test_api_fix_01_a_read_back_that_still_answers_the_old_status_is_not_a_fixture() -> None:
-    """An update that was accepted but did not land is caught by the read-back, not assumed."""
-    clock = _clock()
-    ids = _ids(_fixture(clock))
-    plan = scenario.finalize_event_fixture_writes(clock, ids)
-    seed = _stored_event(clock, ids, "finalized", version=plan["conditionVersion"])
-    client = ScriptedDynamo([seed], ignore_update=True)
-    verdict = scenario.apply_state_fixture(client, plan)
-    assert verdict["result"] == stage2.CLEANUP_FAILED
-    assert "read-back status" in verdict["summary"]
+    assert "no event row to transition" in verdict["summary"]
 
 
 def test_the_state_builder_refuses_an_id_the_lane_never_minted() -> None:

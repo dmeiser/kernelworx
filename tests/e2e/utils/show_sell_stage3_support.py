@@ -72,7 +72,7 @@ from datetime import time as wall_clock_time
 from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
 
-from src.utils import show_and_sell_models
+from src.utils import mutations, show_and_sell_models
 from tests.e2e.utils import show_sell_graphql
 from tests.e2e.utils import show_sell_stage2_support as stage_two
 
@@ -142,7 +142,10 @@ __all__ = [
     "stage_three_ledger_invariants",
     "stage_three_refusal",
     "stage_three_selection_violations",
+    "stage_three_lane_tokens",
     "stage_three_sweep_tokens",
+    "stage_three_write_steps",
+    "SWEEP_TOKEN_ID_FIELDS",
     "stage_three_ttl_expectation",
     "stock_snapshot",
     "sweep_verdict",
@@ -2440,23 +2443,8 @@ def stage_three_cleanup_plan(
                 "key": show_and_sell_models.event_metadata_key(resolve(f"event.{event_name}")),
             }
         )
-    for operation in STAGE_THREE_WRITES:
-        rows.append(
-            {
-                "acceptance": "API-FIX-03",
-                "summary": (
-                    f"delete the {operation} idempotency marker this lane wrote; the table's TTL would sweep "
-                    f"it after {MARKER_TTL_SECONDS // 3600} hours, and a lane that waits for the TTL has not cleaned"
-                ),
-                "lane": lane,
-                "kind": "marker",
-                "table": table,
-                "key": {
-                    "pk": f"IDEM#{resolve('actorAccount')}#{operation}#{resolve('scope')}",
-                    "sk": f"IDEM#{idempotency_key_for(operation, lane)}",
-                },
-            }
-        )
+    for step in stage_three_write_steps(fixture, lane):
+        rows.append(_marker_row(step, lane=lane, table=table, resolve=resolve))
     rows.append(
         {
             "acceptance": "§2.8.7",
@@ -2472,6 +2460,145 @@ def stage_three_cleanup_plan(
         }
     )
     return rows
+
+
+def _marker_row(step: Mapping[str, str], *, lane: str, table: str, resolve: Callable[[str], str]) -> dict[str, Any]:
+    """One marker row, addressed the way production addresses it.
+
+    The address comes from :func:`src.utils.mutations.marker_keys` — the same call every Show & Sell
+    mutation makes — so the row cleanup names is the row the writer put under the TTL.  Scopes differ by
+    operation (an event write scopes to the event, a create to the Unit Campaign), the actor is the
+    identity that signed the request, and the sort key is the caller's key, so a hand-assembled
+    ``IDEM#actor#op#scope`` with one generic actor and one generic scope addresses nothing.
+
+    A placeholder actor or scope is kept as a placeholder rather than fed to ``marker_keys``, which would
+    reject it: the lane has not identified that write, so the row stays blocked instead of addressing a
+    marker that was never written.
+    """
+    actor, scope = resolve(_actor_ref(step)), resolve(step["scopeField"])
+    key = idempotency_key_for(step["op"], lane, step["step"])
+    if UNBOUND_KEY_MARKER in actor or UNBOUND_KEY_MARKER in scope:
+        address = {"pk": f"IDEM#{actor}#{step['op']}#{scope}", "sk": f"IDEM#{key}"}
+    else:
+        marker = mutations.marker_keys(
+            table_key=MARKER_TABLE_KEYS[step["op"]],
+            table_name=table,
+            actor_id=actor,
+            operation=step["op"],
+            scope=scope,
+            idempotency_key=key,
+        )
+        address = {"pk": marker.pk, "sk": marker.sk}
+    return {
+        "acceptance": "API-FIX-03",
+        "summary": (
+            f"delete the {step['op']} marker this lane wrote with key {key}; the table's TTL would sweep it "
+            f"after {MARKER_TTL_SECONDS // 3600} hours, and a lane that waits for the TTL has not cleaned"
+        ),
+        "lane": lane,
+        "kind": "marker",
+        "table": table,
+        "key": address,
+        "idempotencyKey": key,
+        "operation": step["op"],
+        "actorField": _actor_ref(step),
+        "scopeField": step["scopeField"],
+    }
+
+
+#: Every Stage 3 write's marker rides the event aggregate table: ``_show_and_sell_marker`` in
+#: ``src/handlers/unit_operations.py`` is the only marker builder these mutations call.
+MARKER_TABLE_KEYS: dict[str, str] = dict.fromkeys(STAGE_THREE_WRITES, "show_and_sells")
+
+#: The writes that are one call per scenario rather than one per row of the tree, and the event each one
+#: addresses.  These are the mutation ids the walkthrough runs: EVT-M-02 edits an event, EVT-M-03 deletes a
+#: slot, SS-SM-11 cancels a signup, and the 101-row confirm runs on the confirm event.
+SINGLE_STEP_WRITES: tuple[dict[str, str], ...] = (
+    {"op": "updateShowAndSell", "step": "address", "actor": "account.admin", "scopeField": "event.future"},
+    {"op": "deleteShowAndSellSlot", "step": "drop", "actor": "account.admin", "scopeField": "event.future"},
+    {"op": "cancelShowAndSellSignup", "step": "leave", "actor": "account.charlie", "scopeField": "event.future"},
+    {"op": "confirmShowAndSellWork", "step": "rows", "actor": "account.admin", "scopeField": "event.confirm"},
+)
+
+
+def _step_slug(value: str) -> str:
+    """A ref in the shape an idempotency key segment may hold, and the shape the sweeper's ``idem`` kind checks."""
+    return re.sub(r"[^A-Za-z0-9_-]", "-", str(value))
+
+
+def stage_three_write_steps(fixture: Mapping[str, Any], lane: str) -> tuple[dict[str, str], ...]:
+    """Every idempotent write the scenario sends, with the identity that signs it and the resource that scopes its marker.
+
+    This is derived from the tree rather than listed by hand, so the marker cleanup addresses is the marker
+    the writes produce: one create per event, one slot write per planned slot, one assignment per allocation,
+    one signup per signup, one cancel per cancelled event, and the four single-step writes.  A refused write
+    (the §3.6.2 collisions, the removed-member signup) is **not** here: a rejected mutation writes no marker,
+    and a cleanup row for it would delete nothing and prove nothing.
+    """
+    slot_events: Mapping[str, str] = fixture["slotEvents"]
+    steps: list[dict[str, str]] = []
+    for name in sorted(fixture["events"]):
+        steps.append(
+            {
+                "op": "createShowAndSell",
+                "step": f"create-{_step_slug(name)}",
+                "actor": "account.admin",
+                "scopeField": "unit-campaign",
+            }
+        )
+        if fixture["events"][name]["setup"].get("op") == "cancelShowAndSell":
+            steps.append(
+                {
+                    "op": "cancelShowAndSell",
+                    "step": f"cancel-{_step_slug(name)}",
+                    "actor": "account.admin",
+                    "scopeField": f"event.{name}",
+                }
+            )
+    for slot in sorted(slot_events):
+        steps.append(
+            {
+                "op": "upsertShowAndSellSlot",
+                "step": f"slot-{_step_slug(slot)}",
+                "actor": "account.admin",
+                "scopeField": f"event.{slot_events[slot]}",
+            }
+        )
+    for group in sorted(fixture["allocations"]):
+        event = group if group in fixture["events"] else slot_events.get(group, "")
+        for profile_ref, _product, _qty in fixture["allocations"][group]:
+            steps.append(
+                {
+                    "op": "assignShowAndSellInventory",
+                    "step": f"assign-{_step_slug(group)}-{_step_slug(str(profile_ref).split('.')[-1])}",
+                    "actor": "account.admin",
+                    "scopeField": f"event.{event}",
+                }
+            )
+    for entry in fixture["signups"]:
+        steps.append(
+            {
+                "op": "signupScoutForShowAndSellSlot",
+                "step": f"signup-{_step_slug(entry['event'])}-{_step_slug(entry['slot'])}-{_step_slug(entry['profile'])}",
+                "actor": f"account.{entry['profile']}",
+                "scopeField": f"event.{entry['event']}",
+            }
+        )
+    steps += [dict(entry) for entry in SINGLE_STEP_WRITES]
+    for step in steps:
+        step["idempotencyKey"] = idempotency_key_for(step["op"], lane, step["step"])
+    seen: set[str] = set()
+    for step in steps:
+        key = step["idempotencyKey"]
+        if key in seen:
+            raise AssertionError(f"two writes share one idempotency address: {key}")
+        seen.add(key)
+    return tuple(steps)
+
+
+def _actor_ref(step: Mapping[str, str]) -> str:
+    """The id field naming the identity that signs one planned write."""
+    return step.get("actorField") or step["actor"]
 
 
 def stage_three_cleanup_canary(other_lane: str) -> dict[str, Any]:
@@ -2493,9 +2620,68 @@ def stage_three_cleanup_canary(other_lane: str) -> dict[str, Any]:
 
 
 def stage_three_sweep_tokens(lane: str) -> tuple[str, ...]:
-    """The typed ``kind=value`` tokens a Stage 3 sweep may name for one lane:
-    the lane's own entities plus the ``idem`` marker it wrote."""
+    """The token *kinds* a Stage 3 sweep may name: Stage 2's kinds plus ``idem``.
+
+    This is the vocabulary, not a token list.  A token is ``kind=value``, and the value has to be a real
+    id of that kind — see :func:`stage_three_lane_tokens`, which builds the tokens from the ids the lane
+    was actually answered.
+    """
     return tuple(f"{kind}={lane}" for kind in (*stage_two.LANE_TOKEN_KINDS, "idem"))
+
+
+#: The ids a Stage 3 lane can name by kind, in the order the sweeper reads them.  Three kinds are absent,
+#: each for a reason the reviewer can check rather than a reason the lane decides at run time:
+#:
+#: * ``order`` and ``join-code`` — this card's lane mints neither an Order nor a join code;
+#: * ``data-id`` — the Stage 3 ``DATA_ID`` is ``<run>-<scenario>-<lane>-<attempt>`` and starts with an epoch,
+#:   while the sweeper's ``data-id`` rule wants ``[a-z][a-z0-9]*(-[a-z0-9]+)+`` and refuses anything else.
+#:   The lane therefore names every row it was *answered* an id for, which is the stronger claim: an id is
+#:   compared to the key column of the kind that stores it.
+SWEEP_TOKEN_ID_FIELDS: tuple[tuple[str, str], ...] = (("unit", "unit"), ("unit-campaign", "unit-campaign"))
+#: The profile and Scout Campaign refs are enumerated from the tree rather than hard-coded, so a lane
+#: that adds a persona cannot leave its rows un-named for the sweep.
+SWEEP_TOKEN_REF_KINDS: tuple[tuple[str, str], ...] = (("profile", "profile."), ("campaign", "campaign."))
+
+
+def stage_three_lane_tokens(
+    fixture: Mapping[str, Any], ids: Mapping[str, str], steps: Sequence[Mapping[str, str]] = ()
+) -> tuple[str, ...]:
+    """The ``kind=value`` tokens one finished Stage 3 lane can honestly name.
+
+    ``scripts/qa_fixture.py sweep`` deletes without a prompt and refuses a token whose value does not
+    match the stored shape of its kind, so the lane hands over the ids it was answered — the ``DATA_ID``
+    the Unit name and every Scout profile carry, the Unit and Unit Campaign ids, each Scout profile and
+    Campaign id, and every idempotency key it sent as ``idem``.  A ref with no bound id is a ``ValueError``
+    naming it: a placeholder token is free text with a kind glued on, which is what the sweeper exists to
+    refuse.
+    """
+    tokens: list[str] = []
+    for kind, ref in SWEEP_TOKEN_ID_FIELDS:
+        tokens.append(f"{kind}={_require_sweep_value(ids.get(ref, ''), ref)}")
+    for kind, prefix in SWEEP_TOKEN_REF_KINDS:
+        tokens += [
+            f"{kind}={_require_sweep_value(ids.get(entry['ref'], ''), entry['ref'])}"
+            for entry in _refs_with_prefix(fixture, prefix)
+        ]
+    tokens += [f"idem={step['idempotencyKey']}" for step in steps]
+    return tuple(dict.fromkeys(tokens))
+
+
+def _require_sweep_value(value: str, ref: str) -> str:
+    """A bound value for one sweep token, or the error that says the lane cannot name it yet."""
+    if not value or UNBOUND_KEY_MARKER in value:
+        raise ValueError(
+            f"the sweep token for {ref!r} has no bound value; the lane cannot name a row it never identified"
+        )
+    return value
+
+
+def _refs_with_prefix(fixture: Mapping[str, Any], prefix: str) -> list[Mapping[str, Any]]:
+    """The tree's entries whose ref starts with one kind prefix, in a stable order."""
+    entries: list[Mapping[str, Any]] = []
+    for section in ("profiles", "campaigns"):
+        entries += [entry for entry in fixture[section].values() if str(entry["ref"]).startswith(prefix)]
+    return entries
 
 
 def assert_stage_three_cleanup_clean(rows: Iterable[Mapping[str, str]], *, strict: bool | None = None) -> None:

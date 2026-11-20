@@ -921,12 +921,18 @@ def _state_item(
     finalization_id: str | None,
     version: int,
 ) -> dict[str, Any]:
-    """The attribute changes one state transition writes, validated by the model before it is sent.
+    """The attribute changes one state transition writes, validated by model §5.10 before it is sent.
 
     ``build_show_and_sell_item`` refuses a row that breaks a §5.10 invariant, so the builder builds the
     row the create path would have written, applies the transition on top of it, and re-checks the
     result.  A ``FINALIZED`` row without ``approvedFinalizationId``, or a ``REOPENED`` row that still
     points at one, never reaches the client.
+
+    The two pointers are **not** written as a pair.  §5.3.1 reopens by clearing ``approvedFinalizationId``
+    *while retaining* ``latestFinalizationId`` — the history pointer is what §5.1.4's finalization history
+    and a re-finalization's supersede chain read — so the REOPENED update says nothing about the latest
+    pointer and the row keeps whatever it already holds.  A fixture that cleared it would leave a REOPENED
+    event with no history to reopen against, which is a different row than the product can produce.
     """
     base = show_and_sell_models.build_show_and_sell_item(
         show_and_sell_id=lane_id(ids, f"event.{event_ref}"),
@@ -940,26 +946,24 @@ def _state_item(
         status=show_and_sell_models.STATUS_SCHEDULED,
         version=version,
     )
+    changes: dict[str, Any] = {
+        show_and_sell_models.STATUS_ATTRIBUTE: status,
+        show_and_sell_models.VERSION_ATTRIBUTE: version,
+        show_and_sell_models.UPDATED_AT_ATTRIBUTE: clock.iso(),
+    }
     base[show_and_sell_models.STATUS_ATTRIBUTE] = status
     if finalization_id is not None:
+        changes[show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE] = finalization_id
+        changes[show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE] = finalization_id
         base[show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE] = finalization_id
         base[show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE] = finalization_id
     else:
+        changes[show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE] = None
         base[show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE] = None
     violations = show_and_sell_models.event_invariant_violations(base)
     if violations:
         raise AssertionError(f"the {status} fixture would write an invalid event row: {'; '.join(violations)}")
-    return {
-        show_and_sell_models.STATUS_ATTRIBUTE: status,
-        show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE: base[
-            show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE
-        ],
-        show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE: base[
-            show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE
-        ],
-        show_and_sell_models.VERSION_ATTRIBUTE: version,
-        show_and_sell_models.UPDATED_AT_ATTRIBUTE: clock.iso(),
-    }
+    return changes
 
 
 def _state_fixture_plan(
@@ -982,9 +986,10 @@ def _state_fixture_plan(
         "requiredActions": STATE_FIXTURE_REQUIRED_ACTIONS,
         "attestation": (
             f"{state} was produced by the documented Stage 3 fixture builder, not by {state.lower() + 'ShowAndSell'}: "
-            f"§5's mutation is absent from this SDL. The builder changed only status, the finalization pointers and "
-            "the version of the row createShowAndSell wrote, and wrote no FINALIZATION# row — that row family is §5's, "
-            "so a Stage 3 lane reading finalization detail from this fixture is reading a fixture, not a finalization."
+            f"§5's mutation is absent from this SDL. The builder changed only status, the approved finalization "
+            "pointer, the version and updatedAt of the row createShowAndSell wrote, and wrote no FINALIZATION# row — "
+            "that row family is §5's, so a Stage 3 lane reading finalization detail from this fixture is reading a "
+            "fixture, not a finalization."
         ),
         "note": stage_three.BUILDER_ONLY_STATE_FIXTURE_NOTE,
     }
@@ -1009,10 +1014,14 @@ def finalize_event_fixture_writes(
 def reopen_event_fixture_writes(
     clock: stage_three.ScenarioClock, ids: Mapping[str, str], *, event_ref: str = "reopened"
 ) -> dict[str, Any]:
-    """The REOPENED fixture: the same update with ``approvedFinalizationId`` cleared.
+    """The REOPENED fixture: the same update with ``approvedFinalizationId`` cleared and the history kept.
 
     The model refuses a ``REOPENED`` row that still points at an approved finalization (§5.10), so
-    clearing the pointer is part of the fixture rather than a detail a later read has to forgive.
+    clearing that pointer is part of the fixture rather than a detail a later read has to forgive.  What
+    the fixture must not do is clear ``latestFinalizationId`` too: §5.3.1 reopens "while retaining
+    latestFinalizationId", and that pointer is what the finalization history and a re-finalization's
+    supersede chain hang off.  The update therefore names only the approved pointer, and the row's own
+    latest pointer survives it untouched.
     """
     return _state_fixture_plan(clock, ids, event_ref, state=show_and_sell_models.STATUS_REOPENED, finalization_id=None)
 
@@ -1024,26 +1033,32 @@ def apply_state_fixture(
 
     Three calls, each of which can be the one that says the fixture cannot be built:
 
-    1. ``get_item`` — the row the public create wrote, and the action the identity may or may not have;
-    2. ``update_item`` — the transition, conditioned on the version the read answered, so a concurrent
-       write makes this fixture stale rather than silently overwritten;
-    3. ``get_item`` again — the read-back.  A row that still answers the old status is a fixture that
-       did not happen, which is a ``failed`` verdict, not an observation.
+    1. ``get_item`` with ``ConsistentRead`` — the row the public create wrote, and the action the
+       identity may or may not have;
+    2. ``update_item`` — the transition, conditioned on **the version that read answered**, so a
+       concurrent write makes this fixture stale rather than silently overwritten;
+    3. ``get_item`` again, also consistent — the read-back.  A row that still answers the old status is
+       a fixture that did not happen, which is a ``failed`` verdict, not an observation.
+
+    The low-level client speaks in DynamoDB wire form: a read answers ``{"S": "FINALIZED"}``, not
+    ``"FINALIZED"``.  Every comparison here goes through :func:`_python_row` first, so the fixture is
+    judged on the value the table holds rather than on the container it arrives in.
 
     Args:
         client: a DynamoDB client (or a stand-in with the same three calls).
         plan: the plan from :func:`finalize_event_fixture_writes` or :func:`reopen_event_fixture_writes`.
-        on_read: called with the row that was read, so a lane can record the before-image.
+        on_read: called with the decoded before-image, so a lane can record what the row was.
 
     Returns:
         A cleanup-vocabulary row: ``observed`` when the read-back confirms the state, ``blocked`` when
-        an action is denied, ``failed`` when the row is missing or the read-back disagrees.
+        an action is denied, ``failed`` when the row is missing, carries no version to condition on, or
+        answers a state the fixture did not write.
     """
     table, key = str(plan["table"]), wire_key(plan["key"])
 
     def action() -> str:
         try:
-            before = client.get_item(TableName=table, Key=key)
+            before = client.get_item(TableName=table, Key=key, ConsistentRead=True)
         except Exception as exc:  # noqa: BLE001 - the reason it failed decides the verdict
             if is_access_denied(exc):
                 raise stage_two.CleanupBlocked(f"dynamodb:GetItem on {table}: {exc}") from exc
@@ -1053,8 +1068,16 @@ def apply_state_fixture(
             raise AssertionError(
                 f"no event row to transition: the lane's createShowAndSell wrote nothing at {plan['key']}"
             )
+        before_image = _python_row(item)
         if on_read is not None:
-            on_read(item)
+            on_read(before_image)
+        read_version = before_image.get(show_and_sell_models.VERSION_ATTRIBUTE)
+        if read_version is None:
+            raise AssertionError(
+                f"the row at {plan['key']} carries no {show_and_sell_models.VERSION_ATTRIBUTE}, so the fixture "
+                "has no version to condition on and would be writing blind"
+            )
+        conditioned = dict(plan, conditionVersion=int(read_version))
         try:
             client.update_item(
                 TableName=table,
@@ -1062,14 +1085,14 @@ def apply_state_fixture(
                 UpdateExpression=_update_expression(plan["changes"]),
                 ExpressionAttributeNames=_expression_names(plan["changes"]),
                 ConditionExpression="#version = :expected",
-                ExpressionAttributeValues=_condition_values(plan),
+                ExpressionAttributeValues=_condition_values(conditioned),
             )
         except Exception as exc:  # noqa: BLE001
             if is_access_denied(exc):
                 raise stage_two.CleanupBlocked(f"dynamodb:UpdateItem on {table}: {exc}") from exc
             raise
         try:
-            after = client.get_item(TableName=table, Key=key)
+            after = client.get_item(TableName=table, Key=key, ConsistentRead=True)
         except Exception as exc:  # noqa: BLE001
             if is_access_denied(exc):
                 raise stage_two.CleanupBlocked(f"dynamodb:GetItem (read-back) on {table}: {exc}") from exc
@@ -1077,14 +1100,19 @@ def apply_state_fixture(
         row = after.get("Item")
         if not row:
             raise AssertionError(f"the read-back answers nothing at {plan['key']} after the transition was accepted")
-        if str(row.get(show_and_sell_models.STATUS_ATTRIBUTE)) != str(plan["state"]):
+        written = _python_row(row)
+        if str(written.get(show_and_sell_models.STATUS_ATTRIBUTE)) != str(plan["state"]):
             raise AssertionError(
-                f"read-back status is {row.get(show_and_sell_models.STATUS_ATTRIBUTE)!r}, the fixture wrote {plan['state']!r}"
+                f"read-back status is {written.get(show_and_sell_models.STATUS_ATTRIBUTE)!r}, "
+                f"the fixture wrote {plan['state']!r}"
             )
-        violations = show_and_sell_models.event_invariant_violations(_python_row(row))
+        violations = show_and_sell_models.event_invariant_violations(written)
         if violations:
             raise AssertionError(f"the fixture row breaks the model's invariants: {'; '.join(violations)}")
-        return f"{plan['state']} written and read back at {table}/{plan['key']['pk']}/{plan['key']['sk']}; {plan['attestation']}"
+        return (
+            f"{plan['state']} written and read back at {table}/{plan['key']['pk']}/{plan['key']['sk']}, "
+            f"conditioned on version {read_version}; {plan['attestation']}"
+        )
 
     return stage_two.run_cleanup_step(f"API-FIX-01 {plan['state']} fixture", action)
 
@@ -1163,7 +1191,9 @@ def run_stage_three_cleanup(
     lane: str,
     plan: Sequence[Mapping[str, Any]],
     canary: Mapping[str, Any],
-    sweep_row: Mapping[str, str] | None = None,
+    sweep_tokens: Sequence[str] = (),
+    sweep_report: Sequence[str] | None = None,
+    sweep_exit_code: int | None = None,
 ) -> list[dict[str, str]]:
     """Delete every row this lane planned, read each one back, and prove another lane's canary survived.
 
@@ -1187,15 +1217,7 @@ def run_stage_three_cleanup(
     for planned in plan:
         kind = str(planned.get("kind") or "")
         if kind == "sweep":
-            rows.append(
-                sweep_row
-                if sweep_row is not None
-                else stage_two.cleanup_row(
-                    str(planned.get("acceptance") or "§2.8.7"),
-                    "the typed-token sweep has not been run, so cleanup is not complete",
-                    stage_two.CLEANUP_BLOCKED,
-                )
-            )
+            rows.append(_sweep_row(planned, tokens=sweep_tokens, report=sweep_report, exit_code=sweep_exit_code))
             continue
         rows.append(
             stage_two.run_cleanup_step(str(planned.get("acceptance") or kind), _delete_step(client, lane, planned))
@@ -1205,6 +1227,62 @@ def run_stage_three_cleanup(
         stage_two.run_cleanup_step(str(canary.get("acceptance") or "canary"), _canary_step(client, lane, canary))
     )
     return rows
+
+
+SWEEP_CLASSES: tuple[tuple[str, str], ...] = (
+    ("LEFT", "left"),
+    ("FAILED", "failed"),
+    ("UNKNOWN", "unknown"),
+    ("HISTORY", "history"),
+)
+
+
+def _sweep_row(
+    planned: Mapping[str, Any], *, tokens: Sequence[str], report: Sequence[str] | None, exit_code: int | None
+) -> dict[str, str]:
+    """The sweep step, judged by the Stage 2 sweep contract rather than by the plan that promised it.
+
+    A plan row saying *run the typed-token sweep* is an intention.  The verdict comes from the sweeper's
+    own report, through :func:`tests.e2e.utils.show_sell_stage2_support.sweep_verdict`: ``LEFT``,
+    ``FAILED`` and ``UNKNOWN`` are fatal, ``HISTORY`` and ``BLOCKED`` are the residues Amendment B accepts
+    when they are named with the table and the denied action, and a non-zero exit that no class explains is
+    a report this lane does not understand.  A report that was never taken blocks the row: naming a sweep
+    in a plan is not evidence that a residue was swept.
+    """
+    acceptance = str(planned.get("acceptance") or "§2.8.7")
+    if report is None or exit_code is None:
+        return stage_two.cleanup_row(
+            acceptance,
+            f"scripts/qa_fixture.py sweep --lane {' '.join(tokens)} was never run, so cleanup is not complete",
+            stage_two.CLEANUP_BLOCKED,
+        )
+    if not tokens:
+        return stage_two.cleanup_row(
+            acceptance,
+            "the typed-token sweep has no lane tokens, so it cannot name what it would delete",
+            stage_two.CLEANUP_BLOCKED,
+        )
+    classes = {name: [line for line in report if line.startswith(prefix)] for prefix, name in SWEEP_CLASSES}
+    blocked = [line for line in report if line.startswith("BLOCKED")]
+    kept = [line for line in report if line.startswith("kept")]
+    deleted = sum(1 for line in report if line.startswith("deleted row"))
+    counted = "; ".join(f"{name}={len(lines)}" for name, lines in classes.items() if lines)
+    return {
+        "acceptance": acceptance,
+        "summary": (
+            f"scripts/qa_fixture.py sweep --lane {' '.join(tokens)} exited {exit_code}: deleted={deleted}, "
+            f"kept={len(kept)}, {counted or 'no surviving class'}; the sweeper's own re-scan and classes "
+            "decide this row, and every token is a bound id of its kind"
+        ),
+        "result": stage_two.sweep_verdict(
+            left=classes["left"],
+            failed=classes["failed"],
+            unknown=classes["unknown"],
+            history=classes["history"],
+            blocked=blocked,
+            exit_code=exit_code,
+        ),
+    }
 
 
 def _delete_step(client: Any, lane: str, planned: Mapping[str, Any]) -> Callable[[], str]:
@@ -1230,7 +1308,7 @@ def _delete_step(client: Any, lane: str, planned: Mapping[str, Any]) -> Callable
                 raise stage_two.CleanupBlocked(f"dynamodb:DeleteItem on {table}: {exc}") from exc
             raise
         try:
-            after = client.get_item(TableName=table, Key=wire)
+            after = client.get_item(TableName=table, Key=wire, ConsistentRead=True)
         except Exception as exc:  # noqa: BLE001
             if is_access_denied(exc):
                 raise stage_two.CleanupBlocked(f"dynamodb:GetItem on {table}: {exc}") from exc
@@ -1255,7 +1333,7 @@ def _canary_step(client: Any, lane: str, canary: Mapping[str, Any]) -> Callable[
             raise AssertionError("the canary names no table and key")
         wire = wire_key(key)
         try:
-            found = client.get_item(TableName=table, Key=wire)
+            found = client.get_item(TableName=table, Key=wire, ConsistentRead=True)
         except Exception as exc:  # noqa: BLE001
             if is_access_denied(exc):
                 raise stage_two.CleanupBlocked(f"dynamodb:GetItem on {table}: {exc}") from exc
