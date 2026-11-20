@@ -1598,3 +1598,463 @@ export const REVERSE_INDIVIDUAL_ORDER_FULFILLMENT = gql`
     }
   }
 `;
+
+// ============================================================================
+// Show & Sell — Stage 3: events, allocations, slots, signups, work, and the
+// participant surfaces (§3.5). The admin documents and the participant
+// documents are separate on purpose: `ShowAndSellAdmin` carries allocations,
+// stock quantities, audit actors, and the finalization pointers, and no
+// participant screen may fetch it; the participant documents select only the
+// `# participant-safe` types (SEC-04), which carry none of it.
+// ============================================================================
+
+/**
+ * One event's reservation of one product, as the admin event board reads it.
+ * `remainingQty` is the server's stored answer, never a browser subtraction.
+ */
+export const SHOW_AND_SELL_ALLOCATION_FRAGMENT = gql`
+  fragment ShowAndSellAllocationFields on ShowAndSellAllocation {
+    unitCampaignId
+    productId
+    showAndSellId
+    startAt
+    endAt
+    status
+    allocatedQty
+    soldQty
+    releasedQty
+    remainingQty
+    version
+    createdAt
+    updatedAt
+  }
+`;
+
+/** One working slot: its interval, its capacity, and the counter signups maintain. */
+export const SHOW_AND_SELL_SLOT_FRAGMENT = gql`
+  fragment ShowAndSellSlotFields on ShowAndSellSlot {
+    showAndSellId
+    slotId
+    label
+    startAt
+    endAt
+    capacity
+    activeSignupCount
+    version
+    createdAt
+    updatedAt
+  }
+`;
+
+/**
+ * The administrative signup row: who placed it, who confirmed the work, and
+ * when. This projection is admin-only — the participant screens fetch
+ * `ParticipantSignup` (§3.5.3) and never this type.
+ */
+export const SHOW_AND_SELL_SIGNUP_FRAGMENT = gql`
+  fragment ShowAndSellSignupFields on ShowAndSellSignup {
+    showAndSellId
+    slotId
+    profileId
+    unitCampaignId
+    campaignId
+    status
+    actualMinutes
+    signedUpByAccountId
+    confirmedByAccountId
+    confirmedAt
+    version
+    createdAt
+    updatedAt
+  }
+`;
+
+/**
+ * A Show & Sell as its Unit Admin manages it. The times are selected for
+ * display — they are immutable, and the screen shows them, it never edits
+ * them; there is no update input that could carry them (SSE-07).
+ */
+export const SHOW_AND_SELL_ADMIN_FRAGMENT = gql`
+  ${SHOW_AND_SELL_ALLOCATION_FRAGMENT}
+  ${SHOW_AND_SELL_SLOT_FRAGMENT}
+  fragment ShowAndSellAdminFields on ShowAndSellAdmin {
+    showAndSellId
+    unitId
+    unitCampaignId
+    locationName
+    address
+    startAt
+    endAt
+    status
+    splitMethod
+    weOweEnabled
+    productIds
+    allocations {
+      ...ShowAndSellAllocationFields
+    }
+    slots {
+      ...ShowAndSellSlotFields
+    }
+    version
+    createdAt
+    updatedAt
+    createdByAccountId
+    updatedByAccountId
+    cancelledByAccountId
+    cancelledAt
+    cancellationReason
+  }
+`;
+
+/** The pending work picture a confirmation batch returns: computed, never approved. */
+export const SHOW_AND_SELL_WORK_PREVIEW_FRAGMENT = gql`
+  fragment ShowAndSellWorkPreviewFields on ShowAndSellWorkPreview {
+    eventVersion
+    totalConfirmedMinutes
+    confirmedWorkRows
+    confirmedParticipants
+    minimumFinalizationActions
+  }
+`;
+
+// --- participant-safe surfaces (SEC-04) -------------------------------------
+// These documents select only the participant types. The 1.7.5 guard suite fails
+// a build that puts an administrative field on them; these documents are the
+// browser-side half of the same line. `signupScoutForShowAndSellSlot` and
+// `cancelShowAndSellSignup` answer `ParticipantSignup` even when a Unit Admin
+// placed or released the place, because the write's own result is the caller's
+// next concurrency token — the admin's audit read is `showAndSellSignups`.
+
+/**
+ * One signup as the Scout who holds it sees it: the slot, the interval, whether
+ * it is still active, the confirmed minutes, and the version that cancellation
+ * conditions on. No actor field is on this type.
+ */
+export const PARTICIPANT_SIGNUP_FRAGMENT = gql`
+  fragment ParticipantSignupFields on ParticipantSignup {
+    showAndSellId
+    slotId
+    startAt
+    endAt
+    status
+    actualMinutes
+    signupVersion
+  }
+`;
+
+export const GET_SHOW_AND_SELL = gql`
+  ${SHOW_AND_SELL_ADMIN_FRAGMENT}
+  query GetShowAndSell($showAndSellId: ID!) {
+    showAndSell(showAndSellId: $showAndSellId) {
+      ...ShowAndSellAdminFields
+    }
+  }
+`;
+
+export const LIST_SHOW_AND_SELLS = gql`
+  ${SHOW_AND_SELL_ADMIN_FRAGMENT}
+  query ListShowAndSells(
+    $unitCampaignId: ID!
+    $status: ShowAndSellStatus
+    $dateRange: DateRangeFilter
+    $page: PageInput
+  ) {
+    showAndSells(unitCampaignId: $unitCampaignId, status: $status, dateRange: $dateRange, page: $page) {
+      items {
+        ...ShowAndSellAdminFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const CREATE_SHOW_AND_SELL = gql`
+  ${SHOW_AND_SELL_ADMIN_FRAGMENT}
+  mutation CreateShowAndSell($input: CreateShowAndSellInput!) {
+    createShowAndSell(input: $input) {
+      ...ShowAndSellAdminFields
+    }
+  }
+`;
+
+/**
+ * The edit surface is exactly what `UpdateShowAndSellInput` allows: location,
+ * address, split override, We Owe. The document carries no `startAt`/`endAt`
+ * because rescheduling is not a feature; the cancel-and-recreate workflow is
+ * what changes an event's time, and it is a different write on a new row.
+ */
+export const UPDATE_SHOW_AND_SELL = gql`
+  ${SHOW_AND_SELL_ADMIN_FRAGMENT}
+  mutation UpdateShowAndSell($input: UpdateShowAndSellInput!) {
+    updateShowAndSell(input: $input) {
+      ...ShowAndSellAdminFields
+    }
+  }
+`;
+
+export const CANCEL_SHOW_AND_SELL = gql`
+  ${SHOW_AND_SELL_ADMIN_FRAGMENT}
+  ${SHOW_AND_SELL_ALLOCATION_FRAGMENT}
+  ${SHOW_AND_SELL_SIGNUP_FRAGMENT}
+  mutation CancelShowAndSell($input: CancelShowAndSellInput!) {
+    cancelShowAndSell(input: $input) {
+      event {
+        ...ShowAndSellAdminFields
+      }
+      releasedAllocations {
+        ...ShowAndSellAllocationFields
+      }
+      cancelledSignups {
+        ...ShowAndSellSignupFields
+      }
+    }
+  }
+`;
+
+/** One product's stock target for one event: a target, not a delta. */
+export const ASSIGN_SHOW_AND_SELL_INVENTORY = gql`
+  ${SHOW_AND_SELL_ALLOCATION_FRAGMENT}
+  ${INVENTORY_POSITION_FRAGMENT}
+  mutation AssignShowAndSellInventory($input: AssignShowAndSellInventoryInput!) {
+    assignShowAndSellInventory(input: $input) {
+      allocations {
+        ...ShowAndSellAllocationFields
+      }
+      inventoryPositions {
+        ...InventoryPositionFields
+      }
+      warnings {
+        code
+        productId
+        currentStockQty
+        assignedQty
+        overageQty
+        message
+      }
+    }
+  }
+`;
+
+/** Raw allocation facts for a campaign; totals are the browser's, over every page. */
+export const LIST_EVENT_INVENTORY_ALLOCATIONS = gql`
+  ${SHOW_AND_SELL_ALLOCATION_FRAGMENT}
+  query ListEventInventoryAllocations(
+    $unitCampaignId: ID!
+    $productId: ID
+    $showAndSellId: ID
+    $status: AllocationStatus
+    $page: PageInput
+  ) {
+    eventInventoryAllocations(
+      unitCampaignId: $unitCampaignId
+      productId: $productId
+      showAndSellId: $showAndSellId
+      status: $status
+      page: $page
+    ) {
+      items {
+        ...ShowAndSellAllocationFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const UPSERT_SHOW_AND_SELL_SLOT = gql`
+  ${SHOW_AND_SELL_SLOT_FRAGMENT}
+  mutation UpsertShowAndSellSlot($input: UpsertShowAndSellSlotInput!) {
+    upsertShowAndSellSlot(input: $input) {
+      ...ShowAndSellSlotFields
+    }
+  }
+`;
+
+export const DELETE_SHOW_AND_SELL_SLOT = gql`
+  mutation DeleteShowAndSellSlot($input: DeleteShowAndSellSlotInput!) {
+    deleteShowAndSellSlot(input: $input)
+  }
+`;
+
+export const LIST_SHOW_AND_SELL_SIGNUPS = gql`
+  ${SHOW_AND_SELL_SIGNUP_FRAGMENT}
+  query ListShowAndSellSignups($showAndSellId: ID!, $status: SignupStatus, $page: PageInput) {
+    showAndSellSignups(showAndSellId: $showAndSellId, status: $status, page: $page) {
+      items {
+        ...ShowAndSellSignupFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const SIGNUP_SCOUT_FOR_SHOW_AND_SELL_SLOT = gql`
+  ${PARTICIPANT_SIGNUP_FRAGMENT}
+  mutation SignupScoutForShowAndSellSlot($input: SignupShowAndSellSlotInput!) {
+    signupScoutForShowAndSellSlot(input: $input) {
+      ...ParticipantSignupFields
+    }
+  }
+`;
+
+export const CANCEL_SHOW_AND_SELL_SIGNUP = gql`
+  ${PARTICIPANT_SIGNUP_FRAGMENT}
+  mutation CancelShowAndSellSignup($input: CancelShowAndSellSignupInput!) {
+    cancelShowAndSellSignup(input: $input) {
+      ...ParticipantSignupFields
+    }
+  }
+`;
+
+export const CONFIRM_SHOW_AND_SELL_WORK = gql`
+  ${SHOW_AND_SELL_SIGNUP_FRAGMENT}
+  ${SHOW_AND_SELL_WORK_PREVIEW_FRAGMENT}
+  mutation ConfirmShowAndSellWork($input: ConfirmShowAndSellWorkInput!) {
+    confirmShowAndSellWork(input: $input) {
+      work {
+        ...ShowAndSellSignupFields
+      }
+      preview {
+        ...ShowAndSellWorkPreviewFields
+      }
+    }
+  }
+`;
+
+/**
+ * One event as a Scout is offered it: where and when, the slots with the room
+ * left in each, and this Scout's own signups. `openCapacity` and `timezone` come
+ * from the server so the browser never subtracts a capacity it hopes for and
+ * never has to guess the zone an interval is displayed in (SEC-04, SEC-05).
+ */
+export const SHOW_AND_SELL_OPPORTUNITY_FRAGMENT = gql`
+  ${PARTICIPANT_SIGNUP_FRAGMENT}
+  fragment ShowAndSellOpportunityFields on ShowAndSellOpportunity {
+    showAndSellId
+    locationName
+    address
+    startAt
+    endAt
+    status
+    splitMethod
+    weOweEnabled
+    timezone
+    eventVersion
+    slots {
+      slotId
+      label
+      startAt
+      endAt
+      capacity
+      openCapacity
+    }
+    mySignups {
+      ...ParticipantSignupFields
+    }
+  }
+`;
+
+/**
+ * The Scout Campaigns one profile holds, with the Unit Campaign each is joined to.
+ *
+ * A signup names the pair the roster keys on — the Scout Campaign and the profile —
+ * and the server refuses a pair that is not the roster row's own. This is the read
+ * that lets a Scout page name the right half without any administrative surface:
+ * `Campaign.unitCampaignId` is set atomically by `joinUnitCampaign`, so the join the
+ * Unit Admin approved is what the write is addressed to. Removal does not clear it,
+ * which is why the server, not this read, decides whether the place may still be
+ * taken.
+ */
+export const LIST_SCOUT_CAMPAIGN_JOINS = gql`
+  query ListScoutCampaignJoins($profileId: ID!, $limit: Int, $nextToken: String) {
+    listCampaignsByProfile(profileId: $profileId, limit: $limit, nextToken: $nextToken) {
+      campaigns {
+        campaignId
+        campaignName
+        campaignYear
+        isActive
+        unitCampaignId
+      }
+      nextToken
+    }
+  }
+`;
+
+export const LIST_UNIT_CAMPAIGN_OPPORTUNITIES = gql`
+  ${SHOW_AND_SELL_OPPORTUNITY_FRAGMENT}
+  query ListUnitCampaignOpportunities($unitCampaignId: ID!, $includePast: Boolean, $page: PageInput) {
+    unitCampaignOpportunities(unitCampaignId: $unitCampaignId, includePast: $includePast, page: $page) {
+      items {
+        ...ShowAndSellOpportunityFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const GET_SHOW_AND_SELL_OPPORTUNITY = gql`
+  ${SHOW_AND_SELL_OPPORTUNITY_FRAGMENT}
+  query GetShowAndSellOpportunity($showAndSellId: ID!, $profileId: ID!) {
+    showAndSellOpportunity(showAndSellId: $showAndSellId, profileId: $profileId) {
+      ...ShowAndSellOpportunityFields
+    }
+  }
+`;
+
+export const LIST_MY_SCOUT_COMMITMENTS = gql`
+  fragment ParticipantCommitmentFields on ParticipantCommitment {
+    showAndSellId
+    slotId
+    startAt
+    endAt
+    status
+    signupVersion
+  }
+  query ListMyScoutCommitments($profileId: ID!, $unitId: ID, $includeCancelled: Boolean, $page: PageInput) {
+    myScoutCommitments(profileId: $profileId, unitId: $unitId, includeCancelled: $includeCancelled, page: $page) {
+      items {
+        ...ParticipantCommitmentFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+/**
+ * The authorized inputs an ICS needs — data only. No mutation or query here
+ * generates a file: the browser assembles, serializes, and downloads it
+ * itself, and the server holds no artifact to download (CAL-01, CAL-02).
+ */
+export const GET_SIGNUP_CALENDAR_DATA = gql`
+  query GetSignupCalendarData($showAndSellId: ID!, $slotId: ID!, $profileId: ID!) {
+    showAndSellSignupCalendarData(showAndSellId: $showAndSellId, slotId: $slotId, profileId: $profileId) {
+      unitId
+      unitDisplayName
+      unitCampaignId
+      unitCampaignName
+      showAndSellId
+      slotId
+      profileId
+      slotLabel
+      locationName
+      address
+      timezone
+      slotStartAt
+      slotEndAt
+    }
+  }
+`;
