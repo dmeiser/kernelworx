@@ -401,7 +401,7 @@ export function withIdempotency<T extends object>(
 export async function reportWriteFailure(
   error: unknown,
   fallback: string,
-  reload: () => Promise<unknown>,
+  reload: () => Promise<unknown> | void,
 ): Promise<string> {
   if (isStaleVersionError(error)) await refreshQuery(reload);
   return describeShowAndSellFailure(error, fallback);

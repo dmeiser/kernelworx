@@ -42,6 +42,7 @@ import {
   parseCancellationReason,
   parseInterval,
   parseLocationName,
+  reportWriteFailure,
   splitMethodLabel,
   trimmedOrNull,
   utcToZonedWallClock,
@@ -109,6 +110,7 @@ export const EventActionDialogs: React.FC<{
       pending={cancelPending(pending)}
       unit={context}
       onClose={onClose}
+      onRefresh={onRefresh}
       onCancel={(summary) => {
         onCancelled(summary);
         return onRefresh();
@@ -423,7 +425,9 @@ export const EventEditDialog: React.FC<{
     try {
       await updateEvent({ variables: { input: withIdempotency(body, intent.current) } });
     } catch (mutationError) {
-      setError(describeShowAndSellFailure(mutationError, 'Could not save the event.'));
+      // A stale version means the row the form read is not the row there is: say
+      // so and reload the read behind the dialog before the admin tries again.
+      setError(await reportWriteFailure(mutationError, 'Could not save the event.', onSaved));
       return;
     }
     onClose();
@@ -537,7 +541,8 @@ export const EventCancelDialog: React.FC<{
   unit: EventUnitContext;
   onClose: () => void;
   onCancel: (summary: CancelSummary) => Promise<unknown> | void;
-}> = ({ pending, unit, onClose, onCancel }) => {
+  onRefresh: () => Promise<unknown> | void;
+}> = ({ pending, unit, onClose, onCancel, onRefresh }) => {
   const event = eventOf(pending);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -571,7 +576,7 @@ export const EventCancelDialog: React.FC<{
       onClose();
       await refreshQuery(() => onCancel(cancelSummary(event, result)));
     } catch (mutationError) {
-      setError(describeShowAndSellFailure(mutationError, 'Could not cancel the event.'));
+      setError(await reportWriteFailure(mutationError, 'Could not cancel the event.', onRefresh));
     }
   };
 
