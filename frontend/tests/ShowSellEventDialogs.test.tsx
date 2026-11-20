@@ -21,7 +21,7 @@ import {
   type PendingEventAction,
 } from '../src/components/showSell/EventDialogs';
 import { CANCEL_SHOW_AND_SELL, CREATE_SHOW_AND_SELL, UPDATE_SHOW_AND_SELL } from '../src/lib/graphql';
-import { chooseOption, clearAndType, typeInto } from './helpers/unitUi';
+import { chooseOption, clearAndType, clearField, typeInto } from './helpers/unitUi';
 
 const UC = 'UNITCAMP#pack-3149-fall';
 const SSE = 'SSE#library';
@@ -183,8 +183,50 @@ describe('EVT-M-01: creating an event', () => {
     await screen.findByText('The end must be after the start — an event cannot end before it begins.');
   });
 
-  it('names the zone the times are entered in, because a wrong-zone reading moves the event', () => {
-    renderDialogs({ kind: 'create' });
+  it('keeps the form when the create write is refused, and says why in the refusal’s words', async () => {
+    const user = userEvent.setup();
+    const harness = renderDialogs({ kind: 'create' }, [
+      {
+        request: {
+          query: CREATE_SHOW_AND_SELL,
+          variables: {
+            input: {
+              unitCampaignId: UC,
+              locationName: 'Library on Main',
+              address: null,
+              startAt: '2026-03-28T15:00:00.000Z',
+              endAt: '2026-03-28T18:30:00.000Z',
+              splitMethod: null,
+              weOweEnabled: false,
+              idempotency: { idempotencyKey: FIRST_KEY },
+            },
+          },
+        },
+        error: new GraphQLError('This Unit is at its event limit.', { extensions: { errorCode: 'INVALID_INPUT' } }),
+      },
+    ]);
+
+    await typeInto('event-location-input', 'Library on Main', user);
+    await typeInto('event-start-input', '2026-03-28T09:00', user);
+    await typeInto('event-end-input', '2026-03-28T12:30', user);
+    await user.click(screen.getByTestId('submit-create-event'));
+
+    // The refusal is the Show & Sell sentence for a refused input, not the
+    // transport's: a raw AppSync string tells an admin nothing about what to fix.
+    await screen.findByText('The server refused what was entered. Check the values and try again.');
+    expect(harness.onClose).not.toHaveBeenCalled();
+    // What was typed is still there to fix, rather than a cleared form.
+    expect(screen.getByLabelText('Where is it')).toHaveValue('Library on Main');
+  });
+
+  it('mounts no dialog at all when no action is pending', () => {
+    // The list and detail pages keep one `pending` value; a stale action must not
+    // leave two dialogs stacked over the same event.
+    renderDialogs(null);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('names the zone the times are entered in, because a wrong-zone reading moves the event', () => {    renderDialogs({ kind: 'create' });
     expect(screen.getByTestId('event-timezone-note')).toHaveTextContent('Times are entered in America/Denver');
   });
 
@@ -237,6 +279,17 @@ describe('EVT-M-02: editing an event', () => {
 
     await waitFor(() => expect(harness.onClose).toHaveBeenCalledTimes(1));
     expect(harness.onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses an edit that would empty the location, with no write', async () => {
+    const user = userEvent.setup();
+    const harness = renderDialogs({ kind: 'edit', event: eventFixture() }, []);
+
+    await clearField('event-location-input', user);
+    await user.click(screen.getByTestId('submit-edit-event'));
+
+    await screen.findByText('Name where the event is, such as “Kroger on Monroe”.');
+    expect(harness.onClose).not.toHaveBeenCalled();
   });
 
   it('reloads the board and says so when the row moved under the dialog', async () => {

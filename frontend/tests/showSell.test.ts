@@ -147,6 +147,12 @@ describe('zoned wall clock', () => {
     // value, and the server still refuses an interval it cannot use.
     expect(utcToZonedWallClock('2026-03-14T15:00:00.000Z', 'Mars/Olympus_Mons')).toBe('2026-03-14T15:00');
     expect(formatInstant('2026-03-14T15:00:00.000Z', 'Mars/Olympus_Mons')).toContain('UTC');
+    // The same rule on the way in: the text is kept, not dropped, so the admin can
+    // see what the box holds and fix the Unit's zone. The kept value is the box read
+    // in the browser's own zone, which is what an ordinary `datetime-local` means.
+    expect(zonedWallClockToUtc('2026-03-14T09:00', 'Mars/Olympus_Mons')?.toISOString()).toBe(
+      new Date('2026-03-14T09:00').toISOString(),
+    );
   });
 });
 
