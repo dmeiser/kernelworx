@@ -2105,23 +2105,6 @@ type ShowAndSellOpportunitySlot {
   openCapacity: Int!
 }
 
-# participant-safe: a Scout's own signup, without the audit of who placed or confirmed it
-"""One signup as the Scout who holds it sees it: which slot, whether it is still active, and how much work was confirmed. The actor fields are administrative and appear on `ShowAndSellSignup` instead."""
-type ParticipantSignup {
-  """The event signed up for."""
-  showAndSellId: ID!
-  """The slot signed up for."""
-  slotId: ID!
-  """When the slot runs."""
-  startAt: AWSDateTime!
-  """When the slot ends."""
-  endAt: AWSDateTime!
-  """ACTIVE or CANCELLED."""
-  status: SignupStatus!
-  """Confirmed work minutes; 0 means the work is not confirmed yet."""
-  actualMinutes: Int!
-}
-
 """A page of the events one Unit Campaign is offering to one caller's Scouts."""
 type ShowAndSellOpportunityConnection {
   """The opportunities on this page, soonest first."""
@@ -2268,6 +2251,185 @@ input DeleteShowAndSellSlotInput {
   version: VersionedInput!
   """Idempotency for the mutation."""
   idempotency: IdempotencyInput!
+}
+
+# ============================================================================
+# Show & Sell and inventory — Stage 3.4: signups, work, and the read surfaces
+# over them (delivery checklist §3.4)
+#
+# A signup is one Scout's place in one slot, and it is written as an aggregate:
+# the signup row, its cross-campaign commitment projection, the slot's active
+# counter, the Scout's commitment guard, and the event version all commit in one
+# transaction (data model §5.13, sequence §3). Every denial — duplicate, capacity,
+# overlapping times across any Unit Campaign, removed membership — is decided
+# against those authoritative rows, never an index (SEC-06).
+#
+# The read split follows SEC-04. An admin sees `ShowAndSellSignup` with the full
+# actor and confirmation audit; the Scout who holds the place sees
+# `ParticipantSignup` / `ParticipantCommitment` with none of it. `signupVersion`
+# is on the participant types because it is the caller's own concurrency token:
+# `cancelShowAndSellSignup` conditions on it, and a Scout who cannot read it
+# cannot cancel. `showAndSellSignupCalendarData` supplies the authorized facts a
+# browser needs to build an ICS itself — data only; no server generates or
+# stores a file (CAL-01/CAL-02, RPT-00).
+# ============================================================================
+
+"""Input for signupScoutForShowAndSellSlot. The Scout's identity arrives as the pair the roster keys on — the joined Scout Campaign and the SellerProfile — and both are consistency checks against the roster row, never the basis of access (§3.1 SEC-01)."""
+input SignupShowAndSellSlotInput {
+  """The event being signed up for; it must still be scheduled."""
+  showAndSellId: ID!
+  """The slot to take a place in."""
+  slotId: ID!
+  """The Scout Campaign whose roster membership carries the signup; it must be the Campaign joined to the event's Unit Campaign."""
+  campaignId: ID!
+  """The Scout taking the place."""
+  profileId: ID!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for cancelShowAndSellSignup. The version is the signup's own, which the participant reads back as `signupVersion` on its own signup or commitment."""
+input CancelShowAndSellSignupInput {
+  """The event the signup belongs to."""
+  showAndSellId: ID!
+  """The slot the Scout holds (or held)."""
+  slotId: ID!
+  """The Scout whose signup is being cancelled."""
+  profileId: ID!
+  """The signup version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""One Scout's confirmed work in one slot (checklist §3.4.3). `actualMinutes = 0` un-confirms; 1 through the slot's duration confirms."""
+input ConfirmShowAndSellWorkLineInput {
+  """The slot the work happened in."""
+  slotId: ID!
+  """The Scout who worked."""
+  profileId: ID!
+  """Minutes actually worked; 0 un-confirms the row."""
+  actualMinutes: Int!
+}
+
+"""Input for confirmShowAndSellWork. One batch is one atomic save: 1-100 rows, unique (slotId, profileId) pairs, and the event version every prior read was taken against."""
+input ConfirmShowAndSellWorkInput {
+  """The event whose work is being confirmed."""
+  showAndSellId: ID!
+  """The work rows: unique Scout/slot pairs with their confirmed minutes."""
+  work: [ConfirmShowAndSellWorkLineInput!]!
+  """The event version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+# participant-safe: the Scout's own signup, without the audit of who placed or confirmed it
+"""One signup as the Scout who holds it sees it: which slot, whether it is still active, how much work was confirmed, and the signup version `cancelShowAndSellSignup` conditions on. The actor fields are administrative and appear on `ShowAndSellSignup` instead."""
+type ParticipantSignup {
+  """The event signed up for."""
+  showAndSellId: ID!
+  """The slot signed up for."""
+  slotId: ID!
+  """When the slot runs."""
+  startAt: AWSDateTime!
+  """When the slot ends."""
+  endAt: AWSDateTime!
+  """ACTIVE or CANCELLED."""
+  status: SignupStatus!
+  """Confirmed work minutes; 0 means the work is not confirmed yet."""
+  actualMinutes: Int!
+  """The signup version; the caller's own cancellation conditions on it."""
+  signupVersion: Int!
+}
+
+# participant-safe: one Scout's own commitment across every Unit Campaign
+"""One commitment as the Scout who holds it sees it: the interval it blocks, the event it belongs to, and the signup version its cancellation conditions on. It carries no actor, no account, and no other Unit's bookkeeping — a cross-Unit commitment list must not disclose which Unit owns the other one (INV-Q-06). Confirmed work minutes are deliberately absent: they belong to the signup, and a Scout reads them on `ParticipantSignup`."""
+type ParticipantCommitment {
+  """The event the commitment belongs to."""
+  showAndSellId: ID!
+  """The slot the commitment was written for."""
+  slotId: ID!
+  """The interval's start, as the commitment projection stores it."""
+  startAt: AWSDateTime!
+  """The interval's end."""
+  endAt: AWSDateTime!
+  """ACTIVE or CANCELLED — only ACTIVE commitments block a new signup."""
+  status: SignupStatus!
+  """The signup version; the caller's own cancellation conditions on it."""
+  signupVersion: Int!
+}
+
+"""A page of one Scout's commitments."""
+type ParticipantCommitmentConnection {
+  """The commitments on this page, soonest first."""
+  items: [ParticipantCommitment!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+}
+
+"""A page of an event's signups with their work and audit (checklist §3.4.4)."""
+type ShowAndSellSignupConnection {
+  """The signup rows on this page, by slot then Scout."""
+  items: [ShowAndSellSignup!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+}
+
+"""The pending work picture after a confirmation batch, computed and never approved: the minutes Kernels have confirmed and the minimum finalization write set that picture implies (§8.10). Approving credit is finalization's job, not this read's."""
+type ShowAndSellWorkPreview {
+  """The event version this preview was computed against, moved by this batch."""
+  eventVersion: Int!
+  """Confirmed minutes across the whole event, all Scouts summed."""
+  totalConfirmedMinutes: Int!
+  """Signup rows carrying confirmed work (actualMinutes > 0)."""
+  confirmedWorkRows: Int!
+  """Distinct Scouts behind those rows."""
+  confirmedParticipants: Int!
+  """The minimum actions finalization will need for this event's product and work set; the feasibility answer this same batch checks before it stages a write."""
+  minimumFinalizationActions: Int!
+}
+
+"""What a confirmation batch did: the administrative signup rows it wrote, and the recomputed pending preview."""
+type ConfirmShowAndSellWorkPayload {
+  """The signup rows this batch confirmed or un-confirmed, with their full audit."""
+  work: [ShowAndSellSignup!]!
+  """The pending work picture across the event after this batch — computed, not approved."""
+  preview: ShowAndSellWorkPreview!
+}
+
+# The authorized inputs an ICS needs, never an ICS: the browser assembles, serializes, and
+# downloads the file itself (CAL-01, RPT-00). The identity fields are what make the ICS UID
+# stable across downloads of the same signup, which is why they are answered even though
+# nothing here is a report artifact.
+"""The data one browser needs to generate a slot's calendar invite itself: stable identity for the Unit/Campaign/event/slot/signup, the location and address, the Unit's IANA timezone, and the slot's UTC interval. It contains no generated file, no download URL, and no notification."""
+type CalendarInviteData {
+  """The owning Unit; identity for the invite description."""
+  unitId: ID!
+  """The Unit's display name, for the description; absent when the Unit was never given one, in which case the caller composes its own label from the ids."""
+  unitDisplayName: String
+  """The Unit Campaign the event belongs to."""
+  unitCampaignId: ID!
+  """The Unit Campaign's name, for the description."""
+  unitCampaignName: String!
+  """The event."""
+  showAndSellId: ID!
+  """The slot; part of the stable UID identity."""
+  slotId: ID!
+  """The Scout holding the signup; part of the stable UID identity."""
+  profileId: ID!
+  """Display label; absent when the Kernel never named the slot."""
+  slotLabel: String
+  """Required short name of where the event is."""
+  locationName: String!
+  """Optional address."""
+  address: String
+  """The Unit's IANA timezone, so the browser converts the UTC interval to local time."""
+  timezone: String!
+  """Slot start, UTC."""
+  slotStartAt: AWSDateTime!
+  """Slot end, UTC; any duration — no hour or half-hour is assumed."""
+  slotEndAt: AWSDateTime!
 }
 
 # ============================================================================
@@ -2445,6 +2607,37 @@ type Query {
     """Pagination parameters."""
     page: PageInput
   ): EventInventoryAllocationConnection!
+
+  # Show & Sell — signup and commitment reads (checklist §3.4.4-§3.4.5)
+  """An event's signups with the full actor and confirmation audit: who placed each, who confirmed the work, and the version each cancellation or confirmation conditions on. Unit Admin for the event's Unit."""
+  showAndSellSignups(
+    """The event whose signup board is being read."""
+    showAndSellId: ID!
+    """Filter to one signup state; omit for both, since cancelled rows are the history the audit keeps."""
+    status: SignupStatus
+    """Pagination parameters."""
+    page: PageInput
+  ): ShowAndSellSignupConnection!
+  """One Scout's commitments across every Unit Campaign, soonest first, with no actor or account field. Profile READ/Owner/WRITE for that Scout; a Unit Admin must supply an authorized `unitId` and then sees only that Unit's commitments, so the endpoint is never a window onto another Unit's schedule (INV-Q-06)."""
+  myScoutCommitments(
+    """The Scout whose commitments are being read."""
+    profileId: ID!
+    """Restrict the answer to one Unit; required for, and restricted to, a Unit Admin calling as admin."""
+    unitId: ID
+    """Include cancelled commitments (history); omitting it means active commitments only."""
+    includeCancelled: Boolean = false
+    """Pagination parameters."""
+    page: PageInput
+  ): ParticipantCommitmentConnection!
+  """The authorized facts one browser needs to generate a slot's calendar invite itself: identity, location, IANA timezone, and UTC times. Data only — no server generates, stores, or emails a file, and the READ-only collaborator's read surface stops short of it (CAL-01, AUTH-P-02). Unit Admin, or Profile Owner/WRITE for that exact Scout."""
+  showAndSellSignupCalendarData(
+    """The event."""
+    showAndSellId: ID!
+    """The slot."""
+    slotId: ID!
+    """The Scout holding the signup."""
+    profileId: ID!
+  ): CalendarInviteData!
 
   # Account queries
   """The authenticated caller's account. The row is created automatically on first read if it does not yet exist."""
@@ -2765,6 +2958,23 @@ type Mutation {
     """The deletion."""
     input: DeleteShowAndSellSlotInput!
   ): Boolean!
+
+  # Show & Sell — signup and work mutations (checklist §3.4.1-§3.4.3)
+  """Take a Scout's place in one slot of a scheduled event. The whole aggregate commits at once — signup, cross-campaign commitment projection, slot counter, the Scout's commitment guard, and the event version — so the row the next overlap check reads is never behind the signup it should block. Unit Admin of the event's Unit, or Owner/WRITE for that Scout; the Scout must hold ACTIVE membership of the event's Unit Campaign. A duplicate in the slot, a full slot, or a time that overlaps any commitment the Scout already holds — including at another Show & Sell — is refused and writes nothing (SLOT-02, SLOT-04)."""
+  signupScoutForShowAndSellSlot(
+    """The signup."""
+    input: SignupShowAndSellSlotInput!
+  ): ParticipantSignup!
+  """Release a Scout's place: the signup and its commitment projection go CANCELLED, the slot's counter decrements, and the guard and event version move, all in one transaction. Owner/WRITE for the Scout may cancel while the event is scheduled; a Unit Admin may also correct records while the event is active, ended, or reopened, including after the Scout's membership was removed — historical cleanup deliberately does not require an ACTIVE roster row. A finalized event must be reopened first."""
+  cancelShowAndSellSignup(
+    """The cancellation."""
+    input: CancelShowAndSellSignupInput!
+  ): ParticipantSignup!
+  """Confirm (or un-confirm) the work Kernel actually saw, one atomic batch of unique Scout/slot rows: `actualMinutes = 0` clears the confirmation and frees the finalization write set, 1 through the slot's duration confirms it. Allowed while the event is active, ended, or reopened; the batch preflights the event's minimum finalization write set so a confirmed board can never grow past what one transaction can finalize. Returns the administrative rows it wrote and the recomputed pending preview — computed, never approved credit."""
+  confirmShowAndSellWork(
+    """The confirmation batch."""
+    input: ConfirmShowAndSellWorkInput!
+  ): ConfirmShowAndSellWorkPayload!
 
   # Account mutations
   """Update profile fields on the caller's own account. At least one field must be provided. Returns the updated account."""

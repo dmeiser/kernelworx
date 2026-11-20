@@ -401,13 +401,16 @@ describe("Show & Sell Stage 1 - tenant authorization (AUTH)", () => {
   test("a participant-safe type never exposes administrative fields (and a leaking schema is rejected)", () => {
     const derived = participantTypes(RAW_SCHEMA);
     // The marker is load-bearing: the join preview and the three Stage 3.1
-    // opportunity types opt in (§3.1.5 names them participant-safe), and the
-    // check set cannot silently drift away from what the SDL declares.
+    // opportunity types opt in (§3.1.5 names them participant-safe), §3.4 adds the
+    // Scout's own commitment projection (INV-Q-06-01 answers a cross-Unit schedule
+    // that must name no other Unit), and the check set cannot silently drift away
+    // from what the SDL declares.
     expect(derived).toEqual([
       "UnitCampaignJoinPreview",
       "ShowAndSellOpportunity",
       "ShowAndSellOpportunitySlot",
       "ParticipantSignup",
+      "ParticipantCommitment",
     ]);
     for (const typeName of derived) {
       expect(BY_NAME.get(typeName), `participant type ${typeName} is missing`).toBeDefined();
@@ -522,12 +525,28 @@ const LEGACY_REPORT_URL = { owner: "CampaignReport", field: "reportUrl" } as con
  */
 const QR_GET_NAMES = new Set(["qrCodeUrl", "unitPaymentMethodQrDownloadUrl"]);
 
+/**
+ * The §3.4.5 calendar-data read, exempted by EXACT name (checklist §3.4.5, CAL-01).
+ *
+ * RPT-00's target is an artifact the server generates, stores, or serves. This read is none
+ * of those: `CalendarInviteData` carries identity, location, the Unit's IANA timezone and
+ * the slot's UTC interval — no file, no URL, and no timestamp of its own, because `DTSTAMP`
+ * is a fact about the moment the browser generated the file (CAL-02). The exemption is a
+ * name set, never a `calendar` substring, so `showAndSellSignupCalendar`, `calendarDataExport`
+ * and `showAndSellSignupCalendarFile` remain offenders, and a URL added to the exempt shape is
+ * still caught by the AWSURL seam below.
+ */
+const CALENDAR_DATA_NAMES = new Set(["showAndSellSignupCalendarData", "CalendarInviteData"]);
+
 function isReportArtifact(name: string): boolean {
   if (LEGACY_REPORT_NAMES.has(name) || QR_GET_NAMES.has(name)) {
     return false;
   }
   if (REPORT_BAD_ENDPOINTS.has(name)) {
     return true;
+  }
+  if (CALENDAR_DATA_NAMES.has(name)) {
+    return false;
   }
   const n = name.toLowerCase();
   // "sheet"/"document"/"invoice"/"export" catch the printable-artifact names;
@@ -785,6 +804,26 @@ describe("Show & Sell Stage 1 - browser-only reporting (WEB-MIG-04)", () => {
       "}",
     ].join("\n");
     expect(reportOffenders(bad)).toContain("Query.showAndSellSignupCalendar");
+  });
+
+  test("the §3.4.5 calendar-data read is exempt by exact name, and its neighbours are not", () => {
+    // The one calendar-shaped surface the SDL is allowed to carry is the data read §3.4.5
+    // names: the browser assembles, serializes and downloads the ICS itself (CAL-01, RPT-00).
+    // The exemption must stay exact-name, or the artifact path reopens under a friendlier word.
+    expect(isReportArtifact("showAndSellSignupCalendarData")).toBe(false);
+    expect(isReportArtifact("CalendarInviteData")).toBe(false);
+    for (const artifact of ["showAndSellSignupCalendar", "showAndSellSignupCalendarFile", "calendarDataExport", "signupIcs", "downloadIcs"]) {
+      expect(isReportArtifact(artifact), `${artifact} is a server artifact, not calendar data`).toBe(true);
+    }
+    // The IaC leg: wiring the data read is allowed, wiring the artifact is not.
+    const wired = (field: string) =>
+      reportResolverWiring(`resource "aws_appsync_resolver" "x" {\n  field = "${field}"\n}`);
+    expect(wired("showAndSellSignupCalendarData")).toEqual([]);
+    expect(wired("showAndSellSignupCalendar")).toEqual(["showAndSellSignupCalendar"]);
+    // And the exempt shape still cannot grow an artifact: a URL on it is a served file no
+    // matter what the type is called.
+    const bad = ["type CalendarInviteData {", "  icsUrl: AWSURL", "}"].join("\n");
+    expect(reportOffenders(bad)).toContain("CalendarInviteData.icsUrl");
   });
 
   test("the detector also rejects a report name smuggled onto an existing type", () => {
