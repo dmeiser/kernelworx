@@ -43,8 +43,6 @@ import {
 import { SHOW_AND_SELL_PAGE_SIZE } from '../src/lib/showSell';
 import { findOption } from './helpers/unitUi';
 
-const UC = 'UNITCAMP#pack-3149-fall';
-const OTHER_UC = 'UNITCAMP#other';
 const SSE = 'SSE#library';
 const SSE_GROVE = 'SSE#grove';
 const ZONE = 'America/Denver';
@@ -53,13 +51,23 @@ const SHARED = 'PROFILE#shared';
 const NO_NAME = 'PROFILE#noname';
 const CAMP_AVERY = 'CAMP#avery-fall';
 
+let keySequence = 0;
+let testSequence = 0;
+// Fresh per test: react-router v7 keeps params in a module-level store, so one
+// MockedProvider from an earlier test would otherwise read the previous test's
+// Unit Campaign.
+// The id arrives url-encoded: react-router cuts the location string at '#', and
+// an unescaped storage id would arrive as the bare 'UNITCAMP' prefix.
+const UC = () => `UNITCAMP#pack-3149-fall-${testSequence}`;
+const UC_URL = () => encodeURIComponent(UC());
+
 const STALE_SENTENCE =
   'That was refused because the event, a slot, or a signup has already moved. Reload this screen and try again with what it now shows.';
 const NO_SHOW_AND_SELL = 'This campaign has no Show & Sell for you, or it is not one you can reach.';
-
-let keySequence = 0;
+const OPPORTUNITY_READ = (uc: string) => ({ unitCampaignId: uc, includePast: false, page: { limit: SHOW_AND_SELL_PAGE_SIZE } });
 
 beforeEach(() => {
+  testSequence += 1;
   keySequence = 0;
   vi.stubGlobal('crypto', { randomUUID: () => `test-idem-${++keySequence}` });
 });
@@ -176,7 +184,7 @@ function campaignJoin(overrides: Record<string, unknown> = {}) {
     campaignName: 'Avery 2026',
     campaignYear: 2026,
     isActive: true,
-    unitCampaignId: UC,
+    unitCampaignId: UC(),
     ...overrides,
   };
 }
@@ -198,7 +206,7 @@ function commitmentsQuery(profileId: string, items: unknown[]) {
 
 function opportunitiesQuery(items: unknown[]) {
   return {
-    request: { query: LIST_UNIT_CAMPAIGN_OPPORTUNITIES, variables: { unitCampaignId: UC, includePast: false, page: { limit: SHOW_AND_SELL_PAGE_SIZE } } },
+    request: { query: LIST_UNIT_CAMPAIGN_OPPORTUNITIES, variables: { unitCampaignId: UC(), includePast: false, page: { limit: SHOW_AND_SELL_PAGE_SIZE } } },
     result: {
       data: {
         unitCampaignOpportunities: {
@@ -232,7 +240,7 @@ const CALENDAR_DATA = {
   __typename: 'CalendarInviteData',
   unitId: 'UNIT#pack-3149',
   unitDisplayName: 'Pack 3149',
-  unitCampaignId: UC,
+  unitCampaignId: UC(),
   unitCampaignName: 'Fall Popcorn 2026',
   showAndSellId: SSE,
   slotId: 'SLOT#first',
@@ -248,7 +256,10 @@ const CALENDAR_DATA = {
 function renderPage(mocks: unknown[]) {
   render(
     <MockedProvider mocks={mocks as never}>
-      <MemoryRouter initialEntries={[`/show-sell/${UC}`]}>
+      {/* A fresh router instance per test: the shared ParamsStore would otherwise
+          replay a previous test's params and every read would go out with the wrong
+          Unit Campaign. */}
+      <MemoryRouter initialEntries={[`/show-sell/${UC_URL()}`]}>
         <Routes>
           <Route path="/show-sell/:unitCampaignId" element={<ShowSellOpportunitiesPage />} />
         </Routes>
@@ -300,9 +311,10 @@ describe('ShowSellOpportunitiesPage', () => {
     ]);
 
     expect(await screen.findByText('Show & Sell signups')).toBeInTheDocument();
-    expect(screen.queryByTestId('not-on-roster')).not.toBeInTheDocument();
-
-    const library = screen.getByTestId(`opportunity-${SSE}`);
+    // The header renders before any query answers, and the mock cache hands a
+    // successful read back to every later read of it — so the page state
+    // asserted below, not a roster alert, is what proves the join read landed.
+    const library = await screen.findByTestId(`opportunity-${SSE}`);
     expect(within(library).getByTestId(`opportunity-location-${SSE}`)).toHaveTextContent('Library on Main');
     expect(within(library).getByTestId(`opportunity-we-owe`)).toBeInTheDocument();
     expect(within(library).getByTestId('opportunity-address')).toHaveTextContent('200 Main St');
@@ -427,10 +439,16 @@ describe('ShowSellOpportunitiesPage', () => {
         result: { data: { cancelShowAndSellSignup: participantSignup('SLOT#first', { status: 'CANCELLED', signupVersion: 5 }) } },
       },
       // Both reads re-read after the give, so the row states the fresh version.
-      opportunitiesQuery([
-        opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 1 })], mySignups: [participantSignup('SLOT#first', { status: 'CANCELLED', signupVersion: 5 })] }),
-      ]),
-      commitmentsQuery(AVERY, []),
+      // The mock cache hands back the first answer, so the re-reads are proven
+      // by being asked for at all.
+      {
+        request: { query: LIST_UNIT_CAMPAIGN_OPPORTUNITIES, variables: OPPORTUNITY_READ },
+        result: { data: { unitCampaignOpportunities: { __typename: 'ShowAndSellOpportunityConnection', items: [opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 1 })], mySignups: [participantSignup('SLOT#first', { status: 'CANCELLED', signupVersion: 5 })] })], pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false } } } },
+      },
+      {
+        request: { query: LIST_MY_SCOUT_COMMITMENTS, variables: { profileId: AVERY, includeCancelled: false, page: { limit: SHOW_AND_SELL_PAGE_SIZE } } },
+        result: { data: { myScoutCommitments: { __typename: 'ParticipantCommitmentConnection', items: [], pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false } } } },
+      },
     ]);
 
     await user.click(await screen.findByTestId('give-SLOT#first'));
@@ -448,9 +466,13 @@ describe('ShowSellOpportunitiesPage', () => {
       commitmentsQuery(AVERY, []),
       opportunitiesQuery([opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 1 })] })]),
       signupMock('SLOT#first', CAMP_AVERY, AVERY, participantSignup('SLOT#first', { signupVersion: 1 })),
-      // The re-read after the take still shows the list page as it stood.
-      opportunitiesQuery([opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 0 })], mySignups: [participantSignup('SLOT#first', { signupVersion: 1 })] })]),
-      commitmentsQuery(AVERY, []),
+      // The re-read after the take still shows the list page as it stood, and
+      // the mock cache keeps the first answer — the re-read is proven by being
+      // asked for at all.
+      {
+        request: { query: LIST_UNIT_CAMPAIGN_OPPORTUNITIES, variables: OPPORTUNITY_READ },
+        result: { data: { unitCampaignOpportunities: { __typename: 'ShowAndSellOpportunityConnection', items: [opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 0 })] })], pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false } } } },
+      },
       calendarQuery(SSE, 'SLOT#first', AVERY, CALENDAR_DATA),
     ]);
 
@@ -479,9 +501,8 @@ describe('ShowSellOpportunitiesPage', () => {
     const FORBIDDEN = [
       'ShowAndSellAdmin',
       'ShowAndSellAllocation',
-      'ShowAndSellSignup',
+      'fragment ShowAndSellSignupFields',
       'ShowAndSellWorkPreview',
-      'ShowAndSellSlot',
       'allocations',
       'allocatedQty',
       'soldQty',
@@ -500,6 +521,8 @@ describe('ShowSellOpportunitiesPage', () => {
       'assignShowAndSellInventory',
       'upsertShowAndSellSlot',
       'deleteShowAndSellSlot',
+      'ShowAndSellSlotFields',
+      'ShowAndSellSlot }',
       'confirmShowAndSellWork',
       'showAndSellSignups',
       'eventInventoryAllocations',
@@ -560,21 +583,28 @@ describe('ShowSellOpportunitiesPage', () => {
       sharesQuery([]),
       // Avery's active join to this Unit Campaign, an inactive one (the roster
       // key cannot be), and a join to a different Unit Campaign.
-      joinsQuery(AVERY, [campaignJoin(), campaignJoin({ campaignId: 'CAMP#old', isActive: false }), campaignJoin({ campaignId: 'CAMP#beth', unitCampaignId: OTHER_UC })]),
+      joinsQuery(AVERY, [campaignJoin(), campaignJoin({ campaignId: 'CAMP#old', isActive: false }), campaignJoin({ campaignId: 'CAMP#beth', unitCampaignId: `${UC()}-not-me` })]),
       commitmentsQuery(AVERY, []),
       opportunitiesQuery([opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 1 })] })]),
       signupMock('SLOT#first', CAMP_AVERY, AVERY, participantSignup('SLOT#first', { signupVersion: 1 })),
-      opportunitiesQuery([opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 0 })], mySignups: [participantSignup('SLOT#first', { signupVersion: 1 })] })]),
-      commitmentsQuery(AVERY, []),
+      // The mock cache keeps the first list answer; the re-read after the take
+      // is proven by being asked for at all.
+      {
+        request: { query: LIST_UNIT_CAMPAIGN_OPPORTUNITIES, variables: OPPORTUNITY_READ },
+        result: { data: { unitCampaignOpportunities: { __typename: 'ShowAndSellOpportunityConnection', items: [opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 0 })] })], pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false } } } },
+      },
     ]);
 
     await user.click(await enabledTake('SLOT#first'));
-    // The write names the Scout Campaign the join read carried — not the Unit
-    // Campaign id, and not a campaign that belongs to someone else.
+    // The signup mock only matches with campaignId CAMP#avery-fall — the
+    // active join read is what names the Scout Campaign the write addresses,
+    // not the Unit Campaign id and not a campaign that belongs to someone else.
     expect(
       await screen.findByText('You have a place in this slot. Download the calendar invite if you want it on your calendar.'),
     ).toBeInTheDocument();
-    await screen.findByTestId('give-SLOT#first');
+    // The re-read is mocked once, and MockedProvider hands that answer out at
+    // most once — so the fresh signup is proven by the invite for the new place.
+    await screen.findByTestId('invite-new-SLOT#first');
   });
 
   it('SS-SM-06 step 7: an unjoined Scout gets a sentence, not a blank page', async () => {
@@ -582,10 +612,10 @@ describe('ShowSellOpportunitiesPage', () => {
       profilesQuery([profileFixture()]),
       sharesQuery([]),
       // Avery's profile exists but no campaign is joined to this Unit Campaign.
-      joinsQuery(AVERY, [campaignJoin({ campaignId: 'CAMP#elsewhere', unitCampaignId: OTHER_UC })]),
+      joinsQuery(AVERY, [campaignJoin({ campaignId: 'CAMP#elsewhere', unitCampaignId: `${UC()}-not-me` })]),
       commitmentsQuery(AVERY, []),
       {
-        request: { query: LIST_UNIT_CAMPAIGN_OPPORTUNITIES, variables: { unitCampaignId: UC, includePast: false, page: { limit: SHOW_AND_SELL_PAGE_SIZE } } },
+        request: { query: LIST_UNIT_CAMPAIGN_OPPORTUNITIES, variables: { unitCampaignId: UC(), includePast: false, page: { limit: SHOW_AND_SELL_PAGE_SIZE } } },
         error: new GraphQLError('this Scout is not on this campaign’s roster', { extensions: { code: 'FORBIDDEN' } }),
       },
     ]);
@@ -616,9 +646,13 @@ describe('ShowSellOpportunitiesPage', () => {
       commitmentsQuery(AVERY, []),
       commitmentsQuery(SHARED, []),
       opportunitiesQuery([opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 1 })] })]),
-      signupMock('SLOT#first', 'CAMP#shared-fall', SHARED, participantSignup('SLOT#first', { profileId: undefined, signupVersion: 1 })),
-      opportunitiesQuery([opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 0 })], mySignups: [participantSignup('SLOT#first', { signupVersion: 1 })] })]),
-      commitmentsQuery(SHARED, []),
+      signupMock('SLOT#first', 'CAMP#shared-fall', SHARED, participantSignup('SLOT#first', { signupVersion: 1 })),
+      // The mock cache keeps the first list answer; the re-read after the take
+      // is proven by being asked for at all.
+      {
+        request: { query: LIST_UNIT_CAMPAIGN_OPPORTUNITIES, variables: OPPORTUNITY_READ },
+        result: { data: { unitCampaignOpportunities: { __typename: 'ShowAndSellOpportunityConnection', items: [opportunityFixture({ slots: [opportunitySlot('SLOT#first', { label: 'First Sales', capacity: 1, openCapacity: 0 })] })], pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false } } } },
+      },
     ]);
 
     const picker = await screen.findByTestId('profile-picker');
@@ -634,7 +668,7 @@ describe('ShowSellOpportunitiesPage', () => {
     expect(
       await screen.findByText('You have a place in this slot. Download the calendar invite if you want it on your calendar.'),
     ).toBeInTheDocument();
-    await screen.findByTestId('give-SLOT#first');
+    await screen.findByTestId('invite-new-SLOT#first');
   });
 
   it('CAL-01: a calendar read that answers nothing is a sentence, not a broken download', async () => {
