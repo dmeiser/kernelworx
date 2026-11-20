@@ -23,6 +23,12 @@
  * finalization write set that picture implies. It is computed, never approved —
  * approving credit is finalization's act, not this read's.
  *
+ * A saved row and that preview are the same write's answer, so the row shows it as
+ * soon as the save lands: the board re-reads its own signup query after a write, and
+ * while that read is in flight the row holds the after-image the write itself
+ * answered. A table left at the pre-save number beside a preview that already moved
+ * is the screen disagreeing with itself about one save.
+ *
  * The calendar action on each row is data-only: it reads the authorized invite
  * fields and hands the browser a file it assembled itself. Nothing on the server is
  * generated, stored, or mailed (CAL-01, CAL-02).
@@ -132,9 +138,15 @@ export const SignupWorkBoard: React.FC<{
     [allRoster.items],
   );
   const durationOf = useMemo(() => durationBySlot(event), [event]);
+
+  // What the last accepted save answered for each row it touched, kept until a read
+  // of this board's own query is at least as new. The preview under the board is that
+  // same save's answer, so a row that goes on showing its pre-save read while the
+  // preview has moved is the screen disagreeing with itself about one write.
+  const [answered, setAnswered] = useState<Map<string, Signup>>(new Map());
   const rows = useMemo(
-    () => sortBy(allSignups.items, (signup) => `${signup.slotId} ${signup.profileId}`),
-    [allSignups.items],
+    () => sortBy(shownRows(allSignups.items, answered), (signup) => `${signup.slotId} ${signup.profileId}`),
+    [allSignups.items, answered],
   );
 
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map());
@@ -161,13 +173,20 @@ export const SignupWorkBoard: React.FC<{
     try {
       const result = await confirmWork({ variables: { input: withIdempotency(body, intent.current) } });
       setPreview(previewOf(result));
+      setAnswered((current) => answeredRows(current, writtenRows(result)));
       setSavedCount(collected.lines.length);
       setDrafts(new Map());
     } catch (mutationError) {
       setError(await reportWriteFailure(mutationError, 'Could not save the worked time.', onChanged));
       return;
     }
-    await refreshQuery(onChanged);
+    // The event is re-read for its version, and this board's own signup read is
+    // re-read for the rows: they are different queries, and refreshing only the
+    // event leaves the table showing what it held before the save until the whole
+    // page is reloaded, next to a preview that already moved.
+    await refreshQuery(async () => {
+      await Promise.all([signups.refetch(), onChanged()]);
+    });
   };
 
   const download = async (signup: Signup) => {
@@ -224,10 +243,45 @@ export const SignupWorkBoard: React.FC<{
   );
 };
 
-/** What the save answered, or null when the batch carried no preview. */
+/** What the save answered for the event: its pending picture, or null when the batch carried none. */
 function previewOf(result: { data?: GqlConfirmShowAndSellWorkMutation }): WorkPreview | null {
   const preview = result.data?.confirmShowAndSellWork?.preview;
   return (preview as WorkPreview | undefined) ?? null;
+}
+
+/**
+ * What the same save answered for the rows it wrote.
+ *
+ * This is the server's own after-image, not a number this screen summed up, which is
+ * why it is kept: the preview under the board is computed from these very rows.
+ */
+function writtenRows(result: { data?: GqlConfirmShowAndSellWorkMutation }): readonly Signup[] {
+  return result.data?.confirmShowAndSellWork?.work ?? [];
+}
+
+/** The newest answer the server has given for every row this board has saved. */
+function answeredRows(current: ReadonlyMap<string, Signup>, written: readonly Signup[]): Map<string, Signup> {
+  const next = new Map(current);
+  for (const signup of written) next.set(workRowKey(signup.slotId, signup.profileId), signup);
+  return next;
+}
+
+/**
+ * The read, with each saved row replaced by what the save answered for it — while the
+ * read has not moved past that answer.
+ *
+ * Which of the two is newer is a fact the rows state rather than a guess the browser
+ * makes: a signup carries its own version. The save's answer wins over a read at an
+ * older version, and a read at a newer version wins over it — that read is either
+ * this board's own re-read catching up, or another Kernel's change arriving. So the
+ * row and the preview under it agree the moment a save lands, and keep agreeing when
+ * the re-read arrives with the same number.
+ */
+function shownRows(rows: readonly Signup[], answered: ReadonlyMap<string, Signup>): Signup[] {
+  return rows.map((signup) => {
+    const written = answered.get(workRowKey(signup.slotId, signup.profileId));
+    return written !== undefined && written.version >= signup.version ? written : signup;
+  });
 }
 
 /**
