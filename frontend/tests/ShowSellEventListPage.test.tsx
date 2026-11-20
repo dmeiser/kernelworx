@@ -172,12 +172,13 @@ const listMock = (events: unknown[], status?: string) => ({
   },
 });
 
-function renderPage(mocks: unknown[] = []) {
+function renderPage(mocks: unknown[] = [], path: string = ROUTE) {
   render(
-    <MockedProvider mocks={mocks as never} addTypename={false}>
-      <MemoryRouter initialEntries={[ROUTE]}>
+    <MockedProvider mocks={mocks as never}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/show-sell/units/:unitId/campaigns/:unitCampaignId/show-sell" element={<ShowSellEventListPage />} />
+          <Route path="/show-sell/show-sell" element={<ShowSellEventListPage />} />
         </Routes>
       </MemoryRouter>
     </MockedProvider>,
@@ -331,6 +332,53 @@ describe('SSE-05, SSE-06: only a pre-start event can be cancelled', () => {
     await screen.findByTestId('recreate-event-library');
     expect(screen.queryByTestId('cancel-event-library')).toBeNull();
   });
+
+  it('counts a released product in the plural and a released Scout in the singular', async () => {
+    const user = userEvent.setup();
+    renderPage([
+      unitMock,
+      campaignMock,
+      listMock([eventFixture()]),
+      {
+        request: {
+          query: CANCEL_SHOW_AND_SELL,
+          variables: {
+            input: {
+              showAndSellId: 'library',
+              reason: 'Weather closure',
+              version: { expectedVersion: 3 },
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        result: {
+          data: {
+            cancelShowAndSell: {
+              __typename: 'CancelShowAndSellResult',
+              event: eventFixture({ status: 'CANCELLED' }),
+              releasedAllocations: [
+                { __typename: 'ShowAndSellAllocation', productId: 'PROD#caramel' },
+                { __typename: 'ShowAndSellAllocation', productId: 'PROD#peanut-butter' },
+              ],
+              cancelledSignups: [{ __typename: 'ShowAndSellSignup', profileId: 'PROFILE#avery' }],
+            },
+          },
+        },
+      },
+      listMock([eventFixture({ status: 'CANCELLED' })]),
+    ]);
+
+    await screen.findByTestId('cancel-event-library');
+    await user.click(screen.getByTestId('cancel-event-library'));
+    await screen.findByTestId('cancel-consequence');
+    await typeInto('cancellation-reason-input', 'Weather closure', user);
+    await user.click(screen.getByTestId('submit-cancel-event'));
+
+    // The counts are the server's, and the sentence agrees with them in number.
+    const summary = await screen.findByTestId('cancelled-summary-text');
+    expect(summary.textContent).toContain('2 product allocations');
+    expect(summary.textContent).toContain('1 Scout signup');
+  });
 });
 
 describe('the read the page is standing on', () => {
@@ -350,5 +398,33 @@ describe('the read the page is standing on', () => {
 
     await screen.findByText('No Show & Sell events yet');
     expect(screen.queryByRole('row')).toBeNull();
+  });
+
+  it('names the split and the We Owe state, and prints no address line when there is no address', async () => {
+    renderPage([
+      unitMock,
+      campaignMock,
+      listMock([eventFixture({ address: null, weOweEnabled: false, splitMethod: 'TIME_WORKED' })]),
+    ]);
+
+    const row = await screen.findByTestId('event-row-library');
+    expect(within(row).getByTestId('event-split-library').textContent).toContain('Split by worked time');
+    expect(within(row).getByTestId('event-split-library').textContent).toContain('We Owe off');
+    expect(within(row).queryByTestId('event-address-library')).toBeNull();
+  });
+
+  it('reads nothing and answers a sentence when the route names no ids', async () => {
+    renderPage(
+      [
+        {
+          request: { query: GET_UNIT, variables: { unitId: '' } },
+          error: new GraphQLError('no such unit', { extensions: { errorCode: 'NOT_FOUND' } }),
+        },
+      ],
+      '/show-sell/show-sell',
+    );
+
+    await screen.findByText('This Unit is not yours, or it no longer exists.');
+    expect(screen.queryByTestId('show-sell-landing')).toBeNull();
   });
 });

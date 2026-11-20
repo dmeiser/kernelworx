@@ -398,7 +398,7 @@ function LandedOnEvents() {
 
 function renderPage(mocks: unknown[] = []) {
   render(
-    <MockedProvider mocks={mocks as never} addTypename={false}>
+    <MockedProvider mocks={mocks as never}>
       <MemoryRouter initialEntries={[DETAIL_ROUTE]}>
         <Routes>
           <Route path={DETAIL_PATH} element={<ShowSellEventDetailPage />} />
@@ -418,7 +418,7 @@ function renderPage(mocks: unknown[] = []) {
  */
 function renderPageWithoutIds(mocks: unknown[] = []) {
   render(
-    <MockedProvider mocks={mocks as never} addTypename={false}>
+    <MockedProvider mocks={mocks as never}>
       <MemoryRouter initialEntries={['/show-sell/show-sell']}>
         <Routes>
           <Route path="/show-sell/show-sell" element={<ShowSellEventDetailPage />} />

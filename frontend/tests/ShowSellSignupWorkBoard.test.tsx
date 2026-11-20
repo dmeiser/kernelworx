@@ -404,7 +404,10 @@ describe('SignupWorkBoard', () => {
     fireEvent.click(screen.getByTestId('save-work'));
 
     expect(await screen.findByText('Save at most 100 work rows at a time.')).toBeInTheDocument();
-  }, 30_000);
+    // The timeout is generous on purpose: this fixture mounts 101 rows, and under a
+    // covered parallel run that render, not the rule, is what takes the time. The
+    // rule itself is pinned in seconds by tests/showSell.test.ts.
+  }, 120_000);
 
   it('SLOT-05 (VER-01): a CONFLICT on the batch names the refusal and reloads the board', async () => {
     const user = userEvent.setup();

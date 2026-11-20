@@ -134,6 +134,9 @@ describe('zoned wall clock', () => {
   it('refuses text that is not a date and a time', () => {
     expect(zonedWallClockToUtc('', ZONE)).toBeNull();
     expect(zonedWallClockToUtc('March 14', ZONE)).toBeNull();
+    // Shaped like the boxes, but no such month: the field refuses it rather than
+    // sending an instant the server can only answer INVALID_INPUT for.
+    expect(zonedWallClockToUtc('2026-13-45T09:00', ZONE)).toBeNull();
     expect(zonedWallClockToUtc('2026-13-45T09:00', ZONE)).toBeNull();
   });
 
@@ -442,9 +445,9 @@ describe('allocation editor arithmetic', () => {
     ]);
     expect(warnings).toHaveLength(1);
     // The server's own sentence wins when it sends one; the fallback names the
-    // three numbers so a row without a message is still actionable.
+    // three numbers so a row whose sentence is blank is still actionable.
     expect(warningSentence(warnings[0])).toBe('assigned more than the campaign holds');
-    const silent = overageWarnings([{ ...warnings[0], message: null }]);
+    const silent = overageWarnings([{ ...warnings[0], message: '' }]);
     expect(warningSentence(silent[0])).toContain('6 assigned against 4 in stock');
     expect(warningSentence(silent[0])).toContain('2 more than the campaign holds');
     expect(overageWarnings(undefined)).toEqual([]);
@@ -458,7 +461,7 @@ describe('allocation editor arithmetic', () => {
       productId: 'PROD#caramel',
       currentStockQty: 4,
       assignedQty: 6,
-      message: null,
+      message: '',
     };
     const small = { ...shape, overageQty: 1 };
     const big = { ...shape, overageQty: 7 };

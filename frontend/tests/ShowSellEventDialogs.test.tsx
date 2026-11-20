@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
+import type { MockedResponse } from '@apollo/client/testing';
 import { GraphQLError } from 'graphql';
 import {
   type EventUnitContext,
@@ -73,10 +74,10 @@ beforeEach(() => {
   vi.stubGlobal('crypto', { randomUUID: () => `test-idem-${++keySequence}` });
 });
 
-function renderDialogs(pending: PendingEventAction, mocks: Parameters<typeof MockedProvider>[0]['mocks'] = []) {
+function renderDialogs(pending: PendingEventAction, mocks: MockedResponse[] = []) {
   const harness = { onClose: vi.fn(), onRefresh: vi.fn(), onCancelled: vi.fn() };
   render(
-    <MockedProvider mocks={mocks} addTypename={false}>
+    <MockedProvider mocks={mocks}>
       <EventActionDialogs
         pending={pending}
         context={UNIT}
@@ -232,7 +233,7 @@ describe('EVT-M-01: creating an event', () => {
 
   it('opens with focus moved into the dialog, so keyboard and mobile flow start in the same place', () => {
     renderDialogs({ kind: 'create' });
-    expect(screen.getByRole('dialog')).toContainElement(document.activeElement);
+    expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement | null);
   });
 
   it('closes on Escape, the dismissal a keyboard-only admin reaches for', () => {
@@ -457,6 +458,15 @@ describe('EVT-M-03: cancelling an event', () => {
     await screen.findByText(/already moved/);
     await waitFor(() => expect(harness.onRefresh).toHaveBeenCalledTimes(1));
     expect(harness.onCancelled).not.toHaveBeenCalled();
+  });
+
+  it('§6.1: recreating an event that had no address leaves the address box empty', async () => {
+    renderDialogs({ kind: 'recreate', from: eventFixture({ status: 'CANCELLED', address: null }) });
+
+    // The words carry over, the empty stays empty: a null address must not come back
+    // as the string "null" for the admin to notice later.
+    expect(screen.getByLabelText('Where is it')).toHaveValue('Library on Main');
+    expect(screen.getByLabelText('Address')).toHaveValue('');
   });
 });
 

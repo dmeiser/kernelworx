@@ -339,6 +339,25 @@ describe('SlotBoard', () => {
     ).toBeInTheDocument();
   });
 
+  it('§3.5.3: a slot the Kernel left unnamed is still editable and deletable, named by what it is', async () => {
+    const user = userEvent.setup();
+    renderBoard(eventFixture([slotFixture({ slotId: 'SLOT#anon', label: null })]));
+
+    // An absent label is a real answer, not a missing one: the row shows the em dash
+    // and every control stays live.
+    expect(await screen.findByTestId('slot-label-SLOT#anon')).toHaveTextContent('—');
+
+    await user.click(screen.getByTestId('edit-slot-SLOT#anon'));
+    expect(await screen.findByTestId('slot-dialog-title')).toHaveTextContent('Edit this slot');
+    // The label box starts empty rather than holding the dash, so saving the row
+    // cannot turn the placeholder into a name the Kernel never typed.
+    expect(screen.getByTestId('slot-label-input')).toHaveValue('');
+
+    await user.click(screen.getByTestId('slot-dialog-cancel'));
+    await user.click(screen.getByTestId('delete-slot-SLOT#anon'));
+    expect(await screen.findByTestId('slot-delete-body')).toHaveTextContent('This slot holds no Scouts');
+  });
+
   it('SLOT-01 (VER-01): a stale slot edit shows the stale-row sentence AND reloads the board', async () => {
     const user = userEvent.setup();
     const stale = {

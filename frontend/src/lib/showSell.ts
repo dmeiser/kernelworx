@@ -634,14 +634,18 @@ export function productQuantityOf(
  * total and the overage — never a clamp and never a refusal.
  */
 export function overageWarnings(
-  warnings: readonly GqlAllocationWarning[] | undefined,
+  warnings: readonly GqlAllocationWarning[] | null | undefined,
 ): GqlAllocationWarning[] {
   return [...(warnings ?? [])].sort((left, right) => right.overageQty - left.overageQty);
 }
 
 /** The tooltip sentence, when the server's own sentence is missing. */
 export function warningSentence(warning: GqlAllocationWarning): string {
-  if (warning.message) return warning.message;
+  // The SDL makes `message` non-null, but a sentence is only useful if it says
+  // something: a blank answer from a version-skewed server gets the same fallback
+  // as a missing one, naming the three numbers the admin has to act on.
+  const sentence = typeof warning.message === 'string' ? warning.message.trim() : '';
+  if (sentence !== '') return sentence;
   return `${warning.assignedQty} assigned against ${warning.currentStockQty} in stock — ${warning.overageQty} more than the campaign holds.`;
 }
 

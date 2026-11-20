@@ -690,4 +690,53 @@ describe('ShowSellOpportunitiesPage', () => {
     expect(download.anchors).toHaveLength(0);
     vi.unstubAllGlobals();
   });
+
+  it('§3.5.3: an account with no Scout it can write as is told so, and the offers are not listed', async () => {
+    renderPage([
+      profilesQuery([]),
+      sharesQuery([]),
+      opportunitiesQuery([opportunityFixture()]),
+    ]);
+
+    // SEC-04/§2.3.1: with no profile this account may sign up as, there is no Scout
+    // to speak for, so the page answers the roster sentence rather than listing what
+    // is on offer with controls that could only fail.
+    await screen.findByTestId('not-on-roster');
+    expect(screen.queryByTestId(`opportunity-${SSE}`)).toBeNull();
+    // The picker is locked: there is no Scout this account may write as, so the
+    // screen cannot address a signup at all.
+    const picker = screen.getByTestId('profile-picker').querySelector('.MuiSelect-select') as HTMLElement;
+    expect(picker).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('§3.5.3: a campaign with nothing scheduled says so instead of an empty list', async () => {
+    renderPage([
+      profilesQuery([profileFixture()]),
+      sharesQuery([]),
+      joinsQuery(AVERY, [campaignJoin()]),
+      commitmentsQuery(AVERY, []),
+      opportunitiesQuery([]),
+    ]);
+
+    await screen.findByText('Nothing is on offer here right now');
+    expect(screen.queryByTestId(`opportunity-${SSE}`)).toBeNull();
+  });
+
+  it('§3.5.3: a slot the Kernel left unnamed is still offered, named by what it is', async () => {
+    renderPage([
+      profilesQuery([profileFixture()]),
+      sharesQuery([]),
+      joinsQuery(AVERY, [campaignJoin()]),
+      commitmentsQuery(AVERY, []),
+      opportunitiesQuery([
+        opportunityFixture({ slots: [opportunitySlot('SLOT#anon', { label: null, capacity: 2, openCapacity: 2 })] }),
+      ]),
+    ]);
+
+    const offer = await screen.findByTestId('slot-offer-SLOT#anon');
+    expect(within(offer).getByTestId('slot-offer-label-SLOT#anon')).toHaveTextContent('Slot');
+    // An unnamed slot is still a place a Scout can take: the name is cosmetic, the
+    // interval and the open count are what the write is addressed by.
+    expect(within(offer).getByTestId('take-SLOT#anon')).toBeEnabled();
+  });
 });
