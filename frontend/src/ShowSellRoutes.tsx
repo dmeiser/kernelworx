@@ -41,6 +41,15 @@ const UnitCampaignWorkspacePage = lazyRoute(() =>
 const UnitCampaignJoinPage = lazyRoute(() =>
   import('./pages/UnitCampaignJoinPage').then((m) => ({ default: m.UnitCampaignJoinPage })),
 );
+const ShowSellEventListPage = lazyRoute(() =>
+  import('./pages/ShowSellEventListPage').then((m) => ({ default: m.ShowSellEventListPage })),
+);
+const ShowSellEventDetailPage = lazyRoute(() =>
+  import('./pages/ShowSellEventDetailPage').then((m) => ({ default: m.ShowSellEventDetailPage })),
+);
+const ShowSellOpportunitiesPage = lazyRoute(() =>
+  import('./pages/ShowSellOpportunitiesPage').then((m) => ({ default: m.ShowSellOpportunitiesPage })),
+);
 
 export const ShowSellRoutes: React.FC = () => {
   const { enabled, loading } = useShowSellPreview();
@@ -61,6 +70,15 @@ export const ShowSellRoutes: React.FC = () => {
       <Route path="units" element={<UnitsPage />} />
       <Route path="units/:unitId" element={<UnitWorkspacePage />} />
       <Route path="units/:unitId/campaigns/:unitCampaignId" element={<UnitCampaignWorkspacePage />} />
+      {/* Stage 3: the admin event surfaces sit under the campaign they belong to,
+          and the participant surface is its own tree because a joined Scout is
+          not a Unit Admin and reaches the campaign through a join code or link. */}
+      <Route path="units/:unitId/campaigns/:unitCampaignId/show-sell" element={<ShowSellEventListPage />} />
+      <Route
+        path="units/:unitId/campaigns/:unitCampaignId/show-sell/:showAndSellId"
+        element={<ShowSellEventDetailPage />}
+      />
+      <Route path="campaigns/:unitCampaignId/opportunities" element={<ShowSellOpportunitiesPage />} />
       <Route path="join" element={<UnitCampaignJoinPage />} />
       <Route path="*" element={<Navigate to="units" replace />} />
     </Routes>
