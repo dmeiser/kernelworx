@@ -700,6 +700,20 @@ resource "aws_appsync_resolver" "unit_invites" {
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
 
+resource "aws_appsync_resolver" "unit_payment_methods" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "unitPaymentMethods"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
 resource "aws_appsync_resolver" "unit_campaign_join_info" {
   api_id      = aws_appsync_graphql_api.main.id
   type        = "Query"

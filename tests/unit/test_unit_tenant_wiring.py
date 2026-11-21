@@ -69,6 +69,7 @@ QUERY_FIELDS = {
     "showAndSellSignups",
     "myScoutCommitments",
     "showAndSellSignupCalendarData",
+    "unitPaymentMethods",
 }
 MUTATION_FIELDS = {
     "createUnit",
@@ -97,6 +98,9 @@ MUTATION_FIELDS = {
     "signupScoutForShowAndSellSlot",
     "cancelShowAndSellSignup",
     "confirmShowAndSellWork",
+    "createUnitPaymentMethod",
+    "updateUnitPaymentMethod",
+    "deactivateUnitPaymentMethod",
 }
 
 
@@ -303,17 +307,18 @@ def test_unit_operations_datasource_is_lambda_backed() -> None:
     assert "unit-operations" in str(config["function_arn"]), "the data source must invoke the unit-operations Lambda"
 
 
-def test_all_forty_nine_unit_fields_are_resolved_on_that_datasource() -> None:
-    """Twenty-three queries and twenty-six mutations, Stage 1 through Stage 3 alike.
+def test_all_fifty_three_unit_fields_are_resolved_on_that_datasource() -> None:
+    """Twenty-four queries and twenty-nine mutations, Stage 1 through Stage 4 alike.
 
     Stage 2 adds the inventory and custody reads and the balance and custody writes to
     the same data source, Stage 3 §2.4 adds the two Order-fulfillment mutations, the
     fulfillment audit query, and the Order list a Unit Admin fulfills from, §3.1
     adds the three event mutations with the admin and participant event reads, §3.2
     adds the stock-assignment mutation with the raw allocation read, §3.3 adds the
-    two slot mutations, and §3.4 adds the signup, cancellation and work-confirmation
+    two slot mutations, §3.4 adds the signup, cancellation and work-confirmation
     mutations with the admin signup board, the Scout's own commitment list and the
-    calendar data a browser needs: tenant isolation, the Unit Admin check, and the
+    calendar data a browser needs, and §4.1.1 adds the payment-method read with its
+    three write mutations: tenant isolation, the Unit Admin check, and the
     Profile share check all live in the one handler, so a new field is a new name in
     its router, and an unbound SDL field answers nothing on ``dev``.
     """
@@ -334,4 +339,4 @@ def test_all_forty_nine_unit_fields_are_resolved_on_that_datasource() -> None:
         assert f"Query:{field}" in bound, f"Query.{field} has no resolver on UnitOperationsDS"
     for field in sorted(MUTATION_FIELDS):
         assert f"Mutation:{field}" in bound, f"Mutation.{field} has no resolver on UnitOperationsDS"
-    assert len(bound) == 49, f"expected exactly the 49 Unit-tenant resolvers, got {sorted(bound)}"
+    assert len(bound) == 53, f"expected exactly the 53 Unit-tenant resolvers, got {sorted(bound)}"

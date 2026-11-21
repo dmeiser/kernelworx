@@ -51,6 +51,7 @@ try:  # pragma: no cover
         unit_auth,
         unit_campaign_models,
         unit_models,
+        unit_payment_models,
     )
     from utils.import_fallback import import_from_utils
 except ModuleNotFoundError:  # pragma: no cover
@@ -62,6 +63,7 @@ except ModuleNotFoundError:  # pragma: no cover
         unit_auth,
         unit_campaign_models,
         unit_models,
+        unit_payment_models,
     )
     from ..utils.import_fallback import import_from_utils
 
@@ -166,6 +168,12 @@ CONFIRM_WORK_FIELD = "confirmShowAndSellWork"
 SHOW_AND_SELL_SIGNUPS_FIELD = "showAndSellSignups"
 MY_COMMITMENTS_FIELD = "myScoutCommitments"
 SIGNUP_CALENDAR_FIELD = "showAndSellSignupCalendarData"
+
+# Stage 4.1 — Unit payment methods (§4.1.1).
+UNIT_PAYMENT_METHODS_FIELD = "unitPaymentMethods"
+CREATE_PAYMENT_METHOD_FIELD = "createUnitPaymentMethod"
+UPDATE_PAYMENT_METHOD_FIELD = "updateUnitPaymentMethod"
+DEACTIVATE_PAYMENT_METHOD_FIELD = "deactivateUnitPaymentMethod"
 
 # Argument names that carry no write intent, so they stay out of the writable-field
 # check.  ``idempotency`` and ``version`` are the mutation contract's own envelopes and
@@ -6682,6 +6690,389 @@ def _show_and_sell_signup_calendar_data(event: Dict[str, Any], caller_id: str) -
     )
 
 
+# --- Unit payment methods (§4.1.1) ------------------------------------------------
+
+
+def _loaded_payment_method(unit_id: str, payment_method_id: str) -> Dict[str, Any]:
+    """Project the stored method this mutation just committed (or is replaying).
+
+    Absent after a committed write — or for a marker whose result id names a row
+    a later tenant-wide cleanup removed — is the internal fault, never
+    ``NOT_FOUND``: the handler cannot say what its own write produced.
+    """
+    row = unit_payment_models.find_payment_by_id(unit_id, payment_method_id)
+    return dict(
+        unit_payment_models.payment_payload(_loaded_or_internal(row, "Unit payment method could not be loaded"))
+    )
+
+
+def _refuse_reserved_payment_name(normalized_name: str) -> None:
+    """Refuse a name that would masquerade as a built-in (§5.4, PAY-M-01-02)."""
+    if unit_payment_models.is_reserved_payment_name(normalized_name):
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "Cash, Check, and Other are built-in payment methods; choose a different name.",
+            details={"subcode": "RESERVED_PAYMENT_METHOD_NAME"},
+        )
+
+
+def _refuse_builtin_mutation(payment_method_id: str, action: str) -> None:
+    """Refuse to rename or deactivate a computed built-in method (§5.4).
+
+    The built-ins have no row to version, so this refusal runs before any row
+    lookup: an id of ``CASH`` is not a stale read of a method, it is a request
+    the model cannot honor at all.
+    """
+    if payment_method_id in unit_payment_models.BUILTIN_PAYMENT_METHOD_IDS:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            f"Built-in payment methods are computed and cannot be {action}.",
+            details={"subcode": "BUILTIN_PAYMENT_METHOD_IMMUTABLE"},
+        )
+
+
+def _payment_method_collection_payload(unit_id: str, *, include_inactive: bool) -> List[Dict[str, Any]]:
+    """The read's list: computed built-ins first, then this Unit's customs."""
+    rows = unit_payment_models.list_payment_rows(unit_id)
+    if not include_inactive:
+        rows = [row for row in rows if row.get("isActive", True)]
+    rows.sort(key=lambda row: str(row.get("displayName", "")).casefold())
+    return [
+        *unit_payment_models.builtin_payment_payloads(unit_id),
+        *(unit_payment_models.payment_payload(row) for row in rows),
+    ]
+
+
+def _list_payment_methods(event: Dict[str, Any], caller_id: str) -> List[Dict[str, Any]]:
+    """Built-in Cash/Check/Other plus the Unit's custom methods (§4.1.1).
+
+    ``includeInactive`` defaults to false — what a new sale may select; true also
+    names the deactivated methods history still references (PAY-M-03-01). A
+    caller without a grant is answered ``NOT_FOUND`` exactly as for an unknown
+    Unit, so the read never confirms that a Unit exists (AUTH-U).
+    """
+    unit_id = _query_argument(event, "unitId")
+    _require_active_admin(caller_id, unit_id)
+    arguments = event.get("arguments")
+    include_inactive = bool(arguments.get("includeInactive")) if isinstance(arguments, Mapping) else False
+    return _payment_method_collection_payload(unit_id, include_inactive=include_inactive)
+
+
+def _create_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Create one named custom method under the reserved-name, duplicate, and cap rules.
+
+    Authorization runs first, then the replay check, then the domain refusals —
+    the same order as every other mutation here: a completed retry answers with
+    its original method even though that method now occupies the name and one of
+    the 50 slots the fresh attempt would fail on. Uniqueness has two guards on
+    purpose: the collection read produces the clean refusal, and the Put's
+    ``attribute_not_exists`` condition (see ``_put_action``) settles the race —
+    two concurrent creates of the same name resolve by the write, not by the
+    read that preceded it.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    unit_id = _resource_id(payload, "unitId")
+    runner = IdempotentMutationRunner()
+
+    keys = _marker(caller_id=caller_id, operation=CREATE_PAYMENT_METHOD_FIELD, scope=unit_id, idempotency_key=key)
+    _require_active_admin(caller_id, unit_id)
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        CREATE_PAYMENT_METHOD_FIELD,
+        lambda stored: _loaded_payment_method(unit_id, str(stored)),
+    )
+    if replayed is not None:
+        return replayed
+
+    display_name = unit_payment_models.normalize_payment_display_name(payload.get("displayName"))
+    normalized = unit_payment_models.normalize_payment_name(display_name)
+    _refuse_reserved_payment_name(normalized)
+
+    rows = unit_payment_models.list_payment_rows(unit_id)
+    if any(str(row.get("sk", "")) == unit_payment_models.payment_sk(normalized) for row in rows):
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "This Unit already has a payment method with this name.",
+            details={"subcode": "DUPLICATE_PAYMENT_METHOD_NAME"},
+        )
+    active_count = sum(1 for row in rows if row.get("isActive", True))
+    if active_count >= unit_payment_models.MAX_ACTIVE_PAYMENT_METHODS:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            f"This Unit already has {unit_payment_models.MAX_ACTIVE_PAYMENT_METHODS} active payment methods. "
+            "Deactivate one before adding another.",
+            details={"subcode": "PAYMENT_METHOD_LIMIT_REACHED", "activeMethods": active_count},
+        )
+
+    payment_method_id = unit_payment_models.new_payment_method_id()
+    item = unit_payment_models.build_payment_item(
+        payment_method_id=payment_method_id,
+        unit_id=unit_id,
+        display_name=display_name,
+        created_by_account_id=caller_id,
+        now_iso=utc_now_iso(),
+    )
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
+    plan.add("Put", _put_action(item))
+    build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=CREATE_PAYMENT_METHOD_FIELD,
+        fingerprint=fingerprint,
+        result_id=payment_method_id,
+        load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
+        result_payload=build_result,
+    )
+    result = build_result()
+    log.info(
+        "Unit payment method created",
+        unit_id=unit_id,
+        payment_method_id=payment_method_id,
+        caller_id=caller_id,
+        version=result["version"],
+    )
+    return result
+
+
+def _rename_update_action(
+    unit_id: str, *, normalized_name: str, display_name: str, caller_id: str, expected_version: int
+) -> Dict[str, Any]:
+    """The single-key rename for a case-only name change.
+
+    When the normalized name does not move, the row is not key-changing and one
+    conditional Update carries the display rename; ``expectedVersion`` rides in
+    the condition, not just the pre-check, so two racing renames leave exactly
+    one winner.
+    """
+    return {
+        "TableName": tables.units.table_name,
+        "Key": wire_key(unit_payment_models.payment_key(unit_id, normalized_name)),
+        "UpdateExpression": "SET #displayName = :displayName, #updatedAt = :updatedAt, "
+        "#updatedBy = :updatedBy, #version = #version + :one",
+        "ExpressionAttributeNames": {
+            "#displayName": "displayName",
+            "#updatedAt": "updatedAt",
+            "#updatedBy": "updatedByAccountId",
+            "#version": "version",
+        },
+        "ExpressionAttributeValues": {
+            ":displayName": {"S": display_name},
+            ":updatedAt": {"S": utc_now_iso()},
+            ":updatedBy": {"S": caller_id},
+            ":one": {"N": "1"},
+            ":expectedVersion": {"N": str(expected_version)},
+        },
+        "ConditionExpression": "#version = :expectedVersion",
+        "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+    }
+
+
+def _update_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Rename a custom method under ``expectedVersion`` (§4.1.1).
+
+    A rename whose normalized name moves is a key-changing update (data model
+    §5.4): the plan Puts the new key — carrying the SAME ``paymentMethodId``,
+    creation audit, active state, and QR reference — and Deletes the old key
+    conditioned on ``expectedVersion``, atomically with the marker. The version
+    guard on the Delete is what refuses a stale rename after another mutation
+    moved the row, and the Put's ``attribute_not_exists`` guard is what refuses
+    a concurrent rename onto a name another write just claimed. ``paymentMethodId``
+    resolves through a consistent read of the Unit's payment collection — the
+    only consistent resolution path (PAY-M-02-02), and the reason a
+    ``paymentMethodId`` from another Unit reads as ``NOT_FOUND`` (AUTH-U-05).
+    Historical sale snapshots are untouched: nothing here writes a sale, and the
+    snapshot contract copies the name at sale time (PAY-06).
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _update_fingerprint(payload)
+    unit_id = _resource_id(payload, "unitId")
+    payment_method_id = _resource_id(payload, "paymentMethodId")
+    expected_version = _expected_version(payload)
+    runner = IdempotentMutationRunner()
+
+    keys = _marker(caller_id=caller_id, operation=UPDATE_PAYMENT_METHOD_FIELD, scope=unit_id, idempotency_key=key)
+    _require_active_admin(caller_id, unit_id)
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        UPDATE_PAYMENT_METHOD_FIELD,
+        lambda stored: _loaded_payment_method(unit_id, str(stored)),
+    )
+    if replayed is not None:
+        return replayed
+
+    display_name = unit_payment_models.normalize_payment_display_name(payload.get("displayName"))
+    normalized = unit_payment_models.normalize_payment_name(display_name)
+    _refuse_reserved_payment_name(normalized)
+    _refuse_builtin_mutation(payment_method_id, "renamed")
+
+    row = unit_payment_models.find_payment_by_id(unit_id, payment_method_id)
+    if row is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Unit payment method not found")
+    old_normalized = str(row["sk"])[len(unit_payment_models.PAYMENT_SK_PREFIX) + 1 :]
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
+    if normalized == old_normalized:
+        plan.add(
+            "Update",
+            _rename_update_action(
+                unit_id,
+                normalized_name=old_normalized,
+                display_name=display_name,
+                caller_id=caller_id,
+                expected_version=expected_version,
+            ),
+        )
+    else:
+        rows = unit_payment_models.list_payment_rows(unit_id)
+        target_sk = unit_payment_models.payment_sk(normalized)
+        if any(str(other.get("sk", "")) == target_sk for other in rows):
+            raise AppError(
+                ErrorCode.CONFLICT,
+                "This Unit already has a payment method with this name.",
+                details={"subcode": "DUPLICATE_PAYMENT_METHOD_NAME"},
+            )
+        renamed_item = unit_payment_models.build_payment_item(
+            payment_method_id=payment_method_id,
+            unit_id=unit_id,
+            display_name=display_name,
+            created_by_account_id=str(row["createdByAccountId"]),
+            now_iso=utc_now_iso(),
+            created_at=str(row["createdAt"]),
+            is_active=bool(row.get("isActive", True)),
+            qr_code_s3_key=row.get("qrCodeS3Key") if isinstance(row.get("qrCodeS3Key"), str) else None,
+            version=int(row["version"]) + 1,
+        )
+        plan.add("Put", _put_action(renamed_item))
+        plan.add(
+            "Delete",
+            {
+                "TableName": tables.units.table_name,
+                "Key": wire_key(unit_payment_models.payment_key(unit_id, old_normalized)),
+                "ConditionExpression": "#version = :expectedVersion",
+                "ExpressionAttributeNames": {"#version": "version"},
+                "ExpressionAttributeValues": {":expectedVersion": {"N": str(expected_version)}},
+                "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+            },
+        )
+    build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=UPDATE_PAYMENT_METHOD_FIELD,
+        fingerprint=fingerprint,
+        result_id=payment_method_id,
+        load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
+        result_payload=build_result,
+    )
+    result = build_result()
+    log.info(
+        "Unit payment method renamed",
+        unit_id=unit_id,
+        payment_method_id=payment_method_id,
+        caller_id=caller_id,
+        version=result["version"],
+    )
+    return result
+
+
+def _deactivate_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Soft-deactivate one custom method under ``expectedVersion`` (§4.1.1).
+
+    Deactivation flips ``isActive`` and the audit fields on the same key and
+    writes nothing else: the row, its ``paymentMethodId``, its QR reference, and
+    every historical sale snapshot that names it all stay readable
+    (PAY-M-03-01, PAY-06). The version rides in the Update condition, so a
+    concurrent rename or QR mutation makes this one fail whole with
+    ``CONFLICT`` and no partial write.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _update_fingerprint(payload)
+    unit_id = _resource_id(payload, "unitId")
+    payment_method_id = _resource_id(payload, "paymentMethodId")
+    expected_version = _expected_version(payload)
+    runner = IdempotentMutationRunner()
+
+    keys = _marker(caller_id=caller_id, operation=DEACTIVATE_PAYMENT_METHOD_FIELD, scope=unit_id, idempotency_key=key)
+    _require_active_admin(caller_id, unit_id)
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        DEACTIVATE_PAYMENT_METHOD_FIELD,
+        lambda stored: _loaded_payment_method(unit_id, str(stored)),
+    )
+    if replayed is not None:
+        return replayed
+
+    _refuse_builtin_mutation(payment_method_id, "deactivated")
+    row = unit_payment_models.find_payment_by_id(unit_id, payment_method_id)
+    if row is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Unit payment method not found")
+
+    old_normalized = str(row["sk"])[len(unit_payment_models.PAYMENT_SK_PREFIX) + 1 :]
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
+    plan.add(
+        "Update",
+        {
+            "TableName": tables.units.table_name,
+            "Key": wire_key(unit_payment_models.payment_key(unit_id, old_normalized)),
+            "UpdateExpression": "SET #isActive = :false, #updatedAt = :updatedAt, "
+            "#updatedBy = :updatedBy, #version = #version + :one",
+            "ExpressionAttributeNames": {
+                "#isActive": "isActive",
+                "#updatedAt": "updatedAt",
+                "#updatedBy": "updatedByAccountId",
+                "#version": "version",
+            },
+            "ExpressionAttributeValues": {
+                ":false": {"BOOL": False},
+                ":updatedAt": {"S": utc_now_iso()},
+                ":updatedBy": {"S": caller_id},
+                ":one": {"N": "1"},
+                ":expectedVersion": {"N": str(expected_version)},
+            },
+            "ConditionExpression": "#version = :expectedVersion",
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+    build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=DEACTIVATE_PAYMENT_METHOD_FIELD,
+        fingerprint=fingerprint,
+        result_id=payment_method_id,
+        load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
+        result_payload=build_result,
+    )
+    result = build_result()
+    log.info(
+        "Unit payment method deactivated",
+        unit_id=unit_id,
+        payment_method_id=payment_method_id,
+        caller_id=caller_id,
+        version=result["version"],
+    )
+    return result
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -6735,6 +7126,10 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     SHOW_AND_SELL_SIGNUPS_FIELD: _show_and_sell_signups,
     MY_COMMITMENTS_FIELD: _my_scout_commitments,
     SIGNUP_CALENDAR_FIELD: _show_and_sell_signup_calendar_data,
+    UNIT_PAYMENT_METHODS_FIELD: _list_payment_methods,
+    CREATE_PAYMENT_METHOD_FIELD: _create_payment_method,
+    UPDATE_PAYMENT_METHOD_FIELD: _update_payment_method,
+    DEACTIVATE_PAYMENT_METHOD_FIELD: _deactivate_payment_method,
 }
 
 

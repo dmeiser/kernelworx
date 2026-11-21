@@ -606,12 +606,34 @@ export type GqlCreateUnitPayload = {
   unit: GqlUnit;
 };
 
+/** Input for createUnitPaymentMethod. Cash/Check/Other names are reserved case-insensitively; at most 50 active custom methods per Unit. */
+export type GqlCreateUnitPaymentMethodInput = {
+  /** The display name (1-100 trimmed characters); unique per Unit case-insensitively. */
+  displayName: Scalars['String']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The owning Unit. */
+  unitId: Scalars['ID']['input'];
+};
+
 /** Inclusive instant window for a history read; at most 366 days wide. */
 export type GqlDateRangeFilter = {
   /** Last instant to include; must be after startAt. */
   endAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
   /** First instant to include. */
   startAt?: InputMaybe<Scalars['AWSDateTime']['input']>;
+};
+
+/** Input for deactivateUnitPaymentMethod. Soft deactivation only; historical sales remain readable. */
+export type GqlDeactivateUnitPaymentMethodInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The method's stable paymentMethodId (built-in IDs cannot be deactivated). */
+  paymentMethodId: Scalars['ID']['input'];
+  /** The owning Unit. */
+  unitId: Scalars['ID']['input'];
+  /** The version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
 };
 
 /** Input for deleteShowAndSellSlot. Allowed only while the slot holds nobody, so a deletion can never silently drop a participant (checklist §3.3.3). */
@@ -935,6 +957,10 @@ export type GqlMutation = {
   createUnitCampaign: GqlUnitCampaignAdmin;
   /** Generate a 16-character, 14-day, single-use unit admin invite. Unit Admin for that Unit. */
   createUnitInvite: GqlUnitInvite;
+  /** Create a named Unit payment method. Unit Admin; Cash/Check/Other names reserved case-insensitively; at most 50 active custom methods. */
+  createUnitPaymentMethod: GqlUnitPaymentMethod;
+  /** Deactivate a Unit payment method (soft deactivate only). Unit Admin; historical sales remain readable. */
+  deactivateUnitPaymentMethod: GqlUnitPaymentMethod;
   /** Delete a campaign and all of its orders, on a profile the caller has write access to. Returns true on success. */
   deleteCampaign: Scalars['Boolean']['output'];
   /** Soft-delete a catalog the caller owns (it is hidden from list queries but kept for reference). Returns true on success. */
@@ -1013,6 +1039,8 @@ export type GqlMutation = {
   updateUnit: GqlUnit;
   /** Update a Unit Campaign's name, year, and active state. Unit Admin for the parent Unit. */
   updateUnitCampaign: GqlUnitCampaignAdmin;
+  /** Rename a Unit payment method under its stable paymentMethodId. Unit Admin; historical sale snapshots keep the old name. */
+  updateUnitPaymentMethod: GqlUnitPaymentMethod;
   /** Add or edit one working slot of an event: an interval inside the event's immutable interval, an optional label, and a capacity of 1-100. Any duration is legal — no hour or half-hour is assumed. Allowed only while the event is scheduled, at most 20 slots per event, and an edit revalidates the signups the slot already holds: a capacity below the active count, or a new time that would put an already-signed-up Scout into overlap with another slot of this event or with a commitment at any other Show & Sell, is refused and writes nothing. The slot row and the event version commit together, so a caller holding a stale event version writes nothing. Unit Admin for the event's Unit. */
   upsertShowAndSellSlot: GqlShowAndSellSlot;
 };
@@ -1154,6 +1182,16 @@ export type GqlMutation_CreateUnitCampaignArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_CreateUnitInviteArgs = {
   input: GqlCreateUnitInviteInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateUnitPaymentMethodArgs = {
+  input: GqlCreateUnitPaymentMethodInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_DeactivateUnitPaymentMethodArgs = {
+  input: GqlDeactivateUnitPaymentMethodInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1347,6 +1385,11 @@ export type GqlMutation_UpdateUnitArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpdateUnitCampaignArgs = {
   input: GqlUpdateUnitCampaignInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateUnitPaymentMethodArgs = {
+  input: GqlUpdateUnitPaymentMethodInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1883,6 +1926,8 @@ export type GqlQuery = {
   unitCampaigns: GqlUnitCampaignConnection;
   /** The unit's active, unused invites; the code is returned only for them. Unit Admin. */
   unitInvites: GqlUnitInviteConnection;
+  /** The Unit's payment methods: computed built-in Cash/Check/Other first, then custom methods. Unit Admin; at most 50 active custom methods. */
+  unitPaymentMethods: Array<GqlUnitPaymentMethod>;
   /** The individual Orders one Scout Campaign holds for this Unit Campaign, newest first, in the projection a fulfillment write needs: origin scope, the stable line identity, each line's fulfilled quantity, and the version the next fulfillment conditions on. Unit Admin for the Unit Campaign, which is the Order's immutable origin; Orders another Unit took under the same Scout Campaign are not answered here, and no customer contact detail is. */
   unitScoutCampaignOrders: GqlUnitOrderConnection;
 };
@@ -2165,6 +2210,12 @@ export type GqlQuery_UnitCampaignsArgs = {
 /** The root query object for the KernelWorx API. */
 export type GqlQuery_UnitInvitesArgs = {
   page?: InputMaybe<GqlPageInput>;
+  unitId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_UnitPaymentMethodsArgs = {
+  includeInactive?: InputMaybe<Scalars['Boolean']['input']>;
   unitId: Scalars['ID']['input'];
 };
 
@@ -3037,6 +3088,31 @@ export type GqlUnitOrderLine = {
   quantity: Scalars['Int']['output'];
 };
 
+/** A Unit-managed payment method. Built-in Cash/Check/Other are computed on every read and are never stored; custom methods carry a stable ID that survives renames. */
+export type GqlUnitPaymentMethod = {
+  __typename?: 'UnitPaymentMethod';
+  /** When the method was created; null for the computed built-ins. */
+  createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  /** The Unit Admin who created it; null for the computed built-ins. */
+  createdByAccountId?: Maybe<Scalars['ID']['output']>;
+  /** The current name shown to users; historical sale snapshots keep the name captured at sale time. */
+  displayName: Scalars['String']['output'];
+  /** Inactive methods are unavailable for new sales but preserved for history. */
+  isActive: Scalars['Boolean']['output'];
+  /** Stable ID within the method's history; built-ins report CASH, CHECK, or OTHER. */
+  paymentMethodId: Scalars['ID']['output'];
+  /** S3 key of the optional shared QR image; null when none is attached. Unit Admin reads only. */
+  qrCodeS3Key?: Maybe<Scalars['String']['output']>;
+  /** The owning Unit. */
+  unitId: Scalars['ID']['output'];
+  /** When the method was last updated; null for the computed built-ins. */
+  updatedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  /** The Unit Admin who last updated it; null for the computed built-ins. */
+  updatedByAccountId?: Maybe<Scalars['ID']['output']>;
+  /** Optimistic-concurrency version for rename and QR mutations; built-ins report 0 and are not mutable. */
+  version: Scalars['Int']['output'];
+};
+
 /** A unit-level sales report aggregating sellers (profiles) and their orders for a unit and season. */
 export type GqlUnitReport = {
   __typename?: 'UnitReport';
@@ -3232,6 +3308,20 @@ export type GqlUpdateUnitInput = {
   unitNumber?: InputMaybe<Scalars['Int']['input']>;
   /** The scout unit type. */
   unitType?: InputMaybe<Scalars['String']['input']>;
+  /** The version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
+};
+
+/** Input for updateUnitPaymentMethod. A rename is a key-changing update; historical sale snapshots are never rewritten. */
+export type GqlUpdateUnitPaymentMethodInput = {
+  /** The new display name; same reserved/duplicate-name rules as create. */
+  displayName: Scalars['String']['input'];
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The method's stable paymentMethodId (built-in IDs cannot be renamed). */
+  paymentMethodId: Scalars['ID']['input'];
+  /** The owning Unit. */
+  unitId: Scalars['ID']['input'];
   /** The version the caller last read (optimistic concurrency). */
   version: GqlVersionedInput;
 };
