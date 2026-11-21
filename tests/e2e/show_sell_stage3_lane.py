@@ -15,9 +15,11 @@ Run it against the stack the fixture identities live on::
 It needs the environment the acceptance journeys need — ``TEST_QA_SHOW_SELL_BASE_URL`` (or
 ``E2E_BASE_URL``), ``TEST_USER_POOL_CLIENT_ID`` and the four ``TEST_QA_SHOW_SELL_*`` identity pairs that
 ``scripts/qa_fixture.py up`` writes.  Beyond those it uses the ambient AWS identity only the way the
-sanctioned sweeper does — ``Scan``, and only on the three tables ``kernelworx-qa-ue1-dev`` can already
-open — to count the residue a sweep report never names.  It never writes to a table: every deletion is a
-product mutation or a ``scripts/qa_fixture.py sweep`` call.
+sanctioned sweeper does — ``Scan``, a keyed ``Query``, and a strongly consistent ``GetItem`` of one exact key,
+on the tables ``kernelworx-qa-ue1-dev`` can already open, with every refused read named in the record rather
+than counted as empty — to count the residue a sweep report never names.  It never writes to a table: every
+deletion is a product mutation or a ``scripts/qa_fixture.py sweep`` call, and the guard pass names below
+makes no delete call at all.
 
 What the lane does, in order:
 
@@ -38,7 +40,9 @@ What the lane does, in order:
    reporting one verdict per step, then runs the sanctioned sweeper over the typed lane tokens, naming
    each roster membership's Scout Campaign exactly (the active-join guard rule needs that id: one profile
    holds a guard per Campaign, so a ``profile`` token cannot say which Campaign is joined, and an unnamed
-   guard comes back ``UNKNOWN`` and fails the sweep closed).
+   guard comes back ``UNKNOWN`` and fails the sweep closed).  What is torn down and swept is whatever ids
+   this run captured, not whether the lane reached its Stage 3 writes: a run refused after ``createUnit``
+   still owes its Unit row and its marker to the sweep.
 6. Gives back an ACTIVE ``ScoutCommitment`` an earlier attempt of **this lane id, or of a lane id named on
    the command line** left standing, and only one written on that lane's own event location
    (:func:`event_location`).  The card-wide prefix is not the gate: every lane this card runs signs in as
@@ -46,25 +50,26 @@ What the lane does, in order:
    checkout is holding, and a cancelled signup cannot be re-created in its slot.  This pass runs inside the
    canary's protection window, after the canary exists and is snapshotted, with the canary's own event
    location excluded from it.
-7. Tears the lane down in a ``finally`` — the run that fails halfway is the run that still cleans up —
-   reporting one verdict per step, then runs the sanctioned sweeper over the typed lane tokens, naming
-   each roster membership's Scout Campaign exactly (the active-join guard rule needs that id: one profile
-   holds a guard per Campaign, so a ``profile`` token cannot say which Campaign is joined, and an unnamed
-   guard comes back ``UNKNOWN`` and fails the sweep closed).  What is torn down and swept is whatever ids
-   this run captured, not whether the lane reached its Stage 3 writes: a run refused after ``createUnit``
-   still owes its Unit row and its marker to the sweep.
-8. Re-reads the canary and fails if that sweep disturbed it, then takes the canary down with its own
+7. Re-reads the canary and fails if that sweep disturbed it, then takes the canary down with its own
    tokens so the record also shows the sweeper removing a lane it is pointed at.  Its removal has to be
    *read* absent, and read twice: a Campaign read that refuses is decided by the identity's own Unit list,
    and that list only counts because it answered the Unit before the sweep ran.
-
-9. Exits on :func:`lane_failures`, never on the absence of a traceback: a blocked step fails under
-   ``SS_STRICT_CLEANUP=1``, a canary that was never compared or never read back fails, and a run that was
-   interrupted exits 130 because it has no verdict to report.
-9. Counts the residue that survives all of it, per physical table, by read: Amendment C requires the
+8. Counts the residue that survives all of it, per physical table, by read: Amendment C requires the
    retained class with counts and key shapes, and a sweep report cannot supply that count for a key shape
    no rule describes — such a row is neither deleted nor reported, so a record quoting only sweep lines
    would read as if nothing were left.
+9. Exits on :func:`lane_failures`, never on the absence of a traceback: a blocked step fails under
+   ``SS_STRICT_CLEANUP=1``, a canary that was never compared or never read back fails, and a run that was
+   interrupted exits 130 because it has no verdict to report.
+
+``--verify-guards`` runs one more thing on its own, and it is read-only by design: the membership-guard
+disposition (:func:`verify_guard_residue`).  A ``campaign=`` token handed to the sweeper deletes scoped rows
+on several tables on the strength of one id, and a guard row carries no lane id, so a pass that mutated
+could take another lane's live join on a name match.  This pass therefore only reads: a strongly consistent
+``GetItem`` of each exact key proves absence, and every key that is answered gets a state and a reason —
+ownership settled by the sweeper's own fixture allowlist before any name match, and liveness decided by the
+two rows the product itself reads.  Where the read that would settle the question is not granted to this
+identity, the record names the table and the action instead of guessing.
 
 The lane stops with words rather than a false pass when the stack cannot carry it: an API that answers no
 Stage 3 endpoint raises with ``MISSING_ENDPOINT_NOTE``, and a catalog with no product to assign says so.
@@ -997,8 +1002,8 @@ def _fixture_tool() -> Any:
     Imported rather than re-implemented: a residue census keyed by *physical* table name is only comparable
     with the sweep's own report when both read the same ``SWEEP_TABLES`` map, and re-declaring the six names
     is how a census drifts onto a table the sweeper never opens.  Nothing here writes: the only DynamoDB
-    call this module makes is ``Scan``, on the three tables the fixture identity can already read, and every
-    deletion stays a product mutation or a ``qa_fixture.py sweep`` call.
+    calls this module makes are ``Scan`` and a keyed ``Query``, on the tables the fixture identity can already
+    read, and every deletion stays a product mutation or a ``qa_fixture.py sweep`` call.
     """
     path = Path(__file__).resolve().parents[2] / "scripts" / "qa_fixture.py"
     spec = importlib.util.spec_from_file_location("qa_fixture_lane_tool", path)
@@ -1650,6 +1655,457 @@ def retained_commitment_rows(scout: str, event_ids: Sequence[str]) -> tuple[list
     return rows, len(rows)
 
 
+GUARD_SORT_KEY = "MEMBERSHIP_GUARD"
+METADATA_SORT_KEY = "METADATA"
+
+#: The one disposition a guard key can end with, and every one of them is a read rather than a guess.  This
+#: pass removes nothing, so the only thing it can decide is what the table answers for that key and whose row
+#: it is when a row is there.
+GUARD_ABSENT = "verified-absent"
+GUARD_LIVE_JOIN = "live-join"
+GUARD_LIVE_SCOUT_CAMPAIGN = "live-scout-campaign"
+GUARD_OTHER_TENANT = "other-tenant"
+GUARD_NOT_THIS_CARD = "not-this-card"
+GUARD_CARD_RESIDUE = "card-residue"
+GUARD_UNPROVEN = "unproven-dead"
+GUARD_UNREADABLE = "unreadable"
+
+#: A key this card's run named cannot pass on these three answers: residue this card owns that still stands,
+#: a row nobody can prove dead, and a read that was refused outright.
+GUARD_NAMED_FAILURES = (GUARD_CARD_RESIDUE, GUARD_UNPROVEN, GUARD_UNREADABLE)
+
+#: The name templates this card's own runs write into the records they create.  A membership-guard row
+#: carries no lane id, so an already-orphaned guard is attributed through the product's own Profile row for
+#: the guarded Scout: that row's ``sellerName`` names the run that made it ("Avery w168qa"), and these are
+#: the labels this card's runners mint.  ``--claim-label`` extends the set for a run whose template is not
+#: listed here, and the label that matched is recorded with every key the pass names.  A label is never
+#: sufficient on its own: :func:`guard_disposition` asks who owns the Profile first.
+CARD_CLAIM_LABELS: tuple[str, ...] = ("w168qa", "w168qb", "w168lane", "w168can", "w168probe")
+
+
+def _table_named(tool: Any, label: str) -> str:
+    """The dev physical name of one of this stack's tables, derived from the sweeper's own map.
+
+    ``scripts/qa_fixture.py`` is the only place the lane reads physical names from, and
+    ``tofu/application/modules/dynamodb/main.tf`` builds every one of them the same way
+    (``${var.name_prefix}-<table>${local.table_suffix}``); re-declaring a name here is how a read drifts onto
+    a table that does not exist, so the suffix comes off a name the sweeper already publishes.
+    """
+    unit_table = tool.SWEEP_TABLES["units"][0]
+    name = unit_table.replace("-units-", f"-{label}-")
+    if name == unit_table:
+        raise AssertionError(f"the sweeper's table map cannot name {label!r}: it answers {unit_table}")
+    return name
+
+
+def _refusal(table: str, exc: BaseException) -> str:
+    """A read this identity was not allowed to make, in the shape a record and a reviewer can both use.
+
+    A raw botocore message is two sentences of ARN; what the record has to carry is the table, the action and
+    the fact that it is an authorization answer rather than an empty result.  "No rows" and "no permission"
+    are different findings, and collapsing them is how a blocked table comes to look clean.
+    """
+    text = " ".join(str(exc).split())
+    called = re.search(r"when calling the (\w+) operation", text)
+    perform = re.search(r"not authorized to perform: ([\w:]+)", text)
+    if called and perform:
+        return f"{table}: {called.group(1)} is not granted to this identity ({perform.group(1)} denied)"
+    return f"{table}: {type(exc).__name__}: {text}"
+
+
+def _read_item(client: Any, tool: Any, table: str, key: Mapping[str, str]) -> tuple[dict[str, str], str]:
+    """One item by its exact key, strongly consistent: the whole of what this pass asks of DynamoDB.
+
+    ``GetItem`` with ``ConsistentRead`` is the only write-adjacent shape that cannot reach a row the caller
+    did not name — a ``Query`` or ``Scan`` on a prefix, or the sweeper's token-matched delete, can.  The pair
+    ``(item, error)`` keeps the two answers that look identical apart: an empty item with no error means the
+    table says that key is not answered, and an empty item with an error means this identity was not allowed
+    to know.  Every guard read in this module goes through here.
+    """
+    try:
+        page = client.get_item(
+            TableName=table,
+            Key={name: {"S": value} for name, value in key.items()},
+            ConsistentRead=True,
+        )
+    except Exception as exc:  # noqa: BLE001 - a refused read is a finding, not a crash
+        return {}, _refusal(table, exc)
+    item = page.get("Item")
+    return (tool._strings(item), "") if item else ({}, "")
+
+
+def _guard_population(client: Any, tool: Any, table: str) -> list[str]:
+    """Every membership-guard row on the Unit Campaign table, as the bare Scout Campaign id it guards.
+
+    The population, not a hand-written list: the three guards this card's first cleanup report left
+    ``UNKNOWN`` were found because a ``profile=`` token happened to reach them, and the same profile token
+    cannot say which Scout Campaign is joined (``scripts/qa_fixture.py``: "one profile holds a guard per
+    Campaign").  Reading the shape out of the table is what makes the disposition complete — and it finds the
+    guards no report ever named.  This is a read of a table ``kernelworx-qa-ue1-dev`` is granted
+    ``dynamodb:Scan`` on; the five keys the card has to answer for are still verified one at a time by
+    :func:`_read_item`, and this scan only enumerates what is left standing around them.
+    """
+    found: list[str] = []
+    scan_kw: dict[str, Any] = {
+        "TableName": table,
+        "FilterExpression": "sk = :sk",
+        "ExpressionAttributeValues": {":sk": {"S": GUARD_SORT_KEY}},
+    }
+    while True:
+        page = client.scan(**scan_kw)
+        for item in page.get("Items", []):
+            flat = tool._strings(item)
+            campaign = flat.get("campaignId") or flat.get("pk", "")
+            found.append(_bare(campaign).removeprefix("CAMPAIGN#"))
+        token = page.get("LastEvaluatedKey")
+        if not token:
+            return sorted(set(found))
+        scan_kw["ExclusiveStartKey"] = token
+
+
+def _profile_row(client: Any, tool: Any, table: str, profile_key: str) -> tuple[dict[str, str], str]:
+    """The Profile row one exact ``profileId`` belongs to, located the way the product locates it.
+
+    ``profiles`` is keyed ``ownerAccountId``/``profileId``, so a profile id on its own is only reachable
+    through ``profileId-index`` — the same index ``unit_campaign_models.seller_display_name`` uses to answer
+    this one question — and an index is eventually consistent, so the row is read again from the base table by
+    the pair the index names.  Both reads are keyed by the id the guard itself carries: this never enumerates
+    the table, and a Profile that cannot be located is reported as unknown, which can only ever *refuse* an
+    attribution, never support one.
+    """
+    try:
+        page = client.query(
+            TableName=table,
+            IndexName="profileId-index",
+            KeyConditionExpression="profileId = :profile_id",
+            ExpressionAttributeValues={":profile_id": {"S": profile_key}},
+        )
+    except Exception as exc:  # noqa: BLE001 - a refused attribution read refuses the attribution
+        return {}, _refusal(table, exc)
+    located = [tool._strings(item) for item in page.get("Items", [])]
+    if not located:
+        return {}, ""
+    owner = located[0].get("ownerAccountId", "")
+    if not owner:
+        return located[0], ""
+    item, error = _read_item(client, tool, table, {"ownerAccountId": owner, "profileId": profile_key})
+    return (item or located[0]), error
+
+
+def _fixture_allowlist(tool: Any) -> dict[str, str]:
+    """``sub`` -> address for the identities ``scripts/qa_fixture.py`` treats as its own, and nobody else's.
+
+    This is the sweeper's own narrowing, line for line: it takes the four configured fixture addresses from
+    ``emails()`` and keeps only the ``sub`` each one has on the pool (``qa_fixture.py``, the ``sweep``
+    branch).  Reading the user pool instead would be wrong in the dangerous direction — the dev pool answers
+    26 users on this identity while the fixture allowlist names 4, so every ordinary dev account would read
+    as "fixture data" and a Profile owned by a real tenant would qualify for a lane's cleanup.
+    """
+    have = tool.pool_users(tool.cip())
+    identities: dict[str, str] = {}
+    for address in tool.emails().values():
+        user = have.get(address)
+        sub = tool._attrs(user).get("sub") if user else ""
+        if sub:
+            identities[sub] = address
+    return identities
+
+
+def guard_facts(
+    client: Any,
+    tool: Any,
+    table: str,
+    campaigns_table: str,
+    profiles_table: str,
+    campaign_id: str,
+    identities: Mapping[str, str],
+    labels: Sequence[str],
+) -> dict[str, Any]:
+    """What one guard key answers right now, each read by its exact key and none of them a write.
+
+    Four aggregates decide everything that follows, and each is the product's own read:
+
+    * the guard row itself, by ``{pk, sk}`` on the Unit Campaign table, strongly consistent;
+    * the Unit Campaign the guard declares ``ACTIVE``, by its ``METADATA`` row — the same row a sale's
+      origin reads before it trusts a join;
+    * the Scout Campaign, on ``campaigns`` by ``{profileId, campaignId}``, which is the base-row key
+      ``unit_campaign_models.campaign_latest_link_action`` writes and ``roster_display`` batch-reads.  The
+      ``METADATA`` row the earlier revision of this pass looked for beside the guard is not a Scout Campaign:
+      that table holds Unit Campaign aggregates, and no Scout Campaign partition there carries one, so that
+      test was true of every guard on the table and pruned nothing;
+    * the Profile row the guard names, which is the only thing on the row that says who made it.
+    """
+    key = {"pk": f"SCOUT_CAMPAIGN#CAMPAIGN#{campaign_id}", "sk": GUARD_SORT_KEY}
+    guard, guard_error = _read_item(client, tool, table, key)
+    profile_key = guard.get("profileId", "")
+    profile, profile_error = _profile_row(client, tool, profiles_table, profile_key) if profile_key else ({}, "")
+    owner = _bare(profile.get("ownerAccountId", ""))
+    active = _bare(guard.get("activeUnitCampaignId", ""))
+    standing, standing_error = (
+        _read_item(client, tool, table, {"pk": f"UNIT_CAMPAIGN#{active}", "sk": METADATA_SORT_KEY})
+        if active
+        else ({}, "")
+    )
+    scout, scout_error = ({}, "")
+    if guard:
+        if profile_key:
+            scout, scout_error = _read_item(
+                client,
+                tool,
+                campaigns_table,
+                {"profileId": profile_key, "campaignId": guard.get("campaignId") or f"CAMPAIGN#{campaign_id}"},
+            )
+        else:
+            scout_error = f"{campaigns_table}: the guard row carries no profileId, so the base-row key cannot be built"
+    return {
+        "campaignId": campaign_id,
+        "guardKey": f"{key['pk']}/{key['sk']}",
+        "guardPresent": bool(guard),
+        "guardError": guard_error,
+        "profileId": _bare(profile_key),
+        "sellerName": str(profile.get("sellerName", "")),
+        "ownerAddress": identities.get(owner, ""),
+        "ownerInFixtureAllowlist": bool(owner) and owner in identities,
+        "profileError": profile_error,
+        "activeUnitCampaignId": active,
+        "activeUnitCampaignName": str(standing.get("campaignName", "")),
+        "activeJoinStands": bool(standing),
+        "activeJoinError": standing_error,
+        "scoutCampaignStands": bool(scout),
+        "scoutCampaignError": scout_error,
+        "claimLabel": next((name for name in labels if name and name in str(profile.get("sellerName", ""))), ""),
+        "updatedAt": str(guard.get("updatedAt", "")),
+    }
+
+
+def guard_disposition(fact: Mapping[str, Any]) -> tuple[str, str]:
+    """What this card may say about one guard key, and in which order the facts have to be asked.
+
+    Ownership is settled before anything is attributed to this card, and the fixture allowlist is what
+    settles it: a Scout whose Profile belongs to an account the sanctioned sweeper does not recognize is a
+    real tenant's row whatever its ``sellerName`` happens to contain, so the label test runs *after* it and
+    can never be the only reason a row is called this card's.  Nothing here decides a delete, so a state that
+    cannot be proved is reported as unproven instead of being taken on the strength of a substring.
+
+    * :data:`GUARD_UNREADABLE` — the read of the key itself was refused, so the key has no answer.
+    * :data:`GUARD_ABSENT` — a strongly consistent ``GetItem`` of the exact key answers no item, which is the
+      read-back the disposition asks for.
+    * :data:`GUARD_OTHER_TENANT` — the Profile that names this guard is not owned by a fixture identity.
+    * :data:`GUARD_LIVE_JOIN` — the guard declares an ACTIVE join whose Unit Campaign still answers its
+      metadata row: a live membership, and deleting the row behind it would leave an ``ACTIVE`` roster row
+      with nothing enforcing it.
+    * :data:`GUARD_NOT_THIS_CARD` — a fixture Scout's row whose Profile names another run's label, or no
+      label at all, or no Profile row any more.
+    * :data:`GUARD_LIVE_SCOUT_CAMPAIGN` — the Scout Campaign stands on the product's own base-row read, so the
+      guard is the lock of a live Campaign, not residue.
+    * :data:`GUARD_UNPROVEN` — every other read says dead, and the one read that would prove it is denied to
+      this identity, so the row cannot be certified dead by anyone holding these credentials.
+    * :data:`GUARD_CARD_RESIDUE` — fixture-owned, this card's label, no live join and no Scout Campaign:
+      this card's own residue, which it must dispose of through the sanctioned sweeper rather than here.
+    """
+    if fact["guardError"]:
+        return GUARD_UNREADABLE, f"the read of {fact['guardKey']} was refused — {fact['guardError']}"
+    if not fact["guardPresent"]:
+        return GUARD_ABSENT, f"a strongly consistent GetItem of {fact['guardKey']} answers no item"
+    if fact["profileError"]:
+        return GUARD_OTHER_TENANT, (
+            f"the Profile {fact['profileId'] or '(none on the guard)'} could not be read — {fact['profileError']}"
+            "; an owner that cannot be read is not a fixture identity"
+        )
+    if not fact["ownerInFixtureAllowlist"]:
+        return GUARD_OTHER_TENANT, (
+            f"the Profile row {fact['profileId'] or '(no profileId on the guard, and no row answers it)'} names "
+            f"{fact['sellerName'] or 'no sellerName'} and is owned by "
+            f"{fact['ownerAddress'] or 'an account that is not on the fixture allowlist'}, which "
+            "scripts/qa_fixture.py does not treat as fixture data"
+        )
+    if fact["activeJoinStands"]:
+        return GUARD_LIVE_JOIN, (
+            f"the guard declares an ACTIVE join on Unit Campaign {fact['activeUnitCampaignId']} "
+            f"({fact['activeUnitCampaignName'] or 'unnamed'}), which still answers its {METADATA_SORT_KEY} row"
+        )
+    if fact["activeJoinError"]:
+        return GUARD_UNPROVEN, (
+            f"the ACTIVE join on {fact['activeUnitCampaignId']} could not be read — {fact['activeJoinError']}"
+        )
+    if not fact["claimLabel"]:
+        return GUARD_NOT_THIS_CARD, (
+            f"the Profile row for {fact['ownerAddress']} names {fact['sellerName'] or 'no sellerName at all'}, "
+            f"which is not one of this card's lane labels ({', '.join(CARD_CLAIM_LABELS)})"
+        )
+    if fact["scoutCampaignStands"]:
+        return GUARD_LIVE_SCOUT_CAMPAIGN, (
+            f"the Scout Campaign {fact['campaignId']} still answers the base-row read the product makes on its "
+            "Campaigns table, so this guard is a live Campaign's lock"
+        )
+    if fact["scoutCampaignError"]:
+        return GUARD_UNPROVEN, (
+            f"the Scout Campaign read the product makes could not run — {fact['scoutCampaignError']}, so no "
+            "credential this pass holds can prove this Campaign is gone"
+        )
+    return GUARD_CARD_RESIDUE, (
+        f"owned by the fixture identity {fact['ownerAddress']} on label {fact['claimLabel']!r}, with no ACTIVE "
+        f"join standing ({fact['activeUnitCampaignId'] or 'none named'}) and no Scout Campaign row at "
+        f"{fact['campaignId']}: this card's residue, to be taken by scripts/qa_fixture.py sweep with "
+        f"campaign={fact['campaignId']} named, not by this pass"
+    )
+
+
+def verify_guard_residue(
+    campaign_ids: Sequence[str] = (), labels: Sequence[str] = CARD_CLAIM_LABELS
+) -> tuple[list[Row], dict[str, Any]]:
+    """Say, key by key, what every membership-guard row on the table is — and remove none of them.
+
+    The card's first cleanup report left three guard rows ``UNKNOWN``: the sweep reached them with a
+    ``profile=`` token, and a profile token cannot say which of a Scout's Scout Campaigns is joined, so the
+    sweeper refused to attribute them and failed closed.  This pass is the keyed answer to that, and it is
+    read-only on purpose.  Pointing the sweeper at a ``campaign=`` id deletes scoped rows on three tables and
+    the guard on a fourth, on the strength of the id alone, and a guard row carries no lane id — so a pass
+    that mutated could take another lane's live join on a name match, and nothing it deleted would come back.
+    What it does instead:
+
+    * reads the guard population, so the residue is enumerated rather than recalled from a report;
+    * for every key, and for each id named on the command line, does a strongly consistent ``GetItem`` of
+      that exact key — the five ids this card owes are proven absent by a read, not by a sweep line;
+    * for a key that is answered, decides ownership from the fixture allowlist before any label match, and
+      decides liveness from the two rows the product itself reads;
+    * reports every key's state with the reason, and fails a named key that is still this card's residue,
+      unprovable, or unreadable rather than passing it.
+    """
+    tool = _fixture_tool()
+    client = tool.ddb()
+    table = _table_named(tool, "unit-campaigns")
+    campaigns_table = _table_named(tool, "campaigns")
+    profiles_table = _table_named(tool, "profiles")
+    identities = _fixture_allowlist(tool)
+    named = sorted({_bare(value) for value in campaign_ids if _bare(value)})
+    keys = sorted({*_guard_population(client, tool, table), *named})
+    facts = [
+        guard_facts(client, tool, table, campaigns_table, profiles_table, key, identities, labels) for key in keys
+    ]
+    dispositions = {str(fact["campaignId"]): guard_disposition(fact) for fact in facts}
+    states = {key: state for key, (state, _reason) in dispositions.items()}
+    answered = sum(1 for fact in facts if fact["guardPresent"])
+    detail: dict[str, Any] = {
+        "table": table,
+        "campaignsTable": campaigns_table,
+        "profilesTable": profiles_table,
+        "guards": len(facts),
+        "guardRows": answered,
+        "claimLabels": list(labels),
+        "fixtureAllowlist": sorted(identities.values()),
+        "namedKeys": named,
+        "verifiedAbsent": sorted(key for key, state in states.items() if state == GUARD_ABSENT),
+        "namedAbsent": [key for key in named if states.get(key) == GUARD_ABSENT],
+        "byState": {
+            state: sorted(key for key, found in states.items() if found == state)
+            for state in sorted(set(states.values()))
+        },
+        "keys": [
+            {
+                "campaignId": fact["campaignId"],
+                "guardKey": fact["guardKey"],
+                "state": states[fact["campaignId"]],
+                "reason": dispositions[fact["campaignId"]][1],
+                "named": fact["campaignId"] in named,
+                **{
+                    name: fact[name]
+                    for name in (
+                        "guardPresent",
+                        "guardError",
+                        "profileId",
+                        "sellerName",
+                        "ownerAddress",
+                        "ownerInFixtureAllowlist",
+                        "profileError",
+                        "claimLabel",
+                        "activeUnitCampaignId",
+                        "activeJoinStands",
+                        "activeJoinError",
+                        "scoutCampaignStands",
+                        "scoutCampaignError",
+                        "updatedAt",
+                    )
+                },
+            }
+            for fact in facts
+        ],
+    }
+
+    rows: list[Row] = []
+    acceptance = "§3.7.7 verify by key that every membership guard this card named is gone"
+    for key in named:
+        state, reason = dispositions.get(key, ("missing-key", "no read answered this key at all"))
+        result = stage2.CLEANUP_FAILED if state in GUARD_NAMED_FAILURES or state == "missing-key" else stage2.CLEANUP_OBSERVED
+        rows.append(stage3.cleanup_row(acceptance, f"{GUARD_SORT_KEY} {key}: {state} — {reason}", result))
+    rows.append(
+        stage3.cleanup_row(
+            "§3.7.7 enumerate the guard rows that are still standing, with the reason for each",
+            f"{table} answers {answered} {GUARD_SORT_KEY} row(s) across {len(facts)} key(s) examined; of the "
+            f"{len(named)} key(s) this card named, {len(detail['namedAbsent'])} answer no row at all and "
+            f"{len(named) - len(detail['namedAbsent'])} are answered — the standing rows are "
+            f"{sum(1 for state in states.values() if state == GUARD_LIVE_JOIN)} guarding a live ACTIVE join, "
+            f"{sum(1 for state in states.values() if state == GUARD_OTHER_TENANT)} owned outside the fixture "
+            f"allowlist, {sum(1 for state in states.values() if state == GUARD_NOT_THIS_CARD)} written by "
+            f"another run, {sum(1 for state in states.values() if state == GUARD_LIVE_SCOUT_CAMPAIGN)} on a "
+            f"Scout Campaign that still stands, {sum(1 for state in states.values() if state == GUARD_UNPROVEN)} "
+            f"nobody here can prove dead, and "
+            f"{sum(1 for state in states.values() if state == GUARD_CARD_RESIDUE)} this card's own residue",
+            stage2.CLEANUP_OBSERVED,
+        )
+    )
+    unproven = [str(fact["scoutCampaignError"]) for fact in facts if fact["scoutCampaignError"]]
+    if unproven:
+        rows.append(
+            stage3.cleanup_row(
+                "§3.7.7 read the Scout Campaign the way the product reads it",
+                f"the base-row read this disposition needs on {campaigns_table} is refused: {unproven[0]}; it was "
+                f"attempted on {len(unproven)} key(s) and decides "
+                f"{sum(1 for state in states.values() if state == GUARD_UNPROVEN)} key(s) as unproven rather "
+                "than dead, and it is the second reason this pass removes nothing — a row nobody can prove dead "
+                "is a row nobody should delete",
+                stage2.CLEANUP_BLOCKED,
+            )
+        )
+    return rows, detail
+
+
+def verify_guards(
+    out_dir: Path, campaign_ids: Sequence[str] = (), labels: Sequence[str] = CARD_CLAIM_LABELS
+) -> dict[str, Any]:
+    """Run the read-only guard verification on its own, and write a record that carries it.
+
+    A separate mode rather than a step of the lane, because this pass creates nothing and tears nothing down:
+    it answers a question about rows earlier attempts of this card left behind, and re-running the whole lane
+    to answer it would write more residue.  The record is written from a ``finally`` for the same reason the
+    lane writes its own: a pass that was refused partway still has to say which keys it touched and which
+    reads it was not allowed to make.
+    """
+    lane_id = new_data_id("w168guards")
+    record: dict[str, Any] = {
+        "dataId": lane_id,
+        "mode": "guard-verify",
+        "startedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+    }
+    cleanup: list[Row] = []
+    try:
+        rows, detail = verify_guard_residue(campaign_ids, labels)
+        record["guardResidue"] = detail
+        cleanup.extend(rows)
+    except Exception as exc:  # noqa: BLE001 - the record has to survive a failing pass to report one
+        record["error"] = f"{type(exc).__name__}: {exc}"
+        cleanup.append(
+            stage3.cleanup_row(
+                "§3.7.7 verify by key that every membership guard this card named is gone",
+                record["error"],
+                stage2.CLEANUP_FAILED,
+            )
+        )
+    finally:
+        write_record(out_dir, lane_id, record, cleanup)
+    return record
+
+
 def write_record(out_dir: Path, lane_id: str, record: dict[str, Any], cleanup: list[Row]) -> Path:
     """Put the lane record on disk exactly as far as the run got.
 
@@ -2138,6 +2594,22 @@ def lane_failures(record: Mapping[str, Any]) -> list[str]:
                     or "the read after its own sweep still answered Unit Campaign rows for that Unit"
                 )
             )
+    residue = record.get("guardResidue") or {}
+    if residue:
+        entries = residue.get("keys") or []
+        if residue.get("guards") is not None and len(entries) != residue["guards"]:
+            failures.append(
+                f"the guard census examined {residue['guards']} key(s) but only {len(entries)} carry a "
+                "disposition, so a guard key is unaccounted for"
+            )
+        unexplained = sorted(
+            set(residue.get("namedKeys") or []) - {str(entry.get("campaignId")) for entry in entries}
+        )
+        if unexplained:
+            failures.append(
+                f"the guard key(s) {', '.join(unexplained)} were named on the command line and no read of them "
+                "is in this record, so it cannot say what became of them"
+            )
     for key in ("error", "sweepError", "censusError"):
         if record.get(key):
             failures.append(f"{key}: {record[key]}")
@@ -2156,8 +2628,55 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="",
         help="comma-separated DATA_IDs of earlier attempts of this lane whose rows are still standing",
     )
+    parser.add_argument(
+        "--verify-guards",
+        action="store_true",
+        help="run only the read-only membership-guard pass: enumerate the guard rows, read every key named "
+        "by its exact key, and report each key's disposition — this pass never deletes anything",
+    )
+    parser.add_argument(
+        "--guard-campaign",
+        action="append",
+        default=[],
+        help="Scout Campaign id of one guard key this card owes a disposition for, on top of the ones the table "
+        "answers; repeatable, for a key an earlier sweep report named and the table no longer explains",
+    )
+    parser.add_argument(
+        "--claim-label",
+        action="append",
+        default=[],
+        help=f"a lane label this card's own runs write into a Profile name; repeatable, extends "
+        f"{', '.join(CARD_CLAIM_LABELS)}",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     prior = [item.strip() for item in args.sweep_prior.split(",") if item.strip()]
+    labels = (*CARD_CLAIM_LABELS, *(label.strip() for label in args.claim_label if label.strip()))
+
+    if args.verify_guards or args.guard_campaign:
+        record = verify_guards(args.out, args.guard_campaign, labels)
+        residue = record.get("guardResidue") or {}
+        print(
+            json.dumps(
+                {
+                    "guards": residue.get("guards"),
+                    "guardRows": residue.get("guardRows"),
+                    "table": residue.get("table"),
+                    "campaignsTable": residue.get("campaignsTable"),
+                    "fixtureAllowlist": residue.get("fixtureAllowlist"),
+                    "namedKeys": residue.get("namedKeys"),
+                    "namedAbsent": residue.get("namedAbsent"),
+                    "byState": residue.get("byState"),
+                    "cleanup": record["cleanup"],
+                },
+                indent=2,
+            )
+        )
+        failures = lane_failures(record)
+        print(f"strict cleanup (SS_STRICT_CLEANUP): {stage3.STRICT_CLEANUP}")
+        print(f"cleanup failures: {failures or 'none'}")
+        print(f"record: {record['dataId']}")
+        return 1 if failures else 0
+
     record = run(args.out, args.data_id, prior)
     keys = (
         "dataId",

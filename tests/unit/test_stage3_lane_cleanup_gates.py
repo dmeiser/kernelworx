@@ -1066,3 +1066,584 @@ def test_a_lane_that_captured_nothing_is_swept_as_nothing(monkeypatch: pytest.Mo
     lane.run_cleanup_steps("tok-admin", "tok-scout", {}, {}, {}, {}, [], {}, [])
 
     assert swept == []
+
+
+# ---------------------------------------------------------------------------
+# 6. the read-only membership-guard disposition
+# ---------------------------------------------------------------------------
+
+
+CARD_GUARD = "ad3b956d-0000-4000-8000-000000000001"
+FOREIGN_GUARD = "ad3b956d-0000-4000-8000-000000000002"
+LIVE_GUARD = "ad3b956d-0000-4000-8000-000000000003"
+TENANT_GUARD = "ad3b956d-0000-4000-8000-000000000004"
+STALE_GUARD = "ad3b956d-0000-4000-8000-000000000099"
+LIVE_SCOUT_GUARD = "ad3b956d-0000-4000-8000-000000000005"
+UNPROVEN_GUARD = "ad3b956d-0000-4000-8000-000000000006"
+ORPHAN_GUARD = "ad3b956d-0000-4000-8000-000000000007"
+DENIED_GUARD = "ad3b956d-0000-4000-8000-000000000008"
+UNIT_CAMPAIGN_TABLE = "kernelworx-unit-campaigns-ue1-dev"
+CAMPAIGNS_TABLE = "kernelworx-campaigns-ue1-dev"
+PROFILES_TABLE = "kernelworx-profiles-ue1-dev"
+CARD_PROFILE = "00000000-0000-4000-8000-0000000000a1"
+FOREIGN_PROFILE = "00000000-0000-4000-8000-0000000000a2"
+LIVE_PROFILE = "00000000-0000-4000-8000-0000000000a3"
+TENANT_PROFILE = "00000000-0000-4000-8000-0000000000a4"
+LIVE_SCOUT_PROFILE = "00000000-0000-4000-8000-0000000000a5"
+UNPROVEN_PROFILE = "00000000-0000-4000-8000-0000000000a6"
+ORPHAN_PROFILE = "00000000-0000-4000-8000-0000000000a7"
+FIXTURE_SUB = "54780458-c0d1-70c7-99be-e78715e5198d"
+POOL_ONLY_SUB = "66666666-6666-4666-8666-666666666666"
+DEAD_UNIT_CAMPAIGN = "00000000-0000-4000-8000-uc0000000001"
+LIVE_UNIT_CAMPAIGN = "00000000-0000-4000-8000-uc0000000003"
+FIXTURE_MAIL = "qa-show-sell-scout@dev.kernelworx.app"
+ADMIN_MAIL = "qa-show-sell-admin@dev.kernelworx.app"
+POOL_ONLY_MAIL = "someone-else@kernelworx.app"
+
+#: What botocore raises for this stack's QA identity on a table its policy does not open.  The lane turns that
+#: into "this action is not granted on this table"; a test that raised something shorter would not prove the
+#: record can tell "no rows" apart from "no permission".
+DENIED_GET_ITEM = (
+    "An error occurred (AccessDeniedException) when calling the GetItem operation: User: "
+    "arn:aws:iam::750620721302:user/kernelworx-qa-ue1-dev is not authorized to perform: dynamodb:GetItem "
+    f"on resource: arn:aws:dynamodb:us-east-1:750620721302:table/{CAMPAIGNS_TABLE} because no identity-based "
+    "policy allows the dynamodb:GetItem action"
+)
+NAMED_ACCEPTANCE = "§3.7.7 verify by key that every membership guard this card named is gone"
+
+
+def _raw(row: Mapping[str, str]) -> Dict[str, Dict[str, str]]:
+    """One row in the AttributeValue spelling the raw DynamoDB client answers with."""
+    return {name: {"S": value} for name, value in row.items()}
+
+
+class FakeDdb:
+    """The read shapes the guard pass is allowed to make, and nothing else.
+
+    Every write verb raises, because the whole point of this pass is that it can only report: what a sweep
+    token deletes is scoped by an id the guard row itself does not carry.  The fake also records every read
+    with its key values and its ``ConsistentRead`` flag, so a test can say "this pass asked for exactly these
+    keys, consistently" instead of trusting the summary the pass printed about itself.
+    """
+
+    def __init__(
+        self,
+        partitions: Dict[str, List[Dict[str, str]]],
+        profiles: List[Dict[str, str]],
+        scout_campaigns: Mapping[str, Dict[str, str]],
+        denied_campaigns: List[str],
+        denied_guards: List[str],
+    ) -> None:
+        self.partitions = partitions
+        self.profiles = profiles
+        self.scout_campaigns = dict(scout_campaigns)
+        self.denied_campaigns = list(denied_campaigns)
+        self.denied_guard_keys = [f"SCOUT_CAMPAIGN#CAMPAIGN#{guard}" for guard in denied_guards]
+        self.reads: List[tuple[str, str, tuple[str, ...], Any]] = []
+        self.scans: List[str] = []
+
+    def get_item(
+        self, *, TableName: str, Key: Mapping[str, Any], ConsistentRead: Any = False, **_: Any
+    ) -> Dict[str, Any]:
+        self.reads.append(
+            ("get_item", TableName, tuple(sorted(f"{name}={value['S']}" for name, value in Key.items())), ConsistentRead)
+        )
+        if TableName == UNIT_CAMPAIGN_TABLE:
+            pk, sk = Key["pk"]["S"], Key["sk"]["S"]
+            if pk in self.denied_guard_keys:
+                raise RuntimeError(DENIED_GET_ITEM)
+            row = next((item for item in self.partitions.get(pk, []) if item.get("sk") == sk), None)
+            return {"Item": _raw(row)} if row else {}
+        if TableName == CAMPAIGNS_TABLE:
+            campaign_id = Key["campaignId"]["S"]
+            if campaign_id in self.denied_campaigns:
+                raise RuntimeError(DENIED_GET_ITEM)
+            item = self.scout_campaigns.get(campaign_id)
+            return {"Item": _raw(item)} if item else {}
+        if TableName == PROFILES_TABLE:
+            row = next(
+                (
+                    item
+                    for item in self.profiles
+                    if item.get("profileId") == Key["profileId"]["S"]
+                    and item.get("ownerAccountId") == Key["ownerAccountId"]["S"]
+                ),
+                None,
+            )
+            return {"Item": _raw(row)} if row else {}
+        raise AssertionError(f"the guard pass read a table it should not: {TableName}")
+
+    def query(
+        self,
+        *,
+        TableName: str,
+        IndexName: str = "",
+        KeyConditionExpression: str = "",
+        ExpressionAttributeValues: Mapping[str, Any],
+        **_: Any,
+    ) -> Dict[str, Any]:
+        profile_id = str(ExpressionAttributeValues[":profile_id"]["S"])
+        self.reads.append(("query", TableName, (f"index={IndexName}", f"profileId={profile_id}"), None))
+        assert TableName == PROFILES_TABLE, "the guard pass queried a table it should not"
+        assert IndexName == "profileId-index", "a profile id is only reachable through the product's own index"
+        assert KeyConditionExpression == "profileId = :profile_id"
+        return {"Items": [_raw(row) for row in self.profiles if row.get("profileId") == profile_id]}
+
+    def scan(self, *, TableName: str, **_: Any) -> Dict[str, Any]:
+        self.scans.append(TableName)
+        assert TableName == UNIT_CAMPAIGN_TABLE, "the guard census reads the table that holds the guards"
+        rows = [row for part in self.partitions.values() for row in part if row.get("sk") == lane.GUARD_SORT_KEY]
+        return {"Items": [_raw(row) for row in rows]}
+
+    def put_item(self, **_: Any) -> Any:
+        raise AssertionError("the guard pass wrote a row")
+
+    def update_item(self, **_: Any) -> Any:
+        raise AssertionError("the guard pass wrote a row")
+
+    def delete_item(self, **_: Any) -> Any:
+        raise AssertionError("the guard pass deleted a row")
+
+    def transact_write_items(self, **_: Any) -> Any:
+        raise AssertionError("the guard pass wrote a row")
+
+    def batch_write_item(self, **_: Any) -> Any:
+        raise AssertionError("the guard pass wrote a row")
+
+    def guard_reads(self, table: str = UNIT_CAMPAIGN_TABLE) -> List[tuple[str, str, tuple[str, ...], Any]]:
+        """Every consistent key read this fake answered on one table."""
+        return [read for read in self.reads if read[0] == "get_item" and read[1] == table]
+
+
+class FakeTool:
+    """The slice of ``scripts/qa_fixture.py`` the guard pass reads: its table map, its decoders, its allowlist.
+
+    ``pool_users`` answers more identities than ``emails()`` does — the dev pool holds 26 users against the four
+    the fixture script owns — because a pass that took the pool as its idea of "fixture data" would treat an
+    ordinary account's Scout as a lane row.
+    """
+
+    SWEEP_TABLES = {
+        "accounts": ("kernelworx-accounts-ue1-dev", ("accountId",), "accountId"),
+        "units": ("kernelworx-units-ue1-dev", ("pk", "sk"), "createdByAccountId"),
+        "unit-campaigns": (UNIT_CAMPAIGN_TABLE, ("pk", "sk"), "createdByAccountId"),
+    }
+
+    def __init__(self, ddb: FakeDdb, pool: Mapping[str, str], allowlist: Mapping[str, str]) -> None:
+        self._ddb = ddb
+        self.pool = pool
+        self.allowlist = allowlist
+
+    def ddb(self) -> FakeDdb:
+        return self._ddb
+
+    def cip(self) -> str:
+        return "fake-pool-client"
+
+    def emails(self) -> Dict[str, str]:
+        return dict(self.allowlist)
+
+    def pool_users(self, _client: Any) -> Dict[str, Dict[str, Any]]:
+        return {mail: {"Attributes": [{"Name": "sub", "Value": sub}]} for sub, mail in self.pool.items()}
+
+    @staticmethod
+    def _strings(item: Mapping[str, Any]) -> Dict[str, str]:
+        return {name: next(iter(value.values())) for name, value in item.items() if isinstance(value, Mapping)}
+
+    @staticmethod
+    def _attrs(user: Mapping[str, Any]) -> Dict[str, str]:
+        return {attr["Name"]: attr["Value"] for attr in user.get("Attributes", [])}
+
+
+def _guard(campaign: str, profile: str, unit_campaign: str = "") -> Dict[str, str]:
+    """One guard row in the shape the table really stores: prefixed ids, and no ``activeUnitCampaignId`` at all
+    once a join was released, rather than an empty one."""
+    row = {
+        "pk": f"SCOUT_CAMPAIGN#CAMPAIGN#{campaign}",
+        "sk": lane.GUARD_SORT_KEY,
+        "campaignId": f"CAMPAIGN#{campaign}",
+        "profileId": f"PROFILE#{profile}",
+        "membershipVersion": "1",
+        "updatedAt": "2026-11-20T23:04:50.026150+00:00",
+    }
+    if unit_campaign:
+        row["activeUnitCampaignId"] = unit_campaign
+        row["unitId"] = "00000000-0000-4000-8000-unit000001"
+    return row
+
+
+def _profile_row(profile: str, seller: str, owner: str) -> Dict[str, str]:
+    return {"profileId": f"PROFILE#{profile}", "sellerName": seller, "ownerAccountId": f"ACCOUNT#{owner}"}
+
+
+def _guard_world(
+    monkeypatch: pytest.MonkeyPatch, *, card_residue: bool = False, denied_guards: List[str] | None = None
+) -> FakeDdb:
+    """Guards on one Unit Campaign table, the Profiles that say who made each, and the Scout Campaigns that stand.
+
+    Each guard fails a different half of the disposition, and none of them can be removed by this pass:
+
+    * ``CARD_GUARD`` — fixture-owned, this card's label, dead at both ends: this card's own residue, so naming
+      it fails the run rather than taking the row (present only when ``card_residue`` asks for it);
+    * ``FOREIGN_GUARD`` — fixture-owned, but the Profile names another card's run;
+    * ``LIVE_GUARD`` — declares an ACTIVE join whose Unit Campaign still answers its metadata row;
+    * ``TENANT_GUARD`` — carries this card's label in its seller name and an account that is on the pool but
+      **not** on the fixture allowlist, which is the case a name match alone gets wrong;
+    * ``ORPHAN_GUARD`` — no Profile row answers it, so its owner cannot be proved at all;
+    * ``LIVE_SCOUT_GUARD`` — its Scout Campaign still answers the base-row read the product makes;
+    * ``UNPROVEN_GUARD`` — that same read is refused to this identity, so nothing here can call it dead;
+    * ``DENIED_GUARD`` — the read of the guard key itself is refused.
+
+    ``ORPHAN_GUARD``'s Profile row is deliberately absent from ``profiles``, and ``CARD_GUARD``'s partition is
+    empty in the passing world, so the suite's default is a pass with one residue finding: the Campaigns read.
+    """
+    partitions: Dict[str, List[Dict[str, str]]] = {
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{CARD_GUARD}": [_guard(CARD_GUARD, CARD_PROFILE, DEAD_UNIT_CAMPAIGN)]
+        if card_residue
+        else [],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{FOREIGN_GUARD}": [_guard(FOREIGN_GUARD, FOREIGN_PROFILE)],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{LIVE_GUARD}": [_guard(LIVE_GUARD, LIVE_PROFILE, LIVE_UNIT_CAMPAIGN)],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{TENANT_GUARD}": [_guard(TENANT_GUARD, TENANT_PROFILE)],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{ORPHAN_GUARD}": [_guard(ORPHAN_GUARD, ORPHAN_PROFILE)],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{LIVE_SCOUT_GUARD}": [_guard(LIVE_SCOUT_GUARD, LIVE_SCOUT_PROFILE)],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{UNPROVEN_GUARD}": [_guard(UNPROVEN_GUARD, UNPROVEN_PROFILE)],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{DENIED_GUARD}": [_guard(DENIED_GUARD, CARD_PROFILE)],
+        f"UNIT_CAMPAIGN#{DEAD_UNIT_CAMPAIGN}": [
+            {"pk": f"UNIT_CAMPAIGN#{DEAD_UNIT_CAMPAIGN}", "sk": "MEMBERSHIP#PROFILE#x", "removedAt": "2026-11-20"}
+        ],
+        f"UNIT_CAMPAIGN#{LIVE_UNIT_CAMPAIGN}": [
+            {
+                "pk": f"UNIT_CAMPAIGN#{LIVE_UNIT_CAMPAIGN}",
+                "sk": lane.METADATA_SORT_KEY,
+                "campaignName": "QA167 Running Booth",
+            }
+        ],
+    }
+    profiles = [
+        _profile_row(CARD_PROFILE, "Avery w168qa", FIXTURE_SUB),
+        _profile_row(FOREIGN_PROFILE, "Avery Stage2 stage2-1118011", FIXTURE_SUB),
+        _profile_row(LIVE_PROFILE, "Blake w168qa", FIXTURE_SUB),
+        _profile_row(TENANT_PROFILE, "Charlie w168qa", POOL_ONLY_SUB),
+        _profile_row(LIVE_SCOUT_PROFILE, "Avery w168lane", FIXTURE_SUB),
+        _profile_row(UNPROVEN_PROFILE, "Avery w168can", FIXTURE_SUB),
+    ]
+    ddb = FakeDdb(
+        partitions,
+        profiles,
+        {
+            f"CAMPAIGN#{LIVE_SCOUT_GUARD}": {
+                "profileId": f"PROFILE#{LIVE_SCOUT_PROFILE}",
+                "campaignId": f"CAMPAIGN#{LIVE_SCOUT_GUARD}",
+            }
+        },
+        [f"CAMPAIGN#{UNPROVEN_GUARD}"],
+        list(denied_guards or []),
+    )
+    monkeypatch.setattr(
+        lane,
+        "_fixture_tool",
+        lambda: FakeTool(
+            ddb, {FIXTURE_SUB: FIXTURE_MAIL, POOL_ONLY_SUB: POOL_ONLY_MAIL}, {"scout": FIXTURE_MAIL, "admin": ADMIN_MAIL}
+        ),
+    )
+
+    def no_sweep(tokens: List[str]) -> Any:
+        raise AssertionError(f"the guard pass reached the sweeper with {tokens}")
+
+    monkeypatch.setattr(stage2, "fixture_sweep", no_sweep)
+    return ddb
+
+
+def _entry(detail: Mapping[str, Any], campaign: str) -> Dict[str, Any]:
+    return next(row for row in detail["keys"] if row["campaignId"] == campaign)
+
+
+def _named_row(rows: List[Dict[str, str]], campaign: str) -> Dict[str, str]:
+    return next(row for row in rows if row["acceptance"] == NAMED_ACCEPTANCE and campaign in row["summary"])
+
+
+def test_the_named_guard_keys_are_verified_absent_by_a_consistent_read_of_each_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The keys this card owes are answered by a read of the key, not by a sweep line that once named one."""
+    ddb = _guard_world(monkeypatch)
+    rows, detail = lane.verify_guard_residue([CARD_GUARD, STALE_GUARD])
+
+    assert detail["table"] == UNIT_CAMPAIGN_TABLE
+    assert detail["campaignsTable"] == CAMPAIGNS_TABLE
+    assert detail["profilesTable"] == PROFILES_TABLE
+    assert detail["namedKeys"] == sorted([CARD_GUARD, STALE_GUARD])
+    assert detail["namedAbsent"] == sorted([CARD_GUARD, STALE_GUARD])
+    assert detail["guards"] == 9 and detail["guardRows"] == 7, detail["guards"]
+    for key in (CARD_GUARD, STALE_GUARD):
+        assert _entry(detail, key)["state"] == lane.GUARD_ABSENT, _entry(detail, key)
+        row = _named_row(rows, key)
+        assert row["result"] == stage2.CLEANUP_OBSERVED and "answers no item" in row["summary"], row
+    assert lane.lane_failures({"cleanup": rows, "guardResidue": detail}) == []
+
+    guard_reads = [read for read in ddb.guard_reads() if lane.GUARD_SORT_KEY in " ".join(read[2])]
+    assert len(guard_reads) == 9, "a guard key was read more than once, or not at all"
+    assert all(read[3] is True for read in guard_reads), "a guard key was read without a consistent read"
+    parts = {part for read in guard_reads for part in read[2]}
+    assert f"pk=SCOUT_CAMPAIGN#CAMPAIGN#{STALE_GUARD}" in parts and f"sk={lane.GUARD_SORT_KEY}" in parts
+
+
+def test_the_guard_pass_never_reaches_the_sweeper_and_never_writes_a_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No delete, no sweep token, no write verb: this pass can only say what the table answers.
+
+    The sweeper's ``campaign=`` token deletes scoped rows on several tables on the strength of the id alone, and
+    a guard row carries no lane id, so the mutation had to come out — and this gate is what keeps it out.
+    """
+    ddb = _guard_world(monkeypatch)
+    rows, detail = lane.verify_guard_residue([CARD_GUARD])
+
+    assert {read[0] for read in ddb.reads} == {"get_item", "query"}
+    assert ddb.scans == [UNIT_CAMPAIGN_TABLE]
+    assert "tokens" not in detail and "sweep" not in detail and "disposed" not in detail
+    assert not any("deleted row" in row["summary"] for row in rows), rows
+
+
+def test_the_fixture_allowlist_is_the_sweeper_s_own_set_and_not_every_user_on_the_pool() -> None:
+    """Every ordinary dev account is on the pool; only the addresses the fixture script owns are fixture data."""
+
+    class PoolTool(FakeTool):
+        def pool_users(self, _client: Any) -> Dict[str, Dict[str, Any]]:
+            everyone = {f"sub-{index}": f"tenant-{index}@kernelworx.app" for index in range(22)}
+            everyone.update(dict(self.pool))
+            return {mail: {"Attributes": [{"Name": "sub", "Value": sub}]} for sub, mail in everyone.items()}
+
+    tool = PoolTool(FakeDdb({}, [], {}, [], []), {FIXTURE_SUB: FIXTURE_MAIL, POOL_ONLY_SUB: POOL_ONLY_MAIL},
+                    {"scout": FIXTURE_MAIL, "admin": ADMIN_MAIL})
+    identities = lane._fixture_allowlist(tool)
+
+    assert len(tool.pool_users(tool.cip())) == 24, "the pool no longer outnumbers the allowlist this test proves"
+    assert identities == {FIXTURE_SUB: FIXTURE_MAIL}
+    assert POOL_ONLY_SUB not in identities, "a pool account outside the fixture allowlist read as fixture data"
+    assert set(tool.emails().values()) == {FIXTURE_MAIL, ADMIN_MAIL} and ADMIN_MAIL not in identities.values()
+
+
+def test_a_pool_account_outside_the_fixture_allowlist_is_never_this_card_s_residue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The seller name matches this card's label and the account is on the pool, and that is still not enough.
+
+    This is the case the ownership gate exists for: every lane on this stack signs in as the same four fixture
+    addresses, so a substring in a name says nothing about whose row it is until the allowlist agrees.
+    """
+    ddb = _guard_world(monkeypatch)
+    rows, detail = lane.verify_guard_residue([TENANT_GUARD])
+
+    entry = _entry(detail, TENANT_GUARD)
+    assert entry["state"] == lane.GUARD_OTHER_TENANT, entry
+    assert entry["sellerName"] == "Charlie w168qa" and entry["claimLabel"] == "w168qa"
+    assert entry["ownerInFixtureAllowlist"] is False and entry["ownerAddress"] == ""
+    assert detail["fixtureAllowlist"] == [FIXTURE_MAIL]
+    row = _named_row(rows, TENANT_GUARD)
+    assert row["result"] == stage2.CLEANUP_OBSERVED, "an owner outside the allowlist is proven not this card's"
+    assert "fixture allowlist" in entry["reason"] or "could not be read" in entry["reason"], entry["reason"]
+    assert all(read[0] in {"get_item", "query"} for read in ddb.reads)
+
+
+def test_a_live_join_s_guard_is_reported_as_live_and_never_counted_as_residue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Taking the guard of a standing join would leave an ACTIVE roster row with nothing enforcing it."""
+    ddb = _guard_world(monkeypatch)
+    rows, detail = lane.verify_guard_residue([LIVE_GUARD])
+
+    entry = _entry(detail, LIVE_GUARD)
+    assert entry["state"] == lane.GUARD_LIVE_JOIN, entry
+    assert entry["activeUnitCampaignId"] == LIVE_UNIT_CAMPAIGN and entry["activeJoinStands"] is True
+    assert "QA167 Running Booth" in entry["reason"]
+    assert LIVE_GUARD not in detail["byState"].get(lane.GUARD_CARD_RESIDUE, [])
+    assert _named_row(rows, LIVE_GUARD)["result"] == stage2.CLEANUP_OBSERVED
+    assert any(f"pk=UNIT_CAMPAIGN#{LIVE_UNIT_CAMPAIGN}" in part for read in ddb.guard_reads() for part in read[2])
+
+
+def test_a_guard_whose_scout_campaign_stands_on_the_product_s_own_read_is_not_residue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Scout Campaign is read where the product reads it: its base row, by the pair the guard itself names.
+
+    The earlier revision looked for a ``METADATA`` row beside the guard on the Unit Campaign table, where no
+    Scout Campaign ever has one — measured on ``dev``, 0 of 53 partitions hold one — so that test was true of
+    every guard on the table and pruned nothing.
+    """
+    ddb = _guard_world(monkeypatch)
+    _rows, detail = lane.verify_guard_residue([LIVE_SCOUT_GUARD])
+
+    entry = _entry(detail, LIVE_SCOUT_GUARD)
+    assert entry["state"] == lane.GUARD_LIVE_SCOUT_CAMPAIGN, entry
+    assert entry["scoutCampaignStands"] is True and entry["scoutCampaignError"] == ""
+    campaigns_reads = [read for read in ddb.reads if read[1] == CAMPAIGNS_TABLE]
+    assert campaigns_reads and all(read[3] is True for read in campaigns_reads)
+    assert (f"campaignId=CAMPAIGN#{LIVE_SCOUT_GUARD}", f"profileId=PROFILE#{LIVE_SCOUT_PROFILE}") in {
+        read[2] for read in campaigns_reads
+    }, campaigns_reads
+
+
+def test_a_scout_campaign_read_that_is_denied_is_reported_unproven_and_never_dead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A read this identity is not allowed to make is a finding, not an empty result.
+
+    ``kernelworx-qa-ue1-dev`` is granted no read on the Campaigns table at all, so no credential this pass holds
+    can prove a standing guard's Campaign is gone — which is a second reason it removes nothing.
+    """
+    _ddb = _guard_world(monkeypatch)
+    rows, detail = lane.verify_guard_residue([UNPROVEN_GUARD])
+
+    entry = _entry(detail, UNPROVEN_GUARD)
+    assert entry["state"] == lane.GUARD_UNPROVEN, entry
+    assert entry["sellerName"] == "Avery w168can" and entry["ownerInFixtureAllowlist"] is True
+    assert UNPROVEN_GUARD in detail["byState"][lane.GUARD_UNPROVEN]
+    blocked = [row for row in rows if row["acceptance"].endswith("the way the product reads it")]
+    assert blocked and blocked[0]["result"] == stage2.CLEANUP_BLOCKED, blocked
+    assert f"{CAMPAIGNS_TABLE}: GetItem is not granted to this identity (dynamodb:GetItem denied)" in blocked[0]["summary"]
+    assert _named_row(rows, UNPROVEN_GUARD)["result"] == stage2.CLEANUP_FAILED, "an unprovable named key must fail"
+    assert lane.lane_failures({"cleanup": rows, "guardResidue": detail}) != []
+
+
+def test_the_denied_campaigns_read_is_a_blocked_step_under_strict_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``SS_STRICT_CLEANUP=1`` reaches this step too, so Amendment C's one-step reversal holds of it."""
+    _ddb = _guard_world(monkeypatch)
+    rows, detail = lane.verify_guard_residue()
+    assert lane.lane_failures({"cleanup": rows, "guardResidue": detail}) == []
+    monkeypatch.setattr(stage2, "STRICT_CLEANUP", True)
+    failures = lane.lane_failures({"cleanup": rows, "guardResidue": detail})
+    assert len(failures) == 1 and "not met" in failures[0], failures
+
+
+def test_this_card_s_own_surviving_residue_fails_the_named_key_instead_of_deleting_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provable residue still standing is reported as a failure, with the sanctioned path named.
+
+    The pass says how the row should be taken — by the sweeper, with its Campaign id named — and does not take it
+    itself, because the row a token would delete is not provably this run's.
+    """
+    ddb = _guard_world(monkeypatch, card_residue=True)
+    rows, detail = lane.verify_guard_residue([CARD_GUARD])
+
+    entry = _entry(detail, CARD_GUARD)
+    assert entry["state"] == lane.GUARD_CARD_RESIDUE, entry
+    assert entry["claimLabel"] == "w168qa" and entry["ownerAddress"] == FIXTURE_MAIL
+    row = _named_row(rows, CARD_GUARD)
+    assert row["result"] == stage2.CLEANUP_FAILED, row
+    assert "scripts/qa_fixture.py sweep with campaign=" in row["summary"]
+    assert ddb.partitions[f"SCOUT_CAMPAIGN#CAMPAIGN#{CARD_GUARD}"] != [], "the pass removed the row it must report"
+    assert all(read[0] in {"get_item", "query"} for read in ddb.reads)
+    assert any("cleanup step(s) not met" in failure for failure in lane.lane_failures({"cleanup": rows}))
+
+
+def test_a_guard_key_whose_read_is_refused_is_a_failure_and_not_an_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No permission and no row are different answers, and only one of them can pass a named key."""
+    _ddb = _guard_world(monkeypatch, denied_guards=[DENIED_GUARD])
+    rows, detail = lane.verify_guard_residue([DENIED_GUARD])
+
+    entry = _entry(detail, DENIED_GUARD)
+    assert entry["state"] == lane.GUARD_UNREADABLE, entry
+    assert entry["guardPresent"] is False and entry["guardError"]
+    assert DENIED_GUARD not in detail["verifiedAbsent"]
+    assert _named_row(rows, DENIED_GUARD)["result"] == stage2.CLEANUP_FAILED
+
+
+def test_a_guard_with_no_profile_row_cannot_be_attributed_to_this_card(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An owner that cannot be read is not a fixture identity, however dead the rows around it look."""
+    ddb = _guard_world(monkeypatch)
+    _rows, detail = lane.verify_guard_residue([ORPHAN_GUARD])
+
+    entry = _entry(detail, ORPHAN_GUARD)
+    assert entry["state"] == lane.GUARD_OTHER_TENANT, entry
+    assert entry["ownerInFixtureAllowlist"] is False and entry["ownerAddress"] == ""
+    assert f"profileId=PROFILE#{ORPHAN_PROFILE}" in {part for read in ddb.reads for part in read[2]}
+
+
+def test_a_guard_key_with_no_disposition_fails_the_record() -> None:
+    """Half a census is worse than none: every key the pass counted has to carry a disposition."""
+    failures = lane.lane_failures(
+        {"cleanup": [], "guardResidue": {"guards": 4, "keys": [{"campaignId": CARD_GUARD, "state": lane.GUARD_ABSENT}]}}
+    )
+    assert any("carry a disposition" in failure for failure in failures), failures
+
+
+def test_a_named_key_the_record_never_reads_fails_the_record() -> None:
+    """A key named on the command line cannot be dropped from the record without saying so."""
+    failures = lane.lane_failures(
+        {
+            "cleanup": [],
+            "guardResidue": {
+                "guards": 1,
+                "keys": [{"campaignId": CARD_GUARD, "state": lane.GUARD_ABSENT}],
+                "namedKeys": [CARD_GUARD, STALE_GUARD],
+            },
+        }
+    )
+    assert any(STALE_GUARD in failure for failure in failures), failures
+
+
+def test_the_guard_pass_still_writes_its_record_when_a_read_refuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A pass that died part-way still leaves a record that says it died, and the exit gate reads that."""
+
+    def refused(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("the profiles table refused: AccessDeniedException")
+
+    monkeypatch.setattr(lane, "verify_guard_residue", refused)
+    record = lane.verify_guards(tmp_path)
+
+    assert record["mode"] == "guard-verify" and record["error"].startswith("AssertionError")
+    written = json.loads((tmp_path / f"{record['dataId']}.json").read_text(encoding="utf-8"))
+    assert written["error"] == record["error"]
+    assert written["cleanup"][0]["result"] == stage2.CLEANUP_FAILED
+    assert lane.lane_failures(written)
+
+
+def test_a_written_guard_record_carries_every_key_state_and_the_census_names_what_stands(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The record on disk is the deliverable, and it has to keep residue and verified absence apart.
+
+    "8 keys were examined" and "1 key is verified absent" are different claims: a summary that counted the rows
+    still standing as if they had been dealt with would read as a clean table.
+    """
+    _guard_world(monkeypatch)
+    first = lane.verify_guards(tmp_path, [STALE_GUARD])
+    written = json.loads((tmp_path / f"{first['dataId']}.json").read_text(encoding="utf-8"))
+
+    assert written["mode"] == "guard-verify"
+    assert written.get("error") is None, written["error"]
+    residue = written["guardResidue"]
+    assert residue["guards"] == 8 and residue["guardRows"] == 7
+    assert len(residue["keys"]) == residue["guards"]
+    assert residue["namedKeys"] == [STALE_GUARD] and residue["namedAbsent"] == [STALE_GUARD]
+    assert residue["verifiedAbsent"] == [STALE_GUARD]
+    assert residue["byState"][lane.GUARD_LIVE_JOIN] == [LIVE_GUARD]
+    assert residue["byState"][lane.GUARD_OTHER_TENANT] == sorted([TENANT_GUARD, ORPHAN_GUARD])
+    assert residue["byState"][lane.GUARD_UNPROVEN] == [UNPROVEN_GUARD]
+    census = next(row["summary"] for row in written["cleanup"] if "answers 7 MEMBERSHIP_GUARD row(s)" in row["summary"])
+    assert "8 key(s) examined" in census and "1 answer no row at all" in census, census
+    assert "this card's own residue" in census, census
+    assert written["cleanup"][0]["result"] == stage2.CLEANUP_OBSERVED
+    assert lane.lane_failures(written) == []
+
+
+def test_a_key_named_again_after_it_is_gone_is_still_verified_by_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Re-running the pass over a key that is already gone says so by read, and reaches nothing."""
+    _guard_world(monkeypatch)
+    again = lane.verify_guards(tmp_path, [CARD_GUARD])
+    second = json.loads((tmp_path / f"{again['dataId']}.json").read_text(encoding="utf-8"))
+
+    assert second["guardResidue"]["namedAbsent"] == [CARD_GUARD]
+    assert _entry(second["guardResidue"], CARD_GUARD)["state"] == lane.GUARD_ABSENT
+    assert second["guardResidue"]["guardRows"] == 7
+    assert lane.lane_failures(second) == []
