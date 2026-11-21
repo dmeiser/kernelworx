@@ -1082,6 +1082,8 @@ LIVE_SCOUT_GUARD = "ad3b956d-0000-4000-8000-000000000005"
 UNPROVEN_GUARD = "ad3b956d-0000-4000-8000-000000000006"
 ORPHAN_GUARD = "ad3b956d-0000-4000-8000-000000000007"
 DENIED_GUARD = "ad3b956d-0000-4000-8000-000000000008"
+STALE_PROJECTION_GUARD = "ad3b956d-0000-4000-8000-000000000009"
+DENIED_PROFILE_GUARD = "ad3b956d-0000-4000-8000-000000000010"
 UNIT_CAMPAIGN_TABLE = "kernelworx-unit-campaigns-ue1-dev"
 CAMPAIGNS_TABLE = "kernelworx-campaigns-ue1-dev"
 PROFILES_TABLE = "kernelworx-profiles-ue1-dev"
@@ -1092,6 +1094,8 @@ TENANT_PROFILE = "00000000-0000-4000-8000-0000000000a4"
 LIVE_SCOUT_PROFILE = "00000000-0000-4000-8000-0000000000a5"
 UNPROVEN_PROFILE = "00000000-0000-4000-8000-0000000000a6"
 ORPHAN_PROFILE = "00000000-0000-4000-8000-0000000000a7"
+STALE_PROJECTION_PROFILE = "00000000-0000-4000-8000-0000000000a8"
+DENIED_PROFILE_ID = "00000000-0000-4000-8000-0000000000a9"
 FIXTURE_SUB = "54780458-c0d1-70c7-99be-e78715e5198d"
 POOL_ONLY_SUB = "66666666-6666-4666-8666-666666666666"
 DEAD_UNIT_CAMPAIGN = "00000000-0000-4000-8000-uc0000000001"
@@ -1111,6 +1115,16 @@ DENIED_GET_ITEM = (
 )
 NAMED_ACCEPTANCE = "§3.7.7 verify by key that every membership guard this card named is gone"
 
+#: What botocore answers when this identity reaches for the ``profileId-index`` projection at all.  Kept apart
+#: from "the projection answers no row": one is a refusal this pass cannot answer, the other is a read that
+#: says the Profile is gone, and both mean no owner is proven — neither may become an attribution.
+DENIED_PROFILE_QUERY = (
+    "An error occurred (AccessDeniedException) when calling the Query operation: User: "
+    "arn:aws:iam::750620721302:user/kernelworx-qa-ue1-dev is not authorized to perform: dynamodb:Query "
+    f"on resource: arn:aws:dynamodb:us-east-1:750620721302:table/{PROFILES_TABLE}/index/profileId-index "
+    "because no identity-based policy allows the dynamodb:Query action"
+)
+
 
 def _raw(row: Mapping[str, str]) -> Dict[str, Dict[str, str]]:
     """One row in the AttributeValue spelling the raw DynamoDB client answers with."""
@@ -1124,6 +1138,11 @@ class FakeDdb:
     token deletes is scoped by an id the guard row itself does not carry.  The fake also records every read
     with its key values and its ``ConsistentRead`` flag, so a test can say "this pass asked for exactly these
     keys, consistently" instead of trusting the summary the pass printed about itself.
+
+    ``projections`` are rows the ``profileId-index`` answers and the base table does not — the stale projection
+    a profile transfer or delete leaves behind — which is how a test can make the pass choose between an index
+    entry and the consistent read that would confirm it.  ``denied_profiles`` names the profile ids whose index
+    read this identity is refused.
     """
 
     def __init__(
@@ -1133,9 +1152,13 @@ class FakeDdb:
         scout_campaigns: Mapping[str, Dict[str, str]],
         denied_campaigns: List[str],
         denied_guards: List[str],
+        projections: List[Dict[str, str]] | None = None,
+        denied_profiles: List[str] | None = None,
     ) -> None:
         self.partitions = partitions
         self.profiles = profiles
+        self.projections = list(projections or [])
+        self.denied_profile_ids = list(denied_profiles or [])
         self.scout_campaigns = dict(scout_campaigns)
         self.denied_campaigns = list(denied_campaigns)
         self.denied_guard_keys = [f"SCOUT_CAMPAIGN#CAMPAIGN#{guard}" for guard in denied_guards]
@@ -1187,7 +1210,10 @@ class FakeDdb:
         assert TableName == PROFILES_TABLE, "the guard pass queried a table it should not"
         assert IndexName == "profileId-index", "a profile id is only reachable through the product's own index"
         assert KeyConditionExpression == "profileId = :profile_id"
-        return {"Items": [_raw(row) for row in self.profiles if row.get("profileId") == profile_id]}
+        if profile_id in self.denied_profile_ids:
+            raise RuntimeError(DENIED_PROFILE_QUERY)
+        rows = [row for row in [*self.profiles, *self.projections] if row.get("profileId") == profile_id]
+        return {"Items": [_raw(row) for row in rows]}
 
     def scan(self, *, TableName: str, **_: Any) -> Dict[str, Any]:
         self.scans.append(TableName)
@@ -1290,12 +1316,17 @@ def _guard_world(
     * ``TENANT_GUARD`` — carries this card's label in its seller name and an account that is on the pool but
       **not** on the fixture allowlist, which is the case a name match alone gets wrong;
     * ``ORPHAN_GUARD`` — no Profile row answers it, so its owner cannot be proved at all;
+    * ``STALE_PROJECTION_GUARD`` — the index still projects a Profile row naming an off-allowlist account and
+      carrying this card's label, while the base-table key that row names answers nothing, so the projection is
+      evidence of nothing;
+    * ``DENIED_PROFILE_GUARD`` — the index read for its Profile is refused to this identity outright;
     * ``LIVE_SCOUT_GUARD`` — its Scout Campaign still answers the base-row read the product makes;
     * ``UNPROVEN_GUARD`` — that same read is refused to this identity, so nothing here can call it dead;
     * ``DENIED_GUARD`` — the read of the guard key itself is refused.
 
-    ``ORPHAN_GUARD``'s Profile row is deliberately absent from ``profiles``, and ``CARD_GUARD``'s partition is
-    empty in the passing world, so the suite's default is a pass with one residue finding: the Campaigns read.
+    ``ORPHAN_GUARD``'s Profile row is deliberately absent from ``profiles``, ``STALE_PROJECTION_GUARD``'s is in
+    the index only, and ``CARD_GUARD``'s partition is empty in the passing world, so the suite's default is a
+    pass with one residue finding: the Campaigns read.
     """
     partitions: Dict[str, List[Dict[str, str]]] = {
         f"SCOUT_CAMPAIGN#CAMPAIGN#{CARD_GUARD}": [_guard(CARD_GUARD, CARD_PROFILE, DEAD_UNIT_CAMPAIGN)]
@@ -1305,6 +1336,10 @@ def _guard_world(
         f"SCOUT_CAMPAIGN#CAMPAIGN#{LIVE_GUARD}": [_guard(LIVE_GUARD, LIVE_PROFILE, LIVE_UNIT_CAMPAIGN)],
         f"SCOUT_CAMPAIGN#CAMPAIGN#{TENANT_GUARD}": [_guard(TENANT_GUARD, TENANT_PROFILE)],
         f"SCOUT_CAMPAIGN#CAMPAIGN#{ORPHAN_GUARD}": [_guard(ORPHAN_GUARD, ORPHAN_PROFILE)],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{STALE_PROJECTION_GUARD}": [
+            _guard(STALE_PROJECTION_GUARD, STALE_PROJECTION_PROFILE)
+        ],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{DENIED_PROFILE_GUARD}": [_guard(DENIED_PROFILE_GUARD, DENIED_PROFILE_ID)],
         f"SCOUT_CAMPAIGN#CAMPAIGN#{LIVE_SCOUT_GUARD}": [_guard(LIVE_SCOUT_GUARD, LIVE_SCOUT_PROFILE)],
         f"SCOUT_CAMPAIGN#CAMPAIGN#{UNPROVEN_GUARD}": [_guard(UNPROVEN_GUARD, UNPROVEN_PROFILE)],
         f"SCOUT_CAMPAIGN#CAMPAIGN#{DENIED_GUARD}": [_guard(DENIED_GUARD, CARD_PROFILE)],
@@ -1338,6 +1373,8 @@ def _guard_world(
         },
         [f"CAMPAIGN#{UNPROVEN_GUARD}"],
         list(denied_guards or []),
+        [_profile_row(STALE_PROJECTION_PROFILE, "Charlie w168qa", POOL_ONLY_SUB)],
+        [f"PROFILE#{DENIED_PROFILE_ID}"],
     )
     monkeypatch.setattr(
         lane,
@@ -1374,7 +1411,7 @@ def test_the_named_guard_keys_are_verified_absent_by_a_consistent_read_of_each_k
     assert detail["profilesTable"] == PROFILES_TABLE
     assert detail["namedKeys"] == sorted([CARD_GUARD, STALE_GUARD])
     assert detail["namedAbsent"] == sorted([CARD_GUARD, STALE_GUARD])
-    assert detail["guards"] == 9 and detail["guardRows"] == 7, detail["guards"]
+    assert detail["guards"] == 11 and detail["guardRows"] == 9, detail["guards"]
     for key in (CARD_GUARD, STALE_GUARD):
         assert _entry(detail, key)["state"] == lane.GUARD_ABSENT, _entry(detail, key)
         row = _named_row(rows, key)
@@ -1382,7 +1419,7 @@ def test_the_named_guard_keys_are_verified_absent_by_a_consistent_read_of_each_k
     assert lane.lane_failures({"cleanup": rows, "guardResidue": detail}) == []
 
     guard_reads = [read for read in ddb.guard_reads() if lane.GUARD_SORT_KEY in " ".join(read[2])]
-    assert len(guard_reads) == 9, "a guard key was read more than once, or not at all"
+    assert len(guard_reads) == 11, "a guard key was read more than once, or not at all"
     assert all(read[3] is True for read in guard_reads), "a guard key was read without a consistent read"
     parts = {part for read in guard_reads for part in read[2]}
     assert f"pk=SCOUT_CAMPAIGN#CAMPAIGN#{STALE_GUARD}" in parts and f"sk={lane.GUARD_SORT_KEY}" in parts
@@ -1437,6 +1474,7 @@ def test_a_pool_account_outside_the_fixture_allowlist_is_never_this_card_s_resid
     assert entry["state"] == lane.GUARD_OTHER_TENANT, entry
     assert entry["sellerName"] == "Charlie w168qa" and entry["claimLabel"] == "w168qa"
     assert entry["ownerInFixtureAllowlist"] is False and entry["ownerAddress"] == ""
+    assert entry["profileConfirmed"] is True, "other-tenant is only ever a confirmed owner off the allowlist"
     assert detail["fixtureAllowlist"] == [FIXTURE_MAIL]
     row = _named_row(rows, TENANT_GUARD)
     assert row["result"] == stage2.CLEANUP_OBSERVED, "an owner outside the allowlist is proven not this card's"
@@ -1555,14 +1593,68 @@ def test_a_guard_key_whose_read_is_refused_is_a_failure_and_not_an_absence(
 def test_a_guard_with_no_profile_row_cannot_be_attributed_to_this_card(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An owner that cannot be read is not a fixture identity, however dead the rows around it look."""
+    """An owner that cannot be read is not a fixture identity, and it is not somebody else's either."""
     ddb = _guard_world(monkeypatch)
-    _rows, detail = lane.verify_guard_residue([ORPHAN_GUARD])
+    rows, detail = lane.verify_guard_residue([ORPHAN_GUARD])
 
     entry = _entry(detail, ORPHAN_GUARD)
-    assert entry["state"] == lane.GUARD_OTHER_TENANT, entry
+    assert entry["state"] == lane.GUARD_OWNER_UNPROVEN, entry
+    assert entry["profileLocated"] == 0 and entry["profileConfirmed"] is False
     assert entry["ownerInFixtureAllowlist"] is False and entry["ownerAddress"] == ""
+    assert "no base-table row answers" in entry["reason"] and "no proven owner" in entry["reason"], entry["reason"]
     assert f"profileId=PROFILE#{ORPHAN_PROFILE}" in {part for read in ddb.reads for part in read[2]}
+    assert _named_row(rows, ORPHAN_GUARD)["result"] == stage2.CLEANUP_FAILED, (
+        f"a named key with no verified owner has no disposition that can pass: {entry}"
+    )
+    assert lane.lane_failures({"cleanup": rows, "guardResidue": detail}) != []
+
+
+def test_a_stale_index_projection_names_no_owner_and_fails_the_named_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The index projecting a row the base table no longer answers is evidence of nothing.
+
+    This is the case the product refuses to act on at ``public_orders_offer._consistent_profile``: a
+    ``profileId-index`` entry can outlive the row, and after a transfer it can even name the previous owner.
+    Here the projection carries this card's label and an account off the fixture allowlist, so an owner taken
+    from it would read as a proven foreign tenant and let a named key pass on an entry that proves nothing.
+    """
+    ddb = _guard_world(monkeypatch)
+    rows, detail = lane.verify_guard_residue([STALE_PROJECTION_GUARD])
+
+    entry = _entry(detail, STALE_PROJECTION_GUARD)
+    assert entry["state"] == lane.GUARD_OWNER_UNPROVEN, entry
+    assert entry["profileLocated"] == 1 and entry["profileConfirmed"] is False
+    assert entry["sellerName"] == "" and entry["claimLabel"] == "", "a stale projection named this row"
+    assert entry["ownerInFixtureAllowlist"] is False and entry["ownerAddress"] == ""
+    assert "stale projection" in entry["reason"], entry["reason"]
+    assert STALE_PROJECTION_GUARD in detail["byState"][lane.GUARD_OWNER_UNPROVEN]
+    profiles_reads = [read for read in ddb.reads if read[0] == "get_item" and read[1] == PROFILES_TABLE]
+    assert (f"ownerAccountId=ACCOUNT#{POOL_ONLY_SUB}", f"profileId=PROFILE#{STALE_PROJECTION_PROFILE}") in {
+        read[2] for read in profiles_reads
+    }, "the pass never asked the base table whether the projected key answers a row"
+    assert all(read[3] is True for read in profiles_reads)
+    assert _named_row(rows, STALE_PROJECTION_GUARD)["result"] == stage2.CLEANUP_FAILED
+    assert lane.lane_failures({"cleanup": rows, "guardResidue": detail}) != []
+
+
+def test_a_profile_read_that_is_denied_earns_no_attribution_and_fails_the_named_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refused ownership read is a finding about the credentials, never a verdict about the row."""
+    _ddb = _guard_world(monkeypatch)
+    rows, detail = lane.verify_guard_residue([DENIED_PROFILE_GUARD])
+
+    entry = _entry(detail, DENIED_PROFILE_GUARD)
+    assert entry["state"] == lane.GUARD_OWNER_UNPROVEN, entry
+    assert f"{PROFILES_TABLE}: Query is not granted to this identity (dynamodb:Query denied)" in entry["profileError"]
+    assert entry["profileLocated"] == 0 and entry["profileConfirmed"] is False
+    assert entry["sellerName"] == "" and entry["ownerAddress"] == ""
+    assert entry["reason"].startswith(f"the Profile {DENIED_PROFILE_ID} could not be read"), entry["reason"]
+    assert DENIED_PROFILE_GUARD in detail["byState"][lane.GUARD_OWNER_UNPROVEN]
+    assert DENIED_PROFILE_GUARD not in detail["byState"].get(lane.GUARD_OTHER_TENANT, [])
+    assert _named_row(rows, DENIED_PROFILE_GUARD)["result"] == stage2.CLEANUP_FAILED
+    assert lane.lane_failures({"cleanup": rows, "guardResidue": detail}) != []
 
 
 def test_a_guard_key_with_no_disposition_fails_the_record() -> None:
@@ -1621,15 +1713,19 @@ def test_a_written_guard_record_carries_every_key_state_and_the_census_names_wha
     assert written["mode"] == "guard-verify"
     assert written.get("error") is None, written["error"]
     residue = written["guardResidue"]
-    assert residue["guards"] == 8 and residue["guardRows"] == 7
+    assert residue["guards"] == 10 and residue["guardRows"] == 9
     assert len(residue["keys"]) == residue["guards"]
     assert residue["namedKeys"] == [STALE_GUARD] and residue["namedAbsent"] == [STALE_GUARD]
     assert residue["verifiedAbsent"] == [STALE_GUARD]
     assert residue["byState"][lane.GUARD_LIVE_JOIN] == [LIVE_GUARD]
-    assert residue["byState"][lane.GUARD_OTHER_TENANT] == sorted([TENANT_GUARD, ORPHAN_GUARD])
+    assert residue["byState"][lane.GUARD_OTHER_TENANT] == [TENANT_GUARD]
     assert residue["byState"][lane.GUARD_UNPROVEN] == [UNPROVEN_GUARD]
-    census = next(row["summary"] for row in written["cleanup"] if "answers 7 MEMBERSHIP_GUARD row(s)" in row["summary"])
-    assert "8 key(s) examined" in census and "1 answer no row at all" in census, census
+    assert residue["byState"][lane.GUARD_OWNER_UNPROVEN] == sorted(
+        [ORPHAN_GUARD, STALE_PROJECTION_GUARD, DENIED_PROFILE_GUARD]
+    )
+    census = next(row["summary"] for row in written["cleanup"] if "answers 9 MEMBERSHIP_GUARD row(s)" in row["summary"])
+    assert "10 key(s) examined" in census and "1 answer no row at all" in census, census
+    assert "whose owner no base-table read confirms, 1 nobody here can prove dead" in census, census
     assert "this card's own residue" in census, census
     assert written["cleanup"][0]["result"] == stage2.CLEANUP_OBSERVED
     assert lane.lane_failures(written) == []
@@ -1645,5 +1741,5 @@ def test_a_key_named_again_after_it_is_gone_is_still_verified_by_read(
 
     assert second["guardResidue"]["namedAbsent"] == [CARD_GUARD]
     assert _entry(second["guardResidue"], CARD_GUARD)["state"] == lane.GUARD_ABSENT
-    assert second["guardResidue"]["guardRows"] == 7
+    assert second["guardResidue"]["guardRows"] == 9
     assert lane.lane_failures(second) == []

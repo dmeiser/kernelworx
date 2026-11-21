@@ -1668,11 +1668,15 @@ GUARD_OTHER_TENANT = "other-tenant"
 GUARD_NOT_THIS_CARD = "not-this-card"
 GUARD_CARD_RESIDUE = "card-residue"
 GUARD_UNPROVEN = "unproven-dead"
+GUARD_OWNER_UNPROVEN = "unproven-owner"
 GUARD_UNREADABLE = "unreadable"
 
-#: A key this card's run named cannot pass on these three answers: residue this card owns that still stands,
-#: a row nobody can prove dead, and a read that was refused outright.
-GUARD_NAMED_FAILURES = (GUARD_CARD_RESIDUE, GUARD_UNPROVEN, GUARD_UNREADABLE)
+#: A key this card's run named cannot pass on these four answers: residue this card owns that still stands, a
+#: row nobody can prove dead, a standing row whose owner nobody can confirm, and a read that was refused
+#: outright.  ``other-tenant`` is not on this list because it is now a proven answer: the base-table read that
+#: names the owner succeeded and that owner is not fixture data, which disposes of the key independently of
+#: anything this card did.
+GUARD_NAMED_FAILURES = (GUARD_CARD_RESIDUE, GUARD_UNPROVEN, GUARD_OWNER_UNPROVEN, GUARD_UNREADABLE)
 
 #: The name templates this card's own runs write into the records they create.  A membership-guard row
 #: carries no lane id, so an already-orphaned guard is attributed through the product's own Profile row for
@@ -1763,16 +1767,36 @@ def _guard_population(client: Any, tool: Any, table: str) -> list[str]:
         scan_kw["ExclusiveStartKey"] = token
 
 
-def _profile_row(client: Any, tool: Any, table: str, profile_key: str) -> tuple[dict[str, str], str]:
+def _unproven_profile(why: str) -> dict[str, Any]:
+    """The Profile lookup's answer when nothing on it can name an owner."""
+    return {
+        "profileRow": {},
+        "profileLocated": 0,
+        "profileConfirmed": False,
+        "profileUnprovenWhy": why,
+        "profileError": "",
+    }
+
+
+def _profile_row(client: Any, tool: Any, table: str, profile_key: str) -> dict[str, Any]:
     """The Profile row one exact ``profileId`` belongs to, located the way the product locates it.
 
     ``profiles`` is keyed ``ownerAccountId``/``profileId``, so a profile id on its own is only reachable
     through ``profileId-index`` — the same index ``unit_campaign_models.seller_display_name`` uses to answer
     this one question — and an index is eventually consistent, so the row is read again from the base table by
     the pair the index names.  Both reads are keyed by the id the guard itself carries: this never enumerates
-    the table, and a Profile that cannot be located is reported as unknown, which can only ever *refuse* an
-    attribution, never support one.
+    the table.
+
+    What comes back is the lookup's evidence, not just a row, because the projection alone cannot answer who
+    owns a Profile: ``src/handlers/public_orders_offer.py`` returns its profile only when
+    ``_consistent_profile`` — a strongly consistent ``GetItem`` of ``{ownerAccountId, profileId}`` — answers an
+    item, and reports the offer unavailable when the index projects a row the base table no longer answers.
+    That same rule is what ``profileConfirmed`` records here: an owner counts only when the base-table read
+    confirms it, so a transferred or deleted Profile whose index entry has not caught up can never be the
+    evidence an attribution rests on.  The four ways no owner is provable are kept apart by
+    ``profileUnprovenWhy``, and a refused read is kept apart from all four by ``profileError``.
     """
+    evidence = _unproven_profile("")
     try:
         page = client.query(
             TableName=table,
@@ -1781,15 +1805,43 @@ def _profile_row(client: Any, tool: Any, table: str, profile_key: str) -> tuple[
             ExpressionAttributeValues={":profile_id": {"S": profile_key}},
         )
     except Exception as exc:  # noqa: BLE001 - a refused attribution read refuses the attribution
-        return {}, _refusal(table, exc)
+        evidence["profileError"] = _refusal(table, exc)
+        return evidence
     located = [tool._strings(item) for item in page.get("Items", [])]
+    evidence["profileLocated"] = len(located)
     if not located:
-        return {}, ""
-    owner = located[0].get("ownerAccountId", "")
-    if not owner:
-        return located[0], ""
-    item, error = _read_item(client, tool, table, {"ownerAccountId": owner, "profileId": profile_key})
-    return (item or located[0]), error
+        evidence["profileUnprovenWhy"] = "the profileId-index projection answers no row for it"
+        return evidence
+    owners = list(dict.fromkeys(str(item.get("ownerAccountId", "")) for item in located if item.get("ownerAccountId")))
+    if not owners:
+        evidence["profileUnprovenWhy"] = (
+            f"the {len(located)} projection(s) carry no ownerAccountId, so the base-table key that would "
+            "confirm the row cannot be built from them"
+        )
+        return evidence
+    confirmed: list[dict[str, str]] = []
+    for owner in owners:
+        item, error = _read_item(client, tool, table, {"ownerAccountId": owner, "profileId": profile_key})
+        if error:
+            evidence["profileError"] = error
+            return evidence
+        if item:
+            confirmed.append(item)
+    if not confirmed:
+        evidence["profileUnprovenWhy"] = (
+            f"the index still projects {len(located)} row(s) for it and none of the base-table keys they name "
+            "answers an item, which is the stale projection a transfer or delete leaves behind"
+        )
+        return evidence
+    if len(confirmed) > 1:
+        evidence["profileUnprovenWhy"] = (
+            f"{len(confirmed)} base-table rows answer the same profileId, so which account owns it is genuinely "
+            "ambiguous — the same ambiguity public_orders_offer refuses to guess at"
+        )
+        return evidence
+    evidence["profileRow"] = confirmed[0]
+    evidence["profileConfirmed"] = True
+    return evidence
 
 
 def _fixture_allowlist(tool: Any) -> dict[str, str]:
@@ -1833,12 +1885,19 @@ def guard_facts(
       ``METADATA`` row the earlier revision of this pass looked for beside the guard is not a Scout Campaign:
       that table holds Unit Campaign aggregates, and no Scout Campaign partition there carries one, so that
       test was true of every guard on the table and pruned nothing;
-    * the Profile row the guard names, which is the only thing on the row that says who made it.
+    * the Profile row the guard names, which is the only thing on the row that says who made it — and only when
+      the strongly consistent base-table read confirms it, because an ``profileId-index`` projection can keep
+      naming an owner a transfer or a delete has already taken away.
     """
     key = {"pk": f"SCOUT_CAMPAIGN#CAMPAIGN#{campaign_id}", "sk": GUARD_SORT_KEY}
     guard, guard_error = _read_item(client, tool, table, key)
     profile_key = guard.get("profileId", "")
-    profile, profile_error = _profile_row(client, tool, profiles_table, profile_key) if profile_key else ({}, "")
+    evidence = (
+        _profile_row(client, tool, profiles_table, profile_key)
+        if profile_key
+        else _unproven_profile("the guard row carries no profileId, so no Profile row can be named for it")
+    )
+    profile = evidence["profileRow"]
     owner = _bare(profile.get("ownerAccountId", ""))
     active = _bare(guard.get("activeUnitCampaignId", ""))
     standing, standing_error = (
@@ -1866,7 +1925,10 @@ def guard_facts(
         "sellerName": str(profile.get("sellerName", "")),
         "ownerAddress": identities.get(owner, ""),
         "ownerInFixtureAllowlist": bool(owner) and owner in identities,
-        "profileError": profile_error,
+        "profileLocated": int(evidence["profileLocated"]),
+        "profileConfirmed": bool(evidence["profileConfirmed"]),
+        "profileUnprovenWhy": str(evidence["profileUnprovenWhy"]),
+        "profileError": str(evidence["profileError"]),
         "activeUnitCampaignId": active,
         "activeUnitCampaignName": str(standing.get("campaignName", "")),
         "activeJoinStands": bool(standing),
@@ -1885,17 +1947,26 @@ def guard_disposition(fact: Mapping[str, Any]) -> tuple[str, str]:
     settles it: a Scout whose Profile belongs to an account the sanctioned sweeper does not recognize is a
     real tenant's row whatever its ``sellerName`` happens to contain, so the label test runs *after* it and
     can never be the only reason a row is called this card's.  Nothing here decides a delete, so a state that
-    cannot be proved is reported as unproven instead of being taken on the strength of a substring.
+    cannot be proved is reported as unproven instead of being taken on the strength of a substring.  Ownership
+    counts only when the base-table read confirms it, for the reason the product gives at
+    ``src/handlers/public_orders_offer.py:_consistent_profile`` — an eventually consistent index projection
+    cannot show who owns a Profile right now — so "not this card's" is never inferred from an owner nobody can
+    name.
 
     * :data:`GUARD_UNREADABLE` — the read of the key itself was refused, so the key has no answer.
     * :data:`GUARD_ABSENT` — a strongly consistent ``GetItem`` of the exact key answers no item, which is the
       read-back the disposition asks for.
-    * :data:`GUARD_OTHER_TENANT` — the Profile that names this guard is not owned by a fixture identity.
+    * :data:`GUARD_OWNER_UNPROVEN` — no confirmed owner for the Profile this guard names: the Profile read was
+      refused, the index answers no row, the row the index names no longer answers the base table, several base
+      rows answer one ``profileId``, or the guard carries no ``profileId`` at all.  Nothing may be attributed to
+      such a row in either direction.
+    * :data:`GUARD_OTHER_TENANT` — a Profile the base table confirms, owned by an account that is not a fixture
+      identity.
     * :data:`GUARD_LIVE_JOIN` — the guard declares an ACTIVE join whose Unit Campaign still answers its
       metadata row: a live membership, and deleting the row behind it would leave an ``ACTIVE`` roster row
       with nothing enforcing it.
-    * :data:`GUARD_NOT_THIS_CARD` — a fixture Scout's row whose Profile names another run's label, or no
-      label at all, or no Profile row any more.
+    * :data:`GUARD_NOT_THIS_CARD` — a fixture Scout's row whose confirmed Profile names another run's label, or
+      no label at all.
     * :data:`GUARD_LIVE_SCOUT_CAMPAIGN` — the Scout Campaign stands on the product's own base-row read, so the
       guard is the lock of a live Campaign, not residue.
     * :data:`GUARD_UNPROVEN` — every other read says dead, and the one read that would prove it is denied to
@@ -1907,16 +1978,22 @@ def guard_disposition(fact: Mapping[str, Any]) -> tuple[str, str]:
         return GUARD_UNREADABLE, f"the read of {fact['guardKey']} was refused — {fact['guardError']}"
     if not fact["guardPresent"]:
         return GUARD_ABSENT, f"a strongly consistent GetItem of {fact['guardKey']} answers no item"
+    named_profile = fact["profileId"] or "none on the guard"
     if fact["profileError"]:
-        return GUARD_OTHER_TENANT, (
-            f"the Profile {fact['profileId'] or '(none on the guard)'} could not be read — {fact['profileError']}"
-            "; an owner that cannot be read is not a fixture identity"
+        return GUARD_OWNER_UNPROVEN, (
+            f"the Profile {named_profile} could not be read — {fact['profileError']}; an owner this identity was "
+            "refused is not an owner, and a row with no owner is not another tenant's"
+        )
+    if not fact["profileConfirmed"]:
+        return GUARD_OWNER_UNPROVEN, (
+            f"no base-table row answers the Profile {named_profile} — {fact['profileUnprovenWhy']} — so this "
+            "guard has no proven owner in either direction, and the pass has no evidence with which to call it "
+            "another tenant's or this card's"
         )
     if not fact["ownerInFixtureAllowlist"]:
         return GUARD_OTHER_TENANT, (
-            f"the Profile row {fact['profileId'] or '(no profileId on the guard, and no row answers it)'} names "
-            f"{fact['sellerName'] or 'no sellerName'} and is owned by "
-            f"{fact['ownerAddress'] or 'an account that is not on the fixture allowlist'}, which "
+            f"the Profile row {fact['profileId']} names {fact['sellerName'] or 'no sellerName'} and the base table "
+            f"confirms it as {fact['ownerAddress'] or 'an account that is not on the fixture allowlist'}, which "
             "scripts/qa_fixture.py does not treat as fixture data"
         )
     if fact["activeJoinStands"]:
@@ -1967,10 +2044,12 @@ def verify_guard_residue(
     * reads the guard population, so the residue is enumerated rather than recalled from a report;
     * for every key, and for each id named on the command line, does a strongly consistent ``GetItem`` of
       that exact key — the five ids this card owes are proven absent by a read, not by a sweep line;
-    * for a key that is answered, decides ownership from the fixture allowlist before any label match, and
-      decides liveness from the two rows the product itself reads;
-    * reports every key's state with the reason, and fails a named key that is still this card's residue,
-      unprovable, or unreadable rather than passing it.
+    * for a key that is answered, decides ownership from the fixture allowlist before any label match, and only
+      off a Profile row the base table confirms — a refused Profile read, a missing Profile, or an index
+      projection whose base row is gone settles nothing and is reported as unproven;
+    * reports every key's state with the reason, and fails a named key that is still this card's residue, whose
+      owner cannot be confirmed, whose deadness cannot be proved, or whose read was refused, rather than passing
+      it on the strength of an owner nobody can name.
     """
     tool = _fixture_tool()
     client = tool.ddb()
@@ -2017,6 +2096,9 @@ def verify_guard_residue(
                         "sellerName",
                         "ownerAddress",
                         "ownerInFixtureAllowlist",
+                        "profileLocated",
+                        "profileConfirmed",
+                        "profileUnprovenWhy",
                         "profileError",
                         "claimLabel",
                         "activeUnitCampaignId",
@@ -2038,19 +2120,24 @@ def verify_guard_residue(
         state, reason = dispositions.get(key, ("missing-key", "no read answered this key at all"))
         result = stage2.CLEANUP_FAILED if state in GUARD_NAMED_FAILURES or state == "missing-key" else stage2.CLEANUP_OBSERVED
         rows.append(stage3.cleanup_row(acceptance, f"{GUARD_SORT_KEY} {key}: {state} — {reason}", result))
+
+    def count_of(state: str) -> int:
+        return sum(1 for found in states.values() if found == state)
+
     rows.append(
         stage3.cleanup_row(
             "§3.7.7 enumerate the guard rows that are still standing, with the reason for each",
             f"{table} answers {answered} {GUARD_SORT_KEY} row(s) across {len(facts)} key(s) examined; of the "
             f"{len(named)} key(s) this card named, {len(detail['namedAbsent'])} answer no row at all and "
             f"{len(named) - len(detail['namedAbsent'])} are answered — the standing rows are "
-            f"{sum(1 for state in states.values() if state == GUARD_LIVE_JOIN)} guarding a live ACTIVE join, "
-            f"{sum(1 for state in states.values() if state == GUARD_OTHER_TENANT)} owned outside the fixture "
-            f"allowlist, {sum(1 for state in states.values() if state == GUARD_NOT_THIS_CARD)} written by "
-            f"another run, {sum(1 for state in states.values() if state == GUARD_LIVE_SCOUT_CAMPAIGN)} on a "
-            f"Scout Campaign that still stands, {sum(1 for state in states.values() if state == GUARD_UNPROVEN)} "
+            f"{count_of(GUARD_LIVE_JOIN)} guarding a live ACTIVE join, "
+            f"{count_of(GUARD_OTHER_TENANT)} with a confirmed owner outside the fixture "
+            f"allowlist, {count_of(GUARD_NOT_THIS_CARD)} written by "
+            f"another run, {count_of(GUARD_LIVE_SCOUT_CAMPAIGN)} on a "
+            f"Scout Campaign that still stands, {count_of(GUARD_OWNER_UNPROVEN)} whose owner no base-table read "
+            f"confirms, {count_of(GUARD_UNPROVEN)} "
             f"nobody here can prove dead, and "
-            f"{sum(1 for state in states.values() if state == GUARD_CARD_RESIDUE)} this card's own residue",
+            f"{count_of(GUARD_CARD_RESIDUE)} this card's own residue",
             stage2.CLEANUP_OBSERVED,
         )
     )
