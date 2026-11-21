@@ -21,6 +21,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import secrets
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Dict, List, Mapping
@@ -468,7 +469,7 @@ def test_an_interrupted_run_still_sweeps_and_still_writes_its_record(
     monkeypatch.setattr(api, "base_url", lambda: "https://dev.kernelworx.test")
     monkeypatch.setattr(lane, "sign_in", lambda persona: f"tok-{persona}")
     monkeypatch.setattr(lane, "build_lane", build_canary_then_break)
-    monkeypatch.setattr(lane, "canary_snapshot", lambda admin, canary: {})
+    monkeypatch.setattr(lane, "canary_snapshot", lambda admin, canary: copy.deepcopy(CANARY_SNAPSHOT))
     monkeypatch.setattr(lane, "recover_standing_commitments", lambda *args: ([], [], []))
     monkeypatch.setattr(lane, "residue_census", lambda lane_ids, own_ids: ([], {}))
     monkeypatch.setattr(lane.stage3, "stage_three_residue_census", lambda *args, **kwargs: {})
@@ -502,11 +503,56 @@ def test_an_interrupted_run_still_sweeps_and_still_writes_its_record(
     ]
     record = json.loads((tmp_path / f"{CURRENT}.json").read_text(encoding="utf-8"))
     assert record["canary"]["removed"] is True
+    assert record["canary"]["before"], "the before-snapshot never reached the record to be compared against"
+    assert record["canary"]["identical"] is True
     assert record["canary"]["unitAnsweredBeforeSweep"] is True, "the control read never ran before the canary's sweep"
     assert record["canary"]["goneReads"]["myUnits"].startswith("fake")
     assert record["canarySweep"]["tokens"][0] == "unit=UNIT-C"
     assert any(row["acceptance"] == "§3.7.7 lane sweep" for row in record["cleanup"])
-    assert lane.lane_failures(record) == []
+    assert record["error"].startswith("KeyboardInterrupt"), "an interrupted run must say so in its own record"
+    assert all(row["result"] == stage2.CLEANUP_OBSERVED for row in record["cleanup"])
+
+
+def test_a_run_that_never_reached_its_canary_snapshot_says_so_instead_of_passing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The compare is taken late if it was never taken, and a compare that refuses is a failed run."""
+    canary: Dict[str, Any] = {
+        "dataId": CANARY,
+        "unitId": "UNIT-C",
+        "unitCampaignId": "UC-C",
+        "scoutCampaignId": "SC-C",
+    }
+
+    def snapshot_refused(admin: str, target: Mapping[str, Any]) -> Dict[str, Any]:
+        raise AssertionError("the canary snapshot answered no roster row")
+
+    monkeypatch.setattr(lane, "teardown", lambda *args: [])
+    monkeypatch.setattr(
+        lane,
+        "sweep_row",
+        lambda tokens, census: (
+            lane.stage3.cleanup_row("§3.7.7 lane sweep", "fake sweep", stage2.CLEANUP_OBSERVED),
+            {"tokens": list(tokens)},
+        ),
+    )
+    monkeypatch.setattr(lane, "_unit_answers", lambda admin, unit_id: True)
+    monkeypatch.setattr(lane, "canary_snapshot", snapshot_refused)
+    monkeypatch.setattr(
+        lane, "_gone", lambda admin, target, answered_before=False: {"removed": True, "readError": "", "reads": {}}
+    )
+
+    record: Dict[str, Any] = {"canary": {"lane": canary}, "residueCensus": {}}
+    cleanup: List[Dict[str, str]] = []
+    lane.run_cleanup_steps("tok-admin", "tok-scout", {}, {}, canary, {}, [], record, cleanup)
+
+    assert record["canary"]["snapshotTakenLate"] is True
+    assert "answered no roster row" in record["canary"]["snapshotError"]
+    assert record["canary"]["identical"] is False
+    assert any(row["result"] == stage2.CLEANUP_FAILED for row in cleanup), "a canary read that refused is a failure"
+    failures = lane.lane_failures({**record, "cleanup": cleanup})
+    assert any("never snapshotted" in failure for failure in failures), failures
+    assert any("cleanup step(s) not met" in failure for failure in failures), failures
 
 
 # ---------------------------------------------------------------------------
@@ -579,8 +625,21 @@ def test_the_post_sweep_read_reports_the_signup_projection_that_still_stands(
 # ---------------------------------------------------------------------------
 
 
+CANARY_SNAPSHOT = {
+    "unit": {"unitId": "UNIT-C", "displayName": "Stage 3 Lane w168can-1225010101"},
+    "unitCampaigns": [{"unitCampaignId": "UC-C", "joinCode": "****************"}],
+    "roster": [{"campaignId": "SC-C", "status": "ACTIVE"}],
+}
+
+
 def _record(rows: List[Dict[str, str]], **canary: Any) -> Dict[str, Any]:
-    guard: Dict[str, Any] = {"lane": {"dataId": CANARY}, "identical": True, "removed": True}
+    guard: Dict[str, Any] = {
+        "lane": {"dataId": CANARY},
+        "before": copy.deepcopy(CANARY_SNAPSHOT),
+        "after": copy.deepcopy(CANARY_SNAPSHOT),
+        "identical": True,
+        "removed": True,
+    }
     guard.update(canary)
     return {"cleanup": rows, "canary": guard}
 
@@ -678,6 +737,58 @@ def test_a_canary_whose_unit_still_answers_its_campaigns_is_never_read_as_gone(
     answer = lane._gone("tok-admin", {"unitId": "UNIT-C"}, answered_before=True)
 
     assert answer["removed"] is False and answer["readError"] == "its Unit still answers its Unit Campaign rows"
+
+
+def test_a_canary_with_no_before_snapshot_fails_the_run() -> None:
+    """An absent before-read is a missing proof, not a canary that was left alone."""
+    assert lane.lane_failures(_record([], before={}, identical=False)) == [
+        "the canary was never snapshotted, so nothing proves this lane's sweep left it alone"
+    ]
+    assert lane.lane_failures(
+        _record([], before={}, identical=False, snapshotError="the canary snapshot answered no roster row")
+    ) == [
+        "the canary was never snapshotted, so nothing proves this lane's sweep left it alone: "
+        "the canary snapshot answered no roster row"
+    ]
+
+
+def test_the_canary_snapshot_masks_a_join_code_and_refuses_a_read_that_answered_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The snapshot is written into the record, and an empty one compares equal to an empty one.
+
+    ``unitCampaigns`` answers a live join code for a Campaign that is still open, so the code has to be
+    masked on the way in rather than redacted afterwards.  And a snapshot with nothing in it would let the
+    before/after compare pass on a lane that was never read, which is the one claim it exists to support.
+    """
+    live_code = secrets.token_hex(8)  # the stack's own shape: 16 hexadecimal characters
+    fake = FakeApi(
+        {
+            "unit": {"unitId": "UNIT-C", "displayName": "Stage 3 Lane w168can-1225010101"},
+            "unitCampaigns": {"items": [{"unitCampaignId": "UC-C", "joinCode": live_code}]},
+            "unitCampaignRoster": {"items": [{"campaignId": "SC-C", "status": "ACTIVE"}]},
+        }
+    )
+    monkeypatch.setattr(api, "gql", fake.gql)
+
+    snapshot = lane.canary_snapshot("tok-admin", {"dataId": CANARY, "unitId": "UNIT-C", "unitCampaignId": "UC-C"})
+
+    assert snapshot["unitCampaigns"][0]["joinCode"] == "*" * len(live_code)
+    assert live_code not in json.dumps(snapshot)
+
+    empty = FakeApi(
+        {
+            "unit": None,
+            "unitCampaigns": {"items": []},
+            "unitCampaignRoster": {"items": [{"campaignId": "SC-C", "status": "ACTIVE"}]},
+        }
+    )
+    monkeypatch.setattr(api, "gql", empty.gql)
+
+    with pytest.raises(AssertionError) as refusal:
+        lane.canary_snapshot("tok-admin", {"dataId": CANARY, "unitId": "UNIT-C", "unitCampaignId": "UC-C"})
+
+    assert "answered no unit/unitCampaigns row" in str(refusal.value)
 
 
 def test_a_canary_that_changed_across_the_sweep_fails_the_run() -> None:

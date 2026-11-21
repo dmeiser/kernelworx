@@ -609,8 +609,15 @@ def lane_reads(admin: str, unit_campaign_id: str) -> dict[str, Any]:
 
 
 def canary_snapshot(admin: str, canary: Mapping[str, Any]) -> dict[str, Any]:
-    """The canary lane's rows, exactly as the API answered them, for a byte-for-byte before/after compare."""
-    return {
+    """The canary lane's rows, exactly as the API answered them, for a byte-for-byte before/after compare.
+
+    Two things keep that compare worth reading.  The join code is masked on the way in — the same masking the
+    residue census applies to a join-code partition key — because the snapshot goes into the lane record, and
+    a record quoted into a PR would otherwise publish a live code.  And a snapshot that answers no Unit, no
+    Unit Campaign or no roster row is refused rather than returned: an empty snapshot compares equal to an
+    empty one, which would report the canary untouched on the strength of having read nothing.
+    """
+    snapshot = {
         "unit": _one(api.gql(admin, SETUP_DOCUMENTS["unitMetadata"], {"unitId": canary["unitId"]})),
         "unitCampaigns": _items(
             api.gql(admin, stage2.STAGE_TWO_SUPPORT_DOCUMENTS["unitCampaigns"], {"unitId": canary["unitId"]})
@@ -619,6 +626,16 @@ def canary_snapshot(admin: str, canary: Mapping[str, Any]) -> dict[str, Any]:
             api.gql(admin, stage2.STAGE_TWO_SUPPORT_DOCUMENTS["roster"], {"unitCampaignId": canary["unitCampaignId"]})
         ),
     }
+    for row in snapshot["unitCampaigns"]:
+        if row.get("joinCode"):
+            row["joinCode"] = "*" * len(str(row["joinCode"]))
+    missing = [name for name, value in snapshot.items() if not value]
+    if missing:
+        raise AssertionError(
+            f"the canary snapshot for lane {canary.get('dataId')} answered no "
+            f"{'/'.join(missing)} row, so a before/after compare on it would be vacuous"
+        )
+    return snapshot
 
 
 def teardown(admin: str, scout: str, lane: Mapping[str, Any], written: Mapping[str, Any]) -> list[Row]:
@@ -1734,6 +1751,14 @@ def run(out_dir: Path, data_id: str = "", prior: Sequence[str] = ()) -> dict[str
         except Exception as exc:  # noqa: BLE001 - a half-finished lane still owes its cleanup and its record
             record["error"] = f"{type(exc).__name__}: {exc}"
             record["errorTrace"] = traceback.format_exc().splitlines()[-8:]
+        except BaseException as exc:  # noqa: BLE001 - an interrupted run still owes its record what it knew
+            # Re-raised, because this is the one exception the lane must not swallow.  Recorded, because the
+            # teardown and sweep that follow it produce a record that otherwise reads like a finished run.
+            record["error"] = (
+                f"{type(exc).__name__}: {exc} — this run was interrupted; its teardown, sweeps and record still ran"
+            )
+            record["errorTrace"] = traceback.format_exc().splitlines()[-8:]
+            raise
         finally:
             # ``finally``, not a follow-on statement: the run that is interrupted or refused halfway still owes
             # every row it captured to a teardown and a sweep, and what it captured is decided by the ids it
@@ -1741,8 +1766,6 @@ def run(out_dir: Path, data_id: str = "", prior: Sequence[str] = ()) -> dict[str
             record["canary"]["lane"] = canary
             record["lane"] = lane
             record["writes"] = written
-            if canary.get("unitCampaignId") and not canary_before:
-                canary_before = canary_snapshot(admin, canary)
             run_cleanup_steps(admin, scout, lane, written, canary, canary_before, recovery_steps, record, cleanup)
     finally:
         # The retained class is counted last, after every teardown and sweep this run can run, and it is
@@ -1798,6 +1821,15 @@ def run_cleanup_steps(
     lane_tokens = sweep_tokens(lane, written, recovery_steps) if lane.get("dataId") else []
     canary_tokens = sweep_tokens(canary, None) if canary.get("dataId") else []
     try:
+        if canary.get("unitId") and not canary_before:
+            # A snapshot this run never got to take is taken here rather than skipped: the compare still
+            # brackets the canary's teardown and its own sweep, and what it no longer covers is said so in
+            # the record.  A snapshot that refuses is recorded, and the identical check below then fails.
+            record["canary"]["snapshotTakenLate"] = True
+            try:
+                canary_before = canary_snapshot(admin, canary)
+            except AssertionError as exc:
+                record["canary"]["snapshotError"] = str(exc)
         if lane.get("dataId"):
             cleanup += teardown(admin, scout, lane, written)
         if not written:
@@ -1815,10 +1847,29 @@ def run_cleanup_steps(
             cleanup.append(row)
             record["sweep"] = detail
         if canary_tokens:
-            canary_after = canary_snapshot(admin, canary)
+            canary_after: dict[str, Any] = {}
+            try:
+                canary_after = canary_snapshot(admin, canary)
+            except AssertionError as exc:
+                # A canary this record cannot read is a failed read-back, not an untouched lane: the compare
+                # is what proves this lane's sweep left an independent lane alone, and it did not run.
+                record["canary"]["snapshotError"] = f"the after-sweep read refused: {exc}"
+                cleanup.append(
+                    stage3.cleanup_row(
+                        "§3.7.7 re-read the canary after this lane's sweep",
+                        str(exc),
+                        stage2.CLEANUP_FAILED,
+                    )
+                )
+            record["canary"]["before"] = canary_before
             record["canary"]["after"] = canary_after
-            record["canary"]["identical"] = json.dumps(canary_before, sort_keys=True) == json.dumps(
-                canary_after, sort_keys=True
+            # ``and canary_before and canary_after`` is what keeps the compare from being vacuous: two
+            # snapshots that both read nothing are equal, and that equality would be reported as a canary
+            # left untouched.
+            record["canary"]["identical"] = (
+                bool(canary_before)
+                and bool(canary_after)
+                and json.dumps(canary_before, sort_keys=True) == json.dumps(canary_after, sort_keys=True)
             )
             cleanup += teardown(admin, scout, canary, {})
             # The control has to be taken while the row is still there: the sweep that works deletes the Unit,
@@ -1957,7 +2008,12 @@ def lane_failures(record: Mapping[str, Any]) -> list[str]:
         failures.append(str(exc))
     canary = record.get("canary") or {}
     if canary.get("lane"):
-        if not canary.get("identical"):
+        if not canary.get("before"):
+            failures.append(
+                "the canary was never snapshotted, so nothing proves this lane's sweep left it alone"
+                + (f": {canary['snapshotError']}" if canary.get("snapshotError") else "")
+            )
+        elif not canary.get("identical"):
             failures.append("the canary lane changed across this lane's sweep")
         if not canary.get("removed"):
             failures.append(
