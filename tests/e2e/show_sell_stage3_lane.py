@@ -39,15 +39,33 @@ What the lane does, in order:
    each roster membership's Scout Campaign exactly (the active-join guard rule needs that id: one profile
    holds a guard per Campaign, so a ``profile`` token cannot say which Campaign is joined, and an unnamed
    guard comes back ``UNKNOWN`` and fails the sweep closed).
-6. Re-reads the canary and fails if that sweep disturbed it, then takes the canary down with its own
-   tokens so the record also shows the sweeper removing a lane it is pointed at.
-7. Counts the residue that survives all of it, per physical table, by read: Amendment C requires the
+6. Gives back an ACTIVE ``ScoutCommitment`` an earlier attempt of **this lane id, or of a lane id named on
+   the command line** left standing, and only one written on that lane's own event location
+   (:func:`event_location`).  The card-wide prefix is not the gate: every lane this card runs signs in as
+   the same four fixture identities, so a prefix match would let one checkout cancel the place another
+   checkout is holding, and a cancelled signup cannot be re-created in its slot.  This pass runs inside the
+   canary's protection window, after the canary exists and is snapshotted, with the canary's own event
+   location excluded from it.
+7. Tears the lane down in a ``finally`` — the run that fails halfway is the run that still cleans up —
+   reporting one verdict per step, then runs the sanctioned sweeper over the typed lane tokens, naming
+   each roster membership's Scout Campaign exactly (the active-join guard rule needs that id: one profile
+   holds a guard per Campaign, so a ``profile`` token cannot say which Campaign is joined, and an unnamed
+   guard comes back ``UNKNOWN`` and fails the sweep closed).  What is torn down and swept is whatever ids
+   this run captured, not whether the lane reached its Stage 3 writes: a run refused after ``createUnit``
+   still owes its Unit row and its marker to the sweep.
+8. Re-reads the canary and fails if that sweep disturbed it, then takes the canary down with its own
+   tokens so the record also shows the sweeper removing a lane it is pointed at.  Its removal has to be
+   *read* absent: a canary read that errors is a failed read-back, never an absence.
+9. Counts the residue that survives all of it, per physical table, by read: Amendment C requires the
    retained class with counts and key shapes, and a sweep report cannot supply that count for a key shape
    no rule describes — such a row is neither deleted nor reported, so a record quoting only sweep lines
    would read as if nothing were left.
 
 The lane stops with words rather than a false pass when the stack cannot carry it: an API that answers no
 Stage 3 endpoint raises with ``MISSING_ENDPOINT_NOTE``, and a catalog with no product to assign says so.
+The exit status is :func:`lane_failures`, which applies the shared cleanup gate — so ``SS_STRICT_CLEANUP=1``
+turns an environment-blocked step red, the one-step reversal Amendment C promises — plus the canary's
+identity and its affirmative read-back.
 """
 
 from __future__ import annotations
@@ -100,12 +118,13 @@ STOCK_PER_PRODUCT = 6
 #: A uuid in any of the spellings this stack stores it in, masked out of a key the record reports.
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
-#: The name every event this module writes carries, and the only fact that makes a standing signup this
-#: card's to cancel.  The four fixture identities are shared by every lane on this stack, so "this Scout
-#: holds it" is not attribution: :func:`recover_standing_commitments` reads the event and acts only when its
-#: own ``locationName`` answers this prefix.  The reason is final, not stylistic — a cancelled signup can
-#: never be re-created in the same slot (``src/handlers/unit_operations.py``: "a cancelled signup stays
-#: history. Choose another slot."), so a row cancelled on a guess is a row nobody can put back.
+#: The name every event this module writes carries.  It is a label, not the recovery gate: every lane this
+#: card runs signs in as the same four fixture identities, so "this Scout holds it" is not attribution and
+#: "this event's name starts with the card's prefix" is not either — it names every lane this card has ever
+#: started, including one running on another checkout right now.  The gate is the exact location
+#: :func:`event_location` mints for a lane id this run was told about, because a cancelled signup can never
+#: be re-created in the same slot (``src/handlers/unit_operations.py``: "a cancelled signup stays history.
+#: Choose another slot."), so a row cancelled on a guess is a row nobody can put back.
 LANE_EVENT_PREFIX = "Stage 3 lane w168"
 
 #: The Stage 1 setup calls this lane needs.  Stage 1 ships no acceptance-support document map, so the lane
@@ -166,6 +185,40 @@ def lane_names(data_id: str, *, unit_number: int) -> dict[str, str]:
         "campaignName": f"Stage 3 Show & Sell {data_id}",
         "scoutCampaignName": f"Stage 3 Scout {data_id}",
     }
+
+
+def event_location(data_id: str) -> str:
+    """The exact ``locationName`` the event of one lane id carries.
+
+    One function writes it and one gate reads it, which is the whole difference between "an event this card
+    wrote" and "an event *this run* is allowed to cancel a place on".  The location is not a key the product
+    matches on, so it stays stable for a lane id: :func:`write_stage_three_rows` sends it once, and
+    :func:`recover_standing_commitments` compares it exactly rather than by prefix.
+    """
+    return f"{LANE_EVENT_PREFIX}{data_id.removeprefix('w168')}"
+
+
+def authorized_lane_ids(current: str, prior: Sequence[str]) -> tuple[str, ...]:
+    """The lane ids this run may write against: itself, plus the earlier attempts named for it.
+
+    A prior lane is named on the command line (``--sweep-prior``) precisely so a later run can take that
+    lane's rows back.  Nothing else is authorized: another card's lane, or this card's lane that is mid-flight
+    somewhere else, is not residue this run owns.
+    """
+    return tuple(dict.fromkeys([value for value in (current, *prior) if value]))
+
+
+def cancellable_locations(current: str, prior: Sequence[str], protected: Sequence[str] = ()) -> dict[str, str]:
+    """Exact event location -> lane id, for the only lanes this run may cancel a signup on.
+
+    ``protected`` names a lane whose location is removed even if it is also authorized.  The canary is the
+    case: it is a lane of this card, its rows are this run's, and its Unit Campaign is still the one thing the
+    record must be able to read unchanged on both sides of the sweep.
+    """
+    locations = {event_location(lane_id): lane_id for lane_id in authorized_lane_ids(current, prior)}
+    for lane_id in protected:
+        locations.pop(event_location(lane_id), None)
+    return locations
 
 
 def new_data_id(prefix: str = "w168lane") -> str:
@@ -386,7 +439,7 @@ def write_stage_three_rows(
             {
                 "input": stage3.create_event_input(
                     str(lane["unitCampaignId"]),
-                    f"{LANE_EVENT_PREFIX}{data_id.removeprefix('w168')}",
+                    event_location(data_id),
                     clock.isoformat(),
                     (clock + dt.timedelta(hours=4)).isoformat(),
                     idempotency_key=key("createShowAndSell", "event"),
@@ -711,6 +764,25 @@ def _standing_commitments(scout: str) -> list[dict[str, Any]]:
         )
         rows += [{**dict(row), "profileId": str(profile["profileId"])} for row in _items(body)]
     return rows
+
+
+def _active_commitments(scout: str) -> list[dict[str, Any]]:
+    """The ``ScoutCommitment`` rows still answering ``ACTIVE`` — the set that makes a profile unavailable.
+
+    The overlap guard is per profile, so this is the read that decides which profile a lane may sign its
+    Scout up on without touching anyone else's place, and the read-back that says whether a recovery pass
+    actually cleared the orphans it was authorized to clear.
+    """
+    return [row for row in _standing_commitments(scout) if str(row.get("status") or "") == "ACTIVE"]
+
+
+def _event_detail(admin: str, event_id: str) -> Mapping[str, Any]:
+    """One event aggregate as the product answers it.
+
+    This is the read every recovery decision is taken from — status, slots, and the ``locationName`` that
+    attributes an event to one lane id — so an event whose read is refused is reported, never assumed.
+    """
+    return _one(api.gql(admin, stage3.STAGE_THREE_DOCUMENTS["showAndSell"], {"showAndSellId": event_id})) or {}
 
 
 def _cancel_signup(
@@ -1194,7 +1266,7 @@ def _lane_scout_campaigns(scout: str, data_id: str) -> list[str]:
 def _recover_standing_events(
     admin: str, scout: str, data_id: str, unit_campaign_ids: Sequence[str]
 ) -> tuple[list[Row], list[str]]:
-    """Take back the Show & Sell rows an earlier attempt left, through the shipped mutations.
+    """Take back the Show & Sell rows one named earlier attempt left, through the shipped mutations.
 
     The sweeper never opens the Show & Sell table, so an event an earlier attempt wrote would survive every
     lane token — and while its signup row stays ``ACTIVE``, its ``ScoutCommitment`` projection stays ACTIVE
@@ -1202,9 +1274,13 @@ def _recover_standing_events(
     Sell at these hours".  So a prior lane is torn down through the product first: signup, then slots, then
     the event, in the order the server's own guards require.
 
-    Cancellation is legal only before ``startAt``, so an event that is already past that line is enumerated as
-    retained rather than forced through a path the product refuses.  A signup whose row names a profile outside
-    the fixture pool is left alone: it is not this lane's to cancel.
+    The scope is exact on purpose.  ``data_id`` is a lane the operator named on the command line, and the only
+    events this writes against are the ones whose ``locationName`` answers :func:`event_location` of that id —
+    every id in the write set comes from that read, so an event merely sharing a Unit Campaign with a prior
+    lane, or an event of another card, is enumerated and left rather than cancelled: a cancelled signup cannot
+    be re-created in its slot.  Cancellation is legal only before ``startAt``, so an event that is already past
+    that line is enumerated as retained rather than forced through a path the product refuses.  A signup whose
+    row names a profile outside the fixture pool is left alone: it is not this lane's to cancel.
     """
     rows: list[Row] = []
     steps: list[str] = []
@@ -1220,6 +1296,18 @@ def _recover_standing_events(
         for event in events:
             event_id = str(event["showAndSellId"])
             status = str(event.get("status") or "")
+            location = str(event.get("locationName") or "")
+            if location != event_location(data_id):
+                rows.append(
+                    stage3.cleanup_row(
+                        "§3.7.7 cancel an event an earlier attempt left",
+                        f"{event_id} on Unit Campaign {campaign} answers location {location!r}, which is not lane "
+                        f"{data_id}'s own event ({event_location(data_id)!r}): left standing, because a signup "
+                        "cancelled on a near match cannot be re-created in its slot",
+                        stage2.CLEANUP_BLOCKED,
+                    )
+                )
+                continue
             if status not in {"DRAFT", "SCHEDULED"}:
                 rows.append(
                     stage3.cleanup_row(
@@ -1230,9 +1318,7 @@ def _recover_standing_events(
                     )
                 )
                 continue
-            detail = (
-                _one(api.gql(admin, stage3.STAGE_THREE_DOCUMENTS["showAndSell"], {"showAndSellId": event_id})) or {}
-            )
+            detail = _event_detail(admin, event_id)
             board = _items(
                 api.gql(admin, stage3.STAGE_THREE_DOCUMENTS["showAndSellSignups"], {"showAndSellId": event_id})
             )
@@ -1279,9 +1365,13 @@ def _recover_standing_events(
 
 
 def recover_standing_commitments(
-    admin: str, scout: str, data_id: str
+    admin: str,
+    scout: str,
+    data_id: str,
+    prior: Sequence[str] = (),
+    protected: Sequence[str] = (),
 ) -> tuple[list[Row], list[str], list[dict[str, Any]]]:
-    """Give back this lane family's own ACTIVE ``ScoutCommitment`` rows, before the lane signs up again.
+    """Give back the ACTIVE ``ScoutCommitment`` rows this run is authorized to clear, before it signs up.
 
     The order is not a preference, it is the product's guard: while a signup row is ``ACTIVE`` its
     ``ScoutCommitment`` projection is ACTIVE too, and ``signupScoutForShowAndSellSlot`` refuses the next lane
@@ -1292,11 +1382,14 @@ def recover_standing_commitments(
     authorizes a non-Kernel caller by profile access alone and asks nothing about the Unit or the roster.
     Both are shipped paths: nothing here reaches for the table.
 
-    The gate is attribution, and it is not optional.  Every lane on this stack signs in as the same four
-    fixture identities, so an ACTIVE commitment is not automatically this lane's to cancel: each one is read
-    through ``showAndSell`` and cancelled only when that event's own ``locationName`` answers the
-    :data:`LANE_EVENT_PREFIX` this module mints.  A row whose event names anything else, or whose event read
-    is refused, is enumerated and left: a cancelled signup can never be created again in the same slot
+    The gate is authorization, and it is exact.  Every lane on this stack signs in as the same four fixture
+    identities, and two lanes of this card can be in flight at once on different checkouts, so an ACTIVE
+    commitment is never automatically this run's to cancel and neither is one whose event merely starts with
+    this card's prefix.  Each commitment is read through ``showAndSell`` and cancelled only when its
+    ``locationName`` is exactly :func:`event_location` of this lane's id or of an id named with
+    ``--sweep-prior``; :func:`cancellable_locations` also drops the ``protected`` ids — the canary — so the
+    lane this record exists to protect cannot be written against either.  Anything else is enumerated and
+    left: a cancelled signup can never be created again in the same slot
     (``src/handlers/unit_operations.py``: "a cancelled signup stays history. Choose another slot."), so
     cancelling another run's place is not a cleanup, it is a row nobody can put back.
 
@@ -1305,6 +1398,8 @@ def recover_standing_commitments(
     """
     rows: list[Row] = []
     steps: list[str] = []
+    locations = cancellable_locations(data_id, prior, protected)
+    allowed = ", ".join(sorted(locations.values())) or "none"
     for position, commitment in enumerate(_standing_commitments(scout), start=1):
         event_id = str(commitment.get("showAndSellId") or "")
         slot_id = str(commitment.get("slotId") or "")
@@ -1312,33 +1407,33 @@ def recover_standing_commitments(
             continue
         where = f"event {event_id} slot {slot_id} profile {commitment.get('profileId')}"
         try:
-            detail = (
-                _one(api.gql(admin, stage3.STAGE_THREE_DOCUMENTS["showAndSell"], {"showAndSellId": event_id})) or {}
-            )
+            detail = _event_detail(admin, event_id)
         except api.GraphQLError as exc:
             rows.append(
                 stage3.cleanup_row(
                     "§3.7.7 read back the Scout's ACTIVE commitments",
-                    f"{where}: the event read answered {exc.args[:1]!r}, so this row cannot be attributed to "
-                    f"a {LANE_EVENT_PREFIX}* lane and nothing is written against it",
+                    f"{where}: the event read answered {exc.args[:1]!r}, so this row cannot be attributed to a "
+                    f"lane this run may write against ({allowed}) and nothing is written against it",
                     stage2.CLEANUP_BLOCKED,
                 )
             )
             continue
         location = str(detail.get("locationName") or "")
-        if not location.startswith(LANE_EVENT_PREFIX):
+        owner = locations.get(location)
+        if owner is None:
             rows.append(
                 stage3.cleanup_row(
                     "§3.7.7 read back the Scout's ACTIVE commitments",
-                    f"{where} answers ACTIVE on an event named {location!r}, which no lane of this card wrote: "
-                    "left standing, because a cancelled signup cannot be re-created in the same slot",
+                    f"{where} answers ACTIVE on an event named {location!r}, the event of no lane this run is "
+                    f"authorized to write against ({allowed}): left standing, because a cancelled signup cannot "
+                    "be re-created in the same slot",
                 )
             )
             continue
         step = f"recover-commitment-{position}"
         steps.append(step)
         row = stage3.run_cleanup_step(
-            "§3.7.7 give back a commitment this card's own earlier attempt left",
+            "§3.7.7 give back a commitment an earlier attempt of a named lane left",
             lambda event_id=event_id, slot_id=slot_id, step=step, commitment=commitment: _cancel_signup(
                 scout,
                 admin,
@@ -1350,28 +1445,27 @@ def recover_standing_commitments(
             ),
         )
         row["summary"] = (
-            f"event {event_id} ({location!r}) slot {slot_id}: commitment answered ACTIVE at "
+            f"lane {owner}'s event {event_id} ({location!r}) slot {slot_id}: commitment answered ACTIVE at "
             f"{commitment.get('startAt')}..{commitment.get('endAt')} — {row['summary']}"
         )
         rows.append(row)
-    still_active = [row for row in _standing_commitments(scout) if str(row.get("status") or "") == "ACTIVE"]
-    ours = [
-        row
-        for row in still_active
-        if str(
-            (
-                _one(
-                    api.gql(
-                        admin,
-                        stage3.STAGE_THREE_DOCUMENTS["showAndSell"],
-                        {"showAndSellId": str(row.get("showAndSellId"))},
-                    )
+    still_active = _active_commitments(scout)
+    ours: list[str] = []
+    for row in still_active:
+        try:
+            location = str(_event_detail(admin, str(row.get("showAndSellId") or "")).get("locationName") or "")
+        except api.GraphQLError as exc:
+            rows.append(
+                stage3.cleanup_row(
+                    "§3.7.7 read back the Scout's commitment set",
+                    f"event {row.get('showAndSellId')} slot {row.get('slotId')} answers ACTIVE and its event read "
+                    f"answered {exc.args[:1]!r}, so it cannot be attributed and nothing is written against it",
+                    stage2.CLEANUP_BLOCKED,
                 )
-                or {}
-            ).get("locationName")
-            or ""
-        ).startswith(LANE_EVENT_PREFIX)
-    ]
+            )
+            continue
+        if location in locations:
+            ours.append(f"lane {locations[location]}: {row.get('showAndSellId')}/{row.get('slotId')}")
     rows.append(
         stage3.cleanup_row(
             "§3.7.7 read back the Scout's commitment set",
@@ -1381,7 +1475,12 @@ def recover_standing_commitments(
                 f"{row.get('showAndSellId')}/{row.get('slotId')} on {row.get('startAt')} (profile {row.get('profileId')})"
                 for row in still_active
             )
-            + f", {len(ours)} of them on an event this card's naming template wrote",
+            + f"; {len(ours)} of them belong to a lane this run is authorized to clear"
+            + (
+                f" ({'; '.join(ours)}) — its signup is still standing, so this run did not finish the job"
+                if ours
+                else ""
+            ),
             stage2.CLEANUP_OBSERVED if not ours else stage2.CLEANUP_BLOCKED,
         )
     )
@@ -1453,6 +1552,98 @@ def sweep_prior(
     return rows
 
 
+def show_and_sell_residue(admin: str, lane: Mapping[str, Any], written: Mapping[str, Any]) -> dict[str, Any]:
+    """What this lane leaves on the Show & Sell table, read in the window where that read still answers.
+
+    Amendment C requires the retained class enumerated with counts and key shapes, and this is the one table
+    the residue census cannot answer: ``scripts/qa_fixture.py`` never opens ``show_and_sells`` (its
+    ``SWEEP_TABLES`` map stops at the six lane tables), so no sweep line will ever name a row here.  The read
+    has to run before the sweep the same way the three blocked tables' census does, because the sweep deletes
+    the Unit and the Unit Admin's grant, and a Kernel-scoped read of an event whose Unit is gone answers
+    nothing at all.
+
+    The key shapes are the model's own (``src/utils/show_and_sell_models.py``): the event aggregate at
+    ``SHOW_AND_SELL#<showAndSellId>/METADATA``, a signup at ``SHOW_AND_SELL#<showAndSellId>/SIGNUP#<slotId>#<profileId>``
+    and a slot at ``SHOW_AND_SELL#<showAndSellId>/SLOT#<slotId>``.  Slots are reported as the teardown
+    removed them, so the residue is the event row and the signup row, and this function counts them rather
+    than asserting them.
+    """
+    table = stage3.show_and_sells_table()
+    event_id = str(written.get("showAndSellId") or "")
+    if not event_id:
+        return {
+            "table": table,
+            "eventRows": [],
+            "signupRows": [],
+            "note": f"{table}: this lane wrote no event, so it leaves no aggregate or signup row of these shapes",
+        }
+    detail = _event_detail(admin, event_id)
+    signups = _items(api.gql(admin, stage3.STAGE_THREE_DOCUMENTS["showAndSellSignups"], {"showAndSellId": event_id}))
+    return {
+        "table": table,
+        "partitionKey": f"SHOW_AND_SELL#{event_id}",
+        "eventRows": [
+            {
+                "sk": "METADATA",
+                "status": str(detail.get("status") or ""),
+                "startAt": str(detail.get("startAt") or ""),
+                "version": detail.get("version"),
+            }
+        ],
+        "signupRows": [
+            {"sk": f"SIGNUP#{row.get('slotId')}#{row.get('profileId')}", "status": str(row.get("status") or "")}
+            for row in signups
+        ],
+        "slotRows": [str(slot.get("slotId")) for slot in detail.get("slots") or []],
+        "note": (
+            f"{table}: {len(signups) + 1} row(s) under {event_id} answer this lane — one METADATA row and "
+            f"{len(signups)} SIGNUP row(s); no shipped path deletes either, and the sweeper's table list "
+            "never opens this table, so they are enumerated here rather than reported clean"
+        ),
+    }
+
+
+def retained_commitment_rows(scout: str, event_ids: Sequence[str]) -> tuple[list[Row], int]:
+    """The signup projections of this lane's events that still answer once every sweep has run.
+
+    This is the post-teardown half of the same count.  ``myScoutCommitments`` is keyed on the Scout's own
+    profile, so it answers after the sweeper took the Unit and Unit Campaign rows every Kernel-side read
+    needs — which is what makes it the read that proves the signup row is still standing instead of merely
+    assumed to be.
+    """
+    named = {str(value) for value in event_ids if value}
+    rows: list[Row] = []
+    if not named:
+        return rows, 0
+    for commitment in _standing_commitments(scout):
+        event_id = str(commitment.get("showAndSellId") or "")
+        if event_id in named:
+            rows.append(
+                stage3.cleanup_row(
+                    "§3.7.7 read the retained Show & Sell rows back after every sweep",
+                    f"myScoutCommitments still answers {stage3.show_and_sells_table()} "
+                    f"SIGNUP#{commitment.get('slotId')}#{commitment.get('profileId')} of event {event_id} as "
+                    f"{commitment.get('status')}, after the teardown and both sweeps ran",
+                )
+            )
+    return rows, len(rows)
+
+
+def write_record(out_dir: Path, lane_id: str, record: dict[str, Any], cleanup: list[Row]) -> Path:
+    """Put the lane record on disk exactly as far as the run got.
+
+    The record is the deliverable, so it is written from a ``finally`` rather than only on the success path:
+    a run that was interrupted, refused at setup, or lost its sweep still leaves the census, the cleanup rows
+    and the ids it captured, which is what the next run of this lane needs to name those rows to the sweeper.
+    """
+    record["cleanup"] = cleanup
+    record["finishedAt"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{lane_id}.json"
+    path.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
+    return path
+
+
 def run(out_dir: Path, data_id: str = "", prior: Sequence[str] = ()) -> dict[str, Any]:
     """Run the lane, write the record where asked, and return it."""
     api.publish_base_url()
@@ -1493,96 +1684,178 @@ def run(out_dir: Path, data_id: str = "", prior: Sequence[str] = ()) -> dict[str
     lane: dict[str, Any] = {}
     written: dict[str, Any] = {}
     canary_before: dict[str, Any] = {}
+    recovery_steps: list[str] = []
 
     def transport(document: str, variables: Mapping[str, Any]) -> Mapping[str, Any]:
         """One census read, sent as the product answers it, with the whole body returned."""
         return api.gql_raw(admin, stage2.STAGE_TWO_DOCUMENTS[document], dict(variables))
 
-    # A commitment an earlier attempt left ACTIVE refuses this lane's signup before the lane writes
-    # anything, so it is given back first, through the Scout's own projection rather than any table read.
-    recovery, recovery_steps, busy_commitments = recover_standing_commitments(admin, scout, lane_id)
-    record["commitmentRecovery"] = recovery
-    cleanup += recovery
-    profile = _lane_profile(scout, busy_commitments)
-    record["scoutProfileId"] = str(profile["profileId"])
-
-    if prior:
-        record["priorSweep"] = sweep_prior(admin, scout, prior, transport)
-        cleanup += record["priorSweep"]
-
+    # The canary is built and snapshotted before anything is given back, so the recovery pass below sits
+    # inside the window the canary exists to watch: a cancellation that reached a row it should not have
+    # reaches the canary's own before/after compare instead of being filed as a cleanup.  Its profile is
+    # picked from the commitments that are already ACTIVE, so the canary does not land on a busy profile
+    # either.
     try:
-        build_lane(admin, scout, lane_names(canary_id, unit_number=digits + 1), catalog_id, canary, profile)
-        canary_before = canary_snapshot(admin, canary)
-        build_lane(admin, scout, lane_names(lane_id, unit_number=digits), catalog_id, lane, profile)
-        write_stage_three_rows(admin, scout, lane, chosen[:2], written)
-        record["readWithLaneStanding"] = lane_reads(admin, lane["unitCampaignId"])
-        record["residueCensus"] = stage3.stage_three_residue_census(
-            transport, [lane["unitCampaignId"]], [lane["scoutCampaignId"]]
-        )
-        # The canary is swept too, and a blocked table is only accepted where a read stands in for the
-        # scan: the lane's census says nothing about the canary's Unit Campaign, so the canary takes its
-        # own.  It wrote no Stage 3 row, and a census that answers zero rows is still an answer.
-        record["canaryResidueCensus"] = stage3.stage_three_residue_census(
-            transport, [canary["unitCampaignId"]], [canary["scoutCampaignId"]]
-        )
-    except Exception as exc:  # noqa: BLE001 - a half-finished lane still owes its cleanup and its record
-        record["error"] = f"{type(exc).__name__}: {exc}"
-        record["errorTrace"] = traceback.format_exc().splitlines()[-8:]
-    record["canary"]["lane"] = canary
-    record["lane"] = lane
-    record["writes"] = written
-    if canary.get("unitCampaignId") and not canary_before:
-        canary_before = canary_snapshot(admin, canary)
-
-    if written:
-        cleanup += teardown(admin, scout, lane, written)
-    else:
-        cleanup.append(
-            stage3.cleanup_row(
-                "§3.7.7 product teardown", "the lane wrote no Stage 3 row, so there was nothing to remove"
+        profile = _lane_profile(scout, _active_commitments(scout))
+        if prior:
+            # An earlier attempt of a named lane goes first: its rows are the residue this card owns, and its
+            # Show & Sell rows can only be taken through the product while its Unit Campaign still answers.
+            record["priorSweep"] = sweep_prior(admin, scout, prior, transport)
+            cleanup += record["priorSweep"]
+        try:
+            build_lane(admin, scout, lane_names(canary_id, unit_number=digits + 1), catalog_id, canary, profile)
+            canary_before = canary_snapshot(admin, canary)
+            # A commitment an earlier attempt of an authorized lane left ACTIVE refuses this lane's signup before
+            # the lane writes anything, so it is given back now, through the Scout's own projection rather than any
+            # table read, and only for the lane ids this run was told about.
+            recovery, recovery_steps, busy_commitments = recover_standing_commitments(
+                admin, scout, lane_id, prior, [canary_id]
             )
-        )
+            record["commitmentRecovery"] = recovery
+            cleanup += recovery
+            profile = _lane_profile(scout, busy_commitments)
+            record["scoutProfileId"] = str(profile["profileId"])
+            build_lane(admin, scout, lane_names(lane_id, unit_number=digits), catalog_id, lane, profile)
+            write_stage_three_rows(admin, scout, lane, chosen[:2], written)
+            record["readWithLaneStanding"] = lane_reads(admin, lane["unitCampaignId"])
+            # Counted in the same pre-teardown window as the blocked-table census: once the sweep takes the
+            # Unit and the Kernel's grant, no Kernel-side read of this lane's event answers anything at all.
+            record["showAndSellResidue"] = show_and_sell_residue(admin, lane, written)
+            record["residueCensus"] = stage3.stage_three_residue_census(
+                transport, [lane["unitCampaignId"]], [lane["scoutCampaignId"]]
+            )
+            # The canary is swept too, and a blocked table is only accepted where a read stands in for the
+            # scan: the lane's census says nothing about the canary's Unit Campaign, so the canary takes its
+            # own.  It wrote no Stage 3 row, and a census that answers zero rows is still an answer.
+            record["canaryResidueCensus"] = stage3.stage_three_residue_census(
+                transport, [canary["unitCampaignId"]], [canary["scoutCampaignId"]]
+            )
+        except Exception as exc:  # noqa: BLE001 - a half-finished lane still owes its cleanup and its record
+            record["error"] = f"{type(exc).__name__}: {exc}"
+            record["errorTrace"] = traceback.format_exc().splitlines()[-8:]
+        finally:
+            # ``finally``, not a follow-on statement: the run that is interrupted or refused halfway still owes
+            # every row it captured to a teardown and a sweep, and what it captured is decided by the ids it
+            # recorded, not by whether it reached its Stage 3 writes.
+            record["canary"]["lane"] = canary
+            record["lane"] = lane
+            record["writes"] = written
+            if canary.get("unitCampaignId") and not canary_before:
+                canary_before = canary_snapshot(admin, canary)
+            run_cleanup_steps(admin, scout, lane, written, canary, canary_before, recovery_steps, record, cleanup)
+    finally:
+        # The retained class is counted last, after every teardown and sweep this run can run, and it is
+        # counted by read: what is left is enumerated with its counts and key shapes instead of being reported
+        # as cleaned.  And the record is written in a ``finally``: the run that was interrupted or refused
+        # halfway still owes the evidence of what it left, so a record only ever missing its tail is a record
+        # a reader can still act on.
+        try:
+            retained_rows, record["retainedResidue"] = residue_census(
+                [lane_id, canary_id, *prior],
+                [
+                    str(lane.get("unitId") or ""),
+                    str(lane.get("unitCampaignId") or ""),
+                    _bare(lane.get("scoutCampaignId") or ""),
+                    str(canary.get("unitId") or ""),
+                    str(canary.get("unitCampaignId") or ""),
+                    _bare(canary.get("scoutCampaignId") or ""),
+                ],
+            )
+            cleanup += retained_rows
+        except Exception as exc:  # noqa: BLE001 - a census that cannot run is reported, never passed off as absent
+            record["censusError"] = f"{type(exc).__name__}: {exc}"
+        write_record(out_dir, lane_id, record, cleanup)
+    return record
+
+
+def run_cleanup_steps(
+    admin: str,
+    scout: str,
+    lane: Mapping[str, Any],
+    written: Mapping[str, Any],
+    canary: Mapping[str, Any],
+    canary_before: Mapping[str, Any],
+    recovery_steps: Sequence[str],
+    record: dict[str, Any],
+    cleanup: list[Row],
+) -> None:
+    """The teardown, both sweeps and the canary read-back, for every id this run actually captured.
+
+    Nothing here waits for the lane to have finished.  Each id was recorded the moment the product answered
+    it, so a run refused after ``createUnit`` still hands that Unit and its ``createUnit`` marker to the
+    sweep, and a run whose join was refused still takes its Scout Campaign back through ``deleteCampaign``.
+    The gate is therefore the token list: ``sweep_tokens`` builds it from the ids that exist, and a lane that
+    captured nothing produces no sweep, because a token for a row that was never written is a claim with no
+    row behind it.  ``teardown`` walks only the resources it is handed, so the same call serves a finished
+    lane and an abandoned one.
+
+    The canary's removal has to be *read* absent.  ``_gone`` reports a failed read as a failed read-back
+    rather than as absence, and that row is what makes the run exit non-zero: an unreadable canary is the one
+    result this record must never be able to report as removed.  A removal nobody read back is not a cleanup.
+    """
+    lane_tokens = sweep_tokens(lane, written, recovery_steps) if lane.get("dataId") else []
+    canary_tokens = sweep_tokens(canary, None) if canary.get("dataId") else []
     try:
-        if canary.get("unitCampaignId"):
-            record["canarySweepTokens"] = sweep_tokens(canary, None)
-        if lane.get("unitCampaignId"):
-            row, detail = sweep_row(sweep_tokens(lane, written, recovery_steps), record.get("residueCensus", {}))
+        if lane.get("dataId"):
+            cleanup += teardown(admin, scout, lane, written)
+        if not written:
+            cleanup.append(
+                stage3.cleanup_row(
+                    "§3.7.7 product teardown",
+                    "the lane wrote no Stage 3 row, so there was no event, slot or signup to take back; its "
+                    "setup rows are the sweep's to take",
+                )
+            )
+        if canary_tokens:
+            record["canarySweepTokens"] = canary_tokens
+        if lane_tokens:
+            row, detail = sweep_row(lane_tokens, record.get("residueCensus", {}))
             cleanup.append(row)
             record["sweep"] = detail
-        if canary.get("unitCampaignId"):
+        if canary_tokens:
             canary_after = canary_snapshot(admin, canary)
             record["canary"]["after"] = canary_after
             record["canary"]["identical"] = json.dumps(canary_before, sort_keys=True) == json.dumps(
                 canary_after, sort_keys=True
             )
             cleanup += teardown(admin, scout, canary, {})
-            canary_row, canary_detail = sweep_row(sweep_tokens(canary, None), record.get("canaryResidueCensus", {}))
+            canary_row, canary_detail = sweep_row(canary_tokens, record.get("canaryResidueCensus", {}))
             cleanup.append(canary_row)
             record["canarySweep"] = canary_detail
-            record["canary"]["removed"] = _gone(admin, canary)
+            gone = _gone(admin, canary)
+            record["canary"]["removed"] = gone["removed"]
+            if gone["readError"]:
+                record["canary"]["goneReadError"] = gone["readError"]
+            cleanup.append(
+                stage3.cleanup_row(
+                    "§3.7.7 read the canary back as gone",
+                    "the canary's own Unit answers no Unit Campaign after its own sweep"
+                    if gone["removed"]
+                    else "the canary was not affirmatively read back as gone: "
+                    f"{gone['readError'] or 'its Unit Campaign rows are still answered'}",
+                    stage2.CLEANUP_OBSERVED if gone["removed"] else stage2.CLEANUP_FAILED,
+                )
+            )
         if lane.get("unitCampaignId"):
             record["readAfterTeardown"] = _safe_reads(admin, lane["unitCampaignId"])
+        # The Show & Sell rows are the one part of the retained class the sweeper can neither take nor
+        # report, so they are read back here: the counts come from the pre-teardown read, and their standing
+        # after the sweep comes from a read the sweep cannot stale out.
+        event_id = str(written.get("showAndSellId") or "")
+        rows, standing = retained_commitment_rows(scout, [event_id])
+        record["retainedCommitmentRows"] = standing
+        cleanup += rows
+        if event_id and not standing:
+            cleanup.append(
+                stage3.cleanup_row(
+                    "§3.7.7 read the retained Show & Sell rows back after every sweep",
+                    f"myScoutCommitments answers no projection of event {event_id}, so the standing of this "
+                    f"lane's {stage3.show_and_sells_table()} rows is not proven by a read",
+                    stage2.CLEANUP_BLOCKED,
+                )
+            )
     except Exception as exc:  # noqa: BLE001 - the record has to survive a failing sweep to report one
         record["sweepError"] = f"{type(exc).__name__}: {exc}"
-    # The retained class is counted last, after every teardown and sweep this run can run, and it is counted
-    # by read: what is left is enumerated with its counts and key shapes instead of being reported as cleaned.
-    retained_rows, record["retainedResidue"] = residue_census(
-        [lane_id, canary_id, *prior],
-        [
-            str(lane.get("unitId") or ""),
-            str(lane.get("unitCampaignId") or ""),
-            _bare(lane.get("scoutCampaignId") or ""),
-            str(canary.get("unitId") or ""),
-            str(canary.get("unitCampaignId") or ""),
-            _bare(canary.get("scoutCampaignId") or ""),
-        ],
-    )
-    cleanup += retained_rows
-    record["cleanup"] = cleanup
-    record["finishedAt"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{lane_id}.json").write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
-    return record
 
 
 def _shared_products(admin: str) -> list[dict[str, Any]]:
@@ -1599,14 +1872,53 @@ def _safe_reads(admin: str, unit_campaign_id: str) -> dict[str, Any]:
         return {"error": str(exc)}
 
 
-def _gone(admin: str, canary: Mapping[str, Any]) -> bool:
-    """Whether the canary's Unit Campaign is no longer answered by its Unit, after its own sweep."""
+def _gone(admin: str, canary: Mapping[str, Any]) -> dict[str, Any]:
+    """Whether the canary's Unit Campaign is no longer answered by its Unit, and what that read said.
+
+    A read that errors is not an absence.  Reporting ``True`` for a failed read would let the record claim
+    the one thing it exists to prove — a lane swept clean, with an independent lane still standing — on the
+    strength of not having looked, so the error comes back as ``removed: False`` plus the error text, and the
+    exit gate turns it into a failed run.
+    """
     try:
-        return not _items(
+        items = _items(
             api.gql(admin, stage2.STAGE_TWO_SUPPORT_DOCUMENTS["unitCampaigns"], {"unitId": canary["unitId"]})
         )
-    except api.GraphQLError:
-        return True
+    except api.GraphQLError as exc:
+        return {"removed": False, "readError": f"{exc.args[0] if exc.args else exc}"}
+    return {"removed": not items, "readError": ""}
+
+
+def lane_failures(record: Mapping[str, Any]) -> list[str]:
+    """Every reason this record does not pass its own gate, as data the exit status and the tests read.
+
+    This is the lane's whole verdict in one place: the shared cleanup gate decides the cleanup rows, so
+    ``SS_STRICT_CLEANUP=1`` turns an environment-blocked step into a failure the same way it does in the
+    Stage 2 lane — the one-step reversal Amendment C promises, wired to the exit status and not only to the
+    printed summary.  A canary that changed, or whose removal was never affirmatively read back, costs the
+    run the same way: a removal nobody read back is not a cleanup.
+    """
+    failures: list[str] = []
+    try:
+        stage3.assert_stage_three_cleanup_clean(list(record.get("cleanup") or []))
+    except stage3.StageThreeCleanupError as exc:
+        failures.append(str(exc))
+    canary = record.get("canary") or {}
+    if canary.get("lane"):
+        if not canary.get("identical"):
+            failures.append("the canary lane changed across this lane's sweep")
+        if not canary.get("removed"):
+            failures.append(
+                "the canary's removal was not affirmatively read back: "
+                + str(
+                    canary.get("goneReadError")
+                    or "the read after its own sweep still answered Unit Campaign rows for that Unit"
+                )
+            )
+    for key in ("error", "sweepError", "censusError"):
+        if record.get(key):
+            failures.append(f"{key}: {record[key]}")
+    return failures
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1628,21 +1940,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         "dataId",
         "error",
         "sweepError",
+        "censusError",
         "commitmentRecovery",
         "priorSweep",
         "residueCensus",
+        "showAndSellResidue",
+        "retainedCommitmentRows",
         "sweep",
         "canarySweep",
+        "canary",
+        "retainedResidue",
         "cleanup",
     )
     print(json.dumps({key: record.get(key) for key in keys}, indent=2))
-    failures = stage3.cleanup_failures(record["cleanup"])
-    blocked = stage3.cleanup_blocked(record["cleanup"])
-    if record["canary"].get("lane") and not record["canary"].get("identical"):
-        failures.append("the canary lane changed across this lane's sweep")
-    for key in ("error", "sweepError"):
-        if record.get(key):
-            failures.append(record[key])
+    failures = lane_failures(record)
+    blocked = stage3.cleanup_blocked(record.get("cleanup") or [])
+    print(f"strict cleanup (SS_STRICT_CLEANUP): {stage3.STRICT_CLEANUP}")
     print(f"cleanup failures: {failures or 'none'}; blocked: {blocked or 'none'}")
     print(f"record: {record['dataId']}")
     return 1 if failures else 0
