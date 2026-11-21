@@ -57,6 +57,10 @@ What the lane does, in order:
    tokens so the record also shows the sweeper removing a lane it is pointed at.  Its removal has to be
    *read* absent, and read twice: a Campaign read that refuses is decided by the identity's own Unit list,
    and that list only counts because it answered the Unit before the sweep ran.
+
+9. Exits on :func:`lane_failures`, never on the absence of a traceback: a blocked step fails under
+   ``SS_STRICT_CLEANUP=1``, a canary that was never compared or never read back fails, and a run that was
+   interrupted exits 130 because it has no verdict to report.
 9. Counts the residue that survives all of it, per physical table, by read: Amendment C requires the
    retained class with counts and key shapes, and a sweep report cannot supply that count for a key shape
    no rule describes — such a row is neither deleted nor reported, so a record quoting only sweep lines
@@ -72,7 +76,6 @@ identity and its affirmative read-back.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import datetime as dt
 import functools
 import importlib.util
@@ -1792,6 +1795,53 @@ def run(out_dir: Path, data_id: str = "", prior: Sequence[str] = ()) -> dict[str
     return record
 
 
+def _canary_compare(admin: str, canary: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
+    """One side of the canary compare, returned with the reason it could not be read rather than raised.
+
+    A partial canary is refused rather than read.  ``canary_snapshot`` needs the Unit, the Unit Campaign and
+    the roster row of a *whole* lane, so a canary whose setup stopped at ``createUnit`` would answer a
+    ``KeyError`` where a reason belongs, and a compare against half a lane would prove something that never
+    happened.  ``GraphQLError`` is a ``RuntimeError``, and a shared stack throttles and refuses as a matter of
+    course, so both it and the assertion that refuses a vacuous snapshot are collected here: an evidence read
+    that cannot run is a fact the record reports, and it is never a reason to skip the teardown and the sweep
+    that are the whole point of the step.
+    """
+    parts = {name: bool(canary.get(name)) for name in ("unitId", "unitCampaignId", "scoutCampaignId")}
+    if not all(parts.values()):
+        return {}, (
+            f"the canary lane {canary.get('dataId') or '(unnamed)'} stopped before it held a whole lane "
+            f"(unitId={parts['unitId']}, unitCampaignId={parts['unitCampaignId']}, "
+            f"scoutCampaignId={parts['scoutCampaignId']}), so there is no complete snapshot to compare"
+        )
+    try:
+        return canary_snapshot(admin, canary), ""
+    except Exception as exc:  # noqa: BLE001 - a failed proof belongs in the record, not in a traceback
+        return {}, f"{type(exc).__name__}: {exc}"
+
+
+def _cleanup_pass(label: str, step: Callable[[], Sequence[Row]], cleanup: list[Row]) -> bool:
+    """Run one teardown or sweep pass, and keep going when it raises.
+
+    These are the passes that give rows back, so no later pass may depend on an earlier one succeeding: a lane
+    whose product teardown is refused still owes its rows to the sweeper, and a canary whose sweep is refused
+    still owes its Unit to the read-back that would have proved it gone.  A pass that raises is recorded as a
+    ``failed`` row of its own, which is what the shared cleanup gate and the exit status both read.
+    """
+    try:
+        result = step()
+    except Exception as exc:  # noqa: BLE001 - a refused pass is reported as one, and the rest still runs
+        cleanup.append(
+            stage3.cleanup_row(
+                label,
+                f"{type(exc).__name__}: {exc} — this pass did not complete; the passes after it still ran",
+                stage2.CLEANUP_FAILED,
+            )
+        )
+        return False
+    cleanup += list(result)
+    return True
+
+
 def run_cleanup_steps(
     admin: str,
     scout: str,
@@ -1817,21 +1867,38 @@ def run_cleanup_steps(
     rather than as absence, and its Unit-list half only counts once the same read is shown to have answered
     that Unit before the sweep ran: a removal nobody read back, and a silence the reader never proved it
     could hear, are not cleanups.
+
+    Every step here is isolated from every other one, because the steps do different jobs.  A census or
+    compare read that refuses, or a canary that never became a whole lane, is a failed proof and nothing more:
+    it never cancels the teardown or the sweep that follow it, which are the steps that take rows back.  A
+    lane abandoned at ``createUnit`` therefore still leaves its Unit, its marker and its canary's Unit on a
+    sweep rather than in the shared stack.
     """
     lane_tokens = sweep_tokens(lane, written, recovery_steps) if lane.get("dataId") else []
     canary_tokens = sweep_tokens(canary, None) if canary.get("dataId") else []
     try:
-        if canary.get("unitId") and not canary_before:
+        if canary.get("dataId") and not canary_before:
             # A snapshot this run never got to take is taken here rather than skipped: the compare still
-            # brackets the canary's teardown and its own sweep, and what it no longer covers is said so in
-            # the record.  A snapshot that refuses is recorded, and the identical check below then fails.
+            # brackets the canary's teardown and its own sweep, and what it no longer covers is said so in the
+            # record.  A snapshot that refuses, or that has no whole lane in front of it, is recorded and the
+            # identical check below then fails — and the sweep still runs.
             record["canary"]["snapshotTakenLate"] = True
-            try:
-                canary_before = canary_snapshot(admin, canary)
-            except AssertionError as exc:
-                record["canary"]["snapshotError"] = str(exc)
+            snapshot, refused = _canary_compare(admin, canary)
+            if refused:
+                record["canary"]["snapshotError"] = refused
+                cleanup.append(
+                    stage3.cleanup_row(
+                        "§3.7.7 snapshot the canary before any teardown", refused, stage2.CLEANUP_BLOCKED
+                    )
+                )
+            else:
+                canary_before = snapshot
         if lane.get("dataId"):
-            cleanup += teardown(admin, scout, lane, written)
+            _cleanup_pass(
+                "§3.7.7 product teardown of the lane under test",
+                lambda: teardown(admin, scout, lane, written),
+                cleanup,
+            )
         if not written:
             cleanup.append(
                 stage3.cleanup_row(
@@ -1843,43 +1910,56 @@ def run_cleanup_steps(
         if canary_tokens:
             record["canarySweepTokens"] = canary_tokens
         if lane_tokens:
-            row, detail = sweep_row(lane_tokens, record.get("residueCensus", {}))
-            cleanup.append(row)
-            record["sweep"] = detail
+
+            def _sweep_lane() -> list[Row]:
+                row, detail = sweep_row(lane_tokens, record.get("residueCensus", {}))
+                record["sweep"] = detail
+                return [row]
+
+            _cleanup_pass("§3.7.7 lane sweep", _sweep_lane, cleanup)
         if canary_tokens:
-            canary_after: dict[str, Any] = {}
-            try:
-                canary_after = canary_snapshot(admin, canary)
-            except AssertionError as exc:
+            snapshot_after, refused = _canary_compare(admin, canary)
+            if refused:
                 # A canary this record cannot read is a failed read-back, not an untouched lane: the compare
                 # is what proves this lane's sweep left an independent lane alone, and it did not run.
-                record["canary"]["snapshotError"] = f"the after-sweep read refused: {exc}"
+                record["canary"]["snapshotError"] = f"the after-sweep read refused: {refused}"
                 cleanup.append(
                     stage3.cleanup_row(
-                        "§3.7.7 re-read the canary after this lane's sweep",
-                        str(exc),
-                        stage2.CLEANUP_FAILED,
+                        "§3.7.7 re-read the canary after this lane's sweep", refused, stage2.CLEANUP_FAILED
                     )
                 )
             record["canary"]["before"] = canary_before
-            record["canary"]["after"] = canary_after
-            # ``and canary_before and canary_after`` is what keeps the compare from being vacuous: two
+            record["canary"]["after"] = snapshot_after
+            # ``and canary_before and snapshot_after`` is what keeps the compare from being vacuous: two
             # snapshots that both read nothing are equal, and that equality would be reported as a canary
             # left untouched.
             record["canary"]["identical"] = (
                 bool(canary_before)
-                and bool(canary_after)
-                and json.dumps(canary_before, sort_keys=True) == json.dumps(canary_after, sort_keys=True)
+                and bool(snapshot_after)
+                and json.dumps(canary_before, sort_keys=True) == json.dumps(snapshot_after, sort_keys=True)
             )
-            cleanup += teardown(admin, scout, canary, {})
+            _cleanup_pass(
+                "§3.7.7 product teardown of the canary lane", lambda: teardown(admin, scout, canary, {}), cleanup
+            )
             # The control has to be taken while the row is still there: the sweep that works deletes the Unit,
-            # and a Unit list that never named the row cannot be evidence that it later stopped naming it.
-            answered_before = _unit_answers(admin, str(canary["unitId"]))
+            # and a Unit list that never named the row cannot be evidence that it later stopped naming it.  A
+            # control read that fails is recorded as failing rather than skipped, because the read-back below
+            # has to say which kind of silence it is reporting — and the canary's sweep runs either way.
+            try:
+                answered_before = _unit_answers(admin, str(canary["unitId"]))
+                control_error = ""
+            except Exception as exc:  # noqa: BLE001 - a failed control read is reported, and the sweep follows
+                answered_before, control_error = False, f"{type(exc).__name__}: {exc}"
+                record["canary"]["controlReadError"] = control_error
             record["canary"]["unitAnsweredBeforeSweep"] = answered_before
-            canary_row, canary_detail = sweep_row(canary_tokens, record.get("canaryResidueCensus", {}))
-            cleanup.append(canary_row)
-            record["canarySweep"] = canary_detail
-            gone = _gone(admin, canary, answered_before=answered_before)
+
+            def _sweep_canary() -> list[Row]:
+                row, detail = sweep_row(canary_tokens, record.get("canaryResidueCensus", {}))
+                record["canarySweep"] = detail
+                return [row]
+
+            _cleanup_pass("§3.7.7 canary sweep", _sweep_canary, cleanup)
+            gone = _gone(admin, canary, answered_before=answered_before, control_error=control_error)
             record["canary"]["removed"] = gone["removed"]
             record["canary"]["goneReads"] = gone["reads"]
             if gone["readError"]:
@@ -1901,9 +1981,21 @@ def run_cleanup_steps(
             record["readAfterTeardown"] = _safe_reads(admin, lane["unitCampaignId"])
         # The Show & Sell rows are the one part of the retained class the sweeper can neither take nor
         # report, so they are read back here: the counts come from the pre-teardown read, and their standing
-        # after the sweep comes from a read the sweep cannot stale out.
+        # after the sweep comes from a read the sweep cannot stale out.  A projection read that fails says that
+        # the standing is unproven; it does not reach past itself into the census that follows.
         event_id = str(written.get("showAndSellId") or "")
-        rows, standing = retained_commitment_rows(scout, [event_id])
+        try:
+            rows, standing = retained_commitment_rows(scout, [event_id])
+        except Exception as exc:  # noqa: BLE001 - a failed read leaves the standing unproven, and says so
+            rows, standing = [], 0
+            cleanup.append(
+                stage3.cleanup_row(
+                    "§3.7.7 read the retained Show & Sell rows back after every sweep",
+                    f"{type(exc).__name__}: {exc} — myScoutCommitments never answered, so the standing of this "
+                    f"lane's rows in {stage3.show_and_sells_table()} after the sweeps is not proven by a read",
+                    stage2.CLEANUP_FAILED,
+                )
+            )
         record["retainedCommitmentRows"] = standing
         cleanup += rows
         if event_id and not standing:
@@ -1915,8 +2007,11 @@ def run_cleanup_steps(
                     stage2.CLEANUP_BLOCKED,
                 )
             )
-    except Exception as exc:  # noqa: BLE001 - the record has to survive a failing sweep to report one
-        record["sweepError"] = f"{type(exc).__name__}: {exc}"
+    except Exception as exc:  # noqa: BLE001 - the record has to survive a failing step to report one
+        record["sweepError"] = (
+            f"{type(exc).__name__}: {exc} — a step outside the guarded teardown and sweep passes failed, so the "
+            "passes it did not reach are named by the rows above rather than by this record"
+        )
 
 
 def _shared_products(admin: str) -> list[dict[str, Any]]:
@@ -1943,7 +2038,13 @@ def _unit_answers(admin: str, unit_id: str) -> bool:
     return any(str(row.get("unitId")) == str(unit_id) for row in _lane_units(admin))
 
 
-def _gone(admin: str, canary: Mapping[str, Any], *, answered_before: bool = False) -> dict[str, Any]:
+def _gone(
+    admin: str,
+    canary: Mapping[str, Any],
+    *,
+    answered_before: bool = False,
+    control_error: str = "",
+) -> dict[str, Any]:
     """Whether the canary's rows are gone, and the reads that say so.
 
     Two reads, because neither one settles it alone.  A sweep that works deletes the Unit row, and afterwards
@@ -1953,6 +2054,9 @@ def _gone(admin: str, canary: Mapping[str, Any], *, answered_before: bool = Fals
     Unit proves nothing when it goes on not naming it.  Reporting absence on a single error, or on a read that
     could not have seen the row, would let the record claim the one thing it exists to prove — a lane swept
     clean while an independent lane stood untouched — on the strength of not having looked.
+
+    ``control_error`` names the case where the control read itself was refused rather than never taken, which
+    is the difference between a silence that proves nothing and a proof this run was not allowed to make.
     """
     reads: dict[str, str] = {}
     campaign_error = ""
@@ -1963,13 +2067,13 @@ def _gone(admin: str, canary: Mapping[str, Any], *, answered_before: bool = Fals
         reads["unitCampaigns"] = f"answers {len(items)} Unit Campaign row(s) for Unit {canary['unitId']}"
         if items:
             return {"removed": False, "readError": "its Unit still answers its Unit Campaign rows", "reads": reads}
-    except api.GraphQLError as exc:
-        campaign_error = f"{exc.args[0] if exc.args else exc}"
+    except Exception as exc:  # noqa: BLE001 - a Campaign read that cannot answer is a fact, not an absence
+        campaign_error = f"{type(exc).__name__}: {exc.args[0] if exc.args else exc}"
         reads["unitCampaigns"] = f"answered {campaign_error!r} for Unit {canary['unitId']}"
     try:
         listed = _unit_answers(admin, str(canary["unitId"]))
-    except api.GraphQLError as exc:
-        error = f"{exc.args[0] if exc.args else exc}"
+    except Exception as exc:  # noqa: BLE001 - a read that cannot answer is a failed read-back, not an absence
+        error = f"{type(exc).__name__}: {exc.args[0] if exc.args else exc}"
         reads["myUnits"] = f"answered {error!r}"
         return {
             "removed": False,
@@ -1986,7 +2090,12 @@ def _gone(admin: str, canary: Mapping[str, Any], *, answered_before: bool = Fals
     if not answered_before:
         return {
             "removed": False,
-            "readError": "the Unit read never answered this Unit while the canary stood, so its silence proves nothing",
+            "readError": (
+                f"the control read that would have named this Unit failed ({control_error}), so the Unit "
+                "list's silence proves nothing"
+                if control_error
+                else "the Unit read never answered this Unit while the canary stood, so its silence proves nothing"
+            ),
             "reads": reads,
         }
     return {"removed": True, "readError": "", "reads": reads}
@@ -2012,6 +2121,12 @@ def lane_failures(record: Mapping[str, Any]) -> list[str]:
             failures.append(
                 "the canary was never snapshotted, so nothing proves this lane's sweep left it alone"
                 + (f": {canary['snapshotError']}" if canary.get("snapshotError") else "")
+            )
+        elif not canary.get("after"):
+            # The compare needs both sides, and a missing right-hand side is not a canary that stayed put.
+            failures.append(
+                "the canary was never re-read after this lane's sweep, so the compare that proves the sweep "
+                "left it alone never ran" + (f": {canary['snapshotError']}" if canary.get("snapshotError") else "")
             )
         elif not canary.get("identical"):
             failures.append("the canary lane changed across this lane's sweep")
@@ -2069,6 +2184,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 1 if failures else 0
 
 
+def cli(argv: Sequence[str] | None = None) -> int:
+    """The module's exit status, including for a run that was cut short.
+
+    ``run`` re-raises a ``KeyboardInterrupt`` on purpose, because the alternative is a record that reads like
+    a finished run.  Suppressing it here instead used to make that honest re-raise leave through the back
+    door: the interrupt skipped ``main``'s call to :func:`lane_failures`, and the command fell off the end
+    with exit status 0.  The one outcome this runner must never produce is a green exit for a run it did not
+    finish.  By the time an interrupt reaches this frame the teardown, both sweeps and the record have run;
+    what is missing is the verdict, so the exit status is what says so.
+    """
+    try:
+        return main(argv)
+    except KeyboardInterrupt:
+        print(
+            "interrupted: the teardown, both sweeps and the lane record ran, and no verdict was reached — exit 130",
+            file=sys.stderr,
+        )
+        return 130
+
+
 if __name__ == "__main__":
-    with contextlib.suppress(KeyboardInterrupt):
-        sys.exit(main())
+    sys.exit(cli())

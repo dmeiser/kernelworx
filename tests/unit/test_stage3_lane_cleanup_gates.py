@@ -478,7 +478,7 @@ def test_an_interrupted_run_still_sweeps_and_still_writes_its_record(
     monkeypatch.setattr(
         lane,
         "_gone",
-        lambda admin, canary, answered_before=True: {
+        lambda admin, canary, answered_before=True, control_error="": {
             "removed": True,
             "readError": "",
             "reads": {"unitCampaigns": "fake: no rows", "myUnits": "fake: no longer answers Unit UNIT-C"},
@@ -539,7 +539,13 @@ def test_a_run_that_never_reached_its_canary_snapshot_says_so_instead_of_passing
     monkeypatch.setattr(lane, "_unit_answers", lambda admin, unit_id: True)
     monkeypatch.setattr(lane, "canary_snapshot", snapshot_refused)
     monkeypatch.setattr(
-        lane, "_gone", lambda admin, target, answered_before=False: {"removed": True, "readError": "", "reads": {}}
+        lane,
+        "_gone",
+        lambda admin, target, answered_before=False, control_error="": {
+            "removed": True,
+            "readError": "",
+            "reads": {},
+        },
     )
 
     record: Dict[str, Any] = {"canary": {"lane": canary}, "residueCensus": {}}
@@ -553,6 +559,213 @@ def test_a_run_that_never_reached_its_canary_snapshot_says_so_instead_of_passing
     failures = lane.lane_failures({**record, "cleanup": cleanup})
     assert any("never snapshotted" in failure for failure in failures), failures
     assert any("cleanup step(s) not met" in failure for failure in failures), failures
+
+
+def _sweep_capture() -> tuple[List[List[str]], Callable[[Any, Any], Any]]:
+    """A ``sweep_row`` stand-in that records the token list each sweep was handed."""
+    swept: List[List[str]] = []
+
+    def record_sweep(tokens: Any, census: Any) -> Any:
+        swept.append(list(tokens))
+        return (
+            lane.stage3.cleanup_row("§3.7.7 lane sweep", "fake sweep", stage2.CLEANUP_OBSERVED),
+            {"tokens": list(tokens)},
+        )
+
+    return swept, record_sweep
+
+
+def _whole_lane(data_id: str, letter: str) -> Dict[str, Any]:
+    """A lane dict with every id recorded, named by one letter so the expected tokens read plainly."""
+    return {
+        "dataId": data_id,
+        "unitId": f"UNIT-{letter}",
+        "unitCampaignId": f"UC-{letter}",
+        "scoutCampaignId": f"SC-{letter}",
+        "profileId": FIXTURE_PROFILE,
+    }
+
+
+@pytest.mark.parametrize("stage", ["before", "after"])
+def test_a_canary_snapshot_the_transport_refuses_still_leaves_both_sweeps_run(
+    monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    """An evidence read that fails is a failed proof; it never cancels the passes that take rows back.
+
+    ``GraphQLError`` is a ``RuntimeError``, and a shared stack throttles as a matter of course, so a snapshot
+    that refuses is an ordinary event in a lane that mutates that stack.  The first shape of this code caught
+    only ``AssertionError``, so one throttled read left both the lane's and the canary's rows unswept and a
+    record whose only mention of them was a traceback.
+    """
+
+    def snapshot_refused(admin: str, target: Mapping[str, Any]) -> Dict[str, Any]:
+        raise api.GraphQLError("ThrottlingException: slow down", ["INTERNAL"], {"errors": [{"message": "slow"}]})
+
+    swept, record_sweep = _sweep_capture()
+    monkeypatch.setattr(lane, "canary_snapshot", snapshot_refused)
+    monkeypatch.setattr(lane, "sweep_row", record_sweep)
+    monkeypatch.setattr(lane, "teardown", lambda admin, scout, lane_rows, written: [])
+    monkeypatch.setattr(lane, "_unit_answers", lambda admin, unit_id: False)
+    monkeypatch.setattr(lane, "_safe_reads", lambda admin, unit_campaign_id: {})
+
+    canary: Dict[str, Any] = {
+        "dataId": CANARY,
+        "unitId": "UNIT-C",
+        "unitCampaignId": "UC-C",
+        "scoutCampaignId": "SC-C",
+        "profileId": FIXTURE_PROFILE,
+    }
+    record: Dict[str, Any] = {"canary": {"lane": canary}, "residueCensus": {}, "canaryResidueCensus": {}}
+    cleanup: List[Dict[str, str]] = []
+    lane.run_cleanup_steps(
+        "tok-admin",
+        "tok-scout",
+        _whole_lane(CURRENT, "L"),
+        {},
+        canary,
+        copy.deepcopy(CANARY_SNAPSHOT) if stage == "after" else {},
+        [],
+        record,
+        cleanup,
+    )
+
+    assert "GraphQLError" in record["canary"]["snapshotError"], record["canary"]["snapshotError"]
+    if stage == "after":
+        assert record["canary"]["snapshotError"].startswith("the after-sweep read refused:")
+        assert record["canary"]["before"] == CANARY_SNAPSHOT, "a snapshot this run did take was dropped"
+    else:
+        assert record["canary"]["before"] == {}, "a snapshot this run could not take was invented"
+    assert record["canary"]["identical"] is False, "a compare with one side missing is not a passing compare"
+    assert any(row["result"] == stage2.CLEANUP_FAILED for row in cleanup), cleanup
+    expected = [
+        f"{kind}={value}" for kind, value in (("unit", "UNIT-L"), ("unit-campaign", "UC-L"), ("campaign", "SC-L"))
+    ] + [
+        f"idem=stage3-{CURRENT}-{marker}"
+        for marker in (
+            "createUnit-unit",
+            "createUnitCampaign-campaign",
+            "joinUnitCampaign-join",
+            "removeUnitCampaignMembership-remove-join",
+        )
+    ]
+    canary_expected = [
+        f"{kind}={value}" for kind, value in (("unit", "UNIT-C"), ("unit-campaign", "UC-C"), ("campaign", "SC-C"))
+    ] + [
+        f"idem=stage3-{CANARY}-{marker}"
+        for marker in (
+            "createUnit-unit",
+            "createUnitCampaign-campaign",
+            "joinUnitCampaign-join",
+            "removeUnitCampaignMembership-remove-join",
+        )
+    ]
+    assert swept == [expected, canary_expected], "a refused evidence read cancelled the sweep it should not touch"
+    missing_side = "never snapshotted" if stage == "before" else "never re-read after this lane's sweep"
+    failures = lane.lane_failures(record)
+    assert any(missing_side in failure and "ThrottlingException" in failure for failure in failures), failures
+
+
+def test_a_canary_refused_at_its_unit_campaign_is_swept_and_never_snapshotted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Half a canary is cleanup work, never a compare — and the compare says which it was.
+
+    ``createUnitCampaign`` is the second setup write, so a canary refused there holds a real Unit row and its
+    ``createUnit`` marker, both of which only the sweeper takes back.  ``canary_snapshot`` reads a whole lane's
+    Unit Campaign and roster rows, so attempting it on this canary raised ``KeyError`` inside the evidence read
+    and, on the strength of that, left the canary's Unit standing in the shared stack.
+    """
+    fake = FakeApi(_setup_answers(), refusals={"createUnitCampaign": "createUnitCampaign refused by the fake"})
+    monkeypatch.setattr(api, "gql", fake.gql)
+    monkeypatch.setattr(api, "gql_raw", fake.gql_raw)
+
+    snapshotted: List[str] = []
+
+    def snapshot(admin: str, target: Mapping[str, Any]) -> Dict[str, Any]:
+        snapshotted.append(str(target.get("dataId")))
+        return copy.deepcopy(CANARY_SNAPSHOT)
+
+    swept, record_sweep = _sweep_capture()
+    monkeypatch.setattr(lane, "canary_snapshot", snapshot)
+    monkeypatch.setattr(lane, "sweep_row", record_sweep)
+    monkeypatch.setattr(lane, "teardown", lambda admin, scout, lane_rows, written: [])
+    monkeypatch.setattr(lane, "_safe_reads", lambda admin, unit_campaign_id: {})
+
+    canary: Dict[str, Any] = {}
+    with pytest.raises(api.GraphQLError):
+        lane.build_lane("tok-admin", "tok-scout", lane.lane_names(CANARY, unit_number=2), "CAT-1", canary)
+    assert canary.get("unitId") and not canary.get("unitCampaignId"), canary
+
+    record: Dict[str, Any] = {"canary": {"lane": canary}, "residueCensus": {}, "canaryResidueCensus": {}}
+    cleanup: List[Dict[str, str]] = []
+    lane.run_cleanup_steps("tok-admin", "tok-scout", {}, {}, canary, {}, [], record, cleanup)
+
+    assert snapshotted == [], "a canary with no Unit Campaign was read as though it were a whole lane"
+    assert "stopped before it held a whole lane" in record["canary"]["snapshotError"]
+    assert any(
+        row["acceptance"] == "§3.7.7 snapshot the canary before any teardown"
+        and row["result"] == stage2.CLEANUP_BLOCKED
+        for row in cleanup
+    ), cleanup
+    assert record["canarySweep"]["tokens"] == [
+        "unit=UNIT-1",
+        f"idem=stage3-{CANARY}-createUnit-unit",
+    ], "the only rows this canary ever wrote never reached the sweeper"
+    assert swept == [record["canarySweep"]["tokens"]]
+
+
+def test_a_control_read_that_fails_leaves_the_canary_unproven_and_still_sweeps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The before-control is a read too, and its failure is named rather than confused with absence.
+
+    A ``myUnits`` list that never answered this Unit proves nothing when it goes on not naming it; a list this
+    run was throttled for proves nothing either, and the record has to tell those two silences apart.  Neither
+    one is a reason to skip the canary's sweep.
+    """
+    calls = {"count": 0}
+
+    def flaky_units(admin: str, unit_id: str) -> bool:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise api.GraphQLError("ThrottlingException: slow down", ["INTERNAL"], {"errors": [{"message": "slow"}]})
+        return False
+
+    swept, record_sweep = _sweep_capture()
+    monkeypatch.setattr(lane, "canary_snapshot", lambda admin, target: copy.deepcopy(CANARY_SNAPSHOT))
+    monkeypatch.setattr(lane, "sweep_row", record_sweep)
+    monkeypatch.setattr(lane, "teardown", lambda admin, scout, lane_rows, written: [])
+    monkeypatch.setattr(lane, "_unit_answers", flaky_units)
+    monkeypatch.setattr(lane, "_safe_reads", lambda admin, unit_campaign_id: {})
+
+    canary: Dict[str, Any] = {
+        "dataId": CANARY,
+        "unitId": "UNIT-C",
+        "unitCampaignId": "UC-C",
+        "scoutCampaignId": "SC-C",
+        "profileId": FIXTURE_PROFILE,
+    }
+    record: Dict[str, Any] = {"canary": {"lane": canary}, "residueCensus": {}, "canaryResidueCensus": {}}
+    cleanup: List[Dict[str, str]] = []
+    lane.run_cleanup_steps(
+        "tok-admin",
+        "tok-scout",
+        _whole_lane(CURRENT, "L"),
+        {},
+        canary,
+        copy.deepcopy(CANARY_SNAPSHOT),
+        [],
+        record,
+        cleanup,
+    )
+
+    assert record["canary"]["controlReadError"].startswith("GraphQLError: ThrottlingException")
+    assert record["canary"]["unitAnsweredBeforeSweep"] is False
+    assert record["canary"]["removed"] is False
+    assert "control read that would have named this Unit failed" in record["canary"]["goneReadError"]
+    assert swept and swept[-1][0] == "unit=UNIT-C", "the canary's sweep was skipped after a read failed"
+    assert any(row["result"] == stage2.CLEANUP_FAILED for row in cleanup), cleanup
+    assert any("not affirmatively read back" in failure for failure in lane.lane_failures(record))
 
 
 # ---------------------------------------------------------------------------
@@ -799,6 +1012,43 @@ def test_a_census_that_could_not_run_fails_the_run() -> None:
     record = _record([])
     record["censusError"] = "ClientError: dynamodb:Scan is not granted to this identity"
     assert lane.lane_failures(record) == [f"censusError: {record['censusError']}"]
+
+
+def test_the_command_exits_130_for_an_interrupted_run_and_never_reports_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``run`` re-raises the interrupt; the entry point is what turns it into a failed exit.
+
+    The lane used to wrap ``main()`` in ``contextlib.suppress(KeyboardInterrupt)``, so a run cut short skipped
+    ``lane_failures`` entirely and left with exit status 0 — the one verdict this runner must never print for
+    work it did not finish.
+    """
+
+    def interrupted(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(lane, "run", interrupted)
+    assert lane.cli(["--out", str(tmp_path)]) == 130
+
+
+def test_the_command_still_prints_the_verdict_of_a_finished_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A completed run is still judged by the shared gate, failure and all."""
+    failing = {
+        "dataId": CURRENT,
+        "canary": {},
+        "cleanup": [lane.stage3.cleanup_row("§3.7.7 lane sweep", "sweep left rows", stage2.CLEANUP_FAILED)],
+    }
+    passing = {
+        "dataId": CURRENT,
+        "canary": {},
+        "cleanup": [lane.stage3.cleanup_row("§3.7.7 lane sweep", "sweep took everything", stage2.CLEANUP_OBSERVED)],
+    }
+    monkeypatch.setattr(lane, "run", lambda *args, **kwargs: dict(failing))
+    assert lane.cli(["--out", str(tmp_path)]) == 1
+    monkeypatch.setattr(lane, "run", lambda *args, **kwargs: dict(passing))
+    assert lane.cli(["--out", str(tmp_path)]) == 0
 
 
 def test_a_lane_that_captured_nothing_is_swept_as_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
