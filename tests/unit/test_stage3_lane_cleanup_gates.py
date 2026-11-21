@@ -1066,3 +1066,414 @@ def test_a_lane_that_captured_nothing_is_swept_as_nothing(monkeypatch: pytest.Mo
     lane.run_cleanup_steps("tok-admin", "tok-scout", {}, {}, {}, {}, [], {}, [])
 
     assert swept == []
+
+
+# ---------------------------------------------------------------------------
+# 6. the keyed membership-guard disposition
+# ---------------------------------------------------------------------------
+
+
+CARD_GUARD = "ad3b956d-0000-4000-8000-000000000001"
+FOREIGN_GUARD = "ad3b956d-0000-4000-8000-000000000002"
+LIVE_GUARD = "ad3b956d-0000-4000-8000-000000000003"
+TENANT_GUARD = "ad3b956d-0000-4000-8000-000000000004"
+STALE_GUARD = "ad3b956d-0000-4000-8000-000000000099"
+UNIT_CAMPAIGN_TABLE = "kernelworx-unit-campaigns-ue1-dev"
+CARD_PROFILE = "00000000-0000-4000-8000-0000000000a1"
+FOREIGN_PROFILE = "00000000-0000-4000-8000-0000000000a2"
+LIVE_PROFILE = "00000000-0000-4000-8000-0000000000a3"
+TENANT_PROFILE = "00000000-0000-4000-8000-0000000000a4"
+FIXTURE_SUB = "54780458-c0d1-70c7-99be-e78715e5198d"
+OUTSIDE_SUB = "66666666-6666-4666-8666-666666666666"
+DEAD_UNIT_CAMPAIGN = "00000000-0000-4000-8000-uc0000000001"
+LIVE_UNIT_CAMPAIGN = "00000000-0000-4000-8000-uc0000000003"
+
+
+def _raw(row: Mapping[str, str]) -> Dict[str, Dict[str, str]]:
+    """One row in the AttributeValue spelling the raw DynamoDB client answers with."""
+    return {name: {"S": value} for name, value in row.items()}
+
+
+class FakeDdb:
+    """The two reads the guard pass makes: one filtered ``scan`` and keyed ``query`` calls.
+
+    The sweeper stand-in deletes out of this same store, so the keyed re-read that follows the sweep answers
+    what the delete actually did rather than what the test hoped it would have done.
+    """
+
+    def __init__(self, partitions: Dict[str, List[Dict[str, str]]], profiles: List[Dict[str, str]]) -> None:
+        self.partitions = partitions
+        self.profiles = profiles
+        self.queries: List[tuple[str, str]] = []
+        self.scans: List[str] = []
+
+    def query(
+        self,
+        *,
+        TableName: str,
+        KeyConditionExpression: str,
+        ExpressionAttributeValues: Mapping[str, Any],
+        **_: Any,
+    ) -> Dict[str, Any]:
+        assert KeyConditionExpression == "pk = :pk"
+        pk = str(ExpressionAttributeValues[":pk"]["S"])
+        self.queries.append((TableName, pk))
+        return {"Items": [_raw(row) for row in self.partitions.get(pk, [])]}
+
+    def scan(self, *, TableName: str, **_: Any) -> Dict[str, Any]:
+        self.scans.append(TableName)
+        if "profiles" in TableName:
+            return {"Items": [_raw(row) for row in self.profiles]}
+        rows = [row for part in self.partitions.values() for row in part if row.get("sk") == lane.GUARD_SORT_KEY]
+        return {"Items": [_raw(row) for row in rows]}
+
+    def remove(self, pk: str, sk: str) -> None:
+        self.partitions[pk] = [row for row in self.partitions.get(pk, []) if row.get("sk") != sk]
+
+
+class FakeTool:
+    """The slice of ``scripts/qa_fixture.py`` the guard pass reads: its table map, its decoders, its pool."""
+
+    SWEEP_TABLES = {
+        "accounts": ("kernelworx-accounts-ue1-dev", ("accountId",), "accountId"),
+        "units": ("kernelworx-units-ue1-dev", ("pk", "sk"), "createdByAccountId"),
+        "unit-campaigns": (UNIT_CAMPAIGN_TABLE, ("pk", "sk"), "createdByAccountId"),
+    }
+
+    def __init__(self, ddb: FakeDdb, pool: Mapping[str, str]) -> None:
+        self._ddb = ddb
+        self.pool = pool
+
+    def ddb(self) -> FakeDdb:
+        return self._ddb
+
+    def cip(self) -> str:
+        return "fake-pool-client"
+
+    def pool_users(self, _client: Any) -> Dict[str, Dict[str, Any]]:
+        return {mail: {"Attributes": [{"Name": "sub", "Value": sub}]} for sub, mail in self.pool.items()}
+
+    @staticmethod
+    def _strings(item: Mapping[str, Any]) -> Dict[str, str]:
+        return {name: next(iter(value.values())) for name, value in item.items() if isinstance(value, Mapping)}
+
+    @staticmethod
+    def _attrs(user: Mapping[str, Any]) -> Dict[str, str]:
+        return {attr["Name"]: attr["Value"] for attr in user.get("Attributes", [])}
+
+
+def _guard(campaign: str, profile: str, unit_campaign: str) -> Dict[str, str]:
+    return {
+        "pk": f"SCOUT_CAMPAIGN#CAMPAIGN#{campaign}",
+        "sk": lane.GUARD_SORT_KEY,
+        "campaignId": f"CAMPAIGN#{campaign}",
+        "profileId": f"PROFILE#{profile}",
+        "activeUnitCampaignId": f"CAMPAIGN#{unit_campaign}",
+        "updatedAt": "2026-11-20T23:04:50.026150+00:00",
+    }
+
+
+def _guard_world(
+    monkeypatch: pytest.MonkeyPatch, *, deleted: bool = True, sweep_lines: List[str] | None = None
+) -> tuple[FakeDdb, List[List[str]]]:
+    """One Unit Campaign table with four guards, and the Profile rows that say who created each.
+
+    The card's own guard is dead at both ends and labelled with a ``w168`` run; the foreign one is labelled
+    with another card's run (``stage2-1118011``); the live one declares an ACTIVE join on a Unit Campaign that
+    still answers its metadata row; and the tenant one sits outside the fixture user pool.  Only the first is
+    this run's to take, and each of the other three fails a different half of the claim gate.
+    """
+    partitions: Dict[str, List[Dict[str, str]]] = {
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{CARD_GUARD}": [_guard(CARD_GUARD, CARD_PROFILE, DEAD_UNIT_CAMPAIGN)],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{FOREIGN_GUARD}": [_guard(FOREIGN_GUARD, FOREIGN_PROFILE, DEAD_UNIT_CAMPAIGN)],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{LIVE_GUARD}": [_guard(LIVE_GUARD, LIVE_PROFILE, LIVE_UNIT_CAMPAIGN)],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{TENANT_GUARD}": [_guard(TENANT_GUARD, TENANT_PROFILE, DEAD_UNIT_CAMPAIGN)],
+        f"UNIT_CAMPAIGN#{DEAD_UNIT_CAMPAIGN}": [
+            {
+                "pk": f"UNIT_CAMPAIGN#{DEAD_UNIT_CAMPAIGN}",
+                "sk": "MEMBERSHIP#PROFILE#x",
+                "profileId": "PROFILE#x",
+                "removedAt": "2026-11-20T23:59:33+00:00",
+            }
+        ],
+        f"UNIT_CAMPAIGN#{LIVE_UNIT_CAMPAIGN}": [
+            {
+                "pk": f"UNIT_CAMPAIGN#{LIVE_UNIT_CAMPAIGN}",
+                "sk": lane.METADATA_SORT_KEY,
+                "campaignName": "QA167 Running Booth",
+            }
+        ],
+    }
+    profiles = [
+        {
+            "profileId": f"PROFILE#{CARD_PROFILE}",
+            "sellerName": "Avery w168qa",
+            "ownerAccountId": f"ACCOUNT#{FIXTURE_SUB}",
+        },
+        {
+            "profileId": f"PROFILE#{FOREIGN_PROFILE}",
+            "sellerName": "Avery Stage2 stage2-1118011",
+            "ownerAccountId": f"ACCOUNT#{FIXTURE_SUB}",
+        },
+        {
+            "profileId": f"PROFILE#{LIVE_PROFILE}",
+            "sellerName": "Blake w168qa",
+            "ownerAccountId": f"ACCOUNT#{FIXTURE_SUB}",
+        },
+        {
+            "profileId": f"PROFILE#{TENANT_PROFILE}",
+            "sellerName": "Charlie w168qa",
+            "ownerAccountId": f"ACCOUNT#{OUTSIDE_SUB}",
+        },
+    ]
+    ddb = FakeDdb(partitions, profiles)
+    monkeypatch.setattr(
+        lane, "_fixture_tool", lambda: FakeTool(ddb, {FIXTURE_SUB: "qa-show-sell-scout@dev.kernelworx.app"})
+    )
+
+    swept: List[List[str]] = []
+
+    def fake_sweep(tokens: List[str]) -> tuple[int, List[str], List[str]]:
+        swept.append(list(tokens))
+        lines = list(sweep_lines) if sweep_lines is not None else []
+        for token in tokens:
+            campaign = token.split("=", 1)[1]
+            pk = f"SCOUT_CAMPAIGN#CAMPAIGN#{campaign}"
+            if deleted:
+                ddb.remove(pk, lane.GUARD_SORT_KEY)
+                lines.append(f"deleted row  unit-campaigns {pk}/{lane.GUARD_SORT_KEY}")
+        lines.append("BLOCKED kernelworx-inventory-ue1-dev: dynamodb:Scan is not granted to this identity")
+        return 1, [line for line in lines if line.startswith("BLOCKED")], lines
+
+    monkeypatch.setattr(stage2, "fixture_sweep", fake_sweep)
+    return ddb, swept
+
+
+def _facts(monkeypatch: pytest.MonkeyPatch, ddb: FakeDdb, campaign: str) -> Dict[str, Any]:
+    tool = FakeTool(ddb, {FIXTURE_SUB: "qa-show-sell-scout@dev.kernelworx.app"})
+    profiles = {
+        lane._bare(row["profileId"]["S"]): tool._strings(row)
+        for row in ddb.scan(TableName="kernelworx-profiles-ue1-dev")["Items"]
+    }
+    return lane.guard_facts(
+        ddb, tool, UNIT_CAMPAIGN_TABLE, campaign, profiles, {FIXTURE_SUB: "qa-show-sell-scout@dev.kernelworx.app"}
+    )
+
+
+def test_the_card_own_dead_guard_is_swept_by_key_and_read_back_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A guard this card owns, dead at both ends, is named to the sweeper and then re-read as no row."""
+    ddb, swept = _guard_world(monkeypatch)
+    rows, detail = lane.resolve_guard_residue()
+
+    assert detail["guards"] == 4, detail
+    assert detail["table"] == UNIT_CAMPAIGN_TABLE
+    assert [entry["before"]["campaignId"] for entry in detail["disposed"]] == [CARD_GUARD]
+    assert detail["disposed"][0]["before"]["sellerName"] == "Avery w168qa"
+    assert detail["disposed"][0]["before"]["ownerAddress"] == "qa-show-sell-scout@dev.kernelworx.app"
+    assert detail["disposed"][0]["after"]["guardPresent"] is False
+    assert detail["stillAnswered"] == []
+    assert swept == [[f"campaign={CARD_GUARD}"]], "a guard this card does not own was named to the sweeper"
+
+    sweep_row = next(
+        row for row in rows if row["acceptance"] == "§3.7.7 sweep the guard keys with their Campaign ids named"
+    )
+    assert sweep_row["result"] == stage2.CLEANUP_OBSERVED, sweep_row
+    assert "1 row(s) deleted" in sweep_row["summary"] and "0 unresolved" in sweep_row["summary"]
+    assert "1 table(s) unreadable" in sweep_row["summary"]
+    disposed = [row for row in rows if f"campaign={CARD_GUARD}" in row["summary"]]
+    assert len(disposed) == 1 and disposed[0]["result"] == stage2.CLEANUP_OBSERVED
+    assert "re-read by key as 0 row(s)" in disposed[0]["summary"]
+    census = next(row for row in rows if "left standing" in row["summary"])
+    assert "answers 4 MEMBERSHIP_GUARD row(s)" in census["summary"]
+    assert "4 key(s) were examined" in census["summary"] and "0 of them answer no row at all" in census["summary"]
+    assert "1 key(s) are this card's" in census["summary"] and "3 were left standing" in census["summary"]
+    assert "1 of them declare an ACTIVE join" in census["summary"]
+    assert detail["guardRows"] == 4
+    assert lane.lane_failures({"cleanup": rows}) == []
+    assert f"SCOUT_CAMPAIGN#CAMPAIGN#{CARD_GUARD}" in [pk for _table, pk in ddb.queries]
+
+
+@pytest.mark.parametrize(
+    ("campaign", "reason"),
+    [
+        (FOREIGN_GUARD, "not one of this card's lane labels"),
+        (LIVE_GUARD, "still answers its metadata row"),
+        (TENANT_GUARD, "not owned by an identity in the fixture user pool"),
+    ],
+)
+def test_the_three_guards_that_are_not_this_run_s_are_named_with_the_reason(
+    monkeypatch: pytest.MonkeyPatch, campaign: str, reason: str
+) -> None:
+    """Each of the three refusals is a different fact, and none of them sends a token.
+
+    A live join's guard is the important one: deleting it would leave an ``ACTIVE`` roster row with nothing
+    enforcing it, which is a worse state on ``dev`` than the residue the pass was asked about.
+    """
+    _ddb, swept = _guard_world(monkeypatch)
+    fact = _facts(monkeypatch, _ddb, campaign)
+    claimed, why = lane.claim_guard(fact, lane.CARD_CLAIM_LABELS)
+    assert claimed is False
+    assert reason in why, why
+
+    _rows, detail = lane.resolve_guard_residue()
+    assert not any(campaign in token for pass_ in swept for token in pass_), swept
+    standing = next(entry for entry in detail["leftStanding"] if entry["campaignId"] == campaign)
+    assert reason in standing["reason"]
+    if campaign == LIVE_GUARD:
+        assert fact["activeUnitCampaignName"] == "QA167 Running Booth" and fact["unitCampaignStands"] is True
+
+
+def test_a_guard_sharing_its_partition_with_a_live_campaign_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Naming a Campaign whose aggregate still stands would take a live lane's join, not a dead row."""
+    ddb, _swept = _guard_world(monkeypatch)
+    pk = f"SCOUT_CAMPAIGN#CAMPAIGN#{CARD_GUARD}"
+    ddb.partitions[pk].append({"pk": pk, "sk": lane.METADATA_SORT_KEY, "campaignName": "still joined"})
+    fact = _facts(monkeypatch, ddb, CARD_GUARD)
+    claimed, why = lane.claim_guard(fact, lane.CARD_CLAIM_LABELS)
+    assert claimed is False
+    assert "still stands on this partition" in why, why
+
+
+def test_a_key_an_earlier_report_named_that_the_table_no_longer_answers_is_said_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale report line is not a row: the disposition is that nothing answers the key, and nothing deletes."""
+    _ddb, swept = _guard_world(monkeypatch)
+    rows, detail = lane.resolve_guard_residue([STALE_GUARD])
+
+    assert detail["guards"] == 5
+    stale = next(entry for entry in detail["leftStanding"] if entry["campaignId"] == STALE_GUARD)
+    assert "no row answers this key" in stale["reason"]
+    assert all(STALE_GUARD not in token for pass_ in swept for token in pass_), swept
+    assert lane.lane_failures({"cleanup": rows}) == []
+
+
+def test_a_swept_guard_that_still_answers_fails_the_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The delete is not the proof; the keyed re-read is, and a row that survives costs the run."""
+    _guard_world(monkeypatch, deleted=False)
+    rows, detail = lane.resolve_guard_residue()
+
+    assert detail["stillAnswered"] == [CARD_GUARD]
+    failed = [row for row in rows if row["result"] == stage2.CLEANUP_FAILED]
+    assert failed and "still answered after it" in failed[0]["summary"]
+    failures = lane.lane_failures({"cleanup": rows, "guardResidue": detail})
+    assert any("is still answered after the keyed sweep" in failure for failure in failures), failures
+
+
+def test_an_unresolved_row_in_the_guard_sweep_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A guard the sweeper cannot attribute is a failure here too, whatever the claim gate concluded."""
+    _guard_world(monkeypatch, sweep_lines=[f"UNKNOWN  unit-campaigns  SCOUT_CAMPAIGN#CAMPAIGN#{CARD_GUARD}  [no rule]"])
+    rows, detail = lane.resolve_guard_residue()
+
+    sweep_row = next(
+        row for row in rows if row["acceptance"] == "§3.7.7 sweep the guard keys with their Campaign ids named"
+    )
+    assert sweep_row["result"] == stage2.CLEANUP_FAILED
+    assert detail["sweep"]["unknown"]
+
+
+def test_a_delete_the_sweeper_never_reported_is_a_failure() -> None:
+    """Claiming a key and getting no ``deleted row`` line for it is not a cleanup."""
+    verdict = lane.guard_verdict(
+        unknown=[], left=[], failed=[], blocked=[], deleted=[], expected=["campaign=x"], still_answered=[], exit_code=0
+    )
+    assert verdict == stage2.CLEANUP_FAILED
+
+
+def test_the_blocked_tables_are_recorded_and_fail_the_pass_only_under_strict() -> None:
+    """This pass is judged on a table it read key by key, so an unreadable one does not stand in for it.
+
+    ``SS_STRICT_CLEANUP=1`` still turns it into a blocked step, which keeps Amendment C's one-step reversal
+    true of this step as well as of the lane sweep.
+    """
+    common = {
+        "unknown": [],
+        "left": [],
+        "failed": [],
+        "blocked": ["BLOCKED kernelworx-inventory-ue1-dev: dynamodb:Scan is not granted"],
+        "deleted": ["deleted row unit-campaigns SCOUT_CAMPAIGN#CAMPAIGN#x/MEMBERSHIP_GUARD"],
+        "expected": ["campaign=x"],
+        "still_answered": [],
+        "exit_code": 1,
+    }
+    assert lane.guard_verdict(**common, strict=False) == stage2.CLEANUP_OBSERVED
+    assert lane.guard_verdict(**common, strict=True) == stage2.CLEANUP_BLOCKED
+
+
+def test_a_guard_key_with_no_disposition_fails_the_record() -> None:
+    """Half a census is worse than none: every row the pass counted has to carry a disposition."""
+    failures = lane.lane_failures(
+        {"cleanup": [], "guardResidue": {"guards": 4, "disposed": [{}], "leftStanding": [{}]}}
+    )
+    assert any("has no disposition" in failure for failure in failures), failures
+
+
+def test_the_guard_pass_still_writes_its_record_when_a_read_refuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A pass that died part-way still leaves a record that says it died, and the exit gate reads that."""
+
+    def refused(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("the profiles table refused: AccessDeniedException")
+
+    monkeypatch.setattr(lane, "resolve_guard_residue", refused)
+    record = lane.resolve_guards(tmp_path)
+
+    assert record["mode"] == "guard-residue" and record["error"].startswith("AssertionError")
+    written = json.loads((tmp_path / f"{record['dataId']}.json").read_text(encoding="utf-8"))
+    assert written["error"] == record["error"]
+    assert written["cleanup"][0]["result"] == stage2.CLEANUP_FAILED
+    assert lane.lane_failures(written)
+
+
+def test_a_written_guard_record_carries_every_key_verdict_and_still_gives_no_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The record on disk is the deliverable, so the per-key rows have to be in it, not only in the return value.
+
+    A pass that reports its work only to stdout cannot be quoted as evidence: the record has to carry the
+    disposed key, the census of what stands, and the sweep verdict, and still give back no failure.
+    """
+    _guard_world(monkeypatch)
+    first = lane.resolve_guards(tmp_path)
+    written = json.loads((tmp_path / f"{first['dataId']}.json").read_text(encoding="utf-8"))
+
+    assert written["mode"] == "guard-residue"
+    assert written.get("error") is None, written["error"]
+    summaries = [row["summary"] for row in written["cleanup"]]
+    assert any(f"campaign={CARD_GUARD}" in row for row in summaries), summaries
+    assert any("4 MEMBERSHIP_GUARD row(s)" in row for row in summaries), summaries
+    assert any("campaign token(s)" in row for row in summaries), summaries
+    assert all(row["result"] == stage2.CLEANUP_OBSERVED for row in written["cleanup"]), written["cleanup"]
+    assert lane.lane_failures(written) == []
+
+    # and a second pass over the same table, pointed at the key it already took, says so rather than sweeping twice
+    again = lane.resolve_guards(tmp_path, [CARD_GUARD])
+    second = json.loads((tmp_path / f"{again['dataId']}.json").read_text(encoding="utf-8"))
+    # three guards still answer the table, and the named key is the fourth entry — one that no row backs
+    assert second["guardResidue"]["guards"] == 4, second["guardResidue"]
+    assert second["guardResidue"]["guardRows"] == 3, second["guardResidue"]
+    census = [row["summary"] for row in second["cleanup"] if "left standing" in row["summary"]]
+    assert "answers 3 MEMBERSHIP_GUARD row(s)" in census[0], census
+    assert "1 of them answer no row at all" in census[0], census
+    assert second["guardResidue"]["disposed"] == []
+    assert second["guardResidue"]["tokens"] == []
+    stale = next(entry for entry in second["guardResidue"]["leftStanding"] if entry["campaignId"] == CARD_GUARD)
+    assert "no row answers this key" in stale["reason"]
+    assert lane.lane_failures(second) == []
+
+
+def test_the_guard_pass_needs_no_identity_tokens_and_refuses_an_empty_token_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing here reaches a row through a profile: every token names one Scout Campaign id.
+
+    The first cleanup report left these guards ``UNKNOWN`` precisely because it carried ``profile=`` tokens,
+    which say whose guard is looked at and nothing about which Campaign is joined.
+    """
+    _ddb, swept = _guard_world(monkeypatch)
+    _rows, detail = lane.resolve_guard_residue()
+
+    assert detail["tokens"] == [f"campaign={CARD_GUARD}"]
+    assert all(token.startswith("campaign=") for pass_ in swept for token in pass_), swept
+    assert all(not token.startswith("profile=") for pass_ in swept for token in pass_), swept
