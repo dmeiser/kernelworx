@@ -459,6 +459,7 @@ def test_an_interrupted_run_still_sweeps_and_still_writes_its_record(
             ],
             "listMyProfiles": _profiles(),
             "myScoutCommitments": {"items": []},
+            "myUnits": {"items": [{"unitId": "UNIT-C"}], "pageInfo": {"hasNextPage": False}},
         }
     )
     monkeypatch.setattr(api, "gql", fake.gql)
@@ -473,7 +474,15 @@ def test_an_interrupted_run_still_sweeps_and_still_writes_its_record(
     monkeypatch.setattr(lane.stage3, "stage_three_residue_census", lambda *args, **kwargs: {})
     monkeypatch.setattr(lane, "teardown", lambda admin, scout, lane_rows, written: [])
     monkeypatch.setattr(lane, "sweep_row", record_sweep)
-    monkeypatch.setattr(lane, "_gone", lambda admin, canary: {"removed": True, "readError": ""})
+    monkeypatch.setattr(
+        lane,
+        "_gone",
+        lambda admin, canary, answered_before=True: {
+            "removed": True,
+            "readError": "",
+            "reads": {"unitCampaigns": "fake: no rows", "myUnits": "fake: no longer answers Unit UNIT-C"},
+        },
+    )
 
     with pytest.raises(KeyboardInterrupt):
         lane.run(tmp_path, CURRENT)
@@ -493,6 +502,8 @@ def test_an_interrupted_run_still_sweeps_and_still_writes_its_record(
     ]
     record = json.loads((tmp_path / f"{CURRENT}.json").read_text(encoding="utf-8"))
     assert record["canary"]["removed"] is True
+    assert record["canary"]["unitAnsweredBeforeSweep"] is True, "the control read never ran before the canary's sweep"
+    assert record["canary"]["goneReads"]["myUnits"].startswith("fake")
     assert record["canarySweep"]["tokens"][0] == "unit=UNIT-C"
     assert any(row["acceptance"] == "§3.7.7 lane sweep" for row in record["cleanup"])
     assert lane.lane_failures(record) == []
@@ -603,15 +614,70 @@ def test_a_canary_that_was_not_read_back_as_gone_fails_the_run() -> None:
     ]
 
 
-def test_a_canary_read_that_errors_is_a_failed_read_back_not_an_absence(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = FakeApi({}, refusals={"unitCampaigns": "Unit not found"})
+def test_a_canary_read_that_errors_is_a_failed_read_back_when_the_unit_stands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refusal from the Campaign read is not an absence while the Unit row is still answered."""
+    fake = FakeApi(
+        {},
+        refusals={"unitCampaigns": "ThrottlingException: slow down"},
+    )
+    fake.answers["myUnits"] = {"items": [{"unitId": "UNIT-C"}], "pageInfo": {"hasNextPage": False}}
     monkeypatch.setattr(api, "gql", fake.gql)
 
-    answer = lane._gone("tok-admin", {"unitId": "UNIT-C"})
+    answer = lane._gone("tok-admin", {"unitId": "UNIT-C"}, answered_before=True)
 
-    assert answer == {"removed": False, "readError": "Unit not found"}
+    assert answer["removed"] is False
+    assert "still answered by myUnits" in answer["readError"]
+    assert "ThrottlingException" in answer["readError"]
     failures = lane.lane_failures(_record([], removed=False, goneReadError=answer["readError"]))
-    assert len(failures) == 1 and "Unit not found" in failures[0]
+    assert len(failures) == 1 and "ThrottlingException" in failures[0]
+
+
+def test_a_canary_read_that_errors_is_read_as_gone_only_against_the_answer_that_saw_the_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``Unit not found`` is what a successful sweep leaves, and only the Unit list can prove it.
+
+    The sweep deletes the Unit row, so the Campaign read refuses rather than answering nothing.  That is an
+    absence because the same identity's Unit list named this Unit while the canary stood and no longer names
+    it — which is also why the control is required: a list that never named the row proves nothing.
+    """
+    fake = FakeApi(
+        {"unitCampaigns": {"items": []}, "myUnits": {"items": [], "pageInfo": {"hasNextPage": False}}},
+    )
+    monkeypatch.setattr(api, "gql", fake.gql)
+
+    answer = lane._gone("tok-admin", {"unitId": "UNIT-C"}, answered_before=True)
+    assert answer == {
+        "removed": True,
+        "readError": "",
+        "reads": {
+            "unitCampaigns": "answers 0 Unit Campaign row(s) for Unit UNIT-C",
+            "myUnits": "no longer answers Unit UNIT-C",
+        },
+    }
+
+    uncontrolled = lane._gone("tok-admin", {"unitId": "UNIT-C"}, answered_before=False)
+    assert uncontrolled["removed"] is False
+    assert "never answered this Unit while the canary stood" in uncontrolled["readError"]
+
+    refused = FakeApi({"unitCampaigns": {"items": []}}, refusals={"myUnits": "Internal Server Error"})
+    monkeypatch.setattr(api, "gql", refused.gql)
+    broken = lane._gone("tok-admin", {"unitId": "UNIT-C"}, answered_before=True)
+    assert broken["removed"] is False
+    assert "Unit read that would confirm" in broken["readError"]
+
+
+def test_a_canary_whose_unit_still_answers_its_campaigns_is_never_read_as_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeApi({"unitCampaigns": {"items": [{"unitCampaignId": "UC-C"}]}})
+    monkeypatch.setattr(api, "gql", fake.gql)
+
+    answer = lane._gone("tok-admin", {"unitId": "UNIT-C"}, answered_before=True)
+
+    assert answer["removed"] is False and answer["readError"] == "its Unit still answers its Unit Campaign rows"
 
 
 def test_a_canary_that_changed_across_the_sweep_fails_the_run() -> None:

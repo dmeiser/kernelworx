@@ -55,7 +55,8 @@ What the lane does, in order:
    still owes its Unit row and its marker to the sweep.
 8. Re-reads the canary and fails if that sweep disturbed it, then takes the canary down with its own
    tokens so the record also shows the sweeper removing a lane it is pointed at.  Its removal has to be
-   *read* absent: a canary read that errors is a failed read-back, never an absence.
+   *read* absent, and read twice: a Campaign read that refuses is decided by the identity's own Unit list,
+   and that list only counts because it answered the Unit before the sweep ran.
 9. Counts the residue that survives all of it, per physical table, by read: Amendment C requires the
    retained class with counts and key shapes, and a sweep report cannot supply that count for a key shape
    no rule describes — such a row is neither deleted nor reported, so a record quoting only sweep lines
@@ -1790,8 +1791,9 @@ def run_cleanup_steps(
     lane and an abandoned one.
 
     The canary's removal has to be *read* absent.  ``_gone`` reports a failed read as a failed read-back
-    rather than as absence, and that row is what makes the run exit non-zero: an unreadable canary is the one
-    result this record must never be able to report as removed.  A removal nobody read back is not a cleanup.
+    rather than as absence, and its Unit-list half only counts once the same read is shown to have answered
+    that Unit before the sweep ran: a removal nobody read back, and a silence the reader never proved it
+    could hear, are not cleanups.
     """
     lane_tokens = sweep_tokens(lane, written, recovery_steps) if lane.get("dataId") else []
     canary_tokens = sweep_tokens(canary, None) if canary.get("dataId") else []
@@ -1819,20 +1821,28 @@ def run_cleanup_steps(
                 canary_after, sort_keys=True
             )
             cleanup += teardown(admin, scout, canary, {})
+            # The control has to be taken while the row is still there: the sweep that works deletes the Unit,
+            # and a Unit list that never named the row cannot be evidence that it later stopped naming it.
+            answered_before = _unit_answers(admin, str(canary["unitId"]))
+            record["canary"]["unitAnsweredBeforeSweep"] = answered_before
             canary_row, canary_detail = sweep_row(canary_tokens, record.get("canaryResidueCensus", {}))
             cleanup.append(canary_row)
             record["canarySweep"] = canary_detail
-            gone = _gone(admin, canary)
+            gone = _gone(admin, canary, answered_before=answered_before)
             record["canary"]["removed"] = gone["removed"]
+            record["canary"]["goneReads"] = gone["reads"]
             if gone["readError"]:
                 record["canary"]["goneReadError"] = gone["readError"]
             cleanup.append(
                 stage3.cleanup_row(
                     "§3.7.7 read the canary back as gone",
-                    "the canary's own Unit answers no Unit Campaign after its own sweep"
+                    "the canary's own Unit answers no Unit Campaign and myUnits no longer answers that Unit, "
+                    "the read that named it while it stood: "
+                    + "; ".join(f"{name} {answer}" for name, answer in gone["reads"].items())
                     if gone["removed"]
                     else "the canary was not affirmatively read back as gone: "
-                    f"{gone['readError'] or 'its Unit Campaign rows are still answered'}",
+                    f"{gone['readError'] or 'its Unit Campaign rows are still answered'} — "
+                    + "; ".join(f"{name} {answer}" for name, answer in gone["reads"].items()),
                     stage2.CLEANUP_OBSERVED if gone["removed"] else stage2.CLEANUP_FAILED,
                 )
             )
@@ -1872,21 +1882,63 @@ def _safe_reads(admin: str, unit_campaign_id: str) -> dict[str, Any]:
         return {"error": str(exc)}
 
 
-def _gone(admin: str, canary: Mapping[str, Any]) -> dict[str, Any]:
-    """Whether the canary's Unit Campaign is no longer answered by its Unit, and what that read said.
+def _unit_answers(admin: str, unit_id: str) -> bool:
+    """Whether this identity's own Unit list answers one Unit id — the read a sweep can stale out.
 
-    A read that errors is not an absence.  Reporting ``True`` for a failed read would let the record claim
-    the one thing it exists to prove — a lane swept clean, with an independent lane still standing — on the
-    strength of not having looked, so the error comes back as ``removed: False`` plus the error text, and the
-    exit gate turns it into a failed run.
+    ``myUnits`` is the read that found the canary's Unit while it stood (the same read
+    :func:`prior_lane` walks for an earlier attempt), which is what makes its silence afterwards a fact about
+    the row rather than about the caller.
     """
+    return any(str(row.get("unitId")) == str(unit_id) for row in _lane_units(admin))
+
+
+def _gone(admin: str, canary: Mapping[str, Any], *, answered_before: bool = False) -> dict[str, Any]:
+    """Whether the canary's rows are gone, and the reads that say so.
+
+    Two reads, because neither one settles it alone.  A sweep that works deletes the Unit row, and afterwards
+    ``unitCampaigns`` answers ``Unit not found`` — a refusal, not an empty list — while a Unit that is still
+    there can also answer no Campaigns.  So the Campaign read decides only when it answers rows; otherwise
+    the Unit list decides, and it decides only against its own earlier answer: a list that never named this
+    Unit proves nothing when it goes on not naming it.  Reporting absence on a single error, or on a read that
+    could not have seen the row, would let the record claim the one thing it exists to prove — a lane swept
+    clean while an independent lane stood untouched — on the strength of not having looked.
+    """
+    reads: dict[str, str] = {}
+    campaign_error = ""
     try:
         items = _items(
             api.gql(admin, stage2.STAGE_TWO_SUPPORT_DOCUMENTS["unitCampaigns"], {"unitId": canary["unitId"]})
         )
+        reads["unitCampaigns"] = f"answers {len(items)} Unit Campaign row(s) for Unit {canary['unitId']}"
+        if items:
+            return {"removed": False, "readError": "its Unit still answers its Unit Campaign rows", "reads": reads}
     except api.GraphQLError as exc:
-        return {"removed": False, "readError": f"{exc.args[0] if exc.args else exc}"}
-    return {"removed": not items, "readError": ""}
+        campaign_error = f"{exc.args[0] if exc.args else exc}"
+        reads["unitCampaigns"] = f"answered {campaign_error!r} for Unit {canary['unitId']}"
+    try:
+        listed = _unit_answers(admin, str(canary["unitId"]))
+    except api.GraphQLError as exc:
+        error = f"{exc.args[0] if exc.args else exc}"
+        reads["myUnits"] = f"answered {error!r}"
+        return {
+            "removed": False,
+            "readError": f"the Unit read that would confirm the row is gone answered {error!r}",
+            "reads": reads,
+        }
+    reads["myUnits"] = f"{'still answers' if listed else 'no longer answers'} Unit {canary['unitId']}"
+    if listed:
+        return {
+            "removed": False,
+            "readError": f"the Unit row is still answered by myUnits ({campaign_error or reads['unitCampaigns']})",
+            "reads": reads,
+        }
+    if not answered_before:
+        return {
+            "removed": False,
+            "readError": "the Unit read never answered this Unit while the canary stood, so its silence proves nothing",
+            "reads": reads,
+        }
+    return {"removed": True, "readError": "", "reads": reads}
 
 
 def lane_failures(record: Mapping[str, Any]) -> list[str]:
