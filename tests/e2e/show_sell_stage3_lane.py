@@ -730,7 +730,7 @@ def _cancel_signup(
     halves are measured, not stylistic: on ``dev`` at ``da90fad6`` ``showAndSellSignups`` is refused to a
     joined Scout with ``Unit not found``, while ``cancelShowAndSellSignup`` deliberately asks nothing about
     the roster (``src/handlers/unit_operations.py``: a Scout removed from membership still has a place to
-    give back, and a caller who is not the Unit's Kernel is authorised by profile access alone), so the Scout
+    give back, and a caller who is not the Unit's Kernel is authorized by profile access alone), so the Scout
     is the entitled canceller while the Kernel is the only one of the two who can read the board.  A version
     is not optional — ``_require_read_version`` refuses a number that disagrees with the row — so a lane
     whose Unit is gone takes its number from ``myScoutCommitments``, which the product keeps in step with the
@@ -1289,7 +1289,7 @@ def recover_standing_commitments(
     sweeper already took cannot be reached through its Unit Campaign — ``showAndSells`` and
     ``showAndSellSignups`` are keyed on rows that no longer exist — so the read that finds the orphan is the
     Scout's own ``myScoutCommitments``, and the write that clears it is ``cancelShowAndSellSignup``, which
-    authorises a non-Kernel caller by profile access alone and asks nothing about the Unit or the roster.
+    authorizes a non-Kernel caller by profile access alone and asks nothing about the Unit or the roster.
     Both are shipped paths: nothing here reaches for the table.
 
     The gate is attribution, and it is not optional.  Every lane on this stack signs in as the same four
