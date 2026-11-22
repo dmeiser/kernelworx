@@ -7608,6 +7608,13 @@ def _confirm_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Di
     versioned, identity-conditioned reference swap commits, and the objects this
     write retired — the image it displaced, anything an earlier write still owed, and
     the browser's upload target — are removed after it.
+
+    A refusal from that proof is the one place the confirm path can answer a caller
+    whose own request already succeeded, because the object it is refusing may be
+    gone for exactly that reason. So the refusal is the fallback, as it is for the
+    other six mutations: :func:`_refuse_unless_committed` looks at the marker once
+    more and returns the committed result when this identical request is what
+    published the attachment and retired the upload the attempt is now missing.
     """
     log = get_logger(__name__)
     payload = _require_input(event)
@@ -7629,7 +7636,19 @@ def _confirm_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Di
 
     _refuse_builtin_mutation(payment_method_id, "given a QR image")
     row = _require_payment_method_row(unit_id, payment_method_id)
-    attachment_key, retired = _publish_confirmed_qr(unit_id, payment_method_id, s3_key, row)
+    refuse = _refuse_unless_committed(runner, keys, fingerprint, CONFIRM_PAYMENT_QR_FIELD, load_payment)
+    try:
+        attachment_key, retired = _publish_confirmed_qr(unit_id, payment_method_id, s3_key, row)
+    except AppError as refused:
+        # The upload this attempt cannot prove may be missing, or already queued for
+        # removal, because this very request already confirmed it: the twin that won
+        # published the attachment and retired the browser's upload target in the
+        # same commit. Refusing here would tell a caller their write failed while the
+        # image they attached is on the method, and every retry would fail the same
+        # way, because the object it wants is never coming back.
+        replayed = refuse(refused)
+        _drain_payment_qr_ledger(unit_id, payment_method_id)
+        return replayed
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)

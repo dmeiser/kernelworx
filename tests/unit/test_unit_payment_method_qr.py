@@ -1301,6 +1301,91 @@ def test_a_qr_delete_whose_twin_already_removed_the_image_is_replayed(
     assert len(markers) == 1
 
 
+def _uploaded_webp(units_table: Any, s3_bucket: Any, payment_method_id: str) -> str:
+    """Ask for a second upload target for an existing method and write the bytes to it.
+
+    The method already carries one image at version 2, which is what a twin race needs:
+    both attempts confirm the same upload against the same expected version.
+    """
+    requested = _request(AVERY, payment_method_id, content_type="image/webp", body=WEBP_BYTES, key="qr-req-2")
+    upload_key = str(requested["s3Key"])
+    s3_bucket.put_object(Bucket=os.environ["EXPORTS_BUCKET"], Key=upload_key, Body=WEBP_BYTES)
+    return upload_key
+
+
+def test_a_confirm_whose_twin_already_published_the_upload_is_replayed(
+    units_table: Any, s3_bucket: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A confirm whose upload its twin already confirmed and retired answers, not fails.
+
+    The attempt read the marker, then its identical twin confirmed the same upload:
+    published the attachment, swapped the reference, and retired the browser's upload
+    target in the post-commit cleanup. So this attempt finds no object to prove, and
+    ``NOT_FOUND`` would tell a caller their write failed while the image they attached
+    is on the method — and every retry fails the same way, because that upload object
+    is never coming back. It replays the committed answer, writes no row and no marker,
+    and publishes no attachment of its own.
+    """
+    _seed(units_table, PACK_ID, [AVERY])
+    payment_method_id, first_key = _attach_qr(units_table, s3_bucket)
+    upload_key = _uploaded_webp(units_table, s3_bucket, payment_method_id)
+    key = "qr-cfm-wise"
+
+    def winner() -> Any:
+        return _confirm(AVERY, payment_method_id, upload_key, key=key, version=2)
+
+    won = _winner_commits_before_the_domains_own_read(monkeypatch, winner)
+    answered = _confirm(AVERY, payment_method_id, upload_key, key=key, version=2)
+
+    assert answered == won["answered"], answered
+    attachment = str(answered["qrCodeS3Key"])
+    assert answered["version"] == 3
+    assert attachment not in (first_key, upload_key)
+    row = _payment_row(units_table, "wise")
+    assert [row["version"], row["qrCodeS3Key"]] == [3, attachment]
+    assert "pendingQrPurgeKeys" not in row
+    # Only the twin's attachment survives: its write retired the image it displaced
+    # and the upload target, and this attempt added nothing to the bucket.
+    assert _keys(s3_bucket) == [attachment]
+    assert len(_markers_for(units_table, CONFIRM_PAYMENT_QR_FIELD, key=key)) == 1
+
+
+def test_a_confirm_refusing_a_doomed_upload_key_replays_its_committed_twin(
+    units_table: Any, s3_bucket: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other shape of the same race: the upload is still there, and already doomed.
+
+    The twin's commit queued the upload target for removal and S3 refused the delete,
+    so the row still owes it and this attempt's proof refuses with ``QR_UPLOAD_RETIRED``
+    before a byte is read. Same answer: the caller's own key already attached the
+    image, so it gets that result. The debt the row carries is attempted again and
+    stays where it was — a loser may pay a debt, never invent or lose an object.
+    """
+    _seed(units_table, PACK_ID, [AVERY])
+    payment_method_id, first_key = _attach_qr(units_table, s3_bucket)
+    upload_key = _uploaded_webp(units_table, s3_bucket, payment_method_id)
+    key = "qr-cfm-owed"
+
+    def refuse_every_delete(bucket: str, s3_key: str) -> bool:
+        return False
+
+    monkeypatch.setattr(qr_objects, "delete_qr_object", refuse_every_delete)
+
+    def winner() -> Any:
+        return _confirm(AVERY, payment_method_id, upload_key, key=key, version=2)
+
+    won = _winner_commits_before_the_domains_own_read(monkeypatch, winner)
+    answered = _confirm(AVERY, payment_method_id, upload_key, key=key, version=2)
+
+    assert answered == won["answered"], answered
+    attachment = str(answered["qrCodeS3Key"])
+    row = _payment_row(units_table, "wise")
+    assert [row["version"], row["qrCodeS3Key"]] == [3, attachment]
+    assert set(row["pendingQrPurgeKeys"]) == {first_key, upload_key}
+    assert sorted(_keys(s3_bucket)) == sorted([first_key, upload_key, attachment])
+    assert len(_markers_for(units_table, CONFIRM_PAYMENT_QR_FIELD, key=key)) == 1
+
+
 # --- unitPaymentMethodQrDownloadUrl -----------------------------------------------
 
 
