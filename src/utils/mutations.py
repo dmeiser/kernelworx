@@ -358,6 +358,12 @@ def wire_value(value: Any) -> dict[str, Any]:
         return {"N": str(value)}
     if value is None:
         return {"NULL": True}
+    if isinstance(value, (set, frozenset)):
+        # A set of strings is the one attribute type with no Python analogue in
+        # the scalar branch below: ``str({...})`` would store the repr of a
+        # Python set and read back as one unusable string. Sorted so the encoded
+        # bytes depend on the members, not on set iteration order.
+        return {"SS": sorted(str(member) for member in value)}
     return {"S": str(value)}
 
 

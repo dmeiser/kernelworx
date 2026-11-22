@@ -194,9 +194,9 @@ Any mutation attempted outside this matrix returns `CONFLICT`, except a cross-te
 | `createUnitPaymentMethod` | `unitId`, `displayName`, `idempotencyKey` | `UnitPaymentMethod` | Unit Admin; Cash/Check/Other names reserved case-insensitively; maximum 50 active |
 | `updateUnitPaymentMethod` | `unitId`, `paymentMethodId`, `displayName`, `expectedVersion`, `idempotencyKey` | `UnitPaymentMethod` | Unit Admin; same reserved/duplicate-name rules; server consistently queries the Unit's payment collection to resolve ID; historical snapshots unchanged |
 | `deactivateUnitPaymentMethod` | `unitId`, `paymentMethodId`, `expectedVersion`, `idempotencyKey` | `UnitPaymentMethod` | Unit Admin; soft deactivate only; historical sales remain readable |
-| `requestUnitPaymentMethodQrUpload` | `unitId`, `paymentMethodId`, `contentType`, `idempotencyKey` | `S3UploadInfo` containing scoped upload URL/fields/key | Unit Admin; existing QR validation and S3 key rules |
-| `confirmUnitPaymentMethodQrUpload` | `unitId`, `paymentMethodId`, `s3Key`, `expectedVersion`, `idempotencyKey` | `UnitPaymentMethod` with QR reference | Unit Admin; validates Unit ownership, upload, type, and size |
-| `deleteUnitPaymentMethodQrCode` | `unitId`, `paymentMethodId`, `expectedVersion`, `idempotencyKey` | `UnitPaymentMethod` | Unit Admin; removes S3 object and reference without altering sale history |
+| `requestUnitPaymentMethodQrUpload` | `unitId`, `paymentMethodId`, `contentType`, `sha256`, `idempotencyKey` | `S3UploadInfo` containing scoped upload URL/fields/key | Unit Admin; existing QR validation and S3 key rules; `sha256` is the lowercase hex digest of the bytes being uploaded and the returned key names it, so confirm can prove the object matches |
+| `confirmUnitPaymentMethodQrUpload` | `unitId`, `paymentMethodId`, `s3Key`, `expectedVersion`, `idempotencyKey` | `UnitPaymentMethod` with QR reference | Unit Admin; validates Unit ownership, upload, type, and size, and that the object's bytes hash to the digest its key names; the object it displaces is retired under a cleanup ledger on the row |
+| `deleteUnitPaymentMethodQrCode` | `unitId`, `paymentMethodId`, `expectedVersion`, `idempotencyKey` | `UnitPaymentMethod` | Unit Admin; removes S3 object and reference without altering sale history; an S3 delete that fails stays recorded on the row for the next write to retry |
 
 ### 4.4 Unit Campaign mutations
 

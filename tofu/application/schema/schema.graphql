@@ -1242,6 +1242,8 @@ input RequestUnitPaymentMethodQrUploadInput {
   paymentMethodId: ID!
   """The image content type the browser uploads: image/png, image/jpeg, or image/webp."""
   contentType: String!
+  """Lowercase hex SHA-256 of the exact bytes being uploaded; the object name commits to it and confirm proves the object matches it."""
+  sha256: String!
   """Idempotency for the mutation."""
   idempotency: IdempotencyInput!
 }

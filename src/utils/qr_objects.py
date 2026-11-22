@@ -5,11 +5,15 @@ Unit payment method's shared QR — arrives by a browser POST to a pre-signed
 form, and S3 validates only the form field that declares the content type. So
 the confirm step is the one place that can learn what the bytes actually are,
 and it has to decide the same way for every writer: the object must exist, it
-must fit the size the pre-signed POST already promised, and its magic numbers
-must match the format its own key extension claims — a JPEG stored as ``.png``
-would otherwise be served under an ``image/png`` URL (#559). A rejected object
-is purged before the error is raised, so a bad upload cannot linger in the
-first-party bucket.
+must fit the size the pre-signed POST already promised, its magic numbers must
+match the format its own key extension claims — a JPEG stored as ``.png`` would
+otherwise be served under an ``image/png`` URL (#559) — and its SHA-256 must be
+the digest its key names. That last check is what turns a stored reference into
+a promise about bytes: the key was minted from the digest the browser declared
+before it uploaded, so confirming proves the object in the bucket is the object
+that key describes, and a later POST cannot swap the content underneath a
+reference that is already current. A rejected object is purged before the error
+is raised, so a bad upload cannot linger in the first-party bucket.
 
 This module is the single source for those rules and for the pre-signed POST
 and GET builders. It deliberately reads no DynamoDB table: the QR object layer
@@ -20,6 +24,7 @@ here would carry an IAM grant the QR path must not have.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -50,6 +55,13 @@ QR_DOWNLOAD_TTL_SECONDS = 900
 
 # The head-object answers that mean "this key is not here".
 _MISSING_OBJECT_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
+
+# S3 answers a HeadObject for a key the caller has no grant on with 403, and —
+# without the bucket-level ListBucket that lets it prove a key is simply absent —
+# it answers a missing key that way too. Only a real denial is here, so a missing
+# upload can never be reported as one, and a denial can never be papered over as
+# "upload not found".
+_DENIED_OBJECT_CODES = frozenset({"403", "AccessDenied", "AccessDeniedException"})
 
 
 def qr_extension_for_content_type(content_type: Any) -> str:
@@ -102,43 +114,58 @@ def image_magic_matches_key(body: bytes, s3_key: str) -> bool:
     return validator is not None and validator(body)
 
 
-def qr_object_is_permitted_image(s3_client: S3Client, bucket: str, s3_key: str, content_length: int) -> bool:
-    """Check the object's leading bytes against the format its key claims.
+def qr_object_bytes(s3_client: S3Client, bucket: str, s3_key: str) -> bytes:
+    """The object's bytes, read once so the magic numbers and the digest agree.
 
-    Only the first 12 bytes are read (the WEBP form type sits at offset 8), so
-    the check stays a fixed-cost peek regardless of how large the object is.
+    The caller has already bounded the size with a HEAD, and one read means the
+    format check and the digest check describe the same object rather than two
+    snapshots of it.
     """
-    if content_length == 0:
-        return False
-    response = s3_client.get_object(Bucket=bucket, Key=s3_key, Range="bytes=0-11")
-    return image_magic_matches_key(response["Body"].read(), s3_key)
+    return bytes(s3_client.get_object(Bucket=bucket, Key=s3_key)["Body"].read())
 
 
-def validate_uploaded_qr_object(bucket: str, s3_key: str) -> None:
+def validate_uploaded_qr_object(bucket: str, s3_key: str, expected_digest: str) -> None:
     """Validate what the browser actually uploaded, purging it when it is bad.
+
+    Three things have to be true of the object before a row may point at it: it
+    exists, it is the image its own key extension claims, and its SHA-256 is the
+    digest the key names. The third is what makes the attachment immutable — the
+    stored reference commits to specific bytes, and confirmation proves the bytes
+    in the bucket are those bytes — so a POST that lands on the same key later
+    with different content can never become current.
 
     Raises:
         AppError: NOT_FOUND when the object is missing — the browser has not
             uploaded yet, or the pre-signed window expired before confirm;
-            INVALID_INPUT when the object is over the cap or is not the image
-            its key claims. A rejected object is deleted before that error.
+            FORBIDDEN when S3 refused the read rather than answering it (a
+            missing grant is an infrastructure fault, never a missing upload);
+            INVALID_INPUT when the object is over the cap, is not the image its
+            key claims, or is not the bytes that key names. A rejected object is
+            deleted before that error.
     """
     log = get_logger(__name__)
     s3_client = get_s3_client()
     try:
         head = s3_client.head_object(Bucket=bucket, Key=s3_key)
     except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") in _MISSING_OBJECT_CODES:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code in _MISSING_OBJECT_CODES:
             raise AppError(ErrorCode.NOT_FOUND, "Upload not found. Please upload the file first.") from exc
+        if code in _DENIED_OBJECT_CODES:
+            raise AppError(ErrorCode.FORBIDDEN, "The uploaded QR image could not be read.") from exc
         raise
 
     content_length = int(head.get("ContentLength", 0) or 0)
     if content_length > MAX_QR_BYTES:
         _purge_rejected(s3_client, bucket, s3_key, log, content_length)
         raise AppError(ErrorCode.INVALID_INPUT, f"QR image is larger than {MAX_QR_BYTES // (1024 * 1024)} MB")
-    if not qr_object_is_permitted_image(s3_client, bucket, s3_key, content_length):
+    body = qr_object_bytes(s3_client, bucket, s3_key)
+    if not image_magic_matches_key(body, s3_key):
         _purge_rejected(s3_client, bucket, s3_key, log, content_length)
         raise AppError(ErrorCode.INVALID_INPUT, "Uploaded file is not a valid image")
+    if hashlib.sha256(body).hexdigest() != expected_digest:
+        _purge_rejected(s3_client, bucket, s3_key, log, content_length)
+        raise AppError(ErrorCode.INVALID_INPUT, "Uploaded file does not match the upload request")
 
 
 def _purge_rejected(s3_client: S3Client, bucket: str, s3_key: str, log: Any, content_length: int) -> None:

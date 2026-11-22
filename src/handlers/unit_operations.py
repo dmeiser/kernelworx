@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, cast
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 try:  # pragma: no cover
     from utils import (
@@ -6827,9 +6827,10 @@ def _create_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
+    _stage_capacity_change(plan, unit_id, delta=1, counted_active=active_count, caller_id=caller_id)
     plan.add("Put", _put_action(item))
     build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
-    runner.execute(
+    committed = runner.execute(
         keys,
         plan,
         operation=CREATE_PAYMENT_METHOD_FIELD,
@@ -6838,6 +6839,13 @@ def _create_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
         load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
         result_payload=build_result,
     )
+    if not isinstance(committed, str):
+        # A concurrent identical request committed between this handler's replay
+        # check and the transaction, and the runner replayed ITS answer. That row
+        # is the one this idempotency key produced; the uuid minted here was never
+        # written, so returning it would hand the caller a method that does not
+        # exist and log a creation that did not happen.
+        return dict(committed)
     result = build_result()
     log.info(
         "Unit payment method created",
@@ -6849,8 +6857,99 @@ def _create_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
     return result
 
 
+def _version_and_owner_condition(row_owner_id: str, expected_version: int) -> Dict[str, Any]:
+    """The condition every write to a name-keyed payment row must carry.
+
+    ``paymentMethodId`` is the row's stable identity and the sort key is not: a
+    rename moves a method off one name key and another method — or a re-created
+    one with the same name — can occupy that key at the same version number. A
+    condition on the version alone therefore lets a stale write land on a
+    different method than the one the caller read. Both facts are checked, so
+    the write either applies to the method that was read or refuses whole.
+    """
+    return {
+        "ConditionExpression": "#version = :expectedVersion AND #paymentMethodId = :paymentMethodId",
+        "ExpressionAttributeNames": {"#version": "version", "#paymentMethodId": "paymentMethodId"},
+        "ExpressionAttributeValues": {
+            ":expectedVersion": {"N": str(expected_version)},
+            ":paymentMethodId": {"S": row_owner_id},
+        },
+    }
+
+
+def _stage_capacity_change(plan: Any, unit_id: str, *, delta: int, counted_active: int, caller_id: str) -> None:
+    """Stage the counter move that settles the 50-active-method ceiling (§4.1.1).
+
+    The collection count a mutation reads first cannot settle the ceiling: it is
+    read outside the transaction, so two differently named creates both see 49
+    and both write. DynamoDB evaluates this action's condition inside the
+    transaction, so exactly one of the two commits and the other refuses whole
+    and re-reads. A Unit with no counter yet is seeded from the count just read,
+    not from an assumption, so a collection that predates the counter still
+    starts under the ceiling.
+    """
+    counter = unit_payment_models.read_payment_active_count(unit_id)
+    if counter is None:
+        seeded = max(counted_active + delta, 0)
+        plan.add("Put", _capacity_seed_action(unit_id, active_count=seeded, caller_id=caller_id))
+        return
+    plan.add("Update", _capacity_move_action(unit_id, delta=delta, caller_id=caller_id))
+
+
+def _capacity_seed_action(unit_id: str, *, active_count: int, caller_id: str) -> Dict[str, Any]:
+    """First write of the ceiling counter for a Unit that has never had one.
+
+    The Put's ``attribute_not_exists`` guard is the race: two first creates on one
+    Unit settle by the write, and the loser retries against a counter that exists.
+    """
+    return _put_action(
+        {
+            **unit_payment_models.payment_capacity_key(unit_id),
+            "activeCount": active_count,
+            "updatedAt": utc_now_iso(),
+            "updatedByAccountId": caller_id,
+        }
+    )
+
+
+def _capacity_move_action(unit_id: str, *, delta: int, caller_id: str) -> Dict[str, Any]:
+    """One atomic counter move, with the ceiling or the floor as its condition.
+
+    The floor on the way down is the same guard as a non-negative inventory
+    balance: a counter that would drop below zero is already inconsistent, and the
+    write refuses rather than making it worse.
+    """
+    rising = delta > 0
+    bound = unit_payment_models.MAX_ACTIVE_PAYMENT_METHODS if rising else 0
+    return {
+        "TableName": tables.units.table_name,
+        "Key": wire_key(unit_payment_models.payment_capacity_key(unit_id)),
+        "UpdateExpression": "SET #activeCount = #activeCount + :delta, #updatedAt = :updatedAt, "
+        "#updatedBy = :updatedBy",
+        "ExpressionAttributeNames": {
+            "#activeCount": "activeCount",
+            "#updatedAt": "updatedAt",
+            "#updatedBy": "updatedByAccountId",
+        },
+        "ExpressionAttributeValues": {
+            ":delta": {"N": str(delta)},
+            ":bound": {"N": str(bound)},
+            ":updatedAt": {"S": utc_now_iso()},
+            ":updatedBy": {"S": caller_id},
+        },
+        "ConditionExpression": "#activeCount < :bound" if rising else "#activeCount > :bound",
+        "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+    }
+
+
 def _rename_update_action(
-    unit_id: str, *, normalized_name: str, display_name: str, caller_id: str, expected_version: int
+    unit_id: str,
+    *,
+    normalized_name: str,
+    payment_method_id: str,
+    display_name: str,
+    caller_id: str,
+    expected_version: int,
 ) -> Dict[str, Any]:
     """The single-key rename for a case-only name change.
 
@@ -6859,6 +6958,7 @@ def _rename_update_action(
     the condition, not just the pre-check, so two racing renames leave exactly
     one winner.
     """
+    condition = _version_and_owner_condition(payment_method_id, expected_version)
     return {
         "TableName": tables.units.table_name,
         "Key": wire_key(unit_payment_models.payment_key(unit_id, normalized_name)),
@@ -6868,16 +6968,16 @@ def _rename_update_action(
             "#displayName": "displayName",
             "#updatedAt": "updatedAt",
             "#updatedBy": "updatedByAccountId",
-            "#version": "version",
+            **condition["ExpressionAttributeNames"],
         },
         "ExpressionAttributeValues": {
             ":displayName": {"S": display_name},
             ":updatedAt": {"S": utc_now_iso()},
             ":updatedBy": {"S": caller_id},
             ":one": {"N": "1"},
-            ":expectedVersion": {"N": str(expected_version)},
+            **condition["ExpressionAttributeValues"],
         },
-        "ConditionExpression": "#version = :expectedVersion",
+        "ConditionExpression": condition["ConditionExpression"],
         "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
     }
 
@@ -6927,7 +7027,7 @@ def _update_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
     row = unit_payment_models.find_payment_by_id(unit_id, payment_method_id)
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, "Unit payment method not found")
-    old_normalized = str(row["sk"])[len(unit_payment_models.PAYMENT_SK_PREFIX) + 1 :]
+    old_normalized = unit_payment_models.normalized_name_from_sk(str(row["sk"]))
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
@@ -6937,6 +7037,7 @@ def _update_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
             _rename_update_action(
                 unit_id,
                 normalized_name=old_normalized,
+                payment_method_id=payment_method_id,
                 display_name=display_name,
                 caller_id=caller_id,
                 expected_version=expected_version,
@@ -6960,22 +7061,27 @@ def _update_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
             created_at=str(row["createdAt"]),
             is_active=bool(row.get("isActive", True)),
             qr_code_s3_key=row.get("qrCodeS3Key") if isinstance(row.get("qrCodeS3Key"), str) else None,
+            pending_qr_purge_keys=_pending_qr_purge_keys(row),
             version=int(row["version"]) + 1,
+            # The rename carries the creation audit onto the new key AND names the
+            # admin who renamed: `createdByAccountId` stays who made the method,
+            # `updatedByAccountId` is this writer. Copying the creator into both
+            # would misattribute the last editor to someone who may have left the Unit.
+            updated_by_account_id=caller_id,
         )
+        condition = _version_and_owner_condition(payment_method_id, expected_version)
         plan.add("Put", _put_action(renamed_item))
         plan.add(
             "Delete",
             {
                 "TableName": tables.units.table_name,
                 "Key": wire_key(unit_payment_models.payment_key(unit_id, old_normalized)),
-                "ConditionExpression": "#version = :expectedVersion",
-                "ExpressionAttributeNames": {"#version": "version"},
-                "ExpressionAttributeValues": {":expectedVersion": {"N": str(expected_version)}},
+                **condition,
                 "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
             },
         )
     build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
-    runner.execute(
+    committed = runner.execute(
         keys,
         plan,
         operation=UPDATE_PAYMENT_METHOD_FIELD,
@@ -6984,6 +7090,11 @@ def _update_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
         load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
         result_payload=build_result,
     )
+    if not isinstance(committed, str):
+        # A concurrent identical request committed between this handler's replay
+        # check and the transaction, so the rename the caller asked for is
+        # already in the table and the runner holds its answer.
+        return dict(committed)
     result = build_result()
     log.info(
         "Unit payment method renamed",
@@ -7027,14 +7138,30 @@ def _deactivate_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[st
         return replayed
 
     _refuse_builtin_mutation(payment_method_id, "deactivated")
-    row = unit_payment_models.find_payment_by_id(unit_id, payment_method_id)
+    rows = unit_payment_models.list_payment_rows(unit_id)
+    row = next(
+        (candidate for candidate in rows if str(candidate.get("paymentMethodId", "")) == payment_method_id), None
+    )
     if row is None:
         raise AppError(ErrorCode.NOT_FOUND, "Unit payment method not found")
+    if not row.get("isActive", True):
+        # The collection count is the counter's seed, and one deactivation is
+        # allowed to move it by exactly one. A second flip of an inactive method
+        # would take a slot that was never given back, so it refuses rather than
+        # re-stamping a row that is already down.
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "This payment method is already inactive.",
+            details={"subcode": "PAYMENT_METHOD_NOT_ACTIVE"},
+        )
+    active_count = sum(1 for candidate in rows if candidate.get("isActive", True))
 
-    old_normalized = str(row["sk"])[len(unit_payment_models.PAYMENT_SK_PREFIX) + 1 :]
+    old_normalized = unit_payment_models.normalized_name_from_sk(str(row["sk"]))
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
+    _stage_capacity_change(plan, unit_id, delta=-1, counted_active=active_count, caller_id=caller_id)
+    condition = _version_and_owner_condition(payment_method_id, expected_version)
     plan.add(
         "Update",
         {
@@ -7046,21 +7173,21 @@ def _deactivate_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[st
                 "#isActive": "isActive",
                 "#updatedAt": "updatedAt",
                 "#updatedBy": "updatedByAccountId",
-                "#version": "version",
+                **condition["ExpressionAttributeNames"],
             },
             "ExpressionAttributeValues": {
                 ":false": {"BOOL": False},
                 ":updatedAt": {"S": utc_now_iso()},
                 ":updatedBy": {"S": caller_id},
                 ":one": {"N": "1"},
-                ":expectedVersion": {"N": str(expected_version)},
+                **condition["ExpressionAttributeValues"],
             },
-            "ConditionExpression": "#version = :expectedVersion",
+            "ConditionExpression": condition["ConditionExpression"],
             "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
         },
     )
     build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
-    runner.execute(
+    committed = runner.execute(
         keys,
         plan,
         operation=DEACTIVATE_PAYMENT_METHOD_FIELD,
@@ -7069,6 +7196,8 @@ def _deactivate_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[st
         load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
         result_payload=build_result,
     )
+    if not isinstance(committed, str):
+        return dict(committed)
     result = build_result()
     log.info(
         "Unit payment method deactivated",
@@ -7117,14 +7246,33 @@ def _qr_upload_payload(s3_key: str) -> Dict[str, Any]:
     return dict(qr_objects.presigned_qr_upload(_exports_bucket(), s3_key, qr_objects.content_type_for_qr_key(s3_key)))
 
 
+def _signed_once(signed: Dict[str, Any]) -> Callable[[str], Dict[str, Any]]:
+    """One signer per request, so the marker and the response carry the SAME credentials.
+
+    Signing is not a pure read: each call mints a fresh signature. Answering the
+    stored result and the response from different signatures would make a replay
+    of this request hand back a POST that no attempt ever used, and the caller
+    would upload bytes to a key the marker never named.
+    """
+
+    def sign(s3_key: str) -> Dict[str, Any]:
+        if not signed:
+            signed.update(_qr_upload_payload(s3_key))
+        return dict(signed)
+
+    return sign
+
+
 def _request_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     """Mint one scoped upload target for a Unit payment method's QR image.
 
     Nothing is written but the marker: the object does not exist yet, and the
     reference on the row is what the confirm mutation moves. The key carries the
-    Unit id and the paymentMethodId, so a key that arrives later on confirm is
-    checkable against the method it claims to belong to, and the execution
-    role's single S3 grant stays scoped to the Unit QR prefix.
+    Unit id, the paymentMethodId, and the SHA-256 the browser declares for the
+    bytes it is about to POST, so a key that arrives later on confirm is checkable
+    both against the method it claims to belong to and against the bytes it
+    claims to hold, and the execution role's single S3 grant stays scoped to the
+    Unit QR prefix.
     """
     log = get_logger(__name__)
     payload = _require_input(event)
@@ -7136,27 +7284,36 @@ def _request_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Di
 
     keys = _marker(caller_id=caller_id, operation=REQUEST_PAYMENT_QR_FIELD, scope=unit_id, idempotency_key=key)
     _require_active_admin(caller_id, unit_id)
-    replayed = _replay(
-        runner, keys, fingerprint, REQUEST_PAYMENT_QR_FIELD, lambda stored: _qr_upload_payload(str(stored))
-    )
+    signed: Dict[str, Any] = {}
+    sign = _signed_once(signed)
+    replayed = _replay(runner, keys, fingerprint, REQUEST_PAYMENT_QR_FIELD, lambda stored: sign(str(stored)))
     if replayed is not None:
         return replayed
 
     _refuse_builtin_mutation(payment_method_id, "given a QR image")
     _require_payment_method_row(unit_id, payment_method_id)
+    digest = unit_payment_models.normalize_qr_digest(payload.get("sha256"))
     extension = qr_objects.qr_extension_for_content_type(payload.get("contentType"))
-    s3_key = unit_payment_models.new_unit_qr_object_key(unit_id, payment_method_id, extension)
+    s3_key = unit_payment_models.new_unit_qr_object_key(unit_id, payment_method_id, digest, extension)
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=s3_key)
-    runner.execute(
+    committed = runner.execute(
         keys,
         plan,
         operation=REQUEST_PAYMENT_QR_FIELD,
         fingerprint=fingerprint,
         result_id=s3_key,
-        load_result=lambda stored: _qr_upload_payload(str(stored)),
+        load_result=lambda stored: sign(str(stored)),
+        result_payload=lambda: sign(s3_key),
     )
+    if not isinstance(committed, str):
+        # A concurrent identical request finished between this handler's replay
+        # check and the transaction, and the runner replayed its credentials.
+        # Signing a second key here would answer the same idempotencyKey twice
+        # with two different upload targets, and only one of them is named by a
+        # marker that any confirm can satisfy.
+        return dict(committed)
     log.info(
         "Unit payment method QR upload requested",
         unit_id=unit_id,
@@ -7164,76 +7321,167 @@ def _request_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Di
         s3_key=s3_key,
         caller_id=caller_id,
     )
-    return _qr_upload_payload(s3_key)
+    return sign(s3_key)
 
 
 def _qr_reference_update_action(
-    row: Mapping[str, Any], *, caller_id: str, expected_version: int, qr_code_s3_key: Optional[str]
+    row: Mapping[str, Any],
+    *,
+    caller_id: str,
+    expected_version: int,
+    qr_code_s3_key: Optional[str],
+    retired: Sequence[str],
 ) -> Dict[str, Any]:
     """The one conditional Update that moves or clears the QR reference.
 
-    expectedVersion rides in the condition, so a confirm or delete that read a
-    stale revision cannot displace an image another admin attached in the
-    meantime -- which is also what keeps a replacement from deleting the wrong
-    object.
+    ``expectedVersion`` and ``paymentMethodId`` both ride in the condition, so a
+    confirm or delete that read a stale revision cannot displace an image another
+    admin attached in the meantime — which is also what keeps a replacement from
+    deleting the wrong object, and stops a stale request from re-attaching a
+    method that is no longer the one it read.
+
+    The cleanup ledger for the objects this write retires is written by the SAME
+    action, atomically with the reference swap. Nothing else can hold that work:
+    a post-commit S3 delete that fails has to leave a record behind, and a record
+    written after the swap commits is a record a crash can lose.
     """
     assigning = qr_code_s3_key is not None
+    condition = _version_and_owner_condition(str(row["paymentMethodId"]), expected_version)
+    ledger = sorted(set(retired))
+    sets = ["#updatedAt = :updatedAt", "#updatedBy = :updatedBy", "#version = #version + :one"]
+    if assigning:
+        sets.insert(0, "#qr = :qr")
+    if ledger:
+        sets.append("#pending = :pending")
+    removes = ([] if assigning else ["#qr"]) + ([] if ledger else ["#pending"])
     return {
         "TableName": tables.units.table_name,
         # The row's own key pair, never a rebuilt one: the sort key is the
         # normalized name as it was stored, and re-deriving it here could address
         # a different row than the one whose version this condition checks.
         "Key": wire_key({"pk": str(row["pk"]), "sk": str(row["sk"])}),
-        "UpdateExpression": (
-            "SET #qr = :qr, #updatedAt = :updatedAt, #updatedBy = :updatedBy, #version = #version + :one"
-            if assigning
-            else "REMOVE #qr SET #updatedAt = :updatedAt, #updatedBy = :updatedBy, #version = #version + :one"
-        ),
+        "UpdateExpression": "SET " + ", ".join(sets) + (f" REMOVE {', '.join(removes)}" if removes else ""),
         "ExpressionAttributeNames": {
             "#qr": "qrCodeS3Key",
             "#updatedAt": "updatedAt",
             "#updatedBy": "updatedByAccountId",
-            "#version": "version",
+            "#pending": "pendingQrPurgeKeys",
+            **condition["ExpressionAttributeNames"],
         },
         "ExpressionAttributeValues": {
             **({":qr": {"S": str(qr_code_s3_key)}} if assigning else {}),
+            **({":pending": {"SS": ledger}} if ledger else {}),
             ":updatedAt": {"S": utc_now_iso()},
             ":updatedBy": {"S": caller_id},
             ":one": {"N": "1"},
-            ":expectedVersion": {"N": str(expected_version)},
+            **condition["ExpressionAttributeValues"],
         },
-        "ConditionExpression": "#version = :expectedVersion",
+        "ConditionExpression": condition["ConditionExpression"],
         "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
     }
 
 
-def _purge_displaced_qr(unit_id: str, payment_method_id: str, displaced: Optional[str], accepted: str) -> None:
-    """Delete the object a committed replacement displaced (4.1.2 cleanup).
+def _pending_qr_purge_keys(row: Mapping[str, Any]) -> list[str]:
+    """QR objects an earlier write retired but could not delete."""
+    stored = row.get("pendingQrPurgeKeys")
+    if not isinstance(stored, (set, frozenset, list, tuple)):
+        return []
+    return [str(key) for key in stored if isinstance(key, str) and key]
 
-    Only a key this very method owns is ever removed: an object outside the
-    method's own prefix belongs to another tenant or to the legacy account
-    scheme, and this write has no business touching it. The reference is already
-    committed, so a refused delete is an orphan to log, never a reason to undo
-    the write the caller asked for.
+
+def _retired_qr_keys(
+    row: Mapping[str, Any],
+    unit_id: str,
+    payment_method_id: str,
+    *newly_retired: Optional[str],
+    keep: Optional[str] = None,
+) -> list[str]:
+    """What this write owes S3: what it just retired, plus what an earlier one owed.
+
+    Two exclusions. The object that is current after the write is never in the
+    list — that is what stops a key still sitting in the retry ledger from taking
+    down the image a reader can still see, even when a competing confirm put that
+    same key back on the row. And a key outside this method's own prefix is never
+    in it either: an object under another Unit, another method, or the legacy
+    account scheme is somebody else's bytes, and owing their deletion would let a
+    later write reach across tenants.
     """
     log = get_logger(__name__)
-    if not displaced or displaced == accepted:
+    owed: list[str] = []
+    for key in [*_pending_qr_purge_keys(row), *newly_retired]:
+        if not key or key == keep:
+            continue
+        if not unit_payment_models.unit_qr_key_is_mine(key, unit_id, payment_method_id):
+            log.warning("QR object left in place: key is outside this method's prefix", s3_key=key)
+            continue
+        owed.append(key)
+    return sorted(set(owed))
+
+
+def _retire_qr_objects(row: Mapping[str, Any], unit_id: str, payment_method_id: str, ledger: Sequence[str]) -> None:
+    """Delete what the committed write's ledger owes, and clear it once paid (4.1.2).
+
+    The ledger rode in the SAME transaction as the reference swap, so a delete S3
+    refused is already recorded on the row before this function runs, and the next
+    write on this method retries it: a bucket no sweeper walks only stays clean if
+    the row that made the orphan remembers it. Clearing after the deletes succeed
+    is what keeps the ledger from growing forever, and it is safe in both
+    directions — crash before the clear and the next write deletes already-gone
+    objects (S3 DeleteObject is idempotent), lose the clear to a concurrent write
+    and that write carried the ledger forward itself.
+    """
+    if not ledger:
         return
-    if not unit_payment_models.unit_qr_key_is_mine(displaced, unit_id, payment_method_id):
-        log.warning("Displaced QR object left in place: key is outside this method's prefix", s3_key=displaced)
+    failed = [key for key in ledger if not qr_objects.delete_qr_object(_exports_bucket(), key)]
+    if failed:
+        get_logger(__name__).warning(
+            "QR objects still owed; the next write on this method retries them", keys=failed, unit_id=unit_id
+        )
         return
-    qr_objects.delete_qr_object(_exports_bucket(), displaced)
+    _clear_qr_purge_ledger(row, payment_method_id=payment_method_id, version=int(row["version"]) + 1)
+
+
+def _clear_qr_purge_ledger(row: Mapping[str, Any], *, payment_method_id: str, version: int) -> None:
+    """Drop a cleanup ledger this write drained to nothing.
+
+    Same guard as :func:`_version_and_owner_condition`, written in the native
+    types the table-resource client takes rather than the wire types the
+    transaction plan carries: this is a follow-up write of its own, and the two
+    encodings are not interchangeable. Conditioning it on the revision this write
+    produced is what makes losing the race harmless — the write that moved the row
+    past it carried the ledger forward itself.
+    """
+    try:
+        tables.units.update_item(
+            Key={"pk": str(row["pk"]), "sk": str(row["sk"])},
+            UpdateExpression="REMOVE #pending",
+            ExpressionAttributeNames={
+                "#pending": "pendingQrPurgeKeys",
+                "#version": "version",
+                "#paymentMethodId": "paymentMethodId",
+            },
+            ExpressionAttributeValues={":expectedVersion": version, ":paymentMethodId": payment_method_id},
+            ConditionExpression="#version = :expectedVersion AND #paymentMethodId = :paymentMethodId",
+        )
+    except (ClientError, BotoCoreError) as exc:
+        # Either another write owns the row now — it carried the ledger forward,
+        # so nothing is lost — or the record of a debt already paid lingers. Both
+        # end the same way: the next write retries the deletes, which is free.
+        get_logger(__name__).warning("QR cleanup ledger could not be cleared", error=str(exc))
 
 
 def _confirm_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     """Attach an uploaded QR image to a Unit payment method (4.1.2).
 
-    Three checks run before anything is written: the key must sit under this
+    Four checks run before anything is written: the key must sit under this
     method's own prefix (a key for another Unit, another method, or the legacy
     account scheme is refused before S3 is touched at all), the object must
-    exist, and its bytes must be the image its extension claims and fit the size
-    the pre-signed POST already pinned. Only then does the versioned reference
-    swap commit, and the displaced object is removed after it.
+    exist, its bytes must be the image its extension claims and fit the size the
+    pre-signed POST already pinned, and their SHA-256 must be the digest the key
+    names — so the reference this write commits to is a promise about specific
+    bytes, not about a name someone else can re-POST. Only then does the
+    versioned, identity-conditioned reference swap commit, and the objects this
+    write retired are removed after it.
     """
     log = get_logger(__name__)
     payload = _require_input(event)
@@ -7259,19 +7507,23 @@ def _confirm_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Di
 
     _refuse_builtin_mutation(payment_method_id, "given a QR image")
     row = _require_payment_method_row(unit_id, payment_method_id)
-    if not unit_payment_models.unit_qr_key_is_mine(s3_key, unit_id, payment_method_id):
+    expected_digest = unit_payment_models.unit_qr_key_digest(s3_key, unit_id, payment_method_id)
+    if not expected_digest:
         raise AppError(ErrorCode.FORBIDDEN, "Invalid S3 key - access denied")
-    qr_objects.validate_uploaded_qr_object(_exports_bucket(), s3_key)
+    qr_objects.validate_uploaded_qr_object(_exports_bucket(), s3_key, expected_digest)
     displaced = _stored_qr_key(row)
+    retired = _retired_qr_keys(row, unit_id, payment_method_id, displaced, keep=s3_key)
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
     plan.add(
         "Update",
-        _qr_reference_update_action(row, caller_id=caller_id, expected_version=expected_version, qr_code_s3_key=s3_key),
+        _qr_reference_update_action(
+            row, caller_id=caller_id, expected_version=expected_version, qr_code_s3_key=s3_key, retired=retired
+        ),
     )
     build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
-    runner.execute(
+    committed = runner.execute(
         keys,
         plan,
         operation=CONFIRM_PAYMENT_QR_FIELD,
@@ -7280,7 +7532,13 @@ def _confirm_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Di
         load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
         result_payload=build_result,
     )
-    _purge_displaced_qr(unit_id, payment_method_id, displaced, s3_key)
+    if not isinstance(committed, str):
+        # A concurrent identical request committed first, so the reference swap
+        # and its cleanup ledger belong to that attempt. Deleting the objects
+        # this attempt merely replayed would race a write whose ledger is the one
+        # now stored, and could remove an image that method is still showing.
+        return dict(committed)
+    _retire_qr_objects(row, unit_id, payment_method_id, retired)
     result = build_result()
     log.info(
         "Unit payment method QR image confirmed",
@@ -7329,15 +7587,18 @@ def _delete_unit_payment_qr_code(event: Dict[str, Any], caller_id: str) -> Dict[
     stored = _stored_qr_key(row)
     if stored is None:
         raise AppError(ErrorCode.INVALID_INPUT, "This payment method has no QR image to remove")
+    retired = _retired_qr_keys(row, unit_id, payment_method_id, stored)
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
     plan.add(
         "Update",
-        _qr_reference_update_action(row, caller_id=caller_id, expected_version=expected_version, qr_code_s3_key=None),
+        _qr_reference_update_action(
+            row, caller_id=caller_id, expected_version=expected_version, qr_code_s3_key=None, retired=retired
+        ),
     )
     build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
-    runner.execute(
+    committed = runner.execute(
         keys,
         plan,
         operation=DELETE_PAYMENT_QR_FIELD,
@@ -7346,7 +7607,9 @@ def _delete_unit_payment_qr_code(event: Dict[str, Any], caller_id: str) -> Dict[
         load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
         result_payload=build_result,
     )
-    _purge_displaced_qr(unit_id, payment_method_id, stored, "")
+    if not isinstance(committed, str):
+        return dict(committed)
+    _retire_qr_objects(row, unit_id, payment_method_id, retired)
     result = build_result()
     log.info(
         "Unit payment method QR image removed",

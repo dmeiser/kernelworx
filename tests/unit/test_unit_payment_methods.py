@@ -19,11 +19,14 @@ the Stage 1 fixture event builder:
 - ``VER-01``/``IDEM`` — stale versions ``CONFLICT``, an identical retry replays
   the original result with no second effect, and a same-key different-content
   retry is refused.
+- the write window — the 50-active ceiling is settled by the counter's condition
+  and a reusable name key by its ``paymentMethodId``, both inside the
+  transaction, and a twin that commits first is replayed rather than re-applied.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 import pytest
 
@@ -34,8 +37,10 @@ from src.handlers.unit_operations import (
     UPDATE_PAYMENT_METHOD_FIELD,
     handle_unit_operation,
 )
+from src.utils import unit_payment_models
 from src.utils.errors import AppError, ErrorCode
-from src.utils.unit_payment_models import MAX_ACTIVE_PAYMENT_METHODS, build_payment_item
+from src.utils.mutations import IdempotentMutationRunner
+from src.utils.unit_payment_models import MAX_ACTIVE_PAYMENT_METHODS, PAYMENT_CAPACITY_SK, build_payment_item
 from tests.unit.show_sell_fixtures import (
     account_id,
     assert_is_error,
@@ -74,6 +79,11 @@ def _payment_rows(units_table: Any, pk: str = PACK_PK) -> List[Dict[str, Any]]:
 def _markers(units_table: Any) -> List[Dict[str, Any]]:
     """Idempotency markers written on the Units table."""
     return [row for row in units_table.scan()["Items"] if str(row["pk"]).startswith("IDEM#")]
+
+
+def _markers_for(units_table: Any, operation: str) -> List[Dict[str, Any]]:
+    """The markers one operation type wrote, whatever else the test seeded."""
+    return [row for row in _markers(units_table) if f"#{operation}#" in str(row["pk"])]
 
 
 def _create(units_table: Any, caller: Any, *, unit_id: str = PACK_ID, key: str = "create-1", **input: Any) -> Any:
@@ -512,6 +522,170 @@ def test_a_revoked_admin_and_a_cross_unit_id_are_denied_without_writes(units_tab
     )
     assert [(row["pk"], row["sk"]) for row in _payment_rows(units_table, TROOP_PK)] == [(TROOP_PK, "PAYMENT#wise")]
     assert _payment_rows(units_table) == []
+
+
+# --- what decides when two writes race --------------------------------------------
+
+
+def _capacity_counter(units_table: Any, pk: str = PACK_PK) -> int:
+    """The Unit's stored active-method counter."""
+    rows = [row for row in units_table.scan()["Items"] if row["pk"] == pk and row["sk"] == PAYMENT_CAPACITY_SK]
+    assert len(rows) == 1, f"expected one {PAYMENT_CAPACITY_SK} row, got {rows!r}"
+    return int(rows[0]["activeCount"])
+
+
+def _plant_active_methods(units_table: Any, count: int) -> None:
+    """Seed a Unit with `count` active customs and a counter that already agrees."""
+    for index in range(count):
+        units_table.put_item(
+            Item=build_payment_item(
+                payment_method_id=f"pm-seeded-{index}",
+                unit_id=PACK_ID,
+                display_name=f"Method {index}",
+                created_by_account_id=AVERY,
+                now_iso="2026-11-21T00:00:00+00:00",
+            )
+        )
+    units_table.put_item(
+        Item={
+            **unit_payment_models.payment_capacity_key(PACK_ID),
+            "activeCount": count,
+            "updatedAt": "2026-11-21T00:00:00+00:00",
+            "updatedByAccountId": AVERY,
+        }
+    )
+
+
+def _twin_commits_in_the_write_window(monkeypatch: pytest.MonkeyPatch, twin: Callable[[], Any]) -> None:
+    """Let an identical concurrent request commit inside one handler's own write window.
+
+    A real twin arrives on a second connection at an unknowable moment, so the
+    interleaving is forced at the one place both halves of every mutation pass
+    through: the idempotency-marker read. The first read is the handler's replay
+    check, the second is inside ``execute``. A twin that lands between them is
+    what the marker condition, the ``paymentMethodId`` condition, and the counter
+    condition exist for, and it cannot be produced any other way in one thread.
+    """
+    real_load = IdempotentMutationRunner.load_marker
+    state = {"calls": 0, "done": False}
+
+    def load_marker(self: Any, keys: Any) -> Any:
+        state["calls"] += 1
+        if state["calls"] == 2 and not state["done"]:
+            state["done"] = True
+            committed = twin()
+            assert not isinstance(committed, dict) or "__isError" not in committed, committed
+        return real_load(self, keys)
+
+    monkeypatch.setattr(IdempotentMutationRunner, "load_marker", load_marker)
+
+
+def test_two_creates_competing_for_the_last_slot_settle_on_the_counter(units_table: Any, monkeypatch: Any) -> None:
+    """PAY-M-01-03 — the collection count is advice; the counter's condition decides.
+
+    Both competitors read 49 active methods, so the read in front of the write
+    cannot be what keeps the Unit at 50: only a counter moved inside the
+    transaction, with the ceiling in its condition, refuses the second one whole.
+    """
+    _seed(units_table, PACK_ID, [AVERY])
+    _plant_active_methods(units_table, MAX_ACTIVE_PAYMENT_METHODS - 1)
+
+    assert _create(units_table, AVERY, key="create-last", displayName="Method 49")["isActive"] is True
+    assert _capacity_counter(units_table) == MAX_ACTIVE_PAYMENT_METHODS
+
+    real_list = unit_payment_models.list_payment_rows
+    monkeypatch.setattr(unit_payment_models, "list_payment_rows", lambda unit_id: real_list(unit_id)[:-1])
+
+    assert_is_error(_create(units_table, AVERY, key="create-twin", displayName="Method 50"), ErrorCode.CONFLICT)
+    assert len(_payment_rows(units_table)) == MAX_ACTIVE_PAYMENT_METHODS
+    assert _capacity_counter(units_table) == MAX_ACTIVE_PAYMENT_METHODS
+    assert len(_markers_for(units_table, CREATE_PAYMENT_METHOD_FIELD)) == 1
+
+
+def test_deactivating_an_inactive_method_frees_no_second_slot(units_table: Any) -> None:
+    """PAY-M-01-03 — one method gives back one slot, and repeating the flip gives none."""
+    _seed(units_table, PACK_ID, [AVERY])
+    created = _create(units_table, AVERY, displayName="Wise")
+    payment_method_id = created["paymentMethodId"]
+    _deactivate(units_table, AVERY, paymentMethodId=payment_method_id, version=1)
+    assert _capacity_counter(units_table) == 0
+
+    denied = assert_is_error(
+        _deactivate(units_table, AVERY, key="deactivate-again", paymentMethodId=payment_method_id, version=2),
+        ErrorCode.CONFLICT,
+    )
+    assert "already inactive" in denied["message"]
+    assert _capacity_counter(units_table) == 0
+    assert _payment_rows(units_table)[0]["version"] == 2
+
+
+def test_a_name_reused_while_a_write_is_in_flight_refuses_the_stale_write(
+    units_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sort key is reusable; ``paymentMethodId`` is what says which method was read.
+
+    The rename reads Wise at version 1, then two other writes move it off that
+    name key and put a different method on it — at version 1 again, so a version
+    condition alone would let the stale write land on the new method. It refuses,
+    and both live rows are exactly as the other writes left them.
+    """
+    _seed(units_table, PACK_ID, [AVERY, DEVON])
+    wise_id = _create(units_table, AVERY, displayName="Wise")["paymentMethodId"]
+
+    def twin() -> Any:
+        moved = _rename(units_table, DEVON, key="twin-rename", paymentMethodId=wise_id, displayName="Wise Gold")
+        assert isinstance(moved, dict) and moved["version"] == 2, moved
+        return _create(units_table, DEVON, key="twin-create", displayName="Wise")
+
+    _twin_commits_in_the_write_window(monkeypatch, twin)
+
+    assert_is_error(_rename(units_table, DEVON, paymentMethodId=wise_id, displayName="WISE"), ErrorCode.CONFLICT)
+
+    rows = {str(row["sk"]): row for row in _payment_rows(units_table)}
+    assert rows["PAYMENT#wise"]["paymentMethodId"] != wise_id
+    assert [rows["PAYMENT#wise"][key] for key in ("displayName", "version", "isActive")] == ["Wise", 1, True]
+    assert rows["PAYMENT#wise gold"]["paymentMethodId"] == wise_id
+    assert [rows["PAYMENT#wise gold"][key] for key in ("displayName", "version")] == ["Wise Gold", 2]
+    assert len(_markers_for(units_table, UPDATE_PAYMENT_METHOD_FIELD)) == 1
+
+
+@pytest.mark.parametrize(
+    "operation,field",
+    [
+        ("create", CREATE_PAYMENT_METHOD_FIELD),
+        ("rename", UPDATE_PAYMENT_METHOD_FIELD),
+        ("deactivate", DEACTIVATE_PAYMENT_METHOD_FIELD),
+    ],
+)
+def test_a_twin_that_commits_first_answers_the_caller_its_result(
+    units_table: Any, monkeypatch: pytest.MonkeyPatch, operation: str, field: str
+) -> None:
+    """A mutation whose twin already committed replays instead of writing again.
+
+    The handler minted its own id and built its own plan before the twin landed,
+    so answering from those would name a row that was never written. Every branch
+    here takes the stored answer, which is also the only answer whose marker the
+    table actually holds.
+    """
+
+    def attempt() -> Any:
+        if operation == "create":
+            return _create(units_table, AVERY, displayName="Wise")
+        assert method_id
+        if operation == "rename":
+            return _rename(units_table, AVERY, paymentMethodId=method_id, displayName="Wise Pay")
+        return _deactivate(units_table, AVERY, paymentMethodId=method_id)
+
+    _seed(units_table, PACK_ID, [AVERY])
+    method_id = None if operation == "create" else _create(units_table, AVERY, displayName="Wise")["paymentMethodId"]
+
+    _twin_commits_in_the_write_window(monkeypatch, attempt)
+    answered = attempt()
+
+    rows = _payment_rows(units_table)
+    assert len(rows) == 1 and len(_markers_for(units_table, field)) == 1
+    assert isinstance(answered, dict) and answered["paymentMethodId"] == rows[0]["paymentMethodId"]
+    assert answered["version"] == rows[0]["version"] == (1 if operation == "create" else 2)
 
 
 # --- the stored-row builder this suite seeds --------------------------------------

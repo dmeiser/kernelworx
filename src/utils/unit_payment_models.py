@@ -39,7 +39,8 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Any, Dict, List, Optional
+from decimal import Decimal
+from typing import Any, Dict, Iterable, List, Optional
 
 from boto3.dynamodb.conditions import Key
 
@@ -50,24 +51,33 @@ from .unit_models import normalize_required_text, unit_pk
 
 # --- Key layout (data model §6.1) ------------------------------------------------
 
-PAYMENT_SK_PREFIX = "PAYMENT"
+PAYMENT_SK_PREFIX = "PAYMENT#"
 
 # The Unit QR prefix (§4.3 of SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md):
 #
-#     payment-qr-codes/units/<unitId>/<paymentMethodId>/<uuid>.<ext>
+#     payment-qr-codes/units/<unitId>/<paymentMethodId>/<sha256>-<uuid>.<ext>
 #
 # A separate root from the legacy account scheme (``payment-qr-codes/<accountId>/``)
 # is what lets the execution role hold one scoped grant, and carrying the
 # paymentMethodId in the key is what makes a foreign key detectable: an
 # ``s3Key`` a caller supplies on confirm has to sit under the prefix of the very
-# method it names, or it belongs to somebody else. One object name per upload
-# (a fresh uuid) is what lets a replacement delete the object it displaced
-# rather than whatever happens to be current.
+# method it names, or it belongs to somebody else.
+#
+# The object name is the pair that makes the attachment immutable. The digest is
+# the SHA-256 of the bytes the browser says it is uploading, so the stored key
+# commits to specific bytes; the uuid makes the name unique to ONE upload
+# request, so the pre-signed POST this API hands out never names a key another
+# request already committed. Confirmation then hashes what is actually in the
+# bucket and refuses unless it matches the digest in the key: the row can only
+# ever reference an object whose bytes are the bytes its own name declares, and
+# a later POST cannot quietly swap them under a committed key.
 UNIT_QR_ROOT = "payment-qr-codes/units"
 
-# A stored object name: the uuid this handler minted, plus the extension that
-# uuid was minted for. Nothing else is ever accepted back on confirm or delete.
-_QR_OBJECT_NAME = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z]{3,4}")
+# A stored object name: the digest the mint declared, the uuid that makes this
+# upload's name unique, and the extension both were minted for. Nothing else is
+# ever accepted back on confirm or delete.
+_QR_DIGEST_HEX = re.compile(r"[0-9a-f]{64}")
+_QR_OBJECT_NAME = re.compile(r"[0-9a-f]{64}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z]{3,4}")
 
 # The two key segments a Unit QR sits under. Unit ids and paymentMethodIds are
 # generated identifiers, so the character set here is a guard against a caller
@@ -77,6 +87,14 @@ _QR_KEY_SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 
 # API contract §3.4: maximum 50 active custom methods per Unit.
 MAX_ACTIVE_PAYMENT_METHODS = 50
+
+# The ceiling guard (§4.1.1): a sort key the ``PAYMENT#`` collection query can
+# never return, holding the count of ACTIVE custom methods. A create counts rows
+# first only to produce a readable refusal; the ceiling itself is the counter's
+# transaction condition, because a count read before a transaction settles
+# nothing — two differently named creates can both read 49 and both commit. The
+# counter is the authority, and only create and deactivate move it.
+PAYMENT_CAPACITY_SK = "PAYMENT-CAPACITY"
 
 # The stored audit/optimistic fields every custom method carries.
 _PAYMENT_ID_MAX_CHARS = 100
@@ -107,9 +125,22 @@ def payment_sk(normalized_name: str) -> str:
     """Sort key of one custom method, addressed by its normalized name.
 
     The normalized name IS the key segment, so per-Unit uniqueness is a key
-    property and the create's conditional Put is the race guard.
+    property and the create's conditional Put is the race guard. The prefix is the
+    full ``PAYMENT#`` rather than a bare ``PAYMENT`` because the Unit's payment
+    collection query runs ``begins_with`` on it, and the ceiling counter shares
+    this partition under a ``PAYMENT-``-shaped key a looser prefix would swallow.
     """
-    return f"{PAYMENT_SK_PREFIX}#{normalized_name}"
+    return f"{PAYMENT_SK_PREFIX}{normalized_name}"
+
+
+def normalized_name_from_sk(sort_key: str) -> str:
+    """The normalized name a payment sort key carries.
+
+    Read off the stored key, never re-derived from caller input: a rename and a
+    deactivation both have to address the row that exists, and the name the caller
+    typed is not evidence of what the key says.
+    """
+    return sort_key[len(PAYMENT_SK_PREFIX) :]
 
 
 def payment_key(unit_id: str, normalized_name: str) -> Dict[str, str]:
@@ -117,7 +148,59 @@ def payment_key(unit_id: str, normalized_name: str) -> Dict[str, str]:
     return {"pk": unit_pk(unit_id), "sk": payment_sk(normalized_name)}
 
 
+def payment_capacity_key(unit_id: str) -> Dict[str, str]:
+    """The ceiling counter's key pair — same partition, unreachable by the query."""
+    return {"pk": unit_pk(unit_id), "sk": PAYMENT_CAPACITY_SK}
+
+
+def read_payment_active_count(unit_id: str) -> Optional[int]:
+    """The stored ceiling counter, or None when this Unit has never had one.
+
+    Read only by the create and deactivate paths, which are the only writers. A
+    missing counter is not a zero: the caller seeds it from the row count it just
+    read, which is what keeps a hand-seeded collection under the ceiling instead
+    of handing it 50 free slots.
+    """
+    response = tables.units.get_item(Key=payment_capacity_key(unit_id), ConsistentRead=True)
+    item = response.get("Item")
+    if not isinstance(item, dict):
+        return None
+    count = item.get("activeCount")
+    return int(count) if isinstance(count, (int, Decimal)) else None
+
+
 # --- QR object keys (§4.1.2) -----------------------------------------------------
+
+
+def normalize_qr_digest(value: Any) -> str:
+    """The 64-hex-digit SHA-256 an upload declares, lower-cased.
+
+    The browser hashes the file it is about to POST, so the object name this
+    handler mints is a claim about bytes the server has not seen yet — which is
+    exactly what confirmation then checks. Anything that is not 64 hex digits is
+    a caller who cannot name the bytes they are uploading.
+    """
+    if not isinstance(value, str):
+        raise AppError(ErrorCode.INVALID_INPUT, "sha256 must be a hex digest")
+    digest = value.strip().lower()
+    if not _QR_DIGEST_HEX.fullmatch(digest):
+        raise AppError(ErrorCode.INVALID_INPUT, "sha256 must be 64 hexadecimal digits")
+    return digest
+
+
+def unit_qr_key_digest(s3_key: str, unit_id: str, payment_method_id: str) -> str:
+    """The digest a Unit QR object name declares — empty unless the key is this method's.
+
+    One gate answers both questions a confirm or download asks of an object name:
+    does it belong to this method at all, and does it name the bytes it claims. A
+    key under another Unit, another method, or the legacy account scheme returns
+    the empty string, which no stored object's digest can match, so a caller
+    cannot sidestep either half by supplying a name.
+    """
+    if not unit_qr_key_is_mine(s3_key, unit_id, payment_method_id):
+        return ""
+    declared, _, _ = s3_key.rsplit("/", 1)[-1].partition("-")
+    return declared
 
 
 def unit_qr_prefix(unit_id: str, payment_method_id: str) -> str:
@@ -134,14 +217,17 @@ def unit_qr_prefix(unit_id: str, payment_method_id: str) -> str:
     return f"{UNIT_QR_ROOT}/{unit_id}/{payment_method_id}"
 
 
-def new_unit_qr_object_key(unit_id: str, payment_method_id: str, extension: str) -> str:
-    """Mint one upload target: a fresh object name under this method's prefix.
+def new_unit_qr_object_key(unit_id: str, payment_method_id: str, digest_hex: str, extension: str) -> str:
+    """Mint one upload target: a fresh, digest-named object under this method's prefix.
 
-    A fresh name per upload is what makes replacement safe to clean up — the
-    object a confirm displaces is a different key from the one it just wrote, so
-    deleting the displaced one can never remove the current image.
+    Two properties do the work. The name is unique to THIS upload request, so the
+    pre-signed POST this API issues never names an object another request already
+    committed — a replacement displaces a different key than the one it writes,
+    and deleting the displaced one can never remove the current image. And the
+    name declares the SHA-256 of the bytes, so the reference this key can become
+    commits to specific bytes that confirmation then verifies.
     """
-    return f"{unit_qr_prefix(unit_id, payment_method_id)}/{uuid.uuid4()}.{extension}"
+    return f"{unit_qr_prefix(unit_id, payment_method_id)}/{digest_hex}-{uuid.uuid4()}.{extension}"
 
 
 def unit_qr_key_is_mine(s3_key: str, unit_id: str, payment_method_id: str) -> bool:
@@ -203,6 +289,8 @@ def build_payment_item(
     is_active: bool = True,
     qr_code_s3_key: Optional[str] = None,
     version: int = 1,
+    updated_by_account_id: Optional[Any] = None,
+    pending_qr_purge_keys: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """Render a custom-method item at ``UNIT#<unitId> / PAYMENT#<normalizedName>``.
 
@@ -210,12 +298,18 @@ def build_payment_item(
     key; every other write stamps ``now_iso`` as its creation too. The QR key is
     stored only when one is attached: an absent attribute and a null read
     identically, and §4.1.2 is the only writer of a non-null value.
+
+    ``updated_by_account_id`` is who wrote THIS revision. It defaults to the
+    creator because creation is the only write where the two are known to be the
+    same account; a rename or QR mutation that leaves it out credits the edit to
+    whoever made the method, who may no longer admin the Unit.
     """
     identity = normalize_required_text(payment_method_id, "paymentMethodId", _PAYMENT_ID_MAX_CHARS)
     unit_identity = normalize_required_text(unit_id, "unitId")
     display = normalize_payment_display_name(display_name)
     if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         raise AppError(ErrorCode.INVALID_INPUT, "version must be at least 1")
+    editor = updated_by_account_id if updated_by_account_id is not None else created_by_account_id
     item: Dict[str, Any] = {
         "pk": unit_pk(unit_identity),
         "sk": payment_sk(normalize_payment_name(display)),
@@ -229,13 +323,17 @@ def build_payment_item(
         "createdByAccountId": normalize_required_text(
             created_by_account_id, "createdByAccountId", _PAYMENT_ID_MAX_CHARS
         ),
-        "updatedByAccountId": normalize_required_text(
-            created_by_account_id, "updatedByAccountId", _PAYMENT_ID_MAX_CHARS
-        ),
+        "updatedByAccountId": normalize_required_text(editor, "updatedByAccountId", _PAYMENT_ID_MAX_CHARS),
         "version": version,
     }
     if qr_code_s3_key is not None:
         item["qrCodeS3Key"] = qr_code_s3_key
+    if pending_qr_purge_keys:
+        # Cleanup work survives the key move: a rename that dropped this set
+        # would abandon an object no row references any more, in a bucket no
+        # sweeper walks. Stored as a set of strings, so a key can only be owed
+        # once however many writes retired it.
+        item["pendingQrPurgeKeys"] = {str(key) for key in pending_qr_purge_keys if str(key)}
     return item
 
 

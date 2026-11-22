@@ -1061,9 +1061,10 @@ data "aws_iam_policy_document" "lambda_unit_tenant_s3" {
   # s3:PutObject is the browser's upload to the pre-signed POST that
   # requestUnitPaymentMethodQrUpload returns (S3 authorizes a pre-signed request
   # against the signing role's policy at request time, so the role must hold it),
-  # s3:GetObject is the confirm step's HeadObject plus its magic-number range
-  # read and the download URL's GET, and s3:DeleteObject is the object a
-  # replacement displaces and an explicit removal. The resource is scoped to the
+  # s3:GetObject is the confirm step's HeadObject plus its one full-body read
+  # (the magic numbers and the SHA-256 of those same bytes) and the download
+  # URL's GET, and s3:DeleteObject is the object a replacement displaces, an
+  # explicit removal, and the objects a failed earlier delete still owes. The resource is scoped to the
   # Unit QR root, not the whole payment-qr-codes prefix: the account scheme
   # payment-qr-codes/<accountId>/ belongs to the payment role, and holding it
   # here would let a Unit admin's handler delete another tenant's QR objects.
@@ -1081,6 +1082,26 @@ data "aws_iam_policy_document" "lambda_unit_tenant_s3" {
       "s3:DeleteObject",
     ]
     resources = ["${var.exports_bucket_arn}/payment-qr-codes/units/*"]
+  }
+
+  # The one bucket-level grant, and it exists to keep a missing upload readable.
+  # S3 answers a HeadObject for a key that does not exist with 403 when the
+  # caller cannot show the bucket that the key is simply absent, and the handler
+  # would then report an infrastructure denial (FORBIDDEN) to a Scout who merely
+  # confirmed before the browser finished its POST. ListBucket scoped to the Unit
+  # QR prefixes is what lets S3 answer 404, so NOT_FOUND stays reachable against
+  # real AWS and a genuine denial stays distinguishable from it. Nothing lists:
+  # the handler never calls ListObjects, and the prefix condition keeps even the
+  # hypothetical listing inside the one tree this role owns.
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [var.exports_bucket_arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["payment-qr-codes/units/*"]
+    }
   }
 }
 
