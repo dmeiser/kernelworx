@@ -26,7 +26,9 @@ head, ranged read, delete — is the client contract and not a call list:
   this handler's replay check and its transaction is replayed, touching no object,
   and a cleanup ledger whose clear write fails is paid by the next write;
 - download authorization — the GET is signed from the stored reference, for a
-  Unit Admin only, so the field cannot be pointed at another tenant's object.
+  Unit Admin only, so the field cannot be pointed at another tenant's object;
+- the write's own audit — the admin who attaches or removes an image is the one
+  recorded on that revision, and the method's creator stays its creator.
 """
 
 from __future__ import annotations
@@ -466,6 +468,28 @@ def test_valid_upload_references_the_object_on_a_versioned_write(units_table: An
     assert confirmed["version"] == 2
     assert _payment_row(units_table, "wise")["qrCodeS3Key"] == s3_key
     assert _keys(s3_bucket) == [s3_key]
+
+
+def test_the_admin_who_writes_the_image_is_the_admin_recorded_on_the_row(units_table: Any, s3_bucket: Any) -> None:
+    """A QR write answers for itself, and the creator stays the creator.
+
+    Devon attaches the image to a method Avery made and Avery removes it again. The
+    row has to name each of them at the revision they wrote: the account
+    responsible for an image arriving at a Unit is the one that uploaded it.
+    """
+    _seed(units_table, PACK_ID, [AVERY, DEVON])
+    payment_method_id = _create(AVERY)
+    requested = _request(DEVON, payment_method_id)
+    s3_key = str(requested["s3Key"])
+    s3_bucket.put_object(Bucket=os.environ["EXPORTS_BUCKET"], Key=s3_key, Body=PNG_BYTES)
+
+    confirmed = _confirm(DEVON, payment_method_id, s3_key)
+    assert confirmed["updatedByAccountId"] == DEVON
+    row = _payment_row(units_table, "wise")
+    assert [row[key] for key in ("createdByAccountId", "updatedByAccountId", "version")] == [AVERY, DEVON, 2]
+
+    assert _delete(AVERY, payment_method_id, version=2)["updatedByAccountId"] == AVERY
+    assert _payment_row(units_table, "wise")["updatedByAccountId"] == AVERY
 
 
 @pytest.mark.parametrize(

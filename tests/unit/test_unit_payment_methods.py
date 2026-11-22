@@ -404,6 +404,37 @@ def test_rename_refuses_builtin_unknown_and_foreign_ids(units_table: Any) -> Non
 # --- deactivateUnitPaymentMethod (PAY-M-03) ---------------------------------------
 
 
+def test_a_second_admin_who_edits_a_method_is_the_one_who_edited_it(units_table: Any) -> None:
+    """The rename audit names the editor; the creator is only ever the creator.
+
+    Two admins, one method: Devon creates it, Avery renames it, Devon retires it.
+    Each revision has to say who wrote it, because the account that can be held to
+    an edit is the one that made it — and the method that was created may by then
+    belong to someone else's Unit grant entirely.
+    """
+    _seed(units_table, PACK_ID, [DEVON, AVERY])
+    created = _create(units_table, DEVON, displayName="Wise")
+    payment_method_id = created["paymentMethodId"]
+
+    renamed = _rename(units_table, AVERY, paymentMethodId=payment_method_id, displayName="Wise Mobile")
+    assert renamed["createdByAccountId"] == DEVON
+    assert renamed["updatedByAccountId"] == AVERY
+    assert renamed["createdAt"] == created["createdAt"]
+
+    deactivated = _deactivate(units_table, DEVON, paymentMethodId=payment_method_id, version=2)
+    assert deactivated["createdByAccountId"] == DEVON
+    assert deactivated["updatedByAccountId"] == DEVON
+
+    rows = _payment_rows(units_table)
+    assert len(rows) == 1
+    assert [rows[0][key] for key in ("createdByAccountId", "updatedByAccountId", "version", "isActive")] == [
+        DEVON,
+        DEVON,
+        3,
+        False,
+    ]
+
+
 def test_deactivation_is_a_soft_flip_preserving_everything_else(units_table: Any) -> None:
     """PAY-M-03-01 — the row, id, QR reference, and audit all stay readable."""
     created = _seed_wise_with_qr(units_table)
