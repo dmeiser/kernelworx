@@ -47,6 +47,7 @@ try:  # pragma: no cover
         allocation_models,
         inventory_models,
         order_fulfillment_models,
+        qr_objects,
         show_and_sell_models,
         unit_auth,
         unit_campaign_models,
@@ -59,6 +60,7 @@ except ModuleNotFoundError:  # pragma: no cover
         allocation_models,
         inventory_models,
         order_fulfillment_models,
+        qr_objects,
         show_and_sell_models,
         unit_auth,
         unit_campaign_models,
@@ -73,6 +75,7 @@ get_caller_id = import_from_utils("appsync_types", "get_caller_id")
 tables = import_from_utils("dynamodb", "tables")
 batch_get_chunked = import_from_utils("dynamodb", "batch_get_chunked")
 get_dynamodb_client = import_from_utils("dynamodb", "get_dynamodb_client")
+get_required_env = import_from_utils("dynamodb", "get_required_env")
 ensure_account_id = import_from_utils("ids", "ensure_account_id")
 batch_check_profile_access = import_from_utils("auth", "batch_check_profile_access")
 check_profile_access = import_from_utils("auth", "check_profile_access")
@@ -174,6 +177,10 @@ UNIT_PAYMENT_METHODS_FIELD = "unitPaymentMethods"
 CREATE_PAYMENT_METHOD_FIELD = "createUnitPaymentMethod"
 UPDATE_PAYMENT_METHOD_FIELD = "updateUnitPaymentMethod"
 DEACTIVATE_PAYMENT_METHOD_FIELD = "deactivateUnitPaymentMethod"
+REQUEST_PAYMENT_QR_FIELD = "requestUnitPaymentMethodQrUpload"
+CONFIRM_PAYMENT_QR_FIELD = "confirmUnitPaymentMethodQrUpload"
+DELETE_PAYMENT_QR_FIELD = "deleteUnitPaymentMethodQrCode"
+PAYMENT_QR_DOWNLOAD_FIELD = "unitPaymentMethodQrDownloadUrl"
 
 # Argument names that carry no write intent, so they stay out of the writable-field
 # check.  ``idempotency`` and ``version`` are the mutation contract's own envelopes and
@@ -7073,6 +7080,305 @@ def _deactivate_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[st
     return result
 
 
+# --- Unit payment-method QR images (checklist 4.1.2) ------------------------------
+
+
+def _exports_bucket() -> str:
+    """The one bucket every QR image lives in (no CloudFront exposure)."""
+    return str(get_required_env("EXPORTS_BUCKET"))
+
+
+def _require_payment_method_row(unit_id: str, payment_method_id: str) -> Dict[str, Any]:
+    """The Unit's stored custom method, or NOT_FOUND.
+
+    A built-in id resolves to no row here, which is why every QR path refuses it
+    before this call: the built-ins have nowhere to carry a QR reference.
+    """
+    row = unit_payment_models.find_payment_by_id(unit_id, payment_method_id)
+    if row is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Unit payment method not found")
+    return dict(row)
+
+
+def _stored_qr_key(row: Mapping[str, Any]) -> Optional[str]:
+    """The QR object a stored method points at, or None."""
+    stored = row.get("qrCodeS3Key")
+    return str(stored) if isinstance(stored, str) and stored else None
+
+
+def _qr_upload_payload(s3_key: str) -> Dict[str, Any]:
+    """The pre-signed POST for one already-minted Unit QR key.
+
+    The fresh issue and the replay both go through here, so a retry hands back
+    credentials for the SAME object name the first attempt minted rather than
+    minting a second orphan in the bucket. The key itself carries the Unit and
+    method it belongs to, so nothing else has to be re-derived to sign it.
+    """
+    return dict(qr_objects.presigned_qr_upload(_exports_bucket(), s3_key, qr_objects.content_type_for_qr_key(s3_key)))
+
+
+def _request_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Mint one scoped upload target for a Unit payment method's QR image.
+
+    Nothing is written but the marker: the object does not exist yet, and the
+    reference on the row is what the confirm mutation moves. The key carries the
+    Unit id and the paymentMethodId, so a key that arrives later on confirm is
+    checkable against the method it claims to belong to, and the execution
+    role's single S3 grant stays scoped to the Unit QR prefix.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    unit_id = _resource_id(payload, "unitId")
+    payment_method_id = _resource_id(payload, "paymentMethodId")
+    runner = IdempotentMutationRunner()
+
+    keys = _marker(caller_id=caller_id, operation=REQUEST_PAYMENT_QR_FIELD, scope=unit_id, idempotency_key=key)
+    _require_active_admin(caller_id, unit_id)
+    replayed = _replay(
+        runner, keys, fingerprint, REQUEST_PAYMENT_QR_FIELD, lambda stored: _qr_upload_payload(str(stored))
+    )
+    if replayed is not None:
+        return replayed
+
+    _refuse_builtin_mutation(payment_method_id, "given a QR image")
+    _require_payment_method_row(unit_id, payment_method_id)
+    extension = qr_objects.qr_extension_for_content_type(payload.get("contentType"))
+    s3_key = unit_payment_models.new_unit_qr_object_key(unit_id, payment_method_id, extension)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=s3_key)
+    runner.execute(
+        keys,
+        plan,
+        operation=REQUEST_PAYMENT_QR_FIELD,
+        fingerprint=fingerprint,
+        result_id=s3_key,
+        load_result=lambda stored: _qr_upload_payload(str(stored)),
+    )
+    log.info(
+        "Unit payment method QR upload requested",
+        unit_id=unit_id,
+        payment_method_id=payment_method_id,
+        s3_key=s3_key,
+        caller_id=caller_id,
+    )
+    return _qr_upload_payload(s3_key)
+
+
+def _qr_reference_update_action(
+    row: Mapping[str, Any], *, caller_id: str, expected_version: int, qr_code_s3_key: Optional[str]
+) -> Dict[str, Any]:
+    """The one conditional Update that moves or clears the QR reference.
+
+    expectedVersion rides in the condition, so a confirm or delete that read a
+    stale revision cannot displace an image another admin attached in the
+    meantime -- which is also what keeps a replacement from deleting the wrong
+    object.
+    """
+    assigning = qr_code_s3_key is not None
+    return {
+        "TableName": tables.units.table_name,
+        # The row's own key pair, never a rebuilt one: the sort key is the
+        # normalized name as it was stored, and re-deriving it here could address
+        # a different row than the one whose version this condition checks.
+        "Key": wire_key({"pk": str(row["pk"]), "sk": str(row["sk"])}),
+        "UpdateExpression": (
+            "SET #qr = :qr, #updatedAt = :updatedAt, #updatedBy = :updatedBy, #version = #version + :one"
+            if assigning
+            else "REMOVE #qr SET #updatedAt = :updatedAt, #updatedBy = :updatedBy, #version = #version + :one"
+        ),
+        "ExpressionAttributeNames": {
+            "#qr": "qrCodeS3Key",
+            "#updatedAt": "updatedAt",
+            "#updatedBy": "updatedByAccountId",
+            "#version": "version",
+        },
+        "ExpressionAttributeValues": {
+            **({":qr": {"S": str(qr_code_s3_key)}} if assigning else {}),
+            ":updatedAt": {"S": utc_now_iso()},
+            ":updatedBy": {"S": caller_id},
+            ":one": {"N": "1"},
+            ":expectedVersion": {"N": str(expected_version)},
+        },
+        "ConditionExpression": "#version = :expectedVersion",
+        "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+    }
+
+
+def _purge_displaced_qr(unit_id: str, payment_method_id: str, displaced: Optional[str], accepted: str) -> None:
+    """Delete the object a committed replacement displaced (4.1.2 cleanup).
+
+    Only a key this very method owns is ever removed: an object outside the
+    method's own prefix belongs to another tenant or to the legacy account
+    scheme, and this write has no business touching it. The reference is already
+    committed, so a refused delete is an orphan to log, never a reason to undo
+    the write the caller asked for.
+    """
+    log = get_logger(__name__)
+    if not displaced or displaced == accepted:
+        return
+    if not unit_payment_models.unit_qr_key_is_mine(displaced, unit_id, payment_method_id):
+        log.warning("Displaced QR object left in place: key is outside this method's prefix", s3_key=displaced)
+        return
+    qr_objects.delete_qr_object(_exports_bucket(), displaced)
+
+
+def _confirm_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Attach an uploaded QR image to a Unit payment method (4.1.2).
+
+    Three checks run before anything is written: the key must sit under this
+    method's own prefix (a key for another Unit, another method, or the legacy
+    account scheme is refused before S3 is touched at all), the object must
+    exist, and its bytes must be the image its extension claims and fit the size
+    the pre-signed POST already pinned. Only then does the versioned reference
+    swap commit, and the displaced object is removed after it.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _update_fingerprint(payload)
+    unit_id = _resource_id(payload, "unitId")
+    payment_method_id = _resource_id(payload, "paymentMethodId")
+    s3_key = _resource_id(payload, "s3Key")
+    expected_version = _expected_version(payload)
+    runner = IdempotentMutationRunner()
+
+    keys = _marker(caller_id=caller_id, operation=CONFIRM_PAYMENT_QR_FIELD, scope=unit_id, idempotency_key=key)
+    _require_active_admin(caller_id, unit_id)
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        CONFIRM_PAYMENT_QR_FIELD,
+        lambda stored: _loaded_payment_method(unit_id, str(stored)),
+    )
+    if replayed is not None:
+        return replayed
+
+    _refuse_builtin_mutation(payment_method_id, "given a QR image")
+    row = _require_payment_method_row(unit_id, payment_method_id)
+    if not unit_payment_models.unit_qr_key_is_mine(s3_key, unit_id, payment_method_id):
+        raise AppError(ErrorCode.FORBIDDEN, "Invalid S3 key - access denied")
+    qr_objects.validate_uploaded_qr_object(_exports_bucket(), s3_key)
+    displaced = _stored_qr_key(row)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
+    plan.add(
+        "Update",
+        _qr_reference_update_action(row, caller_id=caller_id, expected_version=expected_version, qr_code_s3_key=s3_key),
+    )
+    build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=CONFIRM_PAYMENT_QR_FIELD,
+        fingerprint=fingerprint,
+        result_id=payment_method_id,
+        load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
+        result_payload=build_result,
+    )
+    _purge_displaced_qr(unit_id, payment_method_id, displaced, s3_key)
+    result = build_result()
+    log.info(
+        "Unit payment method QR image confirmed",
+        unit_id=unit_id,
+        payment_method_id=payment_method_id,
+        s3_key=s3_key,
+        caller_id=caller_id,
+        version=result["version"],
+    )
+    return result
+
+
+def _delete_unit_payment_qr_code(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Remove a Unit payment method's QR reference and its object (4.1.2).
+
+    The DynamoDB removal commits first, because the reference is the only handle
+    on the object: clearing it and then failing the delete leaves an orphan,
+    while deleting first and failing the versioned write would leave the row
+    naming an object that is gone. Sale history is untouched either way -- no
+    sale row is read or written here, and every snapshot carries its own copy of
+    the name it was sold under.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _update_fingerprint(payload)
+    unit_id = _resource_id(payload, "unitId")
+    payment_method_id = _resource_id(payload, "paymentMethodId")
+    expected_version = _expected_version(payload)
+    runner = IdempotentMutationRunner()
+
+    keys = _marker(caller_id=caller_id, operation=DELETE_PAYMENT_QR_FIELD, scope=unit_id, idempotency_key=key)
+    _require_active_admin(caller_id, unit_id)
+    replayed = _replay(
+        runner,
+        keys,
+        fingerprint,
+        DELETE_PAYMENT_QR_FIELD,
+        lambda stored: _loaded_payment_method(unit_id, str(stored)),
+    )
+    if replayed is not None:
+        return replayed
+
+    _refuse_builtin_mutation(payment_method_id, "have a QR image removed")
+    row = _require_payment_method_row(unit_id, payment_method_id)
+    stored = _stored_qr_key(row)
+    if stored is None:
+        raise AppError(ErrorCode.INVALID_INPUT, "This payment method has no QR image to remove")
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
+    plan.add(
+        "Update",
+        _qr_reference_update_action(row, caller_id=caller_id, expected_version=expected_version, qr_code_s3_key=None),
+    )
+    build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=DELETE_PAYMENT_QR_FIELD,
+        fingerprint=fingerprint,
+        result_id=payment_method_id,
+        load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
+        result_payload=build_result,
+    )
+    _purge_displaced_qr(unit_id, payment_method_id, stored, "")
+    result = build_result()
+    log.info(
+        "Unit payment method QR image removed",
+        unit_id=unit_id,
+        payment_method_id=payment_method_id,
+        s3_key=stored,
+        caller_id=caller_id,
+        version=result["version"],
+    )
+    return result
+
+
+def _unit_payment_qr_download_url(event: Dict[str, Any], caller_id: str) -> Dict[str, str]:
+    """Sign a short-lived GET for one Unit method's QR image, and nothing else.
+
+    The key is read from the row -- never from the caller -- so this field cannot
+    be pointed at another tenant's object, and a stored key that is not a
+    well-formed object under the method's own prefix is not signed either. This
+    is the only pre-signed URL Show & Sell issues, and only so a browser can
+    embed the image an admin uploaded; it is never a report download, which is
+    why it expires.
+    """
+    unit_id = _query_argument(event, "unitId")
+    payment_method_id = _query_argument(event, "paymentMethodId")
+    _require_active_admin(caller_id, unit_id)
+    row = _require_payment_method_row(unit_id, payment_method_id)
+    stored = _stored_qr_key(row)
+    if stored is None or not unit_payment_models.unit_qr_key_is_mine(stored, unit_id, payment_method_id):
+        raise AppError(ErrorCode.NOT_FOUND, "Unit payment method has no QR image")
+    return dict(qr_objects.presigned_qr_download(_exports_bucket(), stored))
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -7130,6 +7436,10 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     CREATE_PAYMENT_METHOD_FIELD: _create_payment_method,
     UPDATE_PAYMENT_METHOD_FIELD: _update_payment_method,
     DEACTIVATE_PAYMENT_METHOD_FIELD: _deactivate_payment_method,
+    REQUEST_PAYMENT_QR_FIELD: _request_unit_payment_qr_upload,
+    CONFIRM_PAYMENT_QR_FIELD: _confirm_unit_payment_qr_upload,
+    DELETE_PAYMENT_QR_FIELD: _delete_unit_payment_qr_code,
+    PAYMENT_QR_DOWNLOAD_FIELD: _unit_payment_qr_download_url,
 }
 
 

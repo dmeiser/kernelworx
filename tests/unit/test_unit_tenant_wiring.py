@@ -70,6 +70,7 @@ QUERY_FIELDS = {
     "myScoutCommitments",
     "showAndSellSignupCalendarData",
     "unitPaymentMethods",
+    "unitPaymentMethodQrDownloadUrl",
 }
 MUTATION_FIELDS = {
     "createUnit",
@@ -101,6 +102,9 @@ MUTATION_FIELDS = {
     "createUnitPaymentMethod",
     "updateUnitPaymentMethod",
     "deactivateUnitPaymentMethod",
+    "requestUnitPaymentMethodQrUpload",
+    "confirmUnitPaymentMethodQrUpload",
+    "deleteUnitPaymentMethodQrCode",
 }
 
 
@@ -339,4 +343,4 @@ def test_all_fifty_three_unit_fields_are_resolved_on_that_datasource() -> None:
         assert f"Query:{field}" in bound, f"Query.{field} has no resolver on UnitOperationsDS"
     for field in sorted(MUTATION_FIELDS):
         assert f"Mutation:{field}" in bound, f"Mutation.{field} has no resolver on UnitOperationsDS"
-    assert len(bound) == 53, f"expected exactly the 53 Unit-tenant resolvers, got {sorted(bound)}"
+    assert len(bound) == 57, f"expected exactly the 57 Unit-tenant resolvers, got {sorted(bound)}"

@@ -1055,6 +1055,41 @@ resource "aws_iam_role_policy" "lambda_unit_tenant_dynamodb" {
   policy = data.aws_iam_policy_document.lambda_unit_tenant_dynamodb.json
 }
 
+data "aws_iam_policy_document" "lambda_unit_tenant_s3" {
+  # The Unit payment-method QR images (checklist 4.1.2). Same three actions the
+  # legacy payment role carries for its own QR prefix, and for the same reasons:
+  # s3:PutObject is the browser's upload to the pre-signed POST that
+  # requestUnitPaymentMethodQrUpload returns (S3 authorizes a pre-signed request
+  # against the signing role's policy at request time, so the role must hold it),
+  # s3:GetObject is the confirm step's HeadObject plus its magic-number range
+  # read and the download URL's GET, and s3:DeleteObject is the object a
+  # replacement displaces and an explicit removal. The resource is scoped to the
+  # Unit QR root, not the whole payment-qr-codes prefix: the account scheme
+  # payment-qr-codes/<accountId>/ belongs to the payment role, and holding it
+  # here would let a Unit admin's handler delete another tenant's QR objects.
+  # Every key is additionally prefix-validated in code
+  # (unit_payment_models.unit_qr_key_is_mine). KICS flags any scoped
+  # s3:GetObject as potential data exfiltration; this is the first-party bucket
+  # this handler writes itself.
+  # kics-scan disable-line
+  statement {
+    effect = "Allow"
+    # kics-scan ignore-line
+    actions = [
+      "s3:PutObject",
+      "s3:GetObject",
+      "s3:DeleteObject",
+    ]
+    resources = ["${var.exports_bucket_arn}/payment-qr-codes/units/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_unit_tenant_s3" {
+  name   = "s3-qr-codes"
+  role   = aws_iam_role.lambda_unit_tenant_execution.id
+  policy = data.aws_iam_policy_document.lambda_unit_tenant_s3.json
+}
+
 data "aws_iam_policy_document" "lambda_public_orders_s3" {
   # Grants only what the buyer's pre-signed QR GETs need at request time. The
   # handler itself never calls S3 (signing is local), so this statement is

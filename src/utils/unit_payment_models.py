@@ -37,6 +37,7 @@ partition.
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -50,6 +51,29 @@ from .unit_models import normalize_required_text, unit_pk
 # --- Key layout (data model §6.1) ------------------------------------------------
 
 PAYMENT_SK_PREFIX = "PAYMENT"
+
+# The Unit QR prefix (§4.3 of SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md):
+#
+#     payment-qr-codes/units/<unitId>/<paymentMethodId>/<uuid>.<ext>
+#
+# A separate root from the legacy account scheme (``payment-qr-codes/<accountId>/``)
+# is what lets the execution role hold one scoped grant, and carrying the
+# paymentMethodId in the key is what makes a foreign key detectable: an
+# ``s3Key`` a caller supplies on confirm has to sit under the prefix of the very
+# method it names, or it belongs to somebody else. One object name per upload
+# (a fresh uuid) is what lets a replacement delete the object it displaced
+# rather than whatever happens to be current.
+UNIT_QR_ROOT = "payment-qr-codes/units"
+
+# A stored object name: the uuid this handler minted, plus the extension that
+# uuid was minted for. Nothing else is ever accepted back on confirm or delete.
+_QR_OBJECT_NAME = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z]{3,4}")
+
+# The two key segments a Unit QR sits under. Unit ids and paymentMethodIds are
+# generated identifiers, so the character set here is a guard against a caller
+# smuggling a path segment (``..``, ``/``) into a prefix match.
+_QR_KEY_SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+
 
 # API contract §3.4: maximum 50 active custom methods per Unit.
 MAX_ACTIVE_PAYMENT_METHODS = 50
@@ -91,6 +115,46 @@ def payment_sk(normalized_name: str) -> str:
 def payment_key(unit_id: str, normalized_name: str) -> Dict[str, str]:
     """The custom-method item's key pair."""
     return {"pk": unit_pk(unit_id), "sk": payment_sk(normalized_name)}
+
+
+# --- QR object keys (§4.1.2) -----------------------------------------------------
+
+
+def unit_qr_prefix(unit_id: str, payment_method_id: str) -> str:
+    """The only S3 prefix one Unit payment method may ever hold objects under.
+
+    Both segments are checked against :data:`_QR_KEY_SEGMENT` here rather than at
+    the call sites, because this is the string a foreign-key refusal is decided
+    by: an unchecked segment would let ``a/..``-shaped input match another
+    method's prefix.
+    """
+    for name, segment in (("unitId", unit_id), ("paymentMethodId", payment_method_id)):
+        if not _QR_KEY_SEGMENT.fullmatch(segment):
+            raise AppError(ErrorCode.INVALID_INPUT, f"{name} cannot address a QR object")
+    return f"{UNIT_QR_ROOT}/{unit_id}/{payment_method_id}"
+
+
+def new_unit_qr_object_key(unit_id: str, payment_method_id: str, extension: str) -> str:
+    """Mint one upload target: a fresh object name under this method's prefix.
+
+    A fresh name per upload is what makes replacement safe to clean up — the
+    object a confirm displaces is a different key from the one it just wrote, so
+    deleting the displaced one can never remove the current image.
+    """
+    return f"{unit_qr_prefix(unit_id, payment_method_id)}/{uuid.uuid4()}.{extension}"
+
+
+def unit_qr_key_is_mine(s3_key: str, unit_id: str, payment_method_id: str) -> bool:
+    """True when ``s3_key`` is an object this method owns and nothing else.
+
+    The confirm and delete paths ask this before they touch S3: a key under
+    another Unit, another method, or the legacy account scheme is foreign, and
+    signing, storing, or deleting it would act on someone else's bytes.
+    """
+    prefix = f"{unit_qr_prefix(unit_id, payment_method_id)}/"
+    if not s3_key.startswith(prefix):
+        return False
+    return _QR_OBJECT_NAME.fullmatch(s3_key[len(prefix) :]) is not None
 
 
 # --- Normalization and validation ------------------------------------------------
