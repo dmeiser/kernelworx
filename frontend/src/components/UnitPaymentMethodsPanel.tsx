@@ -118,12 +118,15 @@ interface UnitPaymentMethodsPanelProps {
   unit: GqlUnit;
 }
 
-/** A create or rename in flight, with the key this attempt owns. */
-interface NameDialog {
-  kind: 'create' | 'rename';
-  method?: GqlUnitPaymentMethod;
-  idempotencyKey: string;
-}
+/**
+ * A create or rename in flight, with the key this attempt owns.
+ *
+ * A rename always names a row this screen read, so the row is part of the variant rather
+ * than an optional field a later callback has to re-check.
+ */
+type NameDialog =
+  | { kind: 'create'; idempotencyKey: string }
+  | { kind: 'rename'; method: GqlUnitPaymentMethod; idempotencyKey: string };
 
 /** A destructive write waiting on one confirmation. */
 interface PendingWrite {
@@ -199,20 +202,21 @@ export const UnitPaymentMethodsPanel: React.FC<UnitPaymentMethodsPanelProps> = (
   );
 
   const submitName = useCallback(
-    async (displayName: string): Promise<void> => {
-      if (!nameDialog) return;
-      const failure = await writes.submitName(nameDialog, unit.unitId, displayName);
+    async (dialog: NameDialog, displayName: string): Promise<void> => {
+      const failure = await writes.submitName(dialog, unit.unitId, displayName);
       setFormError(failure);
       if (!failure) setNameDialog(null);
     },
-    [nameDialog, unit.unitId, writes],
+    [unit.unitId, writes],
   );
 
-  const runPending = useCallback(async (): Promise<void> => {
-    if (!pending) return;
-    await writes.runPending(pending);
-    setPending(null);
-  }, [pending, writes]);
+  const runPending = useCallback(
+    async (write: PendingWrite): Promise<void> => {
+      await writes.runPending(write);
+      setPending(null);
+    },
+    [writes],
+  );
 
   return (
     <QueryGate
@@ -268,7 +272,9 @@ export const UnitPaymentMethodsPanel: React.FC<UnitPaymentMethodsPanelProps> = (
           }}
         />
 
-        <PendingWriteDialog pending={pending} onConfirm={runPending} onClose={() => setPending(null)} />
+        {pending ? (
+          <PendingWriteDialog pending={pending} onConfirm={(write) => void runPending(write)} onClose={() => setPending(null)} />
+        ) : null}
       </Box>
     </QueryGate>
   );
@@ -360,13 +366,12 @@ function createInput(dialog: NameDialog, unitId: string, displayName: string): R
   return { unitId, displayName: displayName.trim(), idempotency: { idempotencyKey: dialog.idempotencyKey } };
 }
 
-function renameInput(dialog: NameDialog, unitId: string, displayName: string): Record<string, unknown> {
-  const method = dialog.method as GqlUnitPaymentMethod;
+function renameInput(dialog: Extract<NameDialog, { kind: 'rename' }>, unitId: string, displayName: string): Record<string, unknown> {
   return {
     unitId,
-    paymentMethodId: method.paymentMethodId,
+    paymentMethodId: dialog.method.paymentMethodId,
     displayName: displayName.trim(),
-    version: { expectedVersion: method.version },
+    version: { expectedVersion: dialog.method.version },
     idempotency: { idempotencyKey: dialog.idempotencyKey },
   };
 }
@@ -641,7 +646,12 @@ function QrRemovalControl(
 /** The words a name dialog shows, derived once from what is being named. */
 function nameDialogCopy(dialog: NameDialog): { title: string; confirmLabel: string } {
   if (dialog.kind === 'create') return { title: 'Add a payment method', confirmLabel: 'Add method' };
-  return { title: `Rename ${nameOfMethod(dialog.method) || 'this method'}`, confirmLabel: 'Save name' };
+  return { title: `Rename ${nameOfMethod(rowInDialog(dialog))}`, confirmLabel: 'Save name' };
+}
+
+/** The row a rename is editing; a create has no row yet, so nothing is pre-filled. */
+function rowInDialog(dialog: NameDialog): GqlUnitPaymentMethod | null {
+  return dialog.kind === 'rename' ? dialog.method : null;
 }
 
 /** The local complaint wins over the one the server sent, because it is the nearer one. */
@@ -649,14 +659,22 @@ function shownError(local: string | null, server: string | null): string | null 
   return local ?? server;
 }
 
+/**
+ * The name field, in a real form.
+ *
+ * The form is what makes Enter mean "save" for a keyboard user, and `preventDefault` is
+ * what stops that Enter from being a page navigation. A second Enter cannot create a
+ * second method: both presses carry the same idempotency key, so the server replays the
+ * first intent rather than recording a new one.
+ */
 const NameFormDialog: React.FC<{
   dialog: NameDialog;
   formError: string | null;
   onDismissError: () => void;
   onCancel: () => void;
-  onSubmit: (displayName: string) => Promise<void>;
+  onSubmit: (dialog: NameDialog, displayName: string) => Promise<void>;
 }> = ({ dialog, formError, onDismissError, onCancel, onSubmit }) => {
-  const [name, setName] = useState(nameOfMethod(dialog.method));
+  const [name, setName] = useState(nameOfMethod(rowInDialog(dialog)));
   const [localError, setLocalError] = useState<string | null>(null);
   const copy = nameDialogCopy(dialog);
 
@@ -666,7 +684,7 @@ const NameFormDialog: React.FC<{
       return;
     }
     setLocalError(null);
-    await onSubmit(name);
+    await onSubmit(dialog, name);
   };
 
   return (
@@ -681,7 +699,14 @@ const NameFormDialog: React.FC<{
         onDismissError();
       }}
     >
-      <Box component="form" onSubmit={(event) => event.preventDefault()} sx={{ pt: 1 }}>
+      <Box
+        component="form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+        sx={{ pt: 1 }}
+      >
         <TextField
           autoFocus
           fullWidth
@@ -691,7 +716,7 @@ const NameFormDialog: React.FC<{
           helperText="Cash, Check, and Other are reserved. A name must be different from every other method on this Unit, ignoring capitalization."
           inputProps={{ maxLength: 100, 'aria-label': 'Payment method name' }}
           data-testid="method-name-field"
-          data-method-id={idOfMethod(dialog.method)}
+          data-method-id={idOfMethod(rowInDialog(dialog))}
         />
       </Box>
     </FormDialog>
@@ -796,8 +821,8 @@ const QrPreviewBody: React.FC<{
 };
 
 /** The two confirmations say what actually happens to history, in their own words. */
-function pendingCopy(pending: PendingWrite | null): { title: string; label: string; notice: string } {
-  if (pending?.kind === 'deactivate') {
+function pendingCopy(pending: PendingWrite): { title: string; label: string; notice: string } {
+  if (pending.kind === 'deactivate') {
     return {
       title: 'Retire this payment method?',
       label: 'Retire method',
@@ -813,19 +838,19 @@ function pendingCopy(pending: PendingWrite | null): { title: string; label: stri
 }
 
 const PendingWriteDialog: React.FC<{
-  pending: PendingWrite | null;
-  onConfirm: () => Promise<void>;
+  pending: PendingWrite;
+  onConfirm: (write: PendingWrite) => void;
   onClose: () => void;
 }> = ({ pending, onConfirm, onClose }) => {
   const copy = pendingCopy(pending);
   return (
     <ConfirmDialog
-      open={pending !== null}
+      open
       title={copy.title}
       confirmLabel={copy.label}
       confirmColor="error"
       onClose={onClose}
-      onConfirm={() => void onConfirm()}
+      onConfirm={() => onConfirm(pending)}
     >
       <Typography data-testid="pending-write-warning">{copy.notice}</Typography>
     </ConfirmDialog>

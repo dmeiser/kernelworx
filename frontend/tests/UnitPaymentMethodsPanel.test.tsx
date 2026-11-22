@@ -543,4 +543,239 @@ describe('UnitPaymentMethodsPanel', () => {
     expect(await screen.findByTestId('create-payment-method')).toBeDisabled();
     expect(screen.getByTestId('active-method-count')).toHaveTextContent('50 active custom methods');
   });
+
+  it('an image the server has but cannot hand back is a refusal, not a broken picture', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod({ qrCodeS3Key: QR_KEY })]),
+      {
+        request: { query: GET_UNIT_PAYMENT_METHOD_QR_DOWNLOAD, variables: { unitId: UNIT_ID, paymentMethodId: WISE } },
+        result: { data: { unitPaymentMethodQrDownloadUrl: null } },
+      },
+    ]);
+
+    await user.click(await screen.findByTestId(`view-qr-${WISE}`));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('The QR image could not be opened.');
+    expect(within(dialog).queryByRole('img')).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('qr-download-link')).not.toBeInTheDocument();
+
+    // Closing it leaves nothing behind: the next open asks for a fresh, short-lived URL.
+    await user.click(within(dialog).getByTestId('close-qr-preview'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('an image read answered by a row that moved says it changed, not that the picture is gone', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod({ qrCodeS3Key: QR_KEY })]),
+      {
+        request: { query: GET_UNIT_PAYMENT_METHOD_QR_DOWNLOAD, variables: { unitId: UNIT_ID, paymentMethodId: WISE } },
+        error: refused('CONFLICT', RACE_SENTENCE),
+      },
+    ]);
+
+    await user.click(await screen.findByTestId(`view-qr-${WISE}`));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(STALE_COPY);
+  });
+
+  it('a storage POST that refuses the bytes never reaches the confirm', async () => {
+    const user = userEvent.setup();
+    const fetchPost = vi.fn().mockResolvedValue({ ok: false, status: 403 });
+    vi.stubGlobal('fetch', fetchPost);
+    renderPanel([listRead([customMethod({ version: 3 })]), uploadAsk(`{"key":"${QR_KEY}"}`)]);
+
+    await user.click(await screen.findByTestId(`qr-${WISE}`));
+    await chooseAndUpload(user);
+
+    // There is no confirm mock in this run: the sentence proves the confirm was never sent,
+    // because a stray confirm would answer "no more mocked responses" instead.
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('The image could not be sent to storage.');
+    expect(within(dialog).getByText('qr.png')).toBeInTheDocument();
+    expect(fetchPost).toHaveBeenCalledTimes(1);
+  });
+
+  it('an ask that answers without a target says so instead of posting nowhere', async () => {
+    const user = userEvent.setup();
+    const fetchPost = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchPost);
+    renderPanel([listRead([customMethod({ version: 3 })]), uploadAsk(`{"key":"${QR_KEY}"}`, null)]);
+
+    await user.click(await screen.findByTestId(`qr-${WISE}`));
+    await chooseAndUpload(user);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('The upload target could not be prepared.');
+    expect(fetchPost).not.toHaveBeenCalled();
+  });
+
+  it('the pre-signed fields also arrive as an object, and post with the file last all the same', async () => {
+    const user = userEvent.setup();
+    const fetchPost = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchPost);
+    renderPanel([
+      listRead([customMethod({ version: 3 })]),
+      uploadAsk({ key: QR_KEY, policy: 'p', 'x-amz-signature': 's' }),
+      {
+        request: {
+          query: CONFIRM_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              s3Key: QR_KEY,
+              version: { expectedVersion: 3 },
+              idempotency: { idempotencyKey: 'test-idem-2' },
+            },
+          },
+        },
+        result: { data: { confirmUnitPaymentMethodQrUpload: customMethod({ qrCodeS3Key: QR_KEY, version: 4 }) } },
+      },
+      listRead([customMethod({ qrCodeS3Key: QR_KEY, version: 4 })], false, 2),
+    ]);
+
+    await user.click(await screen.findByTestId(`qr-${WISE}`));
+    await chooseAndUpload(user);
+
+    expect(await screen.findByTestId(`view-qr-${WISE}`)).toBeInTheDocument();
+    const form = (fetchPost.mock.calls[0][1] as RequestInit).body as FormData;
+    expect(form.get('key')).toBe(QR_KEY);
+    expect(form.get('x-amz-signature')).toBe('s');
+    expect([...form.keys()].pop()).toBe('file');
+  });
+
+  it('a confirm that finds a newer row says it changed, with the file still in the dialog', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    renderPanel([listRead([customMethod({ version: 3 })]), uploadAsk(`{"key":"${QR_KEY}"}`), uploadConfirmRefused('CONFLICT', RACE_SENTENCE)]);
+
+    await user.click(await screen.findByTestId(`qr-${WISE}`));
+    await chooseAndUpload(user);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(STALE_COPY);
+    expect(within(dialog).getByText('qr.png')).toBeInTheDocument();
+    expect(screen.queryByTestId(`view-qr-${WISE}`)).not.toBeInTheDocument();
+  });
+
+  it('a write the server refuses stays on screen until the reader dismisses it', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod({ version: 2 })], false, 2),
+      {
+        request: {
+          query: DEACTIVATE_UNIT_PAYMENT_METHOD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              version: { expectedVersion: 2 },
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        error: refused('FORBIDDEN', 'Only an admin of this Unit can change its payment methods.'),
+      },
+    ]);
+
+    await user.click(await screen.findByTestId(`deactivate-${WISE}`));
+    await user.click(screen.getByRole('button', { name: 'Retire method' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Only an admin of this Unit can change its payment methods.');
+
+    await user.click(within(alert).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    // The row is still offered: dismissing an error is not undoing the read that followed it.
+    expect(screen.getByTestId(`deactivate-${WISE}`)).toBeEnabled();
+  });
+
+  it('closing the name dialog writes nothing, and its own complaint clears when dismissed', async () => {
+    const user = userEvent.setup();
+    renderPanel([listRead([])]);
+
+    await user.click(await screen.findByTestId('create-payment-method'));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Add method' }));
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('A method needs a name of 1 to 100 characters.');
+
+    await user.click(within(within(dialog).getByRole('alert')).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument());
+
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByTestId('method-name-field')).not.toBeInTheDocument());
+    // There is no create mutation mocked in this run, so a write would have named itself.
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('Enter in the name field saves the name exactly as the dialog button does', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([]),
+      {
+        request: {
+          query: CREATE_UNIT_PAYMENT_METHOD,
+          variables: {
+            input: { unitId: UNIT_ID, displayName: 'Wise', idempotency: { idempotencyKey: 'test-idem-1' } },
+          },
+        },
+        result: { data: { createUnitPaymentMethod: customMethod() } },
+      },
+      listRead([customMethod()], false, 2),
+    ]);
+
+    await user.click(await screen.findByTestId('create-payment-method'));
+    await clearAndType('method-name-field', 'Wise', user);
+    await user.keyboard('{Enter}');
+
+    // The form keeps its own submit: Enter may not reload the page or close the dialog
+    // on its own, so the write is what answers, and the row appears from the re-read.
+    const row = await screen.findByTestId(`method-row-${WISE}`);
+    expect(within(row).getByText('Wise')).toBeInTheDocument();
+  });
 });
+
+/** The ask half of an upload, with the fields the server handed back in either shape. */
+function uploadAsk(fields: unknown, target: unknown = undefined) {
+  const info =
+    target === null
+      ? null
+      : {
+          __typename: 'S3UploadInfo',
+          uploadUrl: 'https://kernelworx-exports-ue1-dev.s3.amazonaws.com',
+          fields,
+          s3Key: QR_KEY,
+        };
+  return {
+    request: {
+      query: REQUEST_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+      variables: {
+        input: { unitId: UNIT_ID, paymentMethodId: WISE, contentType: 'image/png', idempotency: { idempotencyKey: 'test-idem-1' } },
+      },
+    },
+    result: { data: { requestUnitPaymentMethodQrUpload: info } },
+  };
+}
+
+function uploadConfirmRefused(code: string, message: string) {
+  return {
+    request: {
+      query: CONFIRM_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+      variables: {
+        input: {
+          unitId: UNIT_ID,
+          paymentMethodId: WISE,
+          s3Key: QR_KEY,
+          version: { expectedVersion: 3 },
+          idempotency: { idempotencyKey: 'test-idem-2' },
+        },
+      },
+    },
+    error: refused(code, message),
+  };
+}
