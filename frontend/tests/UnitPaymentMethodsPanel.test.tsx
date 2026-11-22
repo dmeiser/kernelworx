@@ -1,0 +1,546 @@
+/**
+ * What this Unit may sell against, and the QR image behind each method (§4.1.3).
+ *
+ * The screen's job is to make the server's rules visible before a write has to refuse
+ * them, and these tests are the record of which rule is whose:
+ *
+ * - Cash, Check, and Other are computed. They are listed and switched off, so a Unit
+ *   cannot lose a method every sale may use, and the reason is on the row rather than in
+ *   a control that has gone missing.
+ * - `CONFLICT` is two facts on the wire. A name that is already taken is answered by the
+ *   server's sentence about that name; only a row that moved underneath the reader is
+ *   answered by a re-read — and the re-read is proven here by the list changing, not by a
+ *   message that claims it.
+ * - The deactivation race is that same rule one level up: every write carries the version
+ *   this screen read, so a method retired in another window comes back `CONFLICT` and the
+ *   screen shows what the re-read found instead of writing blind again.
+ * - A failure that is not the reader's — a Unit they no longer administer — answers the
+ *   same whether the Unit is gone or was never theirs.
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MockedProvider } from '@apollo/client/testing/react';
+import { GraphQLError } from 'graphql';
+import {
+  CONFIRM_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+  CREATE_UNIT_PAYMENT_METHOD,
+  DEACTIVATE_UNIT_PAYMENT_METHOD,
+  DELETE_UNIT_PAYMENT_METHOD_QR_CODE,
+  GET_UNIT_PAYMENT_METHOD_QR_DOWNLOAD,
+  LIST_UNIT_PAYMENT_METHODS,
+  REQUEST_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+  UPDATE_UNIT_PAYMENT_METHOD,
+} from '../src/lib/graphql';
+import { UnitPaymentMethodsPanel } from '../src/components/UnitPaymentMethodsPanel';
+import { unitFixture } from './helpers/unitFixtures';
+import { clearAndType, typeInto } from './helpers/unitUi';
+import type { GqlUnitPaymentMethod } from '../src/types/graphql-generated';
+
+const UNIT_ID = 'UNIT#pack-3149';
+const WISE = 'PM#wise';
+
+const QR_KEY = 'payment-qr-codes/units/pack-3149/PM#wise/8f2a4c1e.png';
+const SIGNED_URL = 'https://kernelworx-exports-ue1-dev.s3.amazonaws.com/payment-qr-codes/units/pack-3149?X-Amz-Signature=abc';
+const STALE_COPY = 'This payment method changed while you were working. The list has been reloaded — check it and try again.';
+const RACE_SENTENCE = 'The resource changed underneath this request. Re-read and try again.';
+
+let keySequence = 0;
+
+beforeEach(() => {
+  keySequence = 0;
+  vi.stubGlobal('crypto', { randomUUID: () => `test-idem-${++keySequence}` });
+  globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-preview');
+  globalThis.URL.revokeObjectURL = vi.fn();
+});
+
+function refused(code: string, message: string): GraphQLError {
+  return new GraphQLError(message, { extensions: { code } });
+}
+
+/** A built-in: computed, so no `createdAt`, and version 0 because there is no row to version. */
+function builtIn(paymentMethodId: string, displayName: string): GqlUnitPaymentMethod {
+  return {
+    __typename: 'UnitPaymentMethod',
+    paymentMethodId,
+    unitId: UNIT_ID,
+    displayName,
+    isActive: true,
+    qrCodeS3Key: null,
+    createdAt: null,
+    version: 0,
+  };
+}
+
+/** A method this Unit created, at the version the read answered. */
+function customMethod(overrides: Record<string, unknown> = {}): GqlUnitPaymentMethod {
+  return {
+    __typename: 'UnitPaymentMethod',
+    paymentMethodId: WISE,
+    unitId: UNIT_ID,
+    displayName: 'Wise',
+    isActive: true,
+    qrCodeS3Key: null,
+    createdAt: '2026-02-01T15:00:00Z',
+    version: 2,
+    ...overrides,
+  };
+}
+
+const builtIns = [builtIn('CASH', 'Cash'), builtIn('CHECK', 'Check'), builtIn('OTHER', 'Other')];
+
+const listRequest = (includeInactive: boolean) => ({ query: LIST_UNIT_PAYMENT_METHODS, variables: { unitId: UNIT_ID, includeInactive } });
+
+/**
+ * One read of the list. `maxUsageCount` is how a test says "this same read answers the
+ * re-read too"; a mock left at its default of one is what makes a second read prove
+ * something, because the next mock in line carries the different rows.
+ */
+function listRead(methods: GqlUnitPaymentMethod[], includeInactive = false, maxUsageCount = 1) {
+  return {
+    request: listRequest(includeInactive),
+    result: { data: { unitPaymentMethods: [...builtIns, ...methods] } },
+    maxUsageCount,
+  };
+}
+
+function renderPanel(mocks: unknown[]) {
+  render(
+    <MockedProvider mocks={mocks as never}>
+      <UnitPaymentMethodsPanel unit={unitFixture()} />
+    </MockedProvider>,
+  );
+}
+
+/** The three controls a row offers, read as accessibility state rather than markup. */
+async function rowControls(paymentMethodId: string) {
+  const rename = await screen.findByTestId(`rename-${paymentMethodId}`);
+  return {
+    rename,
+    qr: screen.getByTestId(`qr-${paymentMethodId}`),
+    deactivate: screen.getByTestId(`deactivate-${paymentMethodId}`),
+  };
+}
+
+const qrFile = () => new File([new ArrayBuffer(1024)], 'qr.png', { type: 'image/png' });
+
+/** Opens the upload dialog, chooses the file, and presses the dialog's own Upload button. */
+async function chooseAndUpload(user: ReturnType<typeof userEvent.setup>) {
+  await user.upload(screen.getByLabelText('Select QR code image'), qrFile());
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Upload' }));
+}
+
+describe('UnitPaymentMethodsPanel', () => {
+  it('lists the three built-ins and switches their controls off, with the reason on the row', async () => {
+    renderPanel([listRead([])]);
+
+    const cash = await rowControls('CASH');
+    expect(cash.rename).toBeDisabled();
+    expect(cash.qr).toBeDisabled();
+    expect(cash.deactivate).toBeDisabled();
+    expect(screen.getByTestId('computed-CASH')).toHaveTextContent('always available');
+    // Off, not absent: a method every sale may use has to stay visible.
+    expect(screen.getByText('Check')).toBeInTheDocument();
+    expect(screen.getByText('Other')).toBeInTheDocument();
+    expect(screen.getByTestId('qr-state-CASH')).toHaveTextContent('None');
+  });
+
+  it('offers rename, QR, and retire on a method the Unit created', async () => {
+    renderPanel([listRead([customMethod()])]);
+
+    const wise = await rowControls(WISE);
+    expect(wise.rename).toBeEnabled();
+    expect(wise.qr).toBeEnabled();
+    expect(wise.deactivate).toBeEnabled();
+    expect(wise.qr).toHaveTextContent('Upload QR');
+    expect(screen.queryByTestId(`computed-${WISE}`)).not.toBeInTheDocument();
+  });
+
+  it('creates a method with the name typed, trimmed, and one intent per dialog', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([]),
+      {
+        request: {
+          query: CREATE_UNIT_PAYMENT_METHOD,
+          variables: { input: { unitId: UNIT_ID, displayName: 'Wise', idempotency: { idempotencyKey: 'test-idem-1' } } },
+        },
+        result: { data: { createUnitPaymentMethod: customMethod() } },
+      },
+      listRead([customMethod()], false, 2),
+    ]);
+
+    await user.click(await screen.findByTestId('create-payment-method'));
+    await typeInto('method-name-field', ' Wise ', user);
+    await user.click(screen.getByRole('button', { name: 'Add method' }));
+
+    expect(await screen.findByTestId(`method-row-${WISE}`)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add method' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('a taken name is answered by the server’s sentence, and the dialog keeps the typing', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod()]),
+      {
+        request: {
+          query: CREATE_UNIT_PAYMENT_METHOD,
+          variables: { input: { unitId: UNIT_ID, displayName: 'wise', idempotency: { idempotencyKey: 'test-idem-1' } } },
+        },
+        error: refused('CONFLICT', 'This Unit already has a payment method with this name.'),
+      },
+    ]);
+
+    await user.click(await screen.findByTestId('create-payment-method'));
+    await typeInto('method-name-field', 'wise', user);
+    await user.click(screen.getByRole('button', { name: 'Add method' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('This Unit already has a payment method with this name.');
+    // The same code covers a stale version, and the two want different answers.
+    expect(alert).not.toHaveTextContent(STALE_COPY);
+    expect(screen.getByTestId('method-name-field')).toBeInTheDocument();
+  });
+
+  it('a reserved name is refused with the three names that are spoken for', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([]),
+      {
+        request: {
+          query: CREATE_UNIT_PAYMENT_METHOD,
+          variables: { input: { unitId: UNIT_ID, displayName: 'cash', idempotency: { idempotencyKey: 'test-idem-1' } } },
+        },
+        error: refused('INVALID_INPUT', 'Cash, Check, and Other are built-in payment methods; choose a different name.'),
+      },
+    ]);
+
+    await user.click(await screen.findByTestId('create-payment-method'));
+    await typeInto('method-name-field', '  cash  ', user);
+    await user.click(screen.getByRole('button', { name: 'Add method' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Cash, Check, and Other are built-in payment methods');
+    // The dialog is still open with the typing intact, because the fix is a different word.
+    expect(screen.getByTestId('method-name-field')).toBeInTheDocument();
+  });
+
+  it('an empty name is stopped here, where it costs no write', async () => {
+    const user = userEvent.setup();
+    renderPanel([listRead([])]);
+
+    await user.click(await screen.findByTestId('create-payment-method'));
+    await typeInto('method-name-field', '   ', user);
+    await user.click(screen.getByRole('button', { name: 'Add method' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('A method needs a name of 1 to 100 characters.');
+    expect(screen.getByTestId('method-name-field')).toBeInTheDocument();
+  });
+
+  it('a rename against a stale version re-reads the list instead of writing again', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      // The first read says Wise at version 2. The re-read says what the other admin
+      // actually wrote, and the screen has to show that name.
+      listRead([customMethod({ version: 2 })]),
+      {
+        request: {
+          query: UPDATE_UNIT_PAYMENT_METHOD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              displayName: 'Wise Pay',
+              version: { expectedVersion: 2 },
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        error: refused('CONFLICT', RACE_SENTENCE),
+      },
+      listRead([customMethod({ displayName: 'Wise Pay', version: 4 })], false, 2),
+    ]);
+
+    await user.click(await screen.findByTestId(`rename-${WISE}`));
+    await clearAndType('method-name-field', 'Wise Pay', user);
+    await user.click(screen.getByRole('button', { name: 'Save name' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(STALE_COPY);
+    expect(await screen.findByText('Wise Pay')).toBeInTheDocument();
+  });
+
+  it('retiring a method asks once, says what happens to history, and then drops it from the default read', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod()]),
+      {
+        request: {
+          query: DEACTIVATE_UNIT_PAYMENT_METHOD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              version: { expectedVersion: 2 },
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        result: { data: { deactivateUnitPaymentMethod: customMethod({ isActive: false, version: 3 }) } },
+      },
+      // The default read is what a new sale may select, so the retired row is gone from it.
+      listRead([], false, 2),
+    ]);
+
+    await user.click(await screen.findByTestId(`deactivate-${WISE}`));
+    expect(await screen.findByTestId('pending-write-warning')).toHaveTextContent('It stops appearing for new sales.');
+    await user.click(screen.getByRole('button', { name: 'Retire method' }));
+
+    // The default read is what a new sale may select, so the re-read that follows the
+    // write drops the retired row.
+    await waitFor(() => expect(screen.queryByTestId(`method-row-${WISE}`)).not.toBeInTheDocument());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('the deactivation race: a method retired in another window comes back CONFLICT and the list shows the truth', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod({ version: 2 })]),
+      {
+        request: {
+          query: DEACTIVATE_UNIT_PAYMENT_METHOD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              version: { expectedVersion: 2 },
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        error: refused('CONFLICT', RACE_SENTENCE),
+      },
+      // The other admin retired it, and the reader never asked for history, so the
+      // re-read answers without the row — no second control to press blind.
+      listRead([], false, 2),
+    ]);
+
+    await user.click(await screen.findByTestId(`deactivate-${WISE}`));
+    await user.click(screen.getByRole('button', { name: 'Retire method' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(STALE_COPY);
+    // The re-read that answered the CONFLICT is the same read that shows the row is gone
+    // from what a new sale may select — the screen does not offer a second blind write.
+    await waitFor(() => expect(screen.queryByTestId(`deactivate-${WISE}`)).not.toBeInTheDocument());
+  });
+
+  it('a retired method appears when history is asked for, with no second retire', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod()], false, 2),
+      listRead([customMethod({ isActive: false, version: 3 })], true, 2),
+    ]);
+
+    await user.click(await screen.findByRole('switch', { name: 'Show retired methods' }));
+
+    const row = await screen.findByTestId(`method-row-${WISE}`);
+    expect(within(row).getByText('retired — sales already made still read this way')).toBeInTheDocument();
+    expect(within(row).getByTestId(`deactivate-${WISE}`)).toBeDisabled();
+    // The built-ins are still there, still three, still always available.
+    expect(screen.getAllByTestId(/^computed-/)).toHaveLength(3);
+  });
+
+  it('the QR image is asked for when it is opened, and the same short-lived URL is the download link', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod({ qrCodeS3Key: QR_KEY })]),
+      {
+        request: { query: GET_UNIT_PAYMENT_METHOD_QR_DOWNLOAD, variables: { unitId: UNIT_ID, paymentMethodId: WISE } },
+        result: {
+          data: {
+            unitPaymentMethodQrDownloadUrl: {
+              __typename: 'UnitPaymentMethodQrDownload',
+              downloadUrl: SIGNED_URL,
+              expiresAt: '2026-02-06T15:05:00Z',
+            },
+          },
+        },
+      },
+    ]);
+
+    await user.click(await screen.findByTestId(`view-qr-${WISE}`));
+
+    const dialog = await screen.findByRole('dialog');
+    const image = await within(dialog).findByAltText('QR code for Wise');
+    expect(image).toHaveAttribute('src', SIGNED_URL);
+    expect(within(dialog).getByTestId('qr-download-link')).toHaveAttribute('href', SIGNED_URL);
+  });
+
+  it('a QR image that cannot be opened says so in the dialog, with no broken picture', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod({ qrCodeS3Key: QR_KEY })]),
+      {
+        request: { query: GET_UNIT_PAYMENT_METHOD_QR_DOWNLOAD, variables: { unitId: UNIT_ID, paymentMethodId: WISE } },
+        error: refused('INTERNAL_ERROR', 'The QR object could not be read.'),
+      },
+    ]);
+
+    await user.click(await screen.findByTestId(`view-qr-${WISE}`));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('The QR object could not be read.');
+    expect(within(dialog).queryByRole('img')).not.toBeInTheDocument();
+    expect(within(dialog).queryByTestId('qr-download-link')).not.toBeInTheDocument();
+  });
+
+  it('uploads a QR image as ask, post, confirm, and the confirm names the key the ask returned', async () => {
+    const user = userEvent.setup();
+    const fetchPost = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchPost);
+    renderPanel([
+      listRead([customMethod({ version: 3 })]),
+      {
+        request: {
+          query: REQUEST_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+          variables: {
+            input: { unitId: UNIT_ID, paymentMethodId: WISE, contentType: 'image/png', idempotency: { idempotencyKey: 'test-idem-1' } },
+          },
+        },
+        result: {
+          data: {
+            requestUnitPaymentMethodQrUpload: {
+              __typename: 'S3UploadInfo',
+              uploadUrl: 'https://kernelworx-exports-ue1-dev.s3.amazonaws.com',
+              fields: `{"key":"${QR_KEY}","policy":"p","x-amz-signature":"s"}`,
+              s3Key: QR_KEY,
+            },
+          },
+        },
+      },
+      {
+        request: {
+          query: CONFIRM_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              s3Key: QR_KEY,
+              version: { expectedVersion: 3 },
+              idempotency: { idempotencyKey: 'test-idem-2' },
+            },
+          },
+        },
+        result: { data: { confirmUnitPaymentMethodQrUpload: customMethod({ qrCodeS3Key: QR_KEY, version: 4 }) } },
+      },
+      // The re-read is what puts 'View QR' on the row: the screen never claims an image
+      // it has not read back.
+      listRead([customMethod({ qrCodeS3Key: QR_KEY, version: 4 })], false, 2),
+    ]);
+
+    await user.click(await screen.findByTestId(`qr-${WISE}`));
+    await chooseAndUpload(user);
+
+    expect(await screen.findByTestId(`view-qr-${WISE}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`qr-${WISE}`)).toHaveTextContent('Replace QR');
+    expect(fetchPost.mock.calls[0][0]).toBe('https://kernelworx-exports-ue1-dev.s3.amazonaws.com');
+    // `file` is last because S3 refuses a POST whose file part is not last.
+    const form = (fetchPost.mock.calls[0][1] as RequestInit).body as FormData;
+    expect([...form.keys()].pop()).toBe('file');
+    expect(form.get('key')).toBe(QR_KEY);
+  });
+
+  it('a QR the server turns down stays in the dialog that still holds the file', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    renderPanel([
+      listRead([customMethod({ version: 3 })]),
+      {
+        request: {
+          query: REQUEST_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+          variables: {
+            input: { unitId: UNIT_ID, paymentMethodId: WISE, contentType: 'image/png', idempotency: { idempotencyKey: 'test-idem-1' } },
+          },
+        },
+        result: {
+          data: {
+            requestUnitPaymentMethodQrUpload: {
+              __typename: 'S3UploadInfo',
+              uploadUrl: 'https://kernelworx-exports-ue1-dev.s3.amazonaws.com',
+              fields: `{"key":"${QR_KEY}"}`,
+              s3Key: QR_KEY,
+            },
+          },
+        },
+      },
+      {
+        request: {
+          query: CONFIRM_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              s3Key: QR_KEY,
+              version: { expectedVersion: 3 },
+              idempotency: { idempotencyKey: 'test-idem-2' },
+            },
+          },
+        },
+        error: refused('INVALID_INPUT', 'The image content does not match its declared type.'),
+      },
+    ]);
+
+    await user.click(await screen.findByTestId(`qr-${WISE}`));
+    await chooseAndUpload(user);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('The image content does not match its declared type.');
+    expect(within(dialog).getByText('qr.png')).toBeInTheDocument();
+    expect(screen.queryByTestId(`view-qr-${WISE}`)).not.toBeInTheDocument();
+  });
+
+  it('removing a QR image says what it does not touch, and the row reads None afterwards', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod({ qrCodeS3Key: QR_KEY, version: 4 })]),
+      {
+        request: {
+          query: DELETE_UNIT_PAYMENT_METHOD_QR_CODE,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              version: { expectedVersion: 4 },
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        result: { data: { deleteUnitPaymentMethodQrCode: customMethod({ version: 5 }) } },
+      },
+      listRead([customMethod({ version: 5 })], false, 2),
+    ]);
+
+    await user.click(await screen.findByTestId(`remove-qr-${WISE}`));
+    expect(await screen.findByTestId('pending-write-warning')).toHaveTextContent('The method itself and every sale made with it are untouched.');
+    await user.click(screen.getByRole('button', { name: 'Remove QR image' }));
+
+    await waitFor(() => expect(screen.queryByTestId(`view-qr-${WISE}`)).not.toBeInTheDocument());
+    expect(screen.getByTestId(`qr-state-${WISE}`)).toHaveTextContent('None');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('a Unit the caller no longer administers and a Unit that is gone answer identically', async () => {
+    renderPanel([{ request: listRequest(false), error: refused('NOT_FOUND', 'Unit not found') }]);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent("Could not load this Unit's payment methods.");
+    expect(screen.queryByTestId('create-payment-method')).not.toBeInTheDocument();
+  });
+
+  it('the 50th active method is the last one offered, and the count says so', async () => {
+    const full = Array.from({ length: 50 }, (_, index) => customMethod({ paymentMethodId: `PM#m-${index}`, displayName: `Method ${index}` }));
+    renderPanel([listRead(full)]);
+
+    expect(await screen.findByTestId('create-payment-method')).toBeDisabled();
+    expect(screen.getByTestId('active-method-count')).toHaveTextContent('50 active custom methods');
+  });
+});

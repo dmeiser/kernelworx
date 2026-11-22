@@ -13,7 +13,7 @@ import userEvent from '@testing-library/user-event';
 import { MockedProvider } from '@apollo/client/testing/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { UnitWorkspacePage } from '../src/pages/UnitWorkspacePage';
-import { GET_UNIT, LIST_UNIT_ADMINS, LIST_UNIT_CAMPAIGNS, LIST_UNIT_INVITES } from '../src/lib/graphql';
+import { GET_UNIT, LIST_UNIT_ADMINS, LIST_UNIT_CAMPAIGNS, LIST_UNIT_INVITES, LIST_UNIT_PAYMENT_METHODS } from '../src/lib/graphql';
 import { UNIT_PAGE_SIZE } from '../src/lib/units';
 import { campaignFixture, grantFixture, unitFixture } from './helpers/unitFixtures';
 
@@ -83,6 +83,37 @@ describe('UnitWorkspacePage', () => {
 
     await user.click(await screen.findByTestId('tab-campaigns'));
     expect(await screen.findByTestId(`campaign-row-${campaignFixture().unitCampaignId}`)).toBeInTheDocument();
+  });
+
+  it('the Payments tab is where a Unit names what it may sell against', async () => {
+    const mocks = pageMocks([
+      {
+        request: { query: LIST_UNIT_PAYMENT_METHODS, variables: { unitId: UNIT_ID, includeInactive: false } },
+        result: {
+          data: {
+            unitPaymentMethods: [
+              {
+                __typename: 'UnitPaymentMethod',
+                paymentMethodId: 'CASH',
+                unitId: UNIT_ID,
+                displayName: 'Cash',
+                isActive: true,
+                qrCodeS3Key: null,
+                createdAt: null,
+                version: 0,
+              },
+            ],
+          },
+        },
+      },
+    ]);
+    renderWorkspace(mocks);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByTestId('tab-payments'));
+
+    expect(await screen.findByTestId('method-row-CASH')).toBeInTheDocument();
+    expect(screen.getByTestId('computed-CASH')).toHaveTextContent('always available');
   });
 
   it('a Unit that is not the caller’s and a Unit that is gone answer identically', async () => {
