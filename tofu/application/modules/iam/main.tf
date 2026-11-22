@@ -1084,15 +1084,18 @@ data "aws_iam_policy_document" "lambda_unit_tenant_s3" {
     resources = ["${var.exports_bucket_arn}/payment-qr-codes/units/*"]
   }
 
-  # The one bucket-level grant, and it exists to keep a missing upload readable.
+  # The one bucket-level grant, and it exists to keep a missing object readable.
   # S3 answers a HeadObject for a key that does not exist with 403 when the
   # caller cannot show the bucket that the key is simply absent, and the handler
   # would then report an infrastructure denial (FORBIDDEN) to a Scout who merely
   # confirmed before the browser finished its POST. ListBucket scoped to the Unit
-  # QR prefixes is what lets S3 answer 404, so NOT_FOUND stays reachable against
-  # real AWS and a genuine denial stays distinguishable from it. Nothing lists:
-  # the handler never calls ListObjects, and the prefix condition keeps even the
-  # hypothetical listing inside the one tree this role owns.
+  # QR prefixes is what lets S3 answer that question: a confirm or a download that
+  # is refused HeadObject access lists the exact key, with MaxKeys set to one and
+  # the key itself as the prefix, and answers present as FORBIDDEN and absent as
+  # NOT_FOUND. So a real denial stays distinguishable from a missing object, and
+  # the listing can never reach outside the two folders this role owns —
+  # `uploads/`, which the browser's pre-signed POST writes, and `attachments/`,
+  # which only the Lambda publishes to.
   statement {
     effect    = "Allow"
     actions   = ["s3:ListBucket"]
