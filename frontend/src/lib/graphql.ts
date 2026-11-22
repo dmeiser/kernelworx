@@ -1195,6 +1195,104 @@ export const REVOKE_UNIT_INVITE = gql`
   }
 `;
 
+/**
+ * One Unit's payment methods (§4.1.1, §4.1.2).
+ *
+ * `version` is requested because every mutable row here is written conditionally: the
+ * screen sends back the version it read, and a row that moved underneath it is refused
+ * rather than overwritten. `createdAt` is asked for because the built-ins answer null,
+ * which is how the screen tells a computed method from one the Unit created.
+ */
+export const UNIT_PAYMENT_METHOD_FRAGMENT = gql`
+  fragment UnitPaymentMethodFields on UnitPaymentMethod {
+    paymentMethodId
+    unitId
+    displayName
+    isActive
+    qrCodeS3Key
+    createdAt
+    version
+  }
+`;
+
+export const LIST_UNIT_PAYMENT_METHODS = gql`
+  ${UNIT_PAYMENT_METHOD_FRAGMENT}
+  query ListUnitPaymentMethods($unitId: ID!, $includeInactive: Boolean) {
+    unitPaymentMethods(unitId: $unitId, includeInactive: $includeInactive) {
+      ...UnitPaymentMethodFields
+    }
+  }
+`;
+
+/**
+ * The pre-signed GET for one method's QR image (§4.1.2). Read on demand rather than
+ * listed with the methods: the URL is short-lived, so a list that carried it would
+ * hold an expired link for as long as the screen stayed open.
+ */
+export const GET_UNIT_PAYMENT_METHOD_QR_DOWNLOAD = gql`
+  query UnitPaymentMethodQrDownloadUrl($unitId: ID!, $paymentMethodId: ID!) {
+    unitPaymentMethodQrDownloadUrl(unitId: $unitId, paymentMethodId: $paymentMethodId) {
+      downloadUrl
+      expiresAt
+    }
+  }
+`;
+
+export const CREATE_UNIT_PAYMENT_METHOD = gql`
+  ${UNIT_PAYMENT_METHOD_FRAGMENT}
+  mutation CreateUnitPaymentMethod($input: CreateUnitPaymentMethodInput!) {
+    createUnitPaymentMethod(input: $input) {
+      ...UnitPaymentMethodFields
+    }
+  }
+`;
+
+export const UPDATE_UNIT_PAYMENT_METHOD = gql`
+  ${UNIT_PAYMENT_METHOD_FRAGMENT}
+  mutation UpdateUnitPaymentMethod($input: UpdateUnitPaymentMethodInput!) {
+    updateUnitPaymentMethod(input: $input) {
+      ...UnitPaymentMethodFields
+    }
+  }
+`;
+
+export const DEACTIVATE_UNIT_PAYMENT_METHOD = gql`
+  ${UNIT_PAYMENT_METHOD_FRAGMENT}
+  mutation DeactivateUnitPaymentMethod($input: DeactivateUnitPaymentMethodInput!) {
+    deactivateUnitPaymentMethod(input: $input) {
+      ...UnitPaymentMethodFields
+    }
+  }
+`;
+
+export const REQUEST_UNIT_PAYMENT_METHOD_QR_UPLOAD = gql`
+  mutation RequestUnitPaymentMethodQrUpload($input: RequestUnitPaymentMethodQrUploadInput!) {
+    requestUnitPaymentMethodQrUpload(input: $input) {
+      uploadUrl
+      fields
+      s3Key
+    }
+  }
+`;
+
+export const CONFIRM_UNIT_PAYMENT_METHOD_QR_UPLOAD = gql`
+  ${UNIT_PAYMENT_METHOD_FRAGMENT}
+  mutation ConfirmUnitPaymentMethodQrUpload($input: ConfirmUnitPaymentMethodQrUploadInput!) {
+    confirmUnitPaymentMethodQrUpload(input: $input) {
+      ...UnitPaymentMethodFields
+    }
+  }
+`;
+
+export const DELETE_UNIT_PAYMENT_METHOD_QR_CODE = gql`
+  ${UNIT_PAYMENT_METHOD_FRAGMENT}
+  mutation DeleteUnitPaymentMethodQrCode($input: DeleteUnitPaymentMethodQrCodeInput!) {
+    deleteUnitPaymentMethodQrCode(input: $input) {
+      ...UnitPaymentMethodFields
+    }
+  }
+`;
+
 export const CREATE_UNIT_CAMPAIGN = gql`
   ${UNIT_CAMPAIGN_FRAGMENT}
   mutation CreateUnitCampaign($input: CreateUnitCampaignInput!) {

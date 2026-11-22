@@ -1174,6 +1174,114 @@ type UnitInviteConnection {
   pageInfo: PageInfo!
 }
 
+"""A Unit-managed payment method. Built-in Cash/Check/Other are computed on every read and are never stored; custom methods carry a stable ID that survives renames."""
+type UnitPaymentMethod {
+  """Stable ID within the method's history; built-ins report CASH, CHECK, or OTHER."""
+  paymentMethodId: ID!
+  """The owning Unit."""
+  unitId: ID!
+  """The current name shown to users; historical sale snapshots keep the name captured at sale time."""
+  displayName: String!
+  """Inactive methods are unavailable for new sales but preserved for history."""
+  isActive: Boolean!
+  """S3 key of the optional shared QR image; null when none is attached. Unit Admin reads only."""
+  qrCodeS3Key: String
+  """When the method was created; null for the computed built-ins."""
+  createdAt: AWSDateTime
+  """When the method was last updated; null for the computed built-ins."""
+  updatedAt: AWSDateTime
+  """The Unit Admin who created it; null for the computed built-ins."""
+  createdByAccountId: ID
+  """The Unit Admin who last updated it; null for the computed built-ins."""
+  updatedByAccountId: ID
+  """Optimistic-concurrency version for rename and QR mutations; built-ins report 0 and are not mutable."""
+  version: Int!
+}
+
+"""Input for createUnitPaymentMethod. Cash/Check/Other names are reserved case-insensitively; at most 50 active custom methods per Unit."""
+input CreateUnitPaymentMethodInput {
+  """The owning Unit."""
+  unitId: ID!
+  """The display name (1-100 trimmed characters); unique per Unit case-insensitively."""
+  displayName: String!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for updateUnitPaymentMethod. A rename is a key-changing update; historical sale snapshots are never rewritten."""
+input UpdateUnitPaymentMethodInput {
+  """The owning Unit."""
+  unitId: ID!
+  """The method's stable paymentMethodId (built-in IDs cannot be renamed)."""
+  paymentMethodId: ID!
+  """The new display name; same reserved/duplicate-name rules as create."""
+  displayName: String!
+  """The version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for deactivateUnitPaymentMethod. Soft deactivation only; historical sales remain readable."""
+input DeactivateUnitPaymentMethodInput {
+  """The owning Unit."""
+  unitId: ID!
+  """The method's stable paymentMethodId (built-in IDs cannot be deactivated)."""
+  paymentMethodId: ID!
+  """The version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for requestUnitPaymentMethodQrUpload. Reuses the existing QR validation: PNG/JPEG/WebP, 5 MB maximum."""
+input RequestUnitPaymentMethodQrUploadInput {
+  """The owning Unit."""
+  unitId: ID!
+  """The method's stable paymentMethodId (built-in IDs have no QR image)."""
+  paymentMethodId: ID!
+  """The image content type the browser uploads: image/png, image/jpeg, or image/webp."""
+  contentType: String!
+  """Lowercase hex SHA-256 of the exact bytes being uploaded; the object name commits to it and confirm proves the object matches it."""
+  sha256: String!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for confirmUnitPaymentMethodQrUpload. Validates the uploaded object before the reference is written."""
+input ConfirmUnitPaymentMethodQrUploadInput {
+  """The owning Unit."""
+  unitId: ID!
+  """The method's stable paymentMethodId."""
+  paymentMethodId: ID!
+  """The s3Key returned by requestUnitPaymentMethodQrUpload; a key for another method is refused."""
+  s3Key: String!
+  """The version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for deleteUnitPaymentMethodQrCode. Removes the S3 object and the reference; sale history is untouched."""
+input DeleteUnitPaymentMethodQrCodeInput {
+  """The owning Unit."""
+  unitId: ID!
+  """The method's stable paymentMethodId."""
+  paymentMethodId: ID!
+  """The version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""A short-lived pre-signed GET for one payment method's QR image. Not a report download."""
+type UnitPaymentMethodQrDownload {
+  """The pre-signed S3 GET URL the browser embeds; it stops working at expiresAt."""
+  downloadUrl: String!
+  """When the URL stops working."""
+  expiresAt: AWSDateTime!
+}
+
 """The administrative view of a Unit Campaign, including its reusable join code and settings."""
 type UnitCampaignAdmin {
   """The Unit Campaign's stable ID."""
@@ -2463,6 +2571,20 @@ type Query {
     """Pagination parameters."""
     page: PageInput
   ): UnitInviteConnection!
+  """The Unit's payment methods: computed built-in Cash/Check/Other first, then custom methods. Unit Admin; at most 50 active custom methods."""
+  unitPaymentMethods(
+    """The Unit ID."""
+    unitId: ID!
+    """Include deactivated methods that history still references. Defaults to false."""
+    includeInactive: Boolean = false
+  ): [UnitPaymentMethod!]!
+  """A short-lived pre-signed GET for one payment method's QR image, for browser embedding. Unit Admin only."""
+  unitPaymentMethodQrDownloadUrl(
+    """The Unit ID."""
+    unitId: ID!
+    """The method's stable paymentMethodId."""
+    paymentMethodId: ID!
+  ): UnitPaymentMethodQrDownload!
   """The member-safe preview of a campaign from its join code; any authenticated account. No inventory, roster, or grant data."""
   unitCampaignJoinInfo(
     """The campaign join code."""
@@ -2867,6 +2989,36 @@ type Mutation {
     """The grant to revoke."""
     input: RevokeUnitAccessGrantInput!
   ): Unit!
+  """Create a named Unit payment method. Unit Admin; Cash/Check/Other names reserved case-insensitively; at most 50 active custom methods."""
+  createUnitPaymentMethod(
+    """The payment method to create."""
+    input: CreateUnitPaymentMethodInput!
+  ): UnitPaymentMethod!
+  """Rename a Unit payment method under its stable paymentMethodId. Unit Admin; historical sale snapshots keep the old name."""
+  updateUnitPaymentMethod(
+    """The rename."""
+    input: UpdateUnitPaymentMethodInput!
+  ): UnitPaymentMethod!
+  """Deactivate a Unit payment method (soft deactivate only). Unit Admin; historical sales remain readable."""
+  deactivateUnitPaymentMethod(
+    """The deactivation."""
+    input: DeactivateUnitPaymentMethodInput!
+  ): UnitPaymentMethod!
+  """Pre-sign a scoped S3 POST for one payment method's shared QR image. Unit Admin; PNG/JPEG/WebP up to 5 MB."""
+  requestUnitPaymentMethodQrUpload(
+    """The upload request."""
+    input: RequestUnitPaymentMethodQrUploadInput!
+  ): S3UploadInfo!
+  """Attach an uploaded QR image to a Unit payment method. Unit Admin; validates the object exists and is the image its key claims."""
+  confirmUnitPaymentMethodQrUpload(
+    """The confirmation."""
+    input: ConfirmUnitPaymentMethodQrUploadInput!
+  ): UnitPaymentMethod!
+  """Remove a Unit payment method's QR image and reference. Unit Admin; sale history is unchanged."""
+  deleteUnitPaymentMethodQrCode(
+    """The removal."""
+    input: DeleteUnitPaymentMethodQrCodeInput!
+  ): UnitPaymentMethod!
   """Create a Unit Campaign. Unit Admin for the parent Unit."""
   createUnitCampaign(
     """The campaign to create."""

@@ -17,12 +17,13 @@ import { LoadingState } from '../components/LoadingState';
 import { PageHeader } from '../components/PageHeader';
 import { UnitAccessPanel } from '../components/UnitAccessPanel';
 import { UnitCampaignsPanel } from '../components/UnitCampaignsPanel';
+import { UnitPaymentMethodsPanel } from '../components/UnitPaymentMethodsPanel';
 import { UnitSettingsPanel } from '../components/UnitSettingsPanel';
 import { useAuth } from '../contexts/AuthContext';
 import { SHOW_SELL_BASE, unitDisplayName } from '../lib/units';
 import type { GqlGetUnitQuery, GqlUnit } from '../types/graphql-generated';
 
-type WorkspaceTab = 'settings' | 'access' | 'campaigns';
+type WorkspaceTab = 'settings' | 'access' | 'payments' | 'campaigns';
 
 function readUnit(data: GqlGetUnitQuery | undefined): GqlUnit | null {
   return data?.unit ?? null;
@@ -99,6 +100,7 @@ const UnitWorkspaceTabs: React.FC<{ tab: WorkspaceTab; onChange: (tab: Workspace
     >
       <Tab label="Settings" value="settings" data-testid="tab-settings" />
       <Tab label="Access" value="access" data-testid="tab-access" />
+      <Tab label="Payments" value="payments" data-testid="tab-payments" />
       <Tab label="Campaigns" value="campaigns" data-testid="tab-campaigns" />
     </Tabs>
   </Box>
@@ -110,9 +112,25 @@ const UnitWorkspacePanel: React.FC<{
   onUnitChanged: () => Promise<unknown>;
 }> = ({ tab, unit, onUnitChanged }) => {
   const { account } = useAuth();
+  return panelFor(tab, unit, account?.accountId ?? '', onUnitChanged);
+};
+
+/**
+ * Which panel a tab shows, in one branch list rather than four inline ternaries.
+ *
+ * A section is one line here, and the settings panel is the fall-through because it is
+ * the tab the page opens on.
+ */
+function panelFor(
+  tab: WorkspaceTab,
+  unit: GqlUnit,
+  accountId: string,
+  onUnitChanged: () => Promise<unknown>,
+): React.ReactElement {
   if (tab === 'access') {
-    return <UnitAccessPanel unit={unit} callerAccountId={account?.accountId ?? ''} onUnitChanged={onUnitChanged} />;
+    return <UnitAccessPanel unit={unit} callerAccountId={accountId} onUnitChanged={onUnitChanged} />;
   }
+  if (tab === 'payments') return <UnitPaymentMethodsPanel unit={unit} />;
   if (tab === 'campaigns') return <UnitCampaignsPanel unit={unit} />;
   return <UnitSettingsPanel unit={unit} onSaved={onUnitChanged} />;
-};
+}

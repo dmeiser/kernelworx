@@ -9,6 +9,7 @@
  */
 
 import { extractErrorCode, type GraphQLErrorExtensions } from './errorCodes';
+import { getErrorCode } from './api-utils';
 import type { GqlUnit } from '../types/graphql-generated';
 
 /** Page size every Unit list asks for; the server caps at 100 (§ PageInput). */
@@ -63,9 +64,22 @@ function firstExtensions(error: unknown): GraphQLErrorExtensions | undefined {
   return first?.extensions ?? carrier.extensions;
 }
 
-/** The backend `ErrorCode` on an Apollo error, when one is present. */
+/**
+ * The backend `ErrorCode` on a failed operation, in whichever shape it arrived.
+ *
+ * Every Unit read and write answers through the AppSync unit resolver, which reports a
+ * failure with `util.error(message, type, null, { errorCode })`. That lands as the
+ * GraphQL error's own top-level `errorType` and `errorInfo.errorCode` — with **no**
+ * `extensions` at all — and Apollo Client v4 wraps the error list in `errors` rather
+ * than v3's `graphQLErrors`. So the code is read through the shared reader that knows
+ * those shapes (`getErrorCode` in `api-utils.ts`), because a reader that only knows
+ * `extensions` answers `undefined` for every deployed resolver error and each code-based
+ * branch in this file silently stops firing. The `extensions` path stays as the fallback
+ * for a bare `GraphQLError` from a direct link rejection, which carries no wrapper list
+ * for the shared reader to unwrap.
+ */
 export function graphQLErrorCode(error: unknown): string | undefined {
-  return extractErrorCode(firstExtensions(error));
+  return getErrorCode(error) ?? extractErrorCode(firstExtensions(error));
 }
 
 function errorMessage(error: unknown): string {
@@ -95,6 +109,33 @@ export function isDuplicateUnitError(error: unknown): boolean {
  */
 export function isStaleVersionError(error: unknown): boolean {
   return graphQLErrorCode(error) === 'CONFLICT';
+}
+
+/**
+ * True when a `CONFLICT` on a payment-method write is the name or capacity rule,
+ * not a stale version.
+ *
+ * The two are the same code on the wire — a duplicate name, the 50-method ceiling
+ * and a failed version condition all answer `CONFLICT` — and the thing that tells
+ * them apart (`DUPLICATE_PAYMENT_METHOD_NAME` / `PAYMENT_METHOD_LIMIT_REACHED` in
+ * `AppError.details.subcode`) is not forwarded across the AppSync JS resolver
+ * boundary. So the subcode is read where it exists and the sentence the server sent
+ * is what works today. This matters because the two want different answers: a taken
+ * name is fixed by typing a different one, and only a stale version is fixed by
+ * re-reading the row.
+ */
+export function isPaymentMethodTakenError(error: unknown): boolean {
+  return graphQLErrorCode(error) === 'CONFLICT' && (namesTakenMethod(error) || TAKEN_SENTENCE.test(errorMessage(error)));
+}
+
+const TAKEN_SUBCODES = ['DUPLICATE_PAYMENT_METHOD_NAME', 'PAYMENT_METHOD_LIMIT_REACHED'];
+
+/** The sentence DynamoDB's verdict shares with a version condition, read from the server. */
+const TAKEN_SENTENCE = /already has (a payment method|\d+ active payment methods)/i;
+
+function namesTakenMethod(error: unknown): boolean {
+  const details = firstExtensions(error)?.['details'] as { subcode?: string } | undefined;
+  return TAKEN_SUBCODES.includes(details?.subcode ?? '');
 }
 
 /** Where the preview lives in the browser; one constant so nav links and page

@@ -158,13 +158,16 @@ IAM notes:
 
 ### 4.3 Unit QR storage
 
-Current account QR keys use `payment-qr-codes/<accountId>/...`. Unit methods need a separate explicitly authorized scheme, for example:
+Current account QR keys use `payment-qr-codes/<accountId>/...`. Unit methods use a separate explicitly authorized scheme, rooted at the method and split into two folders that decide who may write an object:
 
 ```text
-payment-qr-codes/units/<unitId>/<paymentMethodId>/<filename>
+payment-qr-codes/units/<unitId>/<paymentMethodId>/uploads/<sha256-of-bytes>-<uuid>.<ext>       # the pre-signed POST target
+payment-qr-codes/units/<unitId>/<paymentMethodId>/attachments/<sha256-of-bytes>-<uuid>.<ext>   # what a row may reference
 ```
 
-That is an implementation key contract, not a Unit authorization mechanism by itself. Every upload/confirm/delete/download must still load the method and check the current Unit grant.
+The browser is handed credentials for the `uploads/` object only. Confirm reads that object once, proves it is the image its key claims and the bytes its digest declares, then copies those bytes to a fresh `attachments/` name the browser never saw, and the row references only that name. That split is what makes a stored reference immutable: no pre-signed POST the Unit role ever issues names an object a row references, so a later upload cannot change the image an admin displays. The upload target is retired by the same write that published the attachment, and any object a write displaces goes through the cleanup ledger on the row.
+
+That is an implementation key contract, not a Unit authorization mechanism by itself. Every upload/confirm/delete/download must still load the method and check the current Unit grant, and a key outside the requesting method's own prefix — another method, another Unit, or the legacy account scheme — is refused before S3 or DynamoDB is touched.
 
 Reuse the existing exports bucket so `frontend/index.html` CSP requires no change. `tests/unit/test_exports_bucket_lifecycle.py` must distinguish QR retention from retired `reports/` output.
 

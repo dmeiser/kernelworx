@@ -294,6 +294,7 @@ import_ephemeral_resources() {
   # Wave 2 Unit tenant (§1.7 / SCOPE-1): the unit-operations Lambda's scoped role.
   import_resource "$run_id" "module.iam.aws_iam_role_policy_attachment.lambda_unit_tenant_basic" "${lambda_unit_tenant_exec_role}/arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_unit_tenant_dynamodb" "${lambda_unit_tenant_exec_role}:dynamodb-access"
+  import_resource "$run_id" "module.iam.aws_iam_role_policy.lambda_unit_tenant_s3" "${lambda_unit_tenant_exec_role}:s3-qr-codes"
   # KW-PUBLIC-ORDERS-SES-1: exists only where the SES module is instantiated
   # (dev); count is zero on ephemeral, so this import is expected to fail there
   # and import_resource tolerates that.
