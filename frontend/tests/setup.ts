@@ -64,3 +64,25 @@ Object.defineProperty(window, 'matchMedia', {
     dispatchEvent: () => true,
   }),
 });
+
+// jsdom 27 still has no `Blob.prototype.arrayBuffer` (it implements only the
+// FileReader path), so a component that hashes the bytes of the file it is about
+// to upload cannot run against it at all. Every browser this app supports has
+// the spec method since 2020, so production code uses it and this shim supplies
+// it here — implemented over jsdom's own FileReader, so the bytes a test reads
+// are the bytes the File really holds rather than a stand-in.
+const blobPrototype = Blob.prototype as unknown as { arrayBuffer?: () => Promise<ArrayBuffer> };
+if (typeof blobPrototype.arrayBuffer !== 'function') {
+  Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+    configurable: true,
+    writable: true,
+    value: function readAsArrayBuffer(this: Blob): Promise<ArrayBuffer> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(this);
+      });
+    },
+  });
+}

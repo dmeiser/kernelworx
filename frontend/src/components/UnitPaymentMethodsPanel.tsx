@@ -346,7 +346,7 @@ function usePaymentMethodWrites({ unitId, refetch, setActionError }: WritesArgs)
 
   const uploadQr = useCallback(
     async (method: GqlUnitPaymentMethod, file: File): Promise<void> => {
-      const requested = await requestQr({ variables: { input: uploadRequestInput(unitId, method, file) } });
+      const requested = await requestQr({ variables: { input: await uploadRequestInput(unitId, method, file) } });
       const target = requested.data?.requestUnitPaymentMethodQrUpload;
       if (!target) throw new Error('The upload target could not be prepared.');
       await postToS3(target.uploadUrl, target.fields, file);
@@ -386,13 +386,34 @@ function versionedInput(unitId: string, write: PendingWrite): Record<string, unk
   };
 }
 
-function uploadRequestInput(unitId: string, method: GqlUnitPaymentMethod, file: File): Record<string, unknown> {
+async function uploadRequestInput(
+  unitId: string,
+  method: GqlUnitPaymentMethod,
+  file: File,
+): Promise<Record<string, unknown>> {
   return {
     unitId,
     paymentMethodId: method.paymentMethodId,
     contentType: file.type,
+    sha256: await sha256Hex(file),
     idempotency: { idempotencyKey: newIdempotencyKey() },
   };
+}
+
+/**
+ * The SHA-256 the upload request names its object after.
+ *
+ * The server puts this digest in the pre-signed key and the confirm step proves
+ * the object in the bucket hashes to it, so the reference that ends up on the row
+ * commits to the exact bytes this file holds. The hash is computed here, from the
+ * same bytes being POSTed: a declared digest the browser did not actually
+ * compute is worth nothing to that check.
+ */
+async function sha256Hex(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 function confirmInput(unitId: string, method: GqlUnitPaymentMethod, s3Key: string): Record<string, unknown> {

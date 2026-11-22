@@ -2331,6 +2331,8 @@ export type GqlRequestUnitPaymentMethodQrUploadInput = {
   idempotency: GqlIdempotencyInput;
   /** The method's stable paymentMethodId (built-in IDs have no QR image). */
   paymentMethodId: Scalars['ID']['input'];
+  /** Lowercase hex SHA-256 of the exact bytes being uploaded; the object name commits to it and confirm proves the object matches it. */
+  sha256: Scalars['String']['input'];
   /** The owning Unit. */
   unitId: Scalars['ID']['input'];
 };

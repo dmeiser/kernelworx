@@ -50,7 +50,13 @@ let keySequence = 0;
 
 beforeEach(() => {
   keySequence = 0;
-  vi.stubGlobal('crypto', { randomUUID: () => `test-idem-${++keySequence}` });
+  vi.stubGlobal('crypto', {
+    randomUUID: () => `test-idem-${++keySequence}`,
+    // A fixed 32 bytes, so the upload request's declared digest is knowable by
+    // the mocks below; the digest's real arithmetic is proved by the one test
+    // that swaps in Node's own WebCrypto.
+    subtle: { digest: async () => new Uint8Array(32).buffer },
+  });
   globalThis.URL.createObjectURL = vi.fn(() => 'blob:mock-preview');
   globalThis.URL.revokeObjectURL = vi.fn();
 });
@@ -404,7 +410,13 @@ describe('UnitPaymentMethodsPanel', () => {
         request: {
           query: REQUEST_UNIT_PAYMENT_METHOD_QR_UPLOAD,
           variables: {
-            input: { unitId: UNIT_ID, paymentMethodId: WISE, contentType: 'image/png', idempotency: { idempotencyKey: 'test-idem-1' } },
+            input: {
+          unitId: UNIT_ID,
+          paymentMethodId: WISE,
+          contentType: 'image/png',
+          sha256: '0'.repeat(64),
+          idempotency: { idempotencyKey: 'test-idem-1' },
+        },
           },
         },
         result: {
@@ -450,6 +462,71 @@ describe('UnitPaymentMethodsPanel', () => {
     expect(form.get('key')).toBe(QR_KEY);
   });
 
+  it('declares the SHA-256 of the bytes it posts, which is what the confirm step proves', async () => {
+    // Node's own WebCrypto for this one: the digest has to be the real arithmetic
+    // the server compares against the stored object, not a stand-in.
+    const { webcrypto } = await import('node:crypto');
+    keySequence = 0;
+    vi.stubGlobal('crypto', { randomUUID: () => `test-idem-${++keySequence}`, subtle: webcrypto.subtle });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    renderPanel([
+      listRead([customMethod({ version: 3 })]),
+      {
+        request: {
+          query: REQUEST_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              contentType: 'image/png',
+              // sha256 of the four bytes \x89PNG — the file this test chooses.
+              sha256: '0f4636c78f65d3639ece5a064b5ae753e3408614a14fb18ab4d7540d2c248543',
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        result: {
+          data: {
+            requestUnitPaymentMethodQrUpload: {
+              __typename: 'S3UploadInfo',
+              uploadUrl: 'https://kernelworx-exports-ue1-dev.s3.amazonaws.com',
+              fields: `{"key":"${QR_KEY}"}`,
+              s3Key: QR_KEY,
+            },
+          },
+        },
+      },
+      {
+        request: {
+          query: CONFIRM_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              s3Key: QR_KEY,
+              version: { expectedVersion: 3 },
+              idempotency: { idempotencyKey: 'test-idem-2' },
+            },
+          },
+        },
+        result: { data: { confirmUnitPaymentMethodQrUpload: customMethod({ qrCodeS3Key: QR_KEY, version: 4 }) } },
+      },
+      listRead([customMethod({ qrCodeS3Key: QR_KEY, version: 4 })], false, 2),
+    ]);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId(`qr-${WISE}`));
+    await user.upload(
+      screen.getByLabelText('Select QR code image'),
+      new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'qr.png', { type: 'image/png' }),
+    );
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Upload' }));
+
+    // Every mock above matches its input exactly, so the row reading 'View QR'
+    // means the ask went out with that digest and no other change to it.
+    expect(await screen.findByTestId(`view-qr-${WISE}`)).toBeInTheDocument();
+  });
+
   it('a QR the server turns down stays in the dialog that still holds the file', async () => {
     const user = userEvent.setup();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
@@ -459,7 +536,13 @@ describe('UnitPaymentMethodsPanel', () => {
         request: {
           query: REQUEST_UNIT_PAYMENT_METHOD_QR_UPLOAD,
           variables: {
-            input: { unitId: UNIT_ID, paymentMethodId: WISE, contentType: 'image/png', idempotency: { idempotencyKey: 'test-idem-1' } },
+            input: {
+          unitId: UNIT_ID,
+          paymentMethodId: WISE,
+          contentType: 'image/png',
+          sha256: '0'.repeat(64),
+          idempotency: { idempotencyKey: 'test-idem-1' },
+        },
           },
         },
         result: {
@@ -755,7 +838,13 @@ function uploadAsk(fields: unknown, target: unknown = undefined) {
     request: {
       query: REQUEST_UNIT_PAYMENT_METHOD_QR_UPLOAD,
       variables: {
-        input: { unitId: UNIT_ID, paymentMethodId: WISE, contentType: 'image/png', idempotency: { idempotencyKey: 'test-idem-1' } },
+        input: {
+          unitId: UNIT_ID,
+          paymentMethodId: WISE,
+          contentType: 'image/png',
+          sha256: '0'.repeat(64),
+          idempotency: { idempotencyKey: 'test-idem-1' },
+        },
       },
     },
     result: { data: { requestUnitPaymentMethodQrUpload: info } },
