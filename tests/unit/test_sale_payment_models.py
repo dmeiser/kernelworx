@@ -9,10 +9,11 @@ questions this suite settles are the ones every pooled-sale write path will ask:
 - what it records — the display name read from the server's row and never the
   caller's text (PAY-06), plus the Other explanation when the method is Other
   (AC-19, AC-20);
-- what the write must carry — the method row's version and active state as a
-  transaction condition, so a deactivation landing after the read that filled the
+- what the write must carry — the method row's identity, version and active state as
+  a transaction condition, so a deactivation landing after the read that filled the
   picker fails the whole sale rather than recording it against a retired method
-  (PAY-M-02-03); and
+  (PAY-M-02-03), and so a name that a rename freed and a create reused cannot answer
+  for a sale made under the method that held it first; and
 - that money is classified by the code alone, which is why a custom method named
   ``Cash`` never reaches the cash column (AC-31).
 """
@@ -283,7 +284,7 @@ def test_a_correction_may_keep_the_method_a_sale_was_made_under(units_table: Any
 
 
 def test_the_condition_names_the_method_row_the_snapshot_read(units_table: Any) -> None:
-    """The write carries the version and active state the read saw, on that row's key."""
+    """The write carries the method's identity, version and active state, on that row's key."""
     _seed_units(units_table)
     _method(units_table, PACK_ID, payment_method_id=WISE_ID, display_name="Wise")
     row = resolve_sale_payment(PACK_ID, f"CUSTOM:{WISE_ID}")
@@ -293,8 +294,47 @@ def test_the_condition_names_the_method_row_the_snapshot_read(units_table: Any) 
 
     assert condition["TableName"] == units_table.table_name
     assert condition["Key"] == {"pk": {"S": f"UNIT#{PACK_ID}"}, "sk": {"S": "PAYMENT#wise"}}
-    assert condition["ConditionExpression"] == "#version = :version AND #isActive = :isActive"
-    assert condition["ExpressionAttributeValues"] == {":version": {"N": "1"}, ":isActive": {"BOOL": True}}
+    assert (
+        condition["ConditionExpression"]
+        == "#version = :expectedVersion AND #paymentMethodId = :paymentMethodId AND #isActive = :isActive"
+    )
+    assert condition["ExpressionAttributeNames"] == {
+        "#version": "version",
+        "#paymentMethodId": "paymentMethodId",
+        "#isActive": "isActive",
+    }
+    assert condition["ExpressionAttributeValues"] == {
+        ":expectedVersion": {"N": "1"},
+        ":paymentMethodId": {"S": WISE_ID},
+        ":isActive": {"BOOL": True},
+    }
+
+
+def test_a_renamed_method_frees_the_name_for_another_methods_sale(units_table: Any) -> None:
+    """The identity half of the condition is what makes it about a method, not a name.
+
+    A payment row's sort key is a normalized display name, so a rename followed by a
+    create puts a DIFFERENT method at the key an earlier read saw — and at the same
+    version number that read recorded, because the new row starts at 1. A condition on
+    the version alone would let that sale commit, snapshotting a method the picker
+    never offered. The interleaving is a real one: both writes are ordinary admin
+    mutations, and the sale's read is not part of either transaction.
+    """
+    _seed_units(units_table)
+    _method(units_table, PACK_ID, payment_method_id=WISE_ID, display_name="Wise")
+    decision = _decision(units_table, PACK_ID, f"CUSTOM:{WISE_ID}")
+    assert decision["condition"] is not None
+    assert decision["snapshot"]["displayName"] == "Wise"
+
+    # The rename moved Wise to another key and this create took the name back up, so
+    # PAYMENT#wise is now a different method — at the version the sale's read saw.
+    _method(units_table, PACK_ID, payment_method_id=CASH_BOX_ID, display_name="Wise")
+
+    with pytest.raises(ClientError) as cancelled:
+        _commit_sale(units_table, decision)
+    reasons = cancelled.value.response["CancellationReasons"]
+    assert [reason["Code"] for reason in reasons] == ["ConditionalCheckFailed", "None"]
+    assert _sale_rows(units_table) == []
 
 
 def test_a_deactivation_after_the_read_cancels_the_sale_transaction(units_table: Any) -> None:

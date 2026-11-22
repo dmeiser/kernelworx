@@ -8,12 +8,15 @@ and it has to decide the same way for every writer: the object must exist, it
 must fit the size the pre-signed POST already promised, its magic numbers must
 match the format its own key extension claims — a JPEG stored as ``.png`` would
 otherwise be served under an ``image/png`` URL (#559) — and its SHA-256 must be
-the digest its key names. That last check is what turns a stored reference into
-a promise about bytes: the key was minted from the digest the browser declared
-before it uploaded, so confirming proves the object in the bucket is the object
-that key describes, and a later POST cannot swap the content underneath a
-reference that is already current. A rejected object is purged before the error
-is raised, so a bad upload cannot linger in the first-party bucket.
+the digest its key names. A rejected object is purged before the error is
+raised, so a bad upload cannot linger in the first-party bucket.
+
+What the bytes proved to be are then written a SECOND time, under a name the
+browser was never given. That is the half that keeps a served image from moving
+under a reader: a pre-signed POST stays usable for its whole window and S3 has no
+way to bind it to a request that already finished, so the object a browser can
+write is never the object a row references. See
+``src/utils/unit_payment_models.py`` for the two-key layout that states this.
 
 This module is the single source for those rules and for the pre-signed POST
 and GET builders. It deliberately reads no DynamoDB table: the QR object layer
@@ -85,6 +88,23 @@ def content_type_for_qr_key(s3_key: str) -> str:
     raise AppError(ErrorCode.INVALID_INPUT, "QR image key has an unknown extension")
 
 
+_QR_EXTENSION_BY_CONTENT_TYPE: Dict[str, str] = {
+    content_type: extension for content_type, extension in QR_CONTENT_TYPES.items()
+}
+
+
+def qr_key_extension(s3_key: str) -> str:
+    """The stored extension one QR object name carries, in the minted spelling.
+
+    An attachment published from an upload target keeps that target's extension,
+    so a key minted ``.jpg`` never turns into ``.jpeg`` on the way in: the
+    magic-number check, the served content type, and the stored name then all
+    speak the same format. A key whose extension is not one this API mints raises
+    through :func:`content_type_for_qr_key` rather than returning a guess.
+    """
+    return _QR_EXTENSION_BY_CONTENT_TYPE[content_type_for_qr_key(s3_key)]
+
+
 def _is_png(body: bytes) -> bool:
     """True for a PNG signature."""
     return body.startswith(b"\x89PNG\r\n\x1a\n")
@@ -124,24 +144,28 @@ def qr_object_bytes(s3_client: S3Client, bucket: str, s3_key: str) -> bytes:
     return bytes(s3_client.get_object(Bucket=bucket, Key=s3_key)["Body"].read())
 
 
-def validate_uploaded_qr_object(bucket: str, s3_key: str, expected_digest: str) -> None:
+def validate_uploaded_qr_object(bucket: str, s3_key: str, expected_digest: str) -> bytes:
     """Validate what the browser actually uploaded, purging it when it is bad.
 
-    Three things have to be true of the object before a row may point at it: it
-    exists, it is the image its own key extension claims, and its SHA-256 is the
-    digest the key names. The third is what makes the attachment immutable — the
-    stored reference commits to specific bytes, and confirmation proves the bytes
-    in the bucket are those bytes — so a POST that lands on the same key later
-    with different content can never become current.
+    Three things have to be true of the object before a row may be built from it:
+    it exists, it is the image its own key extension claims, and its SHA-256 is
+    the digest the key names. The last two are decided from ONE read of the body,
+    which is also the body the caller publishes under the attachment key — so the
+    bytes a reference ends up holding are the bytes that passed, with no second
+    snapshot in between. A rejected object is deleted before the error, so a bad
+    upload cannot linger in the first-party bucket.
+
+    Returns:
+        The object's bytes, already proven to be the ``expected_digest`` bytes.
 
     Raises:
         AppError: NOT_FOUND when the object is missing — the browser has not
             uploaded yet, or the pre-signed window expired before confirm;
-            FORBIDDEN when S3 refused the read rather than answering it (a
-            missing grant is an infrastructure fault, never a missing upload);
-            INVALID_INPUT when the object is over the cap, is not the image its
-            key claims, or is not the bytes that key names. A rejected object is
-            deleted before that error.
+            FORBIDDEN when S3 refused the read and a scoped listing proves the
+            key is really there (a missing grant is an infrastructure fault,
+            never a missing upload); INVALID_INPUT when the object is over the
+            cap, is not the image its key claims, or is not the bytes that key
+            names.
     """
     log = get_logger(__name__)
     s3_client = get_s3_client()
@@ -152,7 +176,7 @@ def validate_uploaded_qr_object(bucket: str, s3_key: str, expected_digest: str) 
         if code in _MISSING_OBJECT_CODES:
             raise AppError(ErrorCode.NOT_FOUND, "Upload not found. Please upload the file first.") from exc
         if code in _DENIED_OBJECT_CODES:
-            raise AppError(ErrorCode.FORBIDDEN, "The uploaded QR image could not be read.") from exc
+            raise _refused_read(s3_client, bucket, s3_key, exc, log) from exc
         raise
 
     content_length = int(head.get("ContentLength", 0) or 0)
@@ -166,12 +190,60 @@ def validate_uploaded_qr_object(bucket: str, s3_key: str, expected_digest: str) 
     if hashlib.sha256(body).hexdigest() != expected_digest:
         _purge_rejected(s3_client, bucket, s3_key, log, content_length)
         raise AppError(ErrorCode.INVALID_INPUT, "Uploaded file does not match the upload request")
+    return body
+
+
+def _refused_read(s3_client: S3Client, bucket: str, s3_key: str, refused: ClientError, log: Any) -> AppError:
+    """Decide a HeadObject denial: a key that is not there, or a read that is denied.
+
+    A HeadObject answer of 403 is ambiguous by construction. S3 documents that it
+    refuses — rather than answering 404 — a read of a key the caller has no grant
+    on, and this role's only bucket-level grant is a ``ListBucket`` conditional on
+    an ``s3:prefix`` the HeadObject request itself cannot carry, so a key that is
+    simply absent can answer 403 here too. Guessing either way is wrong half the
+    time: "upload not found" blames a Scout who uploaded fine, and "access denied"
+    blames infrastructure when the object never arrived.
+
+    So the ambiguity is resolved with a request this role provably can make: a
+    listing scoped to the exact key. If the key appears in it, the read really was
+    denied and that is FORBIDDEN; if it does not, the object is absent and that is
+    the same NOT_FOUND the browser would have been given. A listing this role is
+    refused as well leaves the question unanswerable, and the answer then stays
+    the denial it arrived as.
+    """
+    try:
+        listed = s3_client.list_objects_v2(Bucket=bucket, Prefix=s3_key, MaxKeys=1)
+    except ClientError as exc:
+        log.warning("QR object listing refused; reporting the denial", s3_key=s3_key, error=str(exc))
+        return AppError(ErrorCode.FORBIDDEN, "The uploaded QR image could not be read.")
+    contents = listed.get("Contents") or []
+    if any(str(entry.get("Key", "")) == s3_key for entry in contents):
+        return AppError(ErrorCode.FORBIDDEN, "The uploaded QR image could not be read.")
+    log.warning("HeadObject denied the read and the scoped listing shows no such key", s3_key=s3_key)
+    return AppError(ErrorCode.NOT_FOUND, "Upload not found. Please upload the file first.")
 
 
 def _purge_rejected(s3_client: S3Client, bucket: str, s3_key: str, log: Any, content_length: int) -> None:
     """Delete an object that failed validation so it cannot linger in the bucket."""
     log.warning("Rejected QR upload purged from the exports bucket", s3_key=s3_key, content_length=content_length)
     s3_client.delete_object(Bucket=bucket, Key=s3_key)
+
+
+def publish_qr_attachment(bucket: str, s3_key: str, body: bytes, content_type: str) -> None:
+    """Write the validated bytes under the key the row is about to reference.
+
+    This is the step that makes the stored reference serve immutable bytes. The
+    upload object is mutable for as long as its pre-signed POST is valid — anyone
+    holding those credentials can POST again — so it is never what the row points
+    at. The name published here is minted by the handler, is never handed to a
+    browser, and holds the exact bytes this call just proved, so no POST can
+    change what an existing attachment serves.
+
+    Raises:
+        AppError: INTERNAL_ERROR is the caller's verdict if S3 refuses the write;
+            nothing is committed on a failure, and the caller purges the orphan.
+    """
+    get_s3_client().put_object(Bucket=bucket, Key=s3_key, Body=body, ContentType=content_type)
 
 
 def presigned_qr_upload(bucket: str, s3_key: str, content_type: str) -> Dict[str, Any]:
@@ -199,11 +271,22 @@ def presigned_qr_download(bucket: str, s3_key: str) -> Dict[str, str]:
 
     ``expiresAt`` rides with the URL so a screen can say when the image stops
     loading instead of showing a broken image for no stated reason.
+
+    The signature also pins the response's ``Content-Disposition`` to an
+    attachment naming the object's own name, because that parameter is part of
+    the signed URL: a URL whose signature covers it cannot be edited into a bare
+    image GET, and any client that reaches the object directly — a paste into a
+    new tab, a save-from-menu — gets a file rather than a rendered image. The
+    browser control does its own blob download on top of this, since the HTML
+    ``download`` attribute is ignored cross-origin.
     """
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=QR_DOWNLOAD_TTL_SECONDS)
-    url = get_s3_client().generate_presigned_url(
-        "get_object", Params={"Bucket": bucket, "Key": s3_key}, ExpiresIn=QR_DOWNLOAD_TTL_SECONDS
-    )
+    params = {
+        "Bucket": bucket,
+        "Key": s3_key,
+        "ResponseContentDisposition": f'attachment; filename="{s3_key.rsplit("/", 1)[-1]}"',
+    }
+    url = get_s3_client().generate_presigned_url("get_object", Params=params, ExpiresIn=QR_DOWNLOAD_TTL_SECONDS)
     return {"downloadUrl": url, "expiresAt": expires_at.isoformat()}
 
 

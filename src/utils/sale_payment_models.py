@@ -44,7 +44,12 @@ from .dynamodb import tables
 from .errors import AppError, ErrorCode
 from .mutations import wire_key
 from .unit_models import normalize_required_text
-from .unit_payment_models import BUILTIN_PAYMENT_METHOD_IDS, BUILTIN_PAYMENT_METHODS, find_payment_by_id
+from .unit_payment_models import (
+    BUILTIN_PAYMENT_METHOD_IDS,
+    BUILTIN_PAYMENT_METHODS,
+    find_payment_by_id,
+    version_and_owner_guard,
+)
 
 CUSTOM_METHOD_CODE_PREFIX = "CUSTOM:"
 
@@ -160,22 +165,29 @@ def _refuse_inactive_method(row: Mapping[str, Any]) -> None:
 def payment_method_condition_action(row: Mapping[str, Any]) -> Dict[str, Any]:
     """The ``ConditionCheck`` that pins the method this snapshot read.
 
-    The version AND the active flag the read saw are both in the condition, so the
-    sale's transaction fails whole if either moved between the read and the commit
-    — the same optimistic-lock rule the rename and QR paths use, reached across a
-    key this write does not otherwise touch. The row's own key pair is used rather
-    than a rebuilt one: the sort key is the normalized name as stored, and
-    re-deriving it could address a different row than the one read.
+    Three things the read saw are in the condition — the row's ``paymentMethodId``,
+    its ``version``, and its active flag — so the sale's transaction fails whole if
+    any of them moved between the read and the commit. Identity is not optional
+    here even though the sale writes nothing to this row: the key is a normalized
+    name, and a rename plus a re-create can leave a DIFFERENT method sitting at the
+    same name key and the same version number, which would snapshot the wrong
+    method's name into a sale. The guard fragment is therefore the one the method
+    mutations use (:func:`src.utils.unit_payment_models.version_and_owner_guard`),
+    so the two cannot drift. The row's own key pair is used rather than a rebuilt
+    one: the sort key is the normalized name as stored, and re-deriving it could
+    address a different row than the one read.
     """
+    guard = version_and_owner_guard(str(row["paymentMethodId"]), int(row["version"]))
+    names = dict(guard["ExpressionAttributeNames"])
+    values = dict(guard["ExpressionAttributeValues"])
+    names["#isActive"] = "isActive"
+    values[":isActive"] = {"BOOL": bool(row.get("isActive", True))}
     return {
         "TableName": tables.units.table_name,
         "Key": wire_key({"pk": str(row["pk"]), "sk": str(row["sk"])}),
-        "ConditionExpression": "#version = :version AND #isActive = :isActive",
-        "ExpressionAttributeNames": {"#version": "version", "#isActive": "isActive"},
-        "ExpressionAttributeValues": {
-            ":version": {"N": str(int(row["version"]))},
-            ":isActive": {"BOOL": bool(row.get("isActive", True))},
-        },
+        "ConditionExpression": f"{guard['ConditionExpression']} AND #isActive = :isActive",
+        "ExpressionAttributeNames": names,
+        "ExpressionAttributeValues": values,
     }
 
 

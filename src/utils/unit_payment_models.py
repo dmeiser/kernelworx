@@ -55,7 +55,8 @@ PAYMENT_SK_PREFIX = "PAYMENT#"
 
 # The Unit QR prefix (§4.3 of SHOW_AND_SELL_EXISTING_APPLICATION_IMPACT.md):
 #
-#     payment-qr-codes/units/<unitId>/<paymentMethodId>/<sha256>-<uuid>.<ext>
+#     payment-qr-codes/units/<unitId>/<paymentMethodId>/uploads/<sha256>-<uuid>.<ext>
+#     payment-qr-codes/units/<unitId>/<paymentMethodId>/attachments/<sha256>-<uuid>.<ext>
 #
 # A separate root from the legacy account scheme (``payment-qr-codes/<accountId>/``)
 # is what lets the execution role hold one scoped grant, and carrying the
@@ -63,19 +64,26 @@ PAYMENT_SK_PREFIX = "PAYMENT#"
 # ``s3Key`` a caller supplies on confirm has to sit under the prefix of the very
 # method it names, or it belongs to somebody else.
 #
-# The object name is the pair that makes the attachment immutable. The digest is
-# the SHA-256 of the bytes the browser says it is uploading, so the stored key
-# commits to specific bytes; the uuid makes the name unique to ONE upload
-# request, so the pre-signed POST this API hands out never names a key another
-# request already committed. Confirmation then hashes what is actually in the
-# bucket and refuses unless it matches the digest in the key: the row can only
-# ever reference an object whose bytes are the bytes its own name declares, and
-# a later POST cannot quietly swap them under a committed key.
+# The two folders are the two halves of one upload, and which half a key sits in
+# decides who may write it. ``uploads/`` is the pre-signed POST target: the only
+# object a browser can put, and it is named once per upload request. The row
+# never references it. ``attachments/`` is written by the server from the bytes
+# it has just validated, under a name no pre-signed POST ever handed out, and it
+# is the only reference a stored method may carry. That split is what makes an
+# attached image immutable in fact and not only in intention: a POST cannot
+# re-point a committed reference at different bytes, because no POST names the
+# object the reference holds. Confirmation still hashes the uploaded object
+# against the digest its own key names, so the bytes published under the
+# attachment key are the bytes this upload declared.
 UNIT_QR_ROOT = "payment-qr-codes/units"
 
+UNIT_QR_UPLOAD_FOLDER = "uploads"
+UNIT_QR_ATTACHMENT_FOLDER = "attachments"
+UNIT_QR_FOLDERS: frozenset[str] = frozenset({UNIT_QR_UPLOAD_FOLDER, UNIT_QR_ATTACHMENT_FOLDER})
+
 # A stored object name: the digest the mint declared, the uuid that makes this
-# upload's name unique, and the extension both were minted for. Nothing else is
-# ever accepted back on confirm or delete.
+# object's name unique, and the extension both were minted for. Nothing else is
+# ever accepted back on confirm, delete, or download.
 _QR_DIGEST_HEX = re.compile(r"[0-9a-f]{64}")
 _QR_OBJECT_NAME = re.compile(r"[0-9a-f]{64}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z]{3,4}")
 
@@ -188,18 +196,21 @@ def normalize_qr_digest(value: Any) -> str:
     return digest
 
 
-def unit_qr_key_digest(s3_key: str, unit_id: str, payment_method_id: str) -> str:
-    """The digest a Unit QR object name declares — empty unless the key is this method's.
+def unit_qr_upload_digest(s3_key: str, unit_id: str, payment_method_id: str) -> str:
+    """The digest one of this method's upload targets names — empty for anything else.
 
-    One gate answers both questions a confirm or download asks of an object name:
-    does it belong to this method at all, and does it name the bytes it claims. A
-    key under another Unit, another method, or the legacy account scheme returns
-    the empty string, which no stored object's digest can match, so a caller
-    cannot sidestep either half by supplying a name.
+    One gate answers both questions a confirm asks of an object name: does it
+    belong to this method at all, and is it an upload target rather than an
+    attachment already published from one. A key under another Unit, another
+    method, or the legacy account scheme returns the empty string, which no
+    stored object's digest can match, so a caller cannot sidestep either half by
+    supplying a name — and a published attachment can never be re-confirmed,
+    which is what keeps a retired object out of circulation.
     """
-    if not unit_qr_key_is_mine(s3_key, unit_id, payment_method_id):
+    folder, name = _qr_object_folder_and_name(s3_key, unit_id, payment_method_id) or ("", "")
+    if folder != UNIT_QR_UPLOAD_FOLDER:
         return ""
-    declared, _, _ = s3_key.rsplit("/", 1)[-1].partition("-")
+    declared, _, _ = name.partition("-")
     return declared
 
 
@@ -217,30 +228,96 @@ def unit_qr_prefix(unit_id: str, payment_method_id: str) -> str:
     return f"{UNIT_QR_ROOT}/{unit_id}/{payment_method_id}"
 
 
-def new_unit_qr_object_key(unit_id: str, payment_method_id: str, digest_hex: str, extension: str) -> str:
-    """Mint one upload target: a fresh, digest-named object under this method's prefix.
+def _qr_object_folder_and_name(s3_key: str, unit_id: str, payment_method_id: str) -> Optional[tuple[str, str]]:
+    """``(folder, object name)`` for one of this method's QR objects, else None.
+
+    One gate answers every question a confirm, delete, or download asks of an
+    object name: does it belong to this method at all, is it a name this API ever
+    mints, and which half of the upload is it — the browser's POST target or the
+    attachment the row may hold.
+    """
+    prefix = f"{unit_qr_prefix(unit_id, payment_method_id)}/"
+    if not s3_key.startswith(prefix):
+        return None
+    folder, _, name = s3_key[len(prefix) :].partition("/")
+    if folder not in UNIT_QR_FOLDERS or _QR_OBJECT_NAME.fullmatch(name) is None:
+        return None
+    return folder, name
+
+
+def new_unit_qr_upload_key(unit_id: str, payment_method_id: str, digest_hex: str, extension: str) -> str:
+    """Mint one upload target: a fresh, digest-named object this method may POST to.
 
     Two properties do the work. The name is unique to THIS upload request, so the
     pre-signed POST this API issues never names an object another request already
-    committed — a replacement displaces a different key than the one it writes,
-    and deleting the displaced one can never remove the current image. And the
-    name declares the SHA-256 of the bytes, so the reference this key can become
-    commits to specific bytes that confirmation then verifies.
+    committed, and the object the row ends up referencing is a different name
+    again. And the name declares the SHA-256 of the bytes, so confirm can prove
+    the bytes in the bucket are the bytes this key — and the attachment made from
+    it — describes.
     """
-    return f"{unit_qr_prefix(unit_id, payment_method_id)}/{digest_hex}-{uuid.uuid4()}.{extension}"
+    folder = f"{unit_qr_prefix(unit_id, payment_method_id)}/{UNIT_QR_UPLOAD_FOLDER}"
+    return f"{folder}/{digest_hex}-{uuid.uuid4()}.{extension}"
+
+
+def new_unit_qr_attachment_key(unit_id: str, payment_method_id: str, digest_hex: str, extension: str) -> str:
+    """Mint the name the published image will live under, at confirm time.
+
+    The server mints this one, inside the confirm handler, from the digest it has
+    just proved — so no pre-signed POST ever named it, and nothing a browser can
+    do writes it. The uuid keeps every attachment distinct even when two uploads
+    carry identical bytes, which is what lets a retired attachment stay retired:
+    a later upload of the same image gets a different name and no earlier cleanup
+    list can name it.
+    """
+    folder = f"{unit_qr_prefix(unit_id, payment_method_id)}/{UNIT_QR_ATTACHMENT_FOLDER}"
+    return f"{folder}/{digest_hex}-{uuid.uuid4()}.{extension}"
 
 
 def unit_qr_key_is_mine(s3_key: str, unit_id: str, payment_method_id: str) -> bool:
     """True when ``s3_key`` is an object this method owns and nothing else.
 
-    The confirm and delete paths ask this before they touch S3: a key under
+    Both folders count: cleanup has to be able to retire an upload target it
+    published from, as well as the attachment a reference displaced. A key under
     another Unit, another method, or the legacy account scheme is foreign, and
     signing, storing, or deleting it would act on someone else's bytes.
     """
-    prefix = f"{unit_qr_prefix(unit_id, payment_method_id)}/"
-    if not s3_key.startswith(prefix):
-        return False
-    return _QR_OBJECT_NAME.fullmatch(s3_key[len(prefix) :]) is not None
+    return _qr_object_folder_and_name(s3_key, unit_id, payment_method_id) is not None
+
+
+def unit_qr_attachment_key_is_mine(s3_key: str, unit_id: str, payment_method_id: str) -> bool:
+    """True when ``s3_key`` is an attachment this method owns.
+
+    The download path signs the stored reference, so the stored reference has to
+    be the server-published half of an upload. An ``uploads/`` key on a row would
+    mean a reference a browser could still overwrite, and it is signed never.
+    """
+    folder, _ = _qr_object_folder_and_name(s3_key, unit_id, payment_method_id) or ("", "")
+    return folder == UNIT_QR_ATTACHMENT_FOLDER
+
+
+# --- Shared optimistic-lock condition (data model §5.4) ---------------------------
+
+
+def version_and_owner_guard(payment_method_id: str, expected_version: int) -> Dict[str, Any]:
+    """The condition fragment that pins a write to ONE method, in DynamoDB wire form.
+
+    ``paymentMethodId`` is the row's stable identity and the sort key is not: a
+    rename moves a method off one name key, and another method — or a re-created
+    one with the same name — can then occupy that key at the same version number.
+    A condition on the version alone therefore lets a stale write land on a
+    different method than the one the caller read. Every writer of a name-keyed
+    payment row uses this fragment: the method mutations that move the row, and
+    the sale transaction that only reads it, because a snapshot of the wrong
+    method is as wrong as an update to it.
+    """
+    return {
+        "ConditionExpression": "#version = :expectedVersion AND #paymentMethodId = :paymentMethodId",
+        "ExpressionAttributeNames": {"#version": "version", "#paymentMethodId": "paymentMethodId"},
+        "ExpressionAttributeValues": {
+            ":expectedVersion": {"N": str(expected_version)},
+            ":paymentMethodId": {"S": payment_method_id},
+        },
+    }
 
 
 # --- Normalization and validation ------------------------------------------------

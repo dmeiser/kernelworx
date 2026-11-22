@@ -460,7 +460,9 @@ def test_deactivation_with_a_stale_version_or_bad_id_refuses(units_table: Any) -
         _deactivate(units_table, AVERY, version=7, paymentMethodId=created["paymentMethodId"]), ErrorCode.CONFLICT
     )
     assert _payment_rows(units_table)[0]["isActive"] is True
-    assert_is_error(_deactivate(units_table, AVERY, key="deactivate-2", paymentMethodId="CASH"), ErrorCode.INVALID_INPUT)
+    assert_is_error(
+        _deactivate(units_table, AVERY, key="deactivate-2", paymentMethodId="CASH"), ErrorCode.INVALID_INPUT
+    )
     assert_is_error(_deactivate(units_table, AVERY, key="deactivate-3", paymentMethodId="nope"), ErrorCode.NOT_FOUND)
 
 
@@ -543,7 +545,9 @@ def test_a_revoked_admin_and_a_cross_unit_id_are_denied_without_writes(units_tab
     assert_is_error(
         _rename(units_table, DEVON, key="rename-x", paymentMethodId="anything", displayName="Nope"), ErrorCode.NOT_FOUND
     )
-    assert_is_error(_deactivate(units_table, DEVON, key="deactivate-x", paymentMethodId="anything"), ErrorCode.NOT_FOUND)
+    assert_is_error(
+        _deactivate(units_table, DEVON, key="deactivate-x", paymentMethodId="anything"), ErrorCode.NOT_FOUND
+    )
 
     assert_is_error(
         _rename(
@@ -719,7 +723,165 @@ def test_a_twin_that_commits_first_answers_the_caller_its_result(
     assert answered["version"] == rows[0]["version"] == (1 if operation == "create" else 2)
 
 
+def _winner_commits_before_the_domains_own_read(monkeypatch: pytest.MonkeyPatch, winner: Callable[[], Any]) -> Any:
+    """Let an identical concurrent request commit after this attempt's replay check.
+
+    :func:`_twin_commits_in_the_write_window` lands the twin inside ``execute``, which
+    is the late half of the window. This is the early half, and the one a domain rule
+    makes dangerous: the twin commits right after the replay check's marker read, so
+    every read this attempt makes afterwards sees the winner's state — the name is
+    taken, the 50 slots are full, the method is already inactive — and the attempt is
+    about to refuse a caller whose own ``idempotencyKey`` already succeeded. The hook
+    is the marker read again, because it is the one call between the two halves that
+    every mutation makes, and the winner runs nested inside it.
+    """
+    real_load = IdempotentMutationRunner.load_marker
+    state = {"calls": 0, "done": False, "answered": None}
+
+    def load_marker(self: Any, keys: Any) -> Any:
+        marker = real_load(self, keys)
+        state["calls"] += 1
+        if state["calls"] == 1 and not state["done"]:
+            state["done"] = True
+            answered = winner()
+            assert not isinstance(answered, dict) or "__isError" not in answered, answered
+            state["answered"] = answered
+        return marker
+
+    monkeypatch.setattr(IdempotentMutationRunner, "load_marker", load_marker)
+    return state
+
+
+def test_a_create_whose_twin_won_the_name_first_answers_the_caller_its_method(
+    units_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A duplicate-name refusal is wrong when the duplicate is the caller's own write.
+
+    The attempt read no ``PAYMENT#wise`` row, then its twin — same caller, same
+    ``idempotencyKey``, same input — committed one. ``createUnitPaymentMethod`` has
+    already produced this caller's method, so a CONFLICT would send them to retry a
+    name their own request took, forever.
+    """
+    _seed(units_table, PACK_ID, [AVERY])
+    key = "create-wise"
+
+    def winner() -> Any:
+        return _create(units_table, AVERY, key=key, displayName="Wise")
+
+    won = _winner_commits_before_the_domains_own_read(monkeypatch, winner)
+    answered = _create(units_table, AVERY, key=key, displayName="Wise")
+
+    rows = _payment_rows(units_table)
+    assert len(rows) == 1 and len(_markers_for(units_table, CREATE_PAYMENT_METHOD_FIELD)) == 1
+    assert answered == won["answered"]
+    assert answered["paymentMethodId"] == rows[0]["paymentMethodId"]
+    assert [rows[0][k] for k in ("sk", "version", "isActive")] == ["PAYMENT#wise", 1, True]
+
+
+def test_a_create_that_finds_the_slots_full_after_its_own_win_is_not_refused(
+    units_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cap reads the collection before the write, so the ceiling can be its twin's work.
+
+    49 methods, two identical attempts, one method left to add: the loser's count
+    reads 50 because its own key already added the 50th. ``PAYMENT_METHOD_LIMIT_REACHED``
+    would tell an admin to deactivate a method they never created.
+    """
+    _seed(units_table, PACK_ID, [AVERY])
+    _plant_active_methods(units_table, MAX_ACTIVE_PAYMENT_METHODS - 1)
+    key = "create-last-again"
+
+    def winner() -> Any:
+        return _create(units_table, AVERY, key=key, displayName="Method 49")
+
+    won = _winner_commits_before_the_domains_own_read(monkeypatch, winner)
+    answered = _create(units_table, AVERY, key=key, displayName="Method 49")
+
+    assert answered == won["answered"]
+    assert len(_payment_rows(units_table)) == MAX_ACTIVE_PAYMENT_METHODS
+    assert _capacity_counter(units_table) == MAX_ACTIVE_PAYMENT_METHODS
+    assert len(_markers_for(units_table, CREATE_PAYMENT_METHOD_FIELD)) == 1
+
+
+def test_a_deactivation_the_method_already_answered_is_replayed_not_refused(
+    units_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``already inactive`` is the honest answer for a fresh attempt, not a retried one.
+
+    The twin's deactivation flipped the flag and freed the slot, so the attempt that
+    follows reads an inactive row: refusing there would report a failed mutation,
+    double-free nothing, and leave the caller unable to confirm the retirement landed.
+    """
+    _seed(units_table, PACK_ID, [AVERY])
+    wise_id = _create(units_table, AVERY, displayName="Wise")["paymentMethodId"]
+    key = "deactivate-wise"
+
+    def winner() -> Any:
+        return _deactivate(units_table, AVERY, key=key, paymentMethodId=wise_id)
+
+    won = _winner_commits_before_the_domains_own_read(monkeypatch, winner)
+    answered = _deactivate(units_table, AVERY, key=key, paymentMethodId=wise_id)
+
+    assert answered == won["answered"]
+    assert [answered[k] for k in ("isActive", "version")] == [False, 2]
+    assert _capacity_counter(units_table) == 0
+    assert len(_markers_for(units_table, DEACTIVATE_PAYMENT_METHOD_FIELD)) == 1
+    assert _payment_rows(units_table)[0]["version"] == 2
+
+
 # --- the stored-row builder this suite seeds --------------------------------------
+
+
+def test_a_rename_whose_twin_already_moved_the_name_answers_that_rename(
+    units_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A taken name is the caller's own rename when the twin was the same request.
+
+    The attempt read ``PAYMENT#wise`` and no ``PAYMENT#pay wave``, then its twin —
+    same caller, same ``idempotencyKey``, same new name — committed that rename. The
+    name it was told is now held by the very row it asked for, so ``CONFLICT`` would
+    send the admin to pick a different name for a change that already happened.
+    """
+    _seed(units_table, PACK_ID, [AVERY])
+    wise_id = _create(units_table, AVERY, displayName="Wise")["paymentMethodId"]
+    key = "rename-wise"
+
+    def winner() -> Any:
+        return _rename(units_table, AVERY, key=key, paymentMethodId=wise_id, displayName="Pay wave")
+
+    won = _winner_commits_before_the_domains_own_read(monkeypatch, winner)
+    answered = _rename(units_table, AVERY, key=key, paymentMethodId=wise_id, displayName="Pay wave")
+
+    rows = _payment_rows(units_table)
+    assert answered == won["answered"]
+    assert answered["displayName"] == "Pay wave"
+    assert [(row["sk"], row["version"]) for row in rows] == [("PAYMENT#pay wave", 2)]
+    assert rows[0]["paymentMethodId"] == wise_id
+    assert len(_markers_for(units_table, UPDATE_PAYMENT_METHOD_FIELD)) == 1
+
+
+def test_a_retry_whose_winner_stored_no_answer_is_rebuilt_from_the_row(units_table: Any) -> None:
+    """A completed marker with no answer is a read, not a fault.
+
+    A twin can die between its commit and the moment its response would have been
+    written on the marker. The row that commit wrote is the record of what happened
+    and the marker is only a cache of it, so the retry is answered by re-reading —
+    and it is the same loader every other replay of this mutation uses, which is why
+    a refusal path and a replay path cannot disagree about what the write produced.
+    """
+    from src.utils.dynamodb import get_dynamodb_client, tables
+
+    _seed(units_table, PACK_ID, [AVERY])
+    created = _create(units_table, AVERY, displayName="Wise")
+    marker = _markers_for(units_table, CREATE_PAYMENT_METHOD_FIELD)[0]
+    get_dynamodb_client().update_item(
+        TableName=tables.units.table_name,
+        Key={"pk": {"S": marker["pk"]}, "sk": {"S": marker["sk"]}},
+        UpdateExpression="REMOVE resultPayload",
+    )
+
+    assert _create(units_table, AVERY, key="create-1", displayName="Wise") == created
+    assert len(_payment_rows(units_table)) == 1
 
 
 def test_build_payment_item_carries_the_stored_contract() -> None:

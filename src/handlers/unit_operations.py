@@ -426,6 +426,30 @@ def _replay(
     return cast(Optional[Dict[str, Any]], replayed) if handled else None
 
 
+def _refuse_unless_committed(
+    runner: Any, keys: Any, fingerprint: str, operation: str, load_result: Callable[[str], Any]
+) -> Callable[[Any], Dict[str, Any]]:
+    """A refusal that first checks whether this same request already committed.
+
+    The replay check at the top of a resolver cannot be the only one. Two attempts
+    of one request both read the collection; one commits; the other then reads the
+    winner's state and its domain rule fires — the name is taken, the 50 slots are
+    full, the method is already inactive, the QR image is already gone. Refusing
+    there tells a caller their request failed when their own ``idempotencyKey``
+    already produced a committed result, and a retry would keep failing forever.
+    So the refusal is the fallback: look at the marker once more, and replay the
+    winner when the identical request is what committed in that window.
+    """
+
+    def refuse(error: Any) -> Dict[str, Any]:
+        handled, replayed = runner.replay_or_reject(keys, fingerprint, operation=operation, load_result=load_result)
+        if handled:
+            return cast(Dict[str, Any], replayed)
+        raise error
+
+    return refuse
+
+
 # --- createUnit (§1.2.1) ---------------------------------------------------------
 
 
@@ -6713,6 +6737,20 @@ def _loaded_payment_method(unit_id: str, payment_method_id: str) -> Dict[str, An
     )
 
 
+def _payment_loader(unit_id: str) -> Callable[[str], Dict[str, Any]]:
+    """One loader for every replay of this request's payment-method mutation.
+
+    The same function answers the pre-flight replay, the marker whose payload
+    back-fill never happened, and the late replay a state-dependent refusal has to
+    try first, so all three answers come from the same read.
+    """
+
+    def load(stored: str) -> Dict[str, Any]:
+        return _loaded_payment_method(unit_id, str(stored))
+
+    return load
+
+
 def _refuse_reserved_payment_name(normalized_name: str) -> None:
     """Refuse a name that would masquerade as a built-in (§5.4, PAY-M-01-02)."""
     if unit_payment_models.is_reserved_payment_name(normalized_name):
@@ -6786,15 +6824,11 @@ def _create_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
 
     keys = _marker(caller_id=caller_id, operation=CREATE_PAYMENT_METHOD_FIELD, scope=unit_id, idempotency_key=key)
     _require_active_admin(caller_id, unit_id)
-    replayed = _replay(
-        runner,
-        keys,
-        fingerprint,
-        CREATE_PAYMENT_METHOD_FIELD,
-        lambda stored: _loaded_payment_method(unit_id, str(stored)),
-    )
+    load_payment = _payment_loader(unit_id)
+    replayed = _replay(runner, keys, fingerprint, CREATE_PAYMENT_METHOD_FIELD, load_payment)
     if replayed is not None:
         return replayed
+    refuse = _refuse_unless_committed(runner, keys, fingerprint, CREATE_PAYMENT_METHOD_FIELD, load_payment)
 
     display_name = unit_payment_models.normalize_payment_display_name(payload.get("displayName"))
     normalized = unit_payment_models.normalize_payment_name(display_name)
@@ -6802,18 +6836,22 @@ def _create_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
 
     rows = unit_payment_models.list_payment_rows(unit_id)
     if any(str(row.get("sk", "")) == unit_payment_models.payment_sk(normalized) for row in rows):
-        raise AppError(
-            ErrorCode.CONFLICT,
-            "This Unit already has a payment method with this name.",
-            details={"subcode": "DUPLICATE_PAYMENT_METHOD_NAME"},
+        return refuse(
+            AppError(
+                ErrorCode.CONFLICT,
+                "This Unit already has a payment method with this name.",
+                details={"subcode": "DUPLICATE_PAYMENT_METHOD_NAME"},
+            )
         )
     active_count = sum(1 for row in rows if row.get("isActive", True))
     if active_count >= unit_payment_models.MAX_ACTIVE_PAYMENT_METHODS:
-        raise AppError(
-            ErrorCode.CONFLICT,
-            f"This Unit already has {unit_payment_models.MAX_ACTIVE_PAYMENT_METHODS} active payment methods. "
-            "Deactivate one before adding another.",
-            details={"subcode": "PAYMENT_METHOD_LIMIT_REACHED", "activeMethods": active_count},
+        return refuse(
+            AppError(
+                ErrorCode.CONFLICT,
+                f"This Unit already has {unit_payment_models.MAX_ACTIVE_PAYMENT_METHODS} active payment methods. "
+                "Deactivate one before adding another.",
+                details={"subcode": "PAYMENT_METHOD_LIMIT_REACHED", "activeMethods": active_count},
+            )
         )
 
     payment_method_id = unit_payment_models.new_payment_method_id()
@@ -6836,7 +6874,7 @@ def _create_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
         operation=CREATE_PAYMENT_METHOD_FIELD,
         fingerprint=fingerprint,
         result_id=payment_method_id,
-        load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
+        load_result=load_payment,
         result_payload=build_result,
     )
     if not isinstance(committed, str):
@@ -6860,21 +6898,11 @@ def _create_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
 def _version_and_owner_condition(row_owner_id: str, expected_version: int) -> Dict[str, Any]:
     """The condition every write to a name-keyed payment row must carry.
 
-    ``paymentMethodId`` is the row's stable identity and the sort key is not: a
-    rename moves a method off one name key and another method — or a re-created
-    one with the same name — can occupy that key at the same version number. A
-    condition on the version alone therefore lets a stale write land on a
-    different method than the one the caller read. Both facts are checked, so
-    the write either applies to the method that was read or refuses whole.
+    The fragment is shared with the sale transaction's ``ConditionCheck``
+    (:func:`src.utils.sale_payment_models.payment_method_condition_action`), so
+    the two cannot drift: identity plus version, never version alone.
     """
-    return {
-        "ConditionExpression": "#version = :expectedVersion AND #paymentMethodId = :paymentMethodId",
-        "ExpressionAttributeNames": {"#version": "version", "#paymentMethodId": "paymentMethodId"},
-        "ExpressionAttributeValues": {
-            ":expectedVersion": {"N": str(expected_version)},
-            ":paymentMethodId": {"S": row_owner_id},
-        },
-    }
+    return dict(unit_payment_models.version_and_owner_guard(row_owner_id, expected_version))
 
 
 def _stage_capacity_change(plan: Any, unit_id: str, *, delta: int, counted_active: int, caller_id: str) -> None:
@@ -7009,15 +7037,15 @@ def _update_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
 
     keys = _marker(caller_id=caller_id, operation=UPDATE_PAYMENT_METHOD_FIELD, scope=unit_id, idempotency_key=key)
     _require_active_admin(caller_id, unit_id)
-    replayed = _replay(
-        runner,
-        keys,
-        fingerprint,
-        UPDATE_PAYMENT_METHOD_FIELD,
-        lambda stored: _loaded_payment_method(unit_id, str(stored)),
-    )
+    load_payment = _payment_loader(unit_id)
+    replayed = _replay(runner, keys, fingerprint, UPDATE_PAYMENT_METHOD_FIELD, load_payment)
     if replayed is not None:
+        # The rename this key already performed may have moved the row onto a new
+        # name key, and that row can carry a cleanup ledger its own write owed S3.
+        # Replaying must not strand it, so the replay path pays the debt too.
+        _drain_payment_qr_ledger(unit_id, payment_method_id)
         return replayed
+    refuse = _refuse_unless_committed(runner, keys, fingerprint, UPDATE_PAYMENT_METHOD_FIELD, load_payment)
 
     display_name = unit_payment_models.normalize_payment_display_name(payload.get("displayName"))
     normalized = unit_payment_models.normalize_payment_name(display_name)
@@ -7047,10 +7075,12 @@ def _update_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
         rows = unit_payment_models.list_payment_rows(unit_id)
         target_sk = unit_payment_models.payment_sk(normalized)
         if any(str(other.get("sk", "")) == target_sk for other in rows):
-            raise AppError(
-                ErrorCode.CONFLICT,
-                "This Unit already has a payment method with this name.",
-                details={"subcode": "DUPLICATE_PAYMENT_METHOD_NAME"},
+            return refuse(
+                AppError(
+                    ErrorCode.CONFLICT,
+                    "This Unit already has a payment method with this name.",
+                    details={"subcode": "DUPLICATE_PAYMENT_METHOD_NAME"},
+                )
             )
         renamed_item = unit_payment_models.build_payment_item(
             payment_method_id=payment_method_id,
@@ -7087,15 +7117,20 @@ def _update_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[str, A
         operation=UPDATE_PAYMENT_METHOD_FIELD,
         fingerprint=fingerprint,
         result_id=payment_method_id,
-        load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
+        load_result=load_payment,
         result_payload=build_result,
     )
     if not isinstance(committed, str):
         # A concurrent identical request committed between this handler's replay
         # check and the transaction, so the rename the caller asked for is
         # already in the table and the runner holds its answer.
+        _drain_payment_qr_ledger(unit_id, payment_method_id)
         return dict(committed)
     result = build_result()
+    # A rename moves the row, and the row it moves carries whatever cleanup an
+    # earlier QR write owed. Draining it here is the retry path that does not
+    # require anyone to touch a QR image again.
+    _drain_payment_qr_ledger(unit_id, payment_method_id)
     log.info(
         "Unit payment method renamed",
         unit_id=unit_id,
@@ -7127,15 +7162,12 @@ def _deactivate_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[st
 
     keys = _marker(caller_id=caller_id, operation=DEACTIVATE_PAYMENT_METHOD_FIELD, scope=unit_id, idempotency_key=key)
     _require_active_admin(caller_id, unit_id)
-    replayed = _replay(
-        runner,
-        keys,
-        fingerprint,
-        DEACTIVATE_PAYMENT_METHOD_FIELD,
-        lambda stored: _loaded_payment_method(unit_id, str(stored)),
-    )
+    load_payment = _payment_loader(unit_id)
+    replayed = _replay(runner, keys, fingerprint, DEACTIVATE_PAYMENT_METHOD_FIELD, load_payment)
     if replayed is not None:
+        _drain_payment_qr_ledger(unit_id, payment_method_id)
         return replayed
+    refuse = _refuse_unless_committed(runner, keys, fingerprint, DEACTIVATE_PAYMENT_METHOD_FIELD, load_payment)
 
     _refuse_builtin_mutation(payment_method_id, "deactivated")
     rows = unit_payment_models.list_payment_rows(unit_id)
@@ -7148,11 +7180,14 @@ def _deactivate_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[st
         # The collection count is the counter's seed, and one deactivation is
         # allowed to move it by exactly one. A second flip of an inactive method
         # would take a slot that was never given back, so it refuses rather than
-        # re-stamping a row that is already down.
-        raise AppError(
-            ErrorCode.CONFLICT,
-            "This payment method is already inactive.",
-            details={"subcode": "PAYMENT_METHOD_NOT_ACTIVE"},
+        # re-stamping a row that is already down. The exception is the retry whose
+        # own first attempt is what made it inactive: that one replays.
+        return refuse(
+            AppError(
+                ErrorCode.CONFLICT,
+                "This payment method is already inactive.",
+                details={"subcode": "PAYMENT_METHOD_NOT_ACTIVE"},
+            )
         )
     active_count = sum(1 for candidate in rows if candidate.get("isActive", True))
 
@@ -7193,12 +7228,17 @@ def _deactivate_payment_method(event: Dict[str, Any], caller_id: str) -> Dict[st
         operation=DEACTIVATE_PAYMENT_METHOD_FIELD,
         fingerprint=fingerprint,
         result_id=payment_method_id,
-        load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
+        load_result=load_payment,
         result_payload=build_result,
     )
     if not isinstance(committed, str):
+        _drain_payment_qr_ledger(unit_id, payment_method_id)
         return dict(committed)
     result = build_result()
+    # A deactivated method keeps its QR reference, and it keeps whatever deletion
+    # an earlier QR write could not finish. Deactivation is a write on this method
+    # like any other, so it is a chance to pay that debt.
+    _drain_payment_qr_ledger(unit_id, payment_method_id)
     log.info(
         "Unit payment method deactivated",
         unit_id=unit_id,
@@ -7294,7 +7334,7 @@ def _request_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Di
     _require_payment_method_row(unit_id, payment_method_id)
     digest = unit_payment_models.normalize_qr_digest(payload.get("sha256"))
     extension = qr_objects.qr_extension_for_content_type(payload.get("contentType"))
-    s3_key = unit_payment_models.new_unit_qr_object_key(unit_id, payment_method_id, digest, extension)
+    s3_key = unit_payment_models.new_unit_qr_upload_key(unit_id, payment_method_id, digest, extension)
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=s3_key)
@@ -7418,7 +7458,14 @@ def _retired_qr_keys(
     return sorted(set(owed))
 
 
-def _retire_qr_objects(row: Mapping[str, Any], unit_id: str, payment_method_id: str, ledger: Sequence[str]) -> None:
+def _retire_qr_objects(
+    row: Mapping[str, Any],
+    unit_id: str,
+    payment_method_id: str,
+    ledger: Sequence[str],
+    *,
+    cleared_version: Optional[int] = None,
+) -> None:
     """Delete what the committed write's ledger owes, and clear it once paid (4.1.2).
 
     The ledger rode in the SAME transaction as the reference swap, so a delete S3
@@ -7429,6 +7476,11 @@ def _retire_qr_objects(row: Mapping[str, Any], unit_id: str, payment_method_id: 
     directions — crash before the clear and the next write deletes already-gone
     objects (S3 DeleteObject is idempotent), lose the clear to a concurrent write
     and that write carried the ledger forward itself.
+
+    ``cleared_version`` is the revision the clear is valid at. A write that just
+    bumped the row leaves its own version as the answer, which is one past the row
+    this handler read; a drain that changed nothing clears at the version the row
+    already has.
     """
     if not ledger:
         return
@@ -7438,7 +7490,35 @@ def _retire_qr_objects(row: Mapping[str, Any], unit_id: str, payment_method_id: 
             "QR objects still owed; the next write on this method retries them", keys=failed, unit_id=unit_id
         )
         return
-    _clear_qr_purge_ledger(row, payment_method_id=payment_method_id, version=int(row["version"]) + 1)
+    _clear_qr_purge_ledger(
+        row,
+        payment_method_id=payment_method_id,
+        version=int(row["version"]) + 1 if cleared_version is None else cleared_version,
+    )
+
+
+def _drain_payment_qr_ledger(unit_id: str, payment_method_id: str) -> None:
+    """Retry the QR deletions this method still owes, from whatever the row says now.
+
+    A cleanup list written by a failed S3 delete has to be retryable by something
+    other than another QR edit: the admin who replaced an image and then renamed or
+    deactivated the method is done with QRs, and the orphan would live forever in a
+    bucket nothing sweeps. Reading the row here rather than carrying a list through
+    also means the drain can never delete an object a later write made current — the
+    ledger that names it is gone by then — and it re-checks the prefix rule, so a
+    key belonging to another tenant is still never deleted.
+
+    The current image is excluded explicitly as well: it is what a reader can still
+    see, and no cleanup list is ever permission to remove it. A method with no row
+    is not a fault here — this runs after another request's answer was replayed, so
+    raising would turn a committed write into an error — and it owes nothing to the
+    bucket either, because the row was the only thing that could name a debt.
+    """
+    row = unit_payment_models.find_payment_by_id(unit_id, payment_method_id) or {}
+    owed = _retired_qr_keys(row, unit_id, payment_method_id, keep=_stored_qr_key(row))
+    if not owed:
+        return
+    _retire_qr_objects(row, unit_id, payment_method_id, owed, cleared_version=int(row["version"]))
 
 
 def _clear_qr_purge_ledger(row: Mapping[str, Any], *, payment_method_id: str, version: int) -> None:
@@ -7470,18 +7550,64 @@ def _clear_qr_purge_ledger(row: Mapping[str, Any], *, payment_method_id: str, ve
         get_logger(__name__).warning("QR cleanup ledger could not be cleared", error=str(exc))
 
 
+def _publish_confirmed_qr(
+    unit_id: str, payment_method_id: str, s3_key: str, row: Mapping[str, Any]
+) -> tuple[str, List[str]]:
+    """Prove the uploaded bytes and publish them under this method's next attachment key.
+
+    Three refusals happen here, before a byte is copied anywhere. The key must be
+    one of THIS method's upload targets, which is what makes an attachment key
+    impossible to attach a second time — a retired image cannot come back, and no
+    caller can hand back an object the server published. The key must not sit in
+    the row's cleanup ledger: that list is a queue of objects being destroyed, and
+    building an attachment from one would race the delete that is already owed on
+    it. And the object's bytes must be the image the key's extension claims and the
+    digest its name declares.
+
+    Only then is the object that passed written a second time, under a name no
+    pre-signed POST ever handed out, so what the row is about to reference cannot
+    move under a reader.
+
+    Returns:
+        ``(attachment_key, retired_keys)`` — what to reference, and what this write
+        retires: the image it displaces, what an earlier write still owed, and the
+        upload target the browser wrote to.
+
+    Raises:
+        AppError: FORBIDDEN for a key that is not this method's upload target,
+            CONFLICT for one already being retired, and whatever the object
+            validation reports for a missing, unreadable, or bad upload.
+    """
+    declared = unit_payment_models.unit_qr_upload_digest(s3_key, unit_id, payment_method_id)
+    if not declared:
+        raise AppError(ErrorCode.FORBIDDEN, "Invalid S3 key - access denied")
+    if s3_key in _pending_qr_purge_keys(row):
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "This upload has already been used and is being removed. Start the upload again.",
+            details={"subcode": "QR_UPLOAD_RETIRED"},
+        )
+    body = qr_objects.validate_uploaded_qr_object(_exports_bucket(), s3_key, declared)
+    content_type = qr_objects.content_type_for_qr_key(s3_key)
+    attachment_key = unit_payment_models.new_unit_qr_attachment_key(
+        unit_id, payment_method_id, declared, qr_objects.qr_key_extension(s3_key)
+    )
+    qr_objects.publish_qr_attachment(_exports_bucket(), attachment_key, body, content_type)
+    displaced = _stored_qr_key(row)
+    return attachment_key, _retired_qr_keys(row, unit_id, payment_method_id, displaced, s3_key, keep=attachment_key)
+
+
 def _confirm_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
     """Attach an uploaded QR image to a Unit payment method (4.1.2).
 
-    Four checks run before anything is written: the key must sit under this
-    method's own prefix (a key for another Unit, another method, or the legacy
-    account scheme is refused before S3 is touched at all), the object must
-    exist, its bytes must be the image its extension claims and fit the size the
-    pre-signed POST already pinned, and their SHA-256 must be the digest the key
-    names — so the reference this write commits to is a promise about specific
-    bytes, not about a name someone else can re-POST. Only then does the
-    versioned, identity-conditioned reference swap commit, and the objects this
-    write retired are removed after it.
+    The upload is proved first — this method's own upload target, not a retired
+    object, the image its key claims, the bytes its digest declares — and only then
+    published under a fresh attachment key the browser never saw. That is what makes
+    the stored reference immutable: no pre-signed POST names the object a row
+    references, so a later upload cannot change the image an admin displays. Then the
+    versioned, identity-conditioned reference swap commits, and the objects this
+    write retired — the image it displaced, anything an earlier write still owed, and
+    the browser's upload target — are removed after it.
     """
     log = get_logger(__name__)
     payload = _require_input(event)
@@ -7495,48 +7621,52 @@ def _confirm_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Di
 
     keys = _marker(caller_id=caller_id, operation=CONFIRM_PAYMENT_QR_FIELD, scope=unit_id, idempotency_key=key)
     _require_active_admin(caller_id, unit_id)
-    replayed = _replay(
-        runner,
-        keys,
-        fingerprint,
-        CONFIRM_PAYMENT_QR_FIELD,
-        lambda stored: _loaded_payment_method(unit_id, str(stored)),
-    )
+    load_payment = _payment_loader(unit_id)
+    replayed = _replay(runner, keys, fingerprint, CONFIRM_PAYMENT_QR_FIELD, load_payment)
     if replayed is not None:
+        _drain_payment_qr_ledger(unit_id, payment_method_id)
         return replayed
 
     _refuse_builtin_mutation(payment_method_id, "given a QR image")
     row = _require_payment_method_row(unit_id, payment_method_id)
-    expected_digest = unit_payment_models.unit_qr_key_digest(s3_key, unit_id, payment_method_id)
-    if not expected_digest:
-        raise AppError(ErrorCode.FORBIDDEN, "Invalid S3 key - access denied")
-    qr_objects.validate_uploaded_qr_object(_exports_bucket(), s3_key, expected_digest)
-    displaced = _stored_qr_key(row)
-    retired = _retired_qr_keys(row, unit_id, payment_method_id, displaced, keep=s3_key)
+    attachment_key, retired = _publish_confirmed_qr(unit_id, payment_method_id, s3_key, row)
 
     plan = WritePlan()
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=payment_method_id)
     plan.add(
         "Update",
         _qr_reference_update_action(
-            row, caller_id=caller_id, expected_version=expected_version, qr_code_s3_key=s3_key, retired=retired
+            row,
+            caller_id=caller_id,
+            expected_version=expected_version,
+            qr_code_s3_key=attachment_key,
+            retired=retired,
         ),
     )
     build_result = _once(lambda: _loaded_payment_method(unit_id, payment_method_id))
-    committed = runner.execute(
-        keys,
-        plan,
-        operation=CONFIRM_PAYMENT_QR_FIELD,
-        fingerprint=fingerprint,
-        result_id=payment_method_id,
-        load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
-        result_payload=build_result,
-    )
+    try:
+        committed = runner.execute(
+            keys,
+            plan,
+            operation=CONFIRM_PAYMENT_QR_FIELD,
+            fingerprint=fingerprint,
+            result_id=payment_method_id,
+            load_result=load_payment,
+            result_payload=build_result,
+        )
+    except AppError:
+        # Nothing committed, so the attachment this attempt published is an orphan
+        # with no row and no ledger that names it. This is the only place it can be
+        # removed: the bucket has no sweeper, and the upload target that would
+        # otherwise have led to it is retired by the write that won.
+        qr_objects.delete_qr_object(_exports_bucket(), attachment_key)
+        raise
     if not isinstance(committed, str):
         # A concurrent identical request committed first, so the reference swap
-        # and its cleanup ledger belong to that attempt. Deleting the objects
-        # this attempt merely replayed would race a write whose ledger is the one
-        # now stored, and could remove an image that method is still showing.
+        # and its cleanup ledger belong to that attempt, and the attachment this
+        # attempt published is an orphan the winner's ledger cannot name.
+        qr_objects.delete_qr_object(_exports_bucket(), attachment_key)
+        _drain_payment_qr_ledger(unit_id, payment_method_id)
         return dict(committed)
     _retire_qr_objects(row, unit_id, payment_method_id, retired)
     result = build_result()
@@ -7544,7 +7674,8 @@ def _confirm_unit_payment_qr_upload(event: Dict[str, Any], caller_id: str) -> Di
         "Unit payment method QR image confirmed",
         unit_id=unit_id,
         payment_method_id=payment_method_id,
-        s3_key=s3_key,
+        s3_key=attachment_key,
+        upload_key=s3_key,
         caller_id=caller_id,
         version=result["version"],
     )
@@ -7572,21 +7703,24 @@ def _delete_unit_payment_qr_code(event: Dict[str, Any], caller_id: str) -> Dict[
 
     keys = _marker(caller_id=caller_id, operation=DELETE_PAYMENT_QR_FIELD, scope=unit_id, idempotency_key=key)
     _require_active_admin(caller_id, unit_id)
-    replayed = _replay(
-        runner,
-        keys,
-        fingerprint,
-        DELETE_PAYMENT_QR_FIELD,
-        lambda stored: _loaded_payment_method(unit_id, str(stored)),
-    )
+    load_payment = _payment_loader(unit_id)
+    replayed = _replay(runner, keys, fingerprint, DELETE_PAYMENT_QR_FIELD, load_payment)
     if replayed is not None:
+        # The delete this key already performed may have owed an S3 delete it could
+        # not finish, and that debt is still on the row. An identical retry is the
+        # caller's next attempt, so it pays it rather than returning early.
+        _drain_payment_qr_ledger(unit_id, payment_method_id)
         return replayed
+    refuse = _refuse_unless_committed(runner, keys, fingerprint, DELETE_PAYMENT_QR_FIELD, load_payment)
 
     _refuse_builtin_mutation(payment_method_id, "have a QR image removed")
     row = _require_payment_method_row(unit_id, payment_method_id)
     stored = _stored_qr_key(row)
     if stored is None:
-        raise AppError(ErrorCode.INVALID_INPUT, "This payment method has no QR image to remove")
+        # No reference is the honest answer for a method that never had an image,
+        # but not for a retry whose own first attempt is what removed it: that one
+        # replays with the delete it still owes.
+        return refuse(AppError(ErrorCode.INVALID_INPUT, "This payment method has no QR image to remove"))
     retired = _retired_qr_keys(row, unit_id, payment_method_id, stored)
 
     plan = WritePlan()
@@ -7604,10 +7738,11 @@ def _delete_unit_payment_qr_code(event: Dict[str, Any], caller_id: str) -> Dict[
         operation=DELETE_PAYMENT_QR_FIELD,
         fingerprint=fingerprint,
         result_id=payment_method_id,
-        load_result=lambda stored: _loaded_payment_method(unit_id, str(stored)),
+        load_result=load_payment,
         result_payload=build_result,
     )
     if not isinstance(committed, str):
+        _drain_payment_qr_ledger(unit_id, payment_method_id)
         return dict(committed)
     _retire_qr_objects(row, unit_id, payment_method_id, retired)
     result = build_result()
@@ -7637,7 +7772,11 @@ def _unit_payment_qr_download_url(event: Dict[str, Any], caller_id: str) -> Dict
     _require_active_admin(caller_id, unit_id)
     row = _require_payment_method_row(unit_id, payment_method_id)
     stored = _stored_qr_key(row)
-    if stored is None or not unit_payment_models.unit_qr_key_is_mine(stored, unit_id, payment_method_id):
+    if stored is None or not unit_payment_models.unit_qr_attachment_key_is_mine(stored, unit_id, payment_method_id):
+        # The stored reference is the only handle on the object, and it is signed
+        # only if it is the attachment this server published from validated bytes.
+        # An upload target still sitting on a row would be an image a browser could
+        # overwrite with the same credentials, so it is served never.
         raise AppError(ErrorCode.NOT_FOUND, "Unit payment method has no QR image")
     return dict(qr_objects.presigned_qr_download(_exports_bucket(), stored))
 
