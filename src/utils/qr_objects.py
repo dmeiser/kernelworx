@@ -95,7 +95,7 @@ def image_magic_matches_key(body: bytes, s3_key: str) -> bool:
     """True when the bytes carry the magic numbers of the key's own extension.
 
     ``jpg`` and ``jpeg`` both name the JPEG format, so a key an older upload
-    wrote keeps validating after the request path standardised on ``jpg``.
+    wrote keeps validating after the request path settled on ``jpg``.
     """
     extension = s3_key.rsplit("/", 1)[-1].rpartition(".")[2]
     validator = _IMAGE_VALIDATORS_BY_EXTENSION.get(extension)

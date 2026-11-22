@@ -76,7 +76,7 @@ TROOP_PK = f"UNIT#{TROOP_ID}"
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 JPEG_BYTES = b"\xff\xd8\xff" + b"\x00" * 64
-WEBP_BYTES = b"RIFF\x00\x00\x00\x00WEBPVP8 " + b"\x00" * 32
+WEBP_BYTES = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"VP8 " + b"\x00" * 32
 LEGACY_KEY = "payment-qr-codes/account-9/wave.png"
 
 
@@ -193,7 +193,7 @@ def _download(caller: Any, payment_method_id: str, *, unit_id: str = PACK_ID) ->
 
 
 def test_every_qr_key_sits_under_the_methods_own_prefix() -> None:
-    """The key shape is what makes a foreign key detectable and the IAM grant scopeable."""
+    """The key shape is what makes a foreign key detectable and the IAM grant narrow."""
     prefix = unit_qr_prefix(PACK_ID, "pm-1f0d")
     assert prefix == f"{UNIT_QR_ROOT}/{PACK_ID}/pm-1f0d"
 
@@ -421,6 +421,24 @@ def test_confirm_honours_the_version_and_the_loser_writes_nothing(units_table: A
     assert _payment_row(units_table, "wise")["qrCodeS3Key"] == first_key
     assert _payment_row(units_table, "wise")["version"] == 2
     assert sorted(_keys(s3_bucket)) == sorted([first_key, second_key])
+
+
+def test_a_retried_confirm_or_delete_replays_its_own_answer(units_table: Any, s3_bucket: Any) -> None:
+    """IDEM — the two QR mutations that write a row replay without writing twice."""
+    _seed(units_table, PACK_ID, [AVERY])
+    payment_method_id = _create(AVERY)
+    requested = _request(AVERY, payment_method_id)
+    s3_key = str(requested["s3Key"])
+    s3_bucket.put_object(Bucket=os.environ["EXPORTS_BUCKET"], Key=s3_key, Body=PNG_BYTES)
+
+    confirmed = _confirm(AVERY, payment_method_id, s3_key)
+    assert _confirm(AVERY, payment_method_id, s3_key) == confirmed
+    assert _payment_row(units_table, "wise")["version"] == 2
+
+    deleted = _delete(AVERY, payment_method_id, key="qr-delete-1", version=2)
+    assert _delete(AVERY, payment_method_id, key="qr-delete-1", version=2) == deleted
+    assert _payment_row(units_table, "wise")["version"] == 3
+    assert _keys(s3_bucket) == []
 
 
 def test_a_replacement_deletes_the_object_it_displaced(units_table: Any, s3_bucket: Any) -> None:

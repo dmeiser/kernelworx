@@ -557,6 +557,7 @@ vitejs
 Vitest
 wcag
 webauthn
+webp
 wordmark
 worktree
 worx
