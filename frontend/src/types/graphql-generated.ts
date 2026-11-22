@@ -5318,6 +5318,154 @@ export type GqlRevokeUnitInviteMutationVariables = Exact<{
 
 export type GqlRevokeUnitInviteMutation = { __typename?: 'Mutation'; revokeUnitInvite: boolean };
 
+export type GqlUnitPaymentMethodFieldsFragment = {
+  __typename?: 'UnitPaymentMethod';
+  paymentMethodId: string;
+  unitId: string;
+  displayName: string;
+  isActive: boolean;
+  qrCodeS3Key?: string | null | undefined;
+  createdAt?: string | null | undefined;
+  version: number;
+};
+
+export type GqlListUnitPaymentMethodsQueryVariables = Exact<{
+  unitId: Scalars['ID']['input'];
+  includeInactive?: InputMaybe<Scalars['Boolean']['input']>;
+}>;
+
+export type GqlListUnitPaymentMethodsQuery = {
+  __typename?: 'Query';
+  unitPaymentMethods: Array<{
+    __typename?: 'UnitPaymentMethod';
+    paymentMethodId: string;
+    unitId: string;
+    displayName: string;
+    isActive: boolean;
+    qrCodeS3Key?: string | null | undefined;
+    createdAt?: string | null | undefined;
+    version: number;
+  }>;
+};
+
+export type GqlUnitPaymentMethodQrDownloadUrlQueryVariables = Exact<{
+  unitId: Scalars['ID']['input'];
+  paymentMethodId: Scalars['ID']['input'];
+}>;
+
+export type GqlUnitPaymentMethodQrDownloadUrlQuery = {
+  __typename?: 'Query';
+  unitPaymentMethodQrDownloadUrl: {
+    __typename?: 'UnitPaymentMethodQrDownload';
+    downloadUrl: string;
+    expiresAt: string;
+  };
+};
+
+export type GqlCreateUnitPaymentMethodMutationVariables = Exact<{
+  input: GqlCreateUnitPaymentMethodInput;
+}>;
+
+export type GqlCreateUnitPaymentMethodMutation = {
+  __typename?: 'Mutation';
+  createUnitPaymentMethod: {
+    __typename?: 'UnitPaymentMethod';
+    paymentMethodId: string;
+    unitId: string;
+    displayName: string;
+    isActive: boolean;
+    qrCodeS3Key?: string | null | undefined;
+    createdAt?: string | null | undefined;
+    version: number;
+  };
+};
+
+export type GqlUpdateUnitPaymentMethodMutationVariables = Exact<{
+  input: GqlUpdateUnitPaymentMethodInput;
+}>;
+
+export type GqlUpdateUnitPaymentMethodMutation = {
+  __typename?: 'Mutation';
+  updateUnitPaymentMethod: {
+    __typename?: 'UnitPaymentMethod';
+    paymentMethodId: string;
+    unitId: string;
+    displayName: string;
+    isActive: boolean;
+    qrCodeS3Key?: string | null | undefined;
+    createdAt?: string | null | undefined;
+    version: number;
+  };
+};
+
+export type GqlDeactivateUnitPaymentMethodMutationVariables = Exact<{
+  input: GqlDeactivateUnitPaymentMethodInput;
+}>;
+
+export type GqlDeactivateUnitPaymentMethodMutation = {
+  __typename?: 'Mutation';
+  deactivateUnitPaymentMethod: {
+    __typename?: 'UnitPaymentMethod';
+    paymentMethodId: string;
+    unitId: string;
+    displayName: string;
+    isActive: boolean;
+    qrCodeS3Key?: string | null | undefined;
+    createdAt?: string | null | undefined;
+    version: number;
+  };
+};
+
+export type GqlRequestUnitPaymentMethodQrUploadMutationVariables = Exact<{
+  input: GqlRequestUnitPaymentMethodQrUploadInput;
+}>;
+
+export type GqlRequestUnitPaymentMethodQrUploadMutation = {
+  __typename?: 'Mutation';
+  requestUnitPaymentMethodQrUpload: {
+    __typename?: 'S3UploadInfo';
+    uploadUrl: string;
+    fields: Record<string, unknown>;
+    s3Key: string;
+  };
+};
+
+export type GqlConfirmUnitPaymentMethodQrUploadMutationVariables = Exact<{
+  input: GqlConfirmUnitPaymentMethodQrUploadInput;
+}>;
+
+export type GqlConfirmUnitPaymentMethodQrUploadMutation = {
+  __typename?: 'Mutation';
+  confirmUnitPaymentMethodQrUpload: {
+    __typename?: 'UnitPaymentMethod';
+    paymentMethodId: string;
+    unitId: string;
+    displayName: string;
+    isActive: boolean;
+    qrCodeS3Key?: string | null | undefined;
+    createdAt?: string | null | undefined;
+    version: number;
+  };
+};
+
+export type GqlDeleteUnitPaymentMethodQrCodeMutationVariables = Exact<{
+  input: GqlDeleteUnitPaymentMethodQrCodeInput;
+}>;
+
+export type GqlDeleteUnitPaymentMethodQrCodeMutation = {
+  __typename?: 'Mutation';
+  deleteUnitPaymentMethodQrCode: {
+    __typename?: 'UnitPaymentMethod';
+    paymentMethodId: string;
+    unitId: string;
+    displayName: string;
+    isActive: boolean;
+    qrCodeS3Key?: string | null | undefined;
+    createdAt?: string | null | undefined;
+    version: number;
+  };
+};
+
 export type GqlCreateUnitCampaignMutationVariables = Exact<{
   input: GqlCreateUnitCampaignInput;
 }>;

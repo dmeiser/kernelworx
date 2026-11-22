@@ -97,6 +97,33 @@ export function isStaleVersionError(error: unknown): boolean {
   return graphQLErrorCode(error) === 'CONFLICT';
 }
 
+/**
+ * True when a `CONFLICT` on a payment-method write is the name or capacity rule,
+ * not a stale version.
+ *
+ * The two are the same code on the wire — a duplicate name, the 50-method ceiling
+ * and a failed version condition all answer `CONFLICT` — and the thing that tells
+ * them apart (`DUPLICATE_PAYMENT_METHOD_NAME` / `PAYMENT_METHOD_LIMIT_REACHED` in
+ * `AppError.details.subcode`) is not forwarded across the AppSync JS resolver
+ * boundary. So the subcode is read where it exists and the sentence the server sent
+ * is what works today. This matters because the two want different answers: a taken
+ * name is fixed by typing a different one, and only a stale version is fixed by
+ * re-reading the row.
+ */
+export function isPaymentMethodTakenError(error: unknown): boolean {
+  return graphQLErrorCode(error) === 'CONFLICT' && (namesTakenMethod(error) || TAKEN_SENTENCE.test(errorMessage(error)));
+}
+
+const TAKEN_SUBCODES = ['DUPLICATE_PAYMENT_METHOD_NAME', 'PAYMENT_METHOD_LIMIT_REACHED'];
+
+/** The sentence DynamoDB's verdict shares with a version condition, read from the server. */
+const TAKEN_SENTENCE = /already has (a payment method|\d+ active payment methods)/i;
+
+function namesTakenMethod(error: unknown): boolean {
+  const details = firstExtensions(error)?.['details'] as { subcode?: string } | undefined;
+  return TAKEN_SUBCODES.includes(details?.subcode ?? '');
+}
+
 /** Where the preview lives in the browser; one constant so nav links and page
  *  navigation cannot drift apart from the route the gate is mounted on. */
 export const SHOW_SELL_BASE = '/show-sell';
