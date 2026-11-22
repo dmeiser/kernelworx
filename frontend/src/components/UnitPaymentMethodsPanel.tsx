@@ -33,7 +33,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Link,
   Stack,
   Switch,
   Table,
@@ -105,6 +104,18 @@ function readDownloadUrl(data?: { unitPaymentMethodQrDownloadUrl?: GqlUnitPaymen
   return data?.unitPaymentMethodQrDownloadUrl?.downloadUrl ?? null;
 }
 
+/**
+ * The name this image is saved under: the stored object's own name.
+ *
+ * It is the same name the signed GET signs into its `Content-Disposition`, so the file
+ * a reader downloads from this screen and the file one downloads by pasting the URL are
+ * named alike, and both name the image rather than `download.png`.
+ */
+function attachmentName(method: GqlUnitPaymentMethod | null): string {
+  const key = method?.qrCodeS3Key ?? '';
+  return key.split('/').pop() || 'qr-code';
+}
+
 /** A dialog heading or field for a row that may already have closed under the reader. */
 function nameOfMethod(method?: GqlUnitPaymentMethod | null): string {
   return method?.displayName ?? '';
@@ -133,6 +144,26 @@ interface PendingWrite {
   kind: 'deactivate' | 'remove-qr';
   method: GqlUnitPaymentMethod;
   idempotencyKey: string;
+}
+
+/**
+ * The row a dialog named, as the newest read answers it.
+ *
+ * A confirm, a QR removal, and a retirement are all versioned writes, and a dialog keeps
+ * the row that happened to be on screen when it opened. Another admin's write lands in
+ * the meantime and this one is refused for a reason the reader cannot act on. Resolving
+ * by id means the version sent is the newest one this screen read — including the
+ * re-read that follows a stale `CONFLICT`, which is what makes the next attempt carry
+ * the version the server asked for instead of the one it just refused.
+ */
+function liveRow(method: GqlUnitPaymentMethod | null, listed: GqlUnitPaymentMethod[]): GqlUnitPaymentMethod | null {
+  if (!method) return null;
+  return listed.find((row) => row.paymentMethodId === method.paymentMethodId) ?? method;
+}
+
+/** A pending write, onto the row the newest read answers. */
+function withLiveRow(write: PendingWrite, listed: GqlUnitPaymentMethod[]): PendingWrite {
+  return { ...write, method: liveRow(write.method, listed) ?? write.method };
 }
 
 export const UnitPaymentMethodsPanel: React.FC<UnitPaymentMethodsPanelProps> = ({ unit }) => {
@@ -257,11 +288,12 @@ export const UnitPaymentMethodsPanel: React.FC<UnitPaymentMethodsPanelProps> = (
           />
         ) : null}
 
-        <QrUploadFlow method={qrMethod} onUpload={writes.uploadQr} onClose={() => setQrMethod(null)} />
+        <QrUploadFlow method={liveRow(qrMethod, listed)} onUpload={writes.uploadQr} onClose={() => setQrMethod(null)} />
 
         <QrPreviewDialog
           open={preview !== null}
           methodName={nameOfMethod(preview)}
+          fileName={attachmentName(preview)}
           url={previewUrl}
           failure={previewError}
           loading={previewLoading}
@@ -273,7 +305,11 @@ export const UnitPaymentMethodsPanel: React.FC<UnitPaymentMethodsPanelProps> = (
         />
 
         {pending ? (
-          <PendingWriteDialog pending={pending} onConfirm={(write) => void runPending(write)} onClose={() => setPending(null)} />
+          <PendingWriteDialog
+            pending={withLiveRow(pending, listed)}
+            onConfirm={(write) => void runPending(write)}
+            onClose={() => setPending(null)}
+          />
         ) : null}
       </Box>
     </QueryGate>
@@ -350,7 +386,16 @@ function usePaymentMethodWrites({ unitId, refetch, setActionError }: WritesArgs)
       const target = requested.data?.requestUnitPaymentMethodQrUpload;
       if (!target) throw new Error('The upload target could not be prepared.');
       await postToS3(target.uploadUrl, target.fields, file);
-      await confirmQr({ variables: { input: confirmInput(unitId, method, target.s3Key) } });
+      try {
+        await confirmQr({ variables: { input: confirmInput(unitId, method, target.s3Key) } });
+      } catch (error) {
+        // A stale confirm is not the file's problem: the bytes are already in the
+        // bucket and the number the server refused is the row's version. Re-read the
+        // row here so the dialog's next attempt carries the version that write needs —
+        // a refused confirm retires nothing, so the same upload target is still usable.
+        if (isStaleWrite(error)) await refreshQuery(refetch);
+        throw error;
+      }
       await refreshQuery(refetch);
     },
     [unitId, requestQr, confirmQr, refetch],
@@ -797,15 +842,16 @@ const QrUploadFlow: React.FC<{
 const QrPreviewDialog: React.FC<{
   open: boolean;
   methodName: string;
+  fileName: string;
   url: string | null;
   failure: string | null;
   loading: boolean;
   onClose: () => void;
-}> = ({ open, methodName, url, failure, loading, onClose }) => (
+}> = ({ open, methodName, fileName, url, failure, loading, onClose }) => (
   <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
     <DialogTitle>QR code for {methodName}</DialogTitle>
     <DialogContent>
-      <QrPreviewBody url={url} failure={failure} loading={loading} methodName={methodName} />
+      <QrPreviewBody url={url} failure={failure} loading={loading} methodName={methodName} fileName={fileName} />
     </DialogContent>
     <DialogActions>
       <Button onClick={onClose} data-testid="close-qr-preview">
@@ -826,20 +872,64 @@ const QrPreviewBody: React.FC<{
   failure: string | null;
   loading: boolean;
   methodName: string;
-}> = ({ url, failure, loading, methodName }) => {
+  fileName: string;
+}> = ({ url, failure, loading, methodName, fileName }) => {
   if (url) {
     return (
       <>
         <QrCodeImage qrCodeUrl={url} methodName={methodName} />
-        <Link href={url} data-testid="qr-download-link" download>
-          Download this image
-        </Link>
+        <SaveQrButton url={url} fileName={fileName} />
       </>
     );
   }
   if (loading) return <LoadingState minHeight="160px" />;
   return <ErrorNote message={failure ?? 'The QR image could not be opened.'} />;
 };
+
+/**
+ * Saves the image as a file without moving the page.
+ *
+ * A plain `href` would put a short-lived pre-signed URL in the address bar: S3 answers a
+ * navigation with the bytes, and the reader is left on a bucket page holding one picture,
+ * with the dialog behind it gone and no back step that still holds the list. Fetching the
+ * bytes and handing them over as a local object keeps the screen where it was, and the
+ * object name carries the download's file name, which is the object's own name.
+ *
+ * The signed URL also signs `ResponseContentDisposition` into its own signature, so a
+ * reader who pastes that URL elsewhere still gets a named file rather than a rendered
+ * page — this control is about not losing the screen, not about the name alone.
+ */
+const SaveQrButton: React.FC<{ url: string; fileName: string }> = ({ url, fileName }) => {
+  const [failure, setFailure] = useState<string | null>(null);
+
+  const save = async (): Promise<void> => {
+    setFailure(null);
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`storage answered ${response.status}`);
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      setFailure(`The image could not be saved: ${(error as Error)?.message || 'the request failed'}`);
+    }
+  };
+
+  return (
+    <>
+      <Button size="small" onClick={() => void save()} data-testid="save-qr-file">
+        Save image
+      </Button>
+      {failure ? <ErrorNote message={failure} /> : null}
+    </>
+  );
+};
+
 
 /** The two confirmations say what actually happens to history, in their own words. */
 function pendingCopy(pending: PendingWrite): { title: string; label: string; notice: string } {

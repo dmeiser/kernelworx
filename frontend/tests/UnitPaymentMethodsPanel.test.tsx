@@ -65,6 +65,22 @@ function refused(code: string, message: string): GraphQLError {
   return new GraphQLError(message, { extensions: { code } });
 }
 
+/**
+ * A refusal in the shape the deployed Unit resolvers actually send.
+ *
+ * `tofu/application/appsync/js-resolvers/lambda_unit_resolver.js` reports a handler
+ * failure with `util.error(message, errorCode, null, { errorCode })`, and AppSync puts
+ * those on the GraphQL error as its own top-level `errorType` and `errorInfo` — there is
+ * no `extensions` object, and `AppError.details` (where a subcode would live) never
+ * crosses the boundary. Apollo Client hands that payload over unchanged, so this is the
+ * shape every code-based decision on this screen has to read. The `extensions` form above
+ * is what a bare `GraphQLError` from a direct link rejection carries, and both are kept
+ * because the fallback reader in `units.ts` still knows it.
+ */
+function refused_by_the_api(code: string, message: string): { data: null; errors: { message: string; errorType: string; errorInfo: { errorCode: string } }[] } {
+  return { data: null, errors: [{ message, errorType: code, errorInfo: { errorCode: code } }] };
+}
+
 /** A built-in: computed, so no `createdAt`, and version 0 because there is no row to version. */
 function builtIn(paymentMethodId: string, displayName: string): GqlUnitPaymentMethod {
   return {
@@ -356,7 +372,7 @@ describe('UnitPaymentMethodsPanel', () => {
     expect(screen.getAllByTestId(/^computed-/)).toHaveLength(3);
   });
 
-  it('the QR image is asked for when it is opened, and the same short-lived URL is the download link', async () => {
+  it('the QR image is asked for when it is opened, and the save control carries its file name', async () => {
     const user = userEvent.setup();
     renderPanel([
       listRead([customMethod({ qrCodeS3Key: QR_KEY })]),
@@ -379,7 +395,86 @@ describe('UnitPaymentMethodsPanel', () => {
     const dialog = await screen.findByRole('dialog');
     const image = await within(dialog).findByAltText('QR code for Wise');
     expect(image).toHaveAttribute('src', SIGNED_URL);
-    expect(within(dialog).getByTestId('qr-download-link')).toHaveAttribute('href', SIGNED_URL);
+    // The save control is a button, not a link: nothing here can navigate the page away.
+    expect(within(dialog).getByTestId('save-qr-file')).toHaveTextContent('Save image');
+    expect(within(dialog).queryByTestId('qr-download-link')).not.toBeInTheDocument();
+  });
+
+  it('saving the QR image fetches the bytes and hands over a file, without leaving the screen', async () => {
+    const user = userEvent.setup();
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const fetchSave = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob([bytes], { type: 'image/png' }) });
+    vi.stubGlobal('fetch', fetchSave);
+
+    const saved: { download: string; href: string }[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push({ download: this.download, href: this.href });
+    });
+    const objectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:kernelworx/qr-file');
+    const revoked = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const navigated = vi.spyOn(Storage.prototype, 'setItem');
+
+    renderPanel([
+      listRead([customMethod({ qrCodeS3Key: QR_KEY })]),
+      {
+        request: { query: GET_UNIT_PAYMENT_METHOD_QR_DOWNLOAD, variables: { unitId: UNIT_ID, paymentMethodId: WISE } },
+        result: {
+          data: {
+            unitPaymentMethodQrDownloadUrl: {
+              __typename: 'UnitPaymentMethodQrDownload',
+              downloadUrl: SIGNED_URL,
+              expiresAt: '2026-02-06T15:05:00Z',
+            },
+          },
+        },
+      },
+    ]);
+
+    await user.click(await screen.findByTestId(`view-qr-${WISE}`));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(await within(dialog).findByTestId('save-qr-file'));
+
+    await waitFor(() => expect(saved).toHaveLength(1));
+    // The bytes are read from the signed URL, and the file that arrives is named for the
+    // object it was stored under — not `download.png`, and not the URL's signature.
+    expect(fetchSave).toHaveBeenCalledWith(SIGNED_URL);
+    expect(saved[0]).toEqual({ download: '8f2a4c1e.png', href: 'blob:kernelworx/qr-file' });
+    expect(objectUrl.mock.calls[0][0]).toBeInstanceOf(Blob);
+    expect((objectUrl.mock.calls[0][0] as Blob).size).toBe(bytes.length);
+    expect(revoked).toHaveBeenCalledWith('blob:kernelworx/qr-file');
+    // The screen is still the screen: no navigation, and the list is untouched.
+    expect(navigated).not.toHaveBeenCalled();
+    expect(window.location.href).toBe('http://localhost:3000/');
+    expect(within(dialog).getByAltText('QR code for Wise')).toBeInTheDocument();
+    expect(click.mock.calls).toHaveLength(1);
+  });
+
+  it('a QR image that cannot be saved says so without closing the dialog', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+
+    renderPanel([
+      listRead([customMethod({ qrCodeS3Key: QR_KEY })]),
+      {
+        request: { query: GET_UNIT_PAYMENT_METHOD_QR_DOWNLOAD, variables: { unitId: UNIT_ID, paymentMethodId: WISE } },
+        result: {
+          data: {
+            unitPaymentMethodQrDownloadUrl: {
+              __typename: 'UnitPaymentMethodQrDownload',
+              downloadUrl: SIGNED_URL,
+              expiresAt: '2026-02-06T15:05:00Z',
+            },
+          },
+        },
+      },
+    ]);
+
+    await user.click(await screen.findByTestId(`view-qr-${WISE}`));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(await within(dialog).findByTestId('save-qr-file'));
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('The image could not be saved: storage answered 403');
+    expect(within(dialog).getByAltText('QR code for Wise')).toBeInTheDocument();
   });
 
   it('a QR image that cannot be opened says so in the dialog, with no broken picture', async () => {
@@ -821,10 +916,125 @@ describe('UnitPaymentMethodsPanel', () => {
     const row = await screen.findByTestId(`method-row-${WISE}`);
     expect(within(row).getByText('Wise')).toBeInTheDocument();
   });
+
+  it('a refusal in the shape the deployed resolver sends is still read as a version race', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod({ version: 2 })]),
+      {
+        request: {
+          query: DEACTIVATE_UNIT_PAYMENT_METHOD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              version: { expectedVersion: 2 },
+              idempotency: { idempotencyKey: 'test-idem-1' },
+            },
+          },
+        },
+        result: refused_by_the_api('CONFLICT', RACE_SENTENCE),
+      },
+      // The re-read only happens if the code was read. Had this screen fallen back to
+      // matching the sentence, it would show these words and leave a stale row on screen.
+      listRead([customMethod({ version: 3, isActive: false })], false, 2),
+    ]);
+
+    await user.click(await screen.findByTestId(`deactivate-${WISE}`));
+    await user.click(screen.getByRole('button', { name: 'Retire method' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(STALE_COPY);
+    const row = await screen.findByTestId(`method-row-${WISE}`);
+    expect(within(row).getByText('retired — sales already made still read this way')).toBeInTheDocument();
+    expect(within(row).getByTestId(`deactivate-${WISE}`)).toBeDisabled();
+  });
+
+  it('a taken name in the deployed shape keeps its sentence and writes nothing again', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      listRead([customMethod()]),
+      {
+        request: {
+          query: CREATE_UNIT_PAYMENT_METHOD,
+          variables: { input: { unitId: UNIT_ID, displayName: 'wise', idempotency: { idempotencyKey: 'test-idem-1' } } },
+        },
+        result: refused_by_the_api('CONFLICT', 'This Unit already has a payment method with this name.'),
+      },
+    ]);
+
+    await user.click(await screen.findByTestId('create-payment-method'));
+    await typeInto('method-name-field', 'wise', user);
+    await user.click(screen.getByRole('button', { name: 'Add method' }));
+
+    // Same code, different fact: the name rule is answered by the server's sentence, and a
+    // re-read here would fail this run — there is no second list mock to answer it.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('This Unit already has a payment method with this name.');
+    expect(alert).not.toHaveTextContent(STALE_COPY);
+    expect(screen.getByTestId('method-name-field')).toBeInTheDocument();
+    expect(screen.getByTestId(`method-row-${WISE}`)).toBeInTheDocument();
+  });
+
+  it('a confirm the API refuses for a moved row is retried at the version the re-read answered', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    renderPanel([
+      listRead([customMethod({ version: 3 })]),
+      uploadAsk(`{"key":"${QR_KEY}"}`),
+      {
+        request: {
+          query: CONFIRM_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              s3Key: QR_KEY,
+              version: { expectedVersion: 3 },
+              idempotency: { idempotencyKey: 'test-idem-2' },
+            },
+          },
+        },
+        result: refused_by_the_api('CONFLICT', RACE_SENTENCE),
+      },
+      // Another admin retired and re-created the row at 5; this read is what the next
+      // attempt has to be built from. One use only, so the read that follows the
+      // successful retry is a different answer and not this same stale row again.
+      listRead([customMethod({ version: 5 })]),
+      uploadAsk(`{"key":"${QR_KEY}"}`, undefined, 'test-idem-3'),
+      {
+        request: {
+          query: CONFIRM_UNIT_PAYMENT_METHOD_QR_UPLOAD,
+          variables: {
+            input: {
+              unitId: UNIT_ID,
+              paymentMethodId: WISE,
+              s3Key: QR_KEY,
+              version: { expectedVersion: 5 },
+              idempotency: { idempotencyKey: 'test-idem-4' },
+            },
+          },
+        },
+        result: { data: { confirmUnitPaymentMethodQrUpload: customMethod({ qrCodeS3Key: QR_KEY, version: 6 }) } },
+      },
+      listRead([customMethod({ qrCodeS3Key: QR_KEY, version: 6 })], false, 3),
+    ]);
+
+    await user.click(await screen.findByTestId(`qr-${WISE}`));
+    await chooseAndUpload(user);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(STALE_COPY);
+    expect(within(dialog).getByText('qr.png')).toBeInTheDocument();
+
+    // The second attempt is the point: the same file, and the version the re-read answered.
+    await chooseAndUpload(user);
+    await waitFor(() => expect(screen.getByTestId(`qr-state-${WISE}`)).toHaveTextContent('View QR'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });
 
 /** The ask half of an upload, with the fields the server handed back in either shape. */
-function uploadAsk(fields: unknown, target: unknown = undefined) {
+function uploadAsk(fields: unknown, target: unknown = undefined, idempotencyKey = 'test-idem-1') {
   const info =
     target === null
       ? null
@@ -843,7 +1053,7 @@ function uploadAsk(fields: unknown, target: unknown = undefined) {
           paymentMethodId: WISE,
           contentType: 'image/png',
           sha256: '0'.repeat(64),
-          idempotency: { idempotencyKey: 'test-idem-1' },
+          idempotency: { idempotencyKey },
         },
       },
     },
@@ -851,7 +1061,7 @@ function uploadAsk(fields: unknown, target: unknown = undefined) {
   };
 }
 
-function uploadConfirmRefused(code: string, message: string) {
+function uploadConfirmRefused(code: string, message: string, expectedVersion = 3, idempotencyKey = 'test-idem-2') {
   return {
     request: {
       query: CONFIRM_UNIT_PAYMENT_METHOD_QR_UPLOAD,
@@ -860,8 +1070,8 @@ function uploadConfirmRefused(code: string, message: string) {
           unitId: UNIT_ID,
           paymentMethodId: WISE,
           s3Key: QR_KEY,
-          version: { expectedVersion: 3 },
-          idempotency: { idempotencyKey: 'test-idem-2' },
+          version: { expectedVersion },
+          idempotency: { idempotencyKey },
         },
       },
     },

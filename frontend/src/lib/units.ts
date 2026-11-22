@@ -9,6 +9,7 @@
  */
 
 import { extractErrorCode, type GraphQLErrorExtensions } from './errorCodes';
+import { getErrorCode } from './api-utils';
 import type { GqlUnit } from '../types/graphql-generated';
 
 /** Page size every Unit list asks for; the server caps at 100 (§ PageInput). */
@@ -63,9 +64,22 @@ function firstExtensions(error: unknown): GraphQLErrorExtensions | undefined {
   return first?.extensions ?? carrier.extensions;
 }
 
-/** The backend `ErrorCode` on an Apollo error, when one is present. */
+/**
+ * The backend `ErrorCode` on a failed operation, in whichever shape it arrived.
+ *
+ * Every Unit read and write answers through the AppSync unit resolver, which reports a
+ * failure with `util.error(message, type, null, { errorCode })`. That lands as the
+ * GraphQL error's own top-level `errorType` and `errorInfo.errorCode` — with **no**
+ * `extensions` at all — and Apollo Client v4 wraps the error list in `errors` rather
+ * than v3's `graphQLErrors`. So the code is read through the shared reader that knows
+ * those shapes (`getErrorCode` in `api-utils.ts`), because a reader that only knows
+ * `extensions` answers `undefined` for every deployed resolver error and each code-based
+ * branch in this file silently stops firing. The `extensions` path stays as the fallback
+ * for a bare `GraphQLError` from a direct link rejection, which carries no wrapper list
+ * for the shared reader to unwrap.
+ */
 export function graphQLErrorCode(error: unknown): string | undefined {
-  return extractErrorCode(firstExtensions(error));
+  return getErrorCode(error) ?? extractErrorCode(firstExtensions(error));
 }
 
 function errorMessage(error: unknown): string {
