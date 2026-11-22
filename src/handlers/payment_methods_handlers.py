@@ -22,6 +22,7 @@ get_required_env, tables = import_from_utils("dynamodb", "get_required_env", "ta
 AppError, ErrorCode = import_from_utils("errors", "AppError", "ErrorCode")
 ensure_account_id = import_from_utils("ids", "ensure_account_id")
 get_logger = import_from_utils("logging", "get_logger")
+image_magic_matches_key = import_from_utils("qr_objects", "image_magic_matches_key")
 (
     _delete_qr_if_exists,
     _mutate_payment_methods,
@@ -161,46 +162,17 @@ def _validate_s3_object_exists(bucket_name: str, s3_key: str) -> None:
 def _object_is_permitted_image(s3_client: Any, bucket_name: str, s3_key: str, content_length: int) -> bool:
     """Check the object's leading bytes against the format its key permits.
 
-    Only the first 12 bytes are read (the WEBP form type sits at offset 8), so
-    the check stays a fixed-cost peek regardless of object size.
+    The accepted formats are the shared QR rules in ``utils/qr_objects.py``, not
+    a copy kept here: two lists of magic numbers drift, and the one that drifts
+    is the one a caller learns about from a file that uploads on one path and is
+    refused on the other. Only the first 12 bytes are read (the WEBP form type
+    sits at offset 8), so the check stays a fixed-cost peek regardless of object
+    size; the Unit flow reads the whole object because it also hashes it.
     """
     if content_length == 0:
         return False
     response = s3_client.get_object(Bucket=bucket_name, Key=s3_key, Range="bytes=0-11")
-    return _has_image_magic(response["Body"].read(), s3_key)
-
-
-def _is_png(body: bytes) -> bool:
-    """Return True for a PNG signature."""
-    return body.startswith(b"\x89PNG\r\n\x1a\n")
-
-
-def _is_jpeg(body: bytes) -> bool:
-    """Return True for a JPEG SOI marker."""
-    return body.startswith(b"\xff\xd8\xff")
-
-
-def _is_webp(body: bytes) -> bool:
-    """Return True for a RIFF container whose form type is WEBP."""
-    return body.startswith(b"RIFF") and body[8:12] == b"WEBP"
-
-
-# The formats validate_qr_s3_key admits a key extension for. The bytes must
-# match the key's own extension, so a JPEG cannot be stored - and served under
-# the image/png type the pre-signed POST declares - as a .png key (#559).
-_QR_IMAGE_VALIDATORS_BY_EXTENSION: Dict[str, Any] = {
-    "png": _is_png,
-    "jpg": _is_jpeg,
-    "jpeg": _is_jpeg,
-    "webp": _is_webp,
-}
-
-
-def _has_image_magic(body: bytes, s3_key: str) -> bool:
-    """Return True when the body carries the magic numbers of the key's format."""
-    extension = s3_key.rsplit("/", 1)[-1].rpartition(".")[2]
-    validator = _QR_IMAGE_VALIDATORS_BY_EXTENSION.get(extension)
-    return validator is not None and validator(body)
+    return bool(image_magic_matches_key(response["Body"].read(), s3_key))
 
 
 def _validate_qr_upload_inputs(payment_method_name: str, s3_key: str, caller_id: str) -> None:
