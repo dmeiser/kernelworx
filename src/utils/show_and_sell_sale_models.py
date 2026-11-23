@@ -46,8 +46,10 @@ from . import inventory_models, show_and_sell_models
 from .dynamodb import tables
 from .errors import AppError, ErrorCode
 from .inventory_models import (
+    ACTOR_ACCOUNT_ID_ATTRIBUTE,
     ALLOCATED_QTY,
     ALLOCATION_OPEN,
+    FULFILLMENT_ID_ATTRIBUTE,
     KERNEL_PHYSICAL_QTY,
     RELEASED_QTY,
     REMAINING_QTY,
@@ -68,12 +70,14 @@ from .show_and_sell_models import (
     UNIT_ID_ATTRIBUTE,
     UPDATED_AT_ATTRIBUTE,
     UPDATED_BY_ATTRIBUTE,
+    WE_OWE_FULFILLMENT_SK_MARKER,
     WE_OWE_SK_PREFIX,
     WE_OWE_STATUS_CLOSED,
     WE_OWE_STATUS_OPEN,
     event_metadata_key,
     event_we_owe_rows,
     show_and_sell_pk,
+    we_owe_fulfillment_rows,
     wire_item,
     wire_item_value,
 )
@@ -92,6 +96,17 @@ SALE_STATUSES: frozenset[str] = frozenset({SALE_STATUS_ACTIVE, SALE_STATUS_VOIDE
 WE_OWE_CLOSE_FULFILLED = "FULFILLED"
 WE_OWE_CLOSE_CANCELLED = "CANCELLED"
 WE_OWE_CLOSE_REASONS: frozenset[str] = frozenset({WE_OWE_CLOSE_FULFILLED, WE_OWE_CLOSE_CANCELLED})
+
+#: An append-only fulfillment record (§5.15). It has no ``version`` attribute and is never
+#: rewritten: a mistake is corrected by a later record, never by editing history.
+WE_OWE_FULFILLMENT_ENTITY_TYPE = "WeOweFulfillment"
+
+#: Which stock source one fulfillment draws on (§5.15, OWE-07). ``KERNEL_STOCK`` moves
+#: Kernel physical on hand and sold-product-in-our-possession together; ``EXTERNAL_COUNCIL``
+#: closes the supplied quantity and changes no Unit stock at all.
+WE_OWE_SOURCE_KERNEL = "KERNEL_STOCK"
+WE_OWE_SOURCE_EXTERNAL = "EXTERNAL_COUNCIL"
+WE_OWE_SOURCES: frozenset[str] = frozenset({WE_OWE_SOURCE_KERNEL, WE_OWE_SOURCE_EXTERNAL})
 
 # --- Attribute names (§5.14, §5.15) ------------------------------------------------
 
@@ -132,6 +147,22 @@ VALUE_CENTS_SNAPSHOT_ATTRIBUTE = "valueCentsSnapshot"
 CLOSE_REASON_ATTRIBUTE = "closeReason"
 CLOSED_AT_ATTRIBUTE = "closedAt"
 
+# --- Fulfillment record attributes (§5.15) -----------------------------------------
+
+#: The quantity one fulfillment record carries: a positive count, never a signed delta,
+#: because a correction to a fulfillment is a later record rather than a negative one.
+FULFILLMENT_QTY_ATTRIBUTE = "quantity"
+FULFILLMENT_SOURCE_ATTRIBUTE = "source"
+#: The ``InventoryMovement`` a KERNEL_STOCK fulfillment consumed, named on the record so
+#: the audit trail pairs the buyer's delivery with the stock that moved (§5.15). It is
+#: absent for EXTERNAL_COUNCIL, where no Unit stock moved.
+FULFILLMENT_MOVEMENT_ATTRIBUTE = "inventoryMovementId"
+
+#: The ``setWeOweReservation`` argument (§7.2): a target quantity, not a delta, so a
+#: caller that read ``reservedQty: 2`` and wants one held states ``1`` and the write says
+#: what the obligation holds afterwards rather than what it meant to add.
+TARGET_RESERVED_QTY_ARGUMENT = "targetReservedQty"
+
 CORRECTED_BY_ATTRIBUTE = "correctedByAccountId"
 CORRECTED_AT_ATTRIBUTE = "correctedAt"
 REASON_ATTRIBUTE = "reason"
@@ -164,6 +195,27 @@ DUPLICATE_LINE_ITEM = "DUPLICATE_LINE_ITEM"
 SALE_ALREADY_VOIDED = "SALE_ALREADY_VOIDED"
 #: An event that never enabled We Owe still refuses an owed quantity (§7.1).
 WE_OWE_NOT_ENABLED = "WE_OWE_NOT_ENABLED"
+
+# --- We Owe reservation and fulfillment refusals (§4.4.2, §4.4.3, §10) -------------
+
+#: A reservation or fulfillment against an obligation that has already closed: there is
+#: nothing left owed and nothing left held, so a further write would invent quantity.
+WE_OWE_OBLIGATION_CLOSED = "WE_OWE_OBLIGATION_CLOSED"
+#: A reservation target above what the obligation still owes.
+RESERVATION_ABOVE_REMAINING = "RESERVATION_ABOVE_REMAINING"
+#: A reservation increase above the campaign's unassigned stock (OWE-04: reserved stock
+#: "leaves sellable/unassigned stock and cannot be used elsewhere").
+RESERVATION_ABOVE_UNASSIGNED = "RESERVATION_ABOVE_UNASSIGNED"
+#: A fulfillment above what the obligation still owes.
+FULFILLMENT_ABOVE_REMAINING = "FULFILLMENT_ABOVE_REMAINING"
+#: A KERNEL_STOCK fulfillment above the quantity stock is held against (OWE-07).
+FULFILLMENT_ABOVE_RESERVED = "FULFILLMENT_ABOVE_RESERVED"
+#: An EXTERNAL_COUNCIL fulfillment over a portion that Kernel stock is promised to. The
+#: Council cannot supply a unit the Kernel has already set aside for this same buyer, so
+#: the caller releases the reservation first (OWE-07).
+FULFILLMENT_ABOVE_UNCOVERED = "FULFILLMENT_ABOVE_UNCOVERED"
+#: A reservation or fulfillment whose ``expectedVersion`` is not the obligation's version.
+WE_OWE_VERSION_STALE = "WE_OWE_VERSION_STALE"
 
 SALE_STATE_LIVE = "LIVE"
 SALE_STATE_DRAFT = "DRAFT"
@@ -213,6 +265,23 @@ def new_we_owe_id() -> str:
     return str(uuid.uuid4())
 
 
+def new_fulfillment_id() -> str:
+    """A stable fulfillment identity, minted by the server at write time (§5.15).
+
+    The caller never names a fulfillment: the SDL input carries no such field, because an
+    id the browser minted would make "did this click already record a fulfillment" a
+    question about a client's memory rather than about the rows the write committed. The
+    id is also the link the ``WE_OWE_FULFILL`` movement names, so the record and the
+    stock that moved share one identity (§5.15).
+    """
+    return str(uuid.uuid4())
+
+
+def normalize_fulfillment_id(value: Any, field: str = FULFILLMENT_ID_ATTRIBUTE) -> str:
+    """Validate a ``fulfillmentId``, which sits at the end of a composite sort key."""
+    return normalize_sale_key_id(value, field)
+
+
 def normalize_sale_key_id(value: Any, field: str) -> str:
     """Validate an id that sits inside one of this module's composite sort keys.
 
@@ -251,6 +320,18 @@ def normalize_buyer_name(value: Any, field: str = BUYER_NAME_ATTRIBUTE) -> Optio
     return normalize_optional_text(value, field, MAX_BUYER_NAME_LENGTH)
 
 
+def normalize_buyer_name_filter(value: Any, field: str) -> str:
+    """A buyer-name filter, capped by the same ceiling as the stored name (§4.4.4).
+
+    An empty filter is a refusal rather than "match everything": a caller that sent
+    ``buyerName: ""`` meant to ask something, and answering it as the unfiltered list is how
+    a filter that quietly does nothing survives review. The name is the obligation's own
+    snapshot, so a filter matches what a Unit typed at the table — there is no Account to
+    resolve it against, and no contact detail to match on (§5.15).
+    """
+    return normalize_required_text(value, field, MAX_BUYER_NAME_LENGTH)
+
+
 def normalize_buyer_phone(value: Any, field: str = BUYER_PHONE_ATTRIBUTE) -> Optional[str]:
     """Trim the optional buyer phone. Never validated as a phone number: it is contact detail."""
     return normalize_optional_text(value, field, MAX_BUYER_PHONE_LENGTH)
@@ -285,6 +366,32 @@ def normalize_we_owe_close_reason(value: Any, field: str = CLOSE_REASON_ATTRIBUT
     if not isinstance(value, str) or value not in WE_OWE_CLOSE_REASONS:
         raise _invalid(field, f"must be one of {', '.join(sorted(WE_OWE_CLOSE_REASONS))}")
     return value
+
+
+def normalize_we_owe_source(value: Any, field: str = FULFILLMENT_SOURCE_ATTRIBUTE) -> str:
+    """Which stock source a fulfillment draws on (§5.15, OWE-07).
+
+    Two sources and no third: ``KERNEL_STOCK`` is the Unit's own shelf and moves stock,
+    ``EXTERNAL_COUNCIL`` is a Council that supplied the quantity and moves nothing.
+    """
+    if not isinstance(value, str) or value not in WE_OWE_SOURCES:
+        raise _invalid(field, f"must be one of {', '.join(sorted(WE_OWE_SOURCES))}")
+    return value
+
+
+def normalize_reservation_target(value: Any, field: str = TARGET_RESERVED_QTY_ARGUMENT) -> int:
+    """A reservation target: a count that may be zero, because zero is how a Unit releases stock."""
+    return normalize_quantity(value, field)
+
+
+def normalize_fulfillment_qty(value: Any, field: str = FULFILLMENT_QTY_ATTRIBUTE) -> int:
+    """One fulfillment's quantity (§5.15: a positive integer).
+
+    Zero is refused rather than treated as a no-op: a record of delivering nothing would
+    sit in the audit history beside the deliveries that happened, and the obligation's
+    version would move for a write that changed no quantity.
+    """
+    return inventory_models.normalize_quantity(value, field, minimum=1)
 
 
 def normalize_quantity(value: Any, field: str) -> int:
@@ -363,6 +470,21 @@ def we_owe_key(show_and_sell_id: str, we_owe_id: str) -> Dict[str, str]:
     return {"pk": show_and_sell_pk(show_and_sell_id), "sk": we_owe_sk(we_owe_id)}
 
 
+def we_owe_fulfillment_sk(we_owe_id: str, fulfillment_id: str) -> str:
+    """One fulfillment's sort key, under its obligation (§6.4).
+
+    The parent id leads, so one range read answers "what has been delivered on this
+    obligation" without touching any other obligation's history, and the parent row
+    itself sits outside the range.
+    """
+    return f"{we_owe_sk(we_owe_id)}{WE_OWE_FULFILLMENT_SK_MARKER}{fulfillment_id}"
+
+
+def we_owe_fulfillment_key(show_and_sell_id: str, we_owe_id: str, fulfillment_id: str) -> Dict[str, str]:
+    """One fulfillment row's key pair."""
+    return {"pk": show_and_sell_pk(show_and_sell_id), "sk": we_owe_fulfillment_sk(we_owe_id, fulfillment_id)}
+
+
 # --- Reads -------------------------------------------------------------------------
 
 
@@ -392,6 +514,107 @@ def read_we_owe(show_and_sell_id: str, we_owe_id: str) -> Optional[Dict[str, Any
     response = tables.show_and_sells.get_item(Key=we_owe_key(show_and_sell_id, we_owe_id), ConsistentRead=True)
     item = response.get("Item")
     return dict(item) if isinstance(item, Mapping) else None
+
+
+def load_we_owe_or_not_found(show_and_sell_id: str, we_owe_id: str) -> Dict[str, Any]:
+    """The obligation a reservation or fulfillment addresses, or ``NOT_FOUND``."""
+    row = read_we_owe(show_and_sell_id, we_owe_id)
+    if row is None:
+        raise AppError(ErrorCode.NOT_FOUND, "We Owe obligation not found")
+    return row
+
+
+def we_owe_row_by_id(we_owe_id: str) -> Optional[Dict[str, Any]]:
+    """One obligation addressed by its own id, through ``weOweId-index`` (§6.4).
+
+    The direct read has no event to address the partition by, which is what makes this the
+    one obligation read that has to disambiguate the row from its own history: the index is
+    keyed on ``weOweId``, a value the append-only fulfillment records carry as their parent
+    link, so the marker is what picks the aggregate out of the range.
+    """
+    rows = [
+        row
+        for row in query_all_items(
+            tables.show_and_sells,
+            {
+                "IndexName": "weOweId-index",
+                "KeyConditionExpression": "#weOweId = :weOweId",
+                "ExpressionAttributeNames": {"#weOweId": WE_OWE_ID_ATTRIBUTE},
+                "ExpressionAttributeValues": {":weOweId": we_owe_id},
+            },
+        )
+        if WE_OWE_FULFILLMENT_SK_MARKER not in str(row.get("sk") or "")
+    ]
+    return dict(rows[0]) if len(rows) == 1 else None
+
+
+def load_we_owe_by_id_or_not_found(we_owe_id: str) -> Dict[str, Any]:
+    """The obligation its caller addressed, or ``NOT_FOUND``.
+
+    ``NOT_FOUND`` rather than an existence answer about another Unit's obligation: the
+    tenant check happens on the campaign the row names, and an unknown id and a foreign id
+    are the same reply (AUTH-U).
+    """
+    row = we_owe_row_by_id(we_owe_id)
+    if row is None:
+        raise AppError(ErrorCode.NOT_FOUND, "We Owe obligation not found")
+    return row
+
+
+def campaign_we_owe_rows(unit_campaign_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """One Unit Campaign's obligations, through ``unitCampaignId-status-index`` (§6.4).
+
+    The index is what answers "what does this campaign still owe" across every event at
+    once, which no single event partition can: the obligations of a Unit Campaign are the
+    list its table reads (§7.2). Two reads when the caller wants both states, because the
+    index's range key is the state and an absent filter means both of them. Fulfillment
+    records carry no ``status``, so they are never in this index at all.
+
+    Ordered the way a table reads it: what is still owed before what is closed, newest
+    first inside each state, and ``weOweId`` as the tiebreak so two pages of one read never
+    disagree about which of two same-instant obligations came first.
+    """
+    statuses = [status] if status is not None else [WE_OWE_STATUS_OPEN, WE_OWE_STATUS_CLOSED]
+    rows: List[Dict[str, Any]] = []
+    for state in statuses:
+        rows.extend(
+            query_all_items(
+                tables.show_and_sells,
+                {
+                    "IndexName": "unitCampaignId-status-index",
+                    "KeyConditionExpression": "#unitCampaignId = :unitCampaignId AND #status = :status",
+                    "ExpressionAttributeNames": {
+                        "#unitCampaignId": UNIT_CAMPAIGN_ID_ATTRIBUTE,
+                        "#status": STATUS_ATTRIBUTE,
+                    },
+                    "ExpressionAttributeValues": {":unitCampaignId": unit_campaign_id, ":status": state},
+                },
+            )
+        )
+    newest_first = sorted(
+        rows,
+        key=lambda row: (str(row.get(CREATED_AT_ATTRIBUTE) or ""), str(row.get(WE_OWE_ID_ATTRIBUTE) or "")),
+        reverse=True,
+    )
+    # A second, stable sort on the state is what keeps the newest-first order inside each
+    # state: OPEN before CLOSED is the order a table wants, and it says nothing about which
+    # of two open obligations was written first.
+    return sorted(newest_first, key=lambda row: 0 if str(row.get(STATUS_ATTRIBUTE) or "") == WE_OWE_STATUS_OPEN else 1)
+
+
+def we_owe_fulfillment_history(show_and_sell_id: str, we_owe_id: str) -> List[Dict[str, Any]]:
+    """One obligation's fulfillment records, oldest first (§5.15).
+
+    The storage range orders by id, not by time, because §6.4's sort key is
+    ``WE_OWE#<weOweId>#FULFILLMENT#<fulfillmentId>``; the history a reader wants is the
+    sequence deliveries happened in, so the moment is the sort here and the id breaks a tie
+    between two records written in the same instant.
+    """
+    rows = we_owe_fulfillment_rows(show_and_sell_id, we_owe_id)
+    return sorted(
+        rows,
+        key=lambda row: (str(row.get(CREATED_AT_ATTRIBUTE) or ""), str(row.get(FULFILLMENT_ID_ATTRIBUTE) or "")),
+    )
 
 
 def sale_obligations(show_and_sell_id: str, sale_id: str) -> List[Dict[str, Any]]:
@@ -1062,6 +1285,161 @@ def _we_owe_status_violations(item: Mapping[str, Any]) -> List[str]:
     return violations
 
 
+def build_we_owe_fulfillment_item(
+    *,
+    show_and_sell_id: str,
+    we_owe_id: str,
+    fulfillment_id: str,
+    quantity: int,
+    source: Any,
+    actor_account_id: str,
+    now_iso: str,
+    inventory_movement_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """One append-only fulfillment record (§5.15, OWE-09).
+
+    The record says what one write delivered and where it came from; it never restates the
+    obligation's totals, because then two rows would hold the same quantity and a reader
+    could not tell which one a later write updates. There is no ``version`` attribute and
+    no edit path: a mistaken fulfillment is answered by a later record or by a sale
+    correction, never by rewriting this one.
+
+    The row carries no ``unitCampaignId``, and that is deliberate rather than an omission:
+    ``unitCampaignId-status-index`` is the obligation list, and a history row that landed in
+    it would answer a "what is still owed" query with records that owe nothing.
+    """
+    kind = normalize_we_owe_source(source)
+    record_id = normalize_fulfillment_id(fulfillment_id)
+    item: Dict[str, Any] = {
+        "pk": show_and_sell_pk(show_and_sell_id),
+        "sk": we_owe_fulfillment_sk(normalize_we_owe_id(we_owe_id), record_id),
+        "entityType": WE_OWE_FULFILLMENT_ENTITY_TYPE,
+        WE_OWE_ID_ATTRIBUTE: normalize_we_owe_id(we_owe_id),
+        FULFILLMENT_ID_ATTRIBUTE: record_id,
+        FULFILLMENT_QTY_ATTRIBUTE: normalize_fulfillment_qty(quantity),
+        FULFILLMENT_SOURCE_ATTRIBUTE: kind,
+        ACTOR_ACCOUNT_ID_ATTRIBUTE: normalize_required_text(
+            actor_account_id, ACTOR_ACCOUNT_ID_ATTRIBUTE, MAX_ID_LENGTH
+        ),
+        CREATED_AT_ATTRIBUTE: show_and_sell_models.normalize_moment(now_iso, CREATED_AT_ATTRIBUTE),
+    }
+    if inventory_movement_id is not None:
+        item[FULFILLMENT_MOVEMENT_ATTRIBUTE] = inventory_models.normalize_inventory_id(
+            inventory_movement_id, FULFILLMENT_MOVEMENT_ATTRIBUTE
+        )
+    return item
+
+
+#: §5.15's required attributes on a fulfillment record.
+_WE_OWE_FULFILLMENT_REQUIRED_ATTRIBUTES: Tuple[str, ...] = (
+    WE_OWE_ID_ATTRIBUTE,
+    FULFILLMENT_ID_ATTRIBUTE,
+    FULFILLMENT_QTY_ATTRIBUTE,
+    FULFILLMENT_SOURCE_ATTRIBUTE,
+    ACTOR_ACCOUNT_ID_ATTRIBUTE,
+    CREATED_AT_ATTRIBUTE,
+)
+
+
+def we_owe_fulfillment_invariant_violations(item: Mapping[str, Any]) -> List[str]:
+    """What makes one fulfillment record a record of something that happened.
+
+    The source-and-movement pairing is the half that matters for an audit: ``KERNEL_STOCK``
+    names the ``InventoryMovement`` that moved the stock, and ``EXTERNAL_COUNCIL`` names
+    none, because a Council that supplied a quantity changed no Unit quantity, so a movement
+    row would describe a stock change that never occurred (§5.15). A reader reconciling the
+    trail against the balances finds one movement per Kernel fulfillment and no unexplained
+    movement anywhere else.
+    """
+    violations = _missing_required(item, _WE_OWE_FULFILLMENT_REQUIRED_ATTRIBUTES)
+    if violations:
+        return violations
+    if VERSION_ATTRIBUTE in item:
+        violations.append(f"{VERSION_ATTRIBUTE} would make an append-only record mutable")
+    if int(item[FULFILLMENT_QTY_ATTRIBUTE]) < 1:
+        violations.append("quantity must be a positive integer")
+    source = str(item[FULFILLMENT_SOURCE_ATTRIBUTE])
+    if source not in WE_OWE_SOURCES:
+        violations.append(f"source must be one of {', '.join(sorted(WE_OWE_SOURCES))}")
+    elif source == WE_OWE_SOURCE_KERNEL and not item.get(FULFILLMENT_MOVEMENT_ATTRIBUTE):
+        violations.append("a KERNEL_STOCK fulfillment must name the inventory movement that moved the stock")
+    elif source == WE_OWE_SOURCE_EXTERNAL and item.get(FULFILLMENT_MOVEMENT_ATTRIBUTE):
+        violations.append("an EXTERNAL_COUNCIL fulfillment changed no Unit stock and must name no movement")
+    return violations
+
+
+def we_owe_fulfillment_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One fulfillment row as the SDL's ``WeOweFulfillment`` (§7.2)."""
+    return {
+        FULFILLMENT_ID_ATTRIBUTE: str(row[FULFILLMENT_ID_ATTRIBUTE]),
+        WE_OWE_ID_ATTRIBUTE: str(row[WE_OWE_ID_ATTRIBUTE]),
+        FULFILLMENT_QTY_ATTRIBUTE: int(row[FULFILLMENT_QTY_ATTRIBUTE]),
+        FULFILLMENT_SOURCE_ATTRIBUTE: str(row[FULFILLMENT_SOURCE_ATTRIBUTE]),
+        FULFILLMENT_MOVEMENT_ATTRIBUTE: row.get(FULFILLMENT_MOVEMENT_ATTRIBUTE),
+        ACTOR_ACCOUNT_ID_ATTRIBUTE: str(row[ACTOR_ACCOUNT_ID_ATTRIBUTE]),
+        CREATED_AT_ATTRIBUTE: str(row[CREATED_AT_ATTRIBUTE]),
+    }
+
+
+def put_we_owe_fulfillment_action(item: Mapping[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """Create one fulfillment record.
+
+    The condition is what makes the record's own id the uniqueness guard: a retry that
+    somehow reached the write again would collide with the record the first attempt
+    committed rather than appending a second delivery of the same quantity.
+    """
+    return (
+        "Put",
+        {
+            "TableName": tables.show_and_sells.table_name,
+            "Item": wire_item(item),
+            "ConditionExpression": "attribute_not_exists(#pk) AND attribute_not_exists(#sk)",
+            "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+
+def load_we_owe_fulfillment_or_internal(show_and_sell_id: str, we_owe_id: str, fulfillment_id: str) -> Dict[str, Any]:
+    """The fulfillment record this handler just wrote.
+
+    A missing record here is not a caller's error: the record and the obligation write
+    committed in one transaction, so a read that cannot find it means the answer this
+    handler is about to give would not match the rows that exist.
+    """
+    response = tables.show_and_sells.get_item(
+        Key=we_owe_fulfillment_key(show_and_sell_id, we_owe_id, fulfillment_id), ConsistentRead=True
+    )
+    item = response.get("Item")
+    if not isinstance(item, Mapping):
+        raise AppError(ErrorCode.INTERNAL_ERROR, "the fulfillment record could not be loaded")
+    return dict(item)
+
+
+def require_we_owe_version(row: Mapping[str, Any], expected_version: int) -> None:
+    """Refuse a reservation or fulfillment whose caller read a stale obligation (§4.4.2, §4.4.3).
+
+    The obligation's version is what serializes the three writers of one row — a sale
+    correction, a reservation, and a fulfillment — and the write's condition is what makes a
+    stale one lose its whole transaction. This check is the same rule stated before any plan
+    is built, so a caller whose screen is behind learns which obligation moved instead of
+    discovering it through a cancelled transaction it cannot read.
+    """
+    current = int(row[VERSION_ATTRIBUTE])
+    if current == expected_version:
+        return
+    raise AppError(
+        ErrorCode.CONFLICT,
+        "This obligation changed since you read it. Re-read it and try again.",
+        details={
+            "subcode": WE_OWE_VERSION_STALE,
+            "we_owe_id": str(row[WE_OWE_ID_ATTRIBUTE]),
+            "expectedVersion": expected_version,
+            "currentVersion": current,
+        },
+    )
+
+
 # --- Entry rules shared by all three mutations (§4.3.3) -----------------------------
 
 
@@ -1456,6 +1834,277 @@ def we_owe_release_movement_action(
     return inventory_models.put_inventory_movement_action(item)
 
 
+def we_owe_reserve_movement_action(
+    *,
+    unit_campaign_id: str,
+    product_id: str,
+    we_owe_id: str,
+    reserve_qty: int,
+    inventory_version: int,
+    actor_account_id: str,
+    occurred_at: str,
+    idempotency_key: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """The audit row for stock a Unit set aside for one buyer's obligation (§4.4.2).
+
+    ``WE_OWE_RESERVE`` moves only ``soldPossessionDelta``: the Kernels stay physically in the
+    Unit's possession and leave sellable/unassigned stock, which is the whole of OWE-04. The
+    movement names the obligation, so a reader can see whose reservation those units are.
+    """
+    item = inventory_models.build_inventory_movement_item(
+        movement_id=inventory_models.new_inventory_movement_id(),
+        unit_campaign_id=unit_campaign_id,
+        product_id=product_id,
+        movement_type=inventory_models.WE_OWE_RESERVE,
+        actor_account_id=actor_account_id,
+        occurred_at=occurred_at,
+        idempotency_key=idempotency_key,
+        sold_possession_delta=reserve_qty,
+        we_owe_id=we_owe_id,
+        inventory_version=inventory_version,
+    )
+    return inventory_models.put_inventory_movement_action(item)
+
+
+def we_owe_fulfill_movement_action(
+    *,
+    unit_campaign_id: str,
+    product_id: str,
+    we_owe_id: str,
+    fulfillment_id: str,
+    movement_id: str,
+    quantity: int,
+    inventory_version: int,
+    actor_account_id: str,
+    occurred_at: str,
+    idempotency_key: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """The stock leaving the Kernel for a buyer who was owed it (§4.4.3, OWE-07).
+
+    Kernel physical on hand and sold-product-in-our-possession go down together — the unit
+    was already counted as sold to this buyer, and now it has also left the shelf. The
+    movement names both the obligation and the fulfillment record it belongs to, which is
+    the pairing §5.15 requires and the reason the two rows can be reconciled in either
+    direction. An ``EXTERNAL_COUNCIL`` fulfillment writes no movement at all: nothing the
+    Unit owns moved.
+    """
+    item = inventory_models.build_inventory_movement_item(
+        movement_id=movement_id,
+        unit_campaign_id=unit_campaign_id,
+        product_id=product_id,
+        movement_type=inventory_models.WE_OWE_FULFILL,
+        actor_account_id=actor_account_id,
+        occurred_at=occurred_at,
+        idempotency_key=idempotency_key,
+        kernel_physical_delta=-quantity,
+        sold_possession_delta=-quantity,
+        we_owe_id=we_owe_id,
+        fulfillment_id=fulfillment_id,
+        inventory_version=inventory_version,
+    )
+    return inventory_models.put_inventory_movement_action(item)
+
+
+# --- We Owe reservation and fulfillment arithmetic (§4.4.2, §4.4.3, §10) -----------
+
+
+def we_owe_reservation_targets(
+    row: Mapping[str, Any],
+    target_reserved_qty: Any,
+    *,
+    unassigned_qty: int,
+) -> WeOweTarget:
+    """Where one obligation's reservation moves to, and what that hands back.
+
+    A reservation is a target rather than a delta, so the arithmetic is "what does this
+    obligation hold afterwards", and the three refusals are the three ways a target can be
+    wrong:
+
+    * above what the obligation still owes — the Unit would hold stock for a quantity nobody
+      was promised (``0 <= reservedQty <= remainingQty``, §5.15);
+    * above the campaign's unassigned stock — the same units would be promised to this buyer
+      and still sit in an event's allocation or another buyer's reservation (OWE-04);
+    * on a closed obligation — nothing is owed and nothing is held, so there is nothing for
+      stock to be reserved against.
+
+    Releasing is the same write with a lower target: the released quantity goes back to
+    sellable stock through ``WE_OWE_RELEASE``, and a target of zero is how a Unit lets go of
+    a whole reservation. Nothing here ever raises a reservation on its own — new receipts
+    never reserve stock for an old obligation (OWE-05), and an obligation with no stock held
+    against it simply reports that quantity as uncovered.
+    """
+    _require_open_obligation(row)
+    original = int(row[ORIGINAL_QTY_ATTRIBUTE])
+    fulfilled = int(row[FULFILLED_QTY_ATTRIBUTE])
+    cancelled = int(row[CANCELLED_QTY_ATTRIBUTE])
+    reserved = int(row[RESERVED_QTY_ATTRIBUTE])
+    remaining = original - fulfilled - cancelled
+    target = normalize_reservation_target(target_reserved_qty)
+    if target > remaining:
+        _refuse(
+            RESERVATION_ABOVE_REMAINING,
+            f"Only {remaining} of this obligation is still owed; a reservation cannot hold more than that.",
+            we_owe_id=str(row[WE_OWE_ID_ATTRIBUTE]),
+            remainingQty=remaining,
+            requestedQty=target,
+        )
+    increase = target - reserved
+    if increase > unassigned_qty:
+        _refuse(
+            RESERVATION_ABOVE_UNASSIGNED,
+            f"Only {unassigned_qty} unassigned kernels are available for this product; "
+            f"reserving {increase} more would take stock already assigned to an event or reserved elsewhere.",
+            we_owe_id=str(row[WE_OWE_ID_ATTRIBUTE]),
+            unassignedQty=unassigned_qty,
+            requestedIncrease=increase,
+        )
+    closed = remaining == 0 and target == 0
+    return WeOweTarget(
+        we_owe_id=str(row[WE_OWE_ID_ATTRIBUTE]),
+        line_item_id=str(row[LINE_ITEM_ID_ATTRIBUTE]),
+        fulfilled_qty=fulfilled,
+        cancelled_qty=cancelled,
+        reserved_qty=target,
+        remaining_qty=remaining,
+        uncovered_qty=remaining - target,
+        status=WE_OWE_STATUS_CLOSED if closed else WE_OWE_STATUS_OPEN,
+        close_reason=(WE_OWE_CLOSE_CANCELLED if cancelled else WE_OWE_CLOSE_FULFILLED) if closed else None,
+        release_qty=reserved - target if target < reserved else 0,
+        changed=target != reserved,
+    )
+
+
+@dataclass(frozen=True)
+class WeOweFulfillmentTarget:
+    """One fulfillment: the obligation's target quantities, and exactly what moved.
+
+    ``kernel_physical_delta`` and ``sold_possession_delta`` are the source-specific stock
+    effect, stated as numbers rather than as a flag so the resolver cannot apply the wrong
+    one: ``KERNEL_STOCK`` moves both by the delivered quantity and ``EXTERNAL_COUNCIL``
+    moves neither. ``inventory_movement_id`` is present only for ``KERNEL_STOCK``, and it is
+    minted here so the movement row and the fulfillment record can name each other (§5.15).
+
+    The reserved quantity that a Kernel fulfillment consumes is not in ``release_qty``: the
+    ``WE_OWE_FULFILL`` movement already carries the possession decrement, and writing a second
+    ``WE_OWE_RELEASE`` for the same units would take them out of possession twice.
+    """
+
+    target: WeOweTarget
+    fulfillment_id: str
+    source: str
+    quantity: int
+    inventory_movement_id: Optional[str]
+    kernel_physical_delta: int
+    sold_possession_delta: int
+
+
+def we_owe_fulfillment_targets(row: Mapping[str, Any], quantity: Any, source: Any) -> WeOweFulfillmentTarget:
+    """One partial fulfillment's targets, per source (§4.4.3, OWE-07, OWE-09).
+
+    ``KERNEL_STOCK`` may only reach the quantity stock is actually held against, and
+    ``EXTERNAL_COUNCIL`` only the quantity that is not covered by a reservation. That second
+    bound is the reason a covered portion has to be released before the Council supplies it:
+    a Council delivering a unit the Kernel has already set aside for this same buyer would
+    leave the reservation holding stock against an obligation that no longer owes anything,
+    and OWE-07 requires every reserved quantity to be fulfilled or explicitly released
+    before the obligation is resolved.
+
+    The obligation closes only when the write leaves nothing owed and nothing held, and the
+    close reason says which of the two endings happened. A fulfillment that leaves either
+    nonzero leaves the obligation open, which is what makes partial fulfillment the normal
+    case rather than a special one.
+    """
+    _require_open_obligation(row)
+    kind = normalize_we_owe_source(source)
+    amount = normalize_fulfillment_qty(quantity)
+    original = int(row[ORIGINAL_QTY_ATTRIBUTE])
+    fulfilled = int(row[FULFILLED_QTY_ATTRIBUTE])
+    cancelled = int(row[CANCELLED_QTY_ATTRIBUTE])
+    reserved = int(row[RESERVED_QTY_ATTRIBUTE])
+    remaining = original - fulfilled - cancelled
+    uncovered = remaining - reserved
+    obligation_id = str(row[WE_OWE_ID_ATTRIBUTE])
+    if amount > remaining:
+        _refuse(
+            FULFILLMENT_ABOVE_REMAINING,
+            f"This obligation owes {remaining} more; {amount} cannot be fulfilled against it.",
+            we_owe_id=obligation_id,
+            remainingQty=remaining,
+            requestedQty=amount,
+        )
+    if kind == WE_OWE_SOURCE_KERNEL:
+        if amount > reserved:
+            _refuse(
+                FULFILLMENT_ABOVE_RESERVED,
+                f"Only {reserved} kernels are reserved for this obligation; fulfill Kernel stock up to that "
+                "or record the rest as EXTERNAL_COUNCIL.",
+                we_owe_id=obligation_id,
+                reservedQty=reserved,
+                requestedQty=amount,
+            )
+        physical_delta = -amount
+        possession_delta = -amount
+        new_reserved = reserved - amount
+        movement_id: Optional[str] = inventory_models.new_inventory_movement_id()
+    else:
+        if amount > uncovered:
+            _refuse(
+                FULFILLMENT_ABOVE_UNCOVERED,
+                f"Only {uncovered} of this obligation is uncovered; release the reservation on the covered "
+                "portion before a Council supplies it.",
+                we_owe_id=obligation_id,
+                uncoveredQty=uncovered,
+                requestedQty=amount,
+            )
+        physical_delta = 0
+        possession_delta = 0
+        new_reserved = reserved
+        movement_id = None
+    new_fulfilled = fulfilled + amount
+    target_remaining = original - new_fulfilled - cancelled
+    closed = target_remaining == 0 and new_reserved == 0
+    target = WeOweTarget(
+        we_owe_id=obligation_id,
+        line_item_id=str(row[LINE_ITEM_ID_ATTRIBUTE]),
+        fulfilled_qty=new_fulfilled,
+        cancelled_qty=cancelled,
+        reserved_qty=new_reserved,
+        remaining_qty=target_remaining,
+        uncovered_qty=target_remaining - new_reserved,
+        status=WE_OWE_STATUS_CLOSED if closed else WE_OWE_STATUS_OPEN,
+        close_reason=WE_OWE_CLOSE_FULFILLED if closed else None,
+        # The reserved decrement rides on the WE_OWE_FULFILL movement, never a second release.
+        release_qty=0,
+        changed=True,
+    )
+    return WeOweFulfillmentTarget(
+        target=target,
+        fulfillment_id=new_fulfillment_id(),
+        source=kind,
+        quantity=amount,
+        inventory_movement_id=movement_id,
+        kernel_physical_delta=physical_delta,
+        sold_possession_delta=possession_delta,
+    )
+
+
+def _require_open_obligation(row: Mapping[str, Any]) -> None:
+    """Refuse a reservation or fulfillment against an obligation that has closed.
+
+    A CLOSED row owes nothing and holds nothing (§5.15's pair), so a write that moved either
+    number would create quantity out of an audit fact. The refusal says so rather than
+    reporting a version conflict: nothing raced this caller, the obligation is simply over.
+    """
+    if str(row.get(STATUS_ATTRIBUTE) or "") != WE_OWE_STATUS_CLOSED:
+        return
+    _refuse(
+        WE_OWE_OBLIGATION_CLOSED,
+        "This obligation is closed: it owes nothing and has no stock held against it.",
+        we_owe_id=str(row[WE_OWE_ID_ATTRIBUTE]),
+        closeReason=str(row.get(CLOSE_REASON_ATTRIBUTE) or ""),
+    )
+
+
 # --- We Owe correction arithmetic (§8.6.1 step 3) -----------------------------------
 
 
@@ -1541,6 +2190,7 @@ def we_owe_update_action(
     row: Mapping[str, Any],
     target: WeOweTarget,
     updated_at: str,
+    fulfilled_qty: Optional[int] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """Write one obligation's target quantities, pinned to the version this request read.
 
@@ -1550,6 +2200,10 @@ def we_owe_update_action(
     over-written by it. ``closeReason`` and ``closedAt`` are set only when the obligation
     closes, and removed when a reopened edit leaves it open again, so "closed for a
     reason" and "not closed" stay distinguishable on the read.
+
+    ``fulfilled_qty`` is the fulfillment path's one extra term (§4.4.3): a correction never
+    moves a fulfilled quantity — §8.6.1 keeps it historical — so the parameter is absent
+    there and present only for the write that delivered something.
     """
     expected_version = int(row[VERSION_ATTRIBUTE])
     sets: Dict[str, Any] = {
@@ -1561,6 +2215,8 @@ def we_owe_update_action(
         VERSION_ATTRIBUTE: expected_version + 1,
         UPDATED_AT_ATTRIBUTE: updated_at,
     }
+    if fulfilled_qty is not None:
+        sets[FULFILLED_QTY_ATTRIBUTE] = normalize_quantity(fulfilled_qty, FULFILLED_QTY_ATTRIBUTE)
     removes: List[str] = []
     if target.close_reason is None:
         removes.extend([CLOSE_REASON_ATTRIBUTE, CLOSED_AT_ATTRIBUTE])

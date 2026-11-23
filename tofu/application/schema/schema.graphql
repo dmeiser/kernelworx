@@ -2730,6 +2730,30 @@ type Query {
     page: PageInput
   ): EventInventoryAllocationConnection!
 
+  # Show & Sell — We Owe obligation reads (checklist §4.4.4, spec §10)
+  """One We Owe obligation with its full fulfillment history: the quantities each source covered, the inventory movement a kernel fulfillment consumed, and the versions a follow-up write conditions on. `NOT_FOUND` for another Unit's obligation or an unknown id (OWE-Q-01). Unit Admin only (AUTH-U)."""
+  weOweObligation(
+    """The obligation ID."""
+    weOweId: ID!
+  ): WeOweObligationDetail!
+  """One Unit Campaign's We Owe obligations, open obligations first then newest first: filter by event, product, or state. Only OPEN and CLOSED are filterable, because the specification exposes no due date, aging, or assignee concept (OWE-10) — a caller filtering by any of those is asking for a state machine that does not exist. Buyer-name filters match the snapshot the obligation carries, exactly or by prefix. Unit Admin only (AUTH-U, OWE-Q-01)."""
+  weOweObligations(
+    """The Unit Campaign whose obligations are being read."""
+    unitCampaignId: ID!
+    """Filter to obligations from one event."""
+    showAndSellId: ID
+    """Filter to obligations for one product."""
+    productId: ID
+    """Filter by obligation state; omit for both states."""
+    status: WeOweStatus
+    """Filter to the obligation recorded against this exact buyer name."""
+    buyerName: String
+    """Filter to obligations whose recorded buyer name begins with this text."""
+    buyerNamePrefix: String
+    """Pagination parameters."""
+    page: PageInput
+  ): WeOweObligationConnection!
+
   # Show & Sell — signup and commitment reads (checklist §3.4.4-§3.4.5)
   """An event's signups with the full actor and confirmation audit: who placed each, who confirmed the work, and the version each cancellation or confirmation conditions on. Unit Admin for the event's Unit."""
   showAndSellSignups(
@@ -3052,6 +3076,22 @@ type ShowAndSellSaleRevision {
   reason: String!
 }
 
+"""The two report states a We Owe obligation has (data model §4 vocabulary, OWE-06). There is no third state: a reason an obligation closed is audit detail on the CLOSED row, never another category a report has to bucket."""
+enum WeOweStatus {
+  """Something is still owed, or stock is still held against it."""
+  OPEN
+  """Nothing is owed and nothing is reserved."""
+  CLOSED
+}
+
+"""Why a We Owe obligation closed (§5.15): an audit detail on a CLOSED row, never a report-status category."""
+enum WeOweCloseReason {
+  """The buyer received the whole owed quantity."""
+  FULFILLED
+  """A sale correction or void took the remaining quantity back."""
+  CANCELLED
+}
+
 """One We Owe obligation a sale created (§5.15). The buyer is a name, not an Account: nothing here identifies or contacts a user of the system, and there is deliberately no due date, assignee, or aging field — a Unit prioritizes what it owes by looking at the list."""
 type WeOweObligation {
   weOweId: ID!
@@ -3078,15 +3118,102 @@ type WeOweObligation {
   """The owed quantity priced at the sale's snapshot price, in cents."""
   valueCentsSnapshot: Int!
   """`OPEN` or `CLOSED`; the reason an obligation closed is an audit field, never a third status."""
-  status: String!
+  status: WeOweStatus!
   """`FULFILLED` or `CANCELLED`, set only when the obligation closed."""
-  closeReason: String
+  closeReason: WeOweCloseReason
   version: Int!
   createdAt: AWSDateTime
   closedAt: AWSDateTime
 }
 
+"""Append-only audit record of one We Owe fulfillment (§5.15). Never edited: a mistake is corrected by a later fulfillment, never by rewriting this one. The record carries no obligation-state field — the obligation row is the aggregate it belongs to."""
+type WeOweFulfillment {
+  """The fulfillment's stable identity, minted by the server at write time."""
+  fulfillmentId: ID!
+  """The obligation this fulfillment was written against."""
+  weOweId: ID!
+  """The quantity fulfilled; positive on every record, never negative."""
+  quantity: Int!
+  """Which stock source this fulfillment drew on."""
+  source: WeOweFulfillmentSource!
+  """The inventory movement that moved the stock, required for KERNEL_STOCK and absent for EXTERNAL_COUNCIL — the same pairing the data model requires (§5.15)."""
+  inventoryMovementId: ID
+  """The Unit Admin who recorded the fulfillment."""
+  actorAccountId: ID!
+  """When the record was written; the obligation's fulfillment history is read oldest first by this moment."""
+  createdAt: AWSDateTime!
+}
+
+"""Which stock source a We Owe fulfillment draws on. KERNEL_STOCK moves physical stock and sold-in-possession together; EXTERNAL_COUNCIL closes the supplied quantity and changes no Unit stock (§5.15, §10)."""
+enum WeOweFulfillmentSource {
+  """Physical stock the Unit holds against the obligation (reserved)."""
+  KERNEL_STOCK
+  """Stock a Council supplied without moving any Unit stock."""
+  EXTERNAL_COUNCIL
+}
+
+"""The direct We Owe read: one obligation and its full append-only fulfillment history, oldest first (§7.2)."""
+type WeOweObligationDetail {
+  """The obligation as it stands."""
+  obligation: WeOweObligation!
+  """Every fulfillment this obligation has ever had, oldest first."""
+  fulfillments: [WeOweFulfillment!]!
+}
+
+"""A page of We Owe obligations (§7.2). No due date, no aging, no assignee — the Unit prioritizes by looking at the list."""
+type WeOweObligationConnection {
+  """The obligations on this page: open obligations first, then newest first within each state."""
+  items: [WeOweObligation!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+}
+
+"""Input for setWeOweReservation (§4.4.2)."""
+input SetWeOweReservationInput {
+  """The obligation to reserve against."""
+  weOweId: ID!
+  """The reservation target: 0 through the remaining quantity, and no more than the campaign's unassigned stock. A target below the current reservation releases the excess back to sellable stock."""
+  targetReservedQty: Int!
+  """The obligation's version this caller read."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""What one reservation write did: the obligation as it stands and the product's stock position (§7.2)."""
+type SetWeOweReservationPayload {
+  """The obligation after the write, with its reserved and uncovered quantities moved."""
+  obligation: WeOweObligation!
+  """The product's position after the write: physical stock unchanged, sold-in-possession moved."""
+  inventoryPosition: InventoryPosition!
+}
+
+"""Input for fulfillWeOwe (§4.4.3)."""
+input FulfillWeOweInput {
+  """The obligation to fulfil."""
+  weOweId: ID!
+  """Kernels fulfilled on this record; partial fulfillment is allowed."""
+  quantity: Int!
+  """Which stock source the fulfillment draws on; KERNEL_STOCK moves reserved Kernel stock, EXTERNAL_COUNCIL closes an uncovered quantity and changes no stock."""
+  source: WeOweFulfillmentSource!
+  """The obligation's version this caller read."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""What one fulfillment wrote: the obligation after the write, the append-only record, and the product's position (present only when KERNEL_STOCK moved stock, §7.2)."""
+type FulfillWeOwePayload {
+  """The obligation after the write, with fulfilled/remaining/reserved quantities moved."""
+  obligation: WeOweObligation!
+  """The append-only record this fulfillment wrote."""
+  fulfillment: WeOweFulfillment!
+  """The product's position after a KERNEL_STOCK fulfillment, absent for EXTERNAL_COUNCIL."""
+  inventoryPosition: InventoryPosition
+}
+
 """What one sale write did. Every quantity is read back from the rows the write committed, so the answer is the same one a later read gives (§8.9)."""
+
 type ShowAndSellSalePayload {
   """The sale as this write left it, at its new revision."""
   sale: ShowAndSellSale!
@@ -3352,6 +3479,18 @@ type Mutation {
     """The void."""
     input: VoidShowAndSellSaleInput!
   ): ShowAndSellSalePayload!
+
+  # Show & Sell — We Owe reservation and fulfillment (checklist §4.4.2-§4.4.3, spec §10)
+  """Set how much of a We Owe obligation Kernel stock is currently held against. Reserving leaves sellable/unassigned stock without moving anything physically (`OWE-04`); the target may be zero, which releases the whole reservation, and it may never exceed what the obligation still owes or what the campaign has unassigned. Unit Admin only."""
+  setWeOweReservation(
+    """The reservation."""
+    input: SetWeOweReservationInput!
+  ): SetWeOweReservationPayload!
+  """Record that part of a We Owe obligation was delivered, from one stock source. `KERNEL_STOCK` may only reach the reserved quantity and moves Kernel physical on hand and sold product in our possession together; `EXTERNAL_COUNCIL` may only reach the uncovered quantity and moves no Unit stock (`OWE-07`). Partial fulfillment is allowed, and the obligation closes only when nothing is owed and nothing is held (`OWE-09`). Unit Admin only."""
+  fulfillWeOwe(
+    """The fulfillment."""
+    input: FulfillWeOweInput!
+  ): FulfillWeOwePayload!
 
   # Show & Sell — slot board (checklist §3.3)
   """Add or edit one working slot of an event: an interval inside the event's immutable interval, an optional label, and a capacity of 1-100. Any duration is legal — no hour or half-hour is assumed. Allowed only while the event is scheduled, at most 20 slots per event, and an edit revalidates the signups the slot already holds: a capacity below the active count, or a new time that would put an already-signed-up Scout into overlap with another slot of this event or with a commitment at any other Show & Sell, is refused and writes nothing. The slot row and the event version commit together, so a caller holding a stale event version writes nothing. Unit Admin for the event's Unit."""

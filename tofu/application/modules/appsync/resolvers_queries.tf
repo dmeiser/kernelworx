@@ -1022,3 +1022,35 @@ resource "aws_appsync_resolver" "show_and_sell_signup_calendar_data_query" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Show & Sell We Owe obligation reads (checklist §4.4.4). Both ride the unit_operations
+# Lambda, which is where the Unit Admin check and the tenant scoping live: the schema
+# authorizes nothing on its own, so a We Owe read with no resolver would be readable by
+# every signed-in account.
+resource "aws_appsync_resolver" "we_owe_obligation_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "weOweObligation"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "we_owe_obligations_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "weOweObligations"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
