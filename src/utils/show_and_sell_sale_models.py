@@ -516,11 +516,16 @@ def read_we_owe(show_and_sell_id: str, we_owe_id: str) -> Optional[Dict[str, Any
     return dict(item) if isinstance(item, Mapping) else None
 
 
-def load_we_owe_or_not_found(show_and_sell_id: str, we_owe_id: str) -> Dict[str, Any]:
-    """The obligation a reservation or fulfillment addresses, or ``NOT_FOUND``."""
+def load_we_owe_or_internal(show_and_sell_id: str, we_owe_id: str) -> Dict[str, Any]:
+    """The obligation a reservation or fulfillment committed, or an internal fault.
+
+    A replay loader cannot answer with a fresh write, so a missing obligation is not a caller's
+    ``NOT_FOUND`` — the marker and the obligation commit in one transaction, so an absence means
+    the rows no longer match the answer the first attempt was authorized to give.
+    """
     row = read_we_owe(show_and_sell_id, we_owe_id)
     if row is None:
-        raise AppError(ErrorCode.NOT_FOUND, "We Owe obligation not found")
+        raise AppError(ErrorCode.INTERNAL_ERROR, "the obligation could not be loaded")
     return row
 
 

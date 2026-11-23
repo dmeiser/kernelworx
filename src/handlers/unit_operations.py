@@ -8848,7 +8848,7 @@ def _we_owe_row_for_admin(we_owe_id: str, caller_id: str) -> Dict[str, Any]:
     ``NOT_FOUND``, so the read is not an oracle for whether some other Unit has an
     obligation by that id (AUTH-U).
     """
-    row = show_and_sell_sale_models.load_we_owe_by_id_or_not_found(we_owe_id)
+    row: Dict[str, Any] = show_and_sell_sale_models.load_we_owe_by_id_or_not_found(we_owe_id)
     campaign = unit_campaign_models.load_unit_campaign_or_not_found(
         str(row[show_and_sell_sale_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
     )
@@ -8906,27 +8906,38 @@ def _we_owe_filters(event: Dict[str, Any]) -> Dict[str, Any]:
     return values
 
 
-def _we_owe_filter_match(row: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
-    """Does one obligation row answer the caller's filters?
+def _we_owe_link_match(row: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
+    """Do the event and product links of one obligation row answer the caller?
 
-    The buyer filters match the obligation's own name snapshot. ``buyerName`` is exact and
-    ``buyerNamePrefix`` is case-insensitive, because the two questions are different: the
-    first asks "what does the entry say", and the second is a table typing a few letters of a
-    name it does not remember the spelling of.
+    Both are exact: an event or product id is something the caller already has in hand,
+    because the list it is filtering carries it on every row (§4.4.4).
     """
-    for name in (SHOW_AND_SELL_ID_ARGUMENT, "productId"):
-        wanted = filters[name]
-        if wanted is not None and str(row.get(name) or "") != str(wanted):
-            return False
+    return all(
+        filters[name] is None or str(row.get(name) or "") == str(filters[name])
+        for name in (SHOW_AND_SELL_ID_ARGUMENT, "productId")
+    )
+
+
+def _we_owe_buyer_match(row: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
+    """Do the buyer filters match the obligation's own name snapshot?
+
+    ``buyerName`` is exact and ``buyerNamePrefix`` is case-insensitive, because the two
+    questions are different: the first asks what the entry says, the second is a table
+    typing a few letters of a name it does not remember the spelling of. The snapshot is
+    the whole search space — there is no Account behind a We Owe buyer to look a name up
+    against, and no contact detail to match on (§5.15).
+    """
+    name = str(row.get(show_and_sell_sale_models.BUYER_NAME_ATTRIBUTE) or "")
     exact = filters["buyerName"]
-    if exact is not None and str(row.get(show_and_sell_sale_models.BUYER_NAME_ATTRIBUTE) or "") != str(exact):
+    if exact is not None and name != str(exact):
         return False
     prefix = filters["buyerNamePrefix"]
-    if prefix is not None and not str(row.get(show_and_sell_sale_models.BUYER_NAME_ATTRIBUTE) or "").casefold().startswith(
-        str(prefix).casefold()
-    ):
-        return False
-    return True
+    return prefix is None or name.casefold().startswith(str(prefix).casefold())
+
+
+def _we_owe_filter_match(row: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
+    """Does one obligation row answer the caller's filters (§4.4.4)?"""
+    return _we_owe_link_match(row, filters) and _we_owe_buyer_match(row, filters)
 
 
 def _we_owe_obligations(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
@@ -8964,10 +8975,12 @@ def _we_owe_position(campaign_id: str, product_id: str) -> Dict[str, Any]:
 def _reservation_answer(stored: str) -> Dict[str, Any]:
     """Rebuild a reservation answer from its ``eventId:weOweId`` handle, for a marker replay."""
     event_id, _, we_owe_id = stored.partition(":")
-    return _write_answer(show_and_sell_sale_models.load_we_owe_or_not_found(event_id, we_owe_id), position=True)
+    return _write_answer(show_and_sell_sale_models.load_we_owe_or_internal(event_id, we_owe_id), position=True)
 
 
-def _write_answer(row: Mapping[str, Any], *, position: bool, fulfillment: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _write_answer(
+    row: Mapping[str, Any], *, position: bool, fulfillment: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """What a We Owe write answers: the obligation as it now stands, and the stock it moved.
 
     Every field is read back from the rows the write committed (§8.9), so the retry answer
@@ -9172,7 +9185,7 @@ def _stage_fulfillment_writes(
 def _fulfill_answer(stored: str) -> Dict[str, Any]:
     """Rebuild a fulfillment answer from its ``eventId:weOweId:fulfillmentId`` handle."""
     event_id, we_owe_id, fulfillment_id = stored.split(":")
-    row = show_and_sell_sale_models.load_we_owe_or_not_found(event_id, we_owe_id)
+    row = show_and_sell_sale_models.load_we_owe_or_internal(event_id, we_owe_id)
     record = show_and_sell_sale_models.load_we_owe_fulfillment_or_internal(event_id, we_owe_id, fulfillment_id)
     return _write_answer(
         row,

@@ -3213,7 +3213,6 @@ type FulfillWeOwePayload {
 }
 
 """What one sale write did. Every quantity is read back from the rows the write committed, so the answer is the same one a later read gives (§8.9)."""
-
 type ShowAndSellSalePayload {
   """The sale as this write left it, at its new revision."""
   sale: ShowAndSellSale!

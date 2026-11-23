@@ -1924,3 +1924,161 @@ describe("Show & Sell Wave 5.2 sale SDL (schema.graphql)", () => {
     }
   });
 });
+
+// --- Wave 5.3 We Owe obligations and fulfillment (checklist §4.4) ---
+
+const SS53_ENUMS: Record<string, string[]> = {
+  WeOweStatus: ["OPEN", "CLOSED"],
+  WeOweCloseReason: ["FULFILLED", "CANCELLED"],
+  WeOweFulfillmentSource: ["KERNEL_STOCK", "EXTERNAL_COUNCIL"],
+};
+
+const SS53_TYPE_FIELDS: Record<string, string[]> = {
+  WeOweObligation: [
+    "weOweId",
+    "unitCampaignId",
+    "showAndSellId",
+    "saleId",
+    "lineItemId",
+    "buyerName",
+    "productId",
+    "productNameSnapshot",
+    "originalQty",
+    "fulfilledQty",
+    "cancelledQty",
+    "reservedQty",
+    "remainingQty",
+    "uncoveredQty",
+    "valueCentsSnapshot",
+    "status",
+    "closeReason",
+    "version",
+    "createdAt",
+    "closedAt",
+  ],
+  WeOweFulfillment: [
+    "fulfillmentId",
+    "weOweId",
+    "quantity",
+    "source",
+    "inventoryMovementId",
+    "actorAccountId",
+    "createdAt",
+  ],
+  WeOweObligationDetail: ["obligation", "fulfillments"],
+  WeOweObligationConnection: ["items", "pageInfo"],
+  SetWeOweReservationPayload: ["obligation", "inventoryPosition"],
+  FulfillWeOwePayload: ["obligation", "fulfillment", "inventoryPosition"],
+};
+
+const SS53_INPUT_FIELDS: Record<string, string[]> = {
+  SetWeOweReservationInput: ["weOweId", "targetReservedQty", "version", "idempotency"],
+  FulfillWeOweInput: ["weOweId", "quantity", "source", "version", "idempotency"],
+};
+
+describe("Show & Sell Wave 5.3 We Owe SDL (schema.graphql)", () => {
+  test("every We Owe enum carries exactly the report vocabulary", () => {
+    for (const [name, values] of Object.entries(SS53_ENUMS)) {
+      const def = definition(name);
+      expect(def.kind, `${name} must be an enum`).toBe("enum");
+      const found = def.body
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => /^[A-Z][A-Z0-9_]*$/.test(line));
+      expect(found, `${name} values`).toEqual(values);
+    }
+  });
+
+  test("every We Owe object type and payload carries exactly the contract fields", () => {
+    for (const [name, expected] of Object.entries(SS53_TYPE_FIELDS)) {
+      expect(definition(name).kind, `${name} must be an object type`).toBe("type");
+      expect([...fieldNameSet(definition(name))], `${name} fields`).toEqual(expected);
+    }
+  });
+
+  test("every We Owe input carries exactly the caller-chosen fields", () => {
+    for (const [name, expected] of Object.entries(SS53_INPUT_FIELDS)) {
+      expect(definition(name).kind, `${name} must be an input`).toBe("input");
+      expect([...fieldNameSet(definition(name))], `${name} fields`).toEqual(expected);
+    }
+  });
+
+  test("the We Owe inputs take the obligation identity and the write, never a derived number", () => {
+    const reservation = fieldsOf(definition("SetWeOweReservationInput"));
+    expect(reservation.find((f) => f.name === "targetReservedQty")!.text).toMatch(/targetReservedQty\s*:\s*Int!/);
+    const fulfillment = fieldsOf(definition("FulfillWeOweInput"));
+    expect(fulfillment.find((f) => f.name === "quantity")!.text).toMatch(/quantity\s*:\s*Int!/);
+    expect(fulfillment.find((f) => f.name === "source")!.text).toMatch(/source\s*:\s*WeOweFulfillmentSource!/);
+    for (const field of [...reservation, ...fulfillment]) {
+      if (field.name === "idempotency") {
+        expect(field.text).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
+      } else if (field.name !== "weOweId") {
+        expect(field.text).not.toMatch(/ID!$/);
+      }
+    }
+  });
+
+  test("the direct read answers the obligation and its history; the list answers a page of obligations", () => {
+    const direct = rootFieldByName("Query", "weOweObligation");
+    expect(direct, "Query.weOweObligation is missing").toBeDefined();
+    expect(direct!.text).toMatch(/weOweObligation\(\s*weOweId:\s*ID!\s*\)/);
+    expect(returnTypeName(direct!.text)).toBe("WeOweObligationDetail");
+    expect(direct!.directives).toEqual([]);
+
+    const list = rootFieldByName("Query", "weOweObligations");
+    expect(list, "Query.weOweObligations is missing").toBeDefined();
+    expect(returnTypeName(list!.text)).toBe("WeOweObligationConnection");
+    expect(list!.directives).toEqual([]);
+    const args = fieldsOf(definition("WeOweObligationConnection"));
+    expect([...fieldNameSet(definition("WeOweObligationConnection"))]).toEqual(["items", "pageInfo"]);
+    expect(args.find((f) => f.name === "items")!.text).toMatch(/items\s*:\s*\[WeOweObligation!\]!/);
+
+    const connection = fieldsOf(definition("WeOweObligationConnection"));
+    expect(connection.find((f) => f.name === "pageInfo")!.text).toMatch(/pageInfo\s*:\s*PageInfo!/);
+  });
+
+  test("setWeOweReservation and fulfillWeOwe take their one input and answers the contract payload", () => {
+    const roots: Record<string, string> = {
+      setWeOweReservation: "SetWeOweReservationInput",
+      fulfillWeOwe: "FulfillWeOweInput",
+    };
+    const answers: Record<string, string> = {
+      setWeOweReservation: "SetWeOweReservationPayload",
+      fulfillWeOwe: "FulfillWeOwePayload",
+    };
+    for (const [field, input] of Object.entries(roots)) {
+      const entry = rootFieldByName("Mutation", field);
+      expect(entry, `Mutation.${field} is missing`).toBeDefined();
+      expect(entry!.text).toMatch(new RegExp(`${field}\\(\\s*input:\\s*${input}!\\s*\\)`));
+      expect(returnTypeName(entry!.text)).toBe(answers[field]);
+      expect(entry!.directives, `${field} must be directive-free (Cognito-only)`).toEqual([]);
+    }
+  });
+
+  test("the fulfillment's inventory position is nullable, the reservation's is not", () => {
+    const fulfillment = fieldsOf(definition("FulfillWeOwePayload"));
+    expect(fulfillment.find((f) => f.name === "inventoryPosition")!.text).toMatch(/inventoryPosition\s*:\s*InventoryPosition(?!!)/);
+    const reservation = fieldsOf(definition("SetWeOweReservationPayload"));
+    expect(reservation.find((f) => f.name === "inventoryPosition")!.text).toMatch(/inventoryPosition\s*:\s*InventoryPosition!/);
+    const detail = fieldsOf(definition("WeOweObligationDetail"));
+    expect(detail.find((f) => f.name === "fulfillments")!.text).toMatch(/fulfillments\s*:\s*\[WeOweFulfillment!\]!/);
+    expect(detail.find((f) => f.name === "obligation")!.text).toMatch(/obligation\s*:\s*WeOweObligation!/);
+  });
+
+  test("the obligation carries no due date, assignee, or aging — the Unit prioritizes by looking at the list", () => {
+    const names = fieldNameSet(definition("WeOweObligation"));
+    for (const forbidden of ["dueDate", "aging", "assignee", "assigneeId", "assignedTo"]) {
+      expect(names.has(forbidden), `WeOweObligation.${forbidden} would be a report the spec forbids`).toBe(false);
+    }
+  });
+
+  test("AUTH: no We Owe type, input, enum, or root field carries an auth directive", () => {
+    for (const name of [...Object.keys(SS53_TYPE_FIELDS), ...Object.keys(SS53_INPUT_FIELDS), ...Object.keys(SS53_ENUMS)]) {
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+    }
+    for (const name of ["weOweObligation", "weOweObligations", "setWeOweReservation", "fulfillWeOwe"]) {
+      const entry = rootFieldByName(name.startsWith("we") ? "Query" : "Mutation", name);
+      expect(entry!.directives, `${name} must be directive-free`).toEqual([]);
+    }
+  });
+});
