@@ -99,6 +99,9 @@ MUTATION_FIELDS = {
     "signupScoutForShowAndSellSlot",
     "cancelShowAndSellSignup",
     "confirmShowAndSellWork",
+    "createShowAndSellSale",
+    "correctShowAndSellSale",
+    "voidShowAndSellSale",
     "createUnitPaymentMethod",
     "updateUnitPaymentMethod",
     "deactivateUnitPaymentMethod",
@@ -311,8 +314,8 @@ def test_unit_operations_datasource_is_lambda_backed() -> None:
     assert "unit-operations" in str(config["function_arn"]), "the data source must invoke the unit-operations Lambda"
 
 
-def test_all_fifty_three_unit_fields_are_resolved_on_that_datasource() -> None:
-    """Twenty-four queries and twenty-nine mutations, Stage 1 through Stage 4 alike.
+def test_all_sixty_unit_fields_are_resolved_on_that_datasource() -> None:
+    """Twenty-five queries and thirty-five mutations, Stage 1 through Stage 5 alike.
 
     Stage 2 adds the inventory and custody reads and the balance and custody writes to
     the same data source, Stage 3 §2.4 adds the two Order-fulfillment mutations, the
@@ -322,7 +325,7 @@ def test_all_fifty_three_unit_fields_are_resolved_on_that_datasource() -> None:
     two slot mutations, §3.4 adds the signup, cancellation and work-confirmation
     mutations with the admin signup board, the Scout's own commitment list and the
     calendar data a browser needs, and §4.1.1 adds the payment-method read with its
-    three write mutations: tenant isolation, the Unit Admin check, and the
+    three write mutations, and §4.2/§4.3 add pooled sale entry, correction and voiding: tenant isolation, the Unit Admin check, and the
     Profile share check all live in the one handler, so a new field is a new name in
     its router, and an unbound SDL field answers nothing on ``dev``.
     """
@@ -343,4 +346,4 @@ def test_all_fifty_three_unit_fields_are_resolved_on_that_datasource() -> None:
         assert f"Query:{field}" in bound, f"Query.{field} has no resolver on UnitOperationsDS"
     for field in sorted(MUTATION_FIELDS):
         assert f"Mutation:{field}" in bound, f"Mutation.{field} has no resolver on UnitOperationsDS"
-    assert len(bound) == 57, f"expected exactly the 57 Unit-tenant resolvers, got {sorted(bound)}"
+    assert len(bound) == 60, f"expected exactly the 60 Unit-tenant resolvers, got {sorted(bound)}"

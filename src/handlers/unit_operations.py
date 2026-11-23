@@ -48,7 +48,9 @@ try:  # pragma: no cover
         inventory_models,
         order_fulfillment_models,
         qr_objects,
+        sale_payment_models,
         show_and_sell_models,
+        show_and_sell_sale_models,
         unit_auth,
         unit_campaign_models,
         unit_models,
@@ -61,7 +63,9 @@ except ModuleNotFoundError:  # pragma: no cover
         inventory_models,
         order_fulfillment_models,
         qr_objects,
+        sale_payment_models,
         show_and_sell_models,
+        show_and_sell_sale_models,
         unit_auth,
         unit_campaign_models,
         unit_models,
@@ -7800,6 +7804,919 @@ def _unit_payment_qr_download_url(event: Dict[str, Any], caller_id: str) -> Dict
     return dict(qr_objects.presigned_qr_download(_exports_bucket(), stored))
 
 
+# --- Pooled sales: entry, correction, and voiding (§4.2, §4.3) ----------------
+
+
+CREATE_SALE_FIELD = "createShowAndSellSale"
+CORRECT_SALE_FIELD = "correctShowAndSellSale"
+VOID_SALE_FIELD = "voidShowAndSellSale"
+
+
+def _sale_entry_window(event_row: Mapping[str, Any], expected_version: int, sale_at: str) -> bool:
+    """One sale entry's three guards, in the order that keeps each verdict honest.
+
+    The state matrix is decided first (§4.2.2's live states versus the draft-only
+    reopened path), then the caller's event version is pinned to the row this request
+    read, then the sale instant is proven to sit inside the event's immutable interval.
+    The state comes before the version pin because the state that refuses a sale is a
+    property of the row as this request read it: a caller holding a stale version is
+    told to re-read the event, not handed a state verdict about a row that has already
+    moved on.
+    """
+    state: str = show_and_sell_sale_models.require_sale_state(event_row)
+    live: bool = state == show_and_sell_sale_models.SALE_STATE_LIVE
+    _require_read_version(event_row, expected_version)
+    show_and_sell_sale_models.require_sale_at_in_event(sale_at, event_row)
+    return live
+
+
+def _sale_payment_snapshot(
+    payload: Mapping[str, Any], unit_id: str, *, require_active: bool
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Resolve one sale's payment to the snapshot to write and the condition to carry.
+
+    §4.1.3's validator answers both, so a sale, a correction and a void cannot disagree
+    about what ``CASH`` means or about whether a retired custom method may still be
+    named: the condition pins the method row this request read (identity, version and
+    active flag), turning the window between the read and the commit into a failed
+    transaction instead of a sale against a method the Unit removed mid-flight.
+    """
+    decision = sale_payment_models.sale_payment_decision(
+        unit_id=unit_id,
+        method_code=payload.get("paymentMethodCode"),
+        other_details=payload.get("otherDetails"),
+        require_active=require_active,
+    )
+    return cast(Dict[str, Any], decision["snapshot"]), decision["condition"]
+
+
+def _correction_payment(
+    payload: Mapping[str, Any], unit_id: str, stored_snapshot: Mapping[str, Any]
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """The corrected payment: a changed method is validated as new, an unchanged one may keep a retired name.
+
+    A correction that names the method the sale already carried is not choosing a
+    payment method — it is restating history — so §4.3.1 lets it keep naming a method
+    the Unit has since deactivated (PAY-06). The moment the code changes, the new
+    method is a fresh choice and must be active like any sale's method.
+    """
+    if payload.get("paymentMethodCode") is None:
+        return dict(stored_snapshot), None
+    return _sale_payment_snapshot(
+        payload, unit_id, require_active=str(payload["paymentMethodCode"]) != str(stored_snapshot["methodCode"])
+    )
+
+
+def _require_sale_buyer(buyer: Optional[str], line_items: Sequence[Mapping[str, Any]]) -> Optional[str]:
+    """The buyer name a sale carries, required exactly when a line creates We Owe (§5.14).
+
+    An obligation has no Account, only a name: the name is the buyer's whole identity on
+    the Unit's books, so a sale that owes someone something is refused until the admin
+    writes down who. Phone and email stay optional contact detail.
+    """
+    if show_and_sell_sale_models.buyer_name_required(line_items) and buyer is None:
+        raise AppError(
+            ErrorCode.INVALID_INPUT,
+            "buyerName is required because at least one line creates We Owe; a We Owe obligation has no Account, only a buyer name",
+        )
+    return buyer
+
+
+def _correction_buyer_fields(
+    payload: Mapping[str, Any], sale_row: Mapping[str, Any], line_items: Sequence[Mapping[str, Any]]
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """The corrected buyer fields, where an omitted value keeps the one on file (§4.3.1)."""
+    name_raw = payload.get(show_and_sell_sale_models.BUYER_NAME_ATTRIBUTE)
+    stored_name = cast(Optional[str], sale_row.get(show_and_sell_sale_models.BUYER_NAME_ATTRIBUTE))
+    buyer = stored_name if name_raw is None else show_and_sell_sale_models.normalize_buyer_name(name_raw)
+    _require_sale_buyer(buyer, line_items)
+    phone_raw = payload.get(show_and_sell_sale_models.BUYER_PHONE_ATTRIBUTE)
+    email_raw = payload.get(show_and_sell_sale_models.BUYER_EMAIL_ATTRIBUTE)
+    return (
+        buyer,
+        cast(Optional[str], sale_row.get(show_and_sell_sale_models.BUYER_PHONE_ATTRIBUTE))
+        if phone_raw is None
+        else show_and_sell_sale_models.normalize_buyer_phone(phone_raw),
+        cast(Optional[str], sale_row.get(show_and_sell_sale_models.BUYER_EMAIL_ATTRIBUTE))
+        if email_raw is None
+        else show_and_sell_sale_models.normalize_buyer_email(email_raw),
+    )
+
+
+def _sale_line_snapshot(campaign: Mapping[str, Any], lines: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """Snapshot one sale's lines against the campaign's own catalog (§7.1, SALE-M-01-04)."""
+    prices: Dict[str, Dict[str, Any]] = show_and_sell_sale_models.catalog_price_table(
+        _catalog_products(_catalog_or_not_found(campaign))
+    )
+    items: List[Dict[str, Any]] = show_and_sell_sale_models.snapshot_line_items(lines, prices)
+    return items
+
+
+def _correction_line_items(
+    sale_row: Mapping[str, Any], payload_lines: Sequence[Mapping[str, Any]], campaign: Mapping[str, Any]
+) -> List[Dict[str, Any]]:
+    """Map a correction's lines onto the sale's lines by stable identity (§8.6.1 step 2).
+
+    A line that names a ``lineItemId`` is that line's new whole quantity, repriced from
+    the snapshot the sale already carries — a correction changes what sold, never what
+    the product was called or priced at when it sold. A line that names none is
+    supplemental: it is snapshotted from the catalog like a new line, minted its own
+    stable identity, and gets its own obligation. A named line from another sale is not
+    found here, because a line identity is scoped to the sale that minted it.
+    """
+    original = {
+        str(line[show_and_sell_sale_models.LINE_ITEM_ID_ATTRIBUTE]): line
+        for line in cast(Sequence[Mapping[str, Any]], sale_row[show_and_sell_sale_models.LINE_ITEMS_ATTRIBUTE])
+    }
+    items: List[Dict[str, Any]] = []
+    for line in payload_lines:
+        raw_id = line.get(show_and_sell_sale_models.LINE_ITEM_ID_ATTRIBUTE)
+        if raw_id is None:
+            items.extend(_sale_line_snapshot(campaign, [line]))
+            continue
+        line_item_id = show_and_sell_sale_models.normalize_line_item_id(raw_id)
+        existing = original.get(line_item_id)
+        if existing is None:
+            raise AppError(
+                ErrorCode.NOT_FOUND,
+                "Show & Sell sale line not found: a lineItemId belongs to the sale that minted it",
+            )
+        items.append(
+            show_and_sell_sale_models.reprice_line_item(
+                existing,
+                int(line[show_and_sell_sale_models.IMMEDIATE_QTY_ATTRIBUTE]),
+                int(line[show_and_sell_sale_models.WE_OWE_QTY_ATTRIBUTE]),
+            )
+        )
+    return items
+
+
+def _correction_obligation_plan(
+    sale_row: Mapping[str, Any], line_items: Sequence[Mapping[str, Any]]
+) -> Tuple[List[Tuple[Dict[str, Any], show_and_sell_sale_models.WeOweTarget]], Dict[str, int]]:
+    """The obligation half of one correction: every original obligation's target, and the releases stock must free.
+
+    Each existing obligation is addressed by the corrected quantity of the line it came
+    from — zero when the correction omitted that line, which closes it as cancelled —
+    and the release map sums, per product, the reservation the correction no longer
+    owes. A supplemental line's We Owe quantity never reaches an original obligation:
+    it arrives as its own obligation, which is §8.6.1's "an increase is a supplemental
+    obligation" as the data flow rather than as a caller's discipline.
+    """
+    sale_id = str(sale_row[show_and_sell_sale_models.SALE_ID_ATTRIBUTE])
+    event_id = str(sale_row[show_and_sell_sale_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    corrected_by_line = {
+        str(line[show_and_sell_sale_models.LINE_ITEM_ID_ATTRIBUTE]): int(
+            line[show_and_sell_sale_models.WE_OWE_QTY_ATTRIBUTE]
+        )
+        for line in line_items
+    }
+    updates: List[Tuple[Dict[str, Any], show_and_sell_sale_models.WeOweTarget]] = []
+    releases: Dict[str, int] = {}
+    for row in show_and_sell_sale_models.sale_obligations(event_id, sale_id):
+        target = show_and_sell_sale_models.we_owe_correction_targets(
+            row, corrected_by_line.get(str(row[show_and_sell_sale_models.LINE_ITEM_ID_ATTRIBUTE]), 0)
+        )
+        updates.append((dict(row), target))
+        if target.release_qty:
+            product = str(row[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE])
+            releases[product] = releases.get(product, 0) + target.release_qty
+    return updates, releases
+
+
+def _supplemental_obligations(
+    sale_row: Mapping[str, Any],
+    line_items: Sequence[Mapping[str, Any]],
+    buyer: Optional[str],
+    updates: Sequence[Tuple[Dict[str, Any], show_and_sell_sale_models.WeOweTarget]],
+    now_iso: str,
+) -> List[Dict[str, Any]]:
+    """One new obligation per supplemental line that owes something (§8.6.1)."""
+    owed_lines = {str(row[show_and_sell_sale_models.LINE_ITEM_ID_ATTRIBUTE]) for row, _target in updates}
+    created: List[Dict[str, Any]] = []
+    for line in line_items:
+        if int(line[show_and_sell_sale_models.WE_OWE_QTY_ATTRIBUTE]) < 1:
+            continue
+        if str(line[show_and_sell_sale_models.LINE_ITEM_ID_ATTRIBUTE]) in owed_lines:
+            continue
+        if buyer is None:  # pragma: no cover - _require_sale_buyer ran before this plan was built
+            raise AppError(ErrorCode.INTERNAL_ERROR, "a supplemental We Owe line requires a buyer name")
+        created.append(
+            show_and_sell_sale_models.build_we_owe_item(
+                show_and_sell_id=str(sale_row[show_and_sell_sale_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+                unit_campaign_id=str(sale_row[show_and_sell_sale_models.UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+                sale_id=str(sale_row[show_and_sell_sale_models.SALE_ID_ATTRIBUTE]),
+                line_item=line,
+                buyer_name=buyer,
+                now_iso=now_iso,
+            )
+        )
+    return created
+
+
+def _sale_sections(campaign_id: str, product_ids: Sequence[str]) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+    """The balance and allocation rows for the sale's products, in one consistent read each."""
+    return dict(inventory_models.campaign_product_sections(campaign_id, product_ids))
+
+
+def _create_stock_changes(
+    event_row: Mapping[str, Any],
+    sections: Mapping[str, Mapping[str, List[Dict[str, Any]]]],
+    totals: Mapping[str, int],
+    *,
+    live: bool,
+) -> List[Optional[show_and_sell_sale_models.SaleStockChange]]:
+    """Plan one product set's immediate handoffs, refusing the batch if any product cannot cover them."""
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    changes: List[Optional[show_and_sell_sale_models.SaleStockChange]] = []
+    for product_id, immediate in totals.items():
+        section = sections[product_id]
+        changes.append(
+            show_and_sell_sale_models.plan_sale_stock(
+                show_and_sell_id=event_id,
+                product_id=product_id,
+                immediate_qty=immediate,
+                allocation=_event_allocation_row(section["allocations"], event_id),
+                balance=_section_balance(section),
+                live=live,
+            )
+        )
+    return changes
+
+
+def _reversal_stock_changes(
+    event_row: Mapping[str, Any],
+    sections: Mapping[str, Mapping[str, List[Dict[str, Any]]]],
+    original_totals: Mapping[str, int],
+    corrected_totals: Mapping[str, int],
+    *,
+    live: bool,
+) -> List[Optional[show_and_sell_sale_models.SaleStockChange]]:
+    """Plan only the immediate delta between the corrected and original quantities (§8.6.1 step 2)."""
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    changes: List[Optional[show_and_sell_sale_models.SaleStockChange]] = []
+    for product_id in sorted(set(original_totals) | set(corrected_totals)):
+        delta = corrected_totals.get(product_id, 0) - original_totals.get(product_id, 0)
+        if delta == 0:
+            changes.append(None)
+            continue
+        section = sections[product_id]
+        changes.append(
+            show_and_sell_sale_models.corrected_sale_stock_change(
+                show_and_sell_id=event_id,
+                product_id=product_id,
+                immediate_delta=delta,
+                allocation=_event_allocation_row(section["allocations"], event_id),
+                balance=_section_balance(section),
+                live=live,
+            )
+        )
+    return changes
+
+
+def _stage_sale_balance_writes(
+    plan: Any,
+    campaign_id: str,
+    changes: Sequence[Optional[show_and_sell_sale_models.SaleStockChange]],
+    sections: Mapping[str, Mapping[str, List[Dict[str, Any]]]],
+    releases: Mapping[str, int],
+    now_iso: str,
+) -> Dict[str, int]:
+    """One balance write per touched product, combining physical and reservation deltas.
+
+    DynamoDB accepts one operation per item in a transaction, so a product whose write
+    both hands stock back and frees a reservation gets both effects as one update — one
+    version move, one floor set — rather than two operations that could never stage. A
+    product whose physical quantity did not move but whose reservation was released
+    still takes its own write: ``soldInPossessionQty`` changed and the version has to
+    say so. The returned map is each product's produced balance version, which is what
+    the audit movements name.
+    """
+    by_product = {change.product_id: change for change in changes if change is not None}
+    produced: Dict[str, int] = {}
+    for product_id in sorted(set(by_product) | set(releases)):
+        change = by_product.get(product_id)
+        section = sections[product_id]
+        balance = _section_balance(section)
+        expected = _number(balance[inventory_models.VERSION_ATTRIBUTE]) if balance is not None else 0
+        plan.add(
+            *inventory_models.inventory_balance_delta_action(
+                unit_campaign_id=campaign_id,
+                product_id=product_id,
+                existing=balance,
+                expected_version=expected,
+                kernel_physical_delta=change.physical_delta if change is not None else 0,
+                sold_possession_delta=-releases.get(product_id, 0),
+                now_iso=now_iso,
+            )
+        )
+        produced[product_id] = expected + 1
+    return produced
+
+
+def _stage_sale_stock_writes(
+    plan: Any,
+    event_row: Mapping[str, Any],
+    changes: Sequence[Optional[show_and_sell_sale_models.SaleStockChange]],
+    sections: Mapping[str, Mapping[str, List[Dict[str, Any]]]],
+    produced_versions: Mapping[str, int],
+    *,
+    sale_id: str,
+    caller_id: str,
+    idempotency_key: str,
+    now_iso: str,
+) -> None:
+    """One product's live-state sale writes: the allocation and the movement that names the balance version."""
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    for change in changes:
+        if change is None:
+            continue
+        plan.add(
+            *show_and_sell_sale_models.sale_allocation_action(
+                change, _event_allocation_row(sections[change.product_id]["allocations"], event_id), now_iso
+            )
+        )
+        plan.add(
+            *show_and_sell_sale_models.sale_immediate_movement_action(
+                event_row=event_row,
+                sale_id=sale_id,
+                change=change,
+                actor_account_id=caller_id,
+                occurred_at=now_iso,
+                idempotency_key=idempotency_key,
+                inventory_version=produced_versions.get(change.product_id),
+            )
+        )
+
+
+def _stage_sale_release_writes(
+    plan: Any,
+    updates: Sequence[Tuple[Dict[str, Any], show_and_sell_sale_models.WeOweTarget]],
+    produced_versions: Mapping[str, int],
+    caller_id: str,
+    now_iso: str,
+    idempotency_key: str,
+) -> None:
+    """One release audit row per obligation whose reservation this write let go (§8.6.1)."""
+    for row, target in updates:
+        if not target.release_qty:
+            continue
+        product_id = str(row[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE])
+        plan.add(
+            *show_and_sell_sale_models.we_owe_release_movement_action(
+                unit_campaign_id=str(row[show_and_sell_sale_models.UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+                product_id=product_id,
+                we_owe_id=target.we_owe_id,
+                release_qty=target.release_qty,
+                inventory_version=produced_versions[product_id],
+                actor_account_id=caller_id,
+                occurred_at=now_iso,
+                idempotency_key=idempotency_key,
+            )
+        )
+
+
+def _stage_obligation_writes(
+    plan: Any,
+    updates: Sequence[Tuple[Dict[str, Any], show_and_sell_sale_models.WeOweTarget]],
+    created: Sequence[Mapping[str, Any]],
+    now_iso: str,
+) -> None:
+    """Write the obligations a correction or void leaves behind: targets for the originals, rows for the new."""
+    for row, target in updates:
+        if target.changed:
+            plan.add(*show_and_sell_sale_models.we_owe_update_action(row=row, target=target, updated_at=now_iso))
+    for obligation in created:
+        plan.add(*show_and_sell_sale_models.put_we_owe_action(obligation))
+
+
+def _sale_product_ids(event_row: Mapping[str, Any], sale_products: Sequence[str]) -> List[str]:
+    """The event's cumulative product list once this sale's products join it (§8.4)."""
+    return list(
+        show_and_sell_models.merge_product_ids(event_row.get(show_and_sell_models.PRODUCT_IDS_ATTRIBUTE), sale_products)
+    )
+
+
+def _stage_sale_event_write(
+    plan: Any,
+    event_row: Mapping[str, Any],
+    *,
+    expected_version: int,
+    product_ids: Sequence[str],
+    live: bool,
+    caller_id: str,
+    now_iso: str,
+) -> None:
+    """The aggregate half of a sale write: productIds and the version pin, live or reopened.
+
+    Live states write the locator and the bump directly. A reopened event instead
+    records its products as zero-baseline draft targets through the assignment's draft
+    action: §8.6 gives re-finalization the job of validating and applying what was
+    entered meanwhile, and a draft target of zero is how a product a sale touched but
+    the event never held still becomes visible to that walk.
+    """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    if live:
+        plan.add(
+            *show_and_sell_sale_models.sale_event_action(
+                show_and_sell_id=event_id,
+                expected_version=expected_version,
+                product_ids=product_ids,
+                updated_by_account_id=caller_id,
+                updated_at=now_iso,
+            )
+        )
+        return
+    stored = event_row.get(show_and_sell_models.ALLOCATION_DRAFT_ATTRIBUTE)
+    draft: Dict[str, int] = (
+        {str(name): int(value) for name, value in stored.items()} if isinstance(stored, Mapping) else {}
+    )
+    for product_id in product_ids:
+        draft.setdefault(product_id, 0)
+    plan.add(
+        *show_and_sell_models.assignment_draft_action(
+            show_and_sell_id=event_id,
+            expected_version=expected_version,
+            product_ids=product_ids,
+            draft=draft,
+            updated_by_account_id=caller_id,
+            updated_at=now_iso,
+        )
+    )
+
+
+def _sale_feasible(event_row: Mapping[str, Any], product_ids: Sequence[str], *, sale_delta: int) -> None:
+    """Refuse a sale write that would leave the event no longer finalizable inside the budget (§8.10)."""
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    active_sales = [
+        row
+        for row in show_and_sell_sale_models.event_sale_rows(event_id)
+        if str(row.get(show_and_sell_sale_models.STATUS_ATTRIBUTE) or "")
+        == show_and_sell_sale_models.SALE_STATUS_ACTIVE
+    ]
+    allocation_models.require_finalization_feasible(
+        len(product_ids), MAX_TRANSACTION_ACTIONS, sale_count=len(active_sales) + sale_delta
+    )
+
+
+def _sale_answer(sale_row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One sale write's answer, read back from the rows it committed (§8.9).
+
+    Everything here is a fresh read rather than an assembly from the plan, for the
+    reason :func:`_once` states: the stored replay answer and the answer the caller
+    received have to be one answer. Allocations and positions are answered only when
+    the event is live — a reopened write moves no stock, and reporting rows that did
+    not move would claim an effect re-finalization has not applied yet.
+    """
+    sale_id = str(sale_row[show_and_sell_sale_models.SALE_ID_ATTRIBUTE])
+    event_id = str(sale_row[show_and_sell_sale_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    campaign_id = str(sale_row[show_and_sell_sale_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    live = str(event_row[show_and_sell_models.STATUS_ATTRIBUTE]) != show_and_sell_models.STATUS_REOPENED
+    product_ids = sorted(
+        {
+            str(line[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE])
+            for line in cast(Sequence[Mapping[str, Any]], sale_row[show_and_sell_sale_models.LINE_ITEMS_ATTRIBUTE])
+        }
+    )
+    answer: Dict[str, Any] = {
+        "sale": show_and_sell_sale_models.sale_payload(sale_row),
+        "obligations": [
+            show_and_sell_sale_models.we_owe_payload(row)
+            for row in show_and_sell_sale_models.sale_obligations(event_id, sale_id)
+        ],
+        "allocations": [],
+        "inventoryPositions": [],
+        "warnings": [],
+        "eventVersion": _number(event_row[show_and_sell_models.VERSION_ATTRIBUTE]),
+        "draftOnly": not live,
+    }
+    if live and product_ids:
+        sections = _sale_sections(campaign_id, product_ids)
+        for product_id in product_ids:
+            section = sections[product_id]
+            answer["allocations"].extend(
+                show_and_sell_models.allocation_payload(row)
+                for row in section["allocations"]
+                if str(row.get(show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE) or "") == event_id
+            )
+            answer["inventoryPositions"].append(_position_payload(campaign_id, product_id, section))
+            warning = allocation_models.sequential_warning(
+                product_id=product_id,
+                sellable_qty=inventory_models.sellable_kernel_qty(_section_balance(section)),
+                allocations=section["allocations"],
+            )
+            if warning is not None:
+                answer["warnings"].append(warning)
+    return answer
+
+
+def _load_sale_answer(stored: str) -> Dict[str, Any]:
+    """Rebuild a sale answer from its ``eventId:saleId`` handle, for a marker with no payload."""
+    event_id, _, sale_id = stored.partition(":")
+    return _sale_answer(show_and_sell_sale_models.load_sale_or_not_found(event_id, sale_id))
+
+
+def _expected_revision(payload: Mapping[str, Any]) -> int:
+    """Read ``saleVersion.expectedVersion`` — the sale's own revision token."""
+    nested = payload.get("saleVersion")
+    if not isinstance(nested, Mapping) or nested.get("expectedVersion") is None:
+        raise AppError(ErrorCode.INVALID_INPUT, "saleVersion.expectedVersion is required")
+    return int(nested["expectedVersion"])
+
+
+def _load_live_sale(event_id: str, sale_id: str, expected_revision: int) -> Dict[str, Any]:
+    """The sale a change addresses, refused when already voided or at another revision."""
+    sale_row = dict(show_and_sell_sale_models.load_sale_or_not_found(event_id, sale_id))
+    show_and_sell_sale_models.require_sale_active(sale_row)
+    show_and_sell_sale_models.require_sale_revision(sale_row, expected_revision)
+    return sale_row
+
+
+def _create_show_and_sell_sale(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Record one pooled sale at the table (§4.2.2, SALE-M-01).
+
+    The gate order is the one every Show & Sell write uses: tenancy from the event row,
+    replay before the version and state guards, and the caller's event version pinned to
+    the row this request read. Only ``immediateQty`` consumes stock — one allocation
+    write, one balance move and one ``EVENT_IMMEDIATE_SALE`` movement per product —
+    because a We Owe quantity is owed, not sold; the obligations it creates carry no
+    stock effect at all. While the event is reopened only the draft sale is written,
+    with its products recorded as zero-baseline draft targets, and re-finalization
+    applies what the table entered meanwhile (§8.6).
+    """
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    event_id = _resource_id(payload, SHOW_AND_SELL_ID_ARGUMENT)
+    expected_version = _expected_version(payload)
+    sale_at = show_and_sell_sale_models.normalize_sale_at(payload.get(show_and_sell_sale_models.SALE_AT_ATTRIBUTE))
+    lines = show_and_sell_sale_models.normalize_sale_lines(payload.get(show_and_sell_sale_models.LINE_ITEMS_ATTRIBUTE))
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_id = str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE])
+    unit_auth.require_unit_admin(caller_id, unit_id)
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(caller_id=caller_id, operation=CREATE_SALE_FIELD, scope=event_id, idempotency_key=key)
+    replayed = _replay(runner, keys, fingerprint, CREATE_SALE_FIELD, _load_sale_answer)
+    if replayed is not None:
+        return replayed
+
+    live = _sale_entry_window(event_row, expected_version, sale_at)
+    campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    campaign = unit_campaign_models.load_unit_campaign_or_not_found(campaign_id)
+    line_items = _sale_line_snapshot(campaign, lines)
+    show_and_sell_sale_models.require_we_owe_available(event_row, line_items)
+    buyer = _require_sale_buyer(
+        show_and_sell_sale_models.normalize_buyer_name(payload.get(show_and_sell_sale_models.BUYER_NAME_ATTRIBUTE)),
+        line_items,
+    )
+    snapshot, condition = _sale_payment_snapshot(payload, unit_id, require_active=True)
+
+    now_iso = utc_now_iso()
+    sale_id = show_and_sell_sale_models.new_sale_id()
+    sale_row = show_and_sell_sale_models.build_show_and_sell_sale_item(
+        show_and_sell_id=event_id,
+        unit_id=unit_id,
+        unit_campaign_id=campaign_id,
+        sale_at=sale_at,
+        entered_by_account_id=caller_id,
+        line_items=line_items,
+        payment_method_snapshot=snapshot,
+        idempotency_key=key,
+        now_iso=now_iso,
+        sale_id=sale_id,
+        buyer_name=buyer,
+        buyer_phone=payload.get(show_and_sell_sale_models.BUYER_PHONE_ATTRIBUTE),
+        buyer_email=payload.get(show_and_sell_sale_models.BUYER_EMAIL_ATTRIBUTE),
+    )
+    product_ids = _sale_product_ids(
+        event_row, sorted({str(line[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE]) for line in line_items})
+    )
+    _sale_feasible(event_row, product_ids, sale_delta=1)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=f"{event_id}:{sale_id}")
+    plan.add(*show_and_sell_sale_models.put_sale_action(sale_row))
+    if condition is not None:
+        plan.add("ConditionCheck", condition)
+    if live:
+        totals = show_and_sell_sale_models.sale_line_quantities(line_items)
+        sections = _sale_sections(campaign_id, sorted(totals))
+        changes = _create_stock_changes(event_row, sections, totals, live=True)
+        produced = _stage_sale_balance_writes(plan, campaign_id, changes, sections, {}, now_iso)
+        _stage_sale_stock_writes(
+            plan,
+            event_row,
+            changes,
+            sections,
+            produced,
+            sale_id=sale_id,
+            caller_id=caller_id,
+            idempotency_key=key,
+            now_iso=now_iso,
+        )
+        for line in line_items:
+            if int(line[show_and_sell_sale_models.WE_OWE_QTY_ATTRIBUTE]) < 1:
+                continue
+            if buyer is None:  # pragma: no cover - _require_sale_buyer ran before this plan was built
+                raise AppError(ErrorCode.INTERNAL_ERROR, "a We Owe line requires a buyer name")
+            plan.add(
+                *show_and_sell_sale_models.put_we_owe_action(
+                    show_and_sell_sale_models.build_we_owe_item(
+                        show_and_sell_id=event_id,
+                        unit_campaign_id=campaign_id,
+                        sale_id=sale_id,
+                        line_item=line,
+                        buyer_name=buyer,
+                        now_iso=now_iso,
+                    )
+                )
+            )
+    _stage_sale_event_write(
+        plan,
+        event_row,
+        expected_version=expected_version,
+        product_ids=product_ids,
+        live=live,
+        caller_id=caller_id,
+        now_iso=now_iso,
+    )
+
+    build_result = _once(lambda: _load_sale_answer(f"{event_id}:{sale_id}"))
+    runner.execute(
+        keys,
+        plan,
+        operation=CREATE_SALE_FIELD,
+        fingerprint=fingerprint,
+        result_id=f"{event_id}:{sale_id}",
+        load_result=_load_sale_answer,
+        result_payload=build_result,
+    )
+    answer = build_result()
+    get_logger(__name__).info(
+        "Show & Sell sale created",
+        show_and_sell_id=event_id,
+        caller_id=caller_id,
+        sale_id=sale_id,
+        draft_only=answer["draftOnly"],
+        obligations=len(answer["obligations"]),
+    )
+    return answer
+
+
+def _correct_show_and_sell_sale(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Correct a sale without editing away what happened (§4.3.1, SALE-M-02).
+
+    The whole previous revision is archived as an immutable child first — line items,
+    total, buyer fields, the payment snapshot and the state — and then the corrected
+    lines are written at revision ``expectedRevision + 1``. Lines are addressed by
+    their stable ``lineItemId``; a line the correction leaves out is voided and its
+    obligation closes as cancelled; a line that names no id is supplemental. Only the
+    immediate difference between corrected and original quantities touches stock, so
+    an unaffected line spends no movement and no balance version, and quantity the
+    buyer already holds is never taken back. While the event is reopened only the
+    draft is written and the effects defer to re-finalization.
+    """
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    event_id = _resource_id(payload, SHOW_AND_SELL_ID_ARGUMENT)
+    sale_id = show_and_sell_sale_models.normalize_sale_id(_resource_id(payload, "saleId"))
+    expected_version = _expected_version(payload)
+    expected_revision = _expected_revision(payload)
+    reason = show_and_sell_sale_models.normalize_sale_reason(payload.get(show_and_sell_sale_models.REASON_ATTRIBUTE))
+    payload_lines = show_and_sell_sale_models.normalize_correction_lines(
+        payload.get(show_and_sell_sale_models.LINE_ITEMS_ATTRIBUTE)
+    )
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(caller_id=caller_id, operation=CORRECT_SALE_FIELD, scope=event_id, idempotency_key=key)
+    replayed = _replay(runner, keys, fingerprint, CORRECT_SALE_FIELD, _load_sale_answer)
+    if replayed is not None:
+        return replayed
+
+    sale_row = _load_live_sale(event_id, sale_id, expected_revision)
+    live = _sale_entry_window(event_row, expected_version, str(sale_row[show_and_sell_sale_models.SALE_AT_ATTRIBUTE]))
+    campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    campaign = unit_campaign_models.load_unit_campaign_or_not_found(campaign_id)
+    line_items = _correction_line_items(sale_row, payload_lines, campaign)
+    show_and_sell_sale_models.require_we_owe_available(event_row, line_items)
+    buyer, buyer_phone, buyer_email = _correction_buyer_fields(payload, sale_row, line_items)
+    snapshot, condition = _correction_payment(
+        payload,
+        str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]),
+        sale_row[show_and_sell_sale_models.PAYMENT_SNAPSHOT_ATTRIBUTE],
+    )
+
+    now_iso = utc_now_iso()
+    updates, releases = _correction_obligation_plan(sale_row, line_items)
+    created = _supplemental_obligations(sale_row, line_items, buyer, updates, now_iso)
+    original_totals = show_and_sell_sale_models.sale_line_quantities(
+        cast(Sequence[Mapping[str, Any]], sale_row[show_and_sell_sale_models.LINE_ITEMS_ATTRIBUTE])
+    )
+    corrected_totals = show_and_sell_sale_models.sale_line_quantities(line_items)
+    product_ids = _sale_product_ids(
+        event_row, sorted({str(line[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE]) for line in line_items})
+    )
+    _sale_feasible(event_row, product_ids, sale_delta=0)
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=f"{event_id}:{sale_id}")
+    plan.add(
+        *show_and_sell_sale_models.put_sale_revision_action(
+            show_and_sell_sale_models.build_sale_revision_item(
+                sale_row, corrected_by_account_id=caller_id, reason=reason, corrected_at=now_iso
+            )
+        )
+    )
+    plan.add(
+        *show_and_sell_sale_models.sale_revision_update_action(
+            show_and_sell_id=event_id,
+            sale_id=sale_id,
+            expected_revision=expected_revision,
+            sets={
+                show_and_sell_sale_models.LINE_ITEMS_ATTRIBUTE: [dict(line) for line in line_items],
+                show_and_sell_sale_models.TOTAL_CENTS_ATTRIBUTE: show_and_sell_sale_models.sale_total_cents(line_items),
+                show_and_sell_sale_models.PAYMENT_SNAPSHOT_ATTRIBUTE: snapshot,
+                show_and_sell_sale_models.BUYER_NAME_ATTRIBUTE: buyer,
+                show_and_sell_sale_models.BUYER_PHONE_ATTRIBUTE: buyer_phone,
+                show_and_sell_sale_models.BUYER_EMAIL_ATTRIBUTE: buyer_email,
+                show_and_sell_sale_models.REVISION_ATTRIBUTE: expected_revision + 1,
+            },
+            updated_at=now_iso,
+        )
+    )
+    if condition is not None:
+        plan.add("ConditionCheck", condition)
+    if live:
+        sections = _sale_sections(campaign_id, sorted(set(original_totals) | set(corrected_totals)))
+        changes = _reversal_stock_changes(event_row, sections, original_totals, corrected_totals, live=True)
+        produced = _stage_sale_balance_writes(plan, campaign_id, changes, sections, releases, now_iso)
+        _stage_sale_stock_writes(
+            plan,
+            event_row,
+            changes,
+            sections,
+            produced,
+            sale_id=sale_id,
+            caller_id=caller_id,
+            idempotency_key=key,
+            now_iso=now_iso,
+        )
+        _stage_obligation_writes(plan, updates, created, now_iso)
+        _stage_sale_release_writes(plan, updates, produced, caller_id, now_iso, key)
+    _stage_sale_event_write(
+        plan,
+        event_row,
+        expected_version=expected_version,
+        product_ids=product_ids,
+        live=live,
+        caller_id=caller_id,
+        now_iso=now_iso,
+    )
+
+    build_result = _once(lambda: _load_sale_answer(f"{event_id}:{sale_id}"))
+    runner.execute(
+        keys,
+        plan,
+        operation=CORRECT_SALE_FIELD,
+        fingerprint=fingerprint,
+        result_id=f"{event_id}:{sale_id}",
+        load_result=_load_sale_answer,
+        result_payload=build_result,
+    )
+    answer = build_result()
+    get_logger(__name__).info(
+        "Show & Sell sale corrected",
+        show_and_sell_id=event_id,
+        caller_id=caller_id,
+        sale_id=sale_id,
+        revision=expected_revision + 1,
+        draft_only=answer["draftOnly"],
+    )
+    return answer
+
+
+def _void_show_and_sell_sale(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Void a whole sale, and nothing less (§4.3.2, SALE-M-03).
+
+    The sale goes ``VOIDED`` with its actor, instant and reason; its stock is handed
+    back through one ``EVENT_IMMEDIATE_SALE`` movement per product; and each of its We
+    Owe obligations closes as cancelled with any reservation released in the same
+    transaction — no reservation may survive a corrected remainder of zero. A line
+    whose quantity the buyer already holds makes the void impossible, because voiding
+    it as unfulfilled would rewrite stock the Unit no longer has. Line-level voiding is
+    a correction that omits the line, not a smaller void.
+    """
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    event_id = _resource_id(payload, SHOW_AND_SELL_ID_ARGUMENT)
+    sale_id = show_and_sell_sale_models.normalize_sale_id(_resource_id(payload, "saleId"))
+    expected_version = _expected_version(payload)
+    expected_revision = _expected_revision(payload)
+    reason = show_and_sell_sale_models.normalize_sale_reason(payload.get(show_and_sell_sale_models.REASON_ATTRIBUTE))
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(caller_id=caller_id, operation=VOID_SALE_FIELD, scope=event_id, idempotency_key=key)
+    replayed = _replay(runner, keys, fingerprint, VOID_SALE_FIELD, _load_sale_answer)
+    if replayed is not None:
+        return replayed
+
+    sale_row = _load_live_sale(event_id, sale_id, expected_revision)
+    live = _sale_entry_window(event_row, expected_version, str(sale_row[show_and_sell_sale_models.SALE_AT_ATTRIBUTE]))
+
+    campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    original_items = cast(Sequence[Mapping[str, Any]], sale_row[show_and_sell_sale_models.LINE_ITEMS_ATTRIBUTE])
+    original_totals = show_and_sell_sale_models.sale_line_quantities(original_items)
+    empty_totals = {product_id: 0 for product_id in original_totals}
+    updates: List[Tuple[Dict[str, Any], show_and_sell_sale_models.WeOweTarget]] = []
+    releases: Dict[str, int] = {}
+    for row in show_and_sell_sale_models.sale_obligations(event_id, sale_id):
+        target = show_and_sell_sale_models.we_owe_correction_targets(row, 0)
+        updates.append((dict(row), target))
+        if target.release_qty:
+            product = str(row[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE])
+            releases[product] = releases.get(product, 0) + target.release_qty
+
+    now_iso = utc_now_iso()
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=f"{event_id}:{sale_id}")
+    plan.add(
+        *show_and_sell_sale_models.put_sale_revision_action(
+            show_and_sell_sale_models.build_sale_revision_item(
+                sale_row, corrected_by_account_id=caller_id, reason=reason, corrected_at=now_iso
+            )
+        )
+    )
+    plan.add(
+        *show_and_sell_sale_models.sale_revision_update_action(
+            show_and_sell_id=event_id,
+            sale_id=sale_id,
+            expected_revision=expected_revision,
+            sets={
+                show_and_sell_sale_models.STATUS_ATTRIBUTE: show_and_sell_sale_models.SALE_STATUS_VOIDED,
+                show_and_sell_sale_models.VOIDED_BY_ATTRIBUTE: caller_id,
+                show_and_sell_sale_models.VOIDED_AT_ATTRIBUTE: now_iso,
+                show_and_sell_sale_models.REVISION_ATTRIBUTE: expected_revision + 1,
+            },
+            updated_at=now_iso,
+        )
+    )
+    if live:
+        sections = _sale_sections(campaign_id, sorted(original_totals))
+        changes = _reversal_stock_changes(event_row, sections, original_totals, empty_totals, live=True)
+        produced = _stage_sale_balance_writes(plan, campaign_id, changes, sections, releases, now_iso)
+        _stage_sale_stock_writes(
+            plan,
+            event_row,
+            changes,
+            sections,
+            produced,
+            sale_id=sale_id,
+            caller_id=caller_id,
+            idempotency_key=key,
+            now_iso=now_iso,
+        )
+        _stage_obligation_writes(plan, updates, [], now_iso)
+        _stage_sale_release_writes(plan, updates, produced, caller_id, now_iso, key)
+    _stage_sale_event_write(
+        plan,
+        event_row,
+        expected_version=expected_version,
+        product_ids=_sale_product_ids(event_row, list(original_totals)),
+        live=live,
+        caller_id=caller_id,
+        now_iso=now_iso,
+    )
+
+    build_result = _once(lambda: _load_sale_answer(f"{event_id}:{sale_id}"))
+    runner.execute(
+        keys,
+        plan,
+        operation=VOID_SALE_FIELD,
+        fingerprint=fingerprint,
+        result_id=f"{event_id}:{sale_id}",
+        load_result=_load_sale_answer,
+        result_payload=build_result,
+    )
+    answer = build_result()
+    get_logger(__name__).info(
+        "Show & Sell sale voided",
+        show_and_sell_id=event_id,
+        caller_id=caller_id,
+        sale_id=sale_id,
+        draft_only=answer["draftOnly"],
+    )
+    return answer
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -7861,6 +8778,9 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     CONFIRM_PAYMENT_QR_FIELD: _confirm_unit_payment_qr_upload,
     DELETE_PAYMENT_QR_FIELD: _delete_unit_payment_qr_code,
     PAYMENT_QR_DOWNLOAD_FIELD: _unit_payment_qr_download_url,
+    CREATE_SALE_FIELD: _create_show_and_sell_sale,
+    CORRECT_SALE_FIELD: _correct_show_and_sell_sale,
+    VOID_SALE_FIELD: _void_show_and_sell_sale,
 }
 
 
