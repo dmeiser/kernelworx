@@ -1692,3 +1692,235 @@ describe("Show & Sell Stage 3.4 signup and work SDL (schema.graphql)", () => {
     }
   });
 });
+
+/**
+ * Wave 5.2 — the pooled-sale SDL (GRAPHQL_API §7.1, §3.2; DATA_MODEL §5.14, §5.15).
+ *
+ * The three sale mutations share one answer type, and the two things a caller can get
+ * wrong about it are exactly what the shape contract catches: the archived prior revision
+ * a correction returns has to be reachable (an SDL type nothing points at is a promise in
+ * a docstring), and every number the server derives has to stay out of the inputs, because
+ * a sale priced from its caller is the accounting hole §7.1 exists to close.
+ */
+const SS5_SALE_TYPE_FIELDS: Record<string, string[]> = {
+  ShowAndSellSaleLine: [
+    "lineItemId",
+    "productId",
+    "productNameSnapshot",
+    "unitPriceCentsSnapshot",
+    "immediateQty",
+    "weOweQty",
+    "subtotalCents",
+  ],
+  SalePaymentSnapshot: ["methodCode", "displayName", "otherDetails"],
+  ShowAndSellSale: [
+    "saleId",
+    "showAndSellId",
+    "unitId",
+    "unitCampaignId",
+    "saleAt",
+    "enteredByAccountId",
+    "buyerName",
+    "buyerPhone",
+    "buyerEmail",
+    "lineItems",
+    "totalCents",
+    "paymentMethodSnapshot",
+    "revision",
+    "status",
+    "voidedByAccountId",
+    "voidedAt",
+    "createdAt",
+    "updatedAt",
+    "expectedCashCents",
+  ],
+  ShowAndSellSaleRevision: [
+    "saleId",
+    "showAndSellId",
+    "revision",
+    "saleAt",
+    "enteredByAccountId",
+    "buyerName",
+    "buyerPhone",
+    "buyerEmail",
+    "lineItems",
+    "totalCents",
+    "paymentMethodSnapshot",
+    "status",
+    "correctedByAccountId",
+    "correctedAt",
+    "reason",
+  ],
+  WeOweObligation: [
+    "weOweId",
+    "unitCampaignId",
+    "showAndSellId",
+    "saleId",
+    "lineItemId",
+    "buyerName",
+    "productId",
+    "productNameSnapshot",
+    "originalQty",
+    "fulfilledQty",
+    "cancelledQty",
+    "reservedQty",
+    "remainingQty",
+    "uncoveredQty",
+    "valueCentsSnapshot",
+    "status",
+    "closeReason",
+    "version",
+    "createdAt",
+    "closedAt",
+  ],
+  ShowAndSellSalePayload: [
+    "sale",
+    "priorRevision",
+    "obligations",
+    "allocations",
+    "inventoryPositions",
+    "eventVersion",
+    "draftOnly",
+    "warnings",
+  ],
+};
+
+const SS5_INPUT_FIELDS: Record<string, string[]> = {
+  ShowAndSellSaleLineInput: ["productId", "immediateQty", "weOweQty"],
+  ShowAndSellCorrectionLineInput: ["lineItemId", "productId", "immediateQty", "weOweQty"],
+  CreateShowAndSellSaleInput: [
+    "showAndSellId",
+    "saleAt",
+    "buyerName",
+    "buyerPhone",
+    "buyerEmail",
+    "lineItems",
+    "paymentMethodCode",
+    "otherDetails",
+    "version",
+    "idempotency",
+  ],
+  CorrectShowAndSellSaleInput: [
+    "showAndSellId",
+    "saleId",
+    "saleVersion",
+    "version",
+    "buyerName",
+    "buyerPhone",
+    "buyerEmail",
+    "lineItems",
+    "paymentMethodCode",
+    "otherDetails",
+    "reason",
+    "idempotency",
+  ],
+  VoidShowAndSellSaleInput: ["showAndSellId", "saleId", "saleVersion", "version", "reason", "idempotency"],
+};
+
+describe("Show & Sell Wave 5.2 sale SDL (schema.graphql)", () => {
+  test("every sale type is an object type carrying exactly the contract fields", () => {
+    for (const [name, expected] of Object.entries(SS5_SALE_TYPE_FIELDS)) {
+      expect(definition(name).kind, `${name} must be an object type`).toBe("type");
+      expect([...fieldNameSet(definition(name))], `${name} fields`).toEqual(expected);
+    }
+  });
+
+  test("every sale input carries exactly the fields a caller may choose", () => {
+    for (const [name, expected] of Object.entries(SS5_INPUT_FIELDS)) {
+      expect(definition(name).kind, `${name} must be an input`).toBe("input");
+      expect([...fieldNameSet(definition(name))], `${name} fields`).toEqual(expected);
+    }
+  });
+
+  test("the archived prior revision is reachable, and a create has none", () => {
+    // §7.1: correctShowAndSellSale returns the result "including prior revision". A type
+    // nothing points at is unreachable in GraphQL - the caller cannot read what the write
+    // archived - and a non-null field would make a create answer a revision it never had.
+    const payload = fieldsOf(definition("ShowAndSellSalePayload"));
+    const prior = payload.find((f) => f.name === "priorRevision");
+    expect(prior, "ShowAndSellSalePayload.priorRevision is missing").toBeDefined();
+    expect(prior!.text).toMatch(/priorRevision\s*:\s*ShowAndSellSaleRevision(?!!)/);
+    expect(returnTypeName(prior!.text)).toBe("ShowAndSellSaleRevision");
+    expect(definition("ShowAndSellSaleRevision").kind).toBe("type");
+  });
+
+  test("the sale answer reports the rows the write moved, not a count of them", () => {
+    const payload = fieldsOf(definition("ShowAndSellSalePayload"));
+    const listTypes: Record<string, string> = {
+      sale: "ShowAndSellSale",
+      obligations: "WeOweObligation",
+      allocations: "ShowAndSellAllocation",
+      inventoryPositions: "InventoryPosition",
+      warnings: "AllocationWarning",
+    };
+    for (const [field, typeName] of Object.entries(listTypes)) {
+      const entry = payload.find((f) => f.name === field);
+      expect(entry, `ShowAndSellSalePayload.${field} is missing`).toBeDefined();
+      expect(returnTypeName(entry!.text), `ShowAndSellSalePayload.${field}`).toBe(typeName);
+    }
+  });
+
+  test("a correction and a void both carry the sale revision and the event version, and a reason", () => {
+    for (const name of ["CorrectShowAndSellSaleInput", "VoidShowAndSellSaleInput"]) {
+      const input = fieldsOf(definition(name));
+      expect(input.find((f) => f.name === "saleVersion")!.text).toMatch(/saleVersion\s*:\s*VersionedInput!/);
+      expect(input.find((f) => f.name === "version")!.text).toMatch(/version\s*:\s*VersionedInput!/);
+      expect(input.find((f) => f.name === "reason")!.text).toMatch(/reason\s*:\s*String!/);
+      expect(input.find((f) => f.name === "idempotency")!.text).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
+    }
+    // A create has no id and no revision to name: the server mints both.
+    const create = fieldNameSet(definition("CreateShowAndSellSaleInput"));
+    for (const forbidden of ["saleId", "saleVersion", "reason"]) {
+      expect(create.has(forbidden), `CreateShowAndSellSaleInput.${forbidden} would let a caller name the sale`).toBe(false);
+    }
+  });
+
+  test("nothing the server derives is a sale or correction line argument (§7.1)", () => {
+    for (const name of ["ShowAndSellSaleLineInput", "ShowAndSellCorrectionLineInput"]) {
+      const names = fieldNameSet(definition(name));
+      for (const forbidden of [
+        "lineItemId",
+        "unitPriceCentsSnapshot",
+        "productNameSnapshot",
+        "subtotalCents",
+        "totalCents",
+        "quantity",
+        "unitCampaignId",
+        "profileId",
+      ]) {
+        if (name === "ShowAndSellCorrectionLineInput" && forbidden === "lineItemId") {
+          expect(names.has(forbidden), "a correction addresses an existing line by its stable id").toBe(true);
+          continue;
+        }
+        expect(names.has(forbidden), `${name}.${forbidden} would be a caller-supplied price or identity`).toBe(false);
+      }
+    }
+    for (const name of ["CreateShowAndSellSaleInput", "CorrectShowAndSellSaleInput", "VoidShowAndSellSaleInput"]) {
+      const names = fieldNameSet(definition(name));
+      for (const forbidden of ["totalCents", "expectedCashCents", "paymentMethodName", "amountCents", "saleId2"]) {
+        expect(names.has(forbidden), `${name}.${forbidden} would be a caller-supplied amount`).toBe(false);
+      }
+    }
+  });
+
+  test("each sale mutation takes its one input and answers ShowAndSellSalePayload", () => {
+    const roots: Record<string, string> = {
+      createShowAndSellSale: "CreateShowAndSellSaleInput",
+      correctShowAndSellSale: "CorrectShowAndSellSaleInput",
+      voidShowAndSellSale: "VoidShowAndSellSaleInput",
+    };
+    for (const [field, input] of Object.entries(roots)) {
+      const entry = rootFieldByName("Mutation", field);
+      expect(entry, `Mutation.${field} is missing`).toBeDefined();
+      expect(entry!.text).toMatch(new RegExp(`${field}\\(\\s*input:\\s*${input}!\\s*\\)`));
+      expect(returnTypeName(entry!.text)).toBe("ShowAndSellSalePayload");
+      expect(entry!.directives, `${field} must be directive-free (Cognito-only)`).toEqual([]);
+    }
+  });
+
+  test("AUTH: no sale type, input, or root field carries an auth directive", () => {
+    for (const name of [...Object.keys(SS5_SALE_TYPE_FIELDS), ...Object.keys(SS5_INPUT_FIELDS)]) {
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+    }
+  });
+});

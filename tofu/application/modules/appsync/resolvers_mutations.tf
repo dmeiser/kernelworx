@@ -1441,3 +1441,49 @@ resource "aws_appsync_resolver" "confirm_show_and_sell_work" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Pooled sales (delivery checklist §4.2.2, §4.3.1, §4.3.2). Same shared JS invoke
+# resolver as every other Unit-tenant mutation: the whole decision — state matrix,
+# tenant check, stock plan, We Owe writes and the 90-action budget — lives in the
+# unit-operations Lambda, so these three stay thin invoke stubs.
+resource "aws_appsync_resolver" "create_show_and_sell_sale" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "createShowAndSellSale"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "correct_show_and_sell_sale" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "correctShowAndSellSale"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "void_show_and_sell_sale" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "voidShowAndSellSale"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

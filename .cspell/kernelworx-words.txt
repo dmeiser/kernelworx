@@ -93,6 +93,7 @@ Cooldown
 cooldown
 coppa
 costEstimator
+coverable
 CREAT
 creatorMessage
 ctype
@@ -135,6 +136,7 @@ env
 errorMessage
 esac
 finalbody
+handback
 isinstance
 jank
 metas
@@ -142,6 +144,7 @@ mockqr
 multiset
 neighbour
 neighbours
+overcorrected
 prin
 rasterizing
 resends

@@ -428,6 +428,31 @@ export type GqlConfirmUnitPaymentMethodQrUploadInput = {
   version: GqlVersionedInput;
 };
 
+/** Input for correctShowAndSellSale (§4.3.1). The corrected lines are whole quantities, and the whole previous revision is archived before any of them is written. */
+export type GqlCorrectShowAndSellSaleInput = {
+  buyerEmail?: InputMaybe<Scalars['String']['input']>;
+  /** Replaces the buyer name; omit to keep the one on file. Required whenever the corrected sale still owes something. */
+  buyerName?: InputMaybe<Scalars['String']['input']>;
+  buyerPhone?: InputMaybe<Scalars['String']['input']>;
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The corrected line set; a line left out is voided and its We Owe obligation is closed as cancelled. */
+  lineItems: Array<GqlShowAndSellCorrectionLineInput>;
+  otherDetails?: InputMaybe<Scalars['String']['input']>;
+  /** Changes how the sale was paid; omit to keep the method already snapshotted, which may name a method the Unit has since retired. */
+  paymentMethodCode?: InputMaybe<Scalars['String']['input']>;
+  /** Why the sale is being corrected; stored on the archived revision. */
+  reason: Scalars['String']['input'];
+  /** The sale being corrected. */
+  saleId: Scalars['ID']['input'];
+  /** The sale's revision the caller last read (optimistic concurrency on the sale). */
+  saleVersion: GqlVersionedInput;
+  /** The event that owns the sale; a sale id from another event is not found here. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The event version the caller last read (optimistic concurrency on the aggregate). */
+  version: GqlVersionedInput;
+};
+
 /** Primary presentation basis for a unit's needs report. */
 export type GqlCouncilNeedBasis =
   /** Present after applying assignments. */
@@ -563,6 +588,27 @@ export type GqlCreateShowAndSellInput = {
   unitCampaignId: Scalars['ID']['input'];
   /** Offer We Owe at this event; omitting it means off. */
   weOweEnabled?: InputMaybe<Scalars['Boolean']['input']>;
+};
+
+/** Input for createShowAndSellSale (§4.2.2). */
+export type GqlCreateShowAndSellSaleInput = {
+  buyerEmail?: InputMaybe<Scalars['String']['input']>;
+  buyerName?: InputMaybe<Scalars['String']['input']>;
+  buyerPhone?: InputMaybe<Scalars['String']['input']>;
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Non-empty; at most one line per product is not required, several lines of one product consume one allocation. */
+  lineItems: Array<GqlShowAndSellSaleLineInput>;
+  /** Required exactly for `OTHER`, at most 250 characters. */
+  otherDetails?: InputMaybe<Scalars['String']['input']>;
+  /** `CASH`, `CHECK`, `OTHER`, or `CUSTOM:<paymentMethodId>`. A custom method must be active and belong to this event's Unit. */
+  paymentMethodCode: Scalars['String']['input'];
+  /** When the sale actually happened, for a back-dated paper entry included; it must fall inside the event's immutable interval. */
+  saleAt: Scalars['AWSDateTime']['input'];
+  /** The event the sale belongs to; the sale id is not an input, the server mints it. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The event version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
 };
 
 /** Input for createUnitCampaign. The catalog must exist and be usable by the campaign. */
@@ -961,6 +1007,8 @@ export type GqlMutation = {
   confirmShowAndSellWork: GqlConfirmShowAndSellWorkPayload;
   /** Attach an uploaded QR image to a Unit payment method. Unit Admin; validates the object exists and is the image its key claims. */
   confirmUnitPaymentMethodQrUpload: GqlUnitPaymentMethod;
+  /** Correct a sale without editing away what happened: the whole previous revision is archived as an immutable child, then the corrected lines are written. Lines are addressed by their stable `lineItemId`, a line that names no id is supplemental, and a line the correction leaves out is voided — its We Owe obligation closes as cancelled and any reservation above the corrected remainder is released, all in one transaction. Quantity a buyer already received is never taken back, and an increase never rewrites an original obligation upward: it is a new line and a new obligation. Only the immediate difference between the corrected and original quantities touches stock, so an unaffected line spends no movement and no balance version. Allowed while the event is active or ended; while it is reopened only the draft is written. A sale whose payment method the Unit has since retired may keep naming it. Unit Admin for the event's Unit. */
+  correctShowAndSellSale: GqlShowAndSellSalePayload;
   /** Create a new active campaign on a profile the caller has write access to. Returns the created campaign. */
   createCampaign: GqlCampaign;
   /** Create a catalog owned by the caller. Returns the created catalog. */
@@ -979,6 +1027,8 @@ export type GqlMutation = {
   createSharedCampaign: GqlSharedCampaign;
   /** Create a Show & Sell event on a Unit Campaign: required location, optional address, immutable UTC interval, the Unit's split default or an override, and We Owe off unless turned on. Overlapping events are allowed. Unit Admin for the campaign's Unit. */
   createShowAndSell: GqlShowAndSellAdmin;
+  /** Record one sale at the table, as one atomic write: the sale row, the We Owe obligations its lines create, the per-product allocation and balance writes with one `EVENT_IMMEDIATE_SALE` movement each, the event's cumulative productIds, and the event version. Only `immediateQty` consumes stock — a We Owe quantity is owed, not sold, and reserves nothing. A line's product name, unit price, subtotal and the sale total are computed from this campaign's catalog, so no input carries money. Allowed while the event is active or ended; while it is reopened only the draft sale is written and re-finalization applies the effect. The plan is refused before anything is written when it would not fit one transaction or would leave the event no longer finalizable, and a retried request writes nothing twice. `buyerName` is required exactly when some line creates We Owe, because an obligation has no Account, only a name. Unit Admin for the event's Unit. */
+  createShowAndSellSale: GqlShowAndSellSalePayload;
   /** Create a unit; the caller becomes its initial Unit Admin. Returns the Unit and the creator grant. */
   createUnit: GqlCreateUnitPayload;
   /** Create a Unit Campaign. Unit Admin for the parent Unit. */
@@ -1075,6 +1125,8 @@ export type GqlMutation = {
   updateUnitPaymentMethod: GqlUnitPaymentMethod;
   /** Add or edit one working slot of an event: an interval inside the event's immutable interval, an optional label, and a capacity of 1-100. Any duration is legal — no hour or half-hour is assumed. Allowed only while the event is scheduled, at most 20 slots per event, and an edit revalidates the signups the slot already holds: a capacity below the active count, or a new time that would put an already-signed-up Scout into overlap with another slot of this event or with a commitment at any other Show & Sell, is refused and writes nothing. The slot row and the event version commit together, so a caller holding a stale event version writes nothing. Unit Admin for the event's Unit. */
   upsertShowAndSellSlot: GqlShowAndSellSlot;
+  /** Void a whole sale, and nothing less: the sale goes `VOIDED` with the actor, instant and reason, its stock is handed back through one `EVENT_IMMEDIATE_SALE` movement per product, and each of its We Owe obligations closes as cancelled with its reservation released. A line whose quantity the buyer already holds makes the void impossible — that obligation is fulfilled, and voiding it as unfulfilled would rewrite stock the Unit no longer has. The whole sale is one transaction: a void that cannot be completed writes nothing. Unit Admin for the event's Unit. */
+  voidShowAndSellSale: GqlShowAndSellSalePayload;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1162,6 +1214,11 @@ export type GqlMutation_ConfirmUnitPaymentMethodQrUploadArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CorrectShowAndSellSaleArgs = {
+  input: GqlCorrectShowAndSellSaleInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_CreateCampaignArgs = {
   input: GqlCreateCampaignInput;
 };
@@ -1204,6 +1261,11 @@ export type GqlMutation_CreateSharedCampaignArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_CreateShowAndSellArgs = {
   input: GqlCreateShowAndSellInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_CreateShowAndSellSaleArgs = {
+  input: GqlCreateShowAndSellSaleInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1442,6 +1504,11 @@ export type GqlMutation_UpdateUnitPaymentMethodArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpsertShowAndSellSlotArgs = {
   input: GqlUpsertShowAndSellSlotInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_VoidShowAndSellSaleArgs = {
+  input: GqlVoidShowAndSellSaleInput;
 };
 
 /** A customer order placed in a campaign. */
@@ -2426,6 +2493,17 @@ export type GqlS3UploadInfo = {
   uploadUrl: Scalars['String']['output'];
 };
 
+/** How one sale was paid, snapshotted at entry (§5.14). Exactly one method per sale: a split is recorded as Other with an explanation, because two methods on one sale would leave the cash drawer with no single answer. */
+export type GqlSalePaymentSnapshot = {
+  __typename?: 'SalePaymentSnapshot';
+  /** The method's display name as this Unit named it at entry; a later rename does not reach this sale. */
+  displayName: Scalars['String']['output'];
+  /** `CASH`, `CHECK`, `OTHER`, or `CUSTOM:<paymentMethodId>`; the only thing that decides whether this sale counts as expected cash. */
+  methodCode: Scalars['String']['output'];
+  /** Required exactly for `OTHER`: what the unusual payment actually was. */
+  otherDetails?: Maybe<Scalars['String']['output']>;
+};
+
 /** One Scout's custody of one product in one Unit Campaign: unsold unit-owned stock issued for individual sales. Stock with a Scout is not sellable Kernel stock until it is returned or consumed by a sale; it still counts in total unit-owned stock (spec CUST-01). */
 export type GqlScoutCustodyBalance = {
   __typename?: 'ScoutCustodyBalance';
@@ -2689,6 +2767,17 @@ export type GqlShowAndSellAllocation = {
   version: Scalars['Int']['output'];
 };
 
+/** One line of a correction: the same three numbers, plus the stable line id when the line already exists. A line that names no id is supplemental, and a line the correction leaves out is voided (§8.6.1). */
+export type GqlShowAndSellCorrectionLineInput = {
+  /** The line's whole immediate quantity after the correction, never an amount to add. */
+  immediateQty: Scalars['Int']['input'];
+  /** The line being corrected; omit for a new supplemental line. A line id from another sale is not found here. */
+  lineItemId?: InputMaybe<Scalars['ID']['input']>;
+  productId: Scalars['ID']['input'];
+  /** The line's whole We Owe quantity after the correction; it may not fall below what that line has already fulfilled, nor above what was entered. */
+  weOweQty: Scalars['Int']['input'];
+};
+
 /** One event as a Scout sees it: where and when it runs, whether We Owe is offered, how the pool splits, the slots with room left, and this Scout's own signups. It carries no inventory, sale, buyer, cash, finalization, actor, or tenancy field (API contract SEC-04), and it hands the browser no stock number to do arithmetic against. */
 export type GqlShowAndSellOpportunity = {
   __typename?: 'ShowAndSellOpportunity';
@@ -2742,6 +2831,109 @@ export type GqlShowAndSellOpportunitySlot = {
   slotId: Scalars['ID']['output'];
   /** Slot start. */
   startAt: Scalars['AWSDateTime']['output'];
+};
+
+/** One pooled sale of a Show & Sell event, at its current revision (§5.14). Administrative only: buyer contact detail is never part of a participant-safe projection (SEC-04). */
+export type GqlShowAndSellSale = {
+  __typename?: 'ShowAndSellSale';
+  buyerEmail?: Maybe<Scalars['String']['output']>;
+  /** The buyer's name as the admin recorded it; required whenever any line creates We Owe, because an obligation has no Account, only a name. */
+  buyerName?: Maybe<Scalars['String']['output']>;
+  buyerPhone?: Maybe<Scalars['String']['output']>;
+  createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  /** The account that entered the sale. */
+  enteredByAccountId: Scalars['ID']['output'];
+  /** What this sale adds to the cash drawer: its total exactly when `methodCode` is `CASH`, and nothing otherwise — never inferred from a display name or an Other note (AC-31). */
+  expectedCashCents: Scalars['Int']['output'];
+  lineItems: Array<GqlShowAndSellSaleLine>;
+  paymentMethodSnapshot: GqlSalePaymentSnapshot;
+  /** This sale's revision counter, and its optimistic-concurrency token: `correctShowAndSellSale` and `voidShowAndSellSale` condition on it. */
+  revision: Scalars['Int']['output'];
+  /** When the sale actually happened, which may be earlier than when it was entered; always inside the event's immutable interval. */
+  saleAt: Scalars['AWSDateTime']['output'];
+  saleId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  /** `ACTIVE` or `VOIDED`. */
+  status: Scalars['String']['output'];
+  /** The sum of the line subtotals, in cents. */
+  totalCents: Scalars['Int']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  unitId: Scalars['ID']['output'];
+  updatedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  voidedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  voidedByAccountId?: Maybe<Scalars['ID']['output']>;
+};
+
+/** One line of a pooled sale, with the product's identity and price as this campaign's catalog carried them at the moment of the sale (§5.14). A later rename or price change never reaches a sale that already happened. */
+export type GqlShowAndSellSaleLine = {
+  __typename?: 'ShowAndSellSaleLine';
+  /** Items handed to the buyer at the table; this is the quantity that consumes the event's stock. */
+  immediateQty: Scalars['Int']['output'];
+  /** The line's stable identity, minted by the server at entry and kept across corrections; a correction addresses a line by it. */
+  lineItemId: Scalars['ID']['output'];
+  /** The catalog product sold. */
+  productId: Scalars['ID']['output'];
+  /** The product's display name as the campaign's catalog carried it at entry. */
+  productNameSnapshot: Scalars['String']['output'];
+  /** (immediateQty + weOweQty) * unitPriceCentsSnapshot, computed by the server. */
+  subtotalCents: Scalars['Int']['output'];
+  /** One item's price in cents as the catalog carried it at entry. */
+  unitPriceCentsSnapshot: Scalars['Int']['output'];
+  /** Items the Unit owes the buyer later; this quantity consumes no stock until it is reserved. */
+  weOweQty: Scalars['Int']['output'];
+};
+
+/** One line as entered: the product and how much of it goes now versus on We Owe. Product name, unit price, subtotal and total are computed by the server from this campaign's catalog, so they are not inputs and cannot be offered (§7.1). */
+export type GqlShowAndSellSaleLineInput = {
+  /** Items handed over at the table (>= 0); this is what consumes the event's stock. */
+  immediateQty: Scalars['Int']['input'];
+  /** A product of this campaign's catalog; any other id is refused and writes nothing. */
+  productId: Scalars['ID']['input'];
+  /** Items the Unit owes the buyer later (>= 0). immediateQty + weOweQty must be at least 1. */
+  weOweQty: Scalars['Int']['input'];
+};
+
+/** What one sale write did. Every quantity is read back from the rows the write committed, so the answer is the same one a later read gives (§8.9). */
+export type GqlShowAndSellSalePayload = {
+  __typename?: 'ShowAndSellSalePayload';
+  /** The event's allocation rows for the products this sale touched; empty while the event is reopened, where no stock moved. */
+  allocations: Array<GqlShowAndSellAllocation>;
+  /** True when the event was reopened and only the draft sale was written: the stock effect belongs to re-finalization (§8.6). */
+  draftOnly: Scalars['Boolean']['output'];
+  /** The event's version after this write, which is what makes an approved finalization stale. */
+  eventVersion: Scalars['Int']['output'];
+  /** Each touched product's position, with the stock this sale consumed or handed back; empty while the event is reopened. */
+  inventoryPositions: Array<GqlInventoryPosition>;
+  /** This sale's We Owe obligations after the write, including any an obligation-target correction closed. */
+  obligations: Array<GqlWeOweObligation>;
+  /** The whole revision this write replaced, exactly as it stood: the lines, total, buyer fields, payment snapshot and status the correction or void archived, plus who corrected them, when, and why. Null on a create, which had no previous revision — §7.1's correction answer includes the prior revision. */
+  priorRevision?: Maybe<GqlShowAndSellSaleRevision>;
+  /** The sale as this write left it, at its new revision. */
+  sale: GqlShowAndSellSale;
+  /** One warning per product whose sale left this campaign's open allocations above sellable stock; empty when nothing is over-assigned. A sale is never clamped to fit, so this is how a table learns the pool it sold from is thinner than the allocations promise. */
+  warnings: Array<GqlAllocationWarning>;
+};
+
+/** One whole previous revision of a sale, kept immutable by the correction that replaced it (§5.14, §8.6.1). It carries the line items, total, buyer fields, payment snapshot and sale time as they stood, plus who corrected them, when, and why. */
+export type GqlShowAndSellSaleRevision = {
+  __typename?: 'ShowAndSellSaleRevision';
+  buyerEmail?: Maybe<Scalars['String']['output']>;
+  buyerName?: Maybe<Scalars['String']['output']>;
+  buyerPhone?: Maybe<Scalars['String']['output']>;
+  correctedAt: Scalars['AWSDateTime']['output'];
+  correctedByAccountId: Scalars['ID']['output'];
+  enteredByAccountId: Scalars['ID']['output'];
+  lineItems: Array<GqlShowAndSellSaleLine>;
+  paymentMethodSnapshot: GqlSalePaymentSnapshot;
+  reason: Scalars['String']['output'];
+  /** The revision number this snapshot is. */
+  revision: Scalars['Int']['output'];
+  saleAt: Scalars['AWSDateTime']['output'];
+  saleId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  /** The sale's status as this revision had it, so a void that is later corrected still reads as a void at the revision that was voided. */
+  status: Scalars['String']['output'];
+  totalCents: Scalars['Int']['output'];
 };
 
 /** One Scout's signup for one slot, with its audit trail (data model §5.13). The actor fields are why this type is administrative: a Scout sees `ParticipantSignup` instead. */
@@ -3430,6 +3622,57 @@ export type GqlUpsertShowAndSellSlotInput = {
 export type GqlVersionedInput = {
   /** The version the caller last read; a mismatch returns CONFLICT. */
   expectedVersion: Scalars['Int']['input'];
+};
+
+/** Input for voidShowAndSellSale (§4.3.2). A void is whole-sale only: correcting one line is a correction, and a voided sale is history that a new sale replaces. */
+export type GqlVoidShowAndSellSaleInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Why the sale is being voided; a void with no reason is refused. */
+  reason: Scalars['String']['input'];
+  /** The sale to void. */
+  saleId: Scalars['ID']['input'];
+  /** The sale's revision the caller last read. */
+  saleVersion: GqlVersionedInput;
+  /** The event that owns the sale. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The event version the caller last read. */
+  version: GqlVersionedInput;
+};
+
+/** One We Owe obligation a sale created (§5.15). The buyer is a name, not an Account: nothing here identifies or contacts a user of the system, and there is deliberately no due date, assignee, or aging field — a Unit prioritizes what it owes by looking at the list. */
+export type GqlWeOweObligation = {
+  __typename?: 'WeOweObligation';
+  buyerName: Scalars['String']['output'];
+  /** Quantity a correction or void took back before it was fulfilled. */
+  cancelledQty: Scalars['Int']['output'];
+  /** `FULFILLED` or `CANCELLED`, set only when the obligation closed. */
+  closeReason?: Maybe<Scalars['String']['output']>;
+  closedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  fulfilledQty: Scalars['Int']['output'];
+  /** The line of that sale the obligation came from. */
+  lineItemId: Scalars['ID']['output'];
+  /** What the sale originally owed this buyer; a correction never raises it. */
+  originalQty: Scalars['Int']['output'];
+  productId: Scalars['ID']['output'];
+  productNameSnapshot: Scalars['String']['output'];
+  /** originalQty - fulfilledQty - cancelledQty. */
+  remainingQty: Scalars['Int']['output'];
+  /** Quantity stock is currently held against; moves only with a reservation. */
+  reservedQty: Scalars['Int']['output'];
+  /** The sale that created the obligation. */
+  saleId: Scalars['ID']['output'];
+  showAndSellId: Scalars['ID']['output'];
+  /** `OPEN` or `CLOSED`; the reason an obligation closed is an audit field, never a third status. */
+  status: Scalars['String']['output'];
+  /** remainingQty - reservedQty: the part no stock is promised to yet. */
+  uncoveredQty: Scalars['Int']['output'];
+  unitCampaignId: Scalars['ID']['output'];
+  /** The owed quantity priced at the sale's snapshot price, in cents. */
+  valueCentsSnapshot: Scalars['Int']['output'];
+  version: Scalars['Int']['output'];
+  weOweId: Scalars['ID']['output'];
 };
 
 export type GqlSellerProfileFieldsFragment = {

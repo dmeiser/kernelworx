@@ -2953,6 +2953,243 @@ type Query {
 }
 
 # ============================================================================
+# Show & Sell and inventory — Stage 4.2/4.3: pooled sales, their revisions, and
+# the We Owe obligations they create (delivery checklist §4.2, §4.3)
+#
+# A sale is entered by a Unit Admin at the table, for a buyer who may be nobody in
+# the system at all: the row therefore carries what was true when it was written —
+# the product's name and price as this campaign's catalog spelled them, the payment
+# method as this Unit named it — and nothing downstream re-derives those from live
+# rows (data model §5.14, PAY-06). Money is an integer number of cents on every
+# field here, and the price of a line is never an input: name, unit price, subtotal
+# and total are computed from the campaign's own catalog, so a caller cannot offer a
+# price (§7.1, SALE-M-01-04).
+#
+# A correction keeps the whole previous revision as an immutable child rather than
+# editing history away, and a line keeps a stable `lineItemId` across revisions so a
+# correction can say which line it means and a We Owe obligation can name the line it
+# came from (§8.6.1). An increase is a supplemental line, never a rewrite of an
+# original obligation's quantity upward; a reduction may take back only quantity that
+# has not already been handed to the buyer.
+# ============================================================================
+
+"""One line of a pooled sale, with the product's identity and price as this campaign's catalog carried them at the moment of the sale (§5.14). A later rename or price change never reaches a sale that already happened."""
+type ShowAndSellSaleLine {
+  """The line's stable identity, minted by the server at entry and kept across corrections; a correction addresses a line by it."""
+  lineItemId: ID!
+  """The catalog product sold."""
+  productId: ID!
+  """The product's display name as the campaign's catalog carried it at entry."""
+  productNameSnapshot: String!
+  """One item's price in cents as the catalog carried it at entry."""
+  unitPriceCentsSnapshot: Int!
+  """Items handed to the buyer at the table; this is the quantity that consumes the event's stock."""
+  immediateQty: Int!
+  """Items the Unit owes the buyer later; this quantity consumes no stock until it is reserved."""
+  weOweQty: Int!
+  """(immediateQty + weOweQty) * unitPriceCentsSnapshot, computed by the server."""
+  subtotalCents: Int!
+}
+
+"""How one sale was paid, snapshotted at entry (§5.14). Exactly one method per sale: a split is recorded as Other with an explanation, because two methods on one sale would leave the cash drawer with no single answer."""
+type SalePaymentSnapshot {
+  """`CASH`, `CHECK`, `OTHER`, or `CUSTOM:<paymentMethodId>`; the only thing that decides whether this sale counts as expected cash."""
+  methodCode: String!
+  """The method's display name as this Unit named it at entry; a later rename does not reach this sale."""
+  displayName: String!
+  """Required exactly for `OTHER`: what the unusual payment actually was."""
+  otherDetails: String
+}
+
+"""One pooled sale of a Show & Sell event, at its current revision (§5.14). Administrative only: buyer contact detail is never part of a participant-safe projection (SEC-04)."""
+type ShowAndSellSale {
+  saleId: ID!
+  showAndSellId: ID!
+  unitId: ID!
+  unitCampaignId: ID!
+  """When the sale actually happened, which may be earlier than when it was entered; always inside the event's immutable interval."""
+  saleAt: AWSDateTime!
+  """The account that entered the sale."""
+  enteredByAccountId: ID!
+  """The buyer's name as the admin recorded it; required whenever any line creates We Owe, because an obligation has no Account, only a name."""
+  buyerName: String
+  buyerPhone: String
+  buyerEmail: String
+  lineItems: [ShowAndSellSaleLine!]!
+  """The sum of the line subtotals, in cents."""
+  totalCents: Int!
+  paymentMethodSnapshot: SalePaymentSnapshot!
+  """This sale's revision counter, and its optimistic-concurrency token: `correctShowAndSellSale` and `voidShowAndSellSale` condition on it."""
+  revision: Int!
+  """`ACTIVE` or `VOIDED`."""
+  status: String!
+  voidedByAccountId: ID
+  voidedAt: AWSDateTime
+  createdAt: AWSDateTime
+  updatedAt: AWSDateTime
+  """What this sale adds to the cash drawer: its total exactly when `methodCode` is `CASH`, and nothing otherwise — never inferred from a display name or an Other note (AC-31)."""
+  expectedCashCents: Int!
+}
+
+"""One whole previous revision of a sale, kept immutable by the correction that replaced it (§5.14, §8.6.1). It carries the line items, total, buyer fields, payment snapshot and sale time as they stood, plus who corrected them, when, and why."""
+type ShowAndSellSaleRevision {
+  saleId: ID!
+  showAndSellId: ID!
+  """The revision number this snapshot is."""
+  revision: Int!
+  saleAt: AWSDateTime!
+  enteredByAccountId: ID!
+  buyerName: String
+  buyerPhone: String
+  buyerEmail: String
+  lineItems: [ShowAndSellSaleLine!]!
+  totalCents: Int!
+  paymentMethodSnapshot: SalePaymentSnapshot!
+  """The sale's status as this revision had it, so a void that is later corrected still reads as a void at the revision that was voided."""
+  status: String!
+  correctedByAccountId: ID!
+  correctedAt: AWSDateTime!
+  reason: String!
+}
+
+"""One We Owe obligation a sale created (§5.15). The buyer is a name, not an Account: nothing here identifies or contacts a user of the system, and there is deliberately no due date, assignee, or aging field — a Unit prioritizes what it owes by looking at the list."""
+type WeOweObligation {
+  weOweId: ID!
+  unitCampaignId: ID!
+  showAndSellId: ID!
+  """The sale that created the obligation."""
+  saleId: ID!
+  """The line of that sale the obligation came from."""
+  lineItemId: ID!
+  buyerName: String!
+  productId: ID!
+  productNameSnapshot: String!
+  """What the sale originally owed this buyer; a correction never raises it."""
+  originalQty: Int!
+  fulfilledQty: Int!
+  """Quantity a correction or void took back before it was fulfilled."""
+  cancelledQty: Int!
+  """Quantity stock is currently held against; moves only with a reservation."""
+  reservedQty: Int!
+  """originalQty - fulfilledQty - cancelledQty."""
+  remainingQty: Int!
+  """remainingQty - reservedQty: the part no stock is promised to yet."""
+  uncoveredQty: Int!
+  """The owed quantity priced at the sale's snapshot price, in cents."""
+  valueCentsSnapshot: Int!
+  """`OPEN` or `CLOSED`; the reason an obligation closed is an audit field, never a third status."""
+  status: String!
+  """`FULFILLED` or `CANCELLED`, set only when the obligation closed."""
+  closeReason: String
+  version: Int!
+  createdAt: AWSDateTime
+  closedAt: AWSDateTime
+}
+
+"""What one sale write did. Every quantity is read back from the rows the write committed, so the answer is the same one a later read gives (§8.9)."""
+type ShowAndSellSalePayload {
+  """The sale as this write left it, at its new revision."""
+  sale: ShowAndSellSale!
+  """The whole revision this write replaced, exactly as it stood: the lines, total, buyer fields, payment snapshot and status the correction or void archived, plus who corrected them, when, and why. Null on a create, which had no previous revision — §7.1's correction answer includes the prior revision."""
+  priorRevision: ShowAndSellSaleRevision
+  """This sale's We Owe obligations after the write, including any an obligation-target correction closed."""
+  obligations: [WeOweObligation!]!
+  """The event's allocation rows for the products this sale touched; empty while the event is reopened, where no stock moved."""
+  allocations: [ShowAndSellAllocation!]!
+  """Each touched product's position, with the stock this sale consumed or handed back; empty while the event is reopened."""
+  inventoryPositions: [InventoryPosition!]!
+  """The event's version after this write, which is what makes an approved finalization stale."""
+  eventVersion: Int!
+  """True when the event was reopened and only the draft sale was written: the stock effect belongs to re-finalization (§8.6)."""
+  draftOnly: Boolean!
+  """One warning per product whose sale left this campaign's open allocations above sellable stock; empty when nothing is over-assigned. A sale is never clamped to fit, so this is how a table learns the pool it sold from is thinner than the allocations promise."""
+  warnings: [AllocationWarning!]!
+}
+
+"""One line as entered: the product and how much of it goes now versus on We Owe. Product name, unit price, subtotal and total are computed by the server from this campaign's catalog, so they are not inputs and cannot be offered (§7.1)."""
+input ShowAndSellSaleLineInput {
+  """A product of this campaign's catalog; any other id is refused and writes nothing."""
+  productId: ID!
+  """Items handed over at the table (>= 0); this is what consumes the event's stock."""
+  immediateQty: Int!
+  """Items the Unit owes the buyer later (>= 0). immediateQty + weOweQty must be at least 1."""
+  weOweQty: Int!
+}
+
+"""One line of a correction: the same three numbers, plus the stable line id when the line already exists. A line that names no id is supplemental, and a line the correction leaves out is voided (§8.6.1)."""
+input ShowAndSellCorrectionLineInput {
+  """The line being corrected; omit for a new supplemental line. A line id from another sale is not found here."""
+  lineItemId: ID
+  productId: ID!
+  """The line's whole immediate quantity after the correction, never an amount to add."""
+  immediateQty: Int!
+  """The line's whole We Owe quantity after the correction; it may not fall below what that line has already fulfilled, nor above what was entered."""
+  weOweQty: Int!
+}
+
+"""Input for createShowAndSellSale (§4.2.2)."""
+input CreateShowAndSellSaleInput {
+  """The event the sale belongs to; the sale id is not an input, the server mints it."""
+  showAndSellId: ID!
+  """When the sale actually happened, for a back-dated paper entry included; it must fall inside the event's immutable interval."""
+  saleAt: AWSDateTime!
+  buyerName: String
+  buyerPhone: String
+  buyerEmail: String
+  """Non-empty; at most one line per product is not required, several lines of one product consume one allocation."""
+  lineItems: [ShowAndSellSaleLineInput!]!
+  """`CASH`, `CHECK`, `OTHER`, or `CUSTOM:<paymentMethodId>`. A custom method must be active and belong to this event's Unit."""
+  paymentMethodCode: String!
+  """Required exactly for `OTHER`, at most 250 characters."""
+  otherDetails: String
+  """The event version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for correctShowAndSellSale (§4.3.1). The corrected lines are whole quantities, and the whole previous revision is archived before any of them is written."""
+input CorrectShowAndSellSaleInput {
+  """The event that owns the sale; a sale id from another event is not found here."""
+  showAndSellId: ID!
+  """The sale being corrected."""
+  saleId: ID!
+  """The sale's revision the caller last read (optimistic concurrency on the sale)."""
+  saleVersion: VersionedInput!
+  """The event version the caller last read (optimistic concurrency on the aggregate)."""
+  version: VersionedInput!
+  """Replaces the buyer name; omit to keep the one on file. Required whenever the corrected sale still owes something."""
+  buyerName: String
+  buyerPhone: String
+  buyerEmail: String
+  """The corrected line set; a line left out is voided and its We Owe obligation is closed as cancelled."""
+  lineItems: [ShowAndSellCorrectionLineInput!]!
+  """Changes how the sale was paid; omit to keep the method already snapshotted, which may name a method the Unit has since retired."""
+  paymentMethodCode: String
+  otherDetails: String
+  """Why the sale is being corrected; stored on the archived revision."""
+  reason: String!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+"""Input for voidShowAndSellSale (§4.3.2). A void is whole-sale only: correcting one line is a correction, and a voided sale is history that a new sale replaces."""
+input VoidShowAndSellSaleInput {
+  """The event that owns the sale."""
+  showAndSellId: ID!
+  """The sale to void."""
+  saleId: ID!
+  """The sale's revision the caller last read."""
+  saleVersion: VersionedInput!
+  """The event version the caller last read."""
+  version: VersionedInput!
+  """Why the sale is being voided; a void with no reason is refused."""
+  reason: String!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
+# ============================================================================
 # Mutation Root
 # ============================================================================
 
@@ -3098,6 +3335,23 @@ type Mutation {
     """The assignment batch."""
     input: AssignShowAndSellInventoryInput!
   ): AssignShowAndSellInventoryPayload!
+
+  # Show & Sell — pooled sales (checklist §4.2.2, §4.3.1, §4.3.2)
+  """Record one sale at the table, as one atomic write: the sale row, the We Owe obligations its lines create, the per-product allocation and balance writes with one `EVENT_IMMEDIATE_SALE` movement each, the event's cumulative productIds, and the event version. Only `immediateQty` consumes stock — a We Owe quantity is owed, not sold, and reserves nothing. A line's product name, unit price, subtotal and the sale total are computed from this campaign's catalog, so no input carries money. Allowed while the event is active or ended; while it is reopened only the draft sale is written and re-finalization applies the effect. The plan is refused before anything is written when it would not fit one transaction or would leave the event no longer finalizable, and a retried request writes nothing twice. `buyerName` is required exactly when some line creates We Owe, because an obligation has no Account, only a name. Unit Admin for the event's Unit."""
+  createShowAndSellSale(
+    """The sale."""
+    input: CreateShowAndSellSaleInput!
+  ): ShowAndSellSalePayload!
+  """Correct a sale without editing away what happened: the whole previous revision is archived as an immutable child, then the corrected lines are written. Lines are addressed by their stable `lineItemId`, a line that names no id is supplemental, and a line the correction leaves out is voided — its We Owe obligation closes as cancelled and any reservation above the corrected remainder is released, all in one transaction. Quantity a buyer already received is never taken back, and an increase never rewrites an original obligation upward: it is a new line and a new obligation. Only the immediate difference between the corrected and original quantities touches stock, so an unaffected line spends no movement and no balance version. Allowed while the event is active or ended; while it is reopened only the draft is written. A sale whose payment method the Unit has since retired may keep naming it. Unit Admin for the event's Unit."""
+  correctShowAndSellSale(
+    """The correction."""
+    input: CorrectShowAndSellSaleInput!
+  ): ShowAndSellSalePayload!
+  """Void a whole sale, and nothing less: the sale goes `VOIDED` with the actor, instant and reason, its stock is handed back through one `EVENT_IMMEDIATE_SALE` movement per product, and each of its We Owe obligations closes as cancelled with its reservation released. A line whose quantity the buyer already holds makes the void impossible — that obligation is fulfilled, and voiding it as unfulfilled would rewrite stock the Unit no longer has. The whole sale is one transaction: a void that cannot be completed writes nothing. Unit Admin for the event's Unit."""
+  voidShowAndSellSale(
+    """The void."""
+    input: VoidShowAndSellSaleInput!
+  ): ShowAndSellSalePayload!
 
   # Show & Sell — slot board (checklist §3.3)
   """Add or edit one working slot of an event: an interval inside the event's immutable interval, an optional label, and a capacity of 1-100. Any duration is legal — no hour or half-hour is assumed. Allowed only while the event is scheduled, at most 20 slots per event, and an edit revalidates the signups the slot already holds: a capacity below the active count, or a new time that would put an already-signed-up Scout into overlap with another slot of this event or with a commitment at any other Show & Sell, is refused and writes nothing. The slot row and the event version commit together, so a caller holding a stale event version writes nothing. Unit Admin for the event's Unit."""

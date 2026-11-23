@@ -1326,6 +1326,7 @@ def inventory_balance_delta_action(
     expected_version: int,
     kernel_physical_delta: int = 0,
     council_on_order_delta: int = 0,
+    sold_possession_delta: int = 0,
     now_iso: str,
 ) -> tuple[str, Dict[str, Any]]:
     """One versioned balance change with the §4.1 floor carried into the condition.
@@ -1346,6 +1347,12 @@ def inventory_balance_delta_action(
     so no condition here is ever evaluated against a balance that moved underneath
     it. A positive delta needs no bound — the read already satisfied the invariant
     and raising physical cannot break it.
+
+    ``sold_possession_delta`` carries the We Owe reservation terms (§5.7,
+    ``soldInPossessionQty``): a reserve writes a positive delta with the physical
+    floor above, a release a negative one with a zero floor, so a reservation
+    release can never drive ``soldInPossessionQty`` negative and a reservation can
+    never promise stock that is not physically there.
     """
     names = {
         "#version": VERSION_ATTRIBUTE,
@@ -1359,25 +1366,31 @@ def inventory_balance_delta_action(
     sets = ["#version = #version + :one", "#updatedAt = :updatedAt"]
     conditions = ["#version = :expectedVersion"]
     if kernel_physical_delta:
-        names[f"#{KERNEL_PHYSICAL_QTY}"] = KERNEL_PHYSICAL_QTY
-        values[":kernelDelta"] = wire_value(kernel_physical_delta)
-        sets.append(f"#{KERNEL_PHYSICAL_QTY} = #{KERNEL_PHYSICAL_QTY} + :kernelDelta")
-        stock_floor = -kernel_physical_delta
-        if stock_floor > 0:
-            values[":kernelFloor"] = wire_value(stock_floor)
-            conditions.append(f"#{KERNEL_PHYSICAL_QTY} >= :kernelFloor")
-        reserved_floor = _count(existing or {}, SOLD_IN_POSSESSION_QTY) - kernel_physical_delta
-        if reserved_floor > 0:
-            values[":reservedFloor"] = wire_value(reserved_floor)
-            conditions.append(f"#{KERNEL_PHYSICAL_QTY} >= :reservedFloor")
+        _balance_delta_term(names, values, sets, conditions, KERNEL_PHYSICAL_QTY, "kernelDelta", kernel_physical_delta)
+        _balance_condition(
+            names,
+            values,
+            conditions,
+            "reservedFloor",
+            KERNEL_PHYSICAL_QTY,
+            _count(existing or {}, SOLD_IN_POSSESSION_QTY) - kernel_physical_delta,
+        )
     if council_on_order_delta:
-        names[f"#{COUNCIL_ON_ORDER_QTY}"] = COUNCIL_ON_ORDER_QTY
-        values[":councilDelta"] = wire_value(council_on_order_delta)
-        sets.append(f"#{COUNCIL_ON_ORDER_QTY} = #{COUNCIL_ON_ORDER_QTY} + :councilDelta")
-        council_floor = -council_on_order_delta
-        if council_floor > 0:
-            values[":councilFloor"] = wire_value(council_floor)
-            conditions.append(f"#{COUNCIL_ON_ORDER_QTY} >= :councilFloor")
+        _balance_delta_term(
+            names, values, sets, conditions, COUNCIL_ON_ORDER_QTY, "councilDelta", council_on_order_delta
+        )
+    if sold_possession_delta:
+        _balance_delta_term(
+            names, values, sets, conditions, SOLD_IN_POSSESSION_QTY, "soldPossessionDelta", sold_possession_delta
+        )
+        _balance_condition(
+            names,
+            values,
+            conditions,
+            "physicalAbovePossession",
+            KERNEL_PHYSICAL_QTY,
+            _count(existing or {}, SOLD_IN_POSSESSION_QTY) + sold_possession_delta - kernel_physical_delta,
+        )
     return (
         "Update",
         {
@@ -1390,6 +1403,51 @@ def inventory_balance_delta_action(
             "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
         },
     )
+
+
+def _balance_delta_term(
+    names: Dict[str, str],
+    values: Dict[str, Any],
+    sets: List[str],
+    conditions: List[str],
+    attribute: str,
+    placeholder: str,
+    delta: int,
+) -> None:
+    """One quantity moved by ``delta``, with its own non-negative floor in the condition.
+
+    A decrement always carries the bound ``attribute >= -delta``: DynamoDB computes the
+    new value, so the only way to refuse a result below zero is to refuse the write that
+    would produce it, on the attribute as this request read it.
+    """
+    names[f"#{attribute}"] = attribute
+    values[f":{placeholder}"] = wire_value(delta)
+    sets.append(f"#{attribute} = #{attribute} + :{placeholder}")
+    if delta < 0:
+        _balance_condition(names, values, conditions, f"{placeholder}Floor", attribute, -delta)
+
+
+def _balance_condition(
+    names: Dict[str, str],
+    values: Dict[str, Any],
+    conditions: List[str],
+    placeholder: str,
+    attribute: str,
+    floor: int,
+) -> None:
+    """Add ``attribute >= floor`` when the floor is a number that can actually bind.
+
+    A floor of zero or less asks nothing of a quantity that is already non-negative, and
+    naming a condition that can never fail would put work in front of the database's own
+    version check for no protection at all. The attribute name is registered here rather
+    than by the caller's delta term, because a bound is often written against a quantity
+    this request is not moving — a reservation release bounds ``kernelPhysicalQty`` while
+    leaving it untouched — and an unregistered name is a malformed expression.
+    """
+    if floor > 0:
+        names[f"#{attribute}"] = attribute
+        values[f":{placeholder}"] = wire_value(floor)
+        conditions.append(f"#{attribute} >= :{placeholder}")
 
 
 def put_scout_custody_action(item: Mapping[str, Any]) -> tuple[str, Dict[str, Any]]:
