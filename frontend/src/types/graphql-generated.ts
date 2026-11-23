@@ -2906,6 +2906,8 @@ export type GqlShowAndSellSalePayload = {
   inventoryPositions: Array<GqlInventoryPosition>;
   /** This sale's We Owe obligations after the write, including any an obligation-target correction closed. */
   obligations: Array<GqlWeOweObligation>;
+  /** The whole revision this write replaced, exactly as it stood: the lines, total, buyer fields, payment snapshot and status the correction or void archived, plus who corrected them, when, and why. Null on a create, which had no previous revision — §7.1's correction answer includes the prior revision. */
+  priorRevision?: Maybe<GqlShowAndSellSaleRevision>;
   /** The sale as this write left it, at its new revision. */
   sale: GqlShowAndSellSale;
   /** One warning per product whose sale left this campaign's open allocations above sellable stock; empty when nothing is over-assigned. A sale is never clamped to fit, so this is how a table learns the pool it sold from is thinner than the allocations promise. */

@@ -143,7 +143,8 @@ REASON_ATTRIBUTE = "reason"
 # (§5.15 has no Account), so it has to be long enough for a real name and short enough to
 # sit beside the line items it belongs to.
 MAX_MONEY_CENTS = 100_000_000
-MAX_BUYER_NAME_LENGTH = 100
+#: API contract §3.4: "Buyer name: 1-200 trimmed characters when We Owe is present".
+MAX_BUYER_NAME_LENGTH = 200
 MAX_BUYER_PHONE_LENGTH = 40
 MAX_BUYER_EMAIL_LENGTH = 254
 MAX_SALE_REASON_LENGTH = 500
@@ -419,6 +420,19 @@ def sale_revision_rows(show_and_sell_id: str, sale_id: str) -> List[Dict[str, An
         },
     )
     return sorted(rows, key=lambda row: int(row.get(REVISION_ATTRIBUTE) or 0))
+
+
+def read_sale_revision(show_and_sell_id: str, sale_id: str, revision: int) -> Optional[Dict[str, Any]]:
+    """One archived revision by number, or ``None`` when the sale never had one.
+
+    A sale's revision counter is bumped by exactly one for every correction and every void,
+    each of which archives the revision it replaced, so "the revision this write replaced"
+    is always ``revision - 1`` and one exact key read answers it. A create is at revision 1
+    and has no such row, which is why the caller asks only above 1.
+    """
+    response = tables.show_and_sells.get_item(Key=sale_revision_key(show_and_sell_id, sale_id, revision))
+    item = response.get("Item")
+    return dict(item) if isinstance(item, Mapping) else None
 
 
 def event_sale_rows(show_and_sell_id: str) -> List[Dict[str, Any]]:
@@ -1209,21 +1223,16 @@ def plan_sale_stock(
     immediate_qty: int,
     allocation: Optional[Mapping[str, Any]],
     balance: Optional[Mapping[str, Any]],
-    live: bool,
 ) -> Optional[SaleStockChange]:
     """The shared per-product sale planner (§4.2.3).
 
-    ``live`` says whether this event's stock answer is being written now. In a live state
-    the planner refuses an unavailable quantity against the event's own open allocation
-    and against the campaign's physical count, and returns the three numbers one product's
-    write sets: the allocation's ``soldQty`` and ``remainingQty``, and the balance's
-    physical quantity through ``physical_delta``.
-
-    In a reopened state the planner still refuses a quantity the campaign cannot cover —
-    a draft that could never be re-finalized is a trap, not a save — but it names no
-    allocation target, because §8.6 gives re-finalization the job of applying what was
-    entered meanwhile, and a reopened event's allocations have already been released by
-    the version that was suspended.
+    This is the planner a live write uses: it refuses an unavailable quantity against the
+    event's own open allocation and against the campaign's physical count, and returns the
+    three numbers one product's write sets: the allocation's ``soldQty`` and
+    ``remainingQty``, and the balance's physical quantity through ``physical_delta``. A
+    ``REOPENED`` event never reaches this planner at all — its sale writes only the draft
+    sale, and §8.6 gives re-finalization the job of validating and applying what was
+    entered meanwhile, with that version's own planner and its own reads.
 
     A zero quantity answers ``None``: an unaffected line spends no allocation write, no
     balance version bump, and no movement, which is §8.6.1's "do not reverse and reapply
@@ -1233,8 +1242,6 @@ def plan_sale_stock(
     if quantity == 0:
         return None
     _require_coverable_stock(product_id, quantity, balance)
-    if not live:
-        return None
     if allocation is None or str(allocation.get(STATUS_ATTRIBUTE) or "") != ALLOCATION_OPEN:
         _refuse_no_allocation(product_id, show_and_sell_id, allocation)
     allocated = int(allocation[ALLOCATED_QTY])
@@ -1277,7 +1284,6 @@ def corrected_sale_stock_change(
     immediate_delta: int,
     allocation: Optional[Mapping[str, Any]],
     balance: Optional[Mapping[str, Any]],
-    live: bool,
 ) -> Optional[SaleStockChange]:
     """Apply only a correction's ``immediateDelta`` to one product (§8.6.1 step 2).
 
@@ -1288,17 +1294,12 @@ def corrected_sale_stock_change(
     and the stock effect are one statement, and clamping one would leave the other
     claiming a sale that never consumed stock.
 
-    In a reopened state nothing is written: a negative delta is validated against the
-    quantity this event has already recorded as sold, and a positive one against what the
-    shelf can still cover, and both defer to re-finalization.
+    A ``REOPENED`` event never reaches this planner either, for the same reason the sale
+    planner does not: its correction writes only the draft sale, and re-finalization
+    replays the lines against that version's own stock reads.
     """
     delta = inventory_models.normalize_signed_delta(immediate_delta, "immediateDelta", nonzero=False)
     if delta == 0:
-        return None
-    if not live:
-        if delta < 0:
-            _refuse_overcorrected_stock(product_id, -delta, _live_sold_qty(allocation))
-        _require_coverable_stock(product_id, delta, balance)
         return None
     if delta < 0:
         sold = _live_sold_qty(allocation)
@@ -1325,7 +1326,6 @@ def corrected_sale_stock_change(
         immediate_qty=delta,
         allocation=allocation,
         balance=balance,
-        live=True,
     )
 
 

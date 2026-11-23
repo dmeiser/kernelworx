@@ -3090,6 +3090,8 @@ type WeOweObligation {
 type ShowAndSellSalePayload {
   """The sale as this write left it, at its new revision."""
   sale: ShowAndSellSale!
+  """The whole revision this write replaced, exactly as it stood: the lines, total, buyer fields, payment snapshot and status the correction or void archived, plus who corrected them, when, and why. Null on a create, which had no previous revision — §7.1's correction answer includes the prior revision."""
+  priorRevision: ShowAndSellSaleRevision
   """This sale's We Owe obligations after the write, including any an obligation-target correction closed."""
   obligations: [WeOweObligation!]!
   """The event's allocation rows for the products this sale touched; empty while the event is reopened, where no stock moved."""

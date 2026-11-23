@@ -279,6 +279,16 @@ def test_buyer_name_is_required_exactly_when_a_line_creates_we_owe() -> None:
     assert sm.BUYER_NAME_ATTRIBUTE not in corrected
 
 
+def test_the_buyer_name_takes_the_whole_200_character_limit() -> None:
+    """API contract §3.4: "1-200 trimmed characters", so 200 is a name and 201 is not."""
+    longest = "B" * sm.MAX_BUYER_NAME_LENGTH
+    assert sm.MAX_BUYER_NAME_LENGTH == 200
+    assert sm.normalize_buyer_name(f"  {longest}  ") == longest
+    with pytest.raises(AppError) as raised:
+        sm.normalize_buyer_name(longest + "y")
+    assert "buyerName" in raised.value.message
+
+
 def test_sale_builder_keeps_buyer_fields_absent_when_not_supplied() -> None:
     line_items = _lines({"product_id": PRODUCT, "immediate": 1, "we_owe": 0})
     item = sm.build_show_and_sell_sale_item(
@@ -485,7 +495,6 @@ def test_planner_sells_the_last_unit_and_moves_every_number() -> None:
         immediate_qty=1,
         allocation=allocation,
         balance=balance,
-        live=True,
     )
     assert change is not None
     assert change.new_sold_qty == 10
@@ -503,7 +512,6 @@ def test_planner_mixed_line_consumes_only_the_immediate_quantity() -> None:
         immediate_qty=2,
         allocation=_allocation(allocated=10, sold=1),
         balance=_balance(physical=10),
-        live=True,
     )
     assert change is not None and change.new_sold_qty == 3
     assert change.new_remaining_qty == 7
@@ -517,7 +525,6 @@ def test_planner_refuses_more_than_the_event_holds_and_a_missing_allocation() ->
             immediate_qty=5,
             allocation=_allocation(allocated=4),
             balance=_balance(physical=10),
-            live=True,
         )
     assert raised.value.details["subcode"] == sm.INSUFFICIENT_EVENT_STOCK
     with pytest.raises(AppError) as raised:
@@ -527,7 +534,6 @@ def test_planner_refuses_more_than_the_event_holds_and_a_missing_allocation() ->
             immediate_qty=1,
             allocation=None,
             balance=_balance(physical=10),
-            live=True,
         )
     assert raised.value.details["subcode"] == sm.NO_EVENT_ALLOCATION
 
@@ -540,7 +546,6 @@ def test_planner_refuses_stock_the_shelf_cannot_cover_and_a_zero_answers_nothing
             immediate_qty=8,
             allocation=_allocation(allocated=10),
             balance=_balance(physical=5),
-            live=True,
         )
     assert raised.value.details["subcode"] == sm.INSUFFICIENT_EVENT_STOCK
     # Units promised to reservations are not sellable at the table (§7).
@@ -551,7 +556,6 @@ def test_planner_refuses_stock_the_shelf_cannot_cover_and_a_zero_answers_nothing
             immediate_qty=6,
             allocation=_allocation(allocated=10),
             balance=_balance(physical=10, sold_in_possession=5),
-            live=True,
         )
     assert (
         sm.plan_sale_stock(
@@ -560,34 +564,9 @@ def test_planner_refuses_stock_the_shelf_cannot_cover_and_a_zero_answers_nothing
             immediate_qty=0,
             allocation=_allocation(allocated=10),
             balance=_balance(physical=10),
-            live=True,
         )
         is None
     )
-
-
-def test_reopened_planner_still_refuses_stock_the_shelf_cannot_cover_but_writes_nothing() -> None:
-    assert (
-        sm.plan_sale_stock(
-            show_and_sell_id=EVENT,
-            product_id=PRODUCT,
-            immediate_qty=2,
-            allocation=None,
-            balance=_balance(physical=10),
-            live=False,
-        )
-        is None
-    )
-    with pytest.raises(AppError) as raised:
-        sm.plan_sale_stock(
-            show_and_sell_id=EVENT,
-            product_id=PRODUCT,
-            immediate_qty=99,
-            allocation=None,
-            balance=_balance(physical=10),
-            live=False,
-        )
-    assert raised.value.details["subcode"] == sm.INSUFFICIENT_EVENT_STOCK
 
 
 def test_correction_applies_only_the_immediate_delta_either_direction() -> None:
@@ -598,7 +577,6 @@ def test_correction_applies_only_the_immediate_delta_either_direction() -> None:
         immediate_delta=-2,
         allocation=_allocation(allocated=10, sold=4),
         balance=_balance(physical=6, version=3),
-        live=True,
     )
     assert negative is not None
     assert negative.immediate_delta == -2
@@ -613,7 +591,6 @@ def test_correction_applies_only_the_immediate_delta_either_direction() -> None:
         immediate_delta=3,
         allocation=_allocation(allocated=10, sold=1),
         balance=_balance(physical=10),
-        live=True,
     )
     assert positive is not None and positive.new_sold_qty == 4
 
@@ -624,7 +601,6 @@ def test_correction_applies_only_the_immediate_delta_either_direction() -> None:
             immediate_delta=0,
             allocation=_allocation(allocated=10, sold=1),
             balance=_balance(physical=10),
-            live=True,
         )
         is None
     )
@@ -639,32 +615,19 @@ def test_correction_rolls_back_when_the_handback_exceeds_what_was_sold() -> None
             immediate_delta=-5,
             allocation=_allocation(allocated=10, sold=2),
             balance=_balance(physical=10),
-            live=True,
         )
     assert raised.value.details["subcode"] == sm.INSUFFICIENT_EVENT_STOCK
-    # A reopened event validates the same bound and then writes nothing: re-finalization
-    # is what applies the delta.
-    assert (
-        sm.corrected_sale_stock_change(
-            show_and_sell_id=EVENT,
-            product_id=PRODUCT,
-            immediate_delta=-2,
-            allocation=_allocation(allocated=10, sold=2),
-            balance=_balance(physical=10),
-            live=False,
-        )
-        is None
-    )
+
     with pytest.raises(AppError) as raised:
         sm.corrected_sale_stock_change(
             show_and_sell_id=EVENT,
             product_id=PRODUCT,
-            immediate_delta=-3,
-            allocation=_allocation(allocated=10, sold=2),
+            immediate_delta=-1,
+            allocation=None,
             balance=_balance(physical=10),
-            live=False,
         )
     assert raised.value.details["subcode"] == sm.INSUFFICIENT_EVENT_STOCK
+    assert "holds 0 to sell" in raised.value.message
 
 
 def test_write_actions_pin_every_version_and_refuse_to_overwrite() -> None:
@@ -1020,6 +983,13 @@ def test_reads_find_one_obligation_and_one_sale_revision(show_and_sells_table: A
     assert [int(r[sm.REVISION_ATTRIBUTE]) for r in sm.sale_revision_rows(EVENT, "sale-model-reads")] == [1]
     assert sm.sale_revision_rows(EVENT, "sale-model-none") == []
 
+    archived = sm.read_sale_revision(EVENT, "sale-model-reads", 1)
+    assert archived is not None and str(archived[sm.REASON_ATTRIBUTE]) == "typo"
+    assert sm.read_sale_revision(EVENT, "sale-model-reads", 0) is None, (
+        "a sale at revision 1 has no previous revision to answer"
+    )
+    assert sm.read_sale_revision(EVENT, "sale-model-none", 1) is None
+
 
 def test_the_planner_refuses_a_cancelled_allocation_and_a_product_with_no_shelf() -> None:
     """Two absences that read the same at the table: nothing assigned, and nothing on hand."""
@@ -1030,7 +1000,6 @@ def test_the_planner_refuses_a_cancelled_allocation_and_a_product_with_no_shelf(
             immediate_qty=1,
             allocation=_allocation(allocated=4, status=inv.ALLOCATION_CANCELLED),
             balance=_balance(physical=10),
-            live=True,
         )
     assert raised.value.details["subcode"] == sm.INSUFFICIENT_EVENT_STOCK
     assert "allocation is CANCELLED" in raised.value.message
@@ -1041,49 +1010,9 @@ def test_the_planner_refuses_a_cancelled_allocation_and_a_product_with_no_shelf(
             immediate_qty=1,
             allocation=_allocation(allocated=4),
             balance=None,
-            live=True,
         )
     assert raised.value.details["subcode"] == sm.INSUFFICIENT_EVENT_STOCK
     assert "holds 0 to sell" in raised.value.message
-
-
-def test_a_reopened_reversal_is_measured_against_what_the_event_recorded_as_sold() -> None:
-    """A reopened event has no live allocation to read, so the ceiling is what is on the row."""
-    with pytest.raises(AppError) as raised:
-        sm.corrected_sale_stock_change(
-            show_and_sell_id=EVENT,
-            product_id=PRODUCT,
-            immediate_delta=-1,
-            allocation=None,
-            balance=_balance(physical=10),
-            live=False,
-        )
-    assert raised.value.details["subcode"] == sm.INSUFFICIENT_EVENT_STOCK
-    assert "holds 0 to sell" in raised.value.message
-    # A handback the recorded quantity covers still writes nothing here.
-    assert (
-        sm.corrected_sale_stock_change(
-            show_and_sell_id=EVENT,
-            product_id=PRODUCT,
-            immediate_delta=-2,
-            allocation=_allocation(allocated=4, sold=2),
-            balance=_balance(physical=8),
-            live=False,
-        )
-        is None
-    )
-    # A reopened increase is validated against the shelf and then deferred, also silently.
-    assert (
-        sm.corrected_sale_stock_change(
-            show_and_sell_id=EVENT,
-            product_id=PRODUCT,
-            immediate_delta=2,
-            allocation=None,
-            balance=_balance(physical=10),
-            live=False,
-        )
-        is None
-    )
 
 
 def test_a_null_set_becomes_a_remove_because_dynamodb_cannot_bind_a_null() -> None:

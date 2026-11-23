@@ -356,17 +356,61 @@ def _seed_we_owe_state(
     return row
 
 
-def _method(units_table: Any, *, payment_method_id: str = WISE_METHOD_ID, is_active: bool = True) -> Dict[str, Any]:
+def _method(
+    units_table: Any,
+    *,
+    payment_method_id: str = WISE_METHOD_ID,
+    display_name: str = "Wise Transfer",
+    is_active: bool = True,
+) -> Dict[str, Any]:
     """One custom payment method row, written the way ``createUnitPaymentMethod`` writes it."""
     item = upm.build_payment_item(
         payment_method_id=payment_method_id,
         unit_id=UNIT,
-        display_name="Wise Transfer",
+        display_name=display_name,
         created_by_account_id=AVERY,
         now_iso=ACTIVE_START,
         is_active=is_active,
     )
     units_table.put_item(Item=item)
+    return item
+
+
+def _rename_method(units_table: Any, *, display_name: str = "Wise Business", is_active: bool = False) -> Dict[str, Any]:
+    """Rename and retire the seeded method the way ``updateUnitPaymentMethod`` does.
+
+    The method's sort key is its normalized name, so a rename is a new key with the same
+    ``paymentMethodId`` and the old key gone — which is exactly the drift a sale's payment
+    snapshot exists to survive (PAY-06).
+    """
+    for row in list(units_table.scan()["Items"]):
+        if str(row.get("paymentMethodId", "")) == WISE_METHOD_ID:
+            units_table.delete_item(Key={"pk": str(row["pk"]), "sk": str(row["sk"])})
+    return _method(units_table, display_name=display_name, is_active=is_active)
+
+
+def _seed_signup(
+    show_and_sells_table: Any,
+    event_id: str,
+    *,
+    minutes: int = 0,
+    profile_id: str = "PROFILE#sale-budget-scout",
+) -> Dict[str, Any]:
+    """One ACTIVE signup row; minutes > 0 reads as confirmed work by §8.10's budget."""
+    event = show_and_sells_table.get_item(Key=ssm.event_metadata_key(event_id)).get("Item")
+    item = ssm.build_show_and_sell_signup_item(
+        event=dict(event),
+        slot_id="slot-budget",
+        profile_id=profile_id,
+        campaign_id="SC#sale-budget",
+        signed_up_by_account_id=AVERY,
+        now_iso=ACTIVE_START,
+        status=ssm.SIGNUP_ACTIVE,
+        actual_minutes=minutes,
+        confirmed_by_account_id=AVERY if minutes else None,
+        confirmed_at=ACTIVE_START if minutes else None,
+    )
+    show_and_sells_table.put_item(Item=item)
     return item
 
 
@@ -644,6 +688,36 @@ def test_sale_m_01_02_the_largest_transaction_safe_batch_lands_and_a_bigger_one_
     assert sorted(_stored_event(world["show_and_sells"])[ssm.PRODUCT_IDS_ATTRIBUTE]) == sorted(products[:21])
 
 
+def test_sale_m_01_02_confirmed_work_shrinks_the_finalization_budget_a_sale_may_use(
+    world: Dict[str, Any],
+) -> None:
+    """§8.10: the preflight counts the event, not just this sale — confirmed work and the
+    Scouts who earned it are writes finalization has to make too."""
+    products = _offer_products(world["catalogs"], 21)
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT)
+    for product_id in products:
+        _seed_stock(world, product_id=product_id)
+    _seed_signup(world["show_and_sells"], ACTIVE_EVENT, minutes=0)
+
+    largest = _ok(_create(lines=[_line(product_id) for product_id in products], key="sale-21"))
+    assert len(largest["inventoryPositions"]) == 21, (
+        f"an unconfirmed signup costs the budget nothing: {OVERHEAD} + 21×{PER_PRODUCT} + 1 sale fits"
+    )
+
+    _seed_signup(world["show_and_sells"], ACTIVE_EVENT, minutes=30)
+
+    refused = _create(lines=[_line(product_id) for product_id in products], version=2, key="sale-21-again")
+
+    error = assert_is_error(refused, "CONFLICT")
+    assert "finalize" in error["message"], error["message"]
+    assert (
+        f"{OVERHEAD + 21 * PER_PRODUCT + am.FINALIZATION_ACTIONS_PER_CONFIRMED_SIGNUP + am.FINALIZATION_ACTIONS_PER_PARTICIPATING_SCOUT + 2} actions"
+        in error["message"]
+    ), error["message"]
+    assert len(_sale_rows(world["show_and_sells"])) == 1, "the refusal adds no second sale"
+    assert _stored_event(world["show_and_sells"])[ssm.VERSION_ATTRIBUTE] == 2, "the refusal wrote nothing"
+
+
 def test_sale_m_01_02_a_line_batch_over_the_action_budget_is_refused_and_splits_into_two_sales(
     world: Dict[str, Any],
 ) -> None:
@@ -836,7 +910,12 @@ def test_sale_m_01_05_a_reopened_sale_is_a_draft_that_moves_no_stock(world: Dict
         2,
         sorted([PRODUCT, OTHER_PRODUCT]),
     )
-    assert event[ssm.ALLOCATION_DRAFT_ATTRIBUTE] == {OTHER_PRODUCT: 0, PRODUCT: 0}, "zero baselines for re-finalization"
+    assert event[ssm.ALLOCATION_DRAFT_ATTRIBUTE] == {PRODUCT: 0}, (
+        "the zero baseline is for the newly referenced product only: a product the event "
+        "already held keeps its approved allocation, and stamping 0 would tell "
+        "re-finalization the Kernel reduced it"
+    )
+    assert OTHER_PRODUCT not in event[ssm.ALLOCATION_DRAFT_ATTRIBUTE]
 
 
 def test_sale_m_01_05_a_retry_cannot_create_two_sale_ids_or_double_the_stock(world: Dict[str, Any]) -> None:
@@ -845,6 +924,7 @@ def test_sale_m_01_05_a_retry_cannot_create_two_sale_ids_or_double_the_stock(wor
     _seed_stock(world)
 
     first = _ok(_create(lines=[_line(PRODUCT, immediate=1, we_owe=1)], buyerName="Buyer Bee", key="sale-1"))
+    assert first["priorRevision"] is None, "a create had no previous revision to carry"
     replay = _ok(_create(lines=[_line(PRODUCT, immediate=1, we_owe=1)], buyerName="Buyer Bee", key="sale-1"))
 
     assert replay == first
@@ -889,6 +969,18 @@ def test_sale_m_02_01_a_correction_addresses_a_line_by_its_id_and_archives_the_p
     assert answer["sale"]["lineItems"][0][sm.LINE_ITEM_ID_ATTRIBUTE] == line_id
     assert answer["sale"]["lineItems"][0][sm.IMMEDIATE_QTY_ATTRIBUTE] == 1
     assert answer["sale"]["totalCents"] == 1000, "one Kernel immediate, one owed"
+
+    prior = answer["priorRevision"]
+    assert prior is not None, "§7.1: the correction's answer includes the prior revision"
+    assert prior[sm.REVISION_ATTRIBUTE] == 1
+    assert prior[sm.LINE_ITEMS_ATTRIBUTE] == [sm.sale_line_payload(line) for line in before[sm.LINE_ITEMS_ATTRIBUTE]]
+    assert prior[sm.TOTAL_CENTS_ATTRIBUTE] == int(before[sm.TOTAL_CENTS_ATTRIBUTE])
+    assert prior[sm.PAYMENT_SNAPSHOT_ATTRIBUTE] == before[sm.PAYMENT_SNAPSHOT_ATTRIBUTE]
+    assert prior[sm.BUYER_EMAIL_ATTRIBUTE] == "bee@example.test"
+    assert prior[sm.SALE_AT_ATTRIBUTE] == before[sm.SALE_AT_ATTRIBUTE]
+    assert prior[sm.STATUS_ATTRIBUTE] == sm.SALE_STATUS_ACTIVE
+    assert prior["reason"] == "two boxes came back"
+    assert prior["correctedByAccountId"] == AVERY
 
     revision = _stored_revision(world["show_and_sells"], ACTIVE_EVENT, sale_id, 1)
     assert revision is not None
@@ -1029,7 +1121,10 @@ def test_sale_m_02_02_a_reopened_correction_defers_effects_and_adds_zero_baselin
         3,
         sorted([PRODUCT, OTHER_PRODUCT]),
     )
-    assert event[ssm.ALLOCATION_DRAFT_ATTRIBUTE] == {PRODUCT: 0, OTHER_PRODUCT: 0}
+    assert event[ssm.ALLOCATION_DRAFT_ATTRIBUTE] == {OTHER_PRODUCT: 0}, (
+        "only the product the sale newly references takes a zero baseline; PRODUCT was "
+        "already on the event and its approved allocation stands"
+    )
     assert answer["obligations"] == [], "a reopened correction writes no obligations; re-finalization replays the lines"
     assert len(_revision_rows(world["show_and_sells"])) == 1
     revision = _stored_revision(world["show_and_sells"], ACTIVE_EVENT, sale_id, 1)
@@ -1124,8 +1219,9 @@ def test_sale_m_02_04_an_unchanged_correction_may_keep_a_retired_method(world: D
 
     The two halves sit one character apart in the input and worlds apart in the rule:
     naming the method the sale already carried is a restatement, so a method the Unit has
-    since retired is still allowed; naming any other method is a fresh choice, and a
-    retired method is not a choice a sale may be re-priced onto.
+    since retired is still allowed, and the name it keeps is the one the sale recorded,
+    never the row's current one; naming any other method is a fresh choice, and a retired
+    method is not a choice a sale may be re-priced onto.
     """
     _seed_event(world["show_and_sells"], ACTIVE_EVENT)
     _seed_stock(world)
@@ -1133,23 +1229,157 @@ def test_sale_m_02_04_an_unchanged_correction_may_keep_a_retired_method(world: D
     created = _ok(_create(paymentMethodCode=f"CUSTOM:{WISE_METHOD_ID}", lines=[_line(PRODUCT, immediate=2)]))
     sale_id = created["sale"]["saleId"]
     line_id = created["sale"]["lineItems"][0][sm.LINE_ITEM_ID_ATTRIBUTE]
-    _method(world["units"], is_active=False)
     corrected = [{"lineItemId": line_id, "productId": PRODUCT, "immediateQty": 1, "weOweQty": 0}]
 
-    kept = _ok(_correct(sale_id=sale_id, lines=corrected, paymentMethodCode=f"CUSTOM:{WISE_METHOD_ID}"))
-    assert kept["sale"]["paymentMethodSnapshot"]["displayName"] == "Wise Transfer"
+    _rename_method(world["units"])
+    kept = _ok(
+        _correct(
+            sale_id=sale_id,
+            lines=corrected,
+            paymentMethodCode=f"  custom:{WISE_METHOD_ID} ",
+        )
+    )
+    assert kept["sale"]["paymentMethodSnapshot"] == {
+        "methodCode": f"CUSTOM:{WISE_METHOD_ID}",
+        "displayName": "Wise Transfer",
+        "otherDetails": None,
+    }, "the restatement keeps the sale's own snapshot; the renamed row cannot reach it"
     assert kept["sale"]["revision"] == 2
 
+    _method(world["units"], payment_method_id="pm-wise-sale-retired", is_active=False)
     switched = _correct(
         sale_id=sale_id,
         lines=corrected,
-        paymentMethodCode=f"CUSTOM:{WISE_METHOD_ID}-retired",
+        paymentMethodCode="CUSTOM:pm-wise-sale-retired",
         revision=2,
         version=3,
         key="correct-retired",
     )
-    assert_is_error(switched, "NOT_FOUND"), "a retired method is not a method a new choice may pick"
+    error = assert_is_error(switched, "CONFLICT")
+    assert "no longer available for new sales" in error["message"], error["message"]
     assert _stored_sale(world["show_and_sells"], ACTIVE_EVENT, sale_id)[sm.REVISION_ATTRIBUTE] == 2
+
+
+def test_sale_m_02_04_a_correction_that_changes_the_method_validates_it_as_a_fresh_choice(
+    world: Dict[str, Any],
+) -> None:
+    """A new method is not a restatement: it is a fresh choice, validated as such.
+
+    The restated path keeps the sale's recorded snapshot and carries no method-row
+    condition, because nothing about the method changed; a correction that names a
+    different method is the opposite case, and it must snapshot the new method's own
+    display name and refuse to commit a method the Unit has since retired.
+    """
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT)
+    _seed_stock(world)
+    _method(world["units"])
+    _method(world["units"], payment_method_id="pm-wise-payout", display_name="Wise Payout")
+    created = _ok(_create(paymentMethodCode=f"CUSTOM:{WISE_METHOD_ID}", lines=[_line(PRODUCT, immediate=2)]))
+    sale_id = created["sale"]["saleId"]
+    line_id = created["sale"]["lineItems"][0][sm.LINE_ITEM_ID_ATTRIBUTE]
+    corrected = [{"lineItemId": line_id, "productId": PRODUCT, "immediateQty": 1, "weOweQty": 0}]
+
+    switched = _ok(
+        _correct(
+            sale_id=sale_id,
+            lines=corrected,
+            paymentMethodCode="CUSTOM:pm-wise-payout",
+            key="correct-fresh",
+        )
+    )
+
+    assert switched["sale"]["paymentMethodSnapshot"] == {
+        "methodCode": "CUSTOM:pm-wise-payout",
+        "displayName": "Wise Payout",
+        "otherDetails": None,
+    }, "a changed method snapshots its own display name, never the sale's recorded one"
+    assert switched["sale"]["revision"] == 2
+    assert (
+        _stored_sale(world["show_and_sells"], ACTIVE_EVENT, sale_id)[sm.PAYMENT_SNAPSHOT_ATTRIBUTE]["methodCode"]
+        == "CUSTOM:pm-wise-payout"
+    )
+
+
+def test_sale_m_02_04_a_correction_may_edit_the_other_note_without_choosing_the_method_again(
+    world: Dict[str, Any],
+) -> None:
+    """§4.3.1: the note rides the method it explains, and an omission keeps what is on file."""
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT)
+    _seed_stock(world)
+    created = _ok(
+        _create(
+            paymentMethodCode="OTHER",
+            otherDetails="half cash, half a favor",
+            lines=[_line(PRODUCT, immediate=2)],
+        )
+    )
+    sale_id = created["sale"]["saleId"]
+    line_id = created["sale"]["lineItems"][0][sm.LINE_ITEM_ID_ATTRIBUTE]
+    corrected = [{"lineItemId": line_id, "productId": PRODUCT, "immediateQty": 1, "weOweQty": 0}]
+
+    edited = _ok(_correct(sale_id=sale_id, lines=corrected, otherDetails="cash arrived the next morning"))
+    assert edited["sale"]["paymentMethodSnapshot"] == {
+        "methodCode": "OTHER",
+        "displayName": "Other",
+        "otherDetails": "cash arrived the next morning",
+    }
+
+    kept = _ok(
+        _correct(
+            sale_id=sale_id,
+            lines=[{"lineItemId": line_id, "productId": PRODUCT, "immediateQty": 1, "weOweQty": 0}],
+            revision=2,
+            version=3,
+            key="correct-note-keep",
+        )
+    )
+    assert kept["sale"]["paymentMethodSnapshot"]["otherDetails"] == "cash arrived the next morning", (
+        "an omitted note keeps the one on file, like every other omitted field"
+    )
+
+
+def test_sale_m_02_04_a_note_on_a_sale_that_is_not_other_is_refused_either_way(world: Dict[str, Any]) -> None:
+    """§4.3.3: otherDetails exists only for the Other method, said with or without the code."""
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT)
+    _seed_stock(world)
+    created = _ok(_create(paymentMethodCode="CASH", lines=[_line(PRODUCT, immediate=2)]))
+    sale_id = created["sale"]["saleId"]
+    line_id = created["sale"]["lineItems"][0][sm.LINE_ITEM_ID_ATTRIBUTE]
+    corrected = [{"lineItemId": line_id, "productId": PRODUCT, "immediateQty": 1, "weOweQty": 0}]
+
+    without_code = _correct(sale_id=sale_id, lines=corrected, otherDetails="card on the side", key="correct-note-1")
+    assert_is_error(without_code, "INVALID_INPUT")
+    with_code = _correct(
+        sale_id=sale_id,
+        lines=corrected,
+        paymentMethodCode="CASH",
+        otherDetails="card on the side",
+        key="correct-note-2",
+    )
+    assert_is_error(with_code, "INVALID_INPUT")
+    assert _stored_sale(world["show_and_sells"], ACTIVE_EVENT, sale_id)[sm.REVISION_ATTRIBUTE] == 1
+
+
+def test_sale_m_02_01_a_correction_cannot_move_a_line_to_another_product(world: Dict[str, Any]) -> None:
+    """§8.6.1: a line is its product's new quantity; a product change is an omission plus a supplemental."""
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT)
+    _seed_stock(world)
+    _seed_balance(world["inventory"], OTHER_PRODUCT, physical=4)
+    _seed_allocation(world["inventory"], ACTIVE_EVENT, OTHER_PRODUCT, allocated=4)
+    created = _ok(_create(lines=[_line(PRODUCT, immediate=1)]))
+    sale_id = created["sale"]["saleId"]
+    line_id = created["sale"]["lineItems"][0][sm.LINE_ITEM_ID_ATTRIBUTE]
+
+    moved = _correct(
+        sale_id=sale_id,
+        lines=[{"lineItemId": line_id, "productId": OTHER_PRODUCT, "immediateQty": 1, "weOweQty": 0}],
+    )
+
+    error = assert_is_error(moved, "INVALID_INPUT")
+    assert "keeps the product it sold" in error["message"]
+    assert _stored_sale(world["show_and_sells"], ACTIVE_EVENT, sale_id)[sm.REVISION_ATTRIBUTE] == 1
+    assert _revision_rows(world["show_and_sells"]) == []
+    assert len(_movements(world["inventory"])) == 1, "the refusal wrote nothing"
 
 
 def test_sale_m_02_04_a_correction_is_guarded_by_tenancy_replay_and_the_buyer_rule(
@@ -1215,6 +1445,12 @@ def test_sale_m_03_01_voiding_a_sale_hands_every_unit_back_and_closes_each_oblig
     assert answer["sale"]["voidedByAccountId"] == AVERY
     assert answer["sale"]["voidedAt"]
     assert answer["sale"]["lineItems"] == created["sale"]["lineItems"], "a void never rewrites the lines"
+    prior = answer["priorRevision"]
+    assert prior is not None, "the void archives the revision it replaced, and the answer carries it"
+    assert prior[sm.REVISION_ATTRIBUTE] == 1
+    assert prior[sm.STATUS_ATTRIBUTE] == sm.SALE_STATUS_ACTIVE
+    assert prior[sm.LINE_ITEMS_ATTRIBUTE] == created["sale"]["lineItems"]
+    assert prior["reason"] == "the buyer changed their mind"
     assert all(o["status"] == sm.WE_OWE_STATUS_CLOSED for o in answer["obligations"])
     assert all(o["closeReason"] == sm.WE_OWE_CLOSE_CANCELLED for o in answer["obligations"])
 
@@ -1246,6 +1482,13 @@ def test_sale_m_03_01_line_level_voiding_is_a_correction_that_omits_the_line(wor
 
     assert answer["sale"]["status"] == sm.SALE_STATUS_ACTIVE
     assert len(answer["sale"]["lineItems"]) == 1
+    positions = {position["productId"] for position in answer["inventoryPositions"]}
+    assert positions == {PRODUCT, OTHER_PRODUCT}, (
+        "the omitted line's handback is one of this write's effects, and the answer names it "
+        "in the position and allocation it moved"
+    )
+    allocations = {allocation["productId"] for allocation in answer["allocations"]}
+    assert allocations == {PRODUCT, OTHER_PRODUCT}
     assert (_stored_allocation(world["inventory"], ACTIVE_EVENT, OTHER_PRODUCT) or {})[inv.SOLD_QTY] == 0
     assert (_stored_balance(world["inventory"], OTHER_PRODUCT) or {})[inv.KERNEL_PHYSICAL_QTY] == 4
 
