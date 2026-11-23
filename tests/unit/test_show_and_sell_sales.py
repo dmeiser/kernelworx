@@ -75,6 +75,8 @@ SALE_AT = _shift(-1)
 #: The ended event's interval is wholly behind the clock, which is still a live state (§4.2.2).
 ENDED_START, ENDED_END = _shift(-48), _shift(-44)
 ENDED_SALE_AT = _shift(-45)
+#: The future event is still SCHEDULED — the one state that refuses a sale (§4.2.2's matrix).
+FUTURE_START, FUTURE_END = _shift(24), _shift(28)
 
 
 def _product(index: int) -> str:
@@ -214,7 +216,12 @@ def _seed_event(
     show_and_sells_table: Any,
     event_id: str,
     *,
-    status: str = ssm.STATUS_ACTIVE,
+    # A live event stores SCHEDULED: ACTIVE and ENDED are derived from the interval
+    # (SSE-04) and a row storing either one is rejected by the event invariant. The
+    # interval below brackets "now", so the seeded event reads ACTIVE — the row the
+    # deployed product actually creates, which is what makes these tests exercise the
+    # same decision path QA probes on dev.kernelworx.app.
+    status: str = ssm.STATUS_SCHEDULED,
     start_at: str = ACTIVE_START,
     end_at: str = ACTIVE_END,
     version: int = 1,
@@ -594,8 +601,13 @@ def test_sale_m_01_01_one_sale_answers_sale_allocation_obligation_position_and_w
 
 
 def test_sale_m_01_01_an_ended_event_still_takes_sales(world: Dict[str, Any]) -> None:
-    """§4.2.2: ENDED is a live state — finalization has not decided what sold yet."""
-    _seed_event(world["show_and_sells"], ACTIVE_EVENT, start_at=ENDED_START, end_at=ENDED_END, status=ssm.STATUS_ENDED)
+    """§4.2.2: ENDED is a live state — finalization has not decided what sold yet.
+
+    The stored row still says SCHEDULED (an ENDED row is a state the event model derives
+    and refuses to store); the interval is what makes it ended. This is the exact shape
+    QA's reproduction hits on the deployed product.
+    """
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT, start_at=ENDED_START, end_at=ENDED_END)
     _seed_stock(world)
 
     answer = _sold_sale(world, event_id=ACTIVE_EVENT, sale_at=ENDED_SALE_AT)
@@ -624,11 +636,47 @@ def test_sale_m_01_01_only_this_units_admins_enter_sales(world: Dict[str, Any]) 
 # --- SALE-M-01-02: state, interval, version and the write budget ------------------
 
 
+def test_every_event_this_file_seeds_is_a_row_the_deployed_product_writes(world: Dict[str, Any]) -> None:
+    """The suite is evidence only if it seeds rows the product can actually create.
+
+    QA's reproduction failed on the deployed build because every live event there stores
+    ``SCHEDULED`` while this file used to store ``ACTIVE`` — a clock state the event model
+    derives and whose invariant rejects a row that carries one — so a gate that read the
+    stored field looked right against a row the deployed product never writes. This pins
+    the three shapes the sale tests use to the model's own checks: no invariant violation,
+    and the state the read path reports is the one each test believes it is exercising.
+    """
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT)
+    _seed_event(world["show_and_sells"], "SSE#guarded-ended", start_at=ENDED_START, end_at=ENDED_END)
+    _seed_event(world["show_and_sells"], "SSE#guarded-reopened", status=ssm.STATUS_REOPENED)
+
+    for event_id, stored, derived in (
+        (ACTIVE_EVENT, ssm.STATUS_SCHEDULED, ssm.STATUS_ACTIVE),
+        ("SSE#guarded-ended", ssm.STATUS_SCHEDULED, ssm.STATUS_ENDED),
+        ("SSE#guarded-reopened", ssm.STATUS_REOPENED, ssm.STATUS_REOPENED),
+    ):
+        row = _stored_event(world["show_and_sells"], event_id)
+        assert ssm.event_invariant_violations(row) == [], f"{event_id} seeds a row the model rejects"
+        assert row[ssm.STATUS_ATTRIBUTE] == stored, f"{event_id} stores the placeholder, not the answer"
+        assert ssm.derive_event_status(row) == derived, f"{event_id} is not the state the tests assume"
+
+
 def test_sale_m_01_02_scheduled_finalized_and_cancelled_events_refuse_sales(world: Dict[str, Any]) -> None:
-    """§4.2.2's matrix, and the refusal names the state so the admin knows the remedy."""
-    for status in (ssm.STATUS_SCHEDULED, ssm.STATUS_FINALIZED, ssm.STATUS_CANCELLED):
+    """§4.2.2's matrix, and the refusal names the state so the admin knows the remedy.
+
+    ``SCHEDULED`` is refused by its interval, not by its stored field — a stored
+    ``SCHEDULED`` whose interval has begun reads ``ACTIVE`` and takes sales, which is the
+    state every other test in this file seeds. ``FINALIZED`` and ``CANCELLED`` are stored
+    workflow states and refuse whatever the clock says.
+    """
+    cases = (
+        (ssm.STATUS_SCHEDULED, FUTURE_START, FUTURE_END),
+        (ssm.STATUS_FINALIZED, ACTIVE_START, ACTIVE_END),
+        (ssm.STATUS_CANCELLED, ACTIVE_START, ACTIVE_END),
+    )
+    for status, start_at, end_at in cases:
         event_id = f"SSE#{status.lower()}"
-        _seed_event(world["show_and_sells"], event_id, status=status)
+        _seed_event(world["show_and_sells"], event_id, status=status, start_at=start_at, end_at=end_at)
         _seed_stock(world, event_id=event_id)
 
         refused = _create(event_id=event_id, key=f"sale-{status}")

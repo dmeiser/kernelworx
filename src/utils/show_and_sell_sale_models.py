@@ -1065,17 +1065,22 @@ def _we_owe_status_violations(item: Mapping[str, Any]) -> List[str]:
 # --- Entry rules shared by all three mutations (§4.3.3) -----------------------------
 
 
-def require_sale_state(event_row: Mapping[str, Any]) -> str:
+def require_sale_state(event_row: Mapping[str, Any], now_iso: Optional[str] = None) -> str:
     """Which sale-write state this event is in: :data:`SALE_STATE_LIVE` or :data:`SALE_STATE_DRAFT`.
 
-    ``ACTIVE`` and ``ENDED`` write the stock answer now (§4.2.2's live states);
-    ``REOPENED`` records only the draft and leaves the effect to re-finalization (§8.6);
-    every other state is refused, including ``FINALIZED``, where an approved version has
-    already published the numbers a new sale would contradict. The refusal names the
-    state, because an admin staring at a table needs to know whether to reopen the event
-    or to correct the sale before the next finalization.
+    The decision is the one the read path reports — :func:`show_and_sell_models.derive_event_status` —
+    never the stored field: a live event's row stores ``SCHEDULED`` and reads as ``ACTIVE``
+    or ``ENDED`` only once the clock reaches the interval (SSE-04's clock states, which the
+    model forbids storing and the invariant rejects on a row that carries one). Switching
+    on the stored field instead reads every live event as ``SCHEDULED`` and refuses every
+    sale the product can create. ``ACTIVE`` and ``ENDED`` write the stock answer now
+    (§4.2.2's live states); ``REOPENED`` records only the draft and leaves the effect to
+    re-finalization (§8.6); every other state is refused, including ``FINALIZED``, where
+    an approved version has already published the numbers a new sale would contradict.
+    The refusal names the state the caller is told about, because an admin staring at a
+    table needs the verdict to match what ``showAndSell`` answered two lines above.
     """
-    status = str(event_row.get(STATUS_ATTRIBUTE) or "")
+    status = show_and_sell_models.derive_event_status(event_row, now_iso)
     if status in {show_and_sell_models.STATUS_ACTIVE, show_and_sell_models.STATUS_ENDED}:
         return SALE_STATE_LIVE
     if status == show_and_sell_models.STATUS_REOPENED:
@@ -1615,17 +1620,15 @@ def _extra_condition_parts(
 ) -> List[str]:
     """The version pin first, then every extra fragment with the values and names it reads.
 
-    A fragment may be an empty string when its only job is to bind a value a later
-    fragment references: ``#status IN (:a, :b)`` states its check once but needs both
-    states in the document.
+    Every condition states its check in its own fragment; a condition needs only the
+    states it actually pins, so there is no value-only entry to skip over.
     """
     condition_parts = ["#version = :expectedVersion"]
     for placeholder, fragment, value, attribute_names in extra_conditions:
         values[placeholder] = value
         for attribute in attribute_names:
             names[f"#{attribute}"] = attribute
-        if fragment:
-            condition_parts.append(fragment)
+        condition_parts.append(fragment)
     return condition_parts
 
 
@@ -1689,12 +1692,13 @@ def sale_event_action(
 
     The product list and the sale/obligation/allocation rows it points at commit in one
     transaction (§8.4), so a sale of a product the event never held still becomes
-    visible to the finalization walk that lists it. The state condition names the two
-    states a live sale writes in: a racing writer that ended the event (finalized,
-    cancelled, or reopened and released its allocations) moves the version too, but
-    the state check is the sentence that makes the refusal say why, and it is what
-    keeps a reopened event's released allocations from being sold against in the
-    window the version pin alone would leave open.
+    visible to the finalization walk that lists it. The state condition names the stored
+    state a live answer derives from, not the answer itself: ``ACTIVE`` and ``ENDED`` are
+    clock states the model refuses to store, so a live event's row carries ``SCHEDULED``
+    and ``#status = :saleStateScheduled`` matches exactly the rows the resolver accepted
+    while refusing ``FINALIZED``/``CANCELLED``/``REOPENED``. The version pin is what loses
+    the race against a workflow that moved the event meanwhile; the state check is the
+    sentence that says why a non-sale row cannot commit a sale.
     """
     return _versioned_update(
         event_metadata_key(show_and_sell_id),
@@ -1710,12 +1714,11 @@ def sale_event_action(
         version_attribute=VERSION_ATTRIBUTE,
         extra_conditions=(
             (
-                ":saleStateActive",
-                "#status IN (:saleStateActive, :saleStateEnded)",
-                show_and_sell_models.STATUS_ACTIVE,
+                ":saleStateScheduled",
+                "#status = :saleStateScheduled",
+                show_and_sell_models.STATUS_SCHEDULED,
                 (STATUS_ATTRIBUTE,),
             ),
-            (":saleStateEnded", "", show_and_sell_models.STATUS_ENDED, ()),
         ),
     )
 
