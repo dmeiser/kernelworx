@@ -51,6 +51,38 @@ PRICES = {
 }
 
 
+class _RecordingSaleTable:
+    """Stand-in that records the parameters of every read, so consistency is checkable.
+
+    Moto answers every read strongly consistent, so a resolver test cannot tell a consistent
+    read from an eventually consistent one. This records what each call actually asked for.
+    """
+
+    table_name = "kernelworx-show-and-sells-ue1-dev"
+
+    def __init__(self, items: List[Dict[str, Any]]) -> None:
+        self._items = items
+        self.calls: List[Dict[str, Any]] = []
+
+    def get_item(self, **kwargs: Any) -> Dict[str, Any]:
+        self.calls.append({"operation": "GetItem", **kwargs})
+        key = kwargs["Key"]
+        for item in self._items:
+            if all(item.get(name) == value for name, value in key.items()):
+                return {"Item": item}
+        return {}
+
+    def query(self, **kwargs: Any) -> Dict[str, Any]:
+        self.calls.append({"operation": "Query", **kwargs})
+        values = kwargs["ExpressionAttributeValues"]
+        wanted = str(values[":pk"])
+        prefix = values.get(":prefix")
+        rows = [item for item in self._items if str(item.get("pk")) == wanted]
+        if prefix is not None:
+            rows = [item for item in rows if str(item.get("sk", "")).startswith(str(prefix))]
+        return {"Items": rows}
+
+
 def _event_row(
     *,
     status: str = ssm.STATUS_ACTIVE,
@@ -989,6 +1021,38 @@ def test_reads_find_one_obligation_and_one_sale_revision(show_and_sells_table: A
         "a sale at revision 1 has no previous revision to answer"
     )
     assert sm.read_sale_revision(EVENT, "sale-model-none", 1) is None
+
+
+def test_every_sale_read_the_answer_builds_on_is_strongly_consistent() -> None:
+    """§8: the answer is read back off the rows the transaction just wrote.
+
+    An eventually consistent read of a row written milliseconds ago can answer absent, and
+    for this module that is not cosmetic: ``priorRevision`` would come back null and the
+    products only the archived revision names would vanish from the allocation and position
+    answer — and the idempotency marker would then replay that hollowed-out payload for its
+    whole lifetime. Moto is always strongly consistent, so no resolver test can see the
+    difference; the only way to pin it is to record the parameters each read sends.
+    """
+    from src.utils import dynamodb as db_module
+
+    sale = _sale_item([_line(immediate=1)], sale_id="sale-model-consistency")
+    revision = sm.build_sale_revision_item(sale, corrected_by_account_id=AVERY, reason="typo", corrected_at=NOW)
+    owed = _we_owe_item(quantity=3)
+    recorder = _RecordingSaleTable([sale, revision, owed])
+    db_module.override_table("show_and_sells", recorder)
+    try:
+        assert sm.read_sale(EVENT, "sale-model-consistency") is not None
+        assert sm.read_sale_revision(EVENT, "sale-model-consistency", 1) is not None
+        assert sm.read_we_owe(EVENT, str(owed[sm.WE_OWE_ID_ATTRIBUTE])) is not None
+        assert [int(r[sm.REVISION_ATTRIBUTE]) for r in sm.sale_revision_rows(EVENT, "sale-model-consistency")] == [1]
+        assert sm.event_sale_rows(EVENT)
+        assert sm.sale_obligations(EVENT, str(owed[sm.SALE_ID_ATTRIBUTE]))
+    finally:
+        db_module.override_table("show_and_sells", None)
+
+    assert recorder.calls, "no read was recorded, so the guard would prove nothing"
+    lagging = [call for call in recorder.calls if call.get("ConsistentRead") is not True]
+    assert not lagging, f"eventually consistent reads in the answer path: {lagging}"
 
 
 def test_the_planner_refuses_a_cancelled_allocation_and_a_product_with_no_shelf() -> None:

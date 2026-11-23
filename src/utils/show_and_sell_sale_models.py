@@ -429,8 +429,17 @@ def read_sale_revision(show_and_sell_id: str, sale_id: str, revision: int) -> Op
     each of which archives the revision it replaced, so "the revision this write replaced"
     is always ``revision - 1`` and one exact key read answers it. A create is at revision 1
     and has no such row, which is why the caller asks only above 1.
+
+    The read is consistent because of WHEN it happens: the answer builder calls this right
+    after the transaction that wrote the revision child committed, and an eventually
+    consistent read of a row written milliseconds ago can answer absent. That would not be
+    a cosmetic gap — ``priorRevision`` would come back null and the products only the
+    archived revision names would drop out of the allocation and position answer, and the
+    idempotency marker would then replay that hollowed-out payload for seven days (§8).
     """
-    response = tables.show_and_sells.get_item(Key=sale_revision_key(show_and_sell_id, sale_id, revision))
+    response = tables.show_and_sells.get_item(
+        Key=sale_revision_key(show_and_sell_id, sale_id, revision), ConsistentRead=True
+    )
     item = response.get("Item")
     return dict(item) if isinstance(item, Mapping) else None
 
