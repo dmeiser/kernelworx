@@ -85,7 +85,7 @@ class _RecordingSaleTable:
 
 def _event_row(
     *,
-    status: str = ssm.STATUS_ACTIVE,
+    status: str = ssm.STATUS_SCHEDULED,
     start_at: str = "2026-11-21T17:00:00+00:00",
     end_at: str = "2026-11-21T21:00:00+00:00",
     we_owe_enabled: bool = True,
@@ -708,7 +708,8 @@ def test_write_actions_pin_every_version_and_refuse_to_overwrite() -> None:
         updated_by_account_id=AVERY,
         updated_at=NOW,
     )
-    assert "#status IN (:saleStateActive, :saleStateEnded)" in event_update["ConditionExpression"]
+    assert "#status = :saleStateScheduled" in event_update["ConditionExpression"]
+    assert event_update["ExpressionAttributeValues"][":saleStateScheduled"] == {"S": ssm.STATUS_SCHEDULED}
 
     _, movement = sm.sale_immediate_movement_action(
         event_row=_event_row(),
@@ -740,14 +741,27 @@ def test_write_actions_pin_every_version_and_refuse_to_overwrite() -> None:
 
 
 def test_sale_entry_state_matrix() -> None:
-    """ACTIVE and ENDED write now, REOPENED writes only the draft, everything else refuses."""
-    assert sm.require_sale_state(_event_row(status=ssm.STATUS_ACTIVE)) == sm.SALE_STATE_LIVE
-    assert sm.require_sale_state(_event_row(status=ssm.STATUS_ENDED)) == sm.SALE_STATE_LIVE
-    assert sm.require_sale_state(_event_row(status=ssm.STATUS_REOPENED)) == sm.SALE_STATE_DRAFT
-    for refused in (ssm.STATUS_SCHEDULED, ssm.STATUS_FINALIZED, ssm.STATUS_CANCELLED):
+    """ACTIVE and ENDED write now, REOPENED writes only the draft, everything else refuses.
+
+    The stored field is never the decision: a live event stores ``SCHEDULED`` and the
+    clock derives ``ACTIVE`` or ``ENDED`` from the interval (stored clock states are a
+    row the model's own invariant rejects), so the test pins ``now`` inside, past and
+    before the interval rather than seeding states the storage model forbids.
+    """
+    mid_event = "2026-11-21T19:00:00+00:00"  # inside _event_row's 17:00–21:00 interval
+    assert sm.require_sale_state(_event_row(status=ssm.STATUS_SCHEDULED), now_iso=mid_event) == sm.SALE_STATE_LIVE
+    after_event = "2026-11-21T22:00:00+00:00"
+    assert sm.require_sale_state(_event_row(status=ssm.STATUS_SCHEDULED), now_iso=after_event) == sm.SALE_STATE_LIVE
+    assert sm.require_sale_state(_event_row(status=ssm.STATUS_REOPENED), now_iso=mid_event) == sm.SALE_STATE_DRAFT
+    for refused, moment in (
+        (ssm.STATUS_SCHEDULED, "2026-11-21T16:00:00+00:00"),  # before startAt: derived SCHEDULED
+        (ssm.STATUS_FINALIZED, mid_event),
+        (ssm.STATUS_CANCELLED, mid_event),
+    ):
         with pytest.raises(AppError) as raised:
-            sm.require_sale_state(_event_row(status=refused))
+            sm.require_sale_state(_event_row(status=refused), now_iso=moment)
         assert raised.value.details["subcode"] == "EVENT_STATE_REFUSES_SALE"
+        assert refused in str(raised.value), f"the refusal names the state it refused: {raised.value}"
 
 
 def test_sale_at_bounds_are_inclusive_of_both_event_instants() -> None:
