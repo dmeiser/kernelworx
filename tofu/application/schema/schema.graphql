@@ -2484,6 +2484,14 @@ type ShowAndSellSignupConnection {
   pageInfo: PageInfo!
 }
 
+"""A page of one event's sales, raw (checklist §4.5.2)."""
+type ShowAndSellSaleConnection {
+  """The sale rows on this page, by sale time then sale id."""
+  items: [ShowAndSellSale!]!
+  """Cursor state for this page."""
+  pageInfo: PageInfo!
+}
+
 """The pending work picture after a confirmation batch, computed and never approved: the minutes Kernels have confirmed and the minimum finalization write set that picture implies (§8.10). Approving credit is finalization's job, not this read's."""
 type ShowAndSellWorkPreview {
   """The event version this preview was computed against, moved by this batch."""
@@ -2753,6 +2761,17 @@ type Query {
     """Pagination parameters."""
     page: PageInput
   ): WeOweObligationConnection!
+
+  # Show & Sell — sale read (checklist §4.5.2)
+  """An event's sales, raw and paginated: every buyer, line and payment detail an administrative screen needs, with the sale revision an optimistic-concurrency write conditions on. Unit Admin for the event's Unit; contains buyer/payment snapshots, never a participant projection."""
+  showAndSellSales(
+    """The event whose sales are being read."""
+    showAndSellId: ID!
+    """Filter to one sale state; omit for both, since a voided sale is history an admin needs to see."""
+    status: String
+    """Pagination parameters."""
+    page: PageInput
+  ): ShowAndSellSaleConnection!
 
   # Show & Sell — signup and commitment reads (checklist §3.4.4-§3.4.5)
   """An event's signups with the full actor and confirmation audit: who placed each, who confirmed the work, and the version each cancellation or confirmation conditions on. Unit Admin for the event's Unit."""

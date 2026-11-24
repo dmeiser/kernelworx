@@ -2055,6 +2055,8 @@ export type GqlQuery = {
   showAndSell: GqlShowAndSellAdmin;
   /** One event's participant view for one Scout: the slots and that Scout's commitments. Profile Owner/WRITE or READ for that Scout, or a Unit Admin for the event's Unit. An unjoined Scout, another Unit's event, or a Scout the caller cannot read returns `NOT_FOUND`, and no administrative field is present. */
   showAndSellOpportunity: GqlShowAndSellOpportunity;
+  /** An event's sales, raw and paginated: every buyer, line and payment detail an administrative screen needs, with the sale revision an optimistic-concurrency write conditions on. Unit Admin for the event's Unit; contains buyer/payment snapshots, never a participant projection. */
+  showAndSellSales: GqlShowAndSellSaleConnection;
   /** The authorized facts one browser needs to generate a slot's calendar invite itself: identity, location, IANA timezone, and UTC times. Data only — no server generates, stores, or emails a file, and the READ-only collaborator's read surface stops short of it (CAL-01, AUTH-P-02). Unit Admin, or Profile Owner/WRITE for that exact Scout. */
   showAndSellSignupCalendarData: GqlCalendarInviteData;
   /** An event's signups with the full actor and confirmation audit: who placed each, who confirmed the work, and the version each cancellation or confirmation conditions on. Unit Admin for the event's Unit. */
@@ -2295,6 +2297,13 @@ export type GqlQuery_ShowAndSellArgs = {
 export type GqlQuery_ShowAndSellOpportunityArgs = {
   profileId: Scalars['ID']['input'];
   showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellSalesArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  showAndSellId: Scalars['ID']['input'];
+  status?: InputMaybe<Scalars['String']['input']>;
 };
 
 /** The root query object for the KernelWorx API. */
@@ -2942,6 +2951,15 @@ export type GqlShowAndSellSale = {
   updatedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   voidedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   voidedByAccountId?: Maybe<Scalars['ID']['output']>;
+};
+
+/** A page of one event's sales, raw (checklist §4.5.2). */
+export type GqlShowAndSellSaleConnection = {
+  __typename?: 'ShowAndSellSaleConnection';
+  /** The sale rows on this page, by sale time then sale id. */
+  items: Array<GqlShowAndSellSale>;
+  /** Cursor state for this page. */
+  pageInfo: GqlPageInfo;
 };
 
 /** One line of a pooled sale, with the product's identity and price as this campaign's catalog carried them at the moment of the sale (§5.14). A later rename or price change never reaches a sale that already happened. */
