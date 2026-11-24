@@ -9,10 +9,11 @@ interface ErrorAlertProps {
   message: string;
   sx?: React.ComponentProps<typeof Alert>['sx'];
   onDismiss?: () => void;
+  'data-testid'?: string;
 }
 
-export const ErrorAlert: React.FC<ErrorAlertProps> = ({ message, sx = { mb: 3 }, onDismiss }) => (
-  <Alert severity="error" sx={sx} onClose={onDismiss}>
+export const ErrorAlert: React.FC<ErrorAlertProps> = ({ message, sx = { mb: 3 }, onDismiss, 'data-testid': testId }) => (
+  <Alert severity="error" sx={sx} onClose={onDismiss} data-testid={testId}>
     {message}
   </Alert>
 );
@@ -28,7 +29,8 @@ export const ErrorNote: React.FC<{
   message: string | null;
   sx?: React.ComponentProps<typeof Alert>['sx'];
   onDismiss?: () => void;
-}> = ({ message, sx, onDismiss }) => {
+  'data-testid'?: string;
+}> = ({ message, sx, onDismiss, 'data-testid': testId }) => {
   if (!message) return null;
-  return <ErrorAlert message={message} sx={sx} onDismiss={onDismiss} />;
+  return <ErrorAlert message={message} sx={sx} onDismiss={onDismiss} data-testid={testId} />;
 };

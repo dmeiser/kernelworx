@@ -2156,3 +2156,273 @@ export const GET_SIGNUP_CALENDAR_DATA = gql`
     }
   }
 `;
+
+// ============================================================================
+// Show & Sell — Stage 4.5: sale entry/correction and We Owe administration
+// (checklist §4.5.1). The admin documents and the participant documents are
+// separate on purpose: a sale carries buyer contact detail, and the We Owe list
+// carries buyer names and no actor — both are Unit-Admin-only reads, never a
+// participant projection.
+// ============================================================================
+
+/** One sale line as the admin sale screen reads it. */
+export const SHOW_AND_SELL_SALE_LINE_FRAGMENT = gql`
+  fragment ShowAndSellSaleLineFields on ShowAndSellSaleLine {
+    lineItemId
+    productId
+    productNameSnapshot
+    unitPriceCentsSnapshot
+    immediateQty
+    weOweQty
+    subtotalCents
+  }
+`;
+
+/** One pooled sale as the admin sale screen reads it. */
+export const SHOW_AND_SELL_SALE_FRAGMENT = gql`
+  ${SHOW_AND_SELL_SALE_LINE_FRAGMENT}
+  fragment ShowAndSellSaleFields on ShowAndSellSale {
+    saleId
+    showAndSellId
+    unitId
+    unitCampaignId
+    saleAt
+    enteredByAccountId
+    buyerName
+    buyerPhone
+    buyerEmail
+    lineItems {
+      ...ShowAndSellSaleLineFields
+    }
+    totalCents
+    paymentMethodSnapshot {
+      methodCode
+      displayName
+      otherDetails
+    }
+    revision
+    status
+    voidedByAccountId
+    voidedAt
+    createdAt
+    updatedAt
+    expectedCashCents
+  }
+`;
+
+/** One obligation as the admin We Owe screen reads it. */
+export const WE_OWE_OBLIGATION_FRAGMENT = gql`
+  fragment WeOweObligationFields on WeOweObligation {
+    weOweId
+    unitCampaignId
+    showAndSellId
+    saleId
+    lineItemId
+    buyerName
+    productId
+    productNameSnapshot
+    originalQty
+    fulfilledQty
+    cancelledQty
+    reservedQty
+    remainingQty
+    uncoveredQty
+    valueCentsSnapshot
+    status
+    closeReason
+    version
+    createdAt
+    closedAt
+  }
+`;
+
+/** One event's sales, raw and paginated (§4.5.2). */
+export const LIST_SHOW_AND_SELL_SALES = gql`
+  ${SHOW_AND_SELL_SALE_FRAGMENT}
+  query ListShowAndSellSales($showAndSellId: ID!, $status: String, $page: PageInput) {
+    showAndSellSales(showAndSellId: $showAndSellId, status: $status, page: $page) {
+      items {
+        ...ShowAndSellSaleFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+/** One campaign's obligations, raw and paginated (§4.4.4). */
+export const LIST_WE_OWE_OBLIGATIONS = gql`
+  ${WE_OWE_OBLIGATION_FRAGMENT}
+  query ListWeOweObligations(
+    $unitCampaignId: ID!
+    $showAndSellId: ID
+    $productId: ID
+    $status: WeOweStatus
+    $page: PageInput
+  ) {
+    weOweObligations(
+      unitCampaignId: $unitCampaignId
+      showAndSellId: $showAndSellId
+      productId: $productId
+      status: $status
+      page: $page
+    ) {
+      items {
+        ...WeOweObligationFields
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+`;
+
+export const CREATE_SHOW_AND_SELL_SALE = gql`
+  ${SHOW_AND_SELL_SALE_FRAGMENT}
+  ${WE_OWE_OBLIGATION_FRAGMENT}
+  mutation CreateShowAndSellSale($input: CreateShowAndSellSaleInput!) {
+    createShowAndSellSale(input: $input) {
+      sale {
+        ...ShowAndSellSaleFields
+      }
+      eventVersion
+      draftOnly
+      warnings {
+        productId
+        currentStockQty
+        assignedQty
+        overageQty
+        message
+      }
+      obligations {
+        ...WeOweObligationFields
+      }
+    }
+  }
+`;
+
+export const CORRECT_SHOW_AND_SELL_SALE = gql`
+  ${SHOW_AND_SELL_SALE_FRAGMENT}
+  ${WE_OWE_OBLIGATION_FRAGMENT}
+  mutation CorrectShowAndSellSale($input: CorrectShowAndSellSaleInput!) {
+    correctShowAndSellSale(input: $input) {
+      sale {
+        ...ShowAndSellSaleFields
+      }
+      priorRevision {
+        saleId
+        showAndSellId
+        revision
+        saleAt
+        enteredByAccountId
+        buyerName
+        buyerPhone
+        buyerEmail
+        lineItems {
+          ...ShowAndSellSaleLineFields
+        }
+        totalCents
+        paymentMethodSnapshot {
+          methodCode
+          displayName
+          otherDetails
+        }
+        status
+        correctedByAccountId
+        correctedAt
+        reason
+      }
+      eventVersion
+      draftOnly
+      warnings {
+        productId
+        currentStockQty
+        assignedQty
+        overageQty
+        message
+      }
+      obligations {
+        ...WeOweObligationFields
+      }
+    }
+  }
+`;
+
+export const VOID_SHOW_AND_SELL_SALE = gql`
+  ${SHOW_AND_SELL_SALE_FRAGMENT}
+  ${WE_OWE_OBLIGATION_FRAGMENT}
+  mutation VoidShowAndSellSale($input: VoidShowAndSellSaleInput!) {
+    voidShowAndSellSale(input: $input) {
+      sale {
+        ...ShowAndSellSaleFields
+      }
+      priorRevision {
+        saleId
+        showAndSellId
+        revision
+        saleAt
+        enteredByAccountId
+        buyerName
+        buyerPhone
+        buyerEmail
+        lineItems {
+          ...ShowAndSellSaleLineFields
+        }
+        totalCents
+        paymentMethodSnapshot {
+          methodCode
+          displayName
+          otherDetails
+        }
+        status
+        correctedByAccountId
+        correctedAt
+        reason
+      }
+      eventVersion
+      draftOnly
+      warnings {
+        productId
+        currentStockQty
+        assignedQty
+        overageQty
+        message
+      }
+      obligations {
+        ...WeOweObligationFields
+      }
+    }
+  }
+`;
+
+export const SET_WE_OWE_RESERVATION = gql`
+  ${WE_OWE_OBLIGATION_FRAGMENT}
+  mutation SetWeOweReservation($input: SetWeOweReservationInput!) {
+    setWeOweReservation(input: $input) {
+      obligation {
+        ...WeOweObligationFields
+      }
+    }
+  }
+`;
+
+export const FULFILL_WE_OWE = gql`
+  ${WE_OWE_OBLIGATION_FRAGMENT}
+  mutation FulfillWeOwe($input: FulfillWeOweInput!) {
+    fulfillWeOwe(input: $input) {
+      obligation {
+        ...WeOweObligationFields
+      }
+      fulfillment {
+        fulfillmentId
+        weOweId
+        quantity
+        source
+        createdAt
+      }
+    }
+  }
+`;
