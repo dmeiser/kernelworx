@@ -31,15 +31,21 @@ from src.handlers.unit_operations import (
     SET_WE_OWE_RESERVATION_FIELD,
     WE_OWE_OBLIGATION_FIELD,
     WE_OWE_OBLIGATIONS_FIELD,
+    _sale_sections,
+    _stage_reservation_writes,
     handle_unit_operation,
 )
 from src.utils import inventory_models as inv
 from src.utils import show_and_sell_models as ssm
 from src.utils import show_and_sell_sale_models as sm
+from src.utils.dynamodb import tables
+from src.utils.mutations import IdempotentMutationRunner, WritePlan, marker_keys, utc_now_iso, wire_key, wire_value
 from tests.unit.show_sell_fixtures import account_id, assert_is_error, seed_show_sell_fixtures, unit_operation_event
+from tests.unit.show_sell_stock_fixtures import race_two_plans
 from tests.unit.test_show_and_sell_sales import (  # the Wave 5.2 scenario: one table, one catalog
     ACTIVE_EVENT,
     CAMPAIGN,
+    CATALOG_ID,
     OTHER_PRODUCT,
     PRICE_CENTS,
     PRODUCT,
@@ -66,6 +72,8 @@ CREW_529_CAMPAIGN = "uc-crew-529-spring-2027"
 BUYER = "Buyer Bee"
 #: A second table in the same campaign, used only where a read filters by event.
 RIVAL_ID = "SSE#rival-table"
+#: A catalog product the campaign has never received, so its obligation has no balance row.
+THIRD_PRODUCT = f"{CATALOG_ID}#prod-3"
 
 #: The obligation's SDL fields, as the read answers them. ``check_show_and_sell_schema.test.ts``
 #: pins the same list against the SDL, so a payload field that appears here and not there fails.
@@ -327,6 +335,62 @@ def _stored_owe(world: Dict[str, Any], we_owe_id: str) -> Dict[str, Any]:
     return row
 
 
+# --- The eventual-consistency seam -----------------------------------------------
+
+#: The two indexes §6.4 gives the We Owe aggregates. Both are projected copies, so both are
+#: allowed to answer a row as it looked before the write that moved it.
+_OBLIGATION_INDEXES = ("weOweId-index", "unitCampaignId-status-index")
+
+
+def _lagging_obligation_indexes(monkeypatch: pytest.MonkeyPatch, stale: Dict[str, Dict[str, Any]]) -> None:
+    """Make both obligation indexes project the named rows one write behind the base table.
+
+    The only honest test of an index-backed read is one where the index and the table disagree,
+    because that is what an eventual index does on its own schedule. Each scenario row is
+    restated with the attributes the index still believes — and a row lives in the range its
+    stale state names, not the one the real index projects, which is what a projection that has
+    not caught up with a status change looks like. Every other read is handed to the real
+    function untouched, so what can fail here is a read that answered from the projection
+    instead of from the row.
+    """
+    discover_rows = sm.query_all_items
+
+    def restate(row: Dict[str, Any]) -> Dict[str, Any]:
+        we_owe_id = str(row.get(sm.WE_OWE_ID_ATTRIBUTE) or "")
+        return {**row, **stale[we_owe_id]} if we_owe_id in stale else row
+
+    def query(table: Any, query_kwargs: Dict[str, Any], max_items: Optional[int] = None) -> List[Dict[str, Any]]:
+        if query_kwargs.get("IndexName") not in _OBLIGATION_INDEXES:
+            return discover_rows(table, query_kwargs, max_items)
+        asked = query_kwargs.get("ExpressionAttributeValues", {}).get(":status")
+        real = discover_rows(table, query_kwargs, max_items)
+        if asked is None:
+            # The direct read: no range to disagree about, so only the attributes lie.
+            return [restate(row) for row in real]
+        rows = [restate(row) for row in real]
+        # A row whose stale state names the other range is still in the index under its old
+        # state, so it is injected into this one. The base table read that follows is what
+        # decides what it is now.
+        other = "CLOSED" if asked == "OPEN" else "OPEN"
+        other_kwargs = {
+            **query_kwargs,
+            "ExpressionAttributeValues": {
+                **query_kwargs.get("ExpressionAttributeValues", {}),
+                ":status": other,
+            },
+        }
+        real_ids = {str(row.get(sm.WE_OWE_ID_ATTRIBUTE) or "") for row in rows}
+        for row in discover_rows(table, other_kwargs, max_items):
+            we_owe_id = str(row.get(sm.WE_OWE_ID_ATTRIBUTE) or "")
+            if we_owe_id in stale and we_owe_id not in real_ids:
+                restated = restate(row)
+                if restated.get(sm.STATUS_ATTRIBUTE) == asked:
+                    rows.append(restated)
+        return [row for row in rows if row.get(sm.STATUS_ATTRIBUTE) == asked]
+
+    monkeypatch.setattr(sm, "query_all_items", query)
+
+
 # --- OWE-M-01-01, OWE-M-01-02: setWeOweReservation --------------------------------
 
 
@@ -460,6 +524,173 @@ def test_an_equal_reservation_target_writes_no_movement_and_moves_no_stock(world
     assert len(_movement_of(world["inventory"], inv.WE_OWE_RESERVE)) == 1, "no second movement for one reservation"
     assert _movement_of(world["inventory"], inv.WE_OWE_RELEASE) == []
     assert _stored_balance(world["inventory"], PRODUCT)[inv.SOLD_IN_POSSESSION_QTY] == 2
+
+
+def test_a_zero_target_on_a_we_owe_only_sale_with_no_balance_row_answers_a_zero_position(
+    world: Dict[str, Any],
+) -> None:
+    """§4.4.2: a no-op reservation on an obligation with no balance row behind it.
+
+    A We Owe-only sale never receipts its product, so the obligation can exist with no
+    ``InventoryBalance`` row at all — a catalog product the campaign has never received. The
+    target equals the reservation the obligation already holds, so the write is a no-op: no
+    stock moves, no movement is written, and the answer must still carry the zero position a
+    sale with no stock answers with rather than an internal fault that poisons the replay.
+    """
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT)
+    we_owe_id = _owe_id(world, product_id=THIRD_PRODUCT, immediate=0, we_owe=2, key="sale-1")
+    assert _stored_balance(world["inventory"], THIRD_PRODUCT) is None
+
+    first = _ok(_reserve(we_owe_id, 0, key="reserve-1"))
+    assert first["obligation"]["reservedQty"] == 0
+    assert first["obligation"]["remainingQty"] == 2
+    assert first["obligation"]["uncoveredQty"] == 2
+    assert first["obligation"]["status"] == sm.WE_OWE_STATUS_OPEN
+    assert (first["inventoryPosition"]["kernelPhysicalQty"], first["inventoryPosition"]["version"]) == (0, 0)
+
+    replay = _ok(_reserve(we_owe_id, 0, key="reserve-1"))
+    assert replay == first, "a retry answers the write that committed, with no second effect"
+    assert len(_markers_for(world["show_and_sells"], SET_WE_OWE_RESERVATION_FIELD)) == 1
+    assert _movement_of(world["inventory"], inv.WE_OWE_RESERVE) == []
+    assert _movement_of(world["inventory"], inv.WE_OWE_RELEASE) == []
+    assert _stored_owe(world, we_owe_id)[sm.VERSION_ATTRIBUTE] == 1, "a no-op write does not move the row"
+
+
+def test_a_no_op_reservation_pins_the_version_it_read_at_the_transaction_level(
+    world: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§4.4.2: the no-op path stages the same version pin the real path does.
+
+    A target that equals the reservation already held writes nothing — no obligation write,
+    no movement, no stock change — but it is still pinned to the version the caller read, so
+    a writer that moved the row between the read and the transaction cancels the whole
+    transaction, marker included, rather than committing an answer built on a stale row.
+    """
+    _seed_table(world)
+    we_owe_id = _owe_id(world)
+    captured: Dict[str, Any] = {}
+    original_execute = IdempotentMutationRunner.execute
+
+    def capture(self, keys, plan, **kwargs):
+        captured["items"] = plan.transact_items()
+        return original_execute(self, keys, plan, **kwargs)
+
+    monkeypatch.setattr(IdempotentMutationRunner, "execute", capture)
+    answer = _ok(_reserve(we_owe_id, 0, key="reserve-1"))
+    assert answer["obligation"]["reservedQty"] == 0
+
+    actions = [name for entry in captured["items"] for name in entry]
+    assert actions == ["Put", "ConditionCheck"], actions
+    check = next(entry["ConditionCheck"] for entry in captured["items"] if "ConditionCheck" in entry)
+    assert check["ConditionExpression"] == "#version = :expectedVersion"
+    assert check["ExpressionAttributeValues"] == {":expectedVersion": wire_value(1)}
+    assert check["Key"] == wire_key(sm.we_owe_key(ACTIVE_EVENT, we_owe_id))
+
+
+def test_a_no_op_reservation_loses_the_whole_transaction_when_the_obligation_moved_since_the_read(
+    world: Dict[str, Any],
+) -> None:
+    """§4.4.2: a no-op reservation still loses the whole transaction to a stale read.
+
+    A target that equals the reservation already held writes nothing — no obligation write,
+    no movement, no stock change — and used to commit its marker anyway, so a caller that
+    read a row another writer had moved would be answered with a stale answer for a write
+    that should never have happened. The no-op path is pinned to the version the read saw:
+    the real write commits first and moves the row, the no-op's pin then fails, and the
+    transaction — marker included — is cancelled whole.
+    """
+    _seed_table(world)
+    we_owe_id = _owe_id(world)
+    row = sm.load_we_owe_by_id_or_not_found(we_owe_id)
+    now_iso = utc_now_iso()
+
+    # Both plans are staged from ONE read, exactly as two concurrent requests would: the
+    # real write is what the first of them will do, the no-op is what the second of them
+    # will do, and DynamoDB decides which one wins.
+    target = sm.we_owe_reservation_targets(row, 1, unassigned_qty=2)
+    sections = _sale_sections(CAMPAIGN, [PRODUCT])
+    runner = IdempotentMutationRunner()
+    real_keys = marker_keys(
+        table_key="show_and_sells",
+        table_name=tables.show_and_sells.table_name,
+        actor_id=AVERY,
+        operation=SET_WE_OWE_RESERVATION_FIELD,
+        scope=we_owe_id,
+        idempotency_key="reserve-real",
+    )
+    real_plan = WritePlan()
+    runner.stage_marker(real_plan, real_keys, fingerprint="fp-real", result_id=f"{ACTIVE_EVENT}:{we_owe_id}")
+    real_plan.add(*sm.we_owe_update_action(row=row, target=target, updated_at=now_iso))
+    _stage_reservation_writes(real_plan, row, target, sections, AVERY, "reserve-real", now_iso)
+
+    noop_keys = marker_keys(
+        table_key="show_and_sells",
+        table_name=tables.show_and_sells.table_name,
+        actor_id=AVERY,
+        operation=SET_WE_OWE_RESERVATION_FIELD,
+        scope=we_owe_id,
+        idempotency_key="reserve-noop",
+    )
+    noop_plan = WritePlan()
+    runner.stage_marker(noop_plan, noop_keys, fingerprint="fp-noop", result_id=f"{ACTIVE_EVENT}:{we_owe_id}")
+    noop_plan.add(
+        "ConditionCheck",
+        {
+            "TableName": tables.show_and_sells.table_name,
+            "Key": wire_key(sm.we_owe_key(ACTIVE_EVENT, we_owe_id)),
+            "ConditionExpression": "#version = :expectedVersion",
+            "ExpressionAttributeNames": {"#version": sm.VERSION_ATTRIBUTE},
+            "ExpressionAttributeValues": {":expectedVersion": wire_value(int(row[sm.VERSION_ATTRIBUTE]))},
+            "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+        },
+    )
+
+    outcome = race_two_plans([real_plan, noop_plan])
+
+    assert outcome["committed"] == 1, outcome
+    verdicts = outcome["verdicts"]
+    assert verdicts[0]["committed"], verdicts[0]
+    assert not verdicts[1]["committed"], verdicts[1]
+    assert verdicts[1]["code"] == "TransactionCanceledException"
+
+    assert _stored_owe(world, we_owe_id)[sm.VERSION_ATTRIBUTE] == 2, "the real write committed"
+    assert _stored_owe(world, we_owe_id)[sm.RESERVED_QTY_ATTRIBUTE] == 1
+    assert len(_markers_for(world["show_and_sells"], SET_WE_OWE_RESERVATION_FIELD)) == 1, (
+        "the no-op's marker was cancelled with its transaction, not left behind"
+    )
+    assert len(_movement_of(world["inventory"], inv.WE_OWE_RESERVE)) == 1, "the real write's one movement"
+    assert _stored_balance(world["inventory"], PRODUCT)[inv.SOLD_IN_POSSESSION_QTY] == 1
+
+
+def test_a_fulfillment_that_closes_a_reservation_never_demands_stock_this_write_delivers(
+    world: Dict[str, Any],
+) -> None:
+    """OWE-07, §4.4.3: the two-delta coverage condition is stated over the whole write.
+
+    Two boxes reserved for a buyer who owes two, physical down to two, and one write delivers
+    both. The obligation closes and the balance must land on (0, 0): a per-delta condition
+    would demand that the Kernel still hold the units this same write delivers — physical at
+    least possession plus the decrement, i.e. four — and refuse the write whole. The
+    condition is now stated over the write's own deltas and passes.
+    """
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT)
+    _seed_stock(world, physical=3, allocated=1)
+    we_owe_id = _owe_id(world, immediate=1, we_owe=2)
+
+    _ok(_reserve(we_owe_id, 2))
+    assert _stored_balance(world["inventory"], PRODUCT)[inv.SOLD_IN_POSSESSION_QTY] == 2
+
+    answer = _ok(_fulfill(we_owe_id, 2, sm.WE_OWE_SOURCE_KERNEL))
+
+    assert answer["obligation"]["status"] == sm.WE_OWE_STATUS_CLOSED
+    assert answer["obligation"]["closeReason"] == sm.WE_OWE_CLOSE_FULFILLED
+    assert answer["obligation"]["reservedQty"] == 0
+    assert answer["obligation"]["remainingQty"] == 0
+    balance = _stored_balance(world["inventory"], PRODUCT)
+    assert (int(balance[inv.KERNEL_PHYSICAL_QTY]), int(balance[inv.SOLD_IN_POSSESSION_QTY])) == (0, 0), (
+        "the fulfillment delivers the reservation: nothing held, nothing owed, nothing physical"
+    )
+    assert len(_movement_of(world["inventory"], inv.WE_OWE_FULFILL)) == 1
 
 
 def test_owe_m_01_03_reservation_is_guarded_by_tenancy_a_stale_version_and_replay(
@@ -943,6 +1174,74 @@ def test_page_01_obligation_pages_are_complete_ordered_and_scoped_to_their_filte
     assert_is_error(_obligations(productId=PRODUCT, page={"limit": 1, "cursor": cursor}), "INVALID_INPUT")
     assert_is_error(_obligations(page={"limit": 1, "cursor": "bm90LWEtY3Vyc29y"}), "INVALID_INPUT")
     assert_is_error(_obligations(page={"limit": 101}), "INVALID_INPUT")
+
+
+def test_a_lagging_obligation_index_never_answers_for_the_base_table_on_either_read(
+    world: Dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SEC-06, OWE-Q-01: the two We Owe indexes find the row, and the base table says what it is.
+
+    A reservation and a fulfillment both move ``status`` and every quantity, and the two
+    indexes that reach an obligation by id and by campaign state are projected copies that
+    catch up later. So the projection here restates each row as it was before the write that
+    moved it: the reserved obligation is still the unreserved OPEN row at version 1, and the
+    fulfilled one is still the OPEN row at version 2 that reserved three and owes three more
+    — the fulfillment has not reached the index yet, so it still projects it as an obligation
+    that is open and holding stock. A read that answered from the projection would show an
+    admin quantities that no longer exist, hand back a version the next write would then pin,
+    and list a fulfilled obligation as still owed.
+    """
+    _seed_table(world, physical=10)
+    reserved_id = _owe_id(world)
+    closed_id = _owe_id(world, buyer_name="Caterpillar", key="sale-2")
+    _ok(_reserve(reserved_id, 1))
+    _ok(_reserve(closed_id, 3, key="reserve-2"))
+    _ok(_fulfill(closed_id, 3, sm.WE_OWE_SOURCE_KERNEL))
+
+    _lagging_obligation_indexes(
+        monkeypatch,
+        {
+            reserved_id: {
+                sm.STATUS_ATTRIBUTE: sm.WE_OWE_STATUS_OPEN,
+                sm.VERSION_ATTRIBUTE: 1,
+                sm.RESERVED_QTY_ATTRIBUTE: 0,
+                sm.UNCOVERED_QTY_ATTRIBUTE: 3,
+            },
+            closed_id: {
+                sm.STATUS_ATTRIBUTE: sm.WE_OWE_STATUS_OPEN,
+                sm.VERSION_ATTRIBUTE: 2,
+                sm.RESERVED_QTY_ATTRIBUTE: 3,
+                sm.FULFILLED_QTY_ATTRIBUTE: 0,
+                sm.REMAINING_QTY_ATTRIBUTE: 3,
+                sm.UNCOVERED_QTY_ATTRIBUTE: 0,
+            },
+        },
+    )
+
+    assert _owe_version(reserved_id) == 2 and _owe_version(closed_id) == 3, (
+        "the version each write produced, not the one the index still shows"
+    )
+
+    listed = _ok(_obligations())["items"]
+    assert [item["weOweId"] for item in listed] == [reserved_id, closed_id], "still OPEN before still CLOSED"
+    assert [item["status"] for item in listed] == [sm.WE_OWE_STATUS_OPEN, sm.WE_OWE_STATUS_CLOSED]
+    assert [item["version"] for item in listed] == [2, 3]
+    assert (listed[0]["reservedQty"], listed[0]["uncoveredQty"]) == (1, 2)
+    assert (listed[1]["fulfilledQty"], listed[1]["remainingQty"], listed[1]["closeReason"]) == (
+        3,
+        0,
+        sm.WE_OWE_CLOSE_FULFILLED,
+    )
+    assert [item["weOweId"] for item in _ok(_obligations(status="CLOSED"))["items"]] == [closed_id]
+    assert [item["weOweId"] for item in _ok(_obligations(status="OPEN"))["items"]] == [reserved_id]
+
+    direct = _ok(_obligation(reserved_id))
+    assert (direct["obligation"]["status"], direct["obligation"]["version"]) == (sm.WE_OWE_STATUS_OPEN, 2)
+    assert (direct["obligation"]["reservedQty"], direct["obligation"]["uncoveredQty"]) == (1, 2)
+
+    answer = _ok(_reserve(reserved_id, 0))
+    assert (answer["obligation"]["reservedQty"], answer["obligation"]["version"]) == (0, 3)
+    assert _stored_owe(world, reserved_id)[sm.VERSION_ATTRIBUTE] == 3, "the write was pinned to the row, not to the projection"
 
 
 def test_owe_q_01_02_tenancy_is_the_obligations_row_and_the_buyer_is_only_a_name(

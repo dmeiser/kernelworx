@@ -43,7 +43,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Dict, List, Mapping, NoReturn, Optional, Sequence, Tuple, cast
 
 from . import inventory_models, show_and_sell_models
-from .dynamodb import tables
+from .dynamodb import batch_get_chunked, tables
 from .errors import AppError, ErrorCode
 from .inventory_models import (
     ACTOR_ACCOUNT_ID_ATTRIBUTE,
@@ -535,9 +535,12 @@ def we_owe_row_by_id(we_owe_id: str) -> Optional[Dict[str, Any]]:
     The direct read has no event to address the partition by, which is what makes this the
     one obligation read that has to disambiguate the row from its own history: the index is
     keyed on ``weOweId``, a value the append-only fulfillment records carry as their parent
-    link, so the marker is what picks the aggregate out of the range.
+    link, so the marker and the entity type are what pick the aggregate out of the range.
+    The index is used for discovery only (SEC-06): it may still project a row the base
+    table has deleted, and it cannot see the row's current state, so every candidate is
+    read back through a strongly consistent read of its own key and the base table answers.
     """
-    rows = [
+    found = [
         row
         for row in query_all_items(
             tables.show_and_sells,
@@ -548,9 +551,20 @@ def we_owe_row_by_id(we_owe_id: str) -> Optional[Dict[str, Any]]:
                 "ExpressionAttributeValues": {":weOweId": we_owe_id},
             },
         )
-        if WE_OWE_FULFILLMENT_SK_MARKER not in str(row.get("sk") or "")
+        if row.get("entityType") == WE_OWE_ENTITY_TYPE and WE_OWE_FULFILLMENT_SK_MARKER not in str(row.get("sk") or "")
     ]
-    return dict(rows[0]) if len(rows) == 1 else None
+    # The index is discovery only: it cannot tell a row that was deleted from one that was
+    # not, and it does not wait for the base table to catch up. Every candidate is read
+    # through a strongly consistent read of its own key, and the answer is the base table's,
+    # never the index's (SEC-06).
+    for row in found:
+        show_and_sell_id = str(row.get(SHOW_AND_SELL_ID_ATTRIBUTE) or "")
+        if not show_and_sell_id:
+            continue
+        authoritative = read_we_owe(show_and_sell_id, we_owe_id)
+        if authoritative is not None:
+            return authoritative
+    return None
 
 
 def load_we_owe_by_id_or_not_found(we_owe_id: str) -> Dict[str, Any]:
@@ -566,22 +580,15 @@ def load_we_owe_by_id_or_not_found(we_owe_id: str) -> Dict[str, Any]:
     return row
 
 
-def campaign_we_owe_rows(unit_campaign_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
-    """One Unit Campaign's obligations, through ``unitCampaignId-status-index`` (§6.4).
+def _campaign_we_owe_candidates(unit_campaign_id: str) -> List[Tuple[str, str]]:
+    """Every ``(showAndSellId, weOweId)`` the index projects for this campaign (SEC-06).
 
-    The index is what answers "what does this campaign still owe" across every event at
-    once, which no single event partition can: the obligations of a Unit Campaign are the
-    list its table reads (§7.2). Two reads when the caller wants both states, because the
-    index's range key is the state and an absent filter means both of them. Fulfillment
-    records carry no ``status``, so they are never in this index at all.
-
-    Ordered the way a table reads it: what is still owed before what is closed, newest
-    first inside each state, and ``weOweId`` as the tiebreak so two pages of one read never
-    disagree about which of two same-instant obligations came first.
+    Discovery is not authority: the index may still project a row that was just closed or
+    reopened, so both states are always read and the candidate set is deduplicated — the
+    caller's status filter is applied to the base table's answer, never to the index's.
     """
-    statuses = [status] if status is not None else [WE_OWE_STATUS_OPEN, WE_OWE_STATUS_CLOSED]
     rows: List[Dict[str, Any]] = []
-    for state in statuses:
+    for state in (WE_OWE_STATUS_OPEN, WE_OWE_STATUS_CLOSED):
         rows.extend(
             query_all_items(
                 tables.show_and_sells,
@@ -596,15 +603,65 @@ def campaign_we_owe_rows(unit_campaign_id: str, status: Optional[str] = None) ->
                 },
             )
         )
+    candidates = {
+        (str(row.get(SHOW_AND_SELL_ID_ATTRIBUTE) or ""), str(row.get(WE_OWE_ID_ATTRIBUTE) or ""))
+        for row in rows
+        if row.get("entityType") == WE_OWE_ENTITY_TYPE
+        and WE_OWE_FULFILLMENT_SK_MARKER not in str(row.get("sk") or "")
+        and row.get(SHOW_AND_SELL_ID_ATTRIBUTE)
+        and row.get(WE_OWE_ID_ATTRIBUTE)
+    }
+    return sorted(candidates)
+
+
+def _order_we_owe_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Open before closed, newest first inside each state, ``weOweId`` as the tiebreak.
+
+    A second, stable sort on the state is what keeps the newest-first order inside each
+    state: OPEN before CLOSED is the order a table wants, and it says nothing about which
+    of two open obligations was written first.
+    """
     newest_first = sorted(
         rows,
         key=lambda row: (str(row.get(CREATED_AT_ATTRIBUTE) or ""), str(row.get(WE_OWE_ID_ATTRIBUTE) or "")),
         reverse=True,
     )
-    # A second, stable sort on the state is what keeps the newest-first order inside each
-    # state: OPEN before CLOSED is the order a table wants, and it says nothing about which
-    # of two open obligations was written first.
     return sorted(newest_first, key=lambda row: 0 if str(row.get(STATUS_ATTRIBUTE) or "") == WE_OWE_STATUS_OPEN else 1)
+
+
+def campaign_we_owe_rows(unit_campaign_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """One Unit Campaign's obligations, through ``unitCampaignId-status-index`` (§6.4).
+
+    The index is what answers "what does this campaign still owe" across every event at
+    once, which no single event partition can: the obligations of a Unit Campaign are the
+    list its table reads (§7.2). Discovery is not authority (SEC-06): a row that was just
+    closed or reopened may still be projected under its old state, so the discovery range
+    always covers both states and every candidate is read back through a strongly
+    consistent read of its own key — the base table decides what the row is, and the
+    status filter is applied to that answer. Fulfillment records carry no ``status``, so
+    they are never in this index at all, and the entity-type filter drops any that still
+    slip through the projection.
+
+    Ordered the way a table reads it: what is still owed before what is closed, newest
+    first inside each state, and ``weOweId`` as the tiebreak so two pages of one read never
+    disagree about which of two same-instant obligations came first.
+    """
+    candidates = _campaign_we_owe_candidates(unit_campaign_id)
+    authoritative: List[Dict[str, Any]] = []
+    batch_get_chunked(
+        tables.show_and_sells.table_name,
+        [we_owe_key(show_and_sell_id, we_owe_id) for show_and_sell_id, we_owe_id in candidates],
+        authoritative.append,
+        consistent_read=True,
+    )
+    rows_by_id = {str(row.get(WE_OWE_ID_ATTRIBUTE) or ""): row for row in authoritative}
+    filtered = [
+        row
+        for row in rows_by_id.values()
+        if row.get("entityType") == WE_OWE_ENTITY_TYPE
+        and (status is None or str(row.get(STATUS_ATTRIBUTE) or "") == status)
+    ]
+    return _order_we_owe_rows(filtered)
 
 
 def we_owe_fulfillment_history(show_and_sell_id: str, we_owe_id: str) -> List[Dict[str, Any]]:
@@ -1331,6 +1388,14 @@ def build_we_owe_fulfillment_item(
     if inventory_movement_id is not None:
         item[FULFILLMENT_MOVEMENT_ATTRIBUTE] = inventory_models.normalize_inventory_id(
             inventory_movement_id, FULFILLMENT_MOVEMENT_ATTRIBUTE
+        )
+    violations = we_owe_fulfillment_invariant_violations(item)
+    if violations:
+        # Every caller of this builder is the write path itself, so a record that fails
+        # its own invariant is a bug in that path, never a refusal the caller can act on.
+        raise AppError(
+            ErrorCode.INTERNAL_ERROR,
+            "We Owe fulfillment record failed its own invariant: " + "; ".join(violations),
         )
     return item
 

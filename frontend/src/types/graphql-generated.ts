@@ -760,13 +760,13 @@ export type GqlFulfillIndividualOrderLinePayload = {
 export type GqlFulfillWeOweInput = {
   /** Idempotency for the mutation. */
   idempotency: GqlIdempotencyInput;
-  /** Kernels fulfilled on this record; partial fulfillment is allowed. */
+  /** Items fulfilled on this record; partial fulfillment is allowed. */
   quantity: Scalars['Int']['input'];
   /** Which stock source the fulfillment draws on; KERNEL_STOCK moves reserved Kernel stock, EXTERNAL_COUNCIL closes an uncovered quantity and changes no stock. */
   source: GqlWeOweFulfillmentSource;
   /** The obligation's version this caller read. */
   version: GqlVersionedInput;
-  /** The obligation to fulfil. */
+  /** The obligation to fulfill. */
   weOweId: Scalars['ID']['input'];
 };
 

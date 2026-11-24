@@ -181,7 +181,10 @@ def test_no_we_owe_row_carries_a_due_date_an_assignee_or_an_aging_field() -> Non
     for row in (_owe(quantity=3), _record(movement_id=inv.new_inventory_movement_id())):
         for name in FORBIDDEN_WE_OWE_FIELDS:
             assert name not in row, f"{row['entityType']}.{name} would be a work-queue field"
-    for payload in (sm.we_owe_payload(_owe(quantity=3)), sm.we_owe_fulfillment_payload(_record())):
+    for payload in (
+        sm.we_owe_payload(_owe(quantity=3)),
+        sm.we_owe_fulfillment_payload(_record(source=sm.WE_OWE_SOURCE_EXTERNAL)),
+    ):
         for name in FORBIDDEN_WE_OWE_FIELDS:
             assert name not in payload, f"a read would answer {name}, which nothing writes"
 
@@ -578,3 +581,64 @@ def test_a_missing_obligation_on_the_replay_loader_is_an_internal_fault(show_and
         sm.load_we_owe_or_internal(EVENT, "00000000-0000-4000-8000-000000000000")
     assert raised.value.error_code == ErrorCode.INTERNAL_ERROR
     assert "could not be loaded" in raised.value.message
+def test_a_kernel_fulfillment_that_names_no_movement_is_refused_before_it_is_built() -> None:
+    """§5.15: the builder refuses a record that cannot be read as an audit trail.
+
+    ``KERNEL_STOCK`` with no movement is the one record shape normalization accepts and
+    the invariant refuses: the default builder call is exactly that shape.
+    """
+    error = pytest.raises(AppError, _record).value
+    assert error.error_code == ErrorCode.INTERNAL_ERROR
+    assert "failed its own invariant" in error.message
+    assert "movement" in error.message
+
+
+def test_a_discovery_row_with_no_partition_or_one_the_base_table_cannot_read_is_never_answered(
+    show_and_sells_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SEC-06: discovery rows are skipped; the base table answers or the read is empty.
+
+    The index is discovery only: a candidate that carries no partition id, or one whose
+    base-table read finds no row, is never the answer. Only a candidate whose own key
+    reads back through a consistent read can be returned.
+    """
+    obligation = _owe(quantity=3)
+    obligation_id = str(obligation[sm.WE_OWE_ID_ATTRIBUTE])
+    show_and_sells_table.put_item(Item=obligation)
+
+    candidates = [
+        # No partition id at all: nothing to address, so it is skipped.
+        {"pk": "SHOW_AND_SELL#event-1", "sk": f"WE_OWE#{obligation_id}", "entityType": sm.WE_OWE_ENTITY_TYPE, "weOweId": obligation_id},
+        # Carries a partition id, but the base table has no such row: it falls through.
+        {"pk": "SHOW_AND_SELL#event-2", "sk": f"WE_OWE#{obligation_id}", "entityType": sm.WE_OWE_ENTITY_TYPE, "showAndSellId": "event-2", "weOweId": obligation_id},
+        # The real candidate: the base table reads it back.
+        {"pk": "SHOW_AND_SELL#event-1", "sk": f"WE_OWE#{obligation_id}", "entityType": sm.WE_OWE_ENTITY_TYPE, "showAndSellId": EVENT, "weOweId": obligation_id},
+    ]
+
+    def fake_query(table: Any, kwargs: Any) -> Any:
+        return list(candidates)
+
+    monkeypatch.setattr(sm, "query_all_items", fake_query)
+
+    row = sm.we_owe_row_by_id(obligation_id)
+
+    assert row is not None
+    assert row[sm.WE_OWE_ID_ATTRIBUTE] == obligation_id
+    assert row[sm.SHOW_AND_SELL_ID_ATTRIBUTE] == EVENT
+
+
+def test_a_discovery_read_that_finds_no_readable_row_answers_none(
+    show_and_sells_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SEC-06: an index answer with nothing behind it is not an obligation."""
+    obligation = _owe(quantity=3)
+    obligation_id = str(obligation[sm.WE_OWE_ID_ATTRIBUTE])
+    show_and_sells_table.put_item(Item=obligation)
+
+    candidates = [
+        {"pk": "SHOW_AND_SELL#event-2", "sk": f"WE_OWE#{obligation_id}", "entityType": sm.WE_OWE_ENTITY_TYPE, "showAndSellId": "event-2", "weOweId": obligation_id},
+    ]
+
+    monkeypatch.setattr(sm, "query_all_items", lambda table, kwargs: list(candidates))
+
+    assert sm.we_owe_row_by_id(obligation_id) is None

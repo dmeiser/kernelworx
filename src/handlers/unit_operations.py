@@ -36,6 +36,7 @@ across the Lambda boundary, and forwarding an allowlisted subcode into GraphQL
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, cast
@@ -8961,15 +8962,22 @@ def _we_owe_obligations(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]
         for row in show_and_sell_sale_models.campaign_we_owe_rows(campaign_id, status=filters["status"])
         if _we_owe_filter_match(row, filters)
     ]
-    token = "#".join("" if filters[name] is None else str(filters[name]) for name in _WE_OWE_FILTER_ORDER)
+    # Canonical JSON over the ordered filter list: a buyer name containing "#" or "," can
+    # no longer produce a scope token identical to a different filter combination.
+    token = json.dumps([filters[name] for name in _WE_OWE_FILTER_ORDER], separators=(",", ":"))
     page = dict(paginate_page(rows, f"{WE_OWE_OBLIGATIONS_FIELD}#{campaign_id}#{token}", _page_argument(event)))
     page["items"] = [show_and_sell_sale_models.we_owe_payload(row) for row in page["items"]]
     return page
 
 
 def _we_owe_position(campaign_id: str, product_id: str) -> Dict[str, Any]:
-    """The product's position after a We Owe write, or an internal fault if it is gone."""
-    return _written_position(campaign_id, product_id)
+    """The product's position after a We Owe write.
+
+    A We Owe-only sale never receipts the product, so its position may be all zeros with no
+    balance row behind it: the same tolerating answer the sale answer gives, never an
+    internal fault that poisons a retry.
+    """
+    return _position_payload(campaign_id, product_id)
 
 
 def _reservation_answer(stored: str) -> Dict[str, Any]:
@@ -9093,6 +9101,22 @@ def _set_we_owe_reservation(event: Dict[str, Any], caller_id: str) -> Dict[str, 
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=f"{event_id}:{we_owe_id}")
     if target.changed:
         plan.add(*show_and_sell_sale_models.we_owe_update_action(row=row, target=target, updated_at=now_iso))
+    else:
+        # A no-op reservation writes nothing: the obligation is already where the caller
+        # wants it. It is still pinned to the read version, though — an obligation that
+        # moved since the read must lose the whole transaction rather than commit a marker
+        # and hand back a stale answer.
+        plan.add(
+            "ConditionCheck",
+            {
+                "TableName": tables.show_and_sells.table_name,
+                "Key": wire_key(show_and_sell_sale_models.we_owe_key(event_id, we_owe_id)),
+                "ConditionExpression": "#version = :expectedVersion",
+                "ExpressionAttributeNames": {"#version": show_and_sell_sale_models.VERSION_ATTRIBUTE},
+                "ExpressionAttributeValues": {":expectedVersion": wire_value(expected_version)},
+                "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+            },
+        )
     _stage_reservation_writes(plan, row, target, sections, caller_id, key, now_iso)
 
     build_result = _once(lambda: _reservation_answer(f"{event_id}:{we_owe_id}"))
