@@ -73,6 +73,12 @@ SALE_SK_PREFIX = "SALE"
 FINALIZATION_SK_PREFIX = "FINALIZATION"
 CREDIT_SK_PREFIX = "CREDIT"
 WE_OWE_SK_PREFIX = "WE_OWE"
+WE_OWE_FULFILLMENT_SK_PREFIX = "FULFILLMENT"
+#: An obligation row's sort key is exactly ``WE_OWE#<weOweId>``; the append-only
+#: fulfillment rows written under it continue ``#FULFILLMENT#<fulfillmentId>`` (§6.4).
+#: One sort-key prefix reads both kinds, so this marker is what keeps an obligation read
+#: from answering audit history, and a fulfillment read from returning the parent.
+WE_OWE_FULFILLMENT_SK_MARKER = f"#{WE_OWE_FULFILLMENT_SK_PREFIX}#"
 
 # --- Event state vocabulary (data model §5.10, §9.1; SDL enum ShowAndSellStatus) --
 
@@ -1058,8 +1064,39 @@ def event_we_owe_rows(show_and_sell_id: str) -> List[Dict[str, Any]]:
 
     Read by the We Owe disable guard: obligations are the reason §3.5 refuses an
     unsafe change, and before Wave 4 the answer is simply that there are none.
+    The read is the whole ``WE_OWE#`` range, which since Wave 5.3 also covers the
+    fulfillment rows written under each obligation, so the marker is what keeps this
+    answer to the obligations themselves.
     """
-    return _partition_rows(show_and_sell_id, WE_OWE_SK_PREFIX)
+    return [
+        row
+        for row in _partition_rows(show_and_sell_id, WE_OWE_SK_PREFIX)
+        if WE_OWE_FULFILLMENT_SK_MARKER not in str(row.get("sk") or "")
+    ]
+
+
+def we_owe_fulfillment_rows(show_and_sell_id: str, we_owe_id: str) -> List[Dict[str, Any]]:
+    """One obligation's append-only fulfillment records (§5.15, §6.4).
+
+    The range is the obligation's own sort key plus the ``#FULFILLMENT#`` marker, so a
+    fulfillment of one obligation can never answer for another, and the parent row is
+    not part of the range. Read consistently: the direct read answers about the records
+    a fulfillment write just committed (§8.9).
+    """
+    return list(
+        query_all_items(
+            tables.show_and_sells,
+            {
+                "KeyConditionExpression": "#pk = :pk AND begins_with(#sk, :prefix)",
+                "ExpressionAttributeNames": {"#pk": "pk", "#sk": "sk"},
+                "ExpressionAttributeValues": {
+                    ":pk": show_and_sell_pk(show_and_sell_id),
+                    ":prefix": f"{WE_OWE_SK_PREFIX}#{we_owe_id}{WE_OWE_FULFILLMENT_SK_MARKER}",
+                },
+                "ConsistentRead": True,
+            },
+        )
+    )
 
 
 def commitment_rows(profile_id: str, show_and_sell_id: Optional[str] = None) -> List[Dict[str, Any]]:

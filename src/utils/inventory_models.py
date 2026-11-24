@@ -1338,15 +1338,23 @@ def inventory_balance_delta_action(
 
     DynamoDB allows arithmetic only in an ``UpdateExpression``, never in a condition,
     so the floor is stated as a bound on the attribute this request read:
-    ``kernelPhysicalQty + delta >= reserved`` is the same statement as
-    ``kernelPhysicalQty >= reserved - delta``, and the right-hand side is a number
-    this handler computes. Taking ``reserved`` from this request's own read is safe
-    rather than stale-looking, because every writer of any balance quantity
+    ``kernelPhysicalQty + kernelDelta >= soldInPossessionQty + soldPossessionDelta`` is
+    the same statement as ``kernelPhysicalQty >= soldInPossessionQty +
+    soldPossessionDelta - kernelDelta``, and the right-hand side is a number this
+    handler computes. Taking ``soldInPossessionQty`` from this request's own read is
+    safe rather than stale-looking, because every writer of any balance quantity
     increments ``version`` and the same condition pins ``version`` to what this
     request read: a reservation that landed after the read cancels this plan whole,
     so no condition here is ever evaluated against a balance that moved underneath
-    it. A positive delta needs no bound — the read already satisfied the invariant
-    and raising physical cannot break it.
+    it. A write that only raises physical needs no bound — the read already satisfied
+    the invariant and raising physical cannot break it.
+
+    One condition covers both deltas rather than one per delta, because a two-delta
+    write is exactly the case where two separate bounds would be wrong. A We Owe
+    fulfillment takes ``-qty`` from physical and ``-qty`` from possession together
+    (OWE-07), and a bound that read the physical term as if possession never moved
+    would demand that the kernel still hold units this same write delivers. The bound
+    is on the result of the whole write.
 
     ``sold_possession_delta`` carries the We Owe reservation terms (§5.7,
     ``soldInPossessionQty``): a reserve writes a positive delta with the physical
@@ -1367,14 +1375,6 @@ def inventory_balance_delta_action(
     conditions = ["#version = :expectedVersion"]
     if kernel_physical_delta:
         _balance_delta_term(names, values, sets, conditions, KERNEL_PHYSICAL_QTY, "kernelDelta", kernel_physical_delta)
-        _balance_condition(
-            names,
-            values,
-            conditions,
-            "reservedFloor",
-            KERNEL_PHYSICAL_QTY,
-            _count(existing or {}, SOLD_IN_POSSESSION_QTY) - kernel_physical_delta,
-        )
     if council_on_order_delta:
         _balance_delta_term(
             names, values, sets, conditions, COUNCIL_ON_ORDER_QTY, "councilDelta", council_on_order_delta
@@ -1383,6 +1383,8 @@ def inventory_balance_delta_action(
         _balance_delta_term(
             names, values, sets, conditions, SOLD_IN_POSSESSION_QTY, "soldPossessionDelta", sold_possession_delta
         )
+    if kernel_physical_delta or sold_possession_delta:
+        # One coverage condition per write, stated over BOTH deltas this request moves.
         _balance_condition(
             names,
             values,

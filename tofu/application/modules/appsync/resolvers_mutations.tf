@@ -1487,3 +1487,34 @@ resource "aws_appsync_resolver" "void_show_and_sell_sale" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+# Show & Sell We Owe reservation and fulfillment (checklist §4.4.2-§4.4.3). Both write the
+# obligation row, the product balance, and the movement through the unit_operations Lambda,
+# where the Unit Admin check, the obligation version pin, and the idempotency marker live.
+resource "aws_appsync_resolver" "set_we_owe_reservation" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "setWeOweReservation"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "fulfill_we_owe" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Mutation"
+  field       = "fulfillWeOwe"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}

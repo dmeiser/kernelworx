@@ -756,6 +756,31 @@ export type GqlFulfillIndividualOrderLinePayload = {
   order: GqlOrder;
 };
 
+/** Input for fulfillWeOwe (§4.4.3). */
+export type GqlFulfillWeOweInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** Items fulfilled on this record; partial fulfillment is allowed. */
+  quantity: Scalars['Int']['input'];
+  /** Which stock source the fulfillment draws on; KERNEL_STOCK moves reserved Kernel stock, EXTERNAL_COUNCIL closes an uncovered quantity and changes no stock. */
+  source: GqlWeOweFulfillmentSource;
+  /** The obligation's version this caller read. */
+  version: GqlVersionedInput;
+  /** The obligation to fulfill. */
+  weOweId: Scalars['ID']['input'];
+};
+
+/** What one fulfillment wrote: the obligation after the write, the append-only record, and the product's position (present only when KERNEL_STOCK moved stock, §7.2). */
+export type GqlFulfillWeOwePayload = {
+  __typename?: 'FulfillWeOwePayload';
+  /** The append-only record this fulfillment wrote. */
+  fulfillment: GqlWeOweFulfillment;
+  /** The product's position after a KERNEL_STOCK fulfillment, absent for EXTERNAL_COUNCIL. */
+  inventoryPosition?: Maybe<GqlInventoryPosition>;
+  /** The obligation after the write, with fulfilled/remaining/reserved quantities moved. */
+  obligation: GqlWeOweObligation;
+};
+
 /** Idempotency for a mutation: a client key scoped to the caller, operation, and resource. */
 export type GqlIdempotencyInput = {
   /** Client-supplied idempotency key (1-128 trimmed characters). */
@@ -1063,6 +1088,8 @@ export type GqlMutation = {
   deleteUnitPaymentMethodQrCode: GqlUnitPaymentMethod;
   /** Fulfill part or all of one individual Order line from Kernel stock or an external Council supply. Unit Admin for the Order's immutable originating Unit. Kernel stock is taken only for KERNEL_STOCK, and never more than the line still owes (§5.19). */
   fulfillIndividualOrderLine: GqlFulfillIndividualOrderLinePayload;
+  /** Record that part of a We Owe obligation was delivered, from one stock source. `KERNEL_STOCK` may only reach the reserved quantity and moves Kernel physical on hand and sold product in our possession together; `EXTERNAL_COUNCIL` may only reach the uncovered quantity and moves no Unit stock (`OWE-07`). Partial fulfillment is allowed, and the obligation closes only when nothing is owed and nothing is held (`OWE-09`). Unit Admin only. */
+  fulfillWeOwe: GqlFulfillWeOwePayload;
   /** Issue unassigned Kernel stock to an ACTIVE Scout on this campaign's roster. Unit Admin for the parent Unit; Kernel stock down, With Scout up, total unit-owned stock unchanged, and no Order, sale, credit, or We Owe effect. */
   issueStockToScout: GqlIssueStockToScoutPayload;
   /** Join a Unit Campaign with a join code. Any authenticated account with Owner or WRITE on the Scout. */
@@ -1091,6 +1118,8 @@ export type GqlMutation = {
   revokeUnitAccessGrant: GqlUnit;
   /** Revoke an unused unit invite. Unit Admin for that Unit. */
   revokeUnitInvite: Scalars['Boolean']['output'];
+  /** Set how much of a We Owe obligation Kernel stock is currently held against. Reserving leaves sellable/unassigned stock without moving anything physically (`OWE-04`); the target may be zero, which releases the whole reservation, and it may never exceed what the obligation still owes or what the campaign has unassigned. Unit Admin only. */
+  setWeOweReservation: GqlSetWeOweReservationPayload;
   /** Share a profile the caller owns directly with another account by email. Returns the created share. */
   shareProfileDirect: GqlShare;
   /** Take a Scout's place in one slot of a scheduled event. The whole aggregate commits at once — signup, cross-campaign commitment projection, slot counter, the Scout's commitment guard, and the event version — so the row the next overlap check reads is never behind the signup it should block. Unit Admin of the event's Unit, or Owner/WRITE for that Scout; the Scout must hold ACTIVE membership of the event's Unit Campaign. A duplicate in the slot, a full slot, or a time that overlaps any commitment the Scout already holds — including at another Show & Sell — is refused and writes nothing (SLOT-02, SLOT-04). */
@@ -1350,6 +1379,11 @@ export type GqlMutation_FulfillIndividualOrderLineArgs = {
 };
 
 /** The root mutation object for the KernelWorx API. */
+export type GqlMutation_FulfillWeOweArgs = {
+  input: GqlFulfillWeOweInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
 export type GqlMutation_IssueStockToScoutArgs = {
   input: GqlIssueStockToScoutInput;
 };
@@ -1417,6 +1451,11 @@ export type GqlMutation_RevokeUnitAccessGrantArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_RevokeUnitInviteArgs = {
   input: GqlRevokeUnitInviteInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_SetWeOweReservationArgs = {
+  input: GqlSetWeOweReservationInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -2046,6 +2085,10 @@ export type GqlQuery = {
   unitPaymentMethods: Array<GqlUnitPaymentMethod>;
   /** The individual Orders one Scout Campaign holds for this Unit Campaign, newest first, in the projection a fulfillment write needs: origin scope, the stable line identity, each line's fulfilled quantity, and the version the next fulfillment conditions on. Unit Admin for the Unit Campaign, which is the Order's immutable origin; Orders another Unit took under the same Scout Campaign are not answered here, and no customer contact detail is. */
   unitScoutCampaignOrders: GqlUnitOrderConnection;
+  /** One We Owe obligation with its full fulfillment history: the quantities each source covered, the inventory movement a kernel fulfillment consumed, and the versions a follow-up write conditions on. `NOT_FOUND` for another Unit's obligation or an unknown id (OWE-Q-01). Unit Admin only (AUTH-U). */
+  weOweObligation: GqlWeOweObligationDetail;
+  /** One Unit Campaign's We Owe obligations, open obligations first then newest first: filter by event, product, or state. Only OPEN and CLOSED are filterable, because the specification exposes no due date, aging, or assignee concept (OWE-10) — a caller filtering by any of those is asking for a state machine that does not exist. Buyer-name filters match the snapshot the obligation carries, exactly or by prefix. Unit Admin only (AUTH-U, OWE-Q-01). */
+  weOweObligations: GqlWeOweObligationConnection;
 };
 
 /** The root query object for the KernelWorx API. */
@@ -2348,6 +2391,22 @@ export type GqlQuery_UnitScoutCampaignOrdersArgs = {
   unitCampaignId: Scalars['ID']['input'];
 };
 
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_WeOweObligationArgs = {
+  weOweId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_WeOweObligationsArgs = {
+  buyerName?: InputMaybe<Scalars['String']['input']>;
+  buyerNamePrefix?: InputMaybe<Scalars['String']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  showAndSellId?: InputMaybe<Scalars['ID']['input']>;
+  status?: InputMaybe<GqlWeOweStatus>;
+  unitCampaignId: Scalars['ID']['input'];
+};
+
 /** Input for recordInventoryReceipt. Stock only: no Order, payment, credit, or We Owe effect. */
 export type GqlRecordInventoryReceiptInput = {
   /** Idempotency for the mutation. */
@@ -2568,6 +2627,27 @@ export type GqlSellerProfileConnection = {
   nextToken?: Maybe<Scalars['String']['output']>;
   /** The seller profiles owned by the caller on this page. */
   profiles: Array<GqlSellerProfile>;
+};
+
+/** Input for setWeOweReservation (§4.4.2). */
+export type GqlSetWeOweReservationInput = {
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The reservation target: 0 through the remaining quantity, and no more than the campaign's unassigned stock. A target below the current reservation releases the excess back to sellable stock. */
+  targetReservedQty: Scalars['Int']['input'];
+  /** The obligation's version this caller read. */
+  version: GqlVersionedInput;
+  /** The obligation to reserve against. */
+  weOweId: Scalars['ID']['input'];
+};
+
+/** What one reservation write did: the obligation as it stands and the product's stock position (§7.2). */
+export type GqlSetWeOweReservationPayload = {
+  __typename?: 'SetWeOweReservationPayload';
+  /** The product's position after the write: physical stock unchanged, sold-in-possession moved. */
+  inventoryPosition: GqlInventoryPosition;
+  /** The obligation after the write, with its reserved and uncovered quantities moved. */
+  obligation: GqlWeOweObligation;
 };
 
 /** A grant of access to a seller profile, letting another account (the target) view and/or modify it. */
@@ -3640,6 +3720,39 @@ export type GqlVoidShowAndSellSaleInput = {
   version: GqlVersionedInput;
 };
 
+/** Why a We Owe obligation closed (§5.15): an audit detail on a CLOSED row, never a report-status category. */
+export type GqlWeOweCloseReason =
+  /** A sale correction or void took the remaining quantity back. */
+  | 'CANCELLED'
+  /** The buyer received the whole owed quantity. */
+  | 'FULFILLED';
+
+/** Append-only audit record of one We Owe fulfillment (§5.15). Never edited: a mistake is corrected by a later fulfillment, never by rewriting this one. The record carries no obligation-state field — the obligation row is the aggregate it belongs to. */
+export type GqlWeOweFulfillment = {
+  __typename?: 'WeOweFulfillment';
+  /** The Unit Admin who recorded the fulfillment. */
+  actorAccountId: Scalars['ID']['output'];
+  /** When the record was written; the obligation's fulfillment history is read oldest first by this moment. */
+  createdAt: Scalars['AWSDateTime']['output'];
+  /** The fulfillment's stable identity, minted by the server at write time. */
+  fulfillmentId: Scalars['ID']['output'];
+  /** The inventory movement that moved the stock, required for KERNEL_STOCK and absent for EXTERNAL_COUNCIL — the same pairing the data model requires (§5.15). */
+  inventoryMovementId?: Maybe<Scalars['ID']['output']>;
+  /** The quantity fulfilled; positive on every record, never negative. */
+  quantity: Scalars['Int']['output'];
+  /** Which stock source this fulfillment drew on. */
+  source: GqlWeOweFulfillmentSource;
+  /** The obligation this fulfillment was written against. */
+  weOweId: Scalars['ID']['output'];
+};
+
+/** Which stock source a We Owe fulfillment draws on. KERNEL_STOCK moves physical stock and sold-in-possession together; EXTERNAL_COUNCIL closes the supplied quantity and changes no Unit stock (§5.15, §10). */
+export type GqlWeOweFulfillmentSource =
+  /** Stock a Council supplied without moving any Unit stock. */
+  | 'EXTERNAL_COUNCIL'
+  /** Physical stock the Unit holds against the obligation (reserved). */
+  | 'KERNEL_STOCK';
+
 /** One We Owe obligation a sale created (§5.15). The buyer is a name, not an Account: nothing here identifies or contacts a user of the system, and there is deliberately no due date, assignee, or aging field — a Unit prioritizes what it owes by looking at the list. */
 export type GqlWeOweObligation = {
   __typename?: 'WeOweObligation';
@@ -3647,7 +3760,7 @@ export type GqlWeOweObligation = {
   /** Quantity a correction or void took back before it was fulfilled. */
   cancelledQty: Scalars['Int']['output'];
   /** `FULFILLED` or `CANCELLED`, set only when the obligation closed. */
-  closeReason?: Maybe<Scalars['String']['output']>;
+  closeReason?: Maybe<GqlWeOweCloseReason>;
   closedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
   fulfilledQty: Scalars['Int']['output'];
@@ -3665,7 +3778,7 @@ export type GqlWeOweObligation = {
   saleId: Scalars['ID']['output'];
   showAndSellId: Scalars['ID']['output'];
   /** `OPEN` or `CLOSED`; the reason an obligation closed is an audit field, never a third status. */
-  status: Scalars['String']['output'];
+  status: GqlWeOweStatus;
   /** remainingQty - reservedQty: the part no stock is promised to yet. */
   uncoveredQty: Scalars['Int']['output'];
   unitCampaignId: Scalars['ID']['output'];
@@ -3674,6 +3787,31 @@ export type GqlWeOweObligation = {
   version: Scalars['Int']['output'];
   weOweId: Scalars['ID']['output'];
 };
+
+/** A page of We Owe obligations (§7.2). No due date, no aging, no assignee — the Unit prioritizes by looking at the list. */
+export type GqlWeOweObligationConnection = {
+  __typename?: 'WeOweObligationConnection';
+  /** The obligations on this page: open obligations first, then newest first within each state. */
+  items: Array<GqlWeOweObligation>;
+  /** Cursor state for this page. */
+  pageInfo: GqlPageInfo;
+};
+
+/** The direct We Owe read: one obligation and its full append-only fulfillment history, oldest first (§7.2). */
+export type GqlWeOweObligationDetail = {
+  __typename?: 'WeOweObligationDetail';
+  /** Every fulfillment this obligation has ever had, oldest first. */
+  fulfillments: Array<GqlWeOweFulfillment>;
+  /** The obligation as it stands. */
+  obligation: GqlWeOweObligation;
+};
+
+/** The two report states a We Owe obligation has (data model §4 vocabulary, OWE-06). There is no third state: a reason an obligation closed is audit detail on the CLOSED row, never another category a report has to bucket. */
+export type GqlWeOweStatus =
+  /** Nothing is owed and nothing is reserved. */
+  | 'CLOSED'
+  /** Something is still owed, or stock is still held against it. */
+  | 'OPEN';
 
 export type GqlSellerProfileFieldsFragment = {
   __typename?: 'SellerProfile';

@@ -36,6 +36,7 @@ across the Lambda boundary, and forwarding an allowlisted subcode into GraphQL
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, cast
@@ -8824,6 +8825,477 @@ def _void_show_and_sell_sale(event: Dict[str, Any], caller_id: str) -> Dict[str,
     return answer
 
 
+# --- We Owe obligations: reads, reservation, fulfillment (§4.4.2-§4.4.4) -----------
+
+#: The four We Owe surfaces Wave 5.3 adds. Each is a field on ``unit_operations``, so its
+#: name is also the resolver key and the idempotency operation name.
+WE_OWE_OBLIGATION_FIELD = "weOweObligation"
+WE_OWE_OBLIGATIONS_FIELD = "weOweObligations"
+SET_WE_OWE_RESERVATION_FIELD = "setWeOweReservation"
+FULFILL_WE_OWE_FIELD = "fulfillWeOwe"
+WE_OWE_ID_ARGUMENT = "weOweId"
+
+#: The filters a ``weOweObligations`` cursor is scoped by. Every filter belongs in the scope
+#: token, or a cursor taken from a product-filtered page walks the campaign's whole list.
+_WE_OWE_FILTER_ORDER: tuple[str, ...] = ("status", "showAndSellId", "productId", "buyerName", "buyerNamePrefix")
+
+
+def _we_owe_row_for_admin(we_owe_id: str, caller_id: str) -> Dict[str, Any]:
+    """The obligation a caller addressed, inside a Unit it administers, or ``NOT_FOUND``.
+
+    Tenancy is derived from the row, never from an id the caller supplies: the obligation
+    names its Unit Campaign, the campaign names its Unit, and the admin check runs on that
+    Unit. Another Unit's obligation and an id that does not exist answer the same
+    ``NOT_FOUND``, so the read is not an oracle for whether some other Unit has an
+    obligation by that id (AUTH-U).
+    """
+    row: Dict[str, Any] = show_and_sell_sale_models.load_we_owe_by_id_or_not_found(we_owe_id)
+    campaign = unit_campaign_models.load_unit_campaign_or_not_found(
+        str(row[show_and_sell_sale_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    )
+    unit_auth.require_unit_admin(caller_id, str(campaign["unitId"]))
+    return row
+
+
+def _obligation_detail(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One obligation together with the fulfillment history that explains it (§7.2).
+
+    The history comes from the rows, not from the obligation's own counters: §5.15 keeps the
+    aggregate on the obligation and the records append-only beside it, and a direct read that
+    showed only the total could not answer "which of these came from the Kernel and which
+    from a Council".
+    """
+    return {
+        "obligation": show_and_sell_sale_models.we_owe_payload(row),
+        "fulfillments": [
+            show_and_sell_sale_models.we_owe_fulfillment_payload(record)
+            for record in show_and_sell_sale_models.we_owe_fulfillment_history(
+                str(row[show_and_sell_sale_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+                str(row[show_and_sell_sale_models.WE_OWE_ID_ATTRIBUTE]),
+            )
+        ],
+    }
+
+
+def _we_owe_obligation(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One obligation by id, with its fulfillment history (§4.4.4, OWE-Q-01).
+
+    Origin links (``saleId`` and ``lineItemId``) and both version and quantity fields are on
+    the payload, so a caller can walk from an obligation to the sale that created it and then
+    send a reservation or fulfillment that conditions on the version it just read.
+    """
+    we_owe_id = show_and_sell_sale_models.normalize_we_owe_id(_query_argument(event, WE_OWE_ID_ARGUMENT))
+    return _obligation_detail(_we_owe_row_for_admin(we_owe_id, caller_id))
+
+
+def _we_owe_filters(event: Dict[str, Any]) -> Dict[str, Any]:
+    """The validated ``weOweObligations`` filter set (§4.4.4).
+
+    There is no due-date, aging, or assignee filter to validate, because there is no such
+    field to filter on: OWE-10 keeps We Owe a list a Unit prioritizes by looking at, and §5.15
+    carries no date past the obligation's own ``createdAt``.
+    """
+    values: Dict[str, Any] = {}
+    raw_status = _optional_argument(event, "status")
+    values["status"] = None if raw_status is None else show_and_sell_sale_models.normalize_we_owe_status(raw_status)
+    for name in (SHOW_AND_SELL_ID_ARGUMENT, "productId"):
+        raw = _optional_argument(event, name)
+        values[name] = None if raw is None else inventory_models.normalize_inventory_id(raw, name)
+    for name in ("buyerName", "buyerNamePrefix"):
+        raw = _optional_argument(event, name)
+        values[name] = None if raw is None else show_and_sell_sale_models.normalize_buyer_name_filter(raw, name)
+    return values
+
+
+def _we_owe_link_match(row: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
+    """Do the event and product links of one obligation row answer the caller?
+
+    Both are exact: an event or product id is something the caller already has in hand,
+    because the list it is filtering carries it on every row (§4.4.4).
+    """
+    return all(
+        filters[name] is None or str(row.get(name) or "") == str(filters[name])
+        for name in (SHOW_AND_SELL_ID_ARGUMENT, "productId")
+    )
+
+
+def _we_owe_buyer_match(row: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
+    """Do the buyer filters match the obligation's own name snapshot?
+
+    ``buyerName`` is exact and ``buyerNamePrefix`` is case-insensitive, because the two
+    questions are different: the first asks what the entry says, the second is a table
+    typing a few letters of a name it does not remember the spelling of. The snapshot is
+    the whole search space — there is no Account behind a We Owe buyer to look a name up
+    against, and no contact detail to match on (§5.15).
+    """
+    name = str(row.get(show_and_sell_sale_models.BUYER_NAME_ATTRIBUTE) or "")
+    exact = filters["buyerName"]
+    if exact is not None and name != str(exact):
+        return False
+    prefix = filters["buyerNamePrefix"]
+    return prefix is None or name.casefold().startswith(str(prefix).casefold())
+
+
+def _we_owe_filter_match(row: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
+    """Does one obligation row answer the caller's filters (§4.4.4)?"""
+    return _we_owe_link_match(row, filters) and _we_owe_buyer_match(row, filters)
+
+
+def _we_owe_obligations(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One Unit Campaign's obligations, raw and paginated (§4.4.4, OWE-Q-01, PAGE-01).
+
+    The rows are the report: every quantity the We Owe report shows — original, fulfilled,
+    cancelled, reserved, remaining, covered as ``reservedQty``, uncovered — is on the row, and
+    so are the event and product links a browser groups by. No total is computed here, for the
+    same reason the allocation board computes none: the browser adds up every page it fetched,
+    and a second copy of that arithmetic in the server is a second answer that can disagree.
+
+    Fulfillment history is deliberately absent from the list: it is the direct read's answer,
+    so a page that wanted each obligation's full trail would pay a per-row read for a screen
+    that shows one row per obligation.
+    """
+    campaign = _campaign_admin_guard(event, caller_id, "unitCampaignId")
+    campaign_id = str(campaign["unitCampaignId"])
+    filters = _we_owe_filters(event)
+    rows = [
+        row
+        for row in show_and_sell_sale_models.campaign_we_owe_rows(campaign_id, status=filters["status"])
+        if _we_owe_filter_match(row, filters)
+    ]
+    # Canonical JSON over the ordered filter list: a buyer name containing "#" or "," can
+    # no longer produce a scope token identical to a different filter combination.
+    token = json.dumps([filters[name] for name in _WE_OWE_FILTER_ORDER], separators=(",", ":"))
+    page = dict(paginate_page(rows, f"{WE_OWE_OBLIGATIONS_FIELD}#{campaign_id}#{token}", _page_argument(event)))
+    page["items"] = [show_and_sell_sale_models.we_owe_payload(row) for row in page["items"]]
+    return page
+
+
+def _we_owe_position(campaign_id: str, product_id: str) -> Dict[str, Any]:
+    """The product's position after a We Owe write.
+
+    A We Owe-only sale never receipts the product, so its position may be all zeros with no
+    balance row behind it: the same tolerating answer the sale answer gives, never an
+    internal fault that poisons a retry.
+    """
+    return _position_payload(campaign_id, product_id)
+
+
+def _reservation_answer(stored: str) -> Dict[str, Any]:
+    """Rebuild a reservation answer from its ``eventId:weOweId`` handle, for a marker replay."""
+    event_id, _, we_owe_id = stored.partition(":")
+    return _write_answer(show_and_sell_sale_models.load_we_owe_or_internal(event_id, we_owe_id), position=True)
+
+
+def _write_answer(
+    row: Mapping[str, Any], *, position: bool, fulfillment: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """What a We Owe write answers: the obligation as it now stands, and the stock it moved.
+
+    Every field is read back from the rows the write committed (§8.9), so the retry answer
+    stored on the marker and the answer the caller received are one answer.
+    ``inventoryPosition`` is present only when the write moved stock — a reservation always
+    moves it, an ``EXTERNAL_COUNCIL`` fulfillment never does, and a payload that showed a
+    position for a write that changed no quantity would report an effect that did not happen.
+    """
+    answer: Dict[str, Any] = {"obligation": show_and_sell_sale_models.we_owe_payload(row)}
+    if fulfillment is not None:
+        answer["fulfillment"] = fulfillment
+    if position:
+        answer["inventoryPosition"] = _we_owe_position(
+            str(row[show_and_sell_sale_models.UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+            str(row[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE]),
+        )
+    return answer
+
+
+def _stage_reservation_writes(
+    plan: Any,
+    row: Mapping[str, Any],
+    target: show_and_sell_sale_models.WeOweTarget,
+    sections: Mapping[str, Mapping[str, List[Dict[str, Any]]]],
+    caller_id: str,
+    idempotency_key: str,
+    now_iso: str,
+) -> None:
+    """One reservation write: the obligation's target, the possession move, and one movement.
+
+    Physical stock is not touched — a reservation moves stock out of sellable/unassigned by
+    counting it as sold product in our possession, and OWE-04 says it stays on the Kernel's
+    shelf until it is fulfilled. Exactly one movement per write carries the whole change:
+    ``WE_OWE_RESERVE`` when the target holds more than before, ``WE_OWE_RELEASE`` when it
+    holds less, and no movement at all when the target is what the obligation already held.
+    """
+    product_id = str(row[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE])
+    campaign_id = str(row[show_and_sell_sale_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    we_owe_id = str(row[show_and_sell_sale_models.WE_OWE_ID_ATTRIBUTE])
+    delta = target.reserved_qty - int(row[show_and_sell_sale_models.RESERVED_QTY_ATTRIBUTE])
+    if not delta:
+        return
+    balance = _section_balance(sections[product_id])
+    expected = _number(balance[inventory_models.VERSION_ATTRIBUTE]) if balance is not None else 0
+    plan.add(
+        *inventory_models.inventory_balance_delta_action(
+            unit_campaign_id=campaign_id,
+            product_id=product_id,
+            existing=balance,
+            expected_version=expected,
+            sold_possession_delta=delta,
+            now_iso=now_iso,
+        )
+    )
+    common = {
+        "unit_campaign_id": campaign_id,
+        "product_id": product_id,
+        "we_owe_id": we_owe_id,
+        "inventory_version": expected + 1,
+        "actor_account_id": caller_id,
+        "occurred_at": now_iso,
+        "idempotency_key": idempotency_key,
+    }
+    if delta > 0:
+        plan.add(*show_and_sell_sale_models.we_owe_reserve_movement_action(reserve_qty=delta, **common))
+    else:
+        plan.add(*show_and_sell_sale_models.we_owe_release_movement_action(release_qty=-delta, **common))
+
+
+def _set_we_owe_reservation(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Set how much stock one obligation has held against it (§4.4.2).
+
+    The Kernel decides whether stock is reserved (OWE-04): nothing here runs on a receipt, no
+    new stock is claimed for an old obligation automatically, and an owed quantity with no
+    stock held against it stays visible as uncovered until an admin chooses otherwise. A
+    target is a decision about the whole reservation, so releasing is the same call with a
+    lower number and zero is a complete release.
+    """
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    we_owe_id = show_and_sell_sale_models.normalize_we_owe_id(_resource_id(payload, WE_OWE_ID_ARGUMENT))
+    expected_version = _expected_version(payload)
+
+    row = _we_owe_row_for_admin(we_owe_id, caller_id)
+    event_id = str(row[show_and_sell_sale_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    campaign_id = str(row[show_and_sell_sale_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    product_id = str(row[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE])
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(
+        caller_id=caller_id, operation=SET_WE_OWE_RESERVATION_FIELD, scope=we_owe_id, idempotency_key=key
+    )
+    replayed = _replay(runner, keys, fingerprint, SET_WE_OWE_RESERVATION_FIELD, _reservation_answer)
+    if replayed is not None:
+        return replayed
+
+    show_and_sell_sale_models.require_we_owe_version(row, expected_version)
+    sections = _sale_sections(campaign_id, [product_id])
+    target = show_and_sell_sale_models.we_owe_reservation_targets(
+        row,
+        payload.get(show_and_sell_sale_models.TARGET_RESERVED_QTY_ARGUMENT),
+        unassigned_qty=inventory_models.unassigned_kernel_qty(
+            _section_balance(sections[product_id]), sections[product_id]["allocations"]
+        ),
+    )
+
+    now_iso = utc_now_iso()
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=f"{event_id}:{we_owe_id}")
+    if target.changed:
+        plan.add(*show_and_sell_sale_models.we_owe_update_action(row=row, target=target, updated_at=now_iso))
+    else:
+        # A no-op reservation writes nothing: the obligation is already where the caller
+        # wants it. It is still pinned to the read version, though — an obligation that
+        # moved since the read must lose the whole transaction rather than commit a marker
+        # and hand back a stale answer.
+        plan.add(
+            "ConditionCheck",
+            {
+                "TableName": tables.show_and_sells.table_name,
+                "Key": wire_key(show_and_sell_sale_models.we_owe_key(event_id, we_owe_id)),
+                "ConditionExpression": "#version = :expectedVersion",
+                "ExpressionAttributeNames": {"#version": show_and_sell_sale_models.VERSION_ATTRIBUTE},
+                "ExpressionAttributeValues": {":expectedVersion": wire_value(expected_version)},
+                "ReturnValuesOnConditionCheckFailure": "ALL_OLD",
+            },
+        )
+    _stage_reservation_writes(plan, row, target, sections, caller_id, key, now_iso)
+
+    build_result = _once(lambda: _reservation_answer(f"{event_id}:{we_owe_id}"))
+    runner.execute(
+        keys,
+        plan,
+        operation=SET_WE_OWE_RESERVATION_FIELD,
+        fingerprint=fingerprint,
+        result_id=f"{event_id}:{we_owe_id}",
+        load_result=_reservation_answer,
+        result_payload=build_result,
+    )
+    answer = build_result()
+    get_logger(__name__).info(
+        "We Owe reservation set",
+        we_owe_id=we_owe_id,
+        caller_id=caller_id,
+        reserved_qty=target.reserved_qty,
+        released_qty=target.release_qty,
+    )
+    return answer
+
+
+def _stage_fulfillment_writes(
+    plan: Any,
+    row: Mapping[str, Any],
+    plan_target: show_and_sell_sale_models.WeOweFulfillmentTarget,
+    sections: Mapping[str, Mapping[str, List[Dict[str, Any]]]],
+    caller_id: str,
+    idempotency_key: str,
+    now_iso: str,
+) -> None:
+    """The obligation write, the audit record, and only the selected source's stock effect.
+
+    ``KERNEL_STOCK`` moves Kernel physical on hand and sold product in our possession
+    together, through one ``WE_OWE_FULFILL`` movement that names both the obligation and the
+    fulfillment record (§5.15, OWE-07). ``EXTERNAL_COUNCIL`` writes no balance and no
+    movement: a Council supplied the quantity, so no Unit quantity changed and an unexplained
+    movement row would leave the trail unable to reconcile against the balances.
+    """
+    product_id = str(row[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE])
+    campaign_id = str(row[show_and_sell_sale_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    we_owe_id = str(row[show_and_sell_sale_models.WE_OWE_ID_ATTRIBUTE])
+    movement_id = plan_target.inventory_movement_id
+    plan.add(
+        *show_and_sell_sale_models.put_we_owe_fulfillment_action(
+            show_and_sell_sale_models.build_we_owe_fulfillment_item(
+                show_and_sell_id=str(row[show_and_sell_sale_models.SHOW_AND_SELL_ID_ATTRIBUTE]),
+                we_owe_id=we_owe_id,
+                fulfillment_id=plan_target.fulfillment_id,
+                quantity=plan_target.quantity,
+                source=plan_target.source,
+                actor_account_id=caller_id,
+                now_iso=now_iso,
+                inventory_movement_id=movement_id,
+            )
+        )
+    )
+    if movement_id is None:
+        return
+    balance = _section_balance(sections[product_id])
+    expected = _number(balance[inventory_models.VERSION_ATTRIBUTE]) if balance is not None else 0
+    plan.add(
+        *inventory_models.inventory_balance_delta_action(
+            unit_campaign_id=campaign_id,
+            product_id=product_id,
+            existing=balance,
+            expected_version=expected,
+            kernel_physical_delta=plan_target.kernel_physical_delta,
+            sold_possession_delta=plan_target.sold_possession_delta,
+            now_iso=now_iso,
+        )
+    )
+    plan.add(
+        *show_and_sell_sale_models.we_owe_fulfill_movement_action(
+            unit_campaign_id=campaign_id,
+            product_id=product_id,
+            we_owe_id=we_owe_id,
+            fulfillment_id=plan_target.fulfillment_id,
+            movement_id=movement_id,
+            quantity=plan_target.quantity,
+            inventory_version=expected + 1,
+            actor_account_id=caller_id,
+            occurred_at=now_iso,
+            idempotency_key=idempotency_key,
+        )
+    )
+
+
+def _fulfill_answer(stored: str) -> Dict[str, Any]:
+    """Rebuild a fulfillment answer from its ``eventId:weOweId:fulfillmentId`` handle."""
+    event_id, we_owe_id, fulfillment_id = stored.split(":")
+    row = show_and_sell_sale_models.load_we_owe_or_internal(event_id, we_owe_id)
+    record = show_and_sell_sale_models.load_we_owe_fulfillment_or_internal(event_id, we_owe_id, fulfillment_id)
+    return _write_answer(
+        row,
+        position=record[show_and_sell_sale_models.FULFILLMENT_SOURCE_ATTRIBUTE]
+        == show_and_sell_sale_models.WE_OWE_SOURCE_KERNEL,
+        fulfillment=show_and_sell_sale_models.we_owe_fulfillment_payload(record),
+    )
+
+
+def _fulfill_we_owe(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Deliver part of what the Unit owes one buyer, from one stock source (§4.4.3).
+
+    Partial fulfillment is the normal case (OWE-09): each record says what it delivered and
+    where it came from, and the obligation stays open while anything is owed or held. The two
+    sources have different bounds because they move different things — Kernel stock only up to
+    what stock is reserved for this obligation, Council supply only up to what is not — and the
+    second bound is what forces a covered portion to be released first, so no reservation is
+    left holding units a Council already handed over (OWE-07). Fulfillment never creates a
+    second sale or a second Scout credit (OWE-03): the sale that went in at the table is what
+    the pool and the credit already count.
+    """
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _fingerprint(payload)
+    we_owe_id = show_and_sell_sale_models.normalize_we_owe_id(_resource_id(payload, WE_OWE_ID_ARGUMENT))
+    expected_version = _expected_version(payload)
+
+    row = _we_owe_row_for_admin(we_owe_id, caller_id)
+    event_id = str(row[show_and_sell_sale_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    campaign_id = str(row[show_and_sell_sale_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+    product_id = str(row[show_and_sell_sale_models.PRODUCT_ID_ATTRIBUTE])
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(
+        caller_id=caller_id, operation=FULFILL_WE_OWE_FIELD, scope=we_owe_id, idempotency_key=key
+    )
+    replayed = _replay(runner, keys, fingerprint, FULFILL_WE_OWE_FIELD, _fulfill_answer)
+    if replayed is not None:
+        return replayed
+
+    show_and_sell_sale_models.require_we_owe_version(row, expected_version)
+    plan_target = show_and_sell_sale_models.we_owe_fulfillment_targets(
+        row,
+        payload.get(show_and_sell_sale_models.FULFILLMENT_QTY_ATTRIBUTE),
+        payload.get(show_and_sell_sale_models.FULFILLMENT_SOURCE_ATTRIBUTE),
+    )
+    sections = _sale_sections(campaign_id, [product_id]) if plan_target.inventory_movement_id is not None else {}
+
+    now_iso = utc_now_iso()
+    # The marker records the fulfillment's own id, because a replay has to answer with the
+    # record that committed rather than a second delivery of the same quantity.
+    result_id = f"{event_id}:{we_owe_id}:{plan_target.fulfillment_id}"
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=result_id)
+    plan.add(
+        *show_and_sell_sale_models.we_owe_update_action(
+            row=row,
+            target=plan_target.target,
+            updated_at=now_iso,
+            fulfilled_qty=plan_target.target.fulfilled_qty,
+        )
+    )
+    _stage_fulfillment_writes(plan, row, plan_target, sections, caller_id, key, now_iso)
+
+    build_result = _once(lambda: _fulfill_answer(result_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=FULFILL_WE_OWE_FIELD,
+        fingerprint=fingerprint,
+        result_id=result_id,
+        load_result=_fulfill_answer,
+        result_payload=build_result,
+    )
+    answer = build_result()
+    get_logger(__name__).info(
+        "We Owe obligation fulfilled",
+        we_owe_id=we_owe_id,
+        caller_id=caller_id,
+        quantity=plan_target.quantity,
+        source=plan_target.source,
+        status=plan_target.target.status,
+    )
+    return answer
+
+
 # --- Entrypoint ------------------------------------------------------------------
 
 
@@ -8888,6 +9360,10 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     CREATE_SALE_FIELD: _create_show_and_sell_sale,
     CORRECT_SALE_FIELD: _correct_show_and_sell_sale,
     VOID_SALE_FIELD: _void_show_and_sell_sale,
+    WE_OWE_OBLIGATION_FIELD: _we_owe_obligation,
+    WE_OWE_OBLIGATIONS_FIELD: _we_owe_obligations,
+    SET_WE_OWE_RESERVATION_FIELD: _set_we_owe_reservation,
+    FULFILL_WE_OWE_FIELD: _fulfill_we_owe,
 }
 
 
