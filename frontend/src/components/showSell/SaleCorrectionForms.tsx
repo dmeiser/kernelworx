@@ -33,15 +33,18 @@ import { CORRECT_SHOW_AND_SELL_SALE, VOID_SHOW_AND_SELL_SALE } from '../../lib/g
 import {
   correctionPlan,
   formatCents,
+  noticesOf,
   weOweLineError,
   type CorrectionLineDraft,
+  type CorrectionPlan,
   type ExistingLine,
   type PaymentMethodOption,
 } from '../../lib/saleDesk';
 import { describeShowAndSellFailure, formatInstant } from '../../lib/showSell';
-import { createWriteIntent, isStaleVersionError, refreshQuery } from '../../lib/units';
+import { createWriteIntent, isStaleVersionError, refreshQuery, type WriteIntent } from '../../lib/units';
 import { ErrorNote } from '../ErrorAlert';
-import { SaleLineTable, emptyLineRow, linesOf, type CatalogProduct, type LineRowDraft } from './SaleLineEditor';
+import { SaleLineTable } from './SaleLineEditor';
+import { emptyLineRow, linesOf, type CatalogProduct, type LineRowDraft } from './saleLines';
 import type {
   GqlCorrectShowAndSellSaleMutation,
   GqlVoidShowAndSellSaleMutation,
@@ -52,6 +55,8 @@ import type {
 
 type Event = GqlShowAndSellAdminFieldsFragment;
 type Sale = GqlShowAndSellSaleFieldsFragment;
+type MutationPayload = NonNullable<GqlCorrectShowAndSellSaleMutation['correctShowAndSellSale']>;
+type ArchivedRevision = MutationPayload['priorRevision'];
 
 const REASON_MAX_CHARS = 500;
 const OTHER_DETAILS_MAX_CHARS = 250;
@@ -83,6 +88,186 @@ function omittedOf(existing: readonly ExistingLine[], rows: readonly LineRowDraf
   return existing.filter((line) => !keptIds.has(line.lineItemId));
 }
 
+/** The method choices, plus the sale's own method when the Unit no longer offers it. */
+function methodOptionsOf(options: readonly PaymentMethodOption[], stored: PaymentMethodSnapshot): PaymentMethodOption[] {
+  const list = [...options];
+  if (list.some((option) => option.value === stored.methodCode)) return list;
+  list.push({
+    value: stored.methodCode,
+    label: `${stored.displayName} (retired)`,
+    isBuiltIn: false,
+    isOther: stored.methodCode === 'OTHER',
+  });
+  return list;
+}
+
+type PaymentMethodSnapshot = Sale['paymentMethodSnapshot'];
+
+/** The sentence for a missing or over-long reason, in the act's own words. */
+function reasonErrorOf(reasonTrimmed: string, act: string): string | null {
+  if (reasonTrimmed === '') return `Say why the sale is being ${act}.`;
+  if (reasonTrimmed.length > REASON_MAX_CHARS) return `The reason may not exceed ${REASON_MAX_CHARS} characters.`;
+  return null;
+}
+
+/** The We Owe sentence for the corrected lines: an owing line needs the buyer named. */
+function buyerErrorOf(plan: CorrectionPlan, buyerName: string, weOweEnabled: boolean): string | null {
+  return weOweLineError(
+    plan.lines.map((line) => ({
+      productId: line.productId,
+      immediateQty: line.immediateQty,
+      weOweQty: line.weOweQty,
+      subtotalCents: 0,
+    })),
+    buyerName,
+    weOweEnabled,
+  );
+}
+
+/** The note the method choice allows: only Other carries one, and when it does it is required. */
+function otherDetailsErrorOf(otherSelected: boolean, otherDetails: string): string | null {
+  if (!otherSelected) {
+    if (otherDetails === '') return null;
+    return 'Only an Other payment carries a note; remove it or choose the Other method.';
+  }
+  if (otherDetails === '') return 'Say what makes this payment an Other one.';
+  if (otherDetails.length > OTHER_DETAILS_MAX_CHARS) return `Other details may not exceed ${OTHER_DETAILS_MAX_CHARS} characters.`;
+  return null;
+}
+
+/** The first sentence for a correction that cannot be sent, in the order the panel reads it. */
+function correctionFormError(plan: CorrectionPlan, reasonError: string | null, buyerError: string | null, otherDetailsError: string | null): string | null {
+  return plan.error ?? reasonError ?? buyerError ?? otherDetailsError;
+}
+
+/** What the saved correction archived: the revision the server kept, and why it was kept. */
+function priorRevisionNoteOf(archived: ArchivedRevision): string {
+  if (!archived) return 'Correction saved.';
+  return `Revision ${archived.revision} archived${archived.reason ? ` — ${archived.reason}` : ''}.`;
+}
+
+interface CorrectionFields {
+  sale: Sale;
+  event: Event;
+  plan: CorrectionPlan;
+  rows: readonly LineRowDraft[];
+  method: string;
+  changedMethod: boolean;
+  otherSelected: boolean;
+  otherDetails: string;
+  storedOtherDetails: string;
+  buyerName: string;
+  storedBuyerName: string;
+  buyerPhone: string;
+  storedBuyerPhone: string;
+  buyerEmail: string;
+  storedBuyerEmail: string;
+  reason: string;
+  intent: WriteIntent;
+}
+
+/** The buyer and payment fields the sale holds, so the body can say only what actually moved. */
+function storedBuyerOf(sale: Sale) {
+  return {
+    name: sale.buyerName ?? '',
+    phone: sale.buyerPhone ?? '',
+    email: sale.buyerEmail ?? '',
+    otherDetails: sale.paymentMethodSnapshot.otherDetails ?? '',
+  };
+}
+
+/** One line of the replacement set: the stable id when the line kept it, then the product and quantities. */
+function lineItemsOf(plan: CorrectionPlan): Record<string, unknown>[] {
+  return plan.lines.map((line) => ({
+    ...(line.lineItemId != null ? { lineItemId: line.lineItemId } : {}),
+    productId: line.productId,
+    immediateQty: line.immediateQty,
+    weOweQty: line.weOweQty,
+  }));
+}
+
+/** The idempotency key: the whole row set and every field that is part of the same act. */
+function correctionIdempotencyKeyOf(fields: CorrectionFields): string {
+  const { rows, method, otherDetails, buyerName, buyerPhone, buyerEmail, reason, intent } = fields;
+  return intent.keyFor({
+    rows: rows.map((row) => ({ ...row })),
+    method,
+    otherDetails,
+    buyerName,
+    buyerPhone,
+    buyerEmail,
+    reason,
+  });
+}
+
+/** The buyer fields that actually moved — an unchanged one is not a change the server has to re-snapshot. */
+function changedBuyerFields(fields: CorrectionFields): Record<string, unknown> {
+  const changed: Record<string, unknown> = {};
+  if (fields.buyerName !== fields.storedBuyerName) changed.buyerName = fields.buyerName;
+  if (fields.buyerPhone !== fields.storedBuyerPhone) changed.buyerPhone = fields.buyerPhone;
+  if (fields.buyerEmail !== fields.storedBuyerEmail) changed.buyerEmail = fields.buyerEmail;
+  return changed;
+}
+
+/** The payment fields that actually moved: a new method, or the note only Other may carry. */
+function changedPaymentFields(fields: CorrectionFields): Record<string, unknown> {
+  const { method, changedMethod, otherSelected, otherDetails, storedOtherDetails } = fields;
+  if (changedMethod) {
+    const changed: Record<string, unknown> = { paymentMethodCode: method };
+    if (otherSelected) changed.otherDetails = otherDetails;
+    return changed;
+  }
+  if (otherSelected && otherDetails !== storedOtherDetails) return { otherDetails };
+  return {};
+}
+
+/**
+ * The correction body: the whole replacement line set, the sale's own revision and
+ * the event's version as its conditions, and only the buyer and payment fields that
+ * actually moved — an unchanged field is not a change the server has to re-snapshot.
+ */
+function correctionBodyOf(fields: CorrectionFields): Record<string, unknown> {
+  const { sale, event, reason, plan } = fields;
+  const body: Record<string, unknown> = {
+    showAndSellId: event.showAndSellId,
+    saleId: sale.saleId,
+    saleVersion: { expectedVersion: sale.revision },
+    version: { expectedVersion: event.version },
+    lineItems: lineItemsOf(plan),
+    reason,
+    idempotency: { idempotencyKey: correctionIdempotencyKeyOf(fields) },
+  };
+  return { ...body, ...changedBuyerFields(fields), ...changedPaymentFields(fields) };
+}
+
+/** The draft read-out: what the typed rows add up to, and what the correction leaves out. */
+function draftSummaryOf(draftKernels: number, lineCount: number, omittedCount: number): string {
+  const lines = lineCount === 1 ? 'line' : 'lines';
+  if (omittedCount === 0) return `Draft: ${draftKernels} Kernels across ${lineCount} ${lines}`;
+  return `Draft: ${draftKernels} Kernels across ${lineCount} ${lines} · ${omittedCount} line${omittedCount === 1 ? '' : 's'} omitted`;
+}
+
+interface CorrectionFormState {
+  rows: LineRowDraft[];
+  method: string;
+  otherDetails: string;
+  buyerName: string;
+  buyerPhone: string;
+  buyerEmail: string;
+}
+
+/** The panel opens with the sale as it stands, so the admin corrects what they are shown. */
+function formStateOf(sale: Sale): CorrectionFormState {
+  return {
+    rows: linesOf(sale),
+    method: sale.paymentMethodSnapshot.methodCode,
+    otherDetails: sale.paymentMethodSnapshot.otherDetails ?? '',
+    buyerName: sale.buyerName ?? '',
+    buyerPhone: sale.buyerPhone ?? '',
+    buyerEmail: sale.buyerEmail ?? '',
+  };
+}
+
 export const SaleCorrectionPanel: React.FC<{
   sale: Sale;
   event: Event;
@@ -95,12 +280,13 @@ export const SaleCorrectionPanel: React.FC<{
   onClose: () => void;
 }> = ({ sale, event, timezone, products, options, obligations, onChanged, onRefetch, onClose }) => {
   const intent = useRef(createWriteIntent());
-  const [rows, setRows] = useState<LineRowDraft[]>(() => linesOf(sale));
-  const [method, setMethod] = useState<string>(sale.paymentMethodSnapshot.methodCode);
-  const [otherDetails, setOtherDetails] = useState<string>(sale.paymentMethodSnapshot.otherDetails ?? '');
-  const [buyerName, setBuyerName] = useState<string>(sale.buyerName ?? '');
-  const [buyerPhone, setBuyerPhone] = useState<string>(sale.buyerPhone ?? '');
-  const [buyerEmail, setBuyerEmail] = useState<string>(sale.buyerEmail ?? '');
+  const [initial] = useState(() => formStateOf(sale));
+  const [rows, setRows] = useState<LineRowDraft[]>(initial.rows);
+  const [method, setMethod] = useState<string>(initial.method);
+  const [otherDetails, setOtherDetails] = useState<string>(initial.otherDetails);
+  const [buyerName, setBuyerName] = useState<string>(initial.buyerName);
+  const [buyerPhone, setBuyerPhone] = useState<string>(initial.buyerPhone);
+  const [buyerEmail, setBuyerEmail] = useState<string>(initial.buyerEmail);
   const [reason, setReason] = useState<string>('');
   const [serverError, setServerError] = useState<string | null>(null);
   const [notices, setNotices] = useState<string[]>([]);
@@ -113,103 +299,74 @@ export const SaleCorrectionPanel: React.FC<{
     () => obligations.filter((obligation) => obligation.saleId === sale.saleId),
     [obligations, sale.saleId],
   );
-  const methodOptions = useMemo(() => {
-    const stored = sale.paymentMethodSnapshot.methodCode;
-    const list = [...options];
-    if (!list.some((option) => option.value === stored)) {
-      list.push({
-        value: stored,
-        label: `${sale.paymentMethodSnapshot.displayName} (retired)`,
-        isBuiltIn: false,
-        isOther: stored === 'OTHER',
-      });
-    }
-    return list;
-  }, [options, sale.paymentMethodSnapshot.methodCode, sale.paymentMethodSnapshot.displayName]);
+  const methodOptions = useMemo(() => methodOptionsOf(options, sale.paymentMethodSnapshot), [options, sale.paymentMethodSnapshot]);
 
-  const storedCode = sale.paymentMethodSnapshot.methodCode;
-  const changedMethod = method !== storedCode;
-  const selectedOption = methodOptions.find((option) => option.value === method);
-  const otherSelected = selectedOption?.isOther === true;
+  const changedMethod = method !== sale.paymentMethodSnapshot.methodCode;
+  const otherSelected = methodOptions.some((option) => option.value === method && option.isOther === true);
 
   const plan = correctionPlan(existing, draftsOf(rows), products, obligationsForSale);
   const draftKernels = plan.lines.reduce((sum, line) => sum + line.immediateQty + line.weOweQty, 0);
   const reasonTrimmed = reason.trim();
-  const reasonError =
-    reasonTrimmed === ''
-      ? 'Say why the sale is being corrected.'
-      : reasonTrimmed.length > REASON_MAX_CHARS
-        ? `The reason may not exceed ${REASON_MAX_CHARS} characters.`
-        : null;
-  const buyerError = weOweLineError(
-    plan.lines.map((line) => ({ productId: line.productId, immediateQty: line.immediateQty, weOweQty: line.weOweQty, subtotalCents: 0 })),
-    buyerName,
-    event.weOweEnabled,
+  const trimmedDetails = otherDetails.trim();
+  const formError = correctionFormError(
+    plan,
+    reasonErrorOf(reasonTrimmed, 'corrected'),
+    buyerErrorOf(plan, buyerName, event.weOweEnabled),
+    otherDetailsErrorOf(otherSelected, trimmedDetails),
   );
-  const otherDetailsError = otherSelected
-    ? otherDetails.trim() === ''
-      ? 'Say what makes this payment an Other one.'
-      : otherDetails.trim().length > OTHER_DETAILS_MAX_CHARS
-        ? `Other details may not exceed ${OTHER_DETAILS_MAX_CHARS} characters.`
-        : null
-    : otherDetails.trim() === ''
-      ? null
-      : 'Only an Other payment carries a note; remove it or choose the Other method.';
-
-  const formError = plan.error ?? reasonError ?? buyerError ?? otherDetailsError;
   const error = formError ?? serverError;
   const canSubmit = !loading && formError === null;
+
+  const editRow = (index: number, patch: Partial<LineRowDraft>) => {
+    setServerError(null);
+    setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  };
+
+  const removeRow = (index: number) => {
+    setServerError(null);
+    setRows((current) => current.filter((_row, i) => i !== index));
+  };
+
+  const addRow = () => {
+    setServerError(null);
+    setRows((current) => [...current, emptyLineRow()]);
+  };
+
+  const applyPayload = (payload: MutationPayload | undefined) => {
+    setNotices(noticesOf(payload?.warnings));
+    setPriorRevisionNote(priorRevisionNoteOf(payload?.priorRevision));
+    setServerError(null);
+  };
+
+  const stored = storedBuyerOf(sale);
 
   const submit = async () => {
     if (formError !== null) {
       setServerError(formError);
       return;
     }
-    const storedDetails = sale.paymentMethodSnapshot.otherDetails;
-    const detailsChanged = otherDetails.trim() !== (storedDetails ?? '');
-    const body: Record<string, unknown> = {
-      showAndSellId: event.showAndSellId,
-      saleId: sale.saleId,
-      saleVersion: { expectedVersion: sale.revision },
-      version: { expectedVersion: event.version },
-      lineItems: plan.lines.map((line) => ({
-        ...(line.lineItemId != null ? { lineItemId: line.lineItemId } : {}),
-        productId: line.productId,
-        immediateQty: line.immediateQty,
-        weOweQty: line.weOweQty,
-      })),
+    const body = correctionBodyOf({
+      sale,
+      event,
+      plan,
+      rows,
+      method,
+      changedMethod,
+      otherSelected,
+      otherDetails: trimmedDetails,
+      storedOtherDetails: stored.otherDetails,
+      buyerName: buyerName.trim(),
+      storedBuyerName: stored.name,
+      buyerPhone: buyerPhone.trim(),
+      storedBuyerPhone: stored.phone,
+      buyerEmail: buyerEmail.trim(),
+      storedBuyerEmail: stored.email,
       reason: reasonTrimmed,
-      idempotency: {
-        idempotencyKey: intent.current.keyFor({
-          rows: rows.map((row) => ({ ...row })),
-          method,
-          otherDetails: otherDetails.trim(),
-          buyerName: buyerName.trim(),
-          buyerPhone: buyerPhone.trim(),
-          buyerEmail: buyerEmail.trim(),
-          reason: reasonTrimmed,
-        }),
-      },
-    };
-    if (buyerName.trim() !== (sale.buyerName ?? '')) body.buyerName = buyerName.trim();
-    if (buyerPhone.trim() !== (sale.buyerPhone ?? '')) body.buyerPhone = buyerPhone.trim();
-    if (buyerEmail.trim() !== (sale.buyerEmail ?? '')) body.buyerEmail = buyerEmail.trim();
-    if (changedMethod) {
-      body.paymentMethodCode = method;
-      if (otherSelected) body.otherDetails = otherDetails.trim();
-    } else if (otherSelected && detailsChanged) {
-      body.otherDetails = otherDetails.trim();
-    }
+      intent: intent.current,
+    });
     try {
       const result = await correctSale({ variables: { input: body } });
-      const archived = result.data?.correctShowAndSellSale?.priorRevision;
-      setNotices(result.data?.correctShowAndSellSale?.warnings?.map((warning) => `${warning.productId}: ${warning.message}`) ?? []);
-      setPriorRevisionNote(
-        archived
-          ? `Revision ${archived.revision} archived${archived.reason ? ` — ${archived.reason}` : ''}.`
-          : 'Correction saved.',
-      );
-      setServerError(null);
+      applyPayload(result.data?.correctShowAndSellSale);
       await refreshQuery(onChanged);
       await refreshQuery(onRefetch);
     } catch (mutationError) {
@@ -219,145 +376,296 @@ export const SaleCorrectionPanel: React.FC<{
   };
 
   return (
-    <Card variant="outlined" data-testid="sale-correction-form">
-      <CardContent>
-        <Typography variant="subtitle1" gutterBottom data-testid="sale-correction-heading">
-          Correct the sale
-        </Typography>
-        <Typography color="text.secondary" data-testid="sale-correction-summary" sx={{ mb: 2 }}>
-          {formatInstant(sale.saleAt, timezone)} · {formatCents(sale.totalCents)} · {sale.paymentMethodSnapshot.displayName} · revision{' '}
-          {sale.revision}
-        </Typography>
-        <Alert severity="info" sx={{ mb: 2 }} data-testid="sale-correction-note">
-          A correction replaces every line. The whole previous revision is archived, and the event’s version is what this
-          write is aimed at.
-        </Alert>
-        {omitted.length > 0 ? (
-          <Alert severity="warning" sx={{ mb: 2 }} data-testid="correction-omission-warning">
-            Leaving out {omitted.map((line) => `${line.productNameSnapshot} (${line.immediateQty + line.weOweQty} Kernels)`).join(', ')}{' '}
-            voids {omitted.length === 1 ? 'that line' : 'those lines'} — their We Owe obligations close as cancelled and any
-            reservation is released.
-          </Alert>
-        ) : null}
-        <SaleLineTable
-          rows={rows}
-          products={products}
-          idPrefix="correction-line"
-          weOweAllowed={event.weOweEnabled}
-          disabled={loading}
-          onRow={(index, patch) => {
-            setServerError(null);
-            setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-          }}
-          onRemove={(index) => {
-            setServerError(null);
-            setRows((current) => current.filter((_row, i) => i !== index));
-          }}
-          onAdd={() => {
-            setServerError(null);
-            setRows((current) => [...current, emptyLineRow()]);
-          }}
-        />
-        <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
-          <Select
-            size="small"
-            label="Payment method"
-            value={method}
-            displayEmpty
-            onChange={(change) => setMethod(change.target.value)}
-            disabled={loading}
-            data-testid="correction-payment-method"
-            inputProps={{ 'aria-label': 'Payment method' }}
-            sx={{ minWidth: 220 }}
-          >
-            <MenuItem value="">Choose a payment method</MenuItem>
-            {methodOptions.map((option) => (
-              <MenuItem key={option.value} value={option.value} data-testid={`correction-payment-method-${option.value}`}>
-                {option.label}
-              </MenuItem>
-            ))}
-          </Select>
-          {otherSelected ? (
-            <TextField
-              label="Other details"
-              value={otherDetails}
-              onChange={(change) => setOtherDetails(change.target.value)}
-              disabled={loading}
-              inputProps={{ 'aria-label': 'Other payment details', 'data-testid': 'correction-other-details', maxLength: OTHER_DETAILS_MAX_CHARS }}
-              sx={{ minWidth: 220 }}
-            />
-          ) : null}
-        </Stack>
-        <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
-          <TextField
-            label="Buyer name"
-            value={buyerName}
-            onChange={(change) => setBuyerName(change.target.value)}
-            disabled={loading}
-            inputProps={{ 'aria-label': 'Buyer name', 'data-testid': 'correction-buyer-name', maxLength: 100 }}
-            sx={{ minWidth: 200 }}
-          />
-          <TextField
-            label="Buyer phone"
-            value={buyerPhone}
-            onChange={(change) => setBuyerPhone(change.target.value)}
-            disabled={loading}
-            inputProps={{ 'aria-label': 'Buyer phone', 'data-testid': 'correction-buyer-phone', maxLength: 50 }}
-            sx={{ minWidth: 160 }}
-          />
-          <TextField
-            label="Buyer email"
-            value={buyerEmail}
-            onChange={(change) => setBuyerEmail(change.target.value)}
-            disabled={loading}
-            inputProps={{ 'aria-label': 'Buyer email', 'data-testid': 'correction-buyer-email', maxLength: 254 }}
-            sx={{ minWidth: 200 }}
-          />
-        </Stack>
-        <TextField
-          label="Why the correction"
-          value={reason}
-          onChange={(change) => setReason(change.target.value)}
-          disabled={loading}
-          inputProps={{ 'aria-label': 'Why the correction', 'data-testid': 'correction-reason', maxLength: REASON_MAX_CHARS }}
-          sx={{ mt: 2, width: '100%' }}
-        />
-        <Typography variant="body2" color="text.secondary" data-testid="correction-draft-total" sx={{ mt: 2 }}>
-          Draft: {draftKernels} Kernels across {plan.lines.length} {plan.lines.length === 1 ? 'line' : 'lines'}
-          {omitted.length > 0 ? ` · ${omitted.length} line${omitted.length === 1 ? '' : 's'} omitted` : ''}
-        </Typography>
-        {error ? <ErrorNote message={error} data-testid="sale-correction-error" /> : null}
-        {notices.length > 0 ? (
-          <Alert severity="warning" sx={{ mt: 2 }} data-testid="correction-warnings">
-            {notices.map((notice) => (
-              <Typography key={notice} data-testid="correction-warning">
-                {notice}
-              </Typography>
-            ))}
-          </Alert>
-        ) : null}
-        {priorRevisionNote ? (
-          <Alert severity="success" sx={{ mt: 2 }} data-testid="correction-saved">
-            {priorRevisionNote}
-          </Alert>
-        ) : null}
-        <Stack direction="row" spacing={2} sx={{ mt: 2 }} alignItems="center">
-          <Button variant="contained" onClick={() => void submit()} disabled={!canSubmit || priorRevisionNote !== null} data-testid="save-correction">
-            {loading ? 'Saving…' : 'Save the correction'}
-          </Button>
-          <Button variant="text" onClick={onClose} data-testid="cancel-correction">
-            {priorRevisionNote !== null ? 'Done' : 'Cancel'}
-          </Button>
-          <Tooltip title="The correction is written against this event’s current version and the sale’s current revision." describeChild>
-            <IconButton size="small" aria-label="Why the correction is saved this way" data-testid="sale-correction-help">
-              <HelpOutlineIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      </CardContent>
-    </Card>
+    <CorrectionFormView
+      sale={sale}
+      event={event}
+      timezone={timezone}
+      products={products}
+      methodOptions={methodOptions}
+      otherSelected={otherSelected}
+      method={method}
+      setMethod={setMethod}
+      otherDetails={otherDetails}
+      setOtherDetails={setOtherDetails}
+      buyerName={buyerName}
+      setBuyerName={setBuyerName}
+      buyerPhone={buyerPhone}
+      setBuyerPhone={setBuyerPhone}
+      buyerEmail={buyerEmail}
+      setBuyerEmail={setBuyerEmail}
+      reason={reason}
+      setReason={setReason}
+      rows={rows}
+      onEditRow={editRow}
+      onRemoveRow={removeRow}
+      onAddRow={addRow}
+      loading={loading}
+      omitted={omitted}
+      draftSummary={draftSummaryOf(draftKernels, plan.lines.length, omitted.length)}
+      error={error}
+      notices={notices}
+      priorRevisionNote={priorRevisionNote}
+      canSubmit={canSubmit}
+      onSubmit={() => void submit()}
+      onClose={onClose}
+    />
   );
 };
+
+/** The whole correction form: the sale as it stands, the rows being replaced, and the save. */
+const CorrectionFormView: React.FC<{
+  sale: Sale;
+  event: Event;
+  timezone: string;
+  products: readonly CatalogProduct[];
+  methodOptions: readonly PaymentMethodOption[];
+  otherSelected: boolean;
+  method: string;
+  setMethod: (value: string) => void;
+  otherDetails: string;
+  setOtherDetails: (value: string) => void;
+  buyerName: string;
+  setBuyerName: (value: string) => void;
+  buyerPhone: string;
+  setBuyerPhone: (value: string) => void;
+  buyerEmail: string;
+  setBuyerEmail: (value: string) => void;
+  reason: string;
+  setReason: (value: string) => void;
+  rows: LineRowDraft[];
+  onEditRow: (index: number, patch: Partial<LineRowDraft>) => void;
+  onRemoveRow: (index: number) => void;
+  onAddRow: () => void;
+  loading: boolean;
+  omitted: readonly ExistingLine[];
+  draftSummary: string;
+  error: string | null;
+  notices: string[];
+  priorRevisionNote: string | null;
+  canSubmit: boolean;
+  onSubmit: () => void;
+  onClose: () => void;
+}> = ({
+  sale,
+  event,
+  timezone,
+  products,
+  methodOptions,
+  otherSelected,
+  method,
+  setMethod,
+  otherDetails,
+  setOtherDetails,
+  buyerName,
+  setBuyerName,
+  buyerPhone,
+  setBuyerPhone,
+  buyerEmail,
+  setBuyerEmail,
+  reason,
+  setReason,
+  rows,
+  onEditRow,
+  onRemoveRow,
+  onAddRow,
+  loading,
+  omitted,
+  draftSummary,
+  error,
+  notices,
+  priorRevisionNote,
+  canSubmit,
+  onSubmit,
+  onClose,
+}) => (
+  <Card variant="outlined" data-testid="sale-correction-form">
+    <CardContent>
+      <Typography variant="subtitle1" gutterBottom data-testid="sale-correction-heading">
+        Correct the sale
+      </Typography>
+      <CorrectionSaleSummary sale={sale} timezone={timezone} />
+      <Alert severity="info" sx={{ mb: 2 }} data-testid="sale-correction-note">
+        A correction replaces every line. The whole previous revision is archived, and the event’s version is what this
+        write is aimed at.
+      </Alert>
+      {omitted.length > 0 ? <OmittedLinesNotice omitted={omitted} /> : null}
+      <SaleLineTable
+        rows={rows}
+        products={products}
+        idPrefix="correction-line"
+        weOweAllowed={event.weOweEnabled}
+        disabled={loading}
+        onRow={onEditRow}
+        onRemove={onRemoveRow}
+        onAdd={onAddRow}
+      />
+      <CorrectionPaymentFields
+        methodOptions={methodOptions}
+        method={method}
+        setMethod={setMethod}
+        otherSelected={otherSelected}
+        otherDetails={otherDetails}
+        setOtherDetails={setOtherDetails}
+        loading={loading}
+      />
+      <CorrectionBuyerFields
+        buyerName={buyerName}
+        setBuyerName={setBuyerName}
+        buyerPhone={buyerPhone}
+        setBuyerPhone={setBuyerPhone}
+        buyerEmail={buyerEmail}
+        setBuyerEmail={setBuyerEmail}
+        loading={loading}
+      />
+      <TextField
+        label="Why the correction"
+        value={reason}
+        onChange={(change) => setReason(change.target.value)}
+        disabled={loading}
+        inputProps={{ 'aria-label': 'Why the correction', 'data-testid': 'correction-reason', maxLength: REASON_MAX_CHARS }}
+        sx={{ mt: 2, width: '100%' }}
+      />
+      <Typography variant="body2" color="text.secondary" data-testid="correction-draft-total" sx={{ mt: 2 }}>
+        {draftSummary}
+      </Typography>
+      <CorrectionOutcomes error={error} notices={notices} priorRevisionNote={priorRevisionNote} />
+      <Stack direction="row" spacing={2} sx={{ mt: 2 }} alignItems="center">
+        <Button variant="contained" onClick={onSubmit} disabled={!canSubmit || priorRevisionNote !== null} data-testid="save-correction">
+          {loading ? 'Saving…' : 'Save the correction'}
+        </Button>
+        <Button variant="text" onClick={onClose} data-testid="cancel-correction">
+          {priorRevisionNote !== null ? 'Done' : 'Cancel'}
+        </Button>
+        <Tooltip title="The correction is written against this event’s current version and the sale’s current revision." describeChild>
+          <IconButton size="small" aria-label="Why the correction is saved this way" data-testid="sale-correction-help">
+            <HelpOutlineIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+    </CardContent>
+  </Card>
+);
+
+/** The sale the correction is aimed at, as the panel reads it back. */
+const CorrectionSaleSummary: React.FC<{ sale: Sale; timezone: string }> = ({ sale, timezone }) => (
+  <Typography color="text.secondary" data-testid="sale-correction-summary" sx={{ mb: 2 }}>
+    {formatInstant(sale.saleAt, timezone)} · {formatCents(sale.totalCents)} · {sale.paymentMethodSnapshot.displayName} · revision{' '}
+    {sale.revision}
+  </Typography>
+);
+
+/** What leaving these lines out will do, said before the admin commits. */
+const OmittedLinesNotice: React.FC<{ omitted: readonly ExistingLine[] }> = ({ omitted }) => (
+  <Alert severity="warning" sx={{ mb: 2 }} data-testid="correction-omission-warning">
+    Leaving out {omitted.map((line) => `${line.productNameSnapshot} (${line.immediateQty + line.weOweQty} Kernels)`).join(', ')}{' '}
+    voids {omitted.length === 1 ? 'that line' : 'those lines'} — their We Owe obligations close as cancelled and any
+    reservation is released.
+  </Alert>
+);
+
+/** The method the sale keeps, with the note only Other may carry. */
+const CorrectionPaymentFields: React.FC<{
+  methodOptions: readonly PaymentMethodOption[];
+  method: string;
+  setMethod: (value: string) => void;
+  otherSelected: boolean;
+  otherDetails: string;
+  setOtherDetails: (value: string) => void;
+  loading: boolean;
+}> = ({ methodOptions, method, setMethod, otherSelected, otherDetails, setOtherDetails, loading }) => (
+  <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
+    <Select
+      size="small"
+      label="Payment method"
+      value={method}
+      displayEmpty
+      onChange={(change) => setMethod(change.target.value)}
+      disabled={loading}
+      data-testid="correction-payment-method"
+      inputProps={{ 'aria-label': 'Payment method' }}
+      sx={{ minWidth: 220 }}
+    >
+      <MenuItem value="">Choose a payment method</MenuItem>
+      {methodOptions.map((option) => (
+        <MenuItem key={option.value} value={option.value} data-testid={`correction-payment-method-${option.value}`}>
+          {option.label}
+        </MenuItem>
+      ))}
+    </Select>
+    {otherSelected ? (
+      <TextField
+        label="Other details"
+        value={otherDetails}
+        onChange={(change) => setOtherDetails(change.target.value)}
+        disabled={loading}
+        inputProps={{ 'aria-label': 'Other payment details', 'data-testid': 'correction-other-details', maxLength: OTHER_DETAILS_MAX_CHARS }}
+        sx={{ minWidth: 220 }}
+      />
+    ) : null}
+  </Stack>
+);
+
+const CorrectionBuyerFields: React.FC<{
+  buyerName: string;
+  setBuyerName: (value: string) => void;
+  buyerPhone: string;
+  setBuyerPhone: (value: string) => void;
+  buyerEmail: string;
+  setBuyerEmail: (value: string) => void;
+  loading: boolean;
+}> = ({ buyerName, setBuyerName, buyerPhone, setBuyerPhone, buyerEmail, setBuyerEmail, loading }) => (
+  <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
+    <TextField
+      label="Buyer name"
+      value={buyerName}
+      onChange={(change) => setBuyerName(change.target.value)}
+      disabled={loading}
+      inputProps={{ 'aria-label': 'Buyer name', 'data-testid': 'correction-buyer-name', maxLength: 100 }}
+      sx={{ minWidth: 200 }}
+    />
+    <TextField
+      label="Buyer phone"
+      value={buyerPhone}
+      onChange={(change) => setBuyerPhone(change.target.value)}
+      disabled={loading}
+      inputProps={{ 'aria-label': 'Buyer phone', 'data-testid': 'correction-buyer-phone', maxLength: 50 }}
+      sx={{ minWidth: 160 }}
+    />
+    <TextField
+      label="Buyer email"
+      value={buyerEmail}
+      onChange={(change) => setBuyerEmail(change.target.value)}
+      disabled={loading}
+      inputProps={{ 'aria-label': 'Buyer email', 'data-testid': 'correction-buyer-email', maxLength: 254 }}
+      sx={{ minWidth: 200 }}
+    />
+  </Stack>
+);
+
+/** What the last save said: the sentence it refused with, the warnings it kept, the revision it archived. */
+const CorrectionOutcomes: React.FC<{ error: string | null; notices: string[]; priorRevisionNote: string | null }> = ({
+  error,
+  notices,
+  priorRevisionNote,
+}) => (
+  <>
+    {error ? <ErrorNote message={error} data-testid="sale-correction-error" /> : null}
+    {notices.length > 0 ? (
+      <Alert severity="warning" sx={{ mt: 2 }} data-testid="correction-warnings">
+        {notices.map((notice) => (
+          <Typography key={notice} data-testid="correction-warning">
+            {notice}
+          </Typography>
+        ))}
+      </Alert>
+    ) : null}
+    {priorRevisionNote ? (
+      <Alert severity="success" sx={{ mt: 2 }} data-testid="correction-saved">
+        {priorRevisionNote}
+      </Alert>
+    ) : null}
+  </>
+);
 
 export const SaleVoidPanel: React.FC<{
   sale: Sale;
@@ -373,12 +681,7 @@ export const SaleVoidPanel: React.FC<{
   const [voidSale, { loading }] = useMutation<GqlVoidShowAndSellSaleMutation>(VOID_SHOW_AND_SELL_SALE);
 
   const reasonTrimmed = reason.trim();
-  const reasonError =
-    reasonTrimmed === ''
-      ? 'Say why the sale is being voided.'
-      : reasonTrimmed.length > REASON_MAX_CHARS
-        ? `The reason may not exceed ${REASON_MAX_CHARS} characters.`
-        : null;
+  const reasonError = reasonErrorOf(reasonTrimmed, 'voided');
   const canSubmit = !loading && reasonError === null;
 
   const submit = async () => {

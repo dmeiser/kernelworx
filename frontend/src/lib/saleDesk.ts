@@ -20,6 +20,13 @@ import type {
   GqlWeOweObligationFieldsFragment,
 } from '../types/graphql-generated';
 
+/** A catalog row the screens price a sale line from. */
+export interface CatalogEntry {
+  productId: string;
+  productName: string;
+  price: number;
+}
+
 /** The built-in Other method's code; the only method that may carry a note (§8.2). */
 export const OTHER_METHOD_CODE = 'OTHER';
 
@@ -129,6 +136,17 @@ export function defaultSaleAt(event: { startAt: string; endAt: string }, now: Da
   return new Date(clamped).toISOString();
 }
 
+/** The sentence for an instant outside the interval, or null when it is inside it. */
+function saleAtWindowErrorOf(instant: number, start: number, end: number): string | null {
+  if (Number.isFinite(start) && instant < start) {
+    return 'The sale happened before this Show & Sell started. A sale belongs inside the event’s own hours.';
+  }
+  if (Number.isFinite(end) && instant > end) {
+    return 'The sale happened after this Show & Sell ended. A sale belongs inside the event’s own hours.';
+  }
+  return null;
+}
+
 /** Why a typed sale instant cannot be written, or null when the interval holds it. */
 export function saleAtWindowError(
   saleAt: Date | null,
@@ -137,14 +155,7 @@ export function saleAtWindowError(
   if (saleAt === null) return 'Enter when the sale happened, as a date and time.';
   const start = Date.parse(event.startAt);
   const end = Date.parse(event.endAt);
-  const instant = saleAt.getTime();
-  if (Number.isFinite(start) && instant < start) {
-    return 'The sale happened before this Show & Sell started. A sale belongs inside the event’s own hours.';
-  }
-  if (Number.isFinite(end) && instant > end) {
-    return 'The sale happened after this Show & Sell ended. A sale belongs inside the event’s own hours.';
-  }
-  return null;
+  return saleAtWindowErrorOf(saleAt.getTime(), start, end);
 }
 
 // --- sale lines ───────────────────────────────────────────────────────────────
@@ -173,6 +184,37 @@ export interface SalePlan {
 
 const WHOLE_NUMBER = /^\d+$/;
 
+/** One typed quantity as a whole number: empty means zero, anything else must be digits. */
+function wholeQuantity(raw: string): number | null {
+  const text = raw.trim();
+  if (text === '') return 0;
+  return WHOLE_NUMBER.test(text) ? Number(text) : null;
+}
+
+type QuantityResult = { immediateQty: number; weOweQty: number } | { badField: 'immediate' | 'weOwe' | 'empty' };
+
+/** A typed pair of quantities, or the one that cannot be sent. */
+function lineQuantities(immediateRaw: string, weOweRaw: string): QuantityResult {
+  const immediateQty = wholeQuantity(immediateRaw);
+  if (immediateQty === null) return { badField: 'immediate' };
+  const weOweQty = wholeQuantity(weOweRaw);
+  if (weOweQty === null) return { badField: 'weOwe' };
+  if (immediateQty + weOweQty < 1) return { badField: 'empty' };
+  return { immediateQty, weOweQty };
+}
+
+/** The sentence for a bad pair of quantities, in the words the server uses. */
+function quantityErrorMessage(badField: 'immediate' | 'weOwe' | 'empty', productName: string): string {
+  if (badField === 'immediate') return `Enter a whole number of Kernels handed over at the table for ${productName}.`;
+  if (badField === 'weOwe') return `Enter a whole number of Kernels owed later for ${productName}.`;
+  return `${productName} needs at least one item, handed over or owed later.`;
+}
+
+/** The whole quantity priced at the catalog's snapshot price, in cents. */
+function subtotalCents(immediateQty: number, weOweQty: number, price: number): number {
+  return Math.round((immediateQty + weOweQty) * price * 100);
+}
+
 /**
  * One typed line's quantities, validated against the server's rules.
  *
@@ -183,27 +225,22 @@ const WHOLE_NUMBER = /^\d+$/;
  */
 export function validateSaleLine(
   draft: SaleLineDraft,
-  catalog: readonly { productId: string; productName: string; price: number }[],
+  catalog: readonly CatalogEntry[],
 ): { line: ValidatedSaleLine } | { error: string } {
   const product = catalog.find((entry) => entry.productId === draft.productId);
   if (product == null) {
     return { error: 'Choose a product for every line.' };
   }
-  const immediate = draft.immediateQty.trim();
-  const weOwe = draft.weOweQty.trim();
-  if (immediate !== '' && !WHOLE_NUMBER.test(immediate)) return { error: `Enter a whole number of Kernels handed over at the table for ${product.productName}.` };
-  if (weOwe !== '' && !WHOLE_NUMBER.test(weOwe)) return { error: `Enter a whole number of Kernels owed later for ${product.productName}.` };
-  const immediateQty = immediate === '' ? 0 : Number(immediate);
-  const weOweQty = weOwe === '' ? 0 : Number(weOwe);
-  if (immediateQty + weOweQty < 1) {
-    return { error: `${product.productName} needs at least one item, handed over or owed later.` };
+  const quantities = lineQuantities(draft.immediateQty, draft.weOweQty);
+  if ('badField' in quantities) {
+    return { error: quantityErrorMessage(quantities.badField, product.productName) };
   }
   return {
     line: {
       productId: product.productId,
-      immediateQty,
-      weOweQty,
-      subtotalCents: Math.round((immediateQty + weOweQty) * product.price * 100),
+      immediateQty: quantities.immediateQty,
+      weOweQty: quantities.weOweQty,
+      subtotalCents: subtotalCents(quantities.immediateQty, quantities.weOweQty, product.price),
     },
   };
 }
@@ -211,7 +248,7 @@ export function validateSaleLine(
 /** The whole sale, from the typed lines, or the first line that cannot be sent. */
 export function salePlan(
   drafts: readonly SaleLineDraft[],
-  catalog: readonly { productId: string; productName: string; price: number }[],
+  catalog: readonly CatalogEntry[],
 ): SalePlan {
   if (drafts.length === 0) return emptySalePlan();
   const lines: ValidatedSaleLine[] = [];
@@ -259,19 +296,104 @@ export interface CorrectionPlan {
   error: string | null;
 }
 
-/** One typed row's whole quantities, or the sentence for the first thing that is not a whole number. */
-function correctionQuantities(
+/** The product name a correction can name, or null when it cannot be named. */
+function productNameOf(
+  original: ExistingLine | undefined,
   draft: CorrectionLineDraft,
-  productName: string,
-): { immediateQty: number; weOweQty: number } | { error: string } {
-  const immediate = draft.immediateQty.trim();
-  const weOwe = draft.weOweQty.trim();
-  if (immediate !== '' && !WHOLE_NUMBER.test(immediate)) return { error: `Enter a whole number of Kernels handed over at the table for ${productName}.` };
-  if (weOwe !== '' && !WHOLE_NUMBER.test(weOwe)) return { error: `Enter a whole number of Kernels owed later for ${productName}.` };
-  const immediateQty = immediate === '' ? 0 : Number(immediate);
-  const weOweQty = weOwe === '' ? 0 : Number(weOwe);
-  if (immediateQty + weOweQty < 1) return { error: `${productName} needs at least one item, handed over or owed later.` };
-  return { immediateQty, weOweQty };
+  catalog: readonly CatalogEntry[],
+): string | null {
+  if (original != null) return original.productNameSnapshot;
+  return catalog.find((entry) => entry.productId === draft.productId)?.productName ?? null;
+}
+
+/** The first identity refusal a draft line can carry, or null when it may be read. */
+function correctionIdentityError(
+  original: ExistingLine | undefined,
+  draft: CorrectionLineDraft,
+  catalog: readonly CatalogEntry[],
+): string | null {
+  if (draft.lineItemId != null && original == null) {
+    return 'One of the lines being corrected is not on this sale.';
+  }
+  if (original == null && productNameOf(original, draft, catalog) == null) {
+    return 'Choose a product for every line.';
+  }
+  return null;
+}
+
+/** The fulfilled quantity of one line, from the obligations the sale created. */
+function fulfilledQtyOf(lineItemId: string | undefined, obligations: readonly GqlWeOweObligationFieldsFragment[]): number {
+  if (lineItemId == null) return 0;
+  return obligations.find((entry) => entry.lineItemId === lineItemId)?.fulfilledQty ?? 0;
+}
+
+/** A supplemental line: new, and priced from the catalog. */
+function supplementalLine(
+  draft: CorrectionLineDraft,
+  catalog: readonly CatalogEntry[],
+  quantities: { immediateQty: number; weOweQty: number },
+): { line: CorrectionPlan['lines'][number] } | { error: string } {
+  if (!catalog.some((entry) => entry.productId === draft.productId)) {
+    return { error: 'Choose a product for every line.' };
+  }
+  return {
+    line: {
+      productId: draft.productId,
+      immediateQty: quantities.immediateQty,
+      weOweQty: quantities.weOweQty,
+    },
+  };
+}
+
+/** An existing line kept as corrected: the product it sold, and the quantities it may carry. */
+function keptLine(
+  original: ExistingLine,
+  draft: CorrectionLineDraft,
+  quantities: { immediateQty: number; weOweQty: number },
+  obligations: readonly GqlWeOweObligationFieldsFragment[],
+): { line: CorrectionPlan['lines'][number] } | { error: string } {
+  if (draft.productId !== original.productId) {
+    return {
+      error: `${original.productNameSnapshot}: a corrected line keeps the product it sold; move the quantity by omitting this line and adding a supplemental line for the other product.`,
+    };
+  }
+  const fulfilled = fulfilledQtyOf(draft.lineItemId, obligations);
+  if (quantities.weOweQty < fulfilled) {
+    return {
+      error: `${original.productNameSnapshot}: ${fulfilled} Kernels are already fulfilled; a correction cannot take back stock the buyer has (SALE-M-03-02).`,
+    };
+  }
+  if (quantities.weOweQty > original.weOweQty) {
+    return {
+      error: `${original.productNameSnapshot}: an existing line's We Owe quantity cannot exceed the ${original.weOweQty} it was entered with; add a new line for the extra.`,
+    };
+  }
+  return {
+    line: {
+      lineItemId: draft.lineItemId as string,
+      productId: draft.productId,
+      immediateQty: quantities.immediateQty,
+      weOweQty: quantities.weOweQty,
+    },
+  };
+}
+
+/** One typed row, read against the sale's own lines and the obligations they created. */
+function correctionLine(
+  original: ExistingLine | undefined,
+  draft: CorrectionLineDraft,
+  catalog: readonly CatalogEntry[],
+  obligations: readonly GqlWeOweObligationFieldsFragment[],
+): { line: CorrectionPlan['lines'][number] } | { error: string } {
+  const identity = correctionIdentityError(original, draft, catalog);
+  if (identity !== null) return { error: identity };
+  const quantities = lineQuantities(draft.immediateQty, draft.weOweQty);
+  if ('badField' in quantities) {
+    const productName = productNameOf(original, draft, catalog) ?? draft.productId;
+    return { error: quantityErrorMessage(quantities.badField, productName) };
+  }
+  if (original == null) return supplementalLine(draft, catalog, quantities);
+  return keptLine(original, draft, quantities, obligations);
 }
 
 /**
@@ -287,63 +409,30 @@ function correctionQuantities(
  * not carry more We Owe than it was entered with — an increase is a new
  * supplemental line and a new obligation, not an edit to the original.
  */
+/** The one act a draft asks for: keep the line as corrected, or the sentence for why it cannot be sent. */
+function correctionOutcome(
+  existing: readonly ExistingLine[],
+  draft: CorrectionLineDraft,
+  catalog: readonly CatalogEntry[],
+  obligations: readonly GqlWeOweObligationFieldsFragment[],
+): { line: CorrectionPlan['lines'][number] } | { error: string } {
+  const original = draft.lineItemId == null ? undefined : existing.find((line) => line.lineItemId === draft.lineItemId);
+  return correctionLine(original, draft, catalog, obligations);
+}
+
 export function correctionPlan(
   existing: readonly ExistingLine[],
   drafts: readonly CorrectionLineDraft[],
-  catalog: readonly { productId: string; productName: string; price: number }[],
+  catalog: readonly CatalogEntry[],
   obligations: readonly GqlWeOweObligationFieldsFragment[] = [],
 ): CorrectionPlan {
   const lines: CorrectionPlan['lines'] = [];
   const kept = new Set<string>();
   for (const draft of drafts) {
-    const original = draft.lineItemId == null ? undefined : existing.find((line) => line.lineItemId === draft.lineItemId);
-    if (draft.lineItemId != null && original == null) {
-      return { lines: [], omitted: [], error: 'One of the lines being corrected is not on this sale.' };
-    }
-    const productName = original?.productNameSnapshot ?? catalog.find((entry) => entry.productId === draft.productId)?.productName;
-    if (original == null && productName == null) {
-      return { lines: [], omitted: [], error: 'Choose a product for every line.' };
-    }
-    const quantities = correctionQuantities(draft, productName ?? draft.productId);
-    if ('error' in quantities) return { lines: [], omitted: [], error: quantities.error };
-    if (original != null) {
-      if (draft.productId !== original.productId) {
-        return {
-          lines: [],
-          omitted: [],
-          error: `${original.productNameSnapshot}: a corrected line keeps the product it sold; move the quantity by omitting this line and adding a supplemental line for the other product.`,
-        };
-      }
-      const obligation = obligations.find((entry) => entry.lineItemId === draft.lineItemId);
-      const fulfilled = obligation?.fulfilledQty ?? 0;
-      if (quantities.weOweQty < fulfilled) {
-        return {
-          lines: [],
-          omitted: [],
-          error: `${original.productNameSnapshot}: ${fulfilled} Kernels are already fulfilled; a correction cannot take back stock the buyer has (SALE-M-03-02).`,
-        };
-      }
-      if (quantities.weOweQty > original.weOweQty) {
-        return {
-          lines: [],
-          omitted: [],
-          error: `${original.productNameSnapshot}: an existing line's We Owe quantity cannot exceed the ${original.weOweQty} it was entered with; add a new line for the extra.`,
-        };
-      }
-      kept.add(draft.lineItemId as string);
-    } else {
-      const product = catalog.find((entry) => entry.productId === draft.productId);
-      if (product == null) {
-        return { lines: [], omitted: [], error: 'Choose a product for every line.' };
-      }
-    }
-    const line: CorrectionPlan['lines'][number] = {
-      productId: draft.productId,
-      immediateQty: quantities.immediateQty,
-      weOweQty: quantities.weOweQty,
-    };
-    if (original != null) line.lineItemId = draft.lineItemId;
-    lines.push(line);
+    const outcome = correctionOutcome(existing, draft, catalog, obligations);
+    if ('error' in outcome) return { lines: [], omitted: [], error: outcome.error };
+    if (outcome.line.lineItemId != null) kept.add(outcome.line.lineItemId);
+    lines.push(outcome.line);
   }
   const omitted = existing.filter((line) => !kept.has(line.lineItemId));
   return { lines, omitted, error: null };
@@ -378,18 +467,28 @@ export interface ReservationPlan {
  * quantity or the campaign's unassigned stock: the server is what knows the
  * stock, so the screen bounds only the owed side and says so.
  */
+/** The reservation sentence for a typed target, or null when the target is sound. */
+function reservationErrorOf(raw: string, obligation: GqlWeOweObligationFieldsFragment): string | null {
+  const text = raw.trim();
+  if (text === '') return null;
+  if (!WHOLE_NUMBER.test(text)) return 'Enter a whole number of Kernels.';
+  if (Number(text) > obligation.remainingQty) {
+    return `This obligation owes ${obligation.remainingQty} more; a reservation may not exceed that.`;
+  }
+  return null;
+}
+
 export function reservationPlan(
   raw: string,
   obligation: GqlWeOweObligationFieldsFragment,
 ): ReservationPlan {
   const current = obligation.reservedQty;
+  const error = reservationErrorOf(raw, obligation);
+  if (error !== null) {
+    return { target: null, error, current, isRelease: false };
+  }
   const target = reservationTargetOf(raw, obligation);
   if (target === null) {
-    const text = raw.trim();
-    if (text !== '' && !WHOLE_NUMBER.test(text)) return { target: null, error: 'Enter a whole number of Kernels.', current, isRelease: false };
-    if (text !== '' && Number(text) > obligation.remainingQty) {
-      return { target: null, error: `This obligation owes ${obligation.remainingQty} more; a reservation may not exceed that.`, current, isRelease: false };
-    }
     return { target: null, error: 'Enter a whole number of Kernels.', current, isRelease: false };
   }
   return { target, error: null, current, isRelease: target < current };
@@ -411,6 +510,19 @@ export interface FulfillmentPlan {
  * not covered — so a covered portion has to be released first, and the screen
  * refuses a Council fulfillment of stock the Kernel already set aside.
  */
+/** The quantity a source may reach, bounded by what that source holds. */
+function sourceCapacityOf(source: GqlWeOweFulfillmentSource, obligation: GqlWeOweObligationFieldsFragment): number {
+  return source === 'KERNEL_STOCK' ? obligation.reservedQty : obligation.uncoveredQty;
+}
+
+/** The sentence for a quantity past a source's own reach, in the words the screen uses. */
+function overSourceError(source: GqlWeOweFulfillmentSource, obligation: GqlWeOweObligationFieldsFragment): string {
+  if (source === 'KERNEL_STOCK') {
+    return `Only ${obligation.reservedQty} Kernels are reserved for this obligation; release the reservation first or record the rest as EXTERNAL_COUNCIL.`;
+  }
+  return `Only ${obligation.uncoveredQty} is uncovered; release the reservation on the covered portion before a Council supplies it.`;
+}
+
 export function fulfillmentPlan(
   raw: string,
   source: GqlWeOweFulfillmentSource,
@@ -421,18 +533,15 @@ export function fulfillmentPlan(
     return { quantity: null, error: 'Enter a whole number of Kernels to fulfill.', maxBySource: 0, source, blocked: false };
   }
   const quantity = Number(text);
-  const remaining = obligation.remainingQty;
-  const maxBySource = source === 'KERNEL_STOCK' ? obligation.reservedQty : obligation.uncoveredQty;
+  const maxBySource = sourceCapacityOf(source, obligation);
   if (quantity < 1) {
     return { quantity: null, error: 'Enter at least one Kernel to fulfill.', maxBySource, source, blocked: maxBySource < 1 };
   }
-  if (quantity > remaining) {
-    return { quantity: null, error: `This obligation owes ${remaining} more; ${quantity} cannot be fulfilled against it.`, maxBySource, source, blocked: false };
+  if (quantity > obligation.remainingQty) {
+    return { quantity: null, error: `This obligation owes ${obligation.remainingQty} more; ${quantity} cannot be fulfilled against it.`, maxBySource, source, blocked: false };
   }
   if (quantity > maxBySource) {
-    return source === 'KERNEL_STOCK'
-      ? { quantity: null, error: `Only ${obligation.reservedQty} Kernels are reserved for this obligation; release the reservation first or record the rest as EXTERNAL_COUNCIL.`, maxBySource, source, blocked: maxBySource < 1 }
-      : { quantity: null, error: `Only ${obligation.uncoveredQty} is uncovered; release the reservation on the covered portion before a Council supplies it.`, maxBySource, source, blocked: maxBySource < 1 };
+    return { quantity: null, error: overSourceError(source, obligation), maxBySource, source, blocked: maxBySource < 1 };
   }
   return { quantity, error: null, maxBySource, source, blocked: maxBySource < 1 };
 }
@@ -461,6 +570,11 @@ export const WE_OWE_STATUS_OPTIONS: { value: 'OPEN' | 'CLOSED'; label: string }[
   { value: 'OPEN', label: 'Open' },
   { value: 'CLOSED', label: 'Closed' },
 ];
+
+/** The server's over-assignment warnings, one line per product, for the screens to show. */
+export function noticesOf(warnings: readonly { productId: string; message: string }[] | undefined): string[] {
+  return (warnings ?? []).map((warning) => `${warning.productId}: ${warning.message}`);
+}
 
 /**
  * The We Owe side of one line batch, as the server reads it (§4.3.1, §7.1):

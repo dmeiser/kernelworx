@@ -561,6 +561,7 @@ Vitest
 wcag
 webauthn
 webp
+weowe
 wordmark
 worktree
 worx

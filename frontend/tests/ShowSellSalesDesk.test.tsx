@@ -229,29 +229,29 @@ function obligationsMock(items: GqlWeOweObligationFieldsFragment[] = []) {
   };
 }
 
-function renderDesk({
-  event = eventFixture(),
-  sales = [],
-  obligations = [],
-  mutationMocks = [],
-}: {
+interface DeskFixtures {
   event?: GqlShowAndSellAdminFieldsFragment;
   sales?: GqlShowAndSellSaleFieldsFragment[];
   obligations?: GqlWeOweObligationFieldsFragment[];
   mutationMocks?: object[];
-} = {}) {
+}
+
+/** The mocks every desk render needs: the catalog and methods the desk reads, the rows it lists, and the writes it is watching. */
+function deskMocks(fixture: DeskFixtures) {
+  return [
+    { request: { query: GET_UNIT_CAMPAIGN_CATALOG, variables: CATALOG_VARIABLES }, result: CATALOG_RESULT },
+    { request: { query: LIST_UNIT_PAYMENT_METHODS, variables: METHODS_VARIABLES }, result: METHODS_RESULT },
+    salesMock(fixture.sales ?? []),
+    obligationsMock(fixture.obligations ?? []),
+    ...(fixture.mutationMocks ?? []),
+  ] as never;
+}
+
+function renderDesk(fixture: DeskFixtures = {}) {
   const onChanged = vi.fn(async () => undefined);
   render(
-    <MockedProvider
-      mocks={[
-        { request: { query: GET_UNIT_CAMPAIGN_CATALOG, variables: CATALOG_VARIABLES }, result: CATALOG_RESULT },
-        { request: { query: LIST_UNIT_PAYMENT_METHODS, variables: METHODS_VARIABLES }, result: METHODS_RESULT },
-        salesMock(sales),
-        obligationsMock(obligations),
-        ...mutationMocks,
-      ] as never}
-    >
-      <SalesDesk event={event} timezone={ZONE} onChanged={onChanged} />
+    <MockedProvider mocks={deskMocks(fixture)}>
+      <SalesDesk event={fixture.event ?? eventFixture()} timezone={ZONE} onChanged={onChanged} />
     </MockedProvider>,
   );
   return onChanged;

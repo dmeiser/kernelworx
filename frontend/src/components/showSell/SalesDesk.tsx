@@ -48,10 +48,13 @@ import {
   defaultSaleAt,
   formatCents,
   isDraftOnly,
+  noticesOf,
   paymentMethodOptions,
   saleAtWindowError,
   salePlan,
   weOweLineError,
+  type PaymentMethodOption,
+  type SalePlan,
 } from '../../lib/saleDesk';
 import {
   SHOW_AND_SELL_PAGE_SIZE,
@@ -60,12 +63,13 @@ import {
   utcToZonedWallClock,
   zonedWallClockToUtc,
 } from '../../lib/showSell';
-import { createWriteIntent, isStaleVersionError, refreshQuery } from '../../lib/units';
+import { createWriteIntent, isStaleVersionError, refreshQuery, type WriteIntent } from '../../lib/units';
 import { ConnectionRestNotice } from '../ConnectionRestNotice';
 import { ErrorNote } from '../ErrorAlert';
 import { LoadingState } from '../LoadingState';
 import { useCompleteConnection } from '../../hooks/useCompleteConnection';
-import { SaleLineTable, emptyLineRow, type CatalogProduct, type LineRowDraft } from './SaleLineEditor';
+import { SaleLineTable } from './SaleLineEditor';
+import { emptyLineRow, type CatalogProduct, type LineRowDraft } from './saleLines';
 import { SaleCorrectionPanel, SaleVoidPanel } from './SaleCorrectionForms';
 import type {
   GqlCreateShowAndSellSaleMutation,
@@ -95,6 +99,79 @@ interface FormState {
   buyerPhone: string;
   buyerEmail: string;
   otherDetails: string;
+}
+
+/** A trimmed buyer/details field, or undefined when it is blank. */
+function trimmedOrUndefined(value: string): string | undefined {
+  return value.trim() || undefined;
+}
+
+/** The form's Other-details sentence: the 250-character cap, then the required-details check. */
+function formOtherDetailsError(option: PaymentMethodOption | undefined, otherDetails: string): string | null {
+  if (otherDetails.length > 250) return 'Other details may not exceed 250 characters.';
+  if (option?.isOther === true && otherDetails === '') return 'Say what makes this payment an Other one.';
+  return null;
+}
+
+/** The create's Other-details sentence: the required-details check, then the cap. */
+function createOtherDetailsError(option: PaymentMethodOption | undefined, otherDetails: string): string | null {
+  if (option?.isOther === true && otherDetails === '') return 'Say what makes this payment an Other one.';
+  if (otherDetails.length > 250) return 'Other details may not exceed 250 characters.';
+  return null;
+}
+
+/** The entry form's first sentence, in the order the screen reads it. */
+function entryError(
+  plan: SalePlan,
+  windowError: string | null,
+  option: PaymentMethodOption | undefined,
+  otherDetails: string,
+  buyerError: string | null,
+): string | null {
+  return plan.error ?? windowError ?? formOtherDetailsError(option, otherDetails) ?? buyerError;
+}
+
+/** The first sentence for a create that cannot be written, in the order the screen reads it. */
+function createValidationError(
+  plan: SalePlan,
+  windowError: string | null,
+  method: PaymentMethodOption | undefined,
+  buyerError: string | null,
+  otherDetails: string,
+): string | null {
+  if (plan.error !== null) return plan.error;
+  if (windowError !== null) return windowError;
+  if (method === undefined) return 'Choose a payment method the Unit still offers.';
+  if (buyerError !== null) return buyerError;
+  return createOtherDetailsError(method, otherDetails);
+}
+
+/** The create body: one instant, one method, one line per typed product, the event's version. */
+function createBody(
+  plan: SalePlan,
+  event: Event,
+  form: FormState,
+  method: PaymentMethodOption,
+  timezone: string,
+  otherDetails: string,
+  intent: WriteIntent,
+): Record<string, unknown> {
+  return {
+    showAndSellId: event.showAndSellId,
+    saleAt: zonedWallClockToUtc(form.saleAt, timezone)?.toISOString() ?? '',
+    lineItems: plan.lines.map((line) => ({
+      productId: line.productId,
+      immediateQty: line.immediateQty,
+      weOweQty: line.weOweQty,
+    })),
+    paymentMethodCode: method.value,
+    buyerName: trimmedOrUndefined(form.buyerName),
+    buyerPhone: trimmedOrUndefined(form.buyerPhone),
+    buyerEmail: trimmedOrUndefined(form.buyerEmail),
+    otherDetails: method.isOther ? otherDetails : undefined,
+    version: { expectedVersion: event.version },
+    idempotency: { idempotencyKey: intent.keyFor({ rows: form.rows, method: method.value, otherDetails, buyerName: form.buyerName }) },
+  };
 }
 
 function emptyForm(event: Event, timezone: string): FormState {
@@ -176,64 +253,38 @@ export const SalesDesk: React.FC<{
     setNotices([]);
   };
 
-  const submitCreate = async () => {
-    const plan = salePlan(form.rows.map(rowToDraft), products);
-    if (plan.error !== null) {
-      setError(plan.error);
-      return;
-    }
-    const windowError = saleAtWindowError(zonedWallClockToUtc(form.saleAt, timezone), event);
-    if (windowError !== null) {
-      setError(windowError);
-      return;
-    }
-    const method = options.find((option) => option.value === form.paymentMethod);
-    if (method === undefined) {
-      setError('Choose a payment method the Unit still offers.');
-      return;
-    }
-    const buyerError = weOweLineError(plan.lines, form.buyerName, event.weOweEnabled);
-    if (buyerError !== null) {
-      setError(buyerError);
-      return;
-    }
-    const otherDetails = form.otherDetails.trim();
-    if (method.isOther && otherDetails === '') {
-      setError('Say what makes this payment an Other one.');
-      return;
-    }
-    if (otherDetails.length > 250) {
-      setError('Other details may not exceed 250 characters.');
-      return;
-    }
-    const body: Record<string, unknown> = {
-      showAndSellId: event.showAndSellId,
-      saleAt: zonedWallClockToUtc(form.saleAt, timezone)?.toISOString() ?? '',
-      lineItems: plan.lines.map((line) => ({
-        productId: line.productId,
-        immediateQty: line.immediateQty,
-        weOweQty: line.weOweQty,
-      })),
-      paymentMethodCode: method.value,
-      buyerName: form.buyerName.trim() || undefined,
-      buyerPhone: form.buyerPhone.trim() || undefined,
-      buyerEmail: form.buyerEmail.trim() || undefined,
-      otherDetails: method.isOther ? otherDetails : undefined,
-      version: { expectedVersion: event.version },
-      idempotency: { idempotencyKey: intent.current.keyFor({ rows: form.rows, method: method.value, otherDetails, buyerName: form.buyerName }) },
-    };
+  const submitSale = async (body: Record<string, unknown>) => {
     try {
       const result = await createSale({ variables: { input: body } });
-      const warnings = result.data?.createShowAndSellSale?.warnings ?? [];
-      setNotices(warnings.map((warning) => `${warning.productId}: ${warning.message}`));
+      setNotices(noticesOf(result.data?.createShowAndSellSale?.warnings));
       setForm(emptyForm(event, timezone));
       setError(null);
     } catch (mutationError) {
       setError(describeShowAndSellFailure(mutationError, 'Could not save the sale.'));
       if (isStaleVersionError(mutationError)) await refreshQuery(onChanged);
     }
+  };
+
+  const submitCreate = async () => {
+    const plan = salePlan(form.rows.map(rowToDraft), products);
+    const windowError = saleAtWindowError(zonedWallClockToUtc(form.saleAt, timezone), event);
+    const method = options.find((option) => option.value === form.paymentMethod);
+    const otherDetails = form.otherDetails.trim();
+    const buyerError = weOweLineError(plan.lines, form.buyerName, event.weOweEnabled);
+    const validationError = createValidationError(plan, windowError, method, buyerError, otherDetails);
+    if (validationError !== null) {
+      setError(validationError);
+      return;
+    }
+    const body = createBody(plan, event, form, method as PaymentMethodOption, timezone, otherDetails, intent.current);
+    await submitSale(body);
     await refreshQuery(onChanged);
     await refreshQuery(() => sales.refetch());
+  };
+
+  const refetchDesk = async () => {
+    await sales.refetch();
+    await obligations.refetch();
   };
 
   return (
@@ -260,47 +311,84 @@ export const SalesDesk: React.FC<{
       {error !== null ? <ErrorNote message={error} data-testid="sale-desk-error" /> : null}
       <OverageNotices notices={notices} />
       <Divider sx={{ my: 2 }} />
-      {correctionSale !== null ? (
-        <SaleCorrectionPanel
-          sale={correctionSale}
-          event={event}
-          timezone={timezone}
-          products={products}
-          options={options}
-          obligations={allObligations.items}
-          onChanged={onChanged}
-          onRefetch={async () => {
-            await sales.refetch();
-            await obligations.refetch();
-          }}
-          onClose={reset}
-        />
-      ) : voidSale !== null ? (
-        <SaleVoidPanel
-          sale={voidSale}
-          event={event}
-          timezone={timezone}
-          onChanged={onChanged}
-          onRefetch={async () => {
-            await sales.refetch();
-            await obligations.refetch();
-          }}
-          onClose={reset}
-        />
-      ) : (
-        <SaleEntryForm
-          event={event}
-          timezone={timezone}
-          products={products}
-          options={options}
-          form={form}
-          setForm={setForm}
-          loading={creating}
-          editable={editable}
-          onSubmit={() => void submitCreate()}
-        />
-      )}
+      <DeskPanel
+        correctionSale={correctionSale}
+        voidSale={voidSale}
+        event={event}
+        timezone={timezone}
+        products={products}
+        options={options}
+        form={form}
+        setForm={setForm}
+        loading={creating}
+        editable={editable}
+        obligations={allObligations.items}
+        onChanged={onChanged}
+        onRefetch={refetchDesk}
+        onClose={reset}
+        onSubmit={() => void submitCreate()}
+      />
     </Box>
+  );
+};
+
+/** The one panel under the list: the correction or void in flight, or the entry form. */
+const DeskPanel: React.FC<{
+  correctionSale: Sale | null;
+  voidSale: Sale | null;
+  event: Event;
+  timezone: string;
+  products: readonly CatalogProduct[];
+  options: ReturnType<typeof paymentMethodOptions>;
+  form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+  loading: boolean;
+  editable: boolean;
+  obligations: readonly GqlWeOweObligationFieldsFragment[];
+  onChanged: () => Promise<unknown>;
+  onRefetch: () => Promise<void>;
+  onClose: () => void;
+  onSubmit: () => void;
+}> = ({ correctionSale, voidSale, event, timezone, products, options, form, setForm, loading, editable, obligations, onChanged, onRefetch, onClose, onSubmit }) => {
+  if (correctionSale !== null) {
+    return (
+      <SaleCorrectionPanel
+        sale={correctionSale}
+        event={event}
+        timezone={timezone}
+        products={products}
+        options={options}
+        obligations={obligations}
+        onChanged={onChanged}
+        onRefetch={onRefetch}
+        onClose={onClose}
+      />
+    );
+  }
+  if (voidSale !== null) {
+    return (
+      <SaleVoidPanel
+        sale={voidSale}
+        event={event}
+        timezone={timezone}
+        onChanged={onChanged}
+        onRefetch={onRefetch}
+        onClose={onClose}
+      />
+    );
+  }
+  return (
+    <SaleEntryForm
+      event={event}
+      timezone={timezone}
+      products={products}
+      options={options}
+      form={form}
+      setForm={setForm}
+      loading={loading}
+      editable={editable}
+      onSubmit={onSubmit}
+    />
   );
 };
 
@@ -456,18 +544,44 @@ const SaleEntryForm: React.FC<{
   const windowError = saleAtWindowError(zonedWallClockToUtc(form.saleAt, timezone), event);
   const option = options.find((entry) => entry.value === form.paymentMethod);
   const otherDetails = form.otherDetails.trim();
-  const otherDetailsRequired = option?.isOther === true;
-  const otherError =
-    otherDetails.length > 250
-      ? 'Other details may not exceed 250 characters.'
-      : otherDetailsRequired && otherDetails === ''
-        ? 'Say what makes this payment an Other one.'
-        : null;
   const buyerError = weOweLineError(plan.lines, form.buyerName, event.weOweEnabled);
-  const error = plan.error ?? windowError ?? otherError ?? buyerError;
+  const error = entryError(plan, windowError, option, otherDetails, buyerError);
+  const otherDetailsRequired = option?.isOther === true;
+  const disabled = !editable || loading;
   const canSubmit = editable && !loading && error === null;
 
   return (
+    <SaleEntryFormView
+      event={event}
+      products={products}
+      options={options}
+      form={form}
+      setForm={setForm}
+      loading={loading}
+      disabled={disabled}
+      canSubmit={canSubmit}
+      error={error}
+      otherDetailsRequired={otherDetailsRequired}
+      totalCents={plan.totalCents}
+      onSubmit={onSubmit}
+    />
+  );
+};
+
+const SaleEntryFormView: React.FC<{
+  event: Event;
+  products: readonly CatalogProduct[];
+  options: ReturnType<typeof paymentMethodOptions>;
+  form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+  loading: boolean;
+  disabled: boolean;
+  canSubmit: boolean;
+  error: string | null;
+  otherDetailsRequired: boolean;
+  totalCents: number;
+  onSubmit: () => void;
+}> = ({ event, products, options, form, setForm, loading, disabled, canSubmit, error, otherDetailsRequired, totalCents, onSubmit }) => (
     <Card variant="outlined" data-testid="sale-entry-form">
       <CardContent>
         <Typography variant="subtitle1" gutterBottom>
@@ -478,7 +592,7 @@ const SaleEntryForm: React.FC<{
           products={products}
           idPrefix="sale-line"
           weOweAllowed={event.weOweEnabled}
-          disabled={!editable || loading}
+          disabled={disabled}
           onRow={(index, patch) => setForm((current) => ({ ...current, rows: current.rows.map((row, i) => (i === index ? { ...row, ...patch } : row)) }))}
           onRemove={(index) => setForm((current) => ({ ...current, rows: current.rows.filter((_row, i) => i !== index) }))}
           onAdd={() => setForm((current) => ({ ...current, rows: [...current.rows, emptyLineRow()] }))}
@@ -490,7 +604,7 @@ const SaleEntryForm: React.FC<{
             size="small"
             value={form.saleAt}
             onChange={(change) => setForm((current) => ({ ...current, saleAt: change.target.value }))}
-            disabled={!editable || loading}
+            disabled={disabled}
             inputProps={{ 'aria-label': 'When the sale happened', 'data-testid': 'sale-at' }}
           />
           <Select
@@ -499,7 +613,7 @@ const SaleEntryForm: React.FC<{
             value={form.paymentMethod}
             displayEmpty
             onChange={(change) => setForm((current) => ({ ...current, paymentMethod: change.target.value }))}
-            disabled={!editable || loading}
+            disabled={disabled}
             data-testid="sale-payment-method"
             inputProps={{ 'aria-label': 'Payment method' }}
             sx={{ minWidth: 220 }}
@@ -516,7 +630,7 @@ const SaleEntryForm: React.FC<{
               label="Other details (required)"
               value={form.otherDetails}
               onChange={(change) => setForm((current) => ({ ...current, otherDetails: change.target.value }))}
-              disabled={!editable || loading}
+              disabled={disabled}
               inputProps={{ 'aria-label': 'Other payment details', 'data-testid': 'sale-other-details', maxLength: 250 }}
               sx={{ minWidth: 220 }}
             />
@@ -527,7 +641,7 @@ const SaleEntryForm: React.FC<{
             label="Buyer name"
             value={form.buyerName}
             onChange={(change) => setForm((current) => ({ ...current, buyerName: change.target.value }))}
-            disabled={!editable || loading}
+            disabled={disabled}
             inputProps={{ 'aria-label': 'Buyer name', 'data-testid': 'sale-buyer-name', maxLength: 100 }}
             sx={{ minWidth: 200 }}
           />
@@ -535,7 +649,7 @@ const SaleEntryForm: React.FC<{
             label="Buyer phone"
             value={form.buyerPhone}
             onChange={(change) => setForm((current) => ({ ...current, buyerPhone: change.target.value }))}
-            disabled={!editable || loading}
+            disabled={disabled}
             inputProps={{ 'aria-label': 'Buyer phone', 'data-testid': 'sale-buyer-phone', maxLength: 50 }}
             sx={{ minWidth: 160 }}
           />
@@ -543,13 +657,13 @@ const SaleEntryForm: React.FC<{
             label="Buyer email"
             value={form.buyerEmail}
             onChange={(change) => setForm((current) => ({ ...current, buyerEmail: change.target.value }))}
-            disabled={!editable || loading}
+            disabled={disabled}
             inputProps={{ 'aria-label': 'Buyer email', 'data-testid': 'sale-buyer-email', maxLength: 254 }}
             sx={{ minWidth: 200 }}
           />
         </Stack>
         <Typography variant="body2" color="text.secondary" data-testid="sale-draft-total" sx={{ mt: 2 }}>
-          Draft total: {formatCents(plan.totalCents)} — the server prices the lines from the catalog; this is what the typed quantities add up to
+          Draft total: {formatCents(totalCents)} — the server prices the lines from the catalog; this is what the typed quantities add up to
         </Typography>
         {error !== null ? <ErrorNote message={error} data-testid="sale-entry-error" /> : null}
         <Stack direction="row" spacing={2} sx={{ mt: 2 }} alignItems="center">
@@ -564,5 +678,4 @@ const SaleEntryForm: React.FC<{
         </Stack>
       </CardContent>
     </Card>
-  );
-};
+);
