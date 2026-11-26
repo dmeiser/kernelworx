@@ -173,6 +173,7 @@ DELETE_SLOT_FIELD = "deleteShowAndSellSlot"
 SIGNUP_SCOUT_FIELD = "signupScoutForShowAndSellSlot"
 CANCEL_SIGNUP_FIELD = "cancelShowAndSellSignup"
 CONFIRM_WORK_FIELD = "confirmShowAndSellWork"
+SHOW_AND_SELL_SALES_FIELD = "showAndSellSales"
 SHOW_AND_SELL_SIGNUPS_FIELD = "showAndSellSignups"
 MY_COMMITMENTS_FIELD = "myScoutCommitments"
 SIGNUP_CALENDAR_FIELD = "showAndSellSignupCalendarData"
@@ -6590,6 +6591,44 @@ def _show_and_sell_signups(event: Dict[str, Any], caller_id: str) -> Dict[str, A
     )
 
 
+def _show_and_sell_sales(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One event's sales, raw and paginated (§4.5.2, PAGE-01).
+
+    The rows are the report: every buyer, line, payment snapshot and revision the
+    administrative screen needs is on each row, and no total is computed here for the
+    same reason the We Owe list computes none — the browser adds up every page it
+    fetched, and a second copy of that arithmetic in the server is a second answer that
+    can disagree. ``status`` is a presentation filter and the cursor is pinned to it, so a
+    page token from the ACTIVE list cannot be replayed against the history (PAGE-01).
+    The list is never a participant projection: a sale carries buyer and payment
+    snapshots, and those are administrative facts (SEC-04, §5.14).
+    """
+    event_row = _event_admin_guard(event, caller_id)
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    raw_status = _optional_argument(event, "status")
+    status = None if raw_status is None else show_and_sell_sale_models.normalize_sale_status(raw_status)
+    rows = [
+        row
+        for row in show_and_sell_sale_models.event_sale_rows(event_id)
+        if status is None or str(row.get(show_and_sell_sale_models.STATUS_ATTRIBUTE) or "") == status
+    ]
+    rows.sort(
+        key=lambda row: (
+            str(row.get(show_and_sell_sale_models.SALE_AT_ATTRIBUTE) or ""),
+            str(row.get(show_and_sell_sale_models.SALE_ID_ATTRIBUTE) or ""),
+        )
+    )
+    page = dict(
+        paginate_page(
+            rows,
+            f"{SHOW_AND_SELL_SALES_FIELD}#{event_id}#{status or 'ALL'}",
+            _page_argument(event),
+        )
+    )
+    page["items"] = [show_and_sell_sale_models.sale_payload(row) for row in page["items"]]
+    return page
+
+
 def _commitment_read_scope(caller_id: str, profile_id: str, unit_id: Any) -> Optional[set[str]]:
     """Which Unit Campaigns this caller may read this Scout's commitments in (INV-Q-06-02).
 
@@ -9346,6 +9385,7 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     SIGNUP_SCOUT_FIELD: _signup_scout_for_show_and_sell_slot,
     CANCEL_SIGNUP_FIELD: _cancel_show_and_sell_signup,
     CONFIRM_WORK_FIELD: _confirm_show_and_sell_work,
+    SHOW_AND_SELL_SALES_FIELD: _show_and_sell_sales,
     SHOW_AND_SELL_SIGNUPS_FIELD: _show_and_sell_signups,
     MY_COMMITMENTS_FIELD: _my_scout_commitments,
     SIGNUP_CALENDAR_FIELD: _show_and_sell_signup_calendar_data,

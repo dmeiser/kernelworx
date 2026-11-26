@@ -9,10 +9,11 @@
  * version is the one every write on this page conditions on, so a save the server
  * refuses as stale is visibly the same number the screen was read at.
  *
- * The three panels are tabs rather than one long page because each writes a
+ * The five panels are tabs rather than one long page because each writes a
  * different set of rows — allocations move stock reservations, slots move the
- * schedule, work rows move signup records — and an admin in the middle of one
- * should not have the others in the way.
+ * schedule, work rows move signup records, sales move the record of what was
+ * sold, and We Owe moves what the Unit still owes and holds against it — and an
+ * admin in the middle of one should not have the others in the way.
  *
  * An event whose id does not belong to the campaign in the route answers exactly
  * like an event that does not exist: the screen never confirms that the id is real
@@ -40,6 +41,8 @@ import { PageHeader } from '../components/PageHeader';
 import { AllocationEditor } from '../components/showSell/AllocationEditor';
 import { SlotBoard } from '../components/showSell/SlotBoard';
 import { SignupWorkBoard } from '../components/showSell/SignupWorkBoard';
+import { SalesDesk } from '../components/showSell/SalesDesk';
+import { WeOwePanel } from '../components/showSell/WeOwePanel';
 import {
   EventActionDialogs,
   type CancelSummary,
@@ -55,7 +58,7 @@ import type {
 
 type Event = GqlShowAndSellAdminFieldsFragment;
 type Unit = NonNullable<GqlGetUnitQuery['unit']>;
-type EventTab = 'allocations' | 'slots' | 'signups';
+type EventTab = 'allocations' | 'slots' | 'signups' | 'sales' | 'weowe';
 
 /** The three ids the route carries; empty when the route is somehow missing one. */
 function useRouteIds(): { unitId: string; unitCampaignId: string; showAndSellId: string } {
@@ -146,6 +149,8 @@ const EventDetailBody: React.FC<{
           <Tab label="Stock" value="allocations" data-testid="tab-allocations" />
           <Tab label="Slots" value="slots" data-testid="tab-slots" />
           <Tab label="Signups and work" value="signups" data-testid="tab-signups" />
+          <Tab label="Sales" value="sales" data-testid="tab-sales" />
+          <Tab label="We Owe" value="weowe" data-testid="tab-weowe" />
         </Tabs>
       </Box>
       <EventPanels tab={tab} event={event} timezone={timezone} onChanged={onChanged} />
@@ -175,6 +180,8 @@ const EventPanels: React.FC<{
 }> = ({ tab, event, timezone, onChanged }) => {
   if (tab === 'slots') return <SlotBoard event={event} timezone={timezone} onChanged={onChanged} />;
   if (tab === 'signups') return <SignupWorkBoard event={event} timezone={timezone} onChanged={onChanged} />;
+  if (tab === 'sales') return <SalesDesk event={event} timezone={timezone} onChanged={onChanged} />;
+  if (tab === 'weowe') return <WeOwePanel event={event} timezone={timezone} onChanged={onChanged} />;
   return <AllocationEditor event={event} onChanged={onChanged} />;
 };
 

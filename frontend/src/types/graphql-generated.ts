@@ -2055,6 +2055,8 @@ export type GqlQuery = {
   showAndSell: GqlShowAndSellAdmin;
   /** One event's participant view for one Scout: the slots and that Scout's commitments. Profile Owner/WRITE or READ for that Scout, or a Unit Admin for the event's Unit. An unjoined Scout, another Unit's event, or a Scout the caller cannot read returns `NOT_FOUND`, and no administrative field is present. */
   showAndSellOpportunity: GqlShowAndSellOpportunity;
+  /** An event's sales, raw and paginated: every buyer, line and payment detail an administrative screen needs, with the sale revision an optimistic-concurrency write conditions on. Unit Admin for the event's Unit; contains buyer/payment snapshots, never a participant projection. */
+  showAndSellSales: GqlShowAndSellSaleConnection;
   /** The authorized facts one browser needs to generate a slot's calendar invite itself: identity, location, IANA timezone, and UTC times. Data only — no server generates, stores, or emails a file, and the READ-only collaborator's read surface stops short of it (CAL-01, AUTH-P-02). Unit Admin, or Profile Owner/WRITE for that exact Scout. */
   showAndSellSignupCalendarData: GqlCalendarInviteData;
   /** An event's signups with the full actor and confirmation audit: who placed each, who confirmed the work, and the version each cancellation or confirmation conditions on. Unit Admin for the event's Unit. */
@@ -2295,6 +2297,13 @@ export type GqlQuery_ShowAndSellArgs = {
 export type GqlQuery_ShowAndSellOpportunityArgs = {
   profileId: Scalars['ID']['input'];
   showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellSalesArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  showAndSellId: Scalars['ID']['input'];
+  status?: InputMaybe<Scalars['String']['input']>;
 };
 
 /** The root query object for the KernelWorx API. */
@@ -2942,6 +2951,15 @@ export type GqlShowAndSellSale = {
   updatedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   voidedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   voidedByAccountId?: Maybe<Scalars['ID']['output']>;
+};
+
+/** A page of one event's sales, raw (checklist §4.5.2). */
+export type GqlShowAndSellSaleConnection = {
+  __typename?: 'ShowAndSellSaleConnection';
+  /** The sale rows on this page, by sale time then sale id. */
+  items: Array<GqlShowAndSellSale>;
+  /** Cursor state for this page. */
+  pageInfo: GqlPageInfo;
 };
 
 /** One line of a pooled sale, with the product's identity and price as this campaign's catalog carried them at the moment of the sale (§5.14). A later rename or price change never reaches a sale that already happened. */
@@ -7374,6 +7392,553 @@ export type GqlGetSignupCalendarDataQuery = {
     timezone: string;
     slotStartAt: string;
     slotEndAt: string;
+  };
+};
+
+export type GqlShowAndSellSaleLineFieldsFragment = {
+  __typename?: 'ShowAndSellSaleLine';
+  lineItemId: string;
+  productId: string;
+  productNameSnapshot: string;
+  unitPriceCentsSnapshot: number;
+  immediateQty: number;
+  weOweQty: number;
+  subtotalCents: number;
+};
+
+export type GqlShowAndSellSaleFieldsFragment = {
+  __typename?: 'ShowAndSellSale';
+  saleId: string;
+  showAndSellId: string;
+  unitId: string;
+  unitCampaignId: string;
+  saleAt: string;
+  enteredByAccountId: string;
+  buyerName?: string | null | undefined;
+  buyerPhone?: string | null | undefined;
+  buyerEmail?: string | null | undefined;
+  totalCents: number;
+  revision: number;
+  status: string;
+  voidedByAccountId?: string | null | undefined;
+  voidedAt?: string | null | undefined;
+  createdAt?: string | null | undefined;
+  updatedAt?: string | null | undefined;
+  expectedCashCents: number;
+  lineItems: Array<{
+    __typename?: 'ShowAndSellSaleLine';
+    lineItemId: string;
+    productId: string;
+    productNameSnapshot: string;
+    unitPriceCentsSnapshot: number;
+    immediateQty: number;
+    weOweQty: number;
+    subtotalCents: number;
+  }>;
+  paymentMethodSnapshot: {
+    __typename?: 'SalePaymentSnapshot';
+    methodCode: string;
+    displayName: string;
+    otherDetails?: string | null | undefined;
+  };
+};
+
+export type GqlWeOweObligationFieldsFragment = {
+  __typename?: 'WeOweObligation';
+  weOweId: string;
+  unitCampaignId: string;
+  showAndSellId: string;
+  saleId: string;
+  lineItemId: string;
+  buyerName: string;
+  productId: string;
+  productNameSnapshot: string;
+  originalQty: number;
+  fulfilledQty: number;
+  cancelledQty: number;
+  reservedQty: number;
+  remainingQty: number;
+  uncoveredQty: number;
+  valueCentsSnapshot: number;
+  status: GqlWeOweStatus;
+  closeReason?: GqlWeOweCloseReason | null | undefined;
+  version: number;
+  createdAt?: string | null | undefined;
+  closedAt?: string | null | undefined;
+};
+
+export type GqlListShowAndSellSalesQueryVariables = Exact<{
+  showAndSellId: Scalars['ID']['input'];
+  status?: InputMaybe<Scalars['String']['input']>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListShowAndSellSalesQuery = {
+  __typename?: 'Query';
+  showAndSellSales: {
+    __typename?: 'ShowAndSellSaleConnection';
+    items: Array<{
+      __typename?: 'ShowAndSellSale';
+      saleId: string;
+      showAndSellId: string;
+      unitId: string;
+      unitCampaignId: string;
+      saleAt: string;
+      enteredByAccountId: string;
+      buyerName?: string | null | undefined;
+      buyerPhone?: string | null | undefined;
+      buyerEmail?: string | null | undefined;
+      totalCents: number;
+      revision: number;
+      status: string;
+      voidedByAccountId?: string | null | undefined;
+      voidedAt?: string | null | undefined;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+      expectedCashCents: number;
+      lineItems: Array<{
+        __typename?: 'ShowAndSellSaleLine';
+        lineItemId: string;
+        productId: string;
+        productNameSnapshot: string;
+        unitPriceCentsSnapshot: number;
+        immediateQty: number;
+        weOweQty: number;
+        subtotalCents: number;
+      }>;
+      paymentMethodSnapshot: {
+        __typename?: 'SalePaymentSnapshot';
+        methodCode: string;
+        displayName: string;
+        otherDetails?: string | null | undefined;
+      };
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlListWeOweObligationsQueryVariables = Exact<{
+  unitCampaignId: Scalars['ID']['input'];
+  showAndSellId?: InputMaybe<Scalars['ID']['input']>;
+  productId?: InputMaybe<Scalars['ID']['input']>;
+  status?: InputMaybe<GqlWeOweStatus>;
+  page?: InputMaybe<GqlPageInput>;
+}>;
+
+export type GqlListWeOweObligationsQuery = {
+  __typename?: 'Query';
+  weOweObligations: {
+    __typename?: 'WeOweObligationConnection';
+    items: Array<{
+      __typename?: 'WeOweObligation';
+      weOweId: string;
+      unitCampaignId: string;
+      showAndSellId: string;
+      saleId: string;
+      lineItemId: string;
+      buyerName: string;
+      productId: string;
+      productNameSnapshot: string;
+      originalQty: number;
+      fulfilledQty: number;
+      cancelledQty: number;
+      reservedQty: number;
+      remainingQty: number;
+      uncoveredQty: number;
+      valueCentsSnapshot: number;
+      status: GqlWeOweStatus;
+      closeReason?: GqlWeOweCloseReason | null | undefined;
+      version: number;
+      createdAt?: string | null | undefined;
+      closedAt?: string | null | undefined;
+    }>;
+    pageInfo: { __typename?: 'PageInfo'; endCursor?: string | null | undefined; hasNextPage: boolean };
+  };
+};
+
+export type GqlCreateShowAndSellSaleMutationVariables = Exact<{
+  input: GqlCreateShowAndSellSaleInput;
+}>;
+
+export type GqlCreateShowAndSellSaleMutation = {
+  __typename?: 'Mutation';
+  createShowAndSellSale: {
+    __typename?: 'ShowAndSellSalePayload';
+    eventVersion: number;
+    draftOnly: boolean;
+    sale: {
+      __typename?: 'ShowAndSellSale';
+      saleId: string;
+      showAndSellId: string;
+      unitId: string;
+      unitCampaignId: string;
+      saleAt: string;
+      enteredByAccountId: string;
+      buyerName?: string | null | undefined;
+      buyerPhone?: string | null | undefined;
+      buyerEmail?: string | null | undefined;
+      totalCents: number;
+      revision: number;
+      status: string;
+      voidedByAccountId?: string | null | undefined;
+      voidedAt?: string | null | undefined;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+      expectedCashCents: number;
+      lineItems: Array<{
+        __typename?: 'ShowAndSellSaleLine';
+        lineItemId: string;
+        productId: string;
+        productNameSnapshot: string;
+        unitPriceCentsSnapshot: number;
+        immediateQty: number;
+        weOweQty: number;
+        subtotalCents: number;
+      }>;
+      paymentMethodSnapshot: {
+        __typename?: 'SalePaymentSnapshot';
+        methodCode: string;
+        displayName: string;
+        otherDetails?: string | null | undefined;
+      };
+    };
+    warnings: Array<{
+      __typename?: 'AllocationWarning';
+      productId: string;
+      currentStockQty: number;
+      assignedQty: number;
+      overageQty: number;
+      message: string;
+    }>;
+    obligations: Array<{
+      __typename?: 'WeOweObligation';
+      weOweId: string;
+      unitCampaignId: string;
+      showAndSellId: string;
+      saleId: string;
+      lineItemId: string;
+      buyerName: string;
+      productId: string;
+      productNameSnapshot: string;
+      originalQty: number;
+      fulfilledQty: number;
+      cancelledQty: number;
+      reservedQty: number;
+      remainingQty: number;
+      uncoveredQty: number;
+      valueCentsSnapshot: number;
+      status: GqlWeOweStatus;
+      closeReason?: GqlWeOweCloseReason | null | undefined;
+      version: number;
+      createdAt?: string | null | undefined;
+      closedAt?: string | null | undefined;
+    }>;
+  };
+};
+
+export type GqlCorrectShowAndSellSaleMutationVariables = Exact<{
+  input: GqlCorrectShowAndSellSaleInput;
+}>;
+
+export type GqlCorrectShowAndSellSaleMutation = {
+  __typename?: 'Mutation';
+  correctShowAndSellSale: {
+    __typename?: 'ShowAndSellSalePayload';
+    eventVersion: number;
+    draftOnly: boolean;
+    sale: {
+      __typename?: 'ShowAndSellSale';
+      saleId: string;
+      showAndSellId: string;
+      unitId: string;
+      unitCampaignId: string;
+      saleAt: string;
+      enteredByAccountId: string;
+      buyerName?: string | null | undefined;
+      buyerPhone?: string | null | undefined;
+      buyerEmail?: string | null | undefined;
+      totalCents: number;
+      revision: number;
+      status: string;
+      voidedByAccountId?: string | null | undefined;
+      voidedAt?: string | null | undefined;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+      expectedCashCents: number;
+      lineItems: Array<{
+        __typename?: 'ShowAndSellSaleLine';
+        lineItemId: string;
+        productId: string;
+        productNameSnapshot: string;
+        unitPriceCentsSnapshot: number;
+        immediateQty: number;
+        weOweQty: number;
+        subtotalCents: number;
+      }>;
+      paymentMethodSnapshot: {
+        __typename?: 'SalePaymentSnapshot';
+        methodCode: string;
+        displayName: string;
+        otherDetails?: string | null | undefined;
+      };
+    };
+    priorRevision?:
+      | {
+          __typename?: 'ShowAndSellSaleRevision';
+          saleId: string;
+          showAndSellId: string;
+          revision: number;
+          saleAt: string;
+          enteredByAccountId: string;
+          buyerName?: string | null | undefined;
+          buyerPhone?: string | null | undefined;
+          buyerEmail?: string | null | undefined;
+          totalCents: number;
+          status: string;
+          correctedByAccountId: string;
+          correctedAt: string;
+          reason: string;
+          lineItems: Array<{
+            __typename?: 'ShowAndSellSaleLine';
+            lineItemId: string;
+            productId: string;
+            productNameSnapshot: string;
+            unitPriceCentsSnapshot: number;
+            immediateQty: number;
+            weOweQty: number;
+            subtotalCents: number;
+          }>;
+          paymentMethodSnapshot: {
+            __typename?: 'SalePaymentSnapshot';
+            methodCode: string;
+            displayName: string;
+            otherDetails?: string | null | undefined;
+          };
+        }
+      | null
+      | undefined;
+    warnings: Array<{
+      __typename?: 'AllocationWarning';
+      productId: string;
+      currentStockQty: number;
+      assignedQty: number;
+      overageQty: number;
+      message: string;
+    }>;
+    obligations: Array<{
+      __typename?: 'WeOweObligation';
+      weOweId: string;
+      unitCampaignId: string;
+      showAndSellId: string;
+      saleId: string;
+      lineItemId: string;
+      buyerName: string;
+      productId: string;
+      productNameSnapshot: string;
+      originalQty: number;
+      fulfilledQty: number;
+      cancelledQty: number;
+      reservedQty: number;
+      remainingQty: number;
+      uncoveredQty: number;
+      valueCentsSnapshot: number;
+      status: GqlWeOweStatus;
+      closeReason?: GqlWeOweCloseReason | null | undefined;
+      version: number;
+      createdAt?: string | null | undefined;
+      closedAt?: string | null | undefined;
+    }>;
+  };
+};
+
+export type GqlVoidShowAndSellSaleMutationVariables = Exact<{
+  input: GqlVoidShowAndSellSaleInput;
+}>;
+
+export type GqlVoidShowAndSellSaleMutation = {
+  __typename?: 'Mutation';
+  voidShowAndSellSale: {
+    __typename?: 'ShowAndSellSalePayload';
+    eventVersion: number;
+    draftOnly: boolean;
+    sale: {
+      __typename?: 'ShowAndSellSale';
+      saleId: string;
+      showAndSellId: string;
+      unitId: string;
+      unitCampaignId: string;
+      saleAt: string;
+      enteredByAccountId: string;
+      buyerName?: string | null | undefined;
+      buyerPhone?: string | null | undefined;
+      buyerEmail?: string | null | undefined;
+      totalCents: number;
+      revision: number;
+      status: string;
+      voidedByAccountId?: string | null | undefined;
+      voidedAt?: string | null | undefined;
+      createdAt?: string | null | undefined;
+      updatedAt?: string | null | undefined;
+      expectedCashCents: number;
+      lineItems: Array<{
+        __typename?: 'ShowAndSellSaleLine';
+        lineItemId: string;
+        productId: string;
+        productNameSnapshot: string;
+        unitPriceCentsSnapshot: number;
+        immediateQty: number;
+        weOweQty: number;
+        subtotalCents: number;
+      }>;
+      paymentMethodSnapshot: {
+        __typename?: 'SalePaymentSnapshot';
+        methodCode: string;
+        displayName: string;
+        otherDetails?: string | null | undefined;
+      };
+    };
+    priorRevision?:
+      | {
+          __typename?: 'ShowAndSellSaleRevision';
+          saleId: string;
+          showAndSellId: string;
+          revision: number;
+          saleAt: string;
+          enteredByAccountId: string;
+          buyerName?: string | null | undefined;
+          buyerPhone?: string | null | undefined;
+          buyerEmail?: string | null | undefined;
+          totalCents: number;
+          status: string;
+          correctedByAccountId: string;
+          correctedAt: string;
+          reason: string;
+          lineItems: Array<{
+            __typename?: 'ShowAndSellSaleLine';
+            lineItemId: string;
+            productId: string;
+            productNameSnapshot: string;
+            unitPriceCentsSnapshot: number;
+            immediateQty: number;
+            weOweQty: number;
+            subtotalCents: number;
+          }>;
+          paymentMethodSnapshot: {
+            __typename?: 'SalePaymentSnapshot';
+            methodCode: string;
+            displayName: string;
+            otherDetails?: string | null | undefined;
+          };
+        }
+      | null
+      | undefined;
+    warnings: Array<{
+      __typename?: 'AllocationWarning';
+      productId: string;
+      currentStockQty: number;
+      assignedQty: number;
+      overageQty: number;
+      message: string;
+    }>;
+    obligations: Array<{
+      __typename?: 'WeOweObligation';
+      weOweId: string;
+      unitCampaignId: string;
+      showAndSellId: string;
+      saleId: string;
+      lineItemId: string;
+      buyerName: string;
+      productId: string;
+      productNameSnapshot: string;
+      originalQty: number;
+      fulfilledQty: number;
+      cancelledQty: number;
+      reservedQty: number;
+      remainingQty: number;
+      uncoveredQty: number;
+      valueCentsSnapshot: number;
+      status: GqlWeOweStatus;
+      closeReason?: GqlWeOweCloseReason | null | undefined;
+      version: number;
+      createdAt?: string | null | undefined;
+      closedAt?: string | null | undefined;
+    }>;
+  };
+};
+
+export type GqlSetWeOweReservationMutationVariables = Exact<{
+  input: GqlSetWeOweReservationInput;
+}>;
+
+export type GqlSetWeOweReservationMutation = {
+  __typename?: 'Mutation';
+  setWeOweReservation: {
+    __typename?: 'SetWeOweReservationPayload';
+    obligation: {
+      __typename?: 'WeOweObligation';
+      weOweId: string;
+      unitCampaignId: string;
+      showAndSellId: string;
+      saleId: string;
+      lineItemId: string;
+      buyerName: string;
+      productId: string;
+      productNameSnapshot: string;
+      originalQty: number;
+      fulfilledQty: number;
+      cancelledQty: number;
+      reservedQty: number;
+      remainingQty: number;
+      uncoveredQty: number;
+      valueCentsSnapshot: number;
+      status: GqlWeOweStatus;
+      closeReason?: GqlWeOweCloseReason | null | undefined;
+      version: number;
+      createdAt?: string | null | undefined;
+      closedAt?: string | null | undefined;
+    };
+  };
+};
+
+export type GqlFulfillWeOweMutationVariables = Exact<{
+  input: GqlFulfillWeOweInput;
+}>;
+
+export type GqlFulfillWeOweMutation = {
+  __typename?: 'Mutation';
+  fulfillWeOwe: {
+    __typename?: 'FulfillWeOwePayload';
+    obligation: {
+      __typename?: 'WeOweObligation';
+      weOweId: string;
+      unitCampaignId: string;
+      showAndSellId: string;
+      saleId: string;
+      lineItemId: string;
+      buyerName: string;
+      productId: string;
+      productNameSnapshot: string;
+      originalQty: number;
+      fulfilledQty: number;
+      cancelledQty: number;
+      reservedQty: number;
+      remainingQty: number;
+      uncoveredQty: number;
+      valueCentsSnapshot: number;
+      status: GqlWeOweStatus;
+      closeReason?: GqlWeOweCloseReason | null | undefined;
+      version: number;
+      createdAt?: string | null | undefined;
+      closedAt?: string | null | undefined;
+    };
+    fulfillment: {
+      __typename?: 'WeOweFulfillment';
+      fulfillmentId: string;
+      weOweId: string;
+      quantity: number;
+      source: GqlWeOweFulfillmentSource;
+      createdAt: string;
+    };
   };
 };
 

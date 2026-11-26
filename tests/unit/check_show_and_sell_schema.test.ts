@@ -2082,3 +2082,43 @@ describe("Show & Sell Wave 5.3 We Owe SDL (schema.graphql)", () => {
     }
   });
 });
+
+// --- Wave 5.5 (checklist §4.5.2): the raw sale read ──────────────────────────
+
+describe("Show & Sell Wave 5.5 raw sale SDL (schema.graphql)", () => {
+  test("the connection carries items and pageInfo, the list takes showAndSellId, status and page", () => {
+    expect(definition("ShowAndSellSaleConnection").kind, "ShowAndSellSaleConnection must be an object type").toBe("type");
+    expect([...fieldNameSet(definition("ShowAndSellSaleConnection"))]).toEqual(["items", "pageInfo"]);
+    const items = fieldsOf(definition("ShowAndSellSaleConnection")).find((f) => f.name === "items")!;
+    expect(items.text).toMatch(/items\s*:\s*\[ShowAndSellSale!\]!/);
+    expect(fieldsOf(definition("ShowAndSellSaleConnection")).find((f) => f.name === "pageInfo")!.text).toMatch(
+      /pageInfo\s*:\s*PageInfo!/,
+    );
+
+    const list = rootFieldByName("Query", "showAndSellSales");
+    expect(list, "Query.showAndSellSales is missing").toBeDefined();
+    expect(list!.text).toMatch(/showAndSellId\s*:\s*ID!/);
+    expect(list!.text).toMatch(/status\s*:\s*String(?!\s*!)/);
+    expect(list!.text).toMatch(/page\s*:\s*PageInput/);
+    expect(returnTypeName(list!.text)).toBe("ShowAndSellSaleConnection");
+    expect(list!.text).toMatch(/\):\s*ShowAndSellSaleConnection!/);
+    expect(list!.directives, "showAndSellSales must be directive-free (Cognito-only)").toEqual([]);
+  });
+
+  test("the raw sale read carries no totals, no participant projection and no artifact", () => {
+    const names = fieldNameSet(definition("ShowAndSellSaleConnection"));
+    for (const forbidden of ["totalCents", "totalExpectedCashCents", "summary", "report", "fileUrl", "downloadUrl", "url"]) {
+      expect(names.has(forbidden), `ShowAndSellSaleConnection.${forbidden} would be a derived total or an artifact`).toBe(false);
+    }
+    // A sale is an administrative record: no buyer name may appear on a participant projection, and
+    // this connection's items are the full administrative rows, never a projection of them.
+    const items = fieldsOf(definition("ShowAndSellSaleConnection")).find((f) => f.name === "items")!;
+    expect(items.text).toContain("ShowAndSellSale");
+    // The field itself is not a report-shaped name the browser-only reporting rule rejects.
+    expect("showAndSellSales").not.toMatch(/Sheet|Report/);
+  });
+
+  test("AUTH: ShowAndSellSaleConnection carries no auth directive", () => {
+    expect(definition("ShowAndSellSaleConnection").directives, "must carry no auth directive").toEqual([]);
+  });
+});
