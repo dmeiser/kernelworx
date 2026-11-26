@@ -36,8 +36,8 @@ import {
 } from '../src/lib/graphql';
 import { SalesDesk } from '../src/components/showSell/SalesDesk';
 import { SHOW_AND_SELL_PAGE_SIZE } from '../src/lib/showSell';
-import { OTHER_DETAILS_MAX_CHARS } from '../src/lib/saleDesk';
-import { clearAndType, chooseOption, typeInto } from './helpers/unitUi';
+import { OTHER_DETAILS_MAX_CHARS, SALE_REASON_MAX_CHARS } from '../src/lib/saleDesk';
+import { clearAndType, chooseOption, findOption, typeInto } from './helpers/unitUi';
 import type {
   GqlShowAndSellAdminFieldsFragment,
   GqlShowAndSellSaleFieldsFragment,
@@ -263,6 +263,54 @@ function renderDesk(fixture: DeskFixtures = {}) {
 async function fillFirstLine(user: ReturnType<typeof userEvent.setup>) {
   await chooseOption('sale-line-product-0', 'Caramel', user);
   await typeInto('sale-line-immediate-0', '2', user);
+}
+
+/** The revision the server archives when a correction lands. */
+const PRIOR_REVISION = {
+  __typename: 'ShowAndSellSaleRevision',
+  saleId: 'SALE#1',
+  showAndSellId: SSE,
+  revision: 2,
+  saleAt: '2026-03-28T15:30:00.000Z',
+  enteredByAccountId: 'ACCOUNT#casey',
+  buyerName: 'Avery',
+  buyerPhone: null,
+  buyerEmail: null,
+  totalCents: 500,
+  status: 'ACTIVE',
+  correctedByAccountId: 'ACCOUNT#casey',
+  correctedAt: '2026-03-28T16:00:00.000Z',
+  reason: 'Fix the split',
+  lineItems: [saleLineFixture()],
+  paymentMethodSnapshot: { __typename: 'SalePaymentSnapshot', methodCode: 'CASH', displayName: 'Cash', otherDetails: null },
+};
+
+/**
+ * A correction the server accepts, wired to the exact body the panel must send.
+ * The payload is overridable so a test can answer with its own warnings, archived
+ * revision, or sale.
+ */
+function correctionMock(input: Record<string, unknown>, payload: Record<string, unknown> = {}) {
+  return {
+    request: { query: CORRECT_SHOW_AND_SELL_SALE, variables: { input } },
+    result: (variables: Record<string, unknown>) => {
+      sent.correct.push(variables);
+      return {
+        data: {
+          correctShowAndSellSale: {
+            __typename: 'ShowAndSellSalePayload',
+            eventVersion: 8,
+            draftOnly: false,
+            sale: saleFixture({ revision: 3 }),
+            priorRevision: PRIOR_REVISION,
+            warnings: [],
+            obligations: [],
+            ...payload,
+          },
+        },
+      };
+    },
+  };
 }
 
 describe('the entry form', () => {
@@ -635,6 +683,367 @@ describe('the correction form', () => {
     expect(input.lineItems).toEqual([{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 2 }]);
   });
 
+  // A sale can name a method the Unit has since retired. The panel keeps that
+  // method in front of the admin instead of pushing them to pick a different one,
+  // and a correction that changes nothing about payment says nothing about it.
+  it('keeps a retired method the sale was entered with', async () => {
+    const user = userEvent.setup();
+    const sale = saleFixture({
+      paymentMethodSnapshot: { __typename: 'SalePaymentSnapshot', methodCode: 'CUSTOM#2', displayName: 'Retired Pay', otherDetails: null },
+    });
+    const mutation = correctionMock({
+      showAndSellId: SSE,
+      saleId: 'SALE#1',
+      saleVersion: { expectedVersion: 2 },
+      version: { expectedVersion: 7 },
+      lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 }],
+      reason: 'Recount at the table',
+      idempotency: { idempotencyKey: 'test-idem-1' },
+    });
+    renderDesk({ sales: [sale], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await screen.findByTestId('correction-reason');
+
+    const retired = await findOption('correction-payment-method', /Retired Pay/, user);
+    expect(retired).toHaveTextContent('Retired Pay (retired)');
+    await user.click(retired);
+
+    await typeInto('correction-reason', 'Recount at the table', user);
+    await user.click(screen.getByTestId('save-correction'));
+
+    await waitFor(() => expect(sent.correct).toHaveLength(1));
+    const input = sent.correct[0].input as Record<string, unknown>;
+    expect(input.paymentMethodCode).toBeUndefined();
+    expect(input.otherDetails).toBeUndefined();
+  });
+
+  // A method the Unit does offer is a real choice, and switching to Other carries
+  // the note the new method requires in the same write.
+  it('carries a changed method and its Other note into the write', async () => {
+    const user = userEvent.setup();
+    const mutation = correctionMock({
+      showAndSellId: SSE,
+      saleId: 'SALE#1',
+      saleVersion: { expectedVersion: 2 },
+      version: { expectedVersion: 7 },
+      lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 }],
+      reason: 'Paid by chit',
+      paymentMethodCode: 'OTHER',
+      otherDetails: 'Council chit #12',
+      idempotency: { idempotencyKey: 'test-idem-1' },
+    });
+    renderDesk({ sales: [saleFixture()], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await screen.findByTestId('correction-reason');
+    await chooseOption('correction-payment-method', 'Other', user);
+    await typeInto('correction-other-details', 'Council chit #12', user);
+    await typeInto('correction-reason', 'Paid by chit', user);
+    expect(screen.getByTestId('save-correction')).toBeEnabled();
+
+    await user.click(screen.getByTestId('save-correction'));
+
+    await waitFor(() => expect(sent.correct).toHaveLength(1));
+    const input = sent.correct[0].input as Record<string, unknown>;
+    expect(input.paymentMethodCode).toBe('OTHER');
+    expect(input.otherDetails).toBe('Council chit #12');
+  });
+
+  // Only Other carries a note, and an Other with no note is not a payment anybody
+  // can audit: the panel refuses it before a write exists.
+  it('refuses an Other method with no note in a correction', async () => {
+    const user = userEvent.setup();
+    renderDesk({ sales: [saleFixture()] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await chooseOption('correction-payment-method', 'Other', user);
+    await typeInto('correction-reason', 'Paid by chit', user);
+
+    expect(screen.getByTestId('sale-correction-error')).toHaveTextContent('Say what makes this payment an Other one');
+    expect(screen.getByTestId('save-correction')).toBeDisabled();
+    expect(sent.correct).toHaveLength(0);
+  });
+
+  // The note the sale was entered with is editable on its own: the method stays
+  // where it is and the body carries only the note.
+  it('revises a stored Other note without touching the method', async () => {
+    const user = userEvent.setup();
+    const sale = saleFixture({
+      paymentMethodSnapshot: { __typename: 'SalePaymentSnapshot', methodCode: 'OTHER', displayName: 'Other', otherDetails: 'Chit' },
+    });
+    const mutation = correctionMock({
+      showAndSellId: SSE,
+      saleId: 'SALE#1',
+      saleVersion: { expectedVersion: 2 },
+      version: { expectedVersion: 7 },
+      lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 }],
+      reason: 'Chit number was wrong',
+      otherDetails: 'Council chit #12',
+      idempotency: { idempotencyKey: 'test-idem-1' },
+    });
+    renderDesk({ sales: [sale], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await clearAndType('correction-other-details', 'Council chit #12', user);
+    await typeInto('correction-reason', 'Chit number was wrong', user);
+    await user.click(screen.getByTestId('save-correction'));
+
+    await waitFor(() => expect(sent.correct).toHaveLength(1));
+    const input = sent.correct[0].input as Record<string, unknown>;
+    expect(input.otherDetails).toBe('Council chit #12');
+    expect(input.paymentMethodCode).toBeUndefined();
+  });
+
+  // Both free-text fields have the server's own ceiling on the input, so the only
+  // way past it is a value that arrived by another path. The panel still refuses.
+  it('refuses a correction reason or note longer than the server’s ceiling', async () => {
+    const user = userEvent.setup();
+    renderDesk({ sales: [saleFixture()] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    const reason = screen.getByTestId('correction-reason') as HTMLInputElement;
+    const reasonCeiling = reason.maxLength;
+    expect(reasonCeiling).toBe(SALE_REASON_MAX_CHARS);
+    // A typed value stops at the ceiling, so the only way past it is a value the
+    // field did not type. fireEvent hands the panel that value directly.
+    fireEvent.change(reason, { target: { value: 'r'.repeat(reasonCeiling + 1) } });
+    await waitFor(() =>
+      expect(screen.getByTestId('sale-correction-error')).toHaveTextContent(`The reason may not exceed ${reasonCeiling} characters`),
+    );
+    expect(screen.getByTestId('save-correction')).toBeDisabled();
+
+    // The reason is in order now; the note is the field that cannot be sent.
+    await clearAndType('correction-reason', 'Paid by chit', user);
+    await chooseOption('correction-payment-method', 'Other', user);
+    const details = screen.getByTestId('correction-other-details') as HTMLInputElement;
+    expect(details.maxLength).toBe(OTHER_DETAILS_MAX_CHARS);
+    fireEvent.change(details, { target: { value: 'x'.repeat(OTHER_DETAILS_MAX_CHARS + 1) } });
+    await waitFor(() =>
+      expect(screen.getByTestId('sale-correction-error')).toHaveTextContent(
+        `Other details may not exceed ${OTHER_DETAILS_MAX_CHARS} characters`,
+      ),
+    );
+    expect(screen.getByTestId('save-correction')).toBeDisabled();
+    expect(sent.correct).toHaveLength(0);
+  });
+
+  // A line the buyer never took is added as a supplemental row: it carries no
+  // stable id, and the read-out counts it with the lines that did.
+  it('adds a supplemental line beside the stored ones', async () => {
+    const user = userEvent.setup();
+    const mutation = correctionMock({
+      showAndSellId: SSE,
+      saleId: 'SALE#1',
+      saleVersion: { expectedVersion: 2 },
+      version: { expectedVersion: 7 },
+      lineItems: [
+        { lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 },
+        { productId: BUTTER, immediateQty: 1, weOweQty: 0 },
+      ],
+      reason: 'Second box came back',
+      idempotency: { idempotencyKey: 'test-idem-1' },
+    });
+    renderDesk({ sales: [saleFixture()], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await user.click(screen.getByTestId('correction-line-add-line'));
+    await chooseOption('correction-line-product-1', 'Butter', user);
+    await typeInto('correction-line-immediate-1', '1', user);
+    await typeInto('correction-reason', 'Second box came back', user);
+
+    expect(screen.getByTestId('correction-line-correcting-0')).toHaveTextContent('Correcting this line');
+    expect(screen.getByTestId('correction-draft-total')).toHaveTextContent('across 2 lines');
+
+    await user.click(screen.getByTestId('save-correction'));
+
+    await waitFor(() => expect(sent.correct).toHaveLength(1));
+    const input = sent.correct[0].input as Record<string, unknown>;
+    expect(input.lineItems).toEqual([
+      { lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 },
+      { productId: BUTTER, immediateQty: 1, weOweQty: 0 },
+    ]);
+  });
+
+  // The buyer fields move one at a time: the body carries the ones that changed
+  // and leaves the ones that did not for the snapshot the server already holds.
+  // A correction of an owing sale has to keep a buyer name on the line, and the
+  // body carries only the contact fields that actually moved.
+  it('carries only the buyer fields that moved', async () => {
+    const user = userEvent.setup();
+    const mutation = correctionMock(
+      {
+        showAndSellId: SSE,
+        saleId: 'SALE#1',
+        saleVersion: { expectedVersion: 2 },
+        version: { expectedVersion: 7 },
+        lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 }],
+        reason: 'Wrong phone',
+        buyerPhone: '555-010-0100',
+        buyerEmail: 'avery@example.test',
+        idempotency: { idempotencyKey: 'test-idem-1' },
+      },
+      { sale: saleFixture({ revision: 3, buyerPhone: '555-010-0100', buyerEmail: 'avery@example.test' }) },
+    );
+    renderDesk({ sales: [saleFixture()], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await typeInto('correction-buyer-phone', '555-010-0100', user);
+    await typeInto('correction-buyer-email', 'avery@example.test', user);
+    await typeInto('correction-reason', 'Wrong phone', user);
+    // The write carries what the fields hold, so the fields have to hold it first.
+    await waitFor(() => {
+      expect((screen.getByTestId('correction-buyer-phone') as HTMLInputElement).value).toBe('555-010-0100');
+      expect((screen.getByTestId('correction-buyer-email') as HTMLInputElement).value).toBe('avery@example.test');
+    });
+    await user.click(screen.getByTestId('save-correction'));
+
+    await waitFor(() => expect(sent.correct).toHaveLength(1));
+    const input = sent.correct[0].input as Record<string, unknown>;
+    expect(input.buyerPhone).toBe('555-010-0100');
+    expect(input.buyerEmail).toBe('avery@example.test');
+    expect(input.buyerName).toBeUndefined();
+  });
+
+  // What the saved correction archived, in the words the server has: a revision
+  // with no reason of its own still says what happened.
+  it('names the archived revision even when it carries no reason', async () => {
+    const user = userEvent.setup();
+    const mutation = correctionMock(
+      {
+        showAndSellId: SSE,
+        saleId: 'SALE#1',
+        saleVersion: { expectedVersion: 2 },
+        version: { expectedVersion: 7 },
+        lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 }],
+        reason: 'Recount at the table',
+        idempotency: { idempotencyKey: 'test-idem-1' },
+      },
+      { priorRevision: { ...PRIOR_REVISION, reason: null } },
+    );
+    renderDesk({ sales: [saleFixture()], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await typeInto('correction-reason', 'Recount at the table', user);
+    await user.click(screen.getByTestId('save-correction'));
+
+    expect(await screen.findByTestId('correction-saved')).toHaveTextContent('Revision 2 archived.');
+    expect(screen.getByTestId('cancel-correction')).toHaveTextContent('Done');
+  });
+
+  // The server's warnings survive the write: an over-assigned product is still
+  // over-assigned after a correction, and the panel has to say so.
+  it('keeps the warnings the server answered with', async () => {
+    const user = userEvent.setup();
+    const mutation = correctionMock(
+      {
+        showAndSellId: SSE,
+        saleId: 'SALE#1',
+        saleVersion: { expectedVersion: 2 },
+        version: { expectedVersion: 7 },
+        lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 9, weOweQty: 0 }],
+        reason: 'All taken at the table',
+        idempotency: { idempotencyKey: 'test-idem-1' },
+      },
+      { warnings: [{ __typename: 'AllocationWarning', productId: CARAMEL, currentStockQty: 2, assignedQty: 9, overageQty: 7, message: 'Over-assigned by 7.' }] },
+    );
+    renderDesk({ sales: [saleFixture()], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await clearAndType('correction-line-immediate-0', '9', user);
+    await clearAndType('correction-line-weowe-0', '0', user);
+    await typeInto('correction-reason', 'All taken at the table', user);
+    await user.click(screen.getByTestId('save-correction'));
+
+    expect(await screen.findByTestId('correction-warnings')).toHaveTextContent('Over-assigned by 7.');
+    expect(screen.getAllByTestId('correction-warning')).toHaveLength(1);
+  });
+
+  // A correction that lands on a sale someone else already corrected has to stop
+  // and re-read, not offer to write over a revision nobody has looked at.
+  it('shows the stale sentence and re-reads the board when a correction is refused with CONFLICT', async () => {
+    const user = userEvent.setup();
+    const mutation = {
+      request: {
+        query: CORRECT_SHOW_AND_SELL_SALE,
+        variables: {
+          input: {
+            showAndSellId: SSE,
+            saleId: 'SALE#1',
+            saleVersion: { expectedVersion: 2 },
+            version: { expectedVersion: 7 },
+            lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 }],
+            reason: 'Recount at the table',
+            idempotency: { idempotencyKey: 'test-idem-1' },
+          },
+        },
+      },
+      error: new GraphQLError('conflict', { extensions: { code: 'CONFLICT' } }),
+    };
+    const onChanged = renderDesk({ sales: [saleFixture()], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await typeInto('correction-reason', 'Recount at the table', user);
+    await user.click(screen.getByTestId('save-correction'));
+
+    expect(await screen.findByTestId('sale-correction-error')).toBeInTheDocument();
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  // Leaving one line out and leaving two out are different acts in the sentence
+  // the admin has to read before committing, and the summary says how many lines
+  // the sale has in the first place.
+  it('says which lines are being voided, one at a time or together', async () => {
+    const user = userEvent.setup();
+    const twoLines = saleFixture({
+      lineItems: [saleLineFixture(), saleLineFixture({ lineItemId: 'LINE#2', productId: BUTTER, productNameSnapshot: 'Butter' })],
+    });
+    renderDesk({ sales: [twoLines] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await waitFor(() => expect(screen.getByTestId('correction-draft-total')).toHaveTextContent('across 2 lines'));
+
+    await user.click(screen.getByTestId('correction-line-remove-line-0'));
+    await waitFor(() => expect(screen.getByTestId('correction-omission-warning')).toHaveTextContent('voids that line'));
+    expect(screen.getByTestId('correction-draft-total')).toHaveTextContent('1 line omitted');
+
+    await user.click(screen.getByTestId('correction-line-remove-line-0'));
+    await waitFor(() => expect(screen.getByTestId('correction-omission-warning')).toHaveTextContent('voids those lines'));
+    expect(screen.getByTestId('correction-draft-total')).toHaveTextContent('2 lines omitted');
+  });
+
+  // A product the catalog no longer lists can still sit on a stored sale. The picker
+  // keeps offering it, so the admin can keep the line instead of being pushed into
+  // dropping it — and dropping it would cancel an obligation nobody decided to cancel.
+  it('keeps a product the catalog has dropped on a stored line', async () => {
+    const user = userEvent.setup();
+    const sale = saleFixture({
+      lineItems: [saleLineFixture({ productId: 'PROD#retired', productNameSnapshot: 'Old Caramel' })],
+    });
+    renderDesk({ sales: [sale] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    const option = await findOption('correction-line-product-0', 'PROD#retired', user);
+    expect(option).toBeInTheDocument();
+    await user.click(option);
+    expect(screen.getByTestId('save-correction')).toBeDisabled();
+
+    await typeInto('correction-reason', 'Recount at the table', user);
+    expect(screen.getByTestId('save-correction')).toBeEnabled();
+  });
+
   it('shows the prior revision note after a saved correction', async () => {
     const user = userEvent.setup();
     const mutation = {
@@ -755,6 +1164,68 @@ describe('the void form', () => {
     expect(input.saleVersion).toEqual({ expectedVersion: 2 });
     expect(input.version).toEqual({ expectedVersion: 7 });
     expect(input.reason).toBe('Duplicate entry');
+  });
+
+  // A sale someone else already corrected or voided cannot be taken down over
+  // their head: the panel stops, says why, and re-reads the list.
+  it('shows the stale sentence and re-reads the board when a void is refused with CONFLICT', async () => {
+    const user = userEvent.setup();
+    const mutation = {
+      request: {
+        query: VOID_SHOW_AND_SELL_SALE,
+        variables: {
+          input: {
+            showAndSellId: SSE,
+            saleId: 'SALE#1',
+            saleVersion: { expectedVersion: 2 },
+            version: { expectedVersion: 7 },
+            reason: 'Duplicate entry',
+            idempotency: { idempotencyKey: 'test-idem-1' },
+          },
+        },
+      },
+      error: new GraphQLError('conflict', { extensions: { code: 'CONFLICT' } }),
+    };
+    const onChanged = renderDesk({ sales: [saleFixture()], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('void-sale-SALE#1'));
+    await typeInto('void-reason', 'Duplicate entry', user);
+    await user.click(screen.getByTestId('save-void'));
+
+    expect(await screen.findByTestId('sale-void-error')).toHaveTextContent('already moved');
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  // A void takes the whole sale, so the panel says how many lines it is taking down.
+  it('counts the lines a void takes down, one or many', async () => {
+    const user = userEvent.setup();
+    const twoLines = saleFixture({
+      saleId: 'SALE#2',
+      lineItems: [saleLineFixture(), saleLineFixture({ lineItemId: 'LINE#2', productId: BUTTER, productNameSnapshot: 'Butter' })],
+    });
+    renderDesk({ sales: [saleFixture(), twoLines] });
+    await screen.findByTestId('sale-row-SALE#2');
+
+    await user.click(screen.getByTestId('void-sale-SALE#1'));
+    expect(screen.getByTestId('sale-void-summary')).toHaveTextContent('1 line');
+    await user.click(screen.getByTestId('cancel-void'));
+
+    await user.click(screen.getByTestId('void-sale-SALE#2'));
+    expect(screen.getByTestId('sale-void-summary')).toHaveTextContent('2 lines');
+  });
+
+  // A sale the server already took down stays on the list as history, and the two
+  // actions that act on a live sale stop working for it.
+  it('keeps a voided sale on the list with its actions closed', async () => {
+    renderDesk({
+      sales: [saleFixture({ status: 'VOIDED', voidedByAccountId: 'ACCOUNT#averyn', voidedAt: '2026-03-28T16:00:00.000Z' })],
+    });
+
+    const row = await screen.findByTestId('sale-row-SALE#1');
+    expect(row).toHaveTextContent('VOIDED');
+    expect(screen.getByTestId('correct-sale-SALE#1')).toBeDisabled();
+    expect(screen.getByTestId('void-sale-SALE#1')).toBeDisabled();
   });
 });
 

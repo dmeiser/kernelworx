@@ -317,6 +317,26 @@ describe('reservation', () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 
+  // One Kernel is still one Kernel, and a row the server never dated stays undated:
+  // the hint the admin acts on has to read the way the number is.
+  it('says the release and the hold in the singular, and leaves an undated row undated', async () => {
+    const user = userEvent.setup();
+    renderPanel([
+      obligationFixture({ weOweId: 'WEOWE#1', reservedQty: 2, uncoveredQty: 1, remainingQty: 3, createdAt: null }),
+      obligationFixture({ weOweId: 'WEOWE#2', reservedQty: 0, uncoveredQty: 3, remainingQty: 3, createdAt: null }),
+    ]);
+
+    await screen.findByTestId('we-owe-card-WEOWE#2');
+    expect(screen.getByTestId('we-owe-meta-WEOWE#1')).not.toHaveTextContent('opened');
+    expect(screen.getByTestId('we-owe-meta-WEOWE#2')).not.toHaveTextContent('opened');
+
+    await clearAndType('we-owe-reserve-target-WEOWE#1', '1', user);
+    expect(screen.getByTestId('we-owe-release-hint-WEOWE#1')).toHaveTextContent('Releases 1 Kernel back to sellable stock');
+
+    await clearAndType('we-owe-reserve-target-WEOWE#2', '1', user);
+    expect(screen.getByTestId('we-owe-release-hint-WEOWE#2')).toHaveTextContent('Holds 1 Kernel against this obligation');
+  });
+
   it('refuses a target above what the obligation still owes, with no write at all', async () => {
     const user = userEvent.setup();
     renderPanel([obligationFixture({ reservedQty: 0, uncoveredQty: 4, remainingQty: 4 })]);

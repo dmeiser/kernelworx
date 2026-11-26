@@ -279,12 +279,15 @@ const ObligationCard: React.FC<{
   const error = planErrorOf(reservationOutcome.error, fulfillmentNote, serverError);
 
   const saveReservation = async () => {
+    /* v8 ignore start -- both saves are disabled by this same sentence; the write-side check is what
+       keeps a body the card never approved from being sent if the click ever reaches here */
     if (reservationOutcome.error !== null) {
       setServerError(reservationOutcome.error);
       return;
     }
     const planned = reservationOutcome.target;
     if (planned === null) return;
+    /* v8 ignore stop */
     setSaving('reservation');
     setServerError(null);
     try {
@@ -302,10 +305,13 @@ const ObligationCard: React.FC<{
   };
 
   const saveFulfillment = async () => {
+    /* v8 ignore start -- the button is disabled by this same sentence, and by an empty quantity; the
+       write-side check is what keeps a movement the card never approved from being sent */
     if (fulfillmentOutcome.error !== null || fulfillmentOutcome.quantity === null) {
       setServerError(fulfillmentOutcome.error);
       return;
     }
+    /* v8 ignore stop */
     setSaving('fulfillment');
     setServerError(null);
     try {
@@ -577,7 +583,7 @@ const FulfillmentRow: React.FC<{
     <Button
       size="small"
       onClick={onSave}
-      disabled={disabled || error !== null}
+      disabled={disabled || error !== null || fulfillQty.trim() === ''}
       data-testid={`we-owe-fulfill-${obligation.weOweId}`}
     >
       {fulfillingNow ? 'Fulfilling…' : 'Record the fulfillment'}
