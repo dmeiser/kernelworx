@@ -175,8 +175,9 @@ function fulfillmentMock(
                     weOweId: obligation.weOweId,
                     quantity,
                     source: variables.source,
-                    fulfilledAt: '2026-03-29T15:00:00.000Z',
-                    fulfilledByAccountId: 'ACCOUNT#casey',
+                    actorAccountId: 'ACCOUNT#casey',
+                    createdAt: '2026-03-29T15:00:00.000Z',
+                    inventoryMovementId: kernel ? 'MOVE#1' : null,
                   },
                 },
               },
@@ -467,5 +468,100 @@ describe('fulfillment', () => {
 
     expect(screen.getByTestId('we-owe-error-WEOWE#1')).toHaveTextContent('owes 2 more');
     expect(sent.fulfillment).toHaveLength(0);
+  });
+
+  it('a CONFLICT on fulfillment shows the stale sentence and re-reads the board', async () => {
+    const user = userEvent.setup();
+    const obligation = obligationFixture({ reservedQty: 3, uncoveredQty: 1, remainingQty: 4 });
+    const onChanged = renderPanel([obligation], [
+      fulfillmentMock(
+        {
+          weOweId: 'WEOWE#1',
+          quantity: 2,
+          source: 'KERNEL_STOCK',
+          version: { expectedVersion: 1 },
+          idempotency: { idempotencyKey: 'test-idem-1' },
+        },
+        obligation,
+        { error: new GraphQLError('expectedVersion 1 does not match 3', { extensions: { code: 'CONFLICT' } }) },
+      ),
+    ]);
+
+    await screen.findByTestId('we-owe-card-WEOWE#1');
+    await typeInto('we-owe-fulfill-qty-WEOWE#1', '2', user);
+    await user.click(screen.getByTestId('we-owe-fulfill-WEOWE#1'));
+
+    expect(await screen.findByTestId('we-owe-error-WEOWE#1')).toHaveTextContent(STALE_SENTENCE);
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it('spends the intent: a reservation followed by a fulfillment carries two different keys', async () => {
+    const user = userEvent.setup();
+    const obligation = obligationFixture({ reservedQty: 2, uncoveredQty: 2, remainingQty: 4 });
+    renderPanel([obligation], [
+      reservationMock(
+        {
+          weOweId: 'WEOWE#1',
+          targetReservedQty: 3,
+          version: { expectedVersion: 1 },
+          idempotency: { idempotencyKey: 'test-idem-1' },
+        },
+        obligation,
+      ),
+      fulfillmentMock(
+        {
+          weOweId: 'WEOWE#1',
+          quantity: 2,
+          source: 'KERNEL_STOCK',
+          version: { expectedVersion: 1 },
+          idempotency: { idempotencyKey: 'test-idem-2' },
+        },
+        obligation,
+      ),
+    ]);
+
+    await screen.findByTestId('we-owe-card-WEOWE#1');
+    await clearAndType('we-owe-reserve-target-WEOWE#1', '3', user);
+    await user.click(screen.getByTestId('we-owe-save-reservation-WEOWE#1'));
+    await waitFor(() => expect(sent.reservation).toHaveLength(1));
+
+    await typeInto('we-owe-fulfill-qty-WEOWE#1', '2', user);
+    await user.click(screen.getByTestId('we-owe-fulfill-WEOWE#1'));
+    await waitFor(() => expect(sent.fulfillment).toHaveLength(1));
+
+    expect((sent.reservation[0].input as Record<string, unknown>).idempotency).toEqual({ idempotencyKey: 'test-idem-1' });
+    expect((sent.fulfillment[0].input as Record<string, unknown>).idempotency).toEqual({ idempotencyKey: 'test-idem-2' });
+  });
+});
+
+describe('the source rule after review', () => {
+  it('plans against the source the card actually offers, not the blank draft choice', async () => {
+    const user = userEvent.setup();
+    const obligation = obligationFixture({ reservedQty: 0, uncoveredQty: 3, remainingQty: 3 });
+    renderPanel([obligation], [
+      fulfillmentMock(
+        {
+          weOweId: 'WEOWE#1',
+          quantity: 1,
+          source: 'EXTERNAL_COUNCIL',
+          version: { expectedVersion: 1 },
+          idempotency: { idempotencyKey: 'test-idem-1' },
+        },
+        obligation,
+      ),
+    ]);
+
+    await screen.findByTestId('we-owe-card-WEOWE#1');
+    // Only Council is offered here, so the card starts on it and the Kernel bound never applies.
+    expect(screen.getByTestId('we-owe-source-WEOWE#1')).toHaveTextContent('External Council (uncovered)');
+
+    await typeInto('we-owe-fulfill-qty-WEOWE#1', '1', user);
+    expect(screen.queryByTestId('we-owe-error-WEOWE#1')).toBeNull();
+    expect(screen.getByTestId('we-owe-fulfill-WEOWE#1')).toBeEnabled();
+
+    await user.click(screen.getByTestId('we-owe-fulfill-WEOWE#1'));
+
+    await waitFor(() => expect(sent.fulfillment).toHaveLength(1));
+    expect((sent.fulfillment[0].input as Record<string, unknown>).source).toBe('EXTERNAL_COUNCIL');
   });
 });

@@ -10,6 +10,11 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  BUYER_EMAIL_MAX_CHARS,
+  BUYER_NAME_MAX_CHARS,
+  BUYER_PHONE_MAX_CHARS,
+  OTHER_DETAILS_MAX_CHARS,
+  SPLIT_PAYMENT_TOOLTIP,
   acceptsSaleEntry,
   closeReasonLabel,
   correctionPlan,
@@ -17,6 +22,7 @@ import {
   fulfillmentPlan,
   fulfillmentSources,
   isDraftOnly,
+  isOtherMethodOption,
   paymentMethodCode,
   paymentMethodOptions,
   reservationPlan,
@@ -126,6 +132,26 @@ describe('payment method options', () => {
     ]);
     expect(options.find((option) => option.value === 'OTHER')?.isOther).toBe(true);
     expect(options.find((option) => option.value === 'CASH')?.isOther).toBe(false);
+  });
+
+  it('recognises the Other option only by its selected value (PAY-05)', () => {
+    const options = paymentMethodOptions([
+      method({ paymentMethodId: 'OTHER', displayName: 'Other' }),
+      method({ paymentMethodId: 'CASH', displayName: 'Cash' }),
+    ]);
+    expect(isOtherMethodOption(options, 'OTHER')).toBe(true);
+    expect(isOtherMethodOption(options, 'CASH')).toBe(false);
+    expect(isOtherMethodOption(options, undefined)).toBe(false);
+    expect(isOtherMethodOption([], 'OTHER')).toBe(false);
+    expect(SPLIT_PAYMENT_TOOLTIP).toContain('split payments');
+    expect(SPLIT_PAYMENT_TOOLTIP).toContain('Other');
+  });
+
+  it('uses the server-side ceilings verbatim, without a browser-only smaller one', () => {
+    expect(OTHER_DETAILS_MAX_CHARS).toBe(250);
+    expect(BUYER_NAME_MAX_CHARS).toBe(200);
+    expect(BUYER_PHONE_MAX_CHARS).toBe(40);
+    expect(BUYER_EMAIL_MAX_CHARS).toBe(254);
   });
 
   it('names the code a selection carries, or refuses an unknown one', () => {

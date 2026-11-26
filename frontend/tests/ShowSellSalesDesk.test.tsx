@@ -23,6 +23,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { GraphQLError } from 'graphql';
 import { MockedProvider } from '@apollo/client/testing/react';
 import {
   CREATE_SHOW_AND_SELL_SALE,
@@ -637,5 +638,226 @@ describe('the void form', () => {
     expect(input.saleVersion).toEqual({ expectedVersion: 2 });
     expect(input.version).toEqual({ expectedVersion: 7 });
     expect(input.reason).toBe('Duplicate entry');
+  });
+});
+
+const STALE_SENTENCE =
+  'That was refused because the event, a slot, or a signup has already moved. Reload this screen and try again with what it now shows.';
+
+/** A create mock pinned to one intent key, so a replayed key cannot satisfy a later write. */
+function createMutation(key: string, error?: GraphQLError) {
+  return {
+    request: {
+      query: CREATE_SHOW_AND_SELL_SALE,
+      variables: {
+        input: {
+          showAndSellId: SSE,
+          saleAt: '2026-03-28T15:30:00.000Z',
+          lineItems: [{ productId: CARAMEL, immediateQty: 2, weOweQty: 0 }],
+          paymentMethodCode: 'CASH',
+          version: { expectedVersion: 7 },
+          idempotency: { idempotencyKey: key },
+        },
+      },
+    },
+    ...(error
+      ? { error }
+      : {
+          result: (variables: Record<string, unknown>) => {
+            sent.create.push(variables);
+            return {
+              data: {
+                createShowAndSellSale: {
+                  __typename: 'ShowAndSellSalePayload',
+                  eventVersion: 8,
+                  draftOnly: false,
+                  sale: saleFixture(),
+                  warnings: [],
+                  obligations: [],
+                },
+              },
+            };
+          },
+        }),
+  };
+}
+
+async function fillCashSale(user: ReturnType<typeof userEvent.setup>) {
+  await fillFirstLine(user);
+  await chooseOption('sale-payment-method', 'Cash', user);
+  await clearAndType('sale-at', '2026-03-28T09:30', user);
+}
+
+describe('the entry form after review', () => {
+  it('keeps the split-payment guidance and the server-side field ceilings on the fields', async () => {
+    const user = userEvent.setup();
+    renderDesk();
+    await screen.findByTestId('sale-entry-form');
+
+    expect(screen.getByTestId('sale-payment-help')).toBeVisible();
+    await user.hover(screen.getByTestId('sale-payment-help'));
+    expect(await screen.findByText('For split payments, select Other and enter each payment method and amount.')).toBeVisible();
+    expect(screen.getByTestId('sale-buyer-name')).toHaveAttribute('maxlength', '200');
+    expect(screen.getByTestId('sale-buyer-phone')).toHaveAttribute('maxlength', '40');
+    expect(screen.getByTestId('sale-buyer-email')).toHaveAttribute('maxlength', '254');
+
+    await chooseOption('sale-payment-method', 'Other', user);
+    expect(screen.getByTestId('sale-other-details')).toHaveAttribute('maxlength', '250');
+  });
+
+  it('drops an Other note when the method is switched away, instead of sending a note on Cash', async () => {
+    const user = userEvent.setup();
+    renderDesk();
+    await screen.findByTestId('sale-entry-form');
+    await fillFirstLine(user);
+
+    await chooseOption('sale-payment-method', 'Other', user);
+    await typeInto('sale-other-details', 'Apple Pay; cash portion reported separately', user);
+    expect(screen.getByTestId('sale-other-details')).toHaveValue('Apple Pay; cash portion reported separately');
+
+    await chooseOption('sale-payment-method', 'Cash', user);
+
+    expect(screen.queryByTestId('sale-other-details')).toBeNull();
+    expect(screen.queryByTestId('sale-entry-error')).toBeNull();
+    expect(screen.getByTestId('save-sale')).toBeEnabled();
+    expect(sent.create).toHaveLength(0);
+  });
+
+  it('spends the create intent: a deliberately identical second sale carries a fresh key', async () => {
+    const user = userEvent.setup();
+    renderDesk({ mutationMocks: [createMutation('test-idem-1'), createMutation('test-idem-2')] });
+    await screen.findByTestId('sale-entry-form');
+
+    await fillCashSale(user);
+    await user.click(screen.getByTestId('save-sale'));
+    await waitFor(() => expect(sent.create).toHaveLength(1));
+
+    await fillCashSale(user);
+    await user.click(screen.getByTestId('save-sale'));
+    await waitFor(() => expect(sent.create).toHaveLength(2));
+
+    const keys = sent.create.map((variables) => (variables.input as Record<string, unknown>).idempotency);
+    expect(keys).toEqual([
+      { idempotencyKey: 'test-idem-1' },
+      { idempotencyKey: 'test-idem-2' },
+    ]);
+  });
+
+  it('shows the stale sentence and re-reads the board when a create is refused with CONFLICT', async () => {
+    const user = userEvent.setup();
+    const onChanged = renderDesk({
+      mutationMocks: [createMutation('test-idem-1', new GraphQLError('expectedVersion 7 does not match 9', { extensions: { code: 'CONFLICT' } }))],
+    });
+    await screen.findByTestId('sale-entry-form');
+    await fillCashSale(user);
+
+    await user.click(screen.getByTestId('save-sale'));
+
+    expect(await screen.findByTestId('sale-desk-error')).toHaveTextContent(STALE_SENTENCE);
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it('removes a line with the keyboard alone', async () => {
+    const user = userEvent.setup();
+    renderDesk();
+    await screen.findByTestId('sale-entry-form');
+
+    const remove = screen.getByTestId('sale-line-remove-line-0');
+    remove.focus();
+    await user.keyboard('{Enter}');
+
+    expect(screen.getByTestId('sale-entry-error')).toHaveTextContent('Add at least one line');
+    expect(screen.getByTestId('save-sale')).toBeDisabled();
+  });
+});
+
+describe('the sale list after review', () => {
+  it('names the buyer but keeps the buyer’s phone and email out of the shared list', async () => {
+    renderDesk({
+      sales: [saleFixture({ buyerName: 'Quinn WeOwe', buyerPhone: '555-0100', buyerEmail: 'quinn@example.test' })],
+    });
+
+    const row = await screen.findByTestId('sale-row-SALE#1');
+    expect(row).toHaveTextContent('Quinn WeOwe');
+    expect(row).not.toHaveTextContent('555-0100');
+    expect(row).not.toHaveTextContent('quinn@example.test');
+    expect(screen.queryByText('555-0100')).toBeNull();
+    expect(screen.queryByText('quinn@example.test')).toBeNull();
+  });
+
+  it('says so when the event has no sales', async () => {
+    renderDesk();
+    expect(await screen.findByTestId('sale-list-empty')).toHaveTextContent('No sales');
+  });
+
+  it('disables Correct and Void for an ACTIVE sale on an event that is now FINALIZED', async () => {
+    renderDesk({ event: eventFixture({ status: 'FINALIZED' }), sales: [saleFixture()] });
+
+    expect(await screen.findByTestId('correct-sale-SALE#1')).toBeDisabled();
+    expect(screen.getByTestId('void-sale-SALE#1')).toBeDisabled();
+  });
+
+  function pagedDesk(failedContinuation: boolean) {
+    const pageOne = {
+      request: { query: LIST_SHOW_AND_SELL_SALES, variables: SALES_VARIABLES },
+      result: {
+        data: {
+          showAndSellSales: {
+            __typename: 'ShowAndSellSaleConnection',
+            items: [saleFixture()],
+            pageInfo: { endCursor: 'cursor-1', hasNextPage: true },
+          },
+        },
+      },
+    };
+    const pageTwo = {
+      request: {
+        query: LIST_SHOW_AND_SELL_SALES,
+        variables: { showAndSellId: SSE, page: { limit: SHOW_AND_SELL_PAGE_SIZE, cursor: 'cursor-1' } },
+      },
+      ...(failedContinuation
+        ? { error: new GraphQLError('the continuation could not be read') }
+        : {
+            result: {
+              data: {
+                showAndSellSales: {
+                  __typename: 'ShowAndSellSaleConnection',
+                  items: [saleFixture({ saleId: 'SALE#2', buyerName: 'Quinn' })],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            },
+          }),
+    };
+    render(
+      <MockedProvider
+        mocks={[
+          { request: { query: GET_UNIT_CAMPAIGN_CATALOG, variables: CATALOG_VARIABLES }, result: CATALOG_RESULT },
+          { request: { query: LIST_UNIT_PAYMENT_METHODS, variables: METHODS_VARIABLES }, result: METHODS_RESULT },
+          pageOne,
+          obligationsMock(),
+          pageTwo,
+        ] as never}
+      >
+        <SalesDesk event={eventFixture()} timezone={ZONE} onChanged={vi.fn(async () => undefined)} />
+      </MockedProvider>,
+    );
+  }
+
+  it('reads the cursor through to the last page before calling the list complete', async () => {
+    pagedDesk(false);
+
+    expect(await screen.findByTestId('sale-row-SALE#1')).toBeVisible();
+    expect(await screen.findByTestId('sale-row-SALE#2')).toHaveTextContent('Quinn');
+    await waitFor(() => expect(screen.queryByTestId('connection-rest-loading')).toBeNull());
+    expect(screen.queryByText('The rest of this list could not be loaded, so some rows are not shown.')).toBeNull();
+  });
+
+  it('says the list is short when a later page cannot be read', async () => {
+    pagedDesk(true);
+
+    expect(await screen.findByTestId('sale-row-SALE#1')).toBeVisible();
+    expect(await screen.findByText('The rest of this list could not be loaded, so some rows are not shown.')).toBeVisible();
+    expect(screen.queryByTestId('sale-row-SALE#2')).toBeNull();
   });
 });

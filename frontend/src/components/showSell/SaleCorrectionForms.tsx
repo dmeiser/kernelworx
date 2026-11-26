@@ -31,8 +31,14 @@ import {
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import { CORRECT_SHOW_AND_SELL_SALE, VOID_SHOW_AND_SELL_SALE } from '../../lib/graphql';
 import {
+  BUYER_NAME_MAX_CHARS,
+  BUYER_PHONE_MAX_CHARS,
+  BUYER_EMAIL_MAX_CHARS,
+  OTHER_DETAILS_MAX_CHARS,
+  SPLIT_PAYMENT_TOOLTIP,
   correctionPlan,
   formatCents,
+  isOtherMethodOption,
   noticesOf,
   weOweLineError,
   type CorrectionLineDraft,
@@ -59,7 +65,6 @@ type MutationPayload = NonNullable<GqlCorrectShowAndSellSaleMutation['correctSho
 type ArchivedRevision = MutationPayload['priorRevision'];
 
 const REASON_MAX_CHARS = 500;
-const OTHER_DETAILS_MAX_CHARS = 250;
 
 /** The stored lines as the plan reads them, keyed by stable id. */
 function existingOf(sale: Sale): ExistingLine[] {
@@ -126,10 +131,9 @@ function buyerErrorOf(plan: CorrectionPlan, buyerName: string, weOweEnabled: boo
 
 /** The note the method choice allows: only Other carries one, and when it does it is required. */
 function otherDetailsErrorOf(otherSelected: boolean, otherDetails: string): string | null {
-  if (!otherSelected) {
-    if (otherDetails === '') return null;
-    return 'Only an Other payment carries a note; remove it or choose the Other method.';
-  }
+  // Switching away from Other drops the note, so a non-empty note here can only
+  // come from a race between the draft and the write; the field is not offered.
+  if (!otherSelected) return null;
   if (otherDetails === '') return 'Say what makes this payment an Other one.';
   if (otherDetails.length > OTHER_DETAILS_MAX_CHARS) return `Other details may not exceed ${OTHER_DETAILS_MAX_CHARS} characters.`;
   return null;
@@ -186,20 +190,6 @@ function lineItemsOf(plan: CorrectionPlan): Record<string, unknown>[] {
   }));
 }
 
-/** The idempotency key: the whole row set and every field that is part of the same act. */
-function correctionIdempotencyKeyOf(fields: CorrectionFields): string {
-  const { rows, method, otherDetails, buyerName, buyerPhone, buyerEmail, reason, intent } = fields;
-  return intent.keyFor({
-    rows: rows.map((row) => ({ ...row })),
-    method,
-    otherDetails,
-    buyerName,
-    buyerPhone,
-    buyerEmail,
-    reason,
-  });
-}
-
 /** The buyer fields that actually moved — an unchanged one is not a change the server has to re-snapshot. */
 function changedBuyerFields(fields: CorrectionFields): Record<string, unknown> {
   const changed: Record<string, unknown> = {};
@@ -228,16 +218,17 @@ function changedPaymentFields(fields: CorrectionFields): Record<string, unknown>
  */
 function correctionBodyOf(fields: CorrectionFields): Record<string, unknown> {
   const { sale, event, reason, plan } = fields;
-  const body: Record<string, unknown> = {
+  const payload: Record<string, unknown> = {
     showAndSellId: event.showAndSellId,
     saleId: sale.saleId,
     saleVersion: { expectedVersion: sale.revision },
     version: { expectedVersion: event.version },
     lineItems: lineItemsOf(plan),
     reason,
-    idempotency: { idempotencyKey: correctionIdempotencyKeyOf(fields) },
+    ...changedBuyerFields(fields),
+    ...changedPaymentFields(fields),
   };
-  return { ...body, ...changedBuyerFields(fields), ...changedPaymentFields(fields) };
+  return { ...payload, idempotency: { idempotencyKey: fields.intent.keyFor(payload) } };
 }
 
 /** The draft read-out: what the typed rows add up to, and what the correction leaves out. */
@@ -367,6 +358,8 @@ export const SaleCorrectionPanel: React.FC<{
     try {
       const result = await correctSale({ variables: { input: body } });
       applyPayload(result.data?.correctShowAndSellSale);
+      // The intent is spent: a later, deliberately identical correction is a new write.
+      intent.current = createWriteIntent();
       await refreshQuery(onChanged);
       await refreshQuery(onRefetch);
     } catch (mutationError) {
@@ -574,24 +567,36 @@ const CorrectionPaymentFields: React.FC<{
   loading: boolean;
 }> = ({ methodOptions, method, setMethod, otherSelected, otherDetails, setOtherDetails, loading }) => (
   <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
-    <Select
-      size="small"
-      label="Payment method"
-      value={method}
-      displayEmpty
-      onChange={(change) => setMethod(change.target.value)}
-      disabled={loading}
-      data-testid="correction-payment-method"
-      inputProps={{ 'aria-label': 'Payment method' }}
-      sx={{ minWidth: 220 }}
-    >
-      <MenuItem value="">Choose a payment method</MenuItem>
-      {methodOptions.map((option) => (
-        <MenuItem key={option.value} value={option.value} data-testid={`correction-payment-method-${option.value}`}>
-          {option.label}
-        </MenuItem>
-      ))}
-    </Select>
+    <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 220 }}>
+      <Select
+        size="small"
+        label="Payment method"
+        value={method}
+        displayEmpty
+        onChange={(change) => {
+          const value = change.target.value;
+          setMethod(value);
+          // The note only belongs to an Other payment: switching away drops it.
+          if (!isOtherMethodOption(methodOptions, value)) setOtherDetails('');
+        }}
+        disabled={loading}
+        data-testid="correction-payment-method"
+        inputProps={{ 'aria-label': 'Payment method' }}
+        sx={{ minWidth: 220, flex: 1 }}
+      >
+        <MenuItem value="">Choose a payment method</MenuItem>
+        {methodOptions.map((option) => (
+          <MenuItem key={option.value} value={option.value} data-testid={`correction-payment-method-${option.value}`}>
+            {option.label}
+          </MenuItem>
+        ))}
+      </Select>
+      <Tooltip title={SPLIT_PAYMENT_TOOLTIP} describeChild>
+        <IconButton size="small" aria-label="How split payments are recorded" data-testid="correction-payment-help" disabled={loading}>
+          <HelpOutlineIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    </Stack>
     {otherSelected ? (
       <TextField
         label="Other details"
@@ -620,7 +625,7 @@ const CorrectionBuyerFields: React.FC<{
       value={buyerName}
       onChange={(change) => setBuyerName(change.target.value)}
       disabled={loading}
-      inputProps={{ 'aria-label': 'Buyer name', 'data-testid': 'correction-buyer-name', maxLength: 100 }}
+      inputProps={{ 'aria-label': 'Buyer name', 'data-testid': 'correction-buyer-name', maxLength: BUYER_NAME_MAX_CHARS }}
       sx={{ minWidth: 200 }}
     />
     <TextField
@@ -628,7 +633,7 @@ const CorrectionBuyerFields: React.FC<{
       value={buyerPhone}
       onChange={(change) => setBuyerPhone(change.target.value)}
       disabled={loading}
-      inputProps={{ 'aria-label': 'Buyer phone', 'data-testid': 'correction-buyer-phone', maxLength: 50 }}
+      inputProps={{ 'aria-label': 'Buyer phone', 'data-testid': 'correction-buyer-phone', maxLength: BUYER_PHONE_MAX_CHARS }}
       sx={{ minWidth: 160 }}
     />
     <TextField
@@ -636,7 +641,7 @@ const CorrectionBuyerFields: React.FC<{
       value={buyerEmail}
       onChange={(change) => setBuyerEmail(change.target.value)}
       disabled={loading}
-      inputProps={{ 'aria-label': 'Buyer email', 'data-testid': 'correction-buyer-email', maxLength: 254 }}
+      inputProps={{ 'aria-label': 'Buyer email', 'data-testid': 'correction-buyer-email', maxLength: BUYER_EMAIL_MAX_CHARS }}
       sx={{ minWidth: 200 }}
     />
   </Stack>
@@ -689,16 +694,21 @@ export const SaleVoidPanel: React.FC<{
       setError(reasonError);
       return;
     }
-    const body: Record<string, unknown> = {
+    const payload: Record<string, unknown> = {
       showAndSellId: event.showAndSellId,
       saleId: sale.saleId,
       saleVersion: { expectedVersion: sale.revision },
       version: { expectedVersion: event.version },
       reason: reasonTrimmed,
-      idempotency: { idempotencyKey: intent.current.keyFor({ saleId: sale.saleId, reason: reasonTrimmed }) },
+    };
+    const body: Record<string, unknown> = {
+      ...payload,
+      idempotency: { idempotencyKey: intent.current.keyFor(payload) },
     };
     try {
       await voidSale({ variables: { input: body } });
+      // The intent is spent: a later, deliberately identical void is a new write.
+      intent.current = createWriteIntent();
       await refreshQuery(onChanged);
       await refreshQuery(onRefetch);
       onClose();

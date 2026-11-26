@@ -33,12 +33,25 @@ export const OTHER_METHOD_CODE = 'OTHER';
 /** Built-in codes the server accepts, in the order the picker shows them. */
 export const BUILTIN_METHOD_CODES = ['CASH', 'CHECK', 'OTHER'] as const;
 
-/** Field lengths the server applies to the same strings (API contract §4.1.3). */
+/**
+ * Field lengths the server applies to the same strings — the ceiling of the
+ * payment/sale input models (`MAX_BUYER_NAME_LENGTH`, `MAX_BUYER_PHONE_LENGTH`,
+ * `MAX_BUYER_EMAIL_LENGTH`, `MAX_SALE_REASON_LENGTH`), spelled here so a browser
+ * that stopped one character earlier would be a second, different rule.
+ */
 export const OTHER_DETAILS_MAX_CHARS = 250;
-export const BUYER_NAME_MAX_CHARS = 100;
-export const BUYER_PHONE_MAX_CHARS = 50;
+export const BUYER_NAME_MAX_CHARS = 200;
+export const BUYER_PHONE_MAX_CHARS = 40;
 export const BUYER_EMAIL_MAX_CHARS = 254;
 export const SALE_REASON_MAX_CHARS = 500;
+
+/**
+ * PAY-05: a split payment is one **Other** payment whose details name every
+ * method and amount. The screen says so where the method is chosen, because the
+ * alternative the admin might otherwise reach for — two tender records, or a
+ * separate cash field — is a shape the specification rejects.
+ */
+export const SPLIT_PAYMENT_TOOLTIP = 'For split payments, select Other and enter each payment method and amount.';
 
 /** `en-US` with cents: `$1,234.56`, and `-$5.00` for a negative discrepancy. */
 export function formatCents(cents: number): string {
@@ -101,6 +114,11 @@ export function paymentMethodOptions(methods: readonly GqlUnitPaymentMethod[]): 
 export function paymentMethodCode(options: readonly PaymentMethodOption[], value: string | undefined): string | null {
   if (value == null) return null;
   return options.some((option) => option.value === value) ? value : null;
+}
+
+/** Whether a method option is the built-in Other one — the only one that may carry a note. */
+export function isOtherMethodOption(options: readonly PaymentMethodOption[], value: string | undefined): boolean {
+  return options.some((option) => option.value === value && option.isOther === true);
 }
 
 // --- sale state ───────────────────────────────────────────────────────────────

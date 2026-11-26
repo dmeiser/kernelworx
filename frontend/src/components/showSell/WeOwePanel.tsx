@@ -270,13 +270,13 @@ const ObligationCard: React.FC<{
 
   const isOpen = obligation.status === 'OPEN';
   const sources = fulfillmentSources(obligation);
+  const fulfillSource = draftSourceOf(sources, source);
   const reservationOutcome = reservationPlan(target, obligation);
-  const fulfillmentOutcome = fulfillmentPlan(fulfillQty, source, obligation);
+  const fulfillmentOutcome = fulfillmentPlan(fulfillQty, fulfillSource, obligation);
   const plannedTarget = reservationOutcome.target;
   const targetChanged = target.trim() !== String(obligation.reservedQty);
   const fulfillmentNote = fulfillmentNoteOf(fulfillQty, fulfillmentOutcome);
   const error = planErrorOf(reservationOutcome.error, fulfillmentNote, serverError);
-  const fulfillSource = draftSourceOf(sources, source);
 
   const saveReservation = async () => {
     if (reservationOutcome.error !== null) {
@@ -289,6 +289,8 @@ const ObligationCard: React.FC<{
     setServerError(null);
     try {
       await reservation({ variables: { input: reservationBodyOf(obligation, planned, intent.current) } });
+      // The intent is spent: a later, deliberately identical reservation is a new write.
+      intent.current = createWriteIntent();
       await refreshQuery(onChanged);
       await refreshQuery(onRefetch);
     } catch (mutationError) {
@@ -310,6 +312,8 @@ const ObligationCard: React.FC<{
       await fulfill({
         variables: { input: fulfillmentBodyOf(obligation, fulfillmentOutcome.quantity, fulfillSource, intent.current) },
       });
+      // The intent is spent: a later, deliberately identical fulfillment is a new write.
+      intent.current = createWriteIntent();
       await refreshQuery(onChanged);
       await refreshQuery(onRefetch);
     } catch (mutationError) {

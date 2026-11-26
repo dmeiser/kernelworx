@@ -48,11 +48,17 @@ import {
   defaultSaleAt,
   formatCents,
   isDraftOnly,
+  isOtherMethodOption,
   noticesOf,
   paymentMethodOptions,
   saleAtWindowError,
   salePlan,
   weOweLineError,
+  BUYER_EMAIL_MAX_CHARS,
+  BUYER_NAME_MAX_CHARS,
+  BUYER_PHONE_MAX_CHARS,
+  OTHER_DETAILS_MAX_CHARS,
+  SPLIT_PAYMENT_TOOLTIP,
   type PaymentMethodOption,
   type SalePlan,
 } from '../../lib/saleDesk';
@@ -106,9 +112,14 @@ function trimmedOrUndefined(value: string): string | undefined {
   return value.trim() || undefined;
 }
 
+/** The note the method allows: only Other carries one, so switching away drops it. */
+function otherDetailsAfterMethod(options: readonly PaymentMethodOption[], value: string, current: string): string {
+  return isOtherMethodOption(options, value) ? current : '';
+}
+
 /** The form's Other-details sentence: the 250-character cap, then the required-details check. */
 function formOtherDetailsError(option: PaymentMethodOption | undefined, otherDetails: string): string | null {
-  if (otherDetails.length > 250) return 'Other details may not exceed 250 characters.';
+  if (otherDetails.length > OTHER_DETAILS_MAX_CHARS) return `Other details may not exceed ${OTHER_DETAILS_MAX_CHARS} characters.`;
   if (option?.isOther === true && otherDetails === '') return 'Say what makes this payment an Other one.';
   return null;
 }
@@ -116,7 +127,7 @@ function formOtherDetailsError(option: PaymentMethodOption | undefined, otherDet
 /** The create's Other-details sentence: the required-details check, then the cap. */
 function createOtherDetailsError(option: PaymentMethodOption | undefined, otherDetails: string): string | null {
   if (option?.isOther === true && otherDetails === '') return 'Say what makes this payment an Other one.';
-  if (otherDetails.length > 250) return 'Other details may not exceed 250 characters.';
+  if (otherDetails.length > OTHER_DETAILS_MAX_CHARS) return `Other details may not exceed ${OTHER_DETAILS_MAX_CHARS} characters.`;
   return null;
 }
 
@@ -146,7 +157,13 @@ function createValidationError(
   return createOtherDetailsError(method, otherDetails);
 }
 
-/** The create body: one instant, one method, one line per typed product, the event's version. */
+/**
+ * The create body: one instant, one method, one line per typed product, the
+ * event's version — and the idempotency key derived from that whole body, so
+ * every field the write sends is part of what the key stands for. A body that
+ * differs in any one field is a different write; a retry of the same body is
+ * the same write, and must replay rather than double-create.
+ */
 function createBody(
   plan: SalePlan,
   event: Event,
@@ -156,7 +173,7 @@ function createBody(
   otherDetails: string,
   intent: WriteIntent,
 ): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     showAndSellId: event.showAndSellId,
     saleAt: zonedWallClockToUtc(form.saleAt, timezone)?.toISOString() ?? '',
     lineItems: plan.lines.map((line) => ({
@@ -170,8 +187,8 @@ function createBody(
     buyerEmail: trimmedOrUndefined(form.buyerEmail),
     otherDetails: method.isOther ? otherDetails : undefined,
     version: { expectedVersion: event.version },
-    idempotency: { idempotencyKey: intent.keyFor({ rows: form.rows, method: method.value, otherDetails, buyerName: form.buyerName }) },
   };
+  return { ...payload, idempotency: { idempotencyKey: intent.keyFor(payload) } };
 }
 
 function emptyForm(event: Event, timezone: string): FormState {
@@ -243,6 +260,7 @@ export const SalesDesk: React.FC<{
     setForm(emptyForm(event, timezone));
     setError(null);
     setNotices([]);
+    intent.current = createWriteIntent();
   };
 
   const reset = () => {
@@ -251,6 +269,12 @@ export const SalesDesk: React.FC<{
     setForm(emptyForm(event, timezone));
     setError(null);
     setNotices([]);
+    intent.current = createWriteIntent();
+  };
+
+  const refetchDesk = async () => {
+    await sales.refetch();
+    await obligations.refetch();
   };
 
   const submitSale = async (body: Record<string, unknown>) => {
@@ -259,6 +283,10 @@ export const SalesDesk: React.FC<{
       setNotices(noticesOf(result.data?.createShowAndSellSale?.warnings));
       setForm(emptyForm(event, timezone));
       setError(null);
+      // The intent is spent: a later, deliberately identical create is a new write.
+      intent.current = createWriteIntent();
+      await refreshQuery(onChanged);
+      await refetchDesk();
     } catch (mutationError) {
       setError(describeShowAndSellFailure(mutationError, 'Could not save the sale.'));
       if (isStaleVersionError(mutationError)) await refreshQuery(onChanged);
@@ -278,13 +306,6 @@ export const SalesDesk: React.FC<{
     }
     const body = createBody(plan, event, form, method as PaymentMethodOption, timezone, otherDetails, intent.current);
     await submitSale(body);
-    await refreshQuery(onChanged);
-    await refreshQuery(() => sales.refetch());
-  };
-
-  const refetchDesk = async () => {
-    await sales.refetch();
-    await obligations.refetch();
   };
 
   return (
@@ -298,6 +319,7 @@ export const SalesDesk: React.FC<{
         sales={allSales.items}
         timezone={timezone}
         loading={sales.loading && !sales.data}
+        editable={editable}
         onCorrect={(sale) => {
           openCreate();
           setCorrectionSale(sale);
@@ -428,9 +450,10 @@ const SaleList: React.FC<{
   sales: readonly Sale[];
   timezone: string;
   loading: boolean;
+  editable: boolean;
   onCorrect: (sale: Sale) => void;
   onVoid: (sale: Sale) => void;
-}> = ({ sales, timezone, loading, onCorrect, onVoid }) => {
+}> = ({ sales, timezone, loading, editable, onCorrect, onVoid }) => {
   if (loading && sales.length === 0) return <LoadingState minHeight="120px" />;
   if (sales.length === 0) {
     return (
@@ -464,7 +487,7 @@ const SaleList: React.FC<{
             <TableCell>{sale.buyerName ?? '—'}</TableCell>
             <TableCell>{sale.status}</TableCell>
             <TableCell>
-              <SaleActions sale={sale} onCorrect={onCorrect} onVoid={onVoid} />
+              <SaleActions sale={sale} editable={editable} onCorrect={onCorrect} onVoid={onVoid} />
             </TableCell>
           </TableRow>
         ))}
@@ -475,10 +498,13 @@ const SaleList: React.FC<{
 
 const SaleActions: React.FC<{
   sale: Sale;
+  editable: boolean;
   onCorrect: (sale: Sale) => void;
   onVoid: (sale: Sale) => void;
-}> = ({ sale, onCorrect, onVoid }) => {
-  const active = sale.status === 'ACTIVE';
+}> = ({ sale, editable, onCorrect, onVoid }) => {
+  // The buttons act on the event's live history, not on FINALIZED/CANCELLED
+  // events: an ACTIVE sale on a history event is history too.
+  const active = editable && sale.status === 'ACTIVE';
   return (
     <Stack direction="row" spacing={1}>
       <Button
@@ -607,31 +633,42 @@ const SaleEntryFormView: React.FC<{
             disabled={disabled}
             inputProps={{ 'aria-label': 'When the sale happened', 'data-testid': 'sale-at' }}
           />
-          <Select
-            size="small"
-            label="Payment method"
-            value={form.paymentMethod}
-            displayEmpty
-            onChange={(change) => setForm((current) => ({ ...current, paymentMethod: change.target.value }))}
-            disabled={disabled}
-            data-testid="sale-payment-method"
-            inputProps={{ 'aria-label': 'Payment method' }}
-            sx={{ minWidth: 220 }}
-          >
-            <MenuItem value="">Choose a payment method</MenuItem>
-            {options.map((entry) => (
-              <MenuItem key={entry.value} value={entry.value} data-testid={`payment-method-${entry.value}`}>
-                {entry.label}
-              </MenuItem>
-            ))}
-          </Select>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 220 }}>
+            <Select
+              size="small"
+              label="Payment method"
+              value={form.paymentMethod}
+              displayEmpty
+              onChange={(change) => setForm((current) => ({
+                ...current,
+                paymentMethod: change.target.value,
+                otherDetails: otherDetailsAfterMethod(options, change.target.value, current.otherDetails),
+              }))}
+              disabled={disabled}
+              data-testid="sale-payment-method"
+              inputProps={{ 'aria-label': 'Payment method' }}
+              sx={{ minWidth: 220, flex: 1 }}
+            >
+              <MenuItem value="">Choose a payment method</MenuItem>
+              {options.map((entry) => (
+                <MenuItem key={entry.value} value={entry.value} data-testid={`payment-method-${entry.value}`}>
+                  {entry.label}
+                </MenuItem>
+              ))}
+            </Select>
+            <Tooltip title={SPLIT_PAYMENT_TOOLTIP} describeChild>
+              <IconButton size="small" aria-label="How split payments are recorded" data-testid="sale-payment-help" disabled={disabled}>
+                <HelpOutlineIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
           {otherDetailsRequired ? (
             <TextField
               label="Other details (required)"
               value={form.otherDetails}
               onChange={(change) => setForm((current) => ({ ...current, otherDetails: change.target.value }))}
               disabled={disabled}
-              inputProps={{ 'aria-label': 'Other payment details', 'data-testid': 'sale-other-details', maxLength: 250 }}
+              inputProps={{ 'aria-label': 'Other payment details', 'data-testid': 'sale-other-details', maxLength: OTHER_DETAILS_MAX_CHARS }}
               sx={{ minWidth: 220 }}
             />
           ) : null}
@@ -642,7 +679,7 @@ const SaleEntryFormView: React.FC<{
             value={form.buyerName}
             onChange={(change) => setForm((current) => ({ ...current, buyerName: change.target.value }))}
             disabled={disabled}
-            inputProps={{ 'aria-label': 'Buyer name', 'data-testid': 'sale-buyer-name', maxLength: 100 }}
+            inputProps={{ 'aria-label': 'Buyer name', 'data-testid': 'sale-buyer-name', maxLength: BUYER_NAME_MAX_CHARS }}
             sx={{ minWidth: 200 }}
           />
           <TextField
@@ -650,7 +687,7 @@ const SaleEntryFormView: React.FC<{
             value={form.buyerPhone}
             onChange={(change) => setForm((current) => ({ ...current, buyerPhone: change.target.value }))}
             disabled={disabled}
-            inputProps={{ 'aria-label': 'Buyer phone', 'data-testid': 'sale-buyer-phone', maxLength: 50 }}
+            inputProps={{ 'aria-label': 'Buyer phone', 'data-testid': 'sale-buyer-phone', maxLength: BUYER_PHONE_MAX_CHARS }}
             sx={{ minWidth: 160 }}
           />
           <TextField
@@ -658,7 +695,7 @@ const SaleEntryFormView: React.FC<{
             value={form.buyerEmail}
             onChange={(change) => setForm((current) => ({ ...current, buyerEmail: change.target.value }))}
             disabled={disabled}
-            inputProps={{ 'aria-label': 'Buyer email', 'data-testid': 'sale-buyer-email', maxLength: 254 }}
+            inputProps={{ 'aria-label': 'Buyer email', 'data-testid': 'sale-buyer-email', maxLength: BUYER_EMAIL_MAX_CHARS }}
             sx={{ minWidth: 200 }}
           />
         </Stack>
