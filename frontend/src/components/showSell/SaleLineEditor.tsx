@@ -13,10 +13,17 @@
  * line they came from. That id is what makes "change this line" and "drop this line"
  * different acts — a removed row is a line the correction leaves out, which the
  * server reads as a voided line.
+ *
+ * The rows are a table because that is how the two quantities line up against the
+ * product they belong to, and a table keeps its minimum width on a phone screen. So
+ * the table scrolls inside its own container: the page stays as wide as the
+ * viewport, nothing sits cut off past its edge, and a row is reached by scrolling
+ * the rows rather than the whole document.
  */
 
 import React from 'react';
 import {
+  Box,
   Button,
   IconButton,
   MenuItem,
@@ -45,31 +52,33 @@ export const SaleLineTable: React.FC<{
   const options = lineProductOptions(products, rows);
   return (
     <>
-      <Table size="small" aria-label="Sale lines">
-        <TableHead>
-          <TableRow>
-            <TableCell>Product</TableCell>
-            <TableCell>Taken at the table</TableCell>
-            <TableCell>Owed later</TableCell>
-            <TableCell aria-label="Remove line" />
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {rows.map((row, index) => (
-            <SaleLineRow
-              key={row.lineItemId ?? `new-${index}`}
-              row={row}
-              index={index}
-              options={options}
-              idPrefix={idPrefix}
-              weOweAllowed={weOweAllowed}
-              disabled={disabled}
-              onRow={onRow}
-              onRemove={onRemove}
-            />
-          ))}
-        </TableBody>
-      </Table>
+      <Box sx={{ overflowX: 'auto' }}>
+        <Table size="small" aria-label="Sale lines">
+          <TableHead>
+            <TableRow>
+              <TableCell>Product</TableCell>
+              <TableCell>Taken at the table</TableCell>
+              <TableCell>Owed later</TableCell>
+              <TableCell aria-label="Remove line" />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.map((row, index) => (
+              <SaleLineRow
+                key={row.lineItemId ?? `new-${index}`}
+                row={row}
+                index={index}
+                options={options}
+                idPrefix={idPrefix}
+                weOweAllowed={weOweAllowed}
+                disabled={disabled}
+                onRow={onRow}
+                onRemove={onRemove}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      </Box>
       <Button size="small" onClick={onAdd} disabled={disabled} data-testid={`${idPrefix}-add-line`} sx={{ mt: 1 }}>
         Add another line
       </Button>
