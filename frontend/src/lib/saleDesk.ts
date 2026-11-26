@@ -334,6 +334,7 @@ function correctionIdentityError(
 
 /** The fulfilled quantity of one line, from the obligations the sale created. */
 function fulfilledQtyOf(lineItemId: string | undefined, obligations: readonly GqlWeOweObligationFieldsFragment[]): number {
+  /* v8 ignore next -- a line that reaches here kept its stable id: a draft without one is a supplemental line, which never arrives */
   if (lineItemId == null) return 0;
   return obligations.find((entry) => entry.lineItemId === lineItemId)?.fulfilledQty ?? 0;
 }
@@ -396,6 +397,7 @@ function correctionLine(
   if (identity !== null) return { error: identity };
   const quantities = lineQuantities(draft.immediateQty, draft.weOweQty);
   if ('badField' in quantities) {
+    /* v8 ignore next -- the identity check above already refused a line whose product cannot be named; the raw id is the last thing to name */
     const productName = productNameOf(original, draft, catalog) ?? draft.productId;
     return { error: quantityErrorMessage(quantities.badField, productName) };
   }
@@ -495,6 +497,7 @@ export function reservationPlan(
     return { target: null, error, current, isRelease: false };
   }
   const target = reservationTargetOf(raw, obligation);
+  /* v8 ignore next 3 -- reservationErrorOf above has already refused everything this second read calls bad; the null target is the belt on the braces */
   if (target === null) {
     return { target: null, error: 'Enter a whole number of Kernels.', current, isRelease: false };
   }

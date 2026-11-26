@@ -40,8 +40,11 @@ import {
   GET_UNIT,
   GET_UNIT_CAMPAIGN_CATALOG,
   LIST_EVENT_INVENTORY_ALLOCATIONS,
+  LIST_SHOW_AND_SELL_SALES,
   LIST_SHOW_AND_SELL_SIGNUPS,
   LIST_UNIT_CAMPAIGN_ROSTER,
+  LIST_UNIT_PAYMENT_METHODS,
+  LIST_WE_OWE_OBLIGATIONS,
 } from '../src/lib/graphql';
 import { ShowSellEventDetailPage } from '../src/pages/ShowSellEventDetailPage';
 import { SHOW_AND_SELL_PAGE_SIZE } from '../src/lib/showSell';
@@ -87,7 +90,7 @@ let sent: Record<string, unknown[]>;
 
 beforeEach(() => {
   keySequence = 0;
-  sent = { event: [], unit: [], catalog: [], allocations: [], signups: [], roster: [] };
+  sent = { event: [], unit: [], catalog: [], allocations: [], signups: [], roster: [], sales: [], methods: [], obligations: [] };
   vi.stubGlobal('crypto', { randomUUID: () => `test-idem-${++keySequence}` });
 });
 
@@ -342,6 +345,72 @@ function rosterRead() {
       };
     },
   };
+}
+
+/** The reads the two money boards add to the page: the sales, the Unit's methods, the obligations. */
+const DESK_SALES_VARIABLES = { showAndSellId: SSE, status: undefined, page: { limit: SHOW_AND_SELL_PAGE_SIZE } };
+const METHODS_VARIABLES = { unitId: UNIT, includeInactive: true };
+const OBLIGATIONS_VARIABLES = { unitCampaignId: UC, showAndSellId: SSE, status: undefined, page: { limit: SHOW_AND_SELL_PAGE_SIZE } };
+
+function salesRead() {
+  return {
+    request: { query: LIST_SHOW_AND_SELL_SALES, variables: DESK_SALES_VARIABLES },
+    maxUsageCount: READ_LIMIT,
+    result: (variables: Record<string, unknown>) => {
+      sent.sales.push(variables);
+      return {
+        data: {
+          showAndSellSales: {
+            __typename: 'ShowAndSellSaleConnection',
+            items: [],
+            pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+          },
+        },
+      };
+    },
+  };
+}
+
+function methodsRead() {
+  return {
+    request: { query: LIST_UNIT_PAYMENT_METHODS, variables: METHODS_VARIABLES },
+    maxUsageCount: READ_LIMIT,
+    result: (variables: Record<string, unknown>) => {
+      sent.methods.push(variables);
+      return {
+        data: {
+          unitPaymentMethods: [
+            { __typename: 'UnitPaymentMethod', paymentMethodId: 'CASH', unitId: UNIT, displayName: 'Cash', isActive: true, qrCodeS3Key: null, createdAt: null, version: 0 },
+            { __typename: 'UnitPaymentMethod', paymentMethodId: 'OTHER', unitId: UNIT, displayName: 'Other', isActive: true, qrCodeS3Key: null, createdAt: null, version: 0 },
+          ],
+        },
+      };
+    },
+  };
+}
+
+function obligationsRead() {
+  return {
+    request: { query: LIST_WE_OWE_OBLIGATIONS, variables: OBLIGATIONS_VARIABLES },
+    maxUsageCount: READ_LIMIT,
+    result: (variables: Record<string, unknown>) => {
+      sent.obligations.push(variables);
+      return {
+        data: {
+          weOweObligations: {
+            __typename: 'WeOweObligationConnection',
+            items: [],
+            pageInfo: { __typename: 'PageInfo', endCursor: null, hasNextPage: false },
+          },
+        },
+      };
+    },
+  };
+}
+
+/** The page opened on an event that is taking money, so the desk and the board can be mounted. */
+function moneyPageReads() {
+  return [...pageReads(eventFixture({ status: 'ACTIVE' })), salesRead(), methodsRead(), obligationsRead()];
 }
 
 /** The reads one mounted event page issues, so any tab can be opened in any test. */
@@ -706,6 +775,33 @@ describe('§3.5.2-§3.5.4: the boards under the header belong to this event', ()
     // a stale route cannot leave another event's signups on this screen.
     expect(new Set(addressedBy(sent.signups))).toEqual(new Set([SSE]));
     expect(addressedBy(sent.event)).toEqual([SSE]);
+  });
+
+  it('the Sales desk and the We Owe board mount for this event, and read by its ids', async () => {
+    const user = userEvent.setup();
+    renderPage(moneyPageReads());
+
+    // The page has to be standing on its event before a money board can be opened.
+    await screen.findByTestId(`allocation-row-${CARAMEL}`);
+
+    // Sales: the desk reads name this event — its own sales, the payment methods of
+    // this Unit (retired ones included, because a sale entered with one is still
+    // correctable), and the obligations its owing lines created.
+    await user.click(screen.getByTestId('tab-sales'));
+    await screen.findByTestId('sale-entry-form');
+    expect(await screen.findByTestId('sale-list-empty')).toHaveTextContent('No sales');
+    expect(sent.sales[0]).toEqual(DESK_SALES_VARIABLES);
+    expect(sent.methods[0]).toEqual(METHODS_VARIABLES);
+    expect(sent.obligations[0]).toEqual(OBLIGATIONS_VARIABLES);
+
+    // We Owe: the board reads the same obligations, addressed by this event, and an
+    // event with none says so rather than showing a blank table.
+    await user.click(screen.getByTestId('tab-weowe'));
+    await screen.findByTestId('we-owe-empty');
+    expect(new Set(addressedBy(sent.obligations))).toEqual(new Set([SSE]));
+    expect(
+      new Set(sent.obligations.map((variables) => (variables as { unitCampaignId?: string }).unitCampaignId)),
+    ).toEqual(new Set([UC]));
   });
 });
 

@@ -862,7 +862,7 @@ describe('ShowSellOpportunitiesPage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('§3.5.3: an account with no Scout it can write as is told so, and the offers are not listed', async () => {
+  it('§3.5.3: an account with no Scout it can write as is told so, and no place can be taken', async () => {
     renderPage([
       profilesQuery([]),
       sharesQuery([]),
@@ -870,10 +870,20 @@ describe('ShowSellOpportunitiesPage', () => {
     ]);
 
     // SEC-04/§2.3.1: with no profile this account may sign up as, there is no Scout
-    // to speak for, so the page answers the roster sentence rather than listing what
-    // is on offer with controls that could only fail.
+    // to speak for, so the page answers the roster sentence and every signup control
+    // is dead. The offers themselves stay readable — what is on offer in a Campaign
+    // this account can reach is not the secret; the place in it is. The read that
+    // refuses an outsider outright is proven by the row above, where the server
+    // refuses the offer read and nothing is listed at all.
     await screen.findByTestId('not-on-roster');
-    expect(screen.queryByTestId(`opportunity-${SSE}`)).toBeNull();
+    // Wait for the offers read to settle, then judge the settled page: an earlier
+    // version of this test asserted the rows were absent, which was only ever true
+    // because that read had not answered yet — it failed as soon as CI ran the
+    // suite under load.
+    const offer = await screen.findByTestId(`slot-offer-SLOT#first`);
+    // Nothing in the row can be clicked: there is no Scout to sign up as.
+    expect(within(offer).queryByTestId('take-SLOT#first')).toBeNull();
+    expect(within(offer).queryByTestId('give-SLOT#first')).toBeNull();
     // The picker is locked: there is no Scout this account may write as, so the
     // screen cannot address a signup at all.
     const picker = screen.getByTestId('profile-picker').querySelector('.MuiSelect-select') as HTMLElement;

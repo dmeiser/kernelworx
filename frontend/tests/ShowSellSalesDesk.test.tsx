@@ -1103,6 +1103,103 @@ describe('the correction form', () => {
 
     expect(await screen.findByTestId('correction-saved')).toHaveTextContent('Revision 2 archived');
   });
+
+  // A sale can be stored with no buyer at all, and an Other payment can be stored
+  // with no note. The panel opens on what the sale holds — nothing in the buyer
+  // cell, nothing in the note — and refuses to write until the admin fills in what
+  // the event requires: the name behind an owing line, or a method that carries no
+  // note. Only the fields that moved leave the browser.
+  it('opens a sale stored without a buyer or a note and sends only what the admin filled in', async () => {
+    const user = userEvent.setup();
+    const mutation = correctionMock(
+      {
+        showAndSellId: SSE,
+        saleId: 'SALE#1',
+        saleVersion: { expectedVersion: 2 },
+        version: { expectedVersion: 7 },
+        lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 }],
+        reason: 'Named the buyer at the desk',
+        buyerName: 'Avery',
+        paymentMethodCode: 'CASH',
+        idempotency: { idempotencyKey: 'test-idem-1' },
+      },
+      { sale: saleFixture({ revision: 3, buyerName: 'Avery' }) },
+    );
+    const stored = saleFixture({
+      buyerName: null,
+      paymentMethodSnapshot: { __typename: 'SalePaymentSnapshot', methodCode: 'OTHER', displayName: 'Other', otherDetails: null },
+    });
+    renderDesk({ sales: [stored], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await screen.findByTestId('correction-buyer-name');
+
+    // The panel opens on the stored sale, not on a blank form: the buyer cell is
+    // empty because the sale holds no buyer, and the first sentence is the missing
+    // reason.
+    expect((screen.getByTestId('correction-buyer-name') as HTMLInputElement).value).toBe('');
+    expect(screen.getByTestId('sale-correction-error')).toHaveTextContent('Say why the sale is being corrected');
+    expect(screen.getByTestId('save-correction')).toBeDisabled();
+
+    await typeInto('correction-reason', 'Named the buyer at the desk', user);
+    // Then the owing line: a We Owe the sale created needs the name behind it.
+    await waitFor(() => expect(screen.getByTestId('sale-correction-error')).toHaveTextContent('buyer name'));
+
+    await typeInto('correction-buyer-name', 'Avery', user);
+    // Then the payment: Other without a note is a payment no report can read.
+    await waitFor(() => expect(screen.getByTestId('sale-correction-error')).toHaveTextContent('Say what makes this payment an Other one'));
+
+    await typeInto('correction-other-details', 'Paid at the door', user);
+
+    // Switching the method away from Other drops the note the field was holding:
+    // Cash carries no note, and a body that sent one would be a body the server
+    // refuses.
+    await chooseOption('correction-payment-method', 'Cash', user);
+    expect(screen.queryByTestId('correction-other-details')).toBeNull();
+    await waitFor(() => expect((screen.getByTestId('correction-payment-method') as HTMLElement).textContent).toContain('Cash'));
+    expect(screen.getByTestId('save-correction')).toBeEnabled();
+
+    await user.click(screen.getByTestId('save-correction'));
+    await waitFor(() => expect(sent.correct).toHaveLength(1));
+    const input = sent.correct[0].input as Record<string, unknown>;
+    expect(input.buyerName).toBe('Avery');
+    expect(input.paymentMethodCode).toBe('CASH');
+    expect(input).not.toHaveProperty('buyerPhone');
+    expect(input).not.toHaveProperty('buyerEmail');
+    expect(input).not.toHaveProperty('otherDetails');
+  });
+
+  // Some deployments keep the revision the correction replaced, and some answer
+  // with only the new one. Either way the admin is told the correction landed; the
+  // panel never claims an archived revision the server did not name.
+  it('says only that the correction was saved when the server keeps no archived revision', async () => {
+    const user = userEvent.setup();
+    const mutation = correctionMock(
+      {
+        showAndSellId: SSE,
+        saleId: 'SALE#1',
+        saleVersion: { expectedVersion: 2 },
+        version: { expectedVersion: 7 },
+        lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 2 }],
+        reason: 'Fix the split',
+        idempotency: { idempotencyKey: 'test-idem-1' },
+      },
+      { sale: saleFixture({ revision: 3, lineItems: [saleLineFixture({ weOweQty: 2, subtotalCents: 400 })] }), priorRevision: null },
+    );
+    renderDesk({ sales: [saleFixture()], mutationMocks: [mutation] });
+    await screen.findByTestId('sale-row-SALE#1');
+
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await screen.findByTestId('correction-reason');
+    await clearAndType('correction-line-weowe-0', '2', user);
+    await typeInto('correction-reason', 'Fix the split', user);
+    await user.click(screen.getByTestId('save-correction'));
+
+    expect(await screen.findByTestId('correction-saved')).toHaveTextContent('Correction saved.');
+    expect(screen.getByTestId('save-correction')).toBeDisabled();
+    expect(screen.getByTestId('cancel-correction')).toHaveTextContent('Done');
+  });
 });
 
 describe('the void form', () => {
@@ -1309,6 +1406,57 @@ describe('the entry form after review', () => {
     expect(screen.queryByTestId('sale-entry-error')).toBeNull();
     expect(screen.getByTestId('save-sale')).toBeEnabled();
     expect(sent.create).toHaveLength(0);
+  });
+
+  // The note is part of the body, so it is part of what the key stands for: the
+  // same lines paid another way is another write.
+  it('writes an Other payment with the note that explains it', async () => {
+    const user = userEvent.setup();
+    const mutation = {
+      request: {
+        query: CREATE_SHOW_AND_SELL_SALE,
+        variables: {
+          input: {
+            showAndSellId: SSE,
+            saleAt: '2026-03-28T15:30:00.000Z',
+            lineItems: [{ productId: CARAMEL, immediateQty: 2, weOweQty: 0 }],
+            paymentMethodCode: 'OTHER',
+            otherDetails: 'Apple Pay; cash portion reported separately',
+            version: { expectedVersion: 7 },
+            idempotency: { idempotencyKey: 'test-idem-1' },
+          },
+        },
+      },
+      result: (variables: Record<string, unknown>) => {
+        sent.create.push(variables);
+        return {
+          data: {
+            createShowAndSellSale: {
+              __typename: 'ShowAndSellSalePayload',
+              eventVersion: 8,
+              draftOnly: false,
+              sale: saleFixture({ saleAt: '2026-03-28T15:30:00.000Z' }),
+              warnings: [],
+              obligations: [],
+            },
+          },
+        };
+      },
+    };
+    renderDesk({ mutationMocks: [mutation] });
+    await screen.findByTestId('sale-entry-form');
+    await fillFirstLine(user);
+    await chooseOption('sale-payment-method', 'Other', user);
+    await typeInto('sale-other-details', 'Apple Pay; cash portion reported separately', user);
+    await clearAndType('sale-at', '2026-03-28T09:30', user);
+
+    await user.click(screen.getByTestId('save-sale'));
+    await waitFor(() => expect(sent.create).toHaveLength(1));
+
+    const input = sent.create[0].input as Record<string, unknown>;
+    expect(input.paymentMethodCode).toBe('OTHER');
+    expect(input.otherDetails).toBe('Apple Pay; cash portion reported separately');
+    expect(input.idempotency).toEqual({ idempotencyKey: 'test-idem-1' });
   });
 
   it('spends the create intent: a deliberately identical second sale carries a fresh key', async () => {

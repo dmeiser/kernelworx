@@ -557,8 +557,11 @@ describe('ScoutCustodyPanel', () => {
 
     // Two batches, not one row that cannot say which campaign it returns: the Campaign is
     // named on the row so the admin can tell them apart, and the name is what they read.
-    expect(await screen.findByTestId(`custody-scout-campaign-${held(AVERY, CAMP)}`)).toHaveTextContent(
-      'Fall 2026 Campaign',
+    // The name rides the roster read, which settles after the custody rows, so the
+    // wait is for the named row rather than the first paint of it.
+    const fallRow = await screen.findByTestId(`custody-scout-row-${held(AVERY, CAMP)}`);
+    await waitFor(() =>
+      expect(within(fallRow).getByTestId(`custody-scout-campaign-${held(AVERY, CAMP)}`)).toHaveTextContent('Fall 2026 Campaign'),
     );
     const springRow = await screen.findByTestId(`custody-scout-row-${held(AVERY, SPRING)}`);
     expect(within(springRow).getByTestId(`custody-scout-campaign-${held(AVERY, SPRING)}`)).toHaveTextContent(

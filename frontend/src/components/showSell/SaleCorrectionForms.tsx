@@ -332,10 +332,13 @@ export const SaleCorrectionPanel: React.FC<{
   const stored = storedBuyerOf(sale);
 
   const submit = async () => {
+    /* v8 ignore start -- the Save button is disabled by this same sentence; the write-side check is what
+       keeps a body the panel never approved from being sent if the click ever reaches here */
     if (formError !== null) {
       setServerError(formError);
       return;
     }
+    /* v8 ignore stop */
     const body = correctionBodyOf({
       sale,
       event,
@@ -690,10 +693,13 @@ export const SaleVoidPanel: React.FC<{
   const canSubmit = !loading && reasonError === null;
 
   const submit = async () => {
+    /* v8 ignore start -- the Void button is disabled by this same sentence; the write-side check is what
+       keeps a reasonless void from being sent if the click ever reaches here */
     if (reasonError !== null) {
       setError(reasonError);
       return;
     }
+    /* v8 ignore stop */
     const payload: Record<string, unknown> = {
       showAndSellId: event.showAndSellId,
       saleId: sale.saleId,
