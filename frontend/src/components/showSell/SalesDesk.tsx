@@ -117,21 +117,25 @@ function otherDetailsAfterMethod(options: readonly PaymentMethodOption[], value:
   return isOtherMethodOption(options, value) ? current : '';
 }
 
-/** The form's Other-details sentence: the 250-character cap, then the required-details check. */
-function formOtherDetailsError(option: PaymentMethodOption | undefined, otherDetails: string): string | null {
+/** The method sentence: a sale names a method the Unit offers, and the picker only ever offers one. */
+function methodError(option: PaymentMethodOption | undefined): string | null {
+  return option === undefined ? 'Choose a payment method the Unit still offers.' : null;
+}
+
+/** The Other note: the server’s 250-character ceiling, then the fact that Other requires one. */
+function otherDetailsError(option: PaymentMethodOption | undefined, otherDetails: string): string | null {
   if (otherDetails.length > OTHER_DETAILS_MAX_CHARS) return `Other details may not exceed ${OTHER_DETAILS_MAX_CHARS} characters.`;
   if (option?.isOther === true && otherDetails === '') return 'Say what makes this payment an Other one.';
   return null;
 }
 
-/** The create's Other-details sentence: the required-details check, then the cap. */
-function createOtherDetailsError(option: PaymentMethodOption | undefined, otherDetails: string): string | null {
-  if (option?.isOther === true && otherDetails === '') return 'Say what makes this payment an Other one.';
-  if (otherDetails.length > OTHER_DETAILS_MAX_CHARS) return `Other details may not exceed ${OTHER_DETAILS_MAX_CHARS} characters.`;
-  return null;
-}
-
-/** The entry form's first sentence, in the order the screen reads it. */
+/**
+ * The entry’s first sentence, in the one order the screen and the write read it:
+ * lines, instant, method, the Other note, then the buyer an owing line requires.
+ * Both halves call this same function, so the sentence that disables the button is
+ * always the sentence a click would show — a refusal never sits on one side of the
+ * pair while the other side waits for a write that cannot be sent.
+ */
 function entryError(
   plan: SalePlan,
   windowError: string | null,
@@ -139,22 +143,7 @@ function entryError(
   otherDetails: string,
   buyerError: string | null,
 ): string | null {
-  return plan.error ?? windowError ?? formOtherDetailsError(option, otherDetails) ?? buyerError;
-}
-
-/** The first sentence for a create that cannot be written, in the order the screen reads it. */
-function createValidationError(
-  plan: SalePlan,
-  windowError: string | null,
-  method: PaymentMethodOption | undefined,
-  buyerError: string | null,
-  otherDetails: string,
-): string | null {
-  if (plan.error !== null) return plan.error;
-  if (windowError !== null) return windowError;
-  if (method === undefined) return 'Choose a payment method the Unit still offers.';
-  if (buyerError !== null) return buyerError;
-  return createOtherDetailsError(method, otherDetails);
+  return plan.error ?? windowError ?? methodError(option) ?? otherDetailsError(option, otherDetails) ?? buyerError;
 }
 
 /**
@@ -169,13 +158,13 @@ function createBody(
   event: Event,
   form: FormState,
   method: PaymentMethodOption,
-  timezone: string,
+  saleAt: Date,
   otherDetails: string,
   intent: WriteIntent,
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     showAndSellId: event.showAndSellId,
-    saleAt: zonedWallClockToUtc(form.saleAt, timezone)?.toISOString() ?? '',
+    saleAt: saleAt.toISOString(),
     lineItems: plan.lines.map((line) => ({
       productId: line.productId,
       immediateQty: line.immediateQty,
@@ -294,17 +283,21 @@ export const SalesDesk: React.FC<{
   };
 
   const submitCreate = async () => {
+    const saleInstant = zonedWallClockToUtc(form.saleAt, timezone);
     const plan = salePlan(form.rows.map(rowToDraft), products);
-    const windowError = saleAtWindowError(zonedWallClockToUtc(form.saleAt, timezone), event);
+    const windowError = saleAtWindowError(saleInstant, event);
     const method = options.find((option) => option.value === form.paymentMethod);
     const otherDetails = form.otherDetails.trim();
     const buyerError = weOweLineError(plan.lines, form.buyerName, event.weOweEnabled);
-    const validationError = createValidationError(plan, windowError, method, buyerError, otherDetails);
+    const validationError = entryError(plan, windowError, method, otherDetails, buyerError);
+    /* v8 ignore start -- the button is disabled by this same sentence; the write-side check is what
+       keeps a body the screen never approved from being sent if the click ever reaches here */
     if (validationError !== null) {
       setError(validationError);
       return;
     }
-    const body = createBody(plan, event, form, method as PaymentMethodOption, timezone, otherDetails, intent.current);
+    /* v8 ignore stop */
+    const body = createBody(plan, event, form, method as PaymentMethodOption, saleInstant as Date, otherDetails, intent.current);
     await submitSale(body);
   };
 
@@ -479,7 +472,7 @@ const SaleList: React.FC<{
       <TableBody>
         {sales.map((sale) => (
           <TableRow key={sale.saleId} data-testid={`sale-row-${sale.saleId}`}>
-            <TableCell>{sale.saleAt ? formatInstant(sale.saleAt, timezone) : ''}</TableCell>
+            <TableCell>{formatInstant(sale.saleAt, timezone)}</TableCell>
             <TableCell>{sale.lineItems.length}</TableCell>
             <TableCell>{formatCents(sale.totalCents)}</TableCell>
             <TableCell>{sale.paymentMethodSnapshot.displayName}</TableCell>

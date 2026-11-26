@@ -19,17 +19,24 @@ import {
   closeReasonLabel,
   correctionPlan,
   defaultSaleAt,
+  emptySalePlan,
+  formatCents,
   fulfillmentPlan,
   fulfillmentSources,
+  isBuiltInMethod,
   isDraftOnly,
   isOtherMethodOption,
+  noticesOf,
   paymentMethodCode,
+  paymentMethodCodeOf,
   paymentMethodOptions,
   reservationPlan,
   reservationTargetOf,
   saleAtWindowError,
   salePlan,
+  validateSaleLine,
   weOweLineError,
+  weOweStatusLabel,
   type ExistingLine,
 } from '../src/lib/saleDesk';
 import type { GqlUnitPaymentMethod, GqlWeOweObligationFieldsFragment } from '../src/types/graphql-generated';
@@ -286,5 +293,120 @@ describe('We Owe rules', () => {
     expect(closeReasonLabel('FULFILLED')).toBe('Fulfilled');
     expect(closeReasonLabel('CANCELLED')).toBe('Cancelled');
     expect(closeReasonLabel(null)).toBe('');
+    expect(weOweStatusLabel('OPEN')).toBe('Open');
+    expect(weOweStatusLabel('CLOSED')).toBe('Closed');
+  });
+
+  it('shows the server’s over-assignment warnings as its own sentences', () => {
+    expect(noticesOf([{ productId: 'PROD#caramel', message: '3 more Kernels sold than were allocated' }])).toEqual([
+      'PROD#caramel: 3 more Kernels sold than were allocated',
+    ]);
+    // No warnings is an empty list, not a missing section the screen has to guess about.
+    expect(noticesOf(undefined)).toEqual([]);
+    expect(noticesOf([])).toEqual([]);
+  });
+
+  it('refuses a fulfillment a source cannot cover at all', () => {
+    // Nothing reserved: KERNEL_STOCK has no reach, so even one Kernel is refused as blocked.
+    const nothingHeld = obligation({ reservedQty: 0, uncoveredQty: 4, remainingQty: 4 });
+    expect(fulfillmentPlan('1', 'KERNEL_STOCK', nothingHeld).error).toContain('release the reservation first');
+    // Nothing uncovered: the Council has nothing to supply.
+    const allCovered = obligation({ reservedQty: 4, uncoveredQty: 0, remainingQty: 4 });
+    expect(fulfillmentPlan('1', 'EXTERNAL_COUNCIL', allCovered).error).toContain('release the reservation on the covered portion');
+    // A zero quantity against a dead source is both errors at once: nothing to fulfill, nowhere to fulfill it from.
+    expect(fulfillmentPlan('0', 'KERNEL_STOCK', nothingHeld)).toMatchObject({ quantity: null, blocked: true, maxBySource: 0 });
+  });
+});
+
+describe('money and method codes', () => {
+  it('writes money the way the desk reads it, including a negative discrepancy', () => {
+    expect(formatCents(0)).toBe('$0.00');
+    expect(formatCents(5)).toBe('$0.05');
+    expect(formatCents(123_456)).toBe('$1,234.56');
+    expect(formatCents(-500)).toBe('-$5.00');
+  });
+
+  it('codes a built-in by its own code and a custom method by its id', () => {
+    expect(isBuiltInMethod(method({ paymentMethodId: 'CASH', createdAt: null }))).toBe(true);
+    expect(paymentMethodCodeOf(method({ paymentMethodId: 'CASH', createdAt: null }))).toBe('CASH');
+    const custom = method({ paymentMethodId: 'CUSTOM#1', displayName: 'Venmo', createdAt: '2026-01-01T00:00:00.000Z' });
+    expect(isBuiltInMethod(custom)).toBe(false);
+    expect(paymentMethodCodeOf(custom)).toBe('CUSTOM:CUSTOM#1');
+  });
+});
+
+describe('an event with no interval to clamp to', () => {
+  it('starts the sale-at box at now when the event carries no usable bounds', () => {
+    const event = { startAt: '', endAt: '' };
+    const now = new Date('2026-03-28T16:00:00.000Z');
+    expect(defaultSaleAt(event, now)).toBe('2026-03-28T16:00:00.000Z');
+    // The server owns the interval check; with nothing to compare against, the browser stays silent.
+    expect(saleAtWindowError(now, event)).toBeNull();
+  });
+
+  it('bounds a sale on only one side when the event names only that side', () => {
+    const openEnded = { startAt: '2026-03-28T15:00:00.000Z', endAt: '' };
+    expect(saleAtWindowError(new Date('2026-04-28T15:00:00.000Z'), openEnded)).toBeNull();
+    expect(saleAtWindowError(new Date('2026-03-28T14:59:59.000Z'), openEnded)).toContain('before this Show & Sell started');
+    const openStarted = { startAt: '', endAt: '2026-03-28T18:30:00.000Z' };
+    expect(saleAtWindowError(new Date('2026-03-28T18:30:01.000Z'), openStarted)).toContain('after this Show & Sell ended');
+    expect(defaultSaleAt(openStarted, new Date('2026-03-28T19:00:00.000Z'))).toBe('2026-03-28T18:30:00.000Z');
+  });
+});
+
+describe('one typed line, on its own', () => {
+  it('refuses each thing a line can get wrong, naming the product', () => {
+    expect(validateSaleLine({ productId: 'PROD#nope', immediateQty: '1', weOweQty: '' }, CATALOG)).toEqual({
+      error: 'Choose a product for every line.',
+    });
+    expect(validateSaleLine({ productId: 'PROD#caramel', immediateQty: '2.5', weOweQty: '' }, CATALOG)).toEqual({
+      error: 'Enter a whole number of Kernels handed over at the table for Caramel.',
+    });
+    expect(validateSaleLine({ productId: 'PROD#caramel', immediateQty: '2', weOweQty: 'x' }, CATALOG)).toEqual({
+      error: 'Enter a whole number of Kernels owed later for Caramel.',
+    });
+    expect(validateSaleLine({ productId: 'PROD#caramel', immediateQty: '0', weOweQty: '0' }, CATALOG)).toEqual({
+      error: 'Caramel needs at least one item, handed over or owed later.',
+    });
+    expect(validateSaleLine({ productId: 'PROD#caramel', immediateQty: ' 2 ', weOweQty: ' 1 ' }, CATALOG)).toEqual({
+      line: { productId: 'PROD#caramel', immediateQty: 2, weOweQty: 1, subtotalCents: 3000 },
+    });
+  });
+
+  it('has no plan for an empty batch, in words that say what to add', () => {
+    expect(emptySalePlan()).toEqual({
+      lines: [],
+      error: 'Add at least one line — a sale with nothing on it is not a sale.',
+      totalCents: 0,
+    });
+    expect(salePlan([], CATALOG).error).toBe(emptySalePlan().error);
+  });
+});
+
+describe('a correction line, on its own', () => {
+  const existing: ExistingLine[] = [
+    { lineItemId: 'LINE#1', productId: 'PROD#caramel', productNameSnapshot: 'Caramel', immediateQty: 2, weOweQty: 3 },
+  ];
+
+  it('names the product of the line it is refusing, using the snapshot for a kept line', () => {
+    expect(correctionPlan(existing, [{ lineItemId: 'LINE#1', productId: 'PROD#caramel', immediateQty: '1.5', weOweQty: '' }], CATALOG).error)
+      .toContain('handed over at the table for Caramel');
+    expect(correctionPlan(existing, [{ productId: 'PROD#butter', immediateQty: '1', weOweQty: 'x' }], CATALOG).error)
+      .toContain('owed later for Butter');
+    expect(correctionPlan(existing, [{ productId: 'PROD#butter', immediateQty: '', weOweQty: '' }], CATALOG).error)
+      .toContain('Butter needs at least one item');
+  });
+
+  it('refuses a supplemental line that names no catalog product', () => {
+    expect(correctionPlan(existing, [{ productId: 'PROD#gone', immediateQty: '1', weOweQty: '' }], CATALOG).error)
+      .toContain('Choose a product for every line.');
+  });
+
+  it('counts a fulfilled quantity only from the obligation that line created', () => {
+    // A line with no obligation of its own has nothing fulfilled, so any quantity is allowed down to zero.
+    const obligations = [obligation({ lineItemId: 'LINE#other', fulfilledQty: 5 })];
+    const plan = correctionPlan(existing, [{ lineItemId: 'LINE#1', productId: 'PROD#caramel', immediateQty: '2', weOweQty: '0' }], CATALOG, obligations);
+    expect(plan.error).toBeNull();
+    expect(plan.lines).toEqual([{ lineItemId: 'LINE#1', productId: 'PROD#caramel', immediateQty: 2, weOweQty: 0 }]);
   });
 });

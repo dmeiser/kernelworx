@@ -62,13 +62,6 @@ export function formatCents(cents: number): string {
   return `${sign}$${dollars.toLocaleString('en-US')}.${String(remainder).padStart(2, '0')}`;
 }
 
-/** A catalog price (a Dollar float the server converts to cents) in the same spelling. */
-export function formatCatalogPrice(price: number): string {
-  const value = Number(price);
-  if (!Number.isFinite(value)) return '$0.00';
-  return `$${value.toFixed(2)}`;
-}
-
 // --- payment methods ──────────────────────────────────────────────────────────
 
 export interface PaymentMethodOption {
@@ -345,15 +338,11 @@ function fulfilledQtyOf(lineItemId: string | undefined, obligations: readonly Gq
   return obligations.find((entry) => entry.lineItemId === lineItemId)?.fulfilledQty ?? 0;
 }
 
-/** A supplemental line: new, and priced from the catalog. */
+/** A supplemental line: new, and already known to name a catalog product. */
 function supplementalLine(
   draft: CorrectionLineDraft,
-  catalog: readonly CatalogEntry[],
   quantities: { immediateQty: number; weOweQty: number },
-): { line: CorrectionPlan['lines'][number] } | { error: string } {
-  if (!catalog.some((entry) => entry.productId === draft.productId)) {
-    return { error: 'Choose a product for every line.' };
-  }
+): { line: CorrectionPlan['lines'][number] } {
   return {
     line: {
       productId: draft.productId,
@@ -410,7 +399,7 @@ function correctionLine(
     const productName = productNameOf(original, draft, catalog) ?? draft.productId;
     return { error: quantityErrorMessage(quantities.badField, productName) };
   }
-  if (original == null) return supplementalLine(draft, catalog, quantities);
+  if (original == null) return supplementalLine(draft, quantities);
   return keptLine(original, draft, quantities, obligations);
 }
 

@@ -21,7 +21,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GraphQLError } from 'graphql';
 import { MockedProvider } from '@apollo/client/testing/react';
@@ -36,6 +36,7 @@ import {
 } from '../src/lib/graphql';
 import { SalesDesk } from '../src/components/showSell/SalesDesk';
 import { SHOW_AND_SELL_PAGE_SIZE } from '../src/lib/showSell';
+import { OTHER_DETAILS_MAX_CHARS } from '../src/lib/saleDesk';
 import { clearAndType, chooseOption, typeInto } from './helpers/unitUi';
 import type {
   GqlShowAndSellAdminFieldsFragment,
@@ -283,10 +284,26 @@ describe('the entry form', () => {
     renderDesk();
     await screen.findByTestId('sale-entry-form');
     await fillFirstLine(user);
+    await chooseOption('sale-payment-method', 'Cash', user);
     await typeInto('sale-line-weowe-0', '1', user);
 
     expect(screen.getByTestId('sale-entry-error')).toHaveTextContent('buyer name');
     expect(screen.getByTestId('save-sale')).toBeDisabled();
+  });
+
+  // A half-picked method used to sit on only one half of the pair: the button was
+  // enabled because the form read no error, and the click answered with the
+  // sentence instead of writing. One validator means the disabled button and the
+  // click always say the same thing.
+  it('refuses to write until a payment method is chosen', async () => {
+    const user = userEvent.setup();
+    renderDesk();
+    await screen.findByTestId('sale-entry-form');
+    await fillFirstLine(user);
+
+    expect(screen.getByTestId('sale-entry-error')).toHaveTextContent('payment method the Unit still offers');
+    expect(screen.getByTestId('save-sale')).toBeDisabled();
+    expect(sent.create).toHaveLength(0);
   });
 
   it('refuses an Other method without details', async () => {
@@ -298,6 +315,39 @@ describe('the entry form', () => {
 
     expect(screen.getByTestId('sale-entry-error')).toHaveTextContent('Say what makes this payment an Other one');
     expect(screen.getByTestId('save-sale')).toBeDisabled();
+  });
+
+  // The input carries maxLength, but the same ceiling is checked here as well: a
+  // note that arrives by some other path (a filled-in form, a browser that does
+  // not sanitize) still cannot become a body the server would refuse.
+  it('refuses an Other-method note longer than the server’s ceiling', async () => {
+    const user = userEvent.setup();
+    renderDesk();
+    await screen.findByTestId('sale-entry-form');
+    await fillFirstLine(user);
+    await chooseOption('sale-payment-method', 'Other', user);
+    fireEvent.change(screen.getByTestId('sale-other-details'), { target: { value: 'x'.repeat(OTHER_DETAILS_MAX_CHARS + 1) } });
+
+    expect(screen.getByTestId('sale-entry-error')).toHaveTextContent(`Other details may not exceed ${OTHER_DETAILS_MAX_CHARS} characters`);
+    expect(screen.getByTestId('save-sale')).toBeDisabled();
+    expect(sent.create).toHaveLength(0);
+  });
+
+  it('adds a line to the batch', async () => {
+    const user = userEvent.setup();
+    renderDesk();
+    await screen.findByTestId('sale-entry-form');
+    await chooseOption('sale-line-product-0', 'Caramel', user);
+    await user.click(screen.getByTestId('sale-line-add-line'));
+
+    expect(screen.getByTestId('sale-line-product-1')).toBeInTheDocument();
+    await typeInto('sale-line-immediate-0', '2', user);
+    await chooseOption('sale-line-product-1', 'Butter', user);
+    await typeInto('sale-line-immediate-1', '1', user);
+    await chooseOption('sale-payment-method', 'Cash', user);
+
+    expect(screen.getByTestId('sale-draft-total')).toHaveTextContent('$32.50');
+    expect(screen.getByTestId('save-sale')).toBeEnabled();
   });
 
   it('is refused in the browser with no write when the batch is empty', async () => {
@@ -361,6 +411,63 @@ describe('the entry form', () => {
     expect(input.idempotency).toEqual({ idempotencyKey: 'test-idem-1' });
   });
 
+  // The buyer fields are part of the write, and part of what the idempotency key
+  // stands for: the same lines with a different buyer is a different body.
+  it('carries the buyer contact the desk typed into the write', async () => {
+    const user = userEvent.setup();
+    const mutation = {
+      request: {
+        query: CREATE_SHOW_AND_SELL_SALE,
+        variables: {
+          input: {
+            showAndSellId: SSE,
+            saleAt: '2026-03-28T15:30:00.000Z',
+            lineItems: [{ productId: CARAMEL, immediateQty: 1, weOweQty: 1 }],
+            paymentMethodCode: 'CHECK',
+            buyerName: 'Avery T',
+            buyerPhone: '555-0100',
+            buyerEmail: 'avery@example.test',
+            version: { expectedVersion: 7 },
+            idempotency: { idempotencyKey: 'test-idem-1' },
+          },
+        },
+      },
+      result: (variables: Record<string, unknown>) => {
+        sent.create.push(variables);
+        return {
+          data: {
+            createShowAndSellSale: {
+              __typename: 'ShowAndSellSalePayload',
+              eventVersion: 8,
+              draftOnly: false,
+              sale: saleFixture(),
+              warnings: [],
+              obligations: [],
+            },
+          },
+        };
+      },
+    };
+    renderDesk({ mutationMocks: [mutation] });
+    await screen.findByTestId('sale-entry-form');
+    await chooseOption('sale-line-product-0', 'Caramel', user);
+    await typeInto('sale-line-immediate-0', '1', user);
+    await typeInto('sale-line-weowe-0', '1', user);
+    await chooseOption('sale-payment-method', 'Check', user);
+    await typeInto('sale-buyer-name', 'Avery T', user);
+    await typeInto('sale-buyer-phone', '555-0100', user);
+    await typeInto('sale-buyer-email', 'avery@example.test', user);
+    await clearAndType('sale-at', '2026-03-28T09:30', user);
+
+    await user.click(screen.getByTestId('save-sale'));
+
+    await waitFor(() => expect(sent.create).toHaveLength(1));
+    const input = sent.create[0].input as Record<string, unknown>;
+    expect(input.buyerName).toBe('Avery T');
+    expect(input.buyerPhone).toBe('555-0100');
+    expect(input.buyerEmail).toBe('avery@example.test');
+  });
+
   it('re-reads the event and the list after a successful write', async () => {
     const user = userEvent.setup();
     const mutation = {
@@ -405,6 +512,16 @@ describe('the entry form', () => {
   it('marks the form draft-only for a reopened event', async () => {
     renderDesk({ event: eventFixture({ status: 'REOPENED' }) });
     expect(await screen.findByTestId('sale-draft-note')).toHaveTextContent('draft');
+  });
+
+  // An event that closed We Owe before it ended cannot take an owing line, so the
+  // desk says why the We Owe column is missing rather than leaving the admin to
+  // discover it in a refused write.
+  it('says the event does not offer We Owe', async () => {
+    renderDesk({ event: eventFixture({ weOweEnabled: false }) });
+
+    expect(await screen.findByTestId('sale-we-owe-off-note')).toHaveTextContent('does not offer We Owe');
+    expect(screen.getByTestId('sale-line-weowe-0')).toBeDisabled();
   });
 
   it('refuses entry for a FINALIZED event', async () => {
@@ -783,6 +900,14 @@ describe('the sale list after review', () => {
     expect(row).not.toHaveTextContent('quinn@example.test');
     expect(screen.queryByText('555-0100')).toBeNull();
     expect(screen.queryByText('quinn@example.test')).toBeNull();
+  });
+
+  // A sale entered with no buyer is a normal Cash sale: the list still has to say
+  // the buyer cell is empty rather than leave an unexplained gap.
+  it('marks the buyer cell for a sale entered without a buyer', async () => {
+    renderDesk({ sales: [saleFixture({ buyerName: null })] });
+
+    expect(await screen.findByTestId('sale-row-SALE#1')).toHaveTextContent('—');
   });
 
   it('says so when the event has no sales', async () => {
