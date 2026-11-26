@@ -18,6 +18,9 @@
  *   CONFLICT re-reads the board so the next attempt is aimed at fresh versions.
  * - The status filter is a query argument, not a browser filter: the CLOSED view
  *   asks the server for CLOSED rows.
+ * - The board is cards, not a wide table, so on a phone every figure and control of
+ *   an obligation is on the screen with nothing to scroll sideways to reach, and both
+ *   writes are reachable and savable with Tab and Enter alone.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,7 +31,7 @@ import { MockedProvider } from '@apollo/client/testing/react';
 import { FULFILL_WE_OWE, LIST_WE_OWE_OBLIGATIONS, SET_WE_OWE_RESERVATION } from '../src/lib/graphql';
 import { WeOwePanel } from '../src/components/showSell/WeOwePanel';
 import { SHOW_AND_SELL_PAGE_SIZE } from '../src/lib/showSell';
-import { clearAndType, chooseOption, typeInto } from './helpers/unitUi';
+import { clearAndType, chooseOption, focusByTab, scrollContainerOf, typeInto, withViewport } from './helpers/unitUi';
 import type { GqlShowAndSellAdminFieldsFragment, GqlWeOweObligationFieldsFragment } from '../src/types/graphql-generated';
 
 const UC = 'UNITCAMP#pack-3149-fall';
@@ -583,5 +586,118 @@ describe('the source rule after review', () => {
 
     await waitFor(() => expect(sent.fulfillment).toHaveLength(1));
     expect((sent.fulfillment[0].input as Record<string, unknown>).source).toBe('EXTERNAL_COUNCIL');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// §4.5.1: the board on a phone, and with the keyboard alone
+// ---------------------------------------------------------------------------------------------
+
+describe('§4.5.1: the board on a 390-pixel viewport', () => {
+  /*
+   * Reservation and fulfillment happen on the floor, where the Kernel holding the
+   * obligation is the one standing at the shelf with a phone. A board that only works
+   * on a desktop is a promise the Unit cannot keep where it is kept. Unlike the sales
+   * list, these obligations are cards stacked in one column, so a phone does not cut a
+   * figure off — the tests here prove the absence of anything to scroll sideways to,
+   * and that a Kernel who does not use a pointer reaches both writes with Tab.
+   */
+
+  it('shows every figure and control of an obligation with nothing to scroll sideways to', async () => {
+    await withViewport(390, async () => {
+      renderPanel([obligationFixture({ reservedQty: 2, uncoveredQty: 2 })]);
+      await screen.findByTestId('we-owe-card-WEOWE#1');
+
+      // The shape that would make a figure fall off the edge: a wide table, or a card
+      // parked inside a horizontal scroller of its own.
+      expect(screen.queryByRole('table')).toBeNull();
+      expect(scrollContainerOf(screen.getByTestId('we-owe-card-WEOWE#1'))).toBeNull();
+
+      for (
+        const id of [
+          'we-owe-product-WEOWE#1',
+          'we-owe-buyer-WEOWE#1',
+          'we-owe-status-WEOWE#1',
+          'we-owe-reserve-target-WEOWE#1',
+          'we-owe-save-reservation-WEOWE#1',
+          'we-owe-fulfill-qty-WEOWE#1',
+          'we-owe-source-WEOWE#1',
+          'we-owe-fulfill-WEOWE#1',
+        ]
+      ) {
+        expect(screen.getByTestId(id), `${id} is not shown at 390 pixels`).toBeVisible();
+      }
+    });
+  });
+
+  it('sets a reservation with Tab and Enter alone, on a 390-pixel viewport', async () => {
+    const user = userEvent.setup();
+    await withViewport(390, async () => {
+      const obligation = obligationFixture({ reservedQty: 0, uncoveredQty: 4, remainingQty: 4 });
+      renderPanel([obligation], [
+        reservationMock(
+          {
+            weOweId: 'WEOWE#1',
+            targetReservedQty: 3,
+            version: { expectedVersion: 1 },
+            idempotency: { idempotencyKey: 'test-idem-1' },
+          },
+          obligation,
+        ),
+      ]);
+      await screen.findByTestId('we-owe-card-WEOWE#1');
+
+      await clearAndType('we-owe-reserve-target-WEOWE#1', '3', user);
+      await focusByTab(screen.getByTestId('we-owe-save-reservation-WEOWE#1'), user);
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(sent.reservation).toHaveLength(1));
+      const input = sent.reservation[0].input as Record<string, unknown>;
+      expect(input.targetReservedQty).toBe(3);
+      expect(input.idempotency).toEqual({ idempotencyKey: 'test-idem-1' });
+    });
+  });
+
+  it('records a fulfillment with Tab and Enter alone, on a 390-pixel viewport', async () => {
+    const user = userEvent.setup();
+    await withViewport(390, async () => {
+      const obligation = obligationFixture({ reservedQty: 4, uncoveredQty: 0 });
+      renderPanel([obligation], [
+        fulfillmentMock(
+          {
+            weOweId: 'WEOWE#1',
+            quantity: 2,
+            source: 'KERNEL_STOCK',
+            version: { expectedVersion: 1 },
+            idempotency: { idempotencyKey: 'test-idem-1' },
+          },
+          obligation,
+        ),
+      ]);
+      await screen.findByTestId('we-owe-card-WEOWE#1');
+
+      await typeInto('we-owe-fulfill-qty-WEOWE#1', '2', user);
+      // The source picker sits between the quantity and the write, and Tab walks past it
+      // without the picker being opened — the card started on the only legal source.
+      await focusByTab(screen.getByTestId('we-owe-fulfill-WEOWE#1'), user);
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(sent.fulfillment).toHaveLength(1));
+      const input = sent.fulfillment[0].input as Record<string, unknown>;
+      expect(input.quantity).toBe(2);
+      expect(input.source).toBe('KERNEL_STOCK');
+    });
+  });
+
+  it('keeps a closed obligation readable and inert at phone width', async () => {
+    await withViewport(390, async () => {
+      renderPanel([obligationFixture({ status: 'CLOSED', closeReason: 'FULFILLED', fulfilledQty: 4, reservedQty: 4, uncoveredQty: 0, remainingQty: 0 })]);
+
+      const card = await screen.findByTestId('we-owe-card-WEOWE#1');
+      expect(card).toHaveTextContent('history');
+      expect(card).toBeVisible();
+      expect(scrollContainerOf(card)).toBeNull();
+      expect(screen.queryByTestId('we-owe-save-reservation-WEOWE#1')).toBeNull();
+    });
   });
 });

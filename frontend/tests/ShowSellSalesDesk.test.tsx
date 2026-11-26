@@ -18,6 +18,9 @@
  *   its version condition.
  * - A void takes the whole sale down and carries its reason.
  * - A reopened event marks entry draft-only; a FINALIZED event refuses it.
+ * - One obligation is walked from the desk that writes it to the We Owe board that
+ *   reserves and delivers it and back to the desk that corrects and voids the sale
+ *   it came from, and both screens are driven on a phone and by keyboard alone.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,16 +31,19 @@ import { MockedProvider } from '@apollo/client/testing/react';
 import {
   CREATE_SHOW_AND_SELL_SALE,
   CORRECT_SHOW_AND_SELL_SALE,
+  FULFILL_WE_OWE,
   GET_UNIT_CAMPAIGN_CATALOG,
   LIST_SHOW_AND_SELL_SALES,
   LIST_UNIT_PAYMENT_METHODS,
   LIST_WE_OWE_OBLIGATIONS,
+  SET_WE_OWE_RESERVATION,
   VOID_SHOW_AND_SELL_SALE,
 } from '../src/lib/graphql';
 import { SalesDesk } from '../src/components/showSell/SalesDesk';
+import { WeOwePanel } from '../src/components/showSell/WeOwePanel';
 import { SHOW_AND_SELL_PAGE_SIZE } from '../src/lib/showSell';
 import { OTHER_DETAILS_MAX_CHARS, SALE_REASON_MAX_CHARS } from '../src/lib/saleDesk';
-import { clearAndType, chooseOption, findOption, typeInto } from './helpers/unitUi';
+import { clearAndType, chooseOption, findOption, focusByTab, scrollContainerOf, typeInto, withViewport } from './helpers/unitUi';
 import type {
   GqlShowAndSellAdminFieldsFragment,
   GqlShowAndSellSaleFieldsFragment,
@@ -69,7 +75,7 @@ let sent: Record<string, Record<string, unknown>[]>;
 
 beforeEach(() => {
   keySequence = 0;
-  sent = { create: [], correct: [], void: [] };
+  sent = { create: [], correct: [], void: [], reserve: [], fulfil: [] };
   vi.stubGlobal('crypto', { randomUUID: () => `test-idem-${++keySequence}` });
 });
 
@@ -1603,5 +1609,530 @@ describe('the sale list after review', () => {
     expect(await screen.findByTestId('sale-row-SALE#1')).toBeVisible();
     expect(await screen.findByText('The rest of this list could not be loaded, so some rows are not shown.')).toBeVisible();
     expect(screen.queryByTestId('sale-row-SALE#2')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// §4.5.1: one obligation, from the desk that writes it to the We Owe board that closes it
+// ---------------------------------------------------------------------------------------------
+
+describe('one obligation, from the desk that writes it to the board that closes it', () => {
+  /*
+   * Every screen above is tested where it stands; what is tested here is the chain
+   * between them, which is what a Kernel actually walks on a sale Saturday. The sale
+   * writes an obligation, the board holds Kernels against that obligation and later
+   * delivers part of it, and the desk then corrects and voids the sale the obligation
+   * came from. The stages hand the server's own rows to the screen after them, so each
+   * write is aimed at the version the write before it returned, and the delivery the
+   * board recorded comes back to the desk as the floor under what a correction may do
+   * to that line. A screen that drops a version, a line id, or a fulfilled count loses
+   * the sale in the middle of it.
+   */
+
+  /** One stage of the desk, with the handle that takes it down before the next stage mounts. */
+  function mountDesk(fixture: DeskFixtures) {
+    const onChanged = vi.fn(async () => undefined);
+    const view = render(
+      <MockedProvider
+        mocks={
+          [
+            ...deskMocks(fixture),
+            // A successful write makes the desk re-read its rows and MockedProvider
+            // answers one read per mock, so this second copy is that re-read.
+            salesMock(fixture.sales ?? []),
+            obligationsMock(fixture.obligations ?? []),
+          ] as never
+        }
+      >
+        <SalesDesk event={fixture.event ?? eventFixture()} timezone={ZONE} onChanged={onChanged} />
+      </MockedProvider>,
+    );
+    return { onChanged, view };
+  }
+
+  /** One stage of the We Owe board, reading the rows the stage before it produced. */
+  function mountBoard(obligations: readonly GqlWeOweObligationFieldsFragment[], writes: object[]) {
+    const onChanged = vi.fn(async () => undefined);
+    const read = obligationsMock([...obligations]);
+    const view = render(
+      <MockedProvider mocks={[read, read, ...writes] as never}>
+        <WeOwePanel event={eventFixture()} timezone={ZONE} onChanged={onChanged} />
+      </MockedProvider>,
+    );
+    return { onChanged, view };
+  }
+
+  /** A reservation write, answering with the row as the server has it afterwards. */
+  function reserveWrite(input: Record<string, unknown>, after: GqlWeOweObligationFieldsFragment) {
+    return {
+      request: { query: SET_WE_OWE_RESERVATION, variables: { input } },
+      result: (variables: Record<string, unknown>) => {
+        sent.reserve.push(variables);
+        return {
+          data: { setWeOweReservation: { __typename: 'SetWeOweReservationPayload', obligation: after } },
+        };
+      },
+    };
+  }
+
+  /** A fulfillment write, answering with the row, the delivery, and the movement it drew on. */
+  function fulfillWrite(input: Record<string, unknown>, after: GqlWeOweObligationFieldsFragment) {
+    return {
+      request: { query: FULFILL_WE_OWE, variables: { input } },
+      result: (variables: Record<string, unknown>) => {
+        sent.fulfil.push(variables);
+        return {
+          data: {
+            fulfillWeOwe: {
+              __typename: 'FulfillWeOwePayload',
+              obligation: after,
+              fulfillment: {
+                __typename: 'WeOweFulfillment',
+                fulfillmentId: 'FULFILL#1',
+                weOweId: 'WEOWE#1',
+                quantity: 2,
+                source: 'KERNEL_STOCK',
+                actorAccountId: 'ACCOUNT#casey',
+                createdAt: '2026-03-28T16:00:00.000Z',
+                inventoryMovementId: 'MOVE#1',
+              },
+            },
+          },
+        };
+      },
+    };
+  }
+
+  /** The body of a write, for reading its version condition back out. */
+  function bodyOf(write: Record<string, unknown>[]): Record<string, unknown> {
+    return write[0].input as Record<string, unknown>;
+  }
+
+  it('writes the sale, holds what it owes, delivers two, corrects it, and shows which void the server refuses', async () => {
+    const user = userEvent.setup();
+
+    // 1. The desk: two Kernels taken at the table, three owed later, and the buyer
+    //    named because an owed quantity with no name on it is a promise nobody holds.
+    const owed = obligationFixture();
+    const desk = mountDesk({
+      mutationMocks: [
+        {
+          request: {
+            query: CREATE_SHOW_AND_SELL_SALE,
+            variables: {
+              input: {
+                showAndSellId: SSE,
+                saleAt: '2026-03-28T15:30:00.000Z',
+                lineItems: [{ productId: CARAMEL, immediateQty: 2, weOweQty: 3 }],
+                paymentMethodCode: 'CASH',
+                buyerName: 'Avery',
+                version: { expectedVersion: 7 },
+                idempotency: { idempotencyKey: 'test-idem-1' },
+              },
+            },
+          },
+          result: (variables: Record<string, unknown>) => {
+            sent.create.push(variables);
+            return {
+              data: {
+                createShowAndSellSale: {
+                  __typename: 'ShowAndSellSalePayload',
+                  eventVersion: 8,
+                  draftOnly: false,
+                  sale: saleFixture(),
+                  warnings: [],
+                  obligations: [owed],
+                },
+              },
+            };
+          },
+        },
+      ],
+    });
+
+    await screen.findByTestId('sale-entry-form');
+    await chooseOption('sale-line-product-0', 'Caramel', user);
+    await typeInto('sale-line-immediate-0', '2', user);
+    await typeInto('sale-line-weowe-0', '3', user);
+    await typeInto('sale-buyer-name', 'Avery', user);
+    await chooseOption('sale-payment-method', 'Cash', user);
+    await clearAndType('sale-at', '2026-03-28T09:30', user);
+    await user.click(screen.getByTestId('save-sale'));
+
+    await waitFor(() => expect(sent.create).toHaveLength(1));
+    expect(bodyOf(sent.create).lineItems).toEqual([{ productId: CARAMEL, immediateQty: 2, weOweQty: 3 }]);
+    desk.view.unmount();
+
+    // 2. The board: the Kernels for that promise are held against it. The card it shows
+    //    is the row the create reported, and the write is aimed at that row's version 1.
+    const reserved = { ...owed, reservedQty: 3, uncoveredQty: 0, version: 2 };
+    const holding = mountBoard([owed], [
+      reserveWrite(
+        { weOweId: 'WEOWE#1', targetReservedQty: 3, version: { expectedVersion: 1 }, idempotency: { idempotencyKey: 'test-idem-2' } },
+        reserved,
+      ),
+    ]);
+
+    await screen.findByTestId('we-owe-card-WEOWE#1');
+    expect(screen.getByTestId('we-owe-buyer-WEOWE#1')).toHaveTextContent('Avery');
+    await clearAndType('we-owe-reserve-target-WEOWE#1', '3', user);
+    await user.click(screen.getByTestId('we-owe-save-reservation-WEOWE#1'));
+
+    await waitFor(() => expect(sent.reserve).toHaveLength(1));
+    expect(bodyOf(sent.reserve).version).toEqual({ expectedVersion: 1 });
+    holding.view.unmount();
+
+    // 3. The board, a week later: two of the three are delivered out of reserved stock,
+    //    aimed at version 2 — the version the reservation wrote.
+    const delivered = { ...reserved, fulfilledQty: 2, reservedQty: 1, remainingQty: 1, version: 3 };
+    const delivery = mountBoard([reserved], [
+      fulfillWrite(
+        { weOweId: 'WEOWE#1', quantity: 2, source: 'KERNEL_STOCK', version: { expectedVersion: 2 }, idempotency: { idempotencyKey: 'test-idem-3' } },
+        delivered,
+      ),
+    ]);
+
+    await screen.findByTestId('we-owe-card-WEOWE#1');
+    await clearAndType('we-owe-fulfill-qty-WEOWE#1', '2', user);
+    await user.click(screen.getByTestId('we-owe-fulfill-WEOWE#1'));
+
+    await waitFor(() => expect(sent.fulfil).toHaveLength(1));
+    expect(bodyOf(sent.fulfil).version).toEqual({ expectedVersion: 2 });
+    expect(bodyOf(sent.fulfil).source).toBe('KERNEL_STOCK');
+    delivery.view.unmount();
+
+    // 4. Back at the desk: the two Kernels the board delivered are now a floor the
+    //    correction cannot go under, because the obligation the desk reads carries the
+    //    fulfilled count the board wrote. Taking the line to one owed Kernel would
+    //    cancel an obligation the Unit has already partly kept.
+    const correction = correctionMock({
+      showAndSellId: SSE,
+      saleId: 'SALE#1',
+      saleVersion: { expectedVersion: 2 },
+      version: { expectedVersion: 7 },
+      lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 }],
+      reason: 'Owed three all along',
+      idempotency: { idempotencyKey: 'test-idem-4' },
+    });
+    const revised = mountDesk({ sales: [saleFixture()], obligations: [delivered], mutationMocks: [correction] });
+
+    await screen.findByTestId('sale-row-SALE#1');
+    await user.click(screen.getByTestId('correct-sale-SALE#1'));
+    await screen.findByTestId('correction-reason');
+
+    await clearAndType('correction-line-weowe-0', '1', user);
+    expect(screen.getByTestId('sale-correction-error')).toHaveTextContent('already fulfilled');
+    expect(screen.getByTestId('save-correction')).toBeDisabled();
+
+    await clearAndType('correction-line-weowe-0', '3', user);
+    await typeInto('correction-reason', 'Owed three all along', user);
+    await user.click(screen.getByTestId('save-correction'));
+
+    await waitFor(() => expect(sent.correct).toHaveLength(1));
+    // The corrected line still carries the id of the line the obligation was written
+    // from: that id is what makes "change this line" and "drop this line" different.
+    expect(bodyOf(sent.correct).lineItems).toEqual([{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 }]);
+    revised.view.unmount();
+
+    // 5. The void aimed at that sale is refused, in the server's own words: two Kernels
+    //    are already in the buyer's hands, so the sale cannot be taken down as though
+    //    nothing was delivered (SALE-M-03-02). The attempt is still pinned to revision 3
+    //    — the one the correction left — because a void aimed at an old revision is a
+    //    different body, and the screen that holds the old one has to be told, not
+    //    silently re-aimed.
+    const refused = mountDesk({
+      sales: [saleFixture({ revision: 3 })],
+      obligations: [delivered],
+      mutationMocks: [
+        {
+          request: {
+            query: VOID_SHOW_AND_SELL_SALE,
+            variables: {
+              input: {
+                showAndSellId: SSE,
+                saleId: 'SALE#1',
+                saleVersion: { expectedVersion: 3 },
+                version: { expectedVersion: 7 },
+                reason: 'Entered twice at the table',
+                idempotency: { idempotencyKey: 'test-idem-5' },
+              },
+            },
+          },
+          error: new GraphQLError(
+            'This line already has 2 fulfilled; a correction or void cannot take back stock the buyer has (SALE-M-03-02).',
+            { extensions: { code: 'FULFILLED_WE_OWE_PROTECTED' } },
+          ),
+        },
+      ],
+    });
+
+    await screen.findByTestId('sale-row-SALE#1');
+    await user.click(screen.getByTestId('void-sale-SALE#1'));
+    await typeInto('void-reason', 'Entered twice at the table', user);
+    await user.click(screen.getByTestId('save-void'));
+
+    expect(await screen.findByTestId('sale-void-error')).toHaveTextContent('cannot take back stock the buyer has');
+    expect(screen.getByTestId('sale-row-SALE#1')).toHaveTextContent('ACTIVE');
+    refused.view.unmount();
+
+    // 6. The void that does land belongs to the other sale at the table: it owed two and
+    //    never received one, so the whole sale goes down and its obligation closes as
+    //    cancelled rather than staying something to act on.
+    const owedAgain = obligationFixture({
+      weOweId: 'WEOWE#2',
+      saleId: 'SALE#2',
+      lineItemId: 'LINE#2',
+      buyerName: 'Quinn',
+      originalQty: 2,
+      remainingQty: 2,
+      uncoveredQty: 2,
+      valueCentsSnapshot: 200,
+    });
+    // The other sale at the table: it owes two Kernels and never delivered one, which is
+    // the shape a void can close.
+    const repeat = saleFixture({
+      saleId: 'SALE#2',
+      revision: 1,
+      buyerName: 'Quinn',
+      totalCents: 200,
+      expectedCashCents: 0,
+      lineItems: [saleLineFixture({ lineItemId: 'LINE#2', immediateQty: 0, weOweQty: 2, subtotalCents: 200 })],
+    });
+    const cancelledAgain = {
+      ...owedAgain,
+      status: 'CLOSED' as const,
+      closeReason: 'CANCELLED' as const,
+      cancelledQty: 2,
+      remainingQty: 0,
+      version: 2,
+    };
+    const deskAfter = mountDesk({
+      sales: [saleFixture({ revision: 3 }), repeat],
+      obligations: [delivered, owedAgain],
+      mutationMocks: [
+        {
+          request: {
+            query: VOID_SHOW_AND_SELL_SALE,
+            variables: {
+              input: {
+                showAndSellId: SSE,
+                saleId: 'SALE#2',
+                saleVersion: { expectedVersion: 1 },
+                version: { expectedVersion: 7 },
+                reason: 'Buyer never came back',
+                idempotency: { idempotencyKey: 'test-idem-6' },
+              },
+            },
+          },
+          result: (variables: Record<string, unknown>) => {
+            sent.void.push(variables);
+            return {
+              data: {
+                voidShowAndSellSale: {
+                  __typename: 'ShowAndSellSalePayload',
+                  eventVersion: 9,
+                  draftOnly: false,
+                  sale: { ...repeat, revision: 2, status: 'VOIDED' as const, voidedByAccountId: 'ACCOUNT#casey', voidedAt: '2026-03-28T17:00:00.000Z' },
+                  priorRevision: null,
+                  warnings: [],
+                  obligations: [cancelledAgain],
+                },
+              },
+            };
+          },
+        },
+      ],
+    });
+
+    await screen.findByTestId('sale-row-SALE#2');
+    await user.click(screen.getByTestId('void-sale-SALE#2'));
+    await typeInto('void-reason', 'Buyer never came back', user);
+    await user.click(screen.getByTestId('save-void'));
+
+    await waitFor(() => expect(sent.void).toHaveLength(1));
+    expect(bodyOf(sent.void).saleVersion).toEqual({ expectedVersion: 1 });
+    deskAfter.view.unmount();
+
+    // 7. And the board the Kernel closes the tab on shows both results side by side: the
+    //    obligation the refused void left alone is still open with its two delivered
+    //    Kernels counted and its actions still offered, while the cancelled one is
+    //    history with its reason.
+    const closing = mountBoard([delivered, cancelledAgain], []);
+
+    const stillOpen = await screen.findByTestId('we-owe-card-WEOWE#1');
+    expect(screen.getByTestId('we-owe-status-WEOWE#1')).toHaveTextContent('Open');
+    expect(stillOpen).toHaveTextContent('fulfilled 2');
+    expect(screen.getByTestId('we-owe-fulfill-WEOWE#1')).toBeInTheDocument();
+
+    const closed = screen.getByTestId('we-owe-card-WEOWE#2');
+    expect(screen.getByTestId('we-owe-status-WEOWE#2')).toHaveTextContent('Closed · Cancelled');
+    expect(closed).toHaveTextContent('history');
+    expect(screen.queryByTestId('we-owe-save-reservation-WEOWE#2')).toBeNull();
+    expect(screen.queryByTestId('we-owe-fulfill-WEOWE#2')).toBeNull();
+    closing.view.unmount();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// §4.5.1: the desk and the board on a phone, and with the keyboard alone
+// ---------------------------------------------------------------------------------------------
+
+describe('§4.5.1: the desk and the board on a 390-pixel viewport', () => {
+  /*
+   * A Kernel works the table with a phone in one hand, and an admin who does not use a
+   * pointer has to reach the same writes with Tab and Enter. Both claims are about the
+   * markup: at a phone width every control is present and reachable, and a table that
+   * is wider than the phone slides inside its own container instead of pushing its
+   * last column — the Correct and Void buttons, the We Owe quantity — past the edge of
+   * the screen, where nothing can bring it back.
+   *
+   * jsdom performs no layout, so `scrollWidth` reads 0 whatever the markup is and a
+   * measured overflow cannot be asserted here. What these tests pin is the shape that
+   * makes a wide column reachable at all: the table's nearest scrolling ancestor, and
+   * the fact that a row's controls sit inside it.
+   */
+
+  /** The scrolling container the named table has to sit inside. */
+  function scrollContainerFor(tableName: string): HTMLElement {
+    const table = screen.getByRole('table', { name: tableName });
+    const scroller = scrollContainerOf(table);
+    expect(scroller, `the "${tableName}" table sits outside any scrolling container, so a phone cuts off its last column`).not.toBeNull();
+    return scroller as HTMLElement;
+  }
+
+  it('keeps every control of a sale line present at phone width, and scrolls the rows rather than the page', async () => {
+    await withViewport(390, async () => {
+      renderDesk();
+      await screen.findByTestId('sale-entry-form');
+
+      const scroller = scrollContainerFor('Sale lines');
+      // The whole row scrolls together: a control left outside the scroller would sit
+      // past the edge of the phone with nothing to slide it back into view.
+      expect(scroller).toContainElement(screen.getByTestId('sale-line-product-0'));
+      expect(scroller).toContainElement(screen.getByTestId('sale-line-weowe-0'));
+      expect(scroller).toContainElement(screen.getByTestId('sale-line-remove-line-0'));
+
+      // Nothing is hidden at this width either — the rows slide, they do not drop
+      // columns, and the write itself is on the page and not behind a wider screen.
+      for (const id of ['sale-line-product-0', 'sale-line-immediate-0', 'sale-line-weowe-0', 'sale-payment-method', 'sale-at', 'save-sale']) {
+        expect(screen.getByTestId(id), `${id} is not shown at 390 pixels`).toBeVisible();
+      }
+    });
+  });
+
+  it('keeps Correct and Void reachable inside the sales list at phone width', async () => {
+    await withViewport(390, async () => {
+      renderDesk({ sales: [saleFixture()] });
+      await screen.findByTestId('sale-row-SALE#1');
+
+      const scroller = scrollContainerFor('Sales at this event');
+      expect(scroller).toContainElement(screen.getByTestId('correct-sale-SALE#1'));
+      expect(scroller).toContainElement(screen.getByTestId('void-sale-SALE#1'));
+      expect(screen.getByTestId('sale-expected-cash-SALE#1')).toBeVisible();
+    });
+  });
+
+  it('enters a sale with Tab and Enter alone, on a 390-pixel viewport', async () => {
+    const user = userEvent.setup();
+    await withViewport(390, async () => {
+      renderDesk({ mutationMocks: [createMutation('test-idem-1')] });
+      await screen.findByTestId('sale-entry-form');
+      await fillCashSale(user);
+
+      screen.getByTestId('sale-buyer-name').focus();
+      await focusByTab(screen.getByTestId('save-sale'), user);
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(sent.create).toHaveLength(1));
+    });
+  });
+
+  it('opens a correction, scrolls its lines, and saves it with Tab and Enter alone, on a 390-pixel viewport', async () => {
+    const user = userEvent.setup();
+    await withViewport(390, async () => {
+      renderDesk({
+        sales: [saleFixture()],
+        mutationMocks: [
+          correctionMock({
+            showAndSellId: SSE,
+            saleId: 'SALE#1',
+            saleVersion: { expectedVersion: 2 },
+            version: { expectedVersion: 7 },
+            lineItems: [{ lineItemId: 'LINE#1', productId: CARAMEL, immediateQty: 2, weOweQty: 3 }],
+            reason: 'Recount at the table',
+            idempotency: { idempotencyKey: 'test-idem-1' },
+          }),
+        ],
+      });
+      await screen.findByTestId('sale-row-SALE#1');
+
+      // The row that needs correcting is reached from the list, and the form it opens
+      // lays its lines out in a table that slides for a phone just like the entry one.
+      const correct = screen.getByTestId('correct-sale-SALE#1');
+      correct.focus();
+      await user.keyboard('{Enter}');
+      await screen.findByTestId('sale-correction-form');
+      scrollContainerFor('Sale lines');
+
+      await typeInto('correction-reason', 'Recount at the table', user);
+      await focusByTab(screen.getByTestId('save-correction'), user);
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(sent.correct).toHaveLength(1));
+    });
+  });
+
+  it('voids a sale with Tab and Enter alone, on a 390-pixel viewport', async () => {
+    const user = userEvent.setup();
+    await withViewport(390, async () => {
+      renderDesk({
+        sales: [saleFixture()],
+        mutationMocks: [
+          {
+            request: {
+              query: VOID_SHOW_AND_SELL_SALE,
+              variables: {
+                input: {
+                  showAndSellId: SSE,
+                  saleId: 'SALE#1',
+                  saleVersion: { expectedVersion: 2 },
+                  version: { expectedVersion: 7 },
+                  reason: 'Entered twice at the table',
+                  idempotency: { idempotencyKey: 'test-idem-1' },
+                },
+              },
+            },
+            result: (variables: Record<string, unknown>) => {
+              sent.void.push(variables);
+              return {
+                data: {
+                  voidShowAndSellSale: {
+                    __typename: 'ShowAndSellSalePayload',
+                    eventVersion: 8,
+                    draftOnly: false,
+                    sale: saleFixture({ status: 'VOIDED' }),
+                    priorRevision: null,
+                    warnings: [],
+                    obligations: [],
+                  },
+                },
+              };
+            },
+          },
+        ],
+      });
+      await screen.findByTestId('sale-row-SALE#1');
+
+      const voidButton = screen.getByTestId('void-sale-SALE#1');
+      voidButton.focus();
+      await user.keyboard('{Enter}');
+      await screen.findByTestId('sale-void-form');
+
+      await typeInto('void-reason', 'Entered twice at the table', user);
+      await focusByTab(screen.getByTestId('save-void'), user);
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(sent.void).toHaveLength(1));
+    });
   });
 });

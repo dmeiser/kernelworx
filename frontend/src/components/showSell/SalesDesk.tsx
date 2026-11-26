@@ -456,36 +456,41 @@ const SaleList: React.FC<{
     );
   }
   return (
-    <Table size="small" aria-label="Sales at this event">
-      <TableHead>
-        <TableRow>
-          <TableCell>When</TableCell>
-          <TableCell>Lines</TableCell>
-          <TableCell>Total</TableCell>
-          <TableCell>Method</TableCell>
-          <TableCell>Expected cash</TableCell>
-          <TableCell>Buyer</TableCell>
-          <TableCell>Status</TableCell>
-          <TableCell aria-label="Actions" />
-        </TableRow>
-      </TableHead>
-      <TableBody>
-        {sales.map((sale) => (
-          <TableRow key={sale.saleId} data-testid={`sale-row-${sale.saleId}`}>
-            <TableCell>{formatInstant(sale.saleAt, timezone)}</TableCell>
-            <TableCell>{sale.lineItems.length}</TableCell>
-            <TableCell>{formatCents(sale.totalCents)}</TableCell>
-            <TableCell>{sale.paymentMethodSnapshot.displayName}</TableCell>
-            <TableCell data-testid={`sale-expected-cash-${sale.saleId}`}>{formatCents(sale.expectedCashCents)}</TableCell>
-            <TableCell>{sale.buyerName ?? '—'}</TableCell>
-            <TableCell>{sale.status}</TableCell>
-            <TableCell>
-              <SaleActions sale={sale} editable={editable} onCorrect={onCorrect} onVoid={onVoid} />
-            </TableCell>
+    // Eight columns cannot fit a phone, and the page does not scroll sideways: the
+    // list scrolls inside its own container so the Correct and Void controls of a
+    // wide row are reached by sliding the rows, not by losing them past the edge.
+    <Box sx={{ overflowX: 'auto' }}>
+      <Table size="small" aria-label="Sales at this event">
+        <TableHead>
+          <TableRow>
+            <TableCell>When</TableCell>
+            <TableCell>Lines</TableCell>
+            <TableCell>Total</TableCell>
+            <TableCell>Method</TableCell>
+            <TableCell>Expected cash</TableCell>
+            <TableCell>Buyer</TableCell>
+            <TableCell>Status</TableCell>
+            <TableCell aria-label="Actions" />
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHead>
+        <TableBody>
+          {sales.map((sale) => (
+            <TableRow key={sale.saleId} data-testid={`sale-row-${sale.saleId}`}>
+              <TableCell>{formatInstant(sale.saleAt, timezone)}</TableCell>
+              <TableCell>{sale.lineItems.length}</TableCell>
+              <TableCell>{formatCents(sale.totalCents)}</TableCell>
+              <TableCell>{sale.paymentMethodSnapshot.displayName}</TableCell>
+              <TableCell data-testid={`sale-expected-cash-${sale.saleId}`}>{formatCents(sale.expectedCashCents)}</TableCell>
+              <TableCell>{sale.buyerName ?? '—'}</TableCell>
+              <TableCell>{sale.status}</TableCell>
+              <TableCell>
+                <SaleActions sale={sale} editable={editable} onCorrect={onCorrect} onVoid={onVoid} />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Box>
   );
 };
 
