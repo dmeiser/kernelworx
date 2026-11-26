@@ -586,6 +586,8 @@ _OTHER_ORDER = f"ORDER#{_OTHER_CAMPAIGN}#ff00ee11"
 _LANE_CODE = "ABCD1234EFGH5678"
 _OTHER_CODE = "ZZZZ9999YYYY8888"
 _ADMIN_SUB = "sub-admin"
+_LANE_SS = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+_OTHER_SS = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 
 def _lane_tokens(mod: ModuleType) -> Dict[str, set[str]]:
@@ -1366,9 +1368,11 @@ def test_the_lane_token_kinds_are_the_sweepers_token_kinds(mod: ModuleType) -> N
     from tests.e2e.utils import show_sell_stage2_support as stage2
 
     assert set(stage2.LANE_TOKEN_KINDS) <= set(mod.TOKEN_SHAPES), "the lane names a kind the sweeper refuses"
-    assert set(mod.TOKEN_SHAPES) - set(stage2.LANE_TOKEN_KINDS) == {"idem"}, (
-        "idem is the hand-run's narrowest form: a lane reaches its own markers through the DATA_ID every "
-        "key it sends is prefixed with, so a new kind the lane must name belongs in LANE_TOKEN_KINDS too"
+    assert set(mod.TOKEN_SHAPES) - set(stage2.LANE_TOKEN_KINDS) == {"idem", "show-and-sell"}, (
+        "idem is the hand-run's narrowest form and show-and-sell the Stage 4 lane's: a lane reaches its own "
+        "markers through the DATA_ID every key it sends is prefixed with, and a Stage 4 lane names its event "
+        "partition by the showAndSellId it was answered — both kinds are added by the lane that emits them, "
+        "so a new kind any lane must name belongs in that lane's token list too"
     )
 
 
@@ -1508,3 +1512,208 @@ def test_sign_in_proof_fails_loudly_when_no_client_accepts_the_flow(mod: ModuleT
 def test_secrets_file_location_is_documented_and_outside_the_tree(mod: ModuleType) -> None:
     assert mod.SECRETS_FILE.startswith(os.path.expanduser("~")) or "QA_FIXTURE_SECRETS_FILE" in os.environ
     assert not mod.SECRETS_FILE.startswith(str(Path.cwd())), "secrets must not land in the repository"
+
+
+# --------------------------------------------------------------------------- #
+# Stage 4 sweep: the show-and-sells partition and the Unit's payment rows
+# --------------------------------------------------------------------------- #
+
+
+def _stage4_tokens(mod: ModuleType) -> Dict[str, set[str]]:
+    tokens, problems = mod.parse_lane_tokens(
+        [
+            f"data-id={_LANE}",
+            f"unit={_LANE_UNIT}",
+            f"unit-campaign={_LANE_UC}",
+            f"campaign={_LANE_CAMPAIGN}",
+            f"profile={_LANE_PROFILE}",
+            f"join-code={_LANE_CODE}",
+            f"show-and-sell={_LANE_SS}",
+        ]
+    )
+    assert not problems, problems
+    return tokens
+
+
+def test_a_named_show_and_sell_partition_is_swept_whole_and_its_foreigners_survive(mod: ModuleType) -> None:
+    """A ``show-and-sell`` token takes the lane's whole event aggregate; another Scout's signup does not move.
+
+    The Stage 4 lane's cleanup (:func:`tests.unit.show_sell_stage4_fixtures.clean_sales_lane`) already
+    removes this partition as the lane's own step; the sweep is the residue check behind it, so every
+    lane row here — event, slot, signup, sale, sale revision, obligation, fulfillment record — is a
+    ``delete``, the same decision the cleanup makes. The two guards are the standing shape: a signup
+    for a profile no token named and a sale written by an account outside the fixture pool survive as
+    kept, and an event no token names is not mentioned at all.
+    """
+    rows = {
+        "kernelworx-show-and-sells-ue1-dev": [
+            _item(
+                pk=f"SHOW_AND_SELL#{_LANE_SS}",
+                sk="METADATA",
+                entityType="ShowAndSell",
+                unitCampaignId=_LANE_UC,
+                createdByAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+            ),
+            _item(pk=f"SHOW_AND_SELL#{_LANE_SS}", sk="SLOT#slot-1", entityType="ShowAndSellSlot"),
+            _item(
+                pk=f"SHOW_AND_SELL#{_LANE_SS}",
+                sk=f"SIGNUP#slot-1#PROFILE#{_LANE_PROFILE}",
+                entityType="ShowAndSellSignup",
+                profileId=f"PROFILE#{_LANE_PROFILE}",
+                signedUpByAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+            ),
+            _item(
+                pk=f"SHOW_AND_SELL#{_LANE_SS}",
+                sk=f"SIGNUP#slot-1#PROFILE#{_OTHER_PROFILE}",
+                entityType="ShowAndSellSignup",
+                profileId=f"PROFILE#{_OTHER_PROFILE}",
+            ),
+            _item(
+                pk=f"SHOW_AND_SELL#{_LANE_SS}",
+                sk="SALE#sale-1",
+                entityType="ShowAndSellSale",
+                enteredByAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+            ),
+            _item(
+                pk=f"SHOW_AND_SELL#{_LANE_SS}",
+                sk="SALE#sale-1#REVISION#1",
+                entityType="ShowAndSellSaleRevision",
+                correctedByAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+            ),
+            _item(
+                pk=f"SHOW_AND_SELL#{_LANE_SS}",
+                sk="SALE#sale-2",
+                entityType="ShowAndSellSale",
+                enteredByAccountId="ACCOUNT#someone-else",
+            ),
+            _item(pk=f"SHOW_AND_SELL#{_LANE_SS}", sk="WE_OWE#owe-1", entityType="WeOweObligation", saleId="sale-1"),
+            _item(pk=f"SHOW_AND_SELL#{_LANE_SS}", sk="WE_OWE#owe-1#FULFILLMENT#f1", entityType="WeOweFulfillment"),
+            _item(
+                pk=f"IDEM#{_ADMIN_SUB}#createShowAndSellSale#{_LANE_SS}",
+                sk=f"IDEM#{_LANE}-sale-quinn",
+            ),
+            # Another event entirely: the token set says nothing about it, so the sweep is silent.
+            _item(pk=f"SHOW_AND_SELL#{_OTHER_SS}", sk="METADATA", entityType="ShowAndSell"),
+            # A pk shape that is neither an event partition nor a marker: not this rule's business.
+            _item(pk="SOMETHING_ELSE", sk="x"),
+        ]
+    }
+    d = StubDynamo(rows)
+    out = io.StringIO()
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _stage4_tokens(mod), out) == 0
+    text = out.getvalue()
+    deleted = {(t, tuple(sorted(k.items()))) for t, k in d.deleted}
+
+    assert ("kernelworx-show-and-sells-ue1-dev", (("pk", f"SHOW_AND_SELL#{_LANE_SS}"), ("sk", "METADATA"))) in deleted
+    assert (
+        "kernelworx-show-and-sells-ue1-dev",
+        (("pk", f"SHOW_AND_SELL#{_LANE_SS}"), ("sk", "SLOT#slot-1")),
+    ) in deleted
+    assert (
+        "kernelworx-show-and-sells-ue1-dev",
+        (("pk", f"SHOW_AND_SELL#{_LANE_SS}"), ("sk", f"SIGNUP#slot-1#PROFILE#{_LANE_PROFILE}")),
+    ) in deleted
+    assert (
+        "kernelworx-show-and-sells-ue1-dev",
+        (("pk", f"SHOW_AND_SELL#{_LANE_SS}"), ("sk", "SALE#sale-1")),
+    ) in deleted
+    assert (
+        "kernelworx-show-and-sells-ue1-dev",
+        (("pk", f"SHOW_AND_SELL#{_LANE_SS}"), ("sk", "SALE#sale-1#REVISION#1")),
+    ) in deleted
+    assert (
+        "kernelworx-show-and-sells-ue1-dev",
+        (("pk", f"SHOW_AND_SELL#{_LANE_SS}"), ("sk", "WE_OWE#owe-1")),
+    ) in deleted
+    assert (
+        "kernelworx-show-and-sells-ue1-dev",
+        (("pk", f"SHOW_AND_SELL#{_LANE_SS}"), ("sk", "WE_OWE#owe-1#FULFILLMENT#f1")),
+    ) in deleted
+    assert (
+        "kernelworx-show-and-sells-ue1-dev",
+        (("pk", f"IDEM#{_ADMIN_SUB}#createShowAndSellSale#{_LANE_SS}"), ("sk", f"IDEM#{_LANE}-sale-quinn")),
+    ) in deleted
+    survivors = _survivors(d)
+    assert f"kernelworx-show-and-sells-ue1-dev/SHOW_AND_SELL#{_LANE_SS}/SALE#sale-2" in survivors
+    assert (
+        f"kernelworx-show-and-sells-ue1-dev/SHOW_AND_SELL#{_LANE_SS}/SIGNUP#slot-1#PROFILE#{_OTHER_PROFILE}"
+        in survivors
+    )
+    assert f"kernelworx-show-and-sells-ue1-dev/SHOW_AND_SELL#{_OTHER_SS}/METADATA" in survivors
+    assert "that profile is not this lane's" in text
+    assert "written by ACCOUNT#someone-else, not a fixture identity" in text
+    assert _OTHER_SS not in text, "an event no token names is not this sweep's business"
+
+
+def test_an_unruled_shape_inside_a_named_event_fails_the_sweep_closed(mod: ModuleType) -> None:
+    """The event token selects the partition, and a sort key no rule describes must not pass as clean."""
+    rows = {
+        "kernelworx-show-and-sells-ue1-dev": [
+            _item(pk=f"SHOW_AND_SELL#{_LANE_SS}", sk="MYSTERY#row"),
+        ]
+    }
+    d = StubDynamo(rows)
+    out = io.StringIO()
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _stage4_tokens(mod), out) == 1
+    assert "UNKNOWN  show-and-sells" in out.getvalue()
+    assert "1 row(s) a lane token names are UNRESOLVED" in out.getvalue()
+
+
+def test_the_lanes_payment_methods_capacity_counter_and_unit_markers_are_swept(mod: ModuleType) -> None:
+    """The Stage 4 payment half: method rows by author, the counter by Unit token, markers by authorship.
+
+    ``PAYMENT-CAPACITY`` names no author and the collection query can never return it, so the Unit
+    token is the whole ownership fact; a method row is the lane's when ``createdByAccountId`` names a
+    fixture identity, and another tenant's method on the lane's Unit survives. The create/QR markers
+    are scoped to the Unit id, so they live in this table — and the marker rule's authorship guard
+    keeps another account's attempt on the lane's Unit.
+    """
+    rows = {
+        "kernelworx-units-ue1-dev": [
+            _item(
+                pk=f"UNIT#{_LANE_UNIT}",
+                sk=f"PAYMENT#Venmo {_LANE}",
+                paymentMethodId="pm-1",
+                createdByAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+            ),
+            _item(pk=f"UNIT#{_LANE_UNIT}", sk="PAYMENT-CAPACITY", activeCustomCount="3"),
+            _item(
+                pk=f"UNIT#{_LANE_UNIT}",
+                sk="PAYMENT#Someone else's",
+                paymentMethodId="pm-9",
+                createdByAccountId="ACCOUNT#someone-else",
+            ),
+            _item(
+                pk=f"IDEM#{_ADMIN_SUB}#createUnitPaymentMethod#{_LANE_UNIT}",
+                sk=f"IDEM#{_LANE}-payment-method-create",
+            ),
+            _item(
+                pk=f"IDEM#someone-else#requestUnitPaymentMethodQrUpload#{_LANE_UNIT}",
+                sk="IDEM#deadbeef-4444-4444-8444-444444444444",
+            ),
+        ]
+    }
+    d = StubDynamo(rows)
+    out = io.StringIO()
+
+    assert mod.sweep_lane_rows(d, {_ADMIN_SUB}, _stage4_tokens(mod), out) == 0
+    text = out.getvalue()
+    deleted = {(t, tuple(sorted(k.items()))) for t, k in d.deleted}
+
+    assert ("kernelworx-units-ue1-dev", (("pk", f"UNIT#{_LANE_UNIT}"), ("sk", f"PAYMENT#Venmo {_LANE}"))) in deleted
+    assert ("kernelworx-units-ue1-dev", (("pk", f"UNIT#{_LANE_UNIT}"), ("sk", "PAYMENT-CAPACITY"))) in deleted
+    assert (
+        "kernelworx-units-ue1-dev",
+        (
+            ("pk", f"IDEM#{_ADMIN_SUB}#createUnitPaymentMethod#{_LANE_UNIT}"),
+            ("sk", f"IDEM#{_LANE}-payment-method-create"),
+        ),
+    ) in deleted
+    survivors = _survivors(d)
+    assert f"kernelworx-units-ue1-dev/UNIT#{_LANE_UNIT}/PAYMENT#Someone else's" in survivors
+    assert f"kernelworx-units-ue1-dev/UNIT#{_LANE_UNIT}/PAYMENT-CAPACITY" not in survivors
+    assert "carries no createdByAccountId naming a fixture identity" in text
+    assert "names a lane resource but no fixture identity wrote it" in text
+    assert "kept   units" in text
