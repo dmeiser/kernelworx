@@ -1288,7 +1288,11 @@ def test_the_census_covers_every_table_the_sanctioned_sweeper_scans_for_a_lane()
     assert set(stage3.STAGE_THREE_RESIDUE_SCOPES) == set(stage3.STAGE_THREE_RESIDUE_TABLES)
     for documents in stage3.STAGE_THREE_RESIDUE_READS.values():
         for document in documents:
-            assert document in stage2.STAGE_TWO_DOCUMENTS, f"{document} is not a document the lane can send"
+            # ``showAndSells`` is a Stage 3 document (the event list is a Stage 3 product read); every
+            # other census document was minted for Stage 2.
+            assert document in stage2.STAGE_TWO_DOCUMENTS or document in stage3._DOCUMENTS, (
+                f"{document} is not a document the lane can send"
+            )
     # The movements the amendment keeps are read through the inventory table's own query.
     assert "inventoryMovements" in stage3.STAGE_THREE_RESIDUE_READS["inventory"]
     # Longest key first, so a fulfillment line cannot be answered by the Order read.
@@ -1313,6 +1317,7 @@ def test_the_residue_census_answers_only_reads_that_ran() -> None:
         "inventoryMovements": 5,
         "unitScoutCampaignOrders": 1,
         "orderFulfillments": 3,
+        "showAndSells": 2,
     }
     seen: list[tuple[str, dict[str, str]]] = []
 
@@ -1327,6 +1332,7 @@ def test_the_residue_census_answers_only_reads_that_ran() -> None:
         "kernelworx-inventory-ue1-dev",
         "kernelworx-orders-ue1-dev",
         "kernelworx-order-fulfillments-ue1-dev",
+        "kernelworx-show-and-sells-ue1-dev",
     }
     assert census["kernelworx-inventory-ue1-dev"] == (
         "inventoryPositions for UC#1 answered 2 row(s); scoutCustodyBalances for UC#1 answered 1 row(s); "
@@ -1337,6 +1343,7 @@ def test_the_residue_census_answers_only_reads_that_ran() -> None:
         "orderFulfillments for Order ORDER#answered answered 3 row(s); "
         "orderFulfillments for Order ORDER#sold answered 3 row(s)"
     ), "a fulfillment row is partitioned by its Order, so the ids come from the Order read as well as the lane's own"
+    assert census["kernelworx-show-and-sells-ue1-dev"] == "showAndSells for UC#1 answered 2 row(s)"
     assert all(stage3.is_census_statement(answer) for answer in census.values())
     assert ("unitScoutCampaignOrders", {"unitCampaignId": "UC#1", "campaignId": "SC#1"}) in seen, (
         "the Order census is scoped to this lane's Unit and Scout Campaigns, never to the stack"

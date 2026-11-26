@@ -2792,15 +2792,21 @@ MARKER_TABLE_NAMES: dict[str, Callable[[], str]] = {
 #: carries no verdict of its own.  A blocked table that is not here cannot be proven either way and stays
 #: non-clean, exactly as the Stage 2 lane's ``_RESIDUE_READS`` does.
 #:
-#: The three keys are the sweeper's own ``LANE_TABLES`` labels in ``scripts/qa_fixture.py`` — the tables
-#: whose rows are keyed on resource ids rather than on a fixture ``sub``, and the three measured on ``dev``
-#: on 2026-11-19 to deny ``dynamodb:Scan`` to ``kernelworx-qa-ue1-dev``.  Movement rows live on the
-#: inventory table itself, which is why there is no fourth entry: a census keyed on a table the sweeper
-#: never scans would leave every real ``BLOCKED`` line unproven.
+#: The keys are the sweeper's own ``LANE_TABLES`` labels in ``scripts/qa_fixture.py`` — the tables
+#: whose rows are keyed on resource ids rather than on a fixture ``sub``, and the ones measured on ``dev``
+#: on 2026-11-19 to deny ``dynamodb:Scan`` to ``kernelworx-qa-ue1-dev`` (the show-and-sells partition joins
+#: them with the Stage 4 sweep rules).  Movement rows live on the
+#: inventory table itself, which is why there is no separate entry for them: a census keyed on a table the
+#: sweeper never scans would leave every real ``BLOCKED`` line unproven.
 STAGE_THREE_RESIDUE_READS: dict[str, tuple[str, ...]] = {
     "inventory": ("inventoryPositions", "scoutCustodyBalances", "inventoryMovements"),
     "orders": ("unitScoutCampaignOrders",),
     "order-fulfillments": ("orderFulfillments",),
+    # The event aggregate — event, slots, signups, sales, revisions, obligations, fulfillment records —
+    # all lives in one ``SHOW_AND_SELL#`` partition on this table; ``showAndSells`` is the product read
+    # that enumerates the lane's events per Unit Campaign, and it runs before the teardown while the
+    # campaign row still keys it.
+    "show-and-sells": ("showAndSells",),
 }
 
 #: The physical name the sweeper reports for each key, and the ids each read needs.  ``pairs`` means the
@@ -2810,6 +2816,7 @@ STAGE_THREE_RESIDUE_SCOPES: dict[str, str] = {
     "inventory": "units",
     "orders": "pairs",
     "order-fulfillments": "orders",
+    "show-and-sells": "units",
 }
 
 #: One census clause as the lane states it: the document, the id it was scoped to, and how many rows it
@@ -2995,6 +3002,7 @@ STAGE_THREE_RESIDUE_TABLES: dict[str, tuple[str, ...]] = {
     "inventory": ("kernelworx-inventory-ue1-dev",),
     "orders": ("kernelworx-orders-ue1-dev",),
     "order-fulfillments": ("kernelworx-order-fulfillments-ue1-dev",),
+    "show-and-sells": ("kernelworx-show-and-sells-ue1-dev",),
 }
 
 
