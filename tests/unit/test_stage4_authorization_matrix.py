@@ -17,7 +17,7 @@ identity each caller class actually produces:
 
 A denial is only worth recording if the row it wanted is still there and unchanged, so every
 denied case snapshots the whole Stage 4 state — sales, sale revisions, obligations,
-fulfilments, payment rows, the payment capacity counter, movements and idempotency markers —
+fulfillments, payment rows, the payment capacity counter, movements and idempotency markers —
 and compares it afterwards. A denial that answers ``NOT_FOUND`` after writing something is
 caught here, and so is one whose message repeats the private id it just refused to name.
 

@@ -9,7 +9,7 @@ method is renamed, re-imaged, deactivated and deleted — because that is the st
 payment-method change either does or does not reach money:
 
 - one read answers the three computed built-ins and this Unit's customs, in the order the sale
-  desk renders them, and a neighbouring Unit's method appears in neither answer;
+  desk renders them, and a neighboring Unit's method appears in neither answer;
 - no custom method may take a built-in's name, at create or at rename, once a sale has been paid
   under that built-in — expected Cash is only unambiguous while ``CASH`` cannot be manufactured;
 - the 50/51 limit is enforced around a method a live sale already used, and the slot a
