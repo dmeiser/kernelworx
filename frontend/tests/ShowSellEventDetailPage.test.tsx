@@ -770,6 +770,9 @@ describe('§3.5.2-§3.5.4: the boards under the header belong to this event', ()
     await user.click(screen.getByTestId('tab-signups'));
     await screen.findByTestId(`signup-row-${FIRST}#${AVERY}`);
     expect(sent.signups[0]).toEqual(SIGNUP_VARIABLES);
+    // The Scout name in the signup row comes only from the roster read, so waiting for it
+    // proves that read answered — the roster query races the signup rows onto the screen.
+    expect(await screen.findByTestId(`signup-scout-${FIRST}#${AVERY}`)).toHaveTextContent('Avery Scout');
     expect(sent.roster[0]).toEqual(ROSTER_VARIABLES);
     // Every signup read, first and any later one, is addressed by this event's id:
     // a stale route cannot leave another event's signups on this screen.
