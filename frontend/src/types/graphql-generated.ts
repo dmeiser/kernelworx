@@ -1202,6 +1202,8 @@ export type GqlMutation = {
   updateSharedCampaign: GqlSharedCampaign;
   /** Edit an event's location, address, split override, or We Owe setting. There is no time input: times are immutable, and the workflow for a wrong time is cancel-and-recreate. Allowed while scheduled, running, or ended, and as a draft while reopened; refused once finalized or cancelled, and refused when turning We Owe off would strand an open obligation. Unit Admin for the event's Unit. */
   updateShowAndSell: GqlShowAndSellAdmin;
+  /** Save the Kernel's rounding draft for the cents the split left unassigned: whole non-negative cents per unique eligible confirmed participant, and the draft total never above the unassigned cents the split produces. The draft is work in progress — assigning too little stays legal, and finalization is what demands every cent assigned — while an ineligible name, a duplicate name, negative cents, or an over-sum is refused whole and writes nothing. Allowed while scheduled, running, or ended, and as a draft again after a reopening; refused once finalized or cancelled. The answer is the whole fresh preview — pool, shares, residue, returns, cash and blockers — with no Scout credit approved anywhere. Unit Admin for the event's Unit. */
+  updateShowAndSellRoundingDraft: GqlFinalizationPreview;
   /** Update a unit's metadata and settings. Unit Admin for that Unit. */
   updateUnit: GqlUnit;
   /** Update a Unit Campaign's name, year, and active state. Unit Admin for the parent Unit. */
@@ -1579,6 +1581,11 @@ export type GqlMutation_UpdateSharedCampaignArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpdateShowAndSellArgs = {
   input: GqlUpdateShowAndSellInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateShowAndSellRoundingDraftArgs = {
+  input: GqlUpdateShowAndSellRoundingDraftInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -2611,6 +2618,14 @@ export type GqlRevokeUnitInviteInput = {
   inviteCode: Scalars['String']['input'];
   /** The Unit the invite belongs to. */
   unitId: Scalars['ID']['input'];
+};
+
+/** One participant's share of the leftover cents in the Kernel's rounding draft. */
+export type GqlRoundingDraftAssignmentInput = {
+  /** Whole cents assigned to this participant; never negative. */
+  cents: Scalars['Int']['input'];
+  /** The eligible confirmed participant receiving these cents. */
+  profileId: Scalars['ID']['input'];
 };
 
 /** Credentials for uploading a file directly to S3 via a pre-signed POST request. */
@@ -3697,6 +3712,18 @@ export type GqlUpdateShowAndSellInput = {
   version: GqlVersionedInput;
   /** Turn We Owe on or off; refused when switching it off would strand an open We Owe obligation. */
   weOweEnabled?: InputMaybe<Scalars['Boolean']['input']>;
+};
+
+/** Input for updateShowAndSellRoundingDraft. The draft is one complete answer, not a merge: a participant left out of ``assignments`` holds zero draft cents afterwards. */
+export type GqlUpdateShowAndSellRoundingDraftInput = {
+  /** The complete draft: unique eligible participants, non-negative integer cents, total at most the split's unassigned cents. */
+  assignments: Array<GqlRoundingDraftAssignmentInput>;
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The event whose finalization is being drafted. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The event version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
 };
 
 /** Input for updateUnitCampaign. Only name/year/isActive change; catalogId is immutable. */

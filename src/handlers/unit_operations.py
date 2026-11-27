@@ -156,6 +156,7 @@ UNIT_SCOUT_ORDERS_FIELD = "unitScoutCampaignOrders"
 # Stage 3.1 — the Show & Sell event aggregate (§3.1.2-§3.1.5).
 CREATE_SHOW_AND_SELL_FIELD = "createShowAndSell"
 UPDATE_SHOW_AND_SELL_FIELD = "updateShowAndSell"
+UPDATE_ROUNDING_DRAFT_FIELD = "updateShowAndSellRoundingDraft"
 CANCEL_SHOW_AND_SELL_FIELD = "cancelShowAndSell"
 SHOW_AND_SELL_FIELD = "showAndSell"
 SHOW_AND_SELLS_FIELD = "showAndSells"
@@ -6633,6 +6634,11 @@ def _show_and_sell_sales(event: Dict[str, Any], caller_id: str) -> Dict[str, Any
 
 
 def _show_and_sell_finalization_preview(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The admin preview entrypoint: guard the event, then answer §5.1.2's picture."""
+    return _finalization_preview_for_row(_event_admin_guard(event, caller_id))
+
+
+def _finalization_preview_for_row(event_row: Dict[str, Any]) -> Dict[str, Any]:
     """The whole pending finalization picture — computed, never approved (§5.1.2).
 
     One answer over the whole event (SPLIT-02): the pool is every ACTIVE sale's total,
@@ -6664,7 +6670,6 @@ def _show_and_sell_finalization_preview(event: Dict[str, Any], caller_id: str) -
     silently trimmed, because a preview that hides a broken draft promises an
     approval that will then be refused.
     """
-    event_row = _event_admin_guard(event, caller_id)
     event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
     state = show_and_sell_models.derive_event_status(event_row)
     if state == show_and_sell_models.STATUS_FINALIZED:
@@ -6802,6 +6807,117 @@ def _show_and_sell_finalization_preview(event: Dict[str, Any], caller_id: str) -
         "issues": issues,
         "eventVersion": int(event_row[show_and_sell_models.VERSION_ATTRIBUTE]),
     }
+
+
+def _update_rounding_draft(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Store the Kernel's rounding draft and answer the fresh preview (§5.1.3, FIN-M-01).
+
+    The draft is the Kernel's answer to the residue SPLIT-10 leaves visible: a map
+    from an eligible confirmed participant to whole cents, written onto the event row
+    as ``roundingDraftByProfileId`` and nothing else — no credit, no total, no
+    movement. It is a draft by name and by effect: only ``finalizeShowAndSell`` turns
+    these numbers into Scout credit, so a draft that assigns too little stays legal
+    (finalization is what demands every cent assigned), while a draft that names an
+    ineligible or duplicated participant, sends negative cents, or assigns more than
+    the split left unassigned is refused whole (§7.2).
+
+    Eligibility and the ceiling are recomputed live from the same rows the preview
+    reads — active sales, confirmed signups, the split itself — never trusted from
+    anything the caller sends. That is why the mutation returns the whole preview:
+    the Kernel sees the ceiling move under their own draft, an edit made while a sale
+    was being entered cannot spend cents that no longer exist, and the answer shown
+    is the answer the next preview will repeat.
+
+    The state matrix is §3.5's editable set — scheduled, running, ended, reopened —
+    so a draft is writable before approval and again after a §5.3 reopening, and a
+    finalized or cancelled event refuses before anything is read past the guard.
+    ``version.expectedVersion`` conditions the single write: two Kernels drafting
+    concurrently resolve on the event row itself, the loser retries against the
+    preview this mutation returns, and no merge of two partial drafts is attempted —
+    a draft is one complete answer, and the duplicate-entry refusal (one participant
+    cannot appear twice) is the same reason spelled out for one request.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _update_fingerprint(payload)
+    event_id = _resource_id(payload, show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE)
+    expected_version = _expected_version(payload)
+    raw_assignments = payload.get("assignments")
+    if not isinstance(raw_assignments, list) or not all(isinstance(entry, Mapping) for entry in raw_assignments):
+        raise AppError(
+            ErrorCode.INVALID_INPUT, "assignments is required and must be a list of {profileId, cents} entries"
+        )
+    draft = show_and_sell_finalization_models.normalize_rounding_assignments([dict(entry) for entry in raw_assignments])
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(
+        caller_id=caller_id, operation=UPDATE_ROUNDING_DRAFT_FIELD, scope=event_id, idempotency_key=key
+    )
+    replayed = _replay(runner, keys, fingerprint, UPDATE_ROUNDING_DRAFT_FIELD, _rounding_draft_answer)
+    if replayed is not None:
+        return replayed
+
+    # After replay for the reason _update_show_and_sell names: the first attempt's own
+    # write moved the version, so a retry that re-ran this would answer CONFLICT about
+    # a request it already completed.
+    _require_read_version(event_row, expected_version)
+    show_and_sell_models.require_editable(event_row)
+
+    # The ceiling and the eligible set come from the live rows, computed exactly as
+    # the preview computes them — one dialect for the arithmetic, so a draft can
+    # never be legal against one answer and illegal against the next.
+    preview = _finalization_preview_for_row(event_row)
+    show_and_sell_finalization_models.validate_rounding_draft(
+        draft,
+        eligible_profile_ids=[str(row["profileId"]) for row in preview["baseAllocations"]],
+        unassigned=int(preview["unassignedCents"]),
+    )
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=event_id)
+    plan.add(
+        *show_and_sell_models.update_rounding_draft_action(
+            show_and_sell_id=event_id,
+            expected_version=expected_version,
+            draft=draft,
+            updated_by_account_id=caller_id,
+            updated_at=utc_now_iso(),
+        )
+    )
+    build_result = _once(lambda: _rounding_draft_answer(event_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=UPDATE_ROUNDING_DRAFT_FIELD,
+        fingerprint=fingerprint,
+        result_id=event_id,
+        load_result=_rounding_draft_answer,
+        result_payload=build_result,
+    )
+    updated = build_result()
+    log.info(
+        "Show & Sell rounding draft updated",
+        show_and_sell_id=event_id,
+        caller_id=caller_id,
+        version=updated["eventVersion"],
+        participants=len(draft),
+        assigned_cents=sum(draft.values()),
+    )
+    return updated
+
+
+def _rounding_draft_answer(event_id: str) -> Dict[str, Any]:
+    """The mutation's answer: the preview as the stored rows now read.
+
+    Shared by the commit, the replay, and the marker's result loader, so the answer
+    a retry receives is the answer the next preview would give — never a snapshot of
+    what some other writer has since changed.
+    """
+    return _finalization_preview_for_row(dict(show_and_sell_models.load_show_and_sell_or_not_found(event_id)))
 
 
 def _commitment_read_scope(caller_id: str, profile_id: str, unit_id: Any) -> Optional[set[str]]:
@@ -9548,6 +9664,7 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     UNIT_SCOUT_ORDERS_FIELD: _unit_scout_campaign_orders,
     CREATE_SHOW_AND_SELL_FIELD: _create_show_and_sell,
     UPDATE_SHOW_AND_SELL_FIELD: _update_show_and_sell,
+    UPDATE_ROUNDING_DRAFT_FIELD: _update_rounding_draft,
     CANCEL_SHOW_AND_SELL_FIELD: _cancel_show_and_sell,
     SHOW_AND_SELL_FIELD: _show_and_sell,
     SHOW_AND_SELLS_FIELD: _show_and_sells,

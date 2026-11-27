@@ -2227,3 +2227,41 @@ describe("Show & Sell Wave 6.1 finalization preview SDL (schema.graphql)", () =>
     }
   });
 });
+
+describe("Show & Sell Wave 6.1 rounding draft SDL (schema.graphql)", () => {
+  test("the mutation takes one complete draft and answers the whole preview", () => {
+    const mutation = rootFieldByName("Mutation", "updateShowAndSellRoundingDraft");
+    expect(mutation, "Mutation.updateShowAndSellRoundingDraft is missing").toBeDefined();
+    expect(mutation!.text).toMatch(/input\s*:\s*UpdateShowAndSellRoundingDraftInput!/);
+    expect(returnTypeName(mutation!.text)).toBe("FinalizationPreview");
+    expect(mutation!.text).toMatch(/\):\s*FinalizationPreview!/, "the draft answers the fresh preview, never a receipt");
+    expect(mutation!.directives, "updateShowAndSellRoundingDraft must be directive-free (Cognito-only)").toEqual([]);
+
+    expect([...fieldNameSet(definition("UpdateShowAndSellRoundingDraftInput"))]).toEqual([
+      "showAndSellId",
+      "assignments",
+      "version",
+      "idempotency",
+    ]);
+    const input = fieldsOf(definition("UpdateShowAndSellRoundingDraftInput"));
+    expect(input.find((f) => f.name === "assignments")!.text).toMatch(/assignments\s*:\s*\[RoundingDraftAssignmentInput!\]!/);
+    expect(input.find((f) => f.name === "version")!.text).toMatch(/version\s*:\s*VersionedInput!/);
+    expect(input.find((f) => f.name === "idempotency")!.text).toMatch(/idempotency\s*:\s*IdempotencyInput!/);
+
+    expect([...fieldNameSet(definition("RoundingDraftAssignmentInput"))]).toEqual(["profileId", "cents"]);
+    expect(fieldsOf(definition("RoundingDraftAssignmentInput")).find((f) => f.name === "cents")!.text).toMatch(
+      /cents\s*:\s*Int!/,
+    );
+  });
+
+  test("the draft input carries no approved-credit shape and no directive", () => {
+    for (const name of ["UpdateShowAndSellRoundingDraftInput", "RoundingDraftAssignmentInput"]) {
+      expect(definition(name).kind, `${name} must be an input type`).toBe("input");
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+      const names = fieldNameSet(definition(name));
+      for (const forbidden of ["finalizationId", "approved", "expectedVersion", "unassignedCents", "splitMethod"]) {
+        expect(names.has(forbidden), `${name}.${forbidden} would move ceiling or approval into the caller's hands`).toBe(false);
+      }
+    }
+  });
+});

@@ -2259,6 +2259,26 @@ input UpdateShowAndSellInput {
   idempotency: IdempotencyInput!
 }
 
+"""One participant's share of the leftover cents in the Kernel's rounding draft."""
+input RoundingDraftAssignmentInput {
+  """The eligible confirmed participant receiving these cents."""
+  profileId: ID!
+  """Whole cents assigned to this participant; never negative."""
+  cents: Int!
+}
+
+"""Input for updateShowAndSellRoundingDraft. The draft is one complete answer, not a merge: a participant left out of ``assignments`` holds zero draft cents afterwards."""
+input UpdateShowAndSellRoundingDraftInput {
+  """The event whose finalization is being drafted."""
+  showAndSellId: ID!
+  """The complete draft: unique eligible participants, non-negative integer cents, total at most the split's unassigned cents."""
+  assignments: [RoundingDraftAssignmentInput!]!
+  """The event version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
 """Input for cancelShowAndSell. Legal only before startAt, and the reason is required: a state change that releases stock and cancels Scouts has to say why."""
 input CancelShowAndSellInput {
   """The event to cancel."""
@@ -3543,6 +3563,11 @@ type Mutation {
     """The edit."""
     input: UpdateShowAndSellInput!
   ): ShowAndSellAdmin!
+  """Save the Kernel's rounding draft for the cents the split left unassigned: whole non-negative cents per unique eligible confirmed participant, and the draft total never above the unassigned cents the split produces. The draft is work in progress — assigning too little stays legal, and finalization is what demands every cent assigned — while an ineligible name, a duplicate name, negative cents, or an over-sum is refused whole and writes nothing. Allowed while scheduled, running, or ended, and as a draft again after a reopening; refused once finalized or cancelled. The answer is the whole fresh preview — pool, shares, residue, returns, cash and blockers — with no Scout credit approved anywhere. Unit Admin for the event's Unit."""
+  updateShowAndSellRoundingDraft(
+    """The complete draft."""
+    input: UpdateShowAndSellRoundingDraftInput!
+  ): FinalizationPreview!
   """Cancel an event before it starts, in one atomic workflow: the event goes CANCELLED with its reason and actor, every open allocation is cancelled with its remainder released, signups and their commitment projections are cancelled, slot counters go to zero, and each Scout's commitment guard moves. An event that has started is finished by finalizing it, not by cancelling it. Unit Admin for the event's Unit."""
   cancelShowAndSell(
     """The cancellation."""

@@ -96,6 +96,7 @@ MUTATION_FIELDS = {
     "reverseIndividualOrderFulfillment",
     "createShowAndSell",
     "updateShowAndSell",
+    "updateShowAndSellRoundingDraft",
     "cancelShowAndSell",
     "assignShowAndSellInventory",
     "upsertShowAndSellSlot",
@@ -352,4 +353,4 @@ def test_all_sixty_unit_fields_are_resolved_on_that_datasource() -> None:
         assert f"Query:{field}" in bound, f"Query.{field} has no resolver on UnitOperationsDS"
     for field in sorted(MUTATION_FIELDS):
         assert f"Mutation:{field}" in bound, f"Mutation.{field} has no resolver on UnitOperationsDS"
-    assert len(bound) == 66, f"expected exactly the 66 Unit-tenant resolvers, got {sorted(bound)}"
+    assert len(bound) == 67, f"expected exactly the 67 Unit-tenant resolvers, got {sorted(bound)}"
