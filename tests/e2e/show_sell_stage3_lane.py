@@ -103,6 +103,28 @@ UNIT_CITY = "Denver"
 UNIT_STATE = "CO"
 CAMPAIGN_YEAR = 2026
 
+#: The one map the census transport resolves read names against — the support module's merged
+#: Stage 2 + Stage 3 documents, named at the lane so the pins below can tie this transport to it by
+#: identity.  ``showAndSells`` joins the swept tables with the Stage 4 sweep rules and no Stage 2
+#: document mints it, so resolving anywhere else raises ``KeyError('showAndSells')`` into the probe's
+#: exception guard and answers ``""`` for that table — the regression round 1 caught, now pinned.
+CENSUS_DOCUMENTS = stage3.STAGE_THREE_CENSUS_DOCUMENTS
+
+
+def census_transport(admin: str) -> Callable[[str, Mapping[str, Any]], Mapping[str, Any]]:
+    """Build the lane's census transport — the only transport the lane record carries.
+
+    One census read, sent as the product answers it, with the whole body returned.  Read names
+    resolve through :data:`CENSUS_DOCUMENTS`; a name resolving in neither shipped half raises here
+    rather than being swallowed into an unproven table.  Module-level so the pins can drive this
+    exact transport, not a copy of its lookup.
+    """
+
+    def transport(document: str, variables: Mapping[str, Any]) -> Mapping[str, Any]:
+        return api.gql_raw(admin, CENSUS_DOCUMENTS[document], dict(variables))
+
+    return transport
+
 #: Products the lane prefers when the Unit Campaign's catalog carries them.  Never invented: the id comes
 #: from that catalog, and these names only decide which product the lane picks, so two runs of the record
 #: read the same way.
@@ -2252,16 +2274,7 @@ def run(out_dir: Path, data_id: str = "", prior: Sequence[str] = ()) -> dict[str
     canary_before: dict[str, Any] = {}
     recovery_steps: list[str] = []
 
-    def transport(document: str, variables: Mapping[str, Any]) -> Mapping[str, Any]:
-        """One census read, sent as the product answers it, with the whole body returned.
-
-        The document map is the two shipped halves merged: the census reads the swept tables answer
-        are Stage 2 documents except ``showAndSells``, which the Show & Sell table joined to the sweep
-        needs and only the Stage 3 documents mint. A name that resolves in neither is a lookup bug,
-        so it raises here rather than being swallowed into an unproven table.
-        """
-        census_documents = {**stage2.STAGE_TWO_DOCUMENTS, **stage3.STAGE_THREE_DOCUMENTS}
-        return api.gql_raw(admin, census_documents[document], dict(variables))
+    transport = census_transport(admin)
 
     # The canary is built and snapshotted before anything is given back, so the recovery pass below sits
     # inside the window the canary exists to watch: a cancellation that reached a row it should not have

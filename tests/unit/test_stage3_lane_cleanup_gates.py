@@ -31,6 +31,7 @@ import pytest
 from tests.e2e import show_sell_stage3_lane as lane
 from tests.e2e.utils import show_sell_graphql as api
 from tests.e2e.utils import show_sell_stage2_support as stage2
+from tests.e2e.utils import show_sell_stage3_support as stage3
 
 CURRENT = "w168lane-1225010101-aa11"
 SIBLING = "w168lane-1225010102-bb22"
@@ -1743,3 +1744,39 @@ def test_a_key_named_again_after_it_is_gone_is_still_verified_by_read(
     assert _entry(second["guardResidue"], CARD_GUARD)["state"] == lane.GUARD_ABSENT
     assert second["guardResidue"]["guardRows"] == 9
     assert lane.lane_failures(second) == []
+
+
+def test_the_lane_census_transport_resolves_from_the_one_merged_document_map(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lane's own census transport is pinned to the support module's merged map, by identity and use.
+
+    ``showAndSells`` joins the swept tables with the Stage 4 sweep rules and no Stage 2 document mints
+    it, so a transport resolving names from ``stage2.STAGE_TWO_DOCUMENTS`` raises ``KeyError`` into the
+    probe's exception guard and answers ``""`` for that table — the regression the round-1 review
+    caught shipping unpinned. This drives ``lane.census_transport`` itself, not a copy of its lookup:
+    every read name in :data:`STAGE_THREE_RESIDUE_READS` must send its Stage 2 or Stage 3 query text
+    through the lane's real transport, which is the line that broke pre-fix.
+    """
+    assert lane.CENSUS_DOCUMENTS is stage3.STAGE_THREE_CENSUS_DOCUMENTS, (
+        "the lane resolves census names from the support module's single merged map"
+    )
+    assert "showAndSells" not in stage2.STAGE_TWO_DOCUMENTS and "showAndSells" in stage3.STAGE_THREE_DOCUMENTS, (
+        "the very name that broke pre-fix still comes only from the Stage 3 half"
+    )
+
+    sent: list[str] = []
+
+    def fake_gql_raw(_admin: str, query: str, _variables: Mapping[str, Any]) -> Mapping[str, Any]:
+        sent.append(query)
+        return {"data": {}}
+
+    monkeypatch.setattr(lane.api, "gql_raw", fake_gql_raw)
+    transport = lane.census_transport("admin-token")
+    for reads in stage3.STAGE_THREE_RESIDUE_READS.values():
+        for document in reads:
+            transport(document, {})
+            query = sent[-1]
+            assert query == lane.CENSUS_DOCUMENTS[document], f"the transport sent something other than {document}"
+            assert document in query, f"{document} is not selected by its own query text"
+    assert stage3.STAGE_THREE_DOCUMENTS["showAndSells"] in sent, "the Stage 3 half never reached the wire"
