@@ -50,6 +50,7 @@ try:  # pragma: no cover
         order_fulfillment_models,
         qr_objects,
         sale_payment_models,
+        show_and_sell_finalization_models,
         show_and_sell_models,
         show_and_sell_sale_models,
         unit_auth,
@@ -65,6 +66,7 @@ except ModuleNotFoundError:  # pragma: no cover
         order_fulfillment_models,
         qr_objects,
         sale_payment_models,
+        show_and_sell_finalization_models,
         show_and_sell_models,
         show_and_sell_sale_models,
         unit_auth,
@@ -154,6 +156,7 @@ UNIT_SCOUT_ORDERS_FIELD = "unitScoutCampaignOrders"
 # Stage 3.1 — the Show & Sell event aggregate (§3.1.2-§3.1.5).
 CREATE_SHOW_AND_SELL_FIELD = "createShowAndSell"
 UPDATE_SHOW_AND_SELL_FIELD = "updateShowAndSell"
+UPDATE_ROUNDING_DRAFT_FIELD = "updateShowAndSellRoundingDraft"
 CANCEL_SHOW_AND_SELL_FIELD = "cancelShowAndSell"
 SHOW_AND_SELL_FIELD = "showAndSell"
 SHOW_AND_SELLS_FIELD = "showAndSells"
@@ -174,6 +177,14 @@ SIGNUP_SCOUT_FIELD = "signupScoutForShowAndSellSlot"
 CANCEL_SIGNUP_FIELD = "cancelShowAndSellSignup"
 CONFIRM_WORK_FIELD = "confirmShowAndSellWork"
 SHOW_AND_SELL_SALES_FIELD = "showAndSellSales"
+SHOW_AND_SELL_FINALIZATION_PREVIEW_FIELD = "showAndSellFinalizationPreview"
+SHOW_AND_SELL_FINALIZATIONS_FIELD = "showAndSellFinalizations"
+SHOW_AND_SELL_FINALIZATION_FIELD = "showAndSellFinalization"
+FINALIZATION_ID_ARGUMENT = "finalizationId"
+FINALIZATION_SALE_SNAPSHOTS_FIELD = "showAndSellFinalizationSaleSnapshots"
+FINALIZATION_WORK_SNAPSHOTS_FIELD = "showAndSellFinalizationWorkSnapshots"
+FINALIZATION_RETURN_LINES_FIELD = "showAndSellFinalizationReturnLines"
+FINALIZATION_CREDITS_FIELD = "showAndSellFinalizationCredits"
 SHOW_AND_SELL_SIGNUPS_FIELD = "showAndSellSignups"
 MY_COMMITMENTS_FIELD = "myScoutCommitments"
 SIGNUP_CALENDAR_FIELD = "showAndSellSignupCalendarData"
@@ -6629,6 +6640,472 @@ def _show_and_sell_sales(event: Dict[str, Any], caller_id: str) -> Dict[str, Any
     return page
 
 
+def _show_and_sell_finalization_preview(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The admin preview entrypoint: guard the event, then answer §5.1.2's picture."""
+    return _finalization_preview_for_row(_event_admin_guard(event, caller_id))
+
+
+def _finalization_preview_for_row(event_row: Dict[str, Any]) -> Dict[str, Any]:
+    """The whole pending finalization picture — computed, never approved (§5.1.2).
+
+    One answer over the whole event (SPLIT-02): the pool is every ACTIVE sale's total,
+    which already contains each We Owe line — SPLIT-05 counts those sales exactly once,
+    so obligations are never added to the pool a second time. Base shares are the
+    round-down floor of exact integer arithmetic and the residue stays visible as
+    unassigned cents (SPLIT-10); the event's rounding draft rides onto the participant
+    rows and shrinks the *assigned* remainder, but never the reported unassigned
+    cents, because §5.1.3 bounds a draft against the split's residue, not against what
+    an earlier draft already took. Expected returns come from the event's own OPEN
+    allocations read through ``productIds`` (SEC-06: the index is display, not truth),
+    and expected cash is decided by the snapshotted ``methodCode`` alone (CASH-01) —
+    never by parsing an Other note for the word "cash".
+
+    The preview writes nothing (EVT-Q-06-02): no finalization row, no credit, no
+    total, no inventory movement, and the event version does not move — approving any
+    of it is ``finalizeShowAndSell`` (§5.2), whose transaction the preview exists to
+    describe. A FINALIZED event refuses rather than answers: its credit is approved,
+    and a second, computed answer beside the approved one is exactly the disagreement
+    SPLIT-06 forbids; an approved picture is read from the finalization rows
+    themselves. A CANCELLED event has no pool to split and refuses too.
+
+    ``issues`` are the named blockers to approval, not an error: an in-progress event
+    may be previewed, but finalization waits for the clock (``EVENT_NOT_ENDED``); a
+    pool with nobody confirmed cannot be split (``NO_CONFIRMED_WORK``); leftover cents
+    must all be assigned before approval (``ROUNDING_CENTS_UNASSIGNED``, SPLIT-10);
+    and a stored draft that went stale — an ineligible name (``ROUNDING_PARTICIPANT_
+    INELIGIBLE``) or an over-sum (``ROUNDING_OVERSUM``) — is reported rather than
+    silently trimmed, because a preview that hides a broken draft promises an
+    approval that will then be refused.
+    """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    state = _preview_state_guard(event_row)
+    active_sales = [
+        row
+        for row in show_and_sell_sale_models.event_sale_rows(event_id)
+        if str(row.get(show_and_sell_sale_models.STATUS_ATTRIBUTE)) == show_and_sell_sale_models.SALE_STATUS_ACTIVE
+    ]
+    whole_pool = show_and_sell_finalization_models.whole_pool_cents(active_sales)
+    calculated_cash = sum(
+        sale_payment_models.expected_cash_cents(
+            row[show_and_sell_sale_models.PAYMENT_SNAPSHOT_ATTRIBUTE],
+            row[show_and_sell_sale_models.TOTAL_CENTS_ATTRIBUTE],
+        )
+        for row in active_sales
+    )
+
+    # One entry per Scout, minutes summed across slots (SPLIT-03), and the residue
+    # stays visible as unassigned cents (SPLIT-10).
+    minutes_by_profile, campaign_by_profile = _preview_eligible_work(event_id)
+    shares = show_and_sell_finalization_models.base_shares(
+        whole_pool_cents=whole_pool,
+        split_method=str(event_row[show_and_sell_models.SPLIT_METHOD_ATTRIBUTE]),
+        eligible_work=list(minutes_by_profile.items()),
+    )
+    unassigned = show_and_sell_finalization_models.unassigned_cents(whole_pool, shares)
+
+    draft: Dict[str, int] = {
+        str(key): int(value)
+        for key, value in dict(event_row.get(show_and_sell_models.ROUNDING_DRAFT_ATTRIBUTE) or {}).items()
+    }
+    base_allocations, applied_draft = _preview_base_allocations(shares, campaign_by_profile, minutes_by_profile, draft)
+    issues = _preview_issues(state, whole_pool, shares, draft, applied_draft, unassigned)
+    return_lines = _preview_return_lines(event_row)
+    return {
+        "wholePoolCents": whole_pool,
+        "baseAllocations": base_allocations,
+        "unassignedCents": unassigned,
+        "returnLines": return_lines,
+        "cashPreview": {"calculatedExpectedCents": calculated_cash},
+        "issues": issues,
+        "eventVersion": int(event_row[show_and_sell_models.VERSION_ATTRIBUTE]),
+    }
+
+
+def _preview_state_guard(event_row: Dict[str, Any]) -> str:
+    """Refuse the two states a computed answer must not contradict; return the rest."""
+    state = str(show_and_sell_models.derive_event_status(event_row))
+    if state == show_and_sell_models.STATUS_FINALIZED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "this event's credit is approved and final; read the finalization itself, or reopen the event to revise it",
+            details={"subcode": "FINALIZATION_APPROVED"},
+        )
+    if state == show_and_sell_models.STATUS_CANCELLED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "a cancelled event is never finalized; it has no pool to split",
+            details={"subcode": "EVENT_CANCELLED"},
+        )
+    return state
+
+
+def _preview_eligible_work(event_id: str) -> Tuple[Dict[str, int], Dict[str, str]]:
+    """One entry per Scout, minutes summed across slots: SPLIT-03's equal share is per
+    Scout regardless of which slots they worked, and a cancelled signup or an
+    un-confirmed row (zero minutes) is not eligible work.
+    """
+    minutes_by_profile: Dict[str, int] = {}
+    campaign_by_profile: Dict[str, str] = {}
+    for row in show_and_sell_models.event_signup_rows(event_id):
+        if str(row.get(show_and_sell_models.STATUS_ATTRIBUTE)) != show_and_sell_models.SIGNUP_ACTIVE:
+            continue
+        minutes = int(row.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0)
+        if minutes < 1:
+            continue
+        profile = str(row[show_and_sell_models.PROFILE_ID_ATTRIBUTE])
+        minutes_by_profile[profile] = minutes_by_profile.get(profile, 0) + minutes
+        campaign_by_profile.setdefault(profile, str(row[show_and_sell_models.CAMPAIGN_ID_ATTRIBUTE]))
+    return minutes_by_profile, campaign_by_profile
+
+
+def _preview_base_allocations(
+    shares: Dict[str, int],
+    campaign_by_profile: Dict[str, str],
+    minutes_by_profile: Dict[str, int],
+    draft: Dict[str, int],
+) -> Tuple[List[Dict[str, Any]], int]:
+    """The per-Scout answer rows plus the cents a stored draft already assigns."""
+    base_allocations: List[Dict[str, Any]] = []
+    applied_draft = 0
+    for profile in sorted(shares):
+        rounding = int(draft.get(profile, 0))
+        applied_draft += rounding
+        base_allocations.append(
+            {
+                "profileId": profile,
+                "campaignId": campaign_by_profile[profile],
+                "actualMinutes": minutes_by_profile[profile],
+                "baseAmountCents": shares[profile],
+                "roundingCreditCents": rounding,
+                "amountCents": shares[profile] + rounding,
+            }
+        )
+    return base_allocations, applied_draft
+
+
+def _preview_issues(
+    state: str,
+    whole_pool: int,
+    shares: Dict[str, int],
+    draft: Dict[str, int],
+    applied_draft: int,
+    unassigned: int,
+) -> List[Dict[str, Any]]:
+    """The named blockers to approval, ordered — reported, never silently trimmed."""
+    issues: List[Dict[str, Any]] = []
+    if state not in (show_and_sell_models.STATUS_ENDED, show_and_sell_models.STATUS_REOPENED):
+        issues.append(
+            {
+                "code": "EVENT_NOT_ENDED",
+                "field": "status",
+                "message": "the event has not reached its endAt yet; finalization waits for the clock",
+            }
+        )
+    if whole_pool > 0 and not shares:
+        issues.append(
+            {
+                "code": "NO_CONFIRMED_WORK",
+                "field": "work",
+                "message": "the pool has cents but no confirmed participant to award them to (SPLIT-03)",
+            }
+        )
+    for profile in sorted(draft):
+        if profile not in shares:
+            issues.append(
+                {
+                    "code": "ROUNDING_PARTICIPANT_INELIGIBLE",
+                    "field": "roundingDraft",
+                    "message": "the rounding draft names a profile that holds no confirmed share of this pool",
+                    "profileId": profile,
+                }
+            )
+    if applied_draft > unassigned:
+        issues.append(
+            {
+                "code": "ROUNDING_OVERSUM",
+                "field": "roundingDraft",
+                "message": "the rounding draft assigns more cents than the split left unassigned",
+            }
+        )
+    elif shares and unassigned - applied_draft > 0:
+        issues.append(
+            {
+                "code": "ROUNDING_CENTS_UNASSIGNED",
+                "field": "roundingDraft",
+                "message": "every leftover cent must be assigned before approval (SPLIT-10)",
+            }
+        )
+    issues.sort(key=lambda issue: (issue["code"], str(issue.get("profileId") or "")))
+    return issues
+
+
+def _preview_return_lines(event_row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Expected returns from the event's own OPEN allocations, ordered by product."""
+    return_lines: List[Dict[str, Any]] = []
+    for row in show_and_sell_models.event_allocations(event_row):
+        if str(row.get(inventory_models.STATUS_ATTRIBUTE)) != inventory_models.ALLOCATION_OPEN:
+            continue
+        allocated = int(row[inventory_models.ALLOCATED_QTY])
+        sold = int(row[inventory_models.SOLD_QTY])
+        return_lines.append(
+            {
+                "productId": str(row[inventory_models.PRODUCT_ID_ATTRIBUTE]),
+                "allocatedQty": allocated,
+                "soldQty": sold,
+                "expectedQty": show_and_sell_finalization_models.expected_return_qty(allocated, sold),
+            }
+        )
+    return_lines.sort(key=lambda line: line["productId"])
+    return return_lines
+
+
+def _update_rounding_draft(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """Store the Kernel's rounding draft and answer the fresh preview (§5.1.3, FIN-M-01).
+
+    The draft is the Kernel's answer to the residue SPLIT-10 leaves visible: a map
+    from an eligible confirmed participant to whole cents, written onto the event row
+    as ``roundingDraftByProfileId`` and nothing else — no credit, no total, no
+    movement. It is a draft by name and by effect: only ``finalizeShowAndSell`` turns
+    these numbers into Scout credit, so a draft that assigns too little stays legal
+    (finalization is what demands every cent assigned), while a draft that names an
+    ineligible or duplicated participant, sends negative cents, or assigns more than
+    the split left unassigned is refused whole (§7.2).
+
+    Eligibility and the ceiling are recomputed live from the same rows the preview
+    reads — active sales, confirmed signups, the split itself — never trusted from
+    anything the caller sends. That is why the mutation returns the whole preview:
+    the Kernel sees the ceiling move under their own draft, an edit made while a sale
+    was being entered cannot spend cents that no longer exist, and the answer shown
+    is the answer the next preview will repeat.
+
+    The state matrix is §3.5's editable set — scheduled, running, ended, reopened —
+    so a draft is writable before approval and again after a §5.3 reopening, and a
+    finalized or cancelled event refuses before anything is read past the guard.
+    ``version.expectedVersion`` conditions the single write: two Kernels drafting
+    concurrently resolve on the event row itself, the loser retries against the
+    preview this mutation returns, and no merge of two partial drafts is attempted —
+    a draft is one complete answer, and the duplicate-entry refusal (one participant
+    cannot appear twice) is the same reason spelled out for one request.
+    """
+    log = get_logger(__name__)
+    payload = _require_input(event)
+    key = _idempotency_key(payload)
+    fingerprint = _update_fingerprint(payload)
+    event_id = _resource_id(payload, show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE)
+    expected_version = _expected_version(payload)
+    raw_assignments = payload.get("assignments")
+    if not isinstance(raw_assignments, list) or not all(isinstance(entry, Mapping) for entry in raw_assignments):
+        raise AppError(
+            ErrorCode.INVALID_INPUT, "assignments is required and must be a list of {profileId, cents} entries"
+        )
+    draft = show_and_sell_finalization_models.normalize_rounding_assignments([dict(entry) for entry in raw_assignments])
+
+    event_row = show_and_sell_models.load_show_and_sell_or_not_found(event_id)
+    unit_auth.require_unit_admin(caller_id, str(event_row[show_and_sell_models.UNIT_ID_ATTRIBUTE]))
+
+    runner = IdempotentMutationRunner()
+    keys = _show_and_sell_marker(
+        caller_id=caller_id, operation=UPDATE_ROUNDING_DRAFT_FIELD, scope=event_id, idempotency_key=key
+    )
+    replayed = _replay(runner, keys, fingerprint, UPDATE_ROUNDING_DRAFT_FIELD, _rounding_draft_answer)
+    if replayed is not None:
+        return replayed
+
+    # After replay for the reason _update_show_and_sell names: the first attempt's own
+    # write moved the version, so a retry that re-ran this would answer CONFLICT about
+    # a request it already completed.
+    _require_read_version(event_row, expected_version)
+    show_and_sell_models.require_editable(event_row)
+
+    # The ceiling and the eligible set come from the live rows, computed exactly as
+    # the preview computes them — one dialect for the arithmetic, so a draft can
+    # never be legal against one answer and illegal against the next.
+    preview = _finalization_preview_for_row(event_row)
+    show_and_sell_finalization_models.validate_rounding_draft(
+        draft,
+        eligible_profile_ids=[str(row["profileId"]) for row in preview["baseAllocations"]],
+        unassigned=int(preview["unassignedCents"]),
+    )
+
+    plan = WritePlan()
+    runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=event_id)
+    plan.add(
+        *show_and_sell_models.update_rounding_draft_action(
+            show_and_sell_id=event_id,
+            expected_version=expected_version,
+            draft=draft,
+            updated_by_account_id=caller_id,
+            updated_at=utc_now_iso(),
+        )
+    )
+    build_result = _once(lambda: _rounding_draft_answer(event_id))
+    runner.execute(
+        keys,
+        plan,
+        operation=UPDATE_ROUNDING_DRAFT_FIELD,
+        fingerprint=fingerprint,
+        result_id=event_id,
+        load_result=_rounding_draft_answer,
+        result_payload=build_result,
+    )
+    updated = build_result()
+    log.info(
+        "Show & Sell rounding draft updated",
+        show_and_sell_id=event_id,
+        caller_id=caller_id,
+        version=updated["eventVersion"],
+        participants=len(draft),
+        assigned_cents=sum(draft.values()),
+    )
+    return updated
+
+
+def _rounding_draft_answer(event_id: str) -> Dict[str, Any]:
+    """The mutation's answer: the preview as the stored rows now read.
+
+    Shared by the commit, the replay, and the marker's result loader, so the answer
+    a retry receives is the answer the next preview would give — never a snapshot of
+    what some other writer has since changed.
+    """
+    return _finalization_preview_for_row(dict(show_and_sell_models.load_show_and_sell_or_not_found(event_id)))
+
+
+def _show_and_sell_finalizations(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One event's finalization history, paginated (§5.1.4).
+
+    Discovery, in version order: the browser walks APPROVED, SUSPENDED and SUPERSEDED
+    versions oldest-first, and each summary names its ``previousFinalizationId`` so the
+    chain is readable from the list itself without a read per version. A version's
+    record is never replaced by the next one — ``finalizeShowAndSell`` appends — so a
+    list read after a re-finalization shows both answers, which is what
+    current-versus-history reporting reads here to know what to pull detail for.
+    An event that has never been finalized answers an empty page rather than an
+    error: "has this event been finalized?" is a question a screen asks before it
+    knows the answer.
+    """
+    event_row = _event_admin_guard(event, caller_id)
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    rows = show_and_sell_finalization_models.finalization_rows(event_id)
+    rows.sort(key=lambda row: int(row[show_and_sell_finalization_models.VERSION_NUMBER_ATTRIBUTE]))
+    page = dict(
+        paginate_page(
+            rows,
+            f"{SHOW_AND_SELL_FINALIZATIONS_FIELD}#{event_id}",
+            _page_argument(event),
+        )
+    )
+    page["items"] = [show_and_sell_finalization_models.finalization_summary_payload(row) for row in page["items"]]
+    return page
+
+
+def _finalization_address(event: Dict[str, Any], caller_id: str) -> Tuple[str, str]:
+    """Shared entry for the version-scoped reads: admin of the event, one named version."""
+    event_row = _event_admin_guard(event, caller_id)
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    finalization_id = show_and_sell_finalization_models.normalize_finalization_id(
+        _query_argument(event, FINALIZATION_ID_ARGUMENT)
+    )
+    return event_id, finalization_id
+
+
+def _show_and_sell_finalization(event: Dict[str, Any], caller_id: str) -> Optional[Dict[str, Any]]:
+    """One finalization version's full record, or ``null`` when it does not exist (§5.1.4).
+
+    ``null`` rather than ``NOT_FOUND`` for the absent case because this is the
+    detail read behind a screen that first asks whether the event has been
+    finalized at all — the empty history from ``showAndSellFinalizations`` and a
+    null detail are the same answer, "not yet", delivered without an error path
+    the browser would have to special-case. The id itself is validated, so a
+    malformed id is still ``INVALID_INPUT`` — only absence is quiet.
+    """
+    event_id, finalization_id = _finalization_address(event, caller_id)
+    row = show_and_sell_finalization_models.read_finalization(event_id, finalization_id)
+    return None if row is None else show_and_sell_finalization_models.finalization_detail_payload(row)
+
+
+def _finalization_child_page(
+    event: Dict[str, Any],
+    caller_id: str,
+    *,
+    field: str,
+    load_rows: Any,
+    payload: Any,
+    sort_key: Any,
+) -> Dict[str, Any]:
+    """One version's immutable child collection, paginated (PAGE-01, §5.1.4).
+
+    The version row is read first so a child page cannot be answered for an id that
+    names nothing: an empty page must mean "this approved version held no such row",
+    never "you mistyped the finalization id". The cursor is scoped to event and
+    version, so a page token cannot cross from one version's rows to another's.
+    """
+    event_id, finalization_id = _finalization_address(event, caller_id)
+    if show_and_sell_finalization_models.read_finalization(event_id, finalization_id) is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell finalization not found")
+    rows = load_rows(event_id, finalization_id)
+    rows.sort(key=sort_key)
+    page = dict(
+        paginate_page(
+            rows,
+            f"{field}#{event_id}#{finalization_id}",
+            _page_argument(event),
+        )
+    )
+    page["items"] = [payload(row) for row in page["items"]]
+    return page
+
+
+def _show_and_sell_finalization_sale_snapshots(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The version's frozen sales (§5.16) — the report reproduces the sale as approved, not as amended."""
+    return _finalization_child_page(
+        event,
+        caller_id,
+        field=FINALIZATION_SALE_SNAPSHOTS_FIELD,
+        load_rows=show_and_sell_finalization_models.finalization_sale_snapshot_rows,
+        payload=show_and_sell_finalization_models.finalization_sale_snapshot_payload,
+        sort_key=lambda row: str(row[show_and_sell_finalization_models.SALE_ID_ATTRIBUTE]),
+    )
+
+
+def _show_and_sell_finalization_work_snapshots(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The version's frozen per-slot work (§5.16) — minutes as the approval saw them."""
+    return _finalization_child_page(
+        event,
+        caller_id,
+        field=FINALIZATION_WORK_SNAPSHOTS_FIELD,
+        load_rows=show_and_sell_finalization_models.finalization_work_snapshot_rows,
+        payload=show_and_sell_finalization_models.finalization_work_snapshot_payload,
+        sort_key=lambda row: (
+            str(row[show_and_sell_finalization_models.SLOT_ID_ATTRIBUTE]),
+            str(row[show_and_sell_finalization_models.PROFILE_ID_ATTRIBUTE]),
+        ),
+    )
+
+
+def _show_and_sell_finalization_return_lines(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The version's return reconciliation (§5.16) — expected, actual, variance, and the linked adjustment."""
+    return _finalization_child_page(
+        event,
+        caller_id,
+        field=FINALIZATION_RETURN_LINES_FIELD,
+        load_rows=show_and_sell_finalization_models.finalization_return_line_rows,
+        payload=show_and_sell_finalization_models.finalization_return_line_payload,
+        sort_key=lambda row: str(row[show_and_sell_finalization_models.PRODUCT_ID_ATTRIBUTE]),
+    )
+
+
+def _show_and_sell_finalization_credits(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The version's credit rows (§5.17) — amounts with the version's own status, never a live re-derivation."""
+    return _finalization_child_page(
+        event,
+        caller_id,
+        field=FINALIZATION_CREDITS_FIELD,
+        load_rows=show_and_sell_finalization_models.finalization_credit_rows,
+        payload=show_and_sell_finalization_models.finalization_credit_payload,
+        sort_key=lambda row: str(row[show_and_sell_finalization_models.PROFILE_ID_ATTRIBUTE]),
+    )
+
+
 def _commitment_read_scope(caller_id: str, profile_id: str, unit_id: Any) -> Optional[set[str]]:
     """Which Unit Campaigns this caller may read this Scout's commitments in (INV-Q-06-02).
 
@@ -9373,6 +9850,7 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     UNIT_SCOUT_ORDERS_FIELD: _unit_scout_campaign_orders,
     CREATE_SHOW_AND_SELL_FIELD: _create_show_and_sell,
     UPDATE_SHOW_AND_SELL_FIELD: _update_show_and_sell,
+    UPDATE_ROUNDING_DRAFT_FIELD: _update_rounding_draft,
     CANCEL_SHOW_AND_SELL_FIELD: _cancel_show_and_sell,
     SHOW_AND_SELL_FIELD: _show_and_sell,
     SHOW_AND_SELLS_FIELD: _show_and_sells,
@@ -9386,6 +9864,13 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     CANCEL_SIGNUP_FIELD: _cancel_show_and_sell_signup,
     CONFIRM_WORK_FIELD: _confirm_show_and_sell_work,
     SHOW_AND_SELL_SALES_FIELD: _show_and_sell_sales,
+    SHOW_AND_SELL_FINALIZATION_PREVIEW_FIELD: _show_and_sell_finalization_preview,
+    SHOW_AND_SELL_FINALIZATIONS_FIELD: _show_and_sell_finalizations,
+    SHOW_AND_SELL_FINALIZATION_FIELD: _show_and_sell_finalization,
+    FINALIZATION_SALE_SNAPSHOTS_FIELD: _show_and_sell_finalization_sale_snapshots,
+    FINALIZATION_WORK_SNAPSHOTS_FIELD: _show_and_sell_finalization_work_snapshots,
+    FINALIZATION_RETURN_LINES_FIELD: _show_and_sell_finalization_return_lines,
+    FINALIZATION_CREDITS_FIELD: _show_and_sell_finalization_credits,
     SHOW_AND_SELL_SIGNUPS_FIELD: _show_and_sell_signups,
     MY_COMMITMENTS_FIELD: _my_scout_commitments,
     SIGNUP_CALENDAR_FIELD: _show_and_sell_signup_calendar_data,

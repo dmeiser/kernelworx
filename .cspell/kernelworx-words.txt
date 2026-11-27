@@ -506,6 +506,9 @@ ue
 unaccented
 unassociate
 unauthenticate
+underflow
+underflows
+underflowing
 uncompiled
 unconfigured
 unfollow

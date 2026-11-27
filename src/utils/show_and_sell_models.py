@@ -1355,6 +1355,50 @@ def update_event_settings_action(
     )
 
 
+def update_rounding_draft_action(
+    *,
+    show_and_sell_id: str,
+    expected_version: int,
+    draft: Mapping[str, int],
+    updated_by_account_id: str,
+    updated_at: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """Write the Kernel's rounding draft and bump the event version in one conditioned update (§5.1.3).
+
+    A draft is a complete answer, not a merge: the whole map is written, and a
+    participant absent from it holds zero draft cents afterwards. The version
+    condition makes concurrent drafting resolve on this row — the loser's stale read
+    writes nothing and retries against the preview the winner's call returned. The
+    write rides :func:`_assignment_event_update` because the draft is a map and the
+    plain :func:`_conditioned_update` encoder is scalar-only — the WORK-160 trap,
+    named where the map is stored. An empty draft REMOVES the attribute rather than
+    storing an empty map: DynamoDB rejects an empty ``M`` value, and a row that never
+    held a draft and a row whose draft was cleared then read identically — which is
+    what "no draft" means to every later read.
+    """
+    if not draft:
+        return _assignment_event_update(
+            show_and_sell_id,
+            expected_version,
+            {
+                VERSION_ATTRIBUTE: expected_version + 1,
+                UPDATED_BY_ATTRIBUTE: updated_by_account_id,
+                UPDATED_AT_ATTRIBUTE: updated_at,
+            },
+            removes=(ROUNDING_DRAFT_ATTRIBUTE,),
+        )
+    return _assignment_event_update(
+        show_and_sell_id,
+        expected_version,
+        {
+            ROUNDING_DRAFT_ATTRIBUTE: dict(draft),
+            VERSION_ATTRIBUTE: expected_version + 1,
+            UPDATED_BY_ATTRIBUTE: updated_by_account_id,
+            UPDATED_AT_ATTRIBUTE: updated_at,
+        },
+    )
+
+
 def cancel_event_action(
     *,
     show_and_sell_id: str,
@@ -1595,6 +1639,7 @@ def _assignment_event_update(
     show_and_sell_id: str,
     expected_version: int,
     sets: Mapping[str, Any],
+    removes: Sequence[str] = (),
 ) -> Tuple[str, Dict[str, Any]]:
     """One versioned event-row write whose values may be a list or a map.
 
@@ -1618,12 +1663,17 @@ def _assignment_event_update(
         names[f"#{attribute}"] = attribute
         values[f":{attribute}"] = value
         set_parts.append(f"#{attribute} = :{attribute}")
+    update_expression = "SET " + ", ".join(set_parts)
+    if removes:
+        for attribute in removes:
+            names[f"#{attribute}"] = attribute
+        update_expression += " REMOVE " + ", ".join(f"#{attribute}" for attribute in removes)
     return (
         "Update",
         {
             "TableName": tables.show_and_sells.table_name,
             "Key": wire_key(event_metadata_key(show_and_sell_id)),
-            "UpdateExpression": "SET " + ", ".join(set_parts),
+            "UpdateExpression": update_expression,
             "ConditionExpression": "#version = :expectedVersion",
             "ExpressionAttributeNames": names,
             "ExpressionAttributeValues": {name: wire_item_value(value) for name, value in values.items()},

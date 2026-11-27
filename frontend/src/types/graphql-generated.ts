@@ -729,6 +729,120 @@ export type GqlEventInventoryAllocationConnection = {
   pageInfo: GqlPageInfo;
 };
 
+/** One eligible participant's computed share of the whole-event pool: the confirmed minutes used for this calculation, the round-down base share, the Kernel's draft rounding cents, and their sum. Computed — never approved credit (SPLIT-06). */
+export type GqlFinalizationBaseAllocation = {
+  __typename?: 'FinalizationBaseAllocation';
+  /** Confirmed minutes across every slot of this event, summed per Scout. */
+  actualMinutes: Scalars['Int']['output'];
+  /** Base plus draft rounding — the pending amount, approved only by finalization. */
+  amountCents: Scalars['Int']['output'];
+  /** The round-down base share of the whole-event pool (SPLIT-10). */
+  baseAmountCents: Scalars['Int']['output'];
+  /** The Scout Campaign this credit belongs to. */
+  campaignId: Scalars['ID']['output'];
+  /** The Scout holding this share. */
+  profileId: Scalars['ID']['output'];
+  /** Cents the Kernel's rounding draft has assigned to this participant; zero until a draft says otherwise. */
+  roundingCreditCents: Scalars['Int']['output'];
+};
+
+/** Expected cash from the payment snapshots alone: only a snapshot whose methodCode is CASH counts, and no display name or Other note is parsed for cash content (CASH-01). The manual adjustment and the counted amount belong to approval (CASH-02, CASH-03). */
+export type GqlFinalizationCashPreview = {
+  __typename?: 'FinalizationCashPreview';
+  /** Sum of active sales whose snapshotted payment method is Cash. */
+  calculatedExpectedCents: Scalars['Int']['output'];
+};
+
+/** The whole pending finalization picture for one event — pool, computed shares, unassigned cents, expected returns, expected cash, and the blockers to approval — computed on read and approved by nothing. Pending credit is never stored anywhere; approved answers live in the finalization, credit, and scoped-total records. */
+export type GqlFinalizationPreview = {
+  __typename?: 'FinalizationPreview';
+  /** One row per eligible confirmed participant, ordered by profileId. */
+  baseAllocations: Array<GqlFinalizationBaseAllocation>;
+  /** Expected cash from the payment snapshots alone (CASH-01). */
+  cashPreview: GqlFinalizationCashPreview;
+  /** The event version this picture was computed against; what an approval will condition on. */
+  eventVersion: Scalars['Int']['output'];
+  /** Why approval would currently be refused, empty when it would not. */
+  issues: Array<GqlValidationIssue>;
+  /** Expected return per product with an open allocation on this event. */
+  returnLines: Array<GqlFinalizationReturnPreviewLine>;
+  /** The cents the round-down left unassigned — before any draft, and the ceiling a rounding draft is bounded by (SPLIT-10, §7.2). */
+  unassignedCents: Scalars['Int']['output'];
+  /** One whole-event sales pool from active sales, We Owe totals included (SPLIT-02, SPLIT-05). */
+  wholePoolCents: Scalars['Int']['output'];
+};
+
+/** One product's expected return before approval (FIN-02): what the event holds, what it sold, and what should come back. The Kernel confirms or corrects the actual count at approval; a variance never touches sales, cash, or credit on its own (FIN-04). */
+export type GqlFinalizationReturnPreviewLine = {
+  __typename?: 'FinalizationReturnPreviewLine';
+  /** Quantity the event holds assigned. */
+  allocatedQty: Scalars['Int']['output'];
+  /** allocatedQty minus soldQty: the count expected back. */
+  expectedQty: Scalars['Int']['output'];
+  /** The product being returned. */
+  productId: Scalars['ID']['output'];
+  /** Recorded immediate-handoff sales against this allocation. */
+  soldQty: Scalars['Int']['output'];
+};
+
+/** One sale frozen as a finalization recorded it (§5.16): the immutable sale, payment and buyer facts the approval saw, reproduced by later reports even after corrections and voids moved the live sale. */
+export type GqlFinalizationSaleSnapshot = {
+  __typename?: 'FinalizationSaleSnapshot';
+  /** Buyer email as recorded. */
+  buyerEmail?: Maybe<Scalars['String']['output']>;
+  /** Buyer name as recorded. */
+  buyerName?: Maybe<Scalars['String']['output']>;
+  /** Buyer phone as recorded. */
+  buyerPhone?: Maybe<Scalars['String']['output']>;
+  /** The account that entered the sale. */
+  enteredByAccountId: Scalars['ID']['output'];
+  /** The finalization version holding this snapshot. */
+  finalizationId: Scalars['ID']['output'];
+  /** The line items with their price and product snapshots. */
+  lineItems: Array<GqlShowAndSellSaleLine>;
+  /** The payment snapshot as snapshotted (PAY-06). */
+  paymentMethodSnapshot: GqlSalePaymentSnapshot;
+  /** The sale revision copied. */
+  revision: Scalars['Int']['output'];
+  /** When the sale happened. */
+  saleAt: Scalars['AWSDateTime']['output'];
+  /** The sale's id — the live sale it was copied from, as it stood at approval. */
+  saleId: Scalars['ID']['output'];
+  /** The sale total in the pool. */
+  totalCents: Scalars['Int']['output'];
+};
+
+/** Paginated FinalizationSaleSnapshot collection. */
+export type GqlFinalizationSaleSnapshotConnection = {
+  __typename?: 'FinalizationSaleSnapshotConnection';
+  items: Array<GqlFinalizationSaleSnapshot>;
+  pageInfo: GqlPageInfo;
+};
+
+/** One participant's confirmed work for one slot, frozen at approval (§5.16) — minutes as the version saw them, immune to later corrections. */
+export type GqlFinalizationWorkSnapshot = {
+  __typename?: 'FinalizationWorkSnapshot';
+  /** Confirmed minutes copied at approval. */
+  actualMinutes: Scalars['Int']['output'];
+  /** The Scout Campaign credited for the work. */
+  campaignId: Scalars['ID']['output'];
+  /** The finalization version holding this snapshot. */
+  finalizationId: Scalars['ID']['output'];
+  /** The Scout who worked it. */
+  profileId: Scalars['ID']['output'];
+  /** The slot worked. */
+  slotId: Scalars['ID']['output'];
+  /** The signup row's version when it was copied. */
+  sourceSignupVersion: Scalars['Int']['output'];
+};
+
+/** Paginated FinalizationWorkSnapshot collection. */
+export type GqlFinalizationWorkSnapshotConnection = {
+  __typename?: 'FinalizationWorkSnapshotConnection';
+  items: Array<GqlFinalizationWorkSnapshot>;
+  pageInfo: GqlPageInfo;
+};
+
 /** Input for fulfillIndividualOrderLine. Fills part or all of one individual Order line from a Kernel-chosen source. */
 export type GqlFulfillIndividualOrderLineInput = {
   /** The Order.fulfillmentVersion this caller read. A stale value conflicts instead of double-fulfilling one line. */
@@ -1146,6 +1260,8 @@ export type GqlMutation = {
   updateSharedCampaign: GqlSharedCampaign;
   /** Edit an event's location, address, split override, or We Owe setting. There is no time input: times are immutable, and the workflow for a wrong time is cancel-and-recreate. Allowed while scheduled, running, or ended, and as a draft while reopened; refused once finalized or cancelled, and refused when turning We Owe off would strand an open obligation. Unit Admin for the event's Unit. */
   updateShowAndSell: GqlShowAndSellAdmin;
+  /** Save the Kernel's rounding draft for the cents the split left unassigned: whole non-negative cents per unique eligible confirmed participant, and the draft total never above the unassigned cents the split produces. The draft is work in progress — assigning too little stays legal, and finalization is what demands every cent assigned — while an ineligible name, a duplicate name, negative cents, or an over-sum is refused whole and writes nothing. Allowed while scheduled, running, or ended, and as a draft again after a reopening; refused once finalized or cancelled. The answer is the whole fresh preview — pool, shares, residue, returns, cash and blockers — with no Scout credit approved anywhere. Unit Admin for the event's Unit. */
+  updateShowAndSellRoundingDraft: GqlFinalizationPreview;
   /** Update a unit's metadata and settings. Unit Admin for that Unit. */
   updateUnit: GqlUnit;
   /** Update a Unit Campaign's name, year, and active state. Unit Admin for the parent Unit. */
@@ -1523,6 +1639,11 @@ export type GqlMutation_UpdateSharedCampaignArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_UpdateShowAndSellArgs = {
   input: GqlUpdateShowAndSellInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_UpdateShowAndSellRoundingDraftArgs = {
+  input: GqlUpdateShowAndSellRoundingDraftInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -2053,6 +2174,20 @@ export type GqlQuery = {
   scoutCustodyBalances: GqlScoutCustodyBalanceConnection;
   /** One event as its Unit Admin manages it: identity, immutable times, split and We Owe settings, allocations, slots, status, and the version the next write conditions on. Unit Admin for the event's Unit. */
   showAndSell: GqlShowAndSellAdmin;
+  /** One finalization version's full record — pool, split, cash reconciliation, status, actor audit, and the version it replaced — or null when that id does not exist on this event. The heavy collections come from the paginated child reads below, so this detail never hides a size limit. Unit Admin for the event's Unit. */
+  showAndSellFinalization?: Maybe<GqlShowAndSellFinalization>;
+  /** One version's Scout credit: base share, Kernel rounding cents, total, minutes and the version-derived status — approved, suspended, or superseded exactly as the version stands, never re-derived from live rows. Refused for a finalization id that names nothing. Pagination per PAGE-01; the cursor is scoped to event and version. Unit Admin for the event's Unit. */
+  showAndSellFinalizationCredits: GqlScoutSalesAllocationConnection;
+  /** The whole pending finalization picture for one event, computed on every call and approved by none of them: one whole-event pool from active sales (a We Owe sale's total is already inside it), EQUAL or TIME_WORKED base shares from eligible confirmed work with the round-down residue reported as unassigned cents, the Kernel's rounding draft riding onto the participant rows, expected returns from the event's open allocations, expected cash classified by the snapshotted method code alone, and the named blockers that would stop approval. Nothing is persisted: no finalization, credit, total, or movement row, and the event version does not move (SPLIT-06, EVT-Q-06-02). A FINALIZED event refuses — its credit is approved and final, and that answer is read from the finalization rows, not recomputed beside them; a cancelled event has no pool to split. Unit Admin for the event's Unit. */
+  showAndSellFinalizationPreview: GqlFinalizationPreview;
+  /** One version's return reconciliation per product: what was assigned, what was expected back, what came back, the variance, the net stock effect, and any linked stock-only adjustment with its reason. Refused for a finalization id that names nothing. Pagination per PAGE-01; the cursor is scoped to event and version. Unit Admin for the event's Unit. */
+  showAndSellFinalizationReturnLines: GqlReturnReconciliationLineConnection;
+  /** One version's frozen sales: buyer, lines, totals and payment snapshots exactly as the approval recorded them, after later corrections and voids moved the live rows. Refused for a finalization id that names nothing, so an empty page always means "this version held no such row". Pagination per PAGE-01; the cursor is scoped to event and version. Unit Admin for the event's Unit. */
+  showAndSellFinalizationSaleSnapshots: GqlFinalizationSaleSnapshotConnection;
+  /** One version's frozen per-slot work: participant, slot, campaign, confirmed minutes and the signup version copied — the minutes as the approval saw them, immune to later corrections. Refused for a finalization id that names nothing. Pagination per PAGE-01; the cursor is scoped to event and version. Unit Admin for the event's Unit. */
+  showAndSellFinalizationWorkSnapshots: GqlFinalizationWorkSnapshotConnection;
+  /** One event's finalization history, oldest version first: every APPROVED, SUSPENDED and SUPERSEDED version with its number, approval time, and the version it replaced. Versions are appended, never replaced, which is what lets a historical report name the version it was assembled from. An event never finalized answers an empty page. Pagination per PAGE-01; the cursor is scoped to the event. Unit Admin for the event's Unit. */
+  showAndSellFinalizations: GqlShowAndSellFinalizationSummaryConnection;
   /** One event's participant view for one Scout: the slots and that Scout's commitments. Profile Owner/WRITE or READ for that Scout, or a Unit Admin for the event's Unit. An unjoined Scout, another Unit's event, or a Scout the caller cannot read returns `NOT_FOUND`, and no administrative field is present. */
   showAndSellOpportunity: GqlShowAndSellOpportunity;
   /** An event's sales, raw and paginated: every buyer, line and payment detail an administrative screen needs, with the sale revision an optimistic-concurrency write conditions on. Unit Admin for the event's Unit; contains buyer/payment snapshots, never a participant projection. */
@@ -2294,6 +2429,51 @@ export type GqlQuery_ShowAndSellArgs = {
 };
 
 /** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellFinalizationArgs = {
+  finalizationId: Scalars['ID']['input'];
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellFinalizationCreditsArgs = {
+  finalizationId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellFinalizationPreviewArgs = {
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellFinalizationReturnLinesArgs = {
+  finalizationId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellFinalizationSaleSnapshotsArgs = {
+  finalizationId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellFinalizationWorkSnapshotsArgs = {
+  finalizationId: Scalars['ID']['input'];
+  page?: InputMaybe<GqlPageInput>;
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellFinalizationsArgs = {
+  page?: InputMaybe<GqlPageInput>;
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
 export type GqlQuery_ShowAndSellOpportunityArgs = {
   profileId: Scalars['ID']['input'];
   showAndSellId: Scalars['ID']['input'];
@@ -2472,6 +2652,36 @@ export type GqlRequestUnitPaymentMethodQrUploadInput = {
   unitId: Scalars['ID']['input'];
 };
 
+/** One product's return reconciliation on a finalization version (§5.16): expected from the assignment and sales, actual as the Kernel confirmed, and the derived variance and net stock effect — with the stock-only adjustment linked whenever the variance changed stock (FIN-03). */
+export type GqlReturnReconciliationLine = {
+  __typename?: 'ReturnReconciliationLine';
+  /** What actually came back, confirmed at approval. */
+  actualQty: Scalars['Int']['output'];
+  /** Quantity assigned to the event. */
+  allocatedQty: Scalars['Int']['output'];
+  /** What the arithmetic expected back. */
+  expectedQty: Scalars['Int']['output'];
+  /** The finalization version holding this line. */
+  finalizationId: Scalars['ID']['output'];
+  /** actualQty minus allocatedQty: the version's effect on Unit stock. */
+  netStockEffectQty: Scalars['Int']['output'];
+  /** The product returned. */
+  productId: Scalars['ID']['output'];
+  /** The Kernel's reason for a variance; null when there is none to explain. */
+  reason?: Maybe<Scalars['String']['output']>;
+  /** The stock-only adjustment linked when the variance moved stock; null when it did not. */
+  reconciliationMovementId?: Maybe<Scalars['ID']['output']>;
+  /** actualQty minus expectedQty. */
+  varianceQty: Scalars['Int']['output'];
+};
+
+/** Paginated ReturnReconciliationLine collection. */
+export type GqlReturnReconciliationLineConnection = {
+  __typename?: 'ReturnReconciliationLineConnection';
+  items: Array<GqlReturnReconciliationLine>;
+  pageInfo: GqlPageInfo;
+};
+
 /** Input for returnStockFromScout. One atomic batch: every product returns or none does. */
 export type GqlReturnStockFromScoutInput = {
   /** The Scout Campaign the custody was issued under; must match the custody rows. */
@@ -2550,6 +2760,14 @@ export type GqlRevokeUnitInviteInput = {
   unitId: Scalars['ID']['input'];
 };
 
+/** One participant's share of the leftover cents in the Kernel's rounding draft. */
+export type GqlRoundingDraftAssignmentInput = {
+  /** Whole cents assigned to this participant; never negative. */
+  cents: Scalars['Int']['input'];
+  /** The eligible confirmed participant receiving these cents. */
+  profileId: Scalars['ID']['input'];
+};
+
 /** Credentials for uploading a file directly to S3 via a pre-signed POST request. */
 export type GqlS3UploadInfo = {
   __typename?: 'S3UploadInfo';
@@ -2602,6 +2820,44 @@ export type GqlScoutCustodyBalanceConnection = {
   pageInfo: GqlPageInfo;
   /** Total With Scout quantity across the whole filtered set, not just this page. */
   totalWithScoutQty: Scalars['Int']['output'];
+};
+
+/** One Scout's credit under one finalization version (§5.17). The status is the version's: an approved version's credit is APPROVED, and a reopen suspends it as a unit — never a third, torn state. ``amountCents`` is always base plus rounding; the row carries its scope so a report never joins back to the version to know which Unit Campaign owns it. */
+export type GqlScoutSalesAllocation = {
+  __typename?: 'ScoutSalesAllocation';
+  /** Confirmed minutes as the approval copied them. */
+  actualMinutes: Scalars['Int']['output'];
+  /** Stable id of this credit row. */
+  allocationId: Scalars['ID']['output'];
+  /** baseAmountCents plus roundingCreditCents. */
+  amountCents: Scalars['Int']['output'];
+  /** The round-down base share of the whole-event pool. */
+  baseAmountCents: Scalars['Int']['output'];
+  /** The Scout Campaign credited. */
+  campaignId: Scalars['ID']['output'];
+  /** When the credit was approved. */
+  createdAt: Scalars['AWSDateTime']['output'];
+  /** The finalization version that approved this credit. */
+  finalizationId: Scalars['ID']['output'];
+  /** The Scout credited. */
+  profileId: Scalars['ID']['output'];
+  /** The Kernel-assigned rounding cents. */
+  roundingCreditCents: Scalars['Int']['output'];
+  /** The event finalized. */
+  showAndSellId: Scalars['ID']['output'];
+  /** APPROVED, SUSPENDED or SUPERSEDED — moves exactly as the version moves. */
+  status: Scalars['String']['output'];
+  /** The Unit Campaign the credit belongs to. */
+  unitCampaignId: Scalars['ID']['output'];
+  /** When the credit last moved with its version. */
+  updatedAt: Scalars['AWSDateTime']['output'];
+};
+
+/** Paginated ScoutSalesAllocation collection. */
+export type GqlScoutSalesAllocationConnection = {
+  __typename?: 'ScoutSalesAllocationConnection';
+  items: Array<GqlScoutSalesAllocation>;
+  pageInfo: GqlPageInfo;
 };
 
 /** A seller (scout unit) profile that owns campaigns. Returned for the caller's own profiles and for profiles shared to them. */
@@ -2856,6 +3112,25 @@ export type GqlShowAndSellAllocation = {
   version: Scalars['Int']['output'];
 };
 
+/** The CASH-03 record as approved: every number derived from the two the Kernel typed, each nonzero difference carrying its explanation (CASH-02, CASH-04). */
+export type GqlShowAndSellCashReconciliation = {
+  __typename?: 'ShowAndSellCashReconciliation';
+  /** The amount counted at the table. */
+  actualCashCents: Scalars['Int']['output'];
+  /** calculatedExpectedCents plus manualAdjustmentCents. */
+  adjustedExpectedCents: Scalars['Int']['output'];
+  /** Expected cash decided by the payment snapshots alone (CASH-01). */
+  calculatedExpectedCents: Scalars['Int']['output'];
+  /** actualCashCents minus adjustedExpectedCents. */
+  discrepancyCents: Scalars['Int']['output'];
+  /** Required exactly when the discrepancy is nonzero (CASH-04). */
+  discrepancyExplanation?: Maybe<Scalars['String']['output']>;
+  /** The Kernel's signed adjustment to that expectation. */
+  manualAdjustmentCents: Scalars['Int']['output'];
+  /** Required exactly when the adjustment is nonzero. */
+  manualAdjustmentReason?: Maybe<Scalars['String']['output']>;
+};
+
 /** One line of a correction: the same three numbers, plus the stable line id when the line already exists. A line that names no id is supplemental, and a line the correction leaves out is voided (§8.6.1). */
 export type GqlShowAndSellCorrectionLineInput = {
   /** The line's whole immediate quantity after the correction, never an amount to add. */
@@ -2865,6 +3140,63 @@ export type GqlShowAndSellCorrectionLineInput = {
   productId: Scalars['ID']['input'];
   /** The line's whole We Owe quantity after the correction; it may not fall below what that line has already fulfilled, nor above what was entered. */
   weOweQty: Scalars['Int']['input'];
+};
+
+/** One finalization version's full record (§5.16). The audit fields answer their questions only once the version reached that state; the collections of rows the version froze come from the child reads, not from here. */
+export type GqlShowAndSellFinalization = {
+  __typename?: 'ShowAndSellFinalization';
+  /** When it was approved. */
+  approvedAt: Scalars['AWSDateTime']['output'];
+  /** The Kernel who approved it. */
+  approvedByAccountId: Scalars['ID']['output'];
+  /** The cash reconciliation as approved. */
+  cash: GqlShowAndSellCashReconciliation;
+  /** Stable id of this finalization version. */
+  finalizationId: Scalars['ID']['output'];
+  /** The version this one replaced; null on a first approval. */
+  previousFinalizationId?: Maybe<Scalars['ID']['output']>;
+  /** The event this version finalizes. */
+  showAndSellId: Scalars['ID']['output'];
+  /** The event version the approval conditioned on. */
+  sourceEventVersion: Scalars['Int']['output'];
+  /** The split method the shares were computed under. */
+  splitMethod: Scalars['String']['output'];
+  /** APPROVED, SUSPENDED or SUPERSEDED. */
+  status: Scalars['String']['output'];
+  /** When this version was suspended; null until then. */
+  suspendedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  /** Who reopened the event and suspended this version; null until then. */
+  suspendedByAccountId?: Maybe<Scalars['ID']['output']>;
+  /** The reopen's reason, kept on the version forever; null until then. */
+  suspensionReason?: Maybe<Scalars['String']['output']>;
+  /** The Unit Campaign that owns the event. */
+  unitCampaignId: Scalars['ID']['output'];
+  /** One-based version number; re-finalization appends the next one. */
+  versionNumber: Scalars['Int']['output'];
+  /** The whole-event sales pool this version split. */
+  wholePoolCents: Scalars['Int']['output'];
+};
+
+/** A finalization version as the discovery list shows it — enough to pick a version and follow the chain, and nothing heavier. */
+export type GqlShowAndSellFinalizationSummary = {
+  __typename?: 'ShowAndSellFinalizationSummary';
+  /** When it was approved. */
+  approvedAt: Scalars['AWSDateTime']['output'];
+  /** Stable id of this finalization version. */
+  finalizationId: Scalars['ID']['output'];
+  /** The version this one replaced; null on a first approval. */
+  previousFinalizationId?: Maybe<Scalars['ID']['output']>;
+  /** APPROVED, SUSPENDED or SUPERSEDED. */
+  status: Scalars['String']['output'];
+  /** One-based version number. */
+  versionNumber: Scalars['Int']['output'];
+};
+
+/** Paginated ShowAndSellFinalizationSummary collection. */
+export type GqlShowAndSellFinalizationSummaryConnection = {
+  __typename?: 'ShowAndSellFinalizationSummaryConnection';
+  items: Array<GqlShowAndSellFinalizationSummary>;
+  pageInfo: GqlPageInfo;
 };
 
 /** One event as a Scout sees it: where and when it runs, whether We Owe is offered, how the pool splits, the slots with room left, and this Scout's own signups. It carries no inventory, sale, buyer, cash, finalization, actor, or tenancy field (API contract SEC-04), and it hands the browser no stock number to do arithmetic against. */
@@ -3636,6 +3968,18 @@ export type GqlUpdateShowAndSellInput = {
   weOweEnabled?: InputMaybe<Scalars['Boolean']['input']>;
 };
 
+/** Input for updateShowAndSellRoundingDraft. The draft is one complete answer, not a merge: a participant left out of ``assignments`` holds zero draft cents afterwards. */
+export type GqlUpdateShowAndSellRoundingDraftInput = {
+  /** The complete draft: unique eligible participants, non-negative integer cents, total at most the split's unassigned cents. */
+  assignments: Array<GqlRoundingDraftAssignmentInput>;
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** The event whose finalization is being drafted. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The event version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
+};
+
 /** Input for updateUnitCampaign. Only name/year/isActive change; catalogId is immutable. */
 export type GqlUpdateUnitCampaignInput = {
   /** The sales-season name. */
@@ -3714,6 +4058,21 @@ export type GqlUpsertShowAndSellSlotInput = {
   startAt: Scalars['AWSDateTime']['input'];
   /** The event version the caller last read (optimistic concurrency). */
   version: GqlVersionedInput;
+};
+
+/** One blocker to approval, naming the field it belongs to and, when it is about one product or one participant, that id. Used by previews to explain why finalization would currently be refused. */
+export type GqlValidationIssue = {
+  __typename?: 'ValidationIssue';
+  /** Stable machine-readable code: EVENT_NOT_ENDED, NO_CONFIRMED_WORK, ROUNDING_CENTS_UNASSIGNED, ROUNDING_PARTICIPANT_INELIGIBLE, ROUNDING_OVERSUM. */
+  code: Scalars['String']['output'];
+  /** The field or input area the blocker belongs to. */
+  field: Scalars['String']['output'];
+  /** The same answer in one sentence, for a screen with no code table. */
+  message: Scalars['String']['output'];
+  /** Set when the blocker is about one product. */
+  productId?: Maybe<Scalars['ID']['output']>;
+  /** Set when the blocker is about one participant. */
+  profileId?: Maybe<Scalars['ID']['output']>;
 };
 
 /** Optimistic-concurrency version carried by a version-changing operation. */

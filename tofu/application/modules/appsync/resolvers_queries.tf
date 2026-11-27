@@ -1068,3 +1068,101 @@ resource "aws_appsync_resolver" "show_and_sell_sales_query" {
 
   code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
 }
+
+resource "aws_appsync_resolver" "show_and_sell_finalization_preview_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellFinalizationPreview"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "show_and_sell_finalizations_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellFinalizations"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "show_and_sell_finalization_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellFinalization"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "show_and_sell_finalization_sale_snapshots_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellFinalizationSaleSnapshots"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "show_and_sell_finalization_work_snapshots_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellFinalizationWorkSnapshots"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "show_and_sell_finalization_return_lines_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellFinalizationReturnLines"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
+
+resource "aws_appsync_resolver" "show_and_sell_finalization_credits_query" {
+  api_id      = aws_appsync_graphql_api.main.id
+  type        = "Query"
+  field       = "showAndSellFinalizationCredits"
+  data_source = aws_appsync_datasource.unit_operations.name
+
+  runtime {
+    name            = "APPSYNC_JS"
+    runtime_version = "1.0.0"
+  }
+
+  code = file("${local.js_resolvers_dir}/lambda_unit_resolver.js")
+}
