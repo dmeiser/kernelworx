@@ -691,6 +691,7 @@ def _require_snapshot_sale_shape(sale: Mapping[str, Any]) -> None:
         for name in (
             SALE_ID_ATTRIBUTE,
             SALE_AT_ATTRIBUTE,
+            ENTERED_BY_ATTRIBUTE,
             LINE_ITEMS_ATTRIBUTE,
             TOTAL_CENTS_ATTRIBUTE,
             PAYMENT_SNAPSHOT_ATTRIBUTE,
@@ -711,6 +712,19 @@ def _require_snapshot_sale_shape(sale: Mapping[str, Any]) -> None:
             "only an ACTIVE sale enters a finalization's inputs; a voided sale is not part of the pool",
             saleId=sale[SALE_ID_ATTRIBUTE],
             status=sale[STATUS_ATTRIBUTE],
+        )
+    snapshot = sale[PAYMENT_SNAPSHOT_ATTRIBUTE]
+    snapshot_missing = [
+        name
+        for name in ("methodCode", "displayName")
+        if not isinstance(snapshot, Mapping) or not str(snapshot.get(name) or "").strip()
+    ]
+    if snapshot_missing:
+        _refuse(
+            SNAPSHOT_INPUT_INCOMPLETE,
+            "the payment snapshot must carry its methodCode and displayName; a later rename never reaches this version (PAY-06)",
+            saleId=sale[SALE_ID_ATTRIBUTE],
+            missing=snapshot_missing,
         )
 
 
@@ -910,15 +924,19 @@ def mark_finalization_suspended(
 def mark_finalization_superseded(row: Mapping[str, Any]) -> Dict[str, Any]:
     """The row transform re-finalization retires the prior version with (§5.16).
 
-    No actor or timestamp fields exist for supersession in §5.16: the new version's own
-    approval audit says who replaced it and when, so a second copy of that fact on the
-    retired row would be a second answer to one question.
+    The only road to SUPERSEDED runs through SUSPENDED: a FINALIZED event cannot be
+    finalized again without ``reopenShowAndSell`` first, and the reopen suspends the
+    standing version with its actor, time, and reason (§8.7, §9.1) — so the version a
+    re-finalization retires is always the suspended one, and its reopen audit stays on
+    the row forever. No actor or timestamp fields exist for supersession itself: the
+    new version's own approval audit says who replaced it and when, so a second copy
+    of that fact on the retired row would be a second answer to one question.
     """
     current = normalize_finalization_status(row[STATUS_ATTRIBUTE])
-    if current != FINALIZATION_STATUS_APPROVED:
+    if current != FINALIZATION_STATUS_SUSPENDED:
         _refuse(
             FINALIZATION_STATE_INVALID,
-            "only an APPROVED finalization is superseded by a new version",
+            "only a SUSPENDED finalization is superseded; a reopened event's version is suspended before the new approval retires it",
             finalizationId=row[FINALIZATION_ID_ATTRIBUTE],
             status=current,
         )

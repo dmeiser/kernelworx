@@ -2352,7 +2352,7 @@ describe("Show & Sell Wave 6.1 finalization history SDL (schema.graphql)", () =>
       "finalizationId",
       "saleId",
       "saleAt",
-      "enteredBy",
+      "enteredByAccountId",
       "buyerName",
       "buyerPhone",
       "buyerEmail",
@@ -2395,6 +2395,26 @@ describe("Show & Sell Wave 6.1 finalization history SDL (schema.graphql)", () =>
       "createdAt",
       "updatedAt",
     ]);
+  });
+
+  test("account ids and timestamps use the scalars every other Show & Sell type uses", () => {
+    // The Wave 5 convention (ShowAndSellSale.enteredByAccountId: ID!, saleAt:
+    // AWSDateTime!) — a String here is how a resolver key and a schema field drift
+    // apart without any test seeing it.
+    const scalar = (type: string, field: string) => {
+      const found = fieldsOf(definition(type)).find((f) => f.name === field);
+      expect(found, `${type}.${field} is missing`).toBeDefined();
+      return found!.text;
+    };
+    expect(scalar("FinalizationSaleSnapshot", "enteredByAccountId")).toMatch(/enteredByAccountId\s*:\s*ID!/);
+    expect(scalar("FinalizationSaleSnapshot", "saleAt")).toMatch(/saleAt\s*:\s*AWSDateTime!/);
+    expect(scalar("ShowAndSellFinalization", "approvedByAccountId")).toMatch(/approvedByAccountId\s*:\s*ID!/);
+    expect(scalar("ShowAndSellFinalization", "approvedAt")).toMatch(/approvedAt\s*:\s*AWSDateTime!/);
+    expect(scalar("ShowAndSellFinalization", "suspendedByAccountId")).toMatch(/suspendedByAccountId\s*:\s*ID(?!!)/);
+    expect(scalar("ShowAndSellFinalization", "suspendedAt")).toMatch(/suspendedAt\s*:\s*AWSDateTime(?!!)/);
+    expect(scalar("ShowAndSellFinalizationSummary", "approvedAt")).toMatch(/approvedAt\s*:\s*AWSDateTime!/);
+    expect(scalar("ScoutSalesAllocation", "createdAt")).toMatch(/createdAt\s*:\s*AWSDateTime!/);
+    expect(scalar("ScoutSalesAllocation", "updatedAt")).toMatch(/updatedAt\s*:\s*AWSDateTime!/);
   });
 
   test("history is data, never an artifact, and no type carries an auth directive", () => {

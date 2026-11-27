@@ -162,7 +162,16 @@ def _seed_finalization(
             suspension_reason="a box came back after the approval",
         )
     elif status == fm.FINALIZATION_STATUS_SUPERSEDED:
-        row = fm.mark_finalization_superseded(row)
+        # §8.7/§9.1: the road to SUPERSEDED runs through SUSPENDED — the reopen suspends
+        # the standing version with its audit, and the re-finalization retires it.
+        row = fm.mark_finalization_superseded(
+            fm.mark_finalization_suspended(
+                row,
+                suspended_by_account_id=AVERY,
+                suspended_at=f"2026-11-0{version_number}T13:00:00+00:00",
+                suspension_reason="a box came back after the approval",
+            )
+        )
     world["show_and_sells"].put_item(Item=row)
     return row
 
@@ -259,6 +268,10 @@ def test_detail_answers_the_whole_record_and_history_stays_readable_after_a_newe
     retired = _ok(_detail(FIN_ONE))
     assert retired["status"] == fm.FINALIZATION_STATUS_SUPERSEDED
     assert retired["wholePoolCents"] == 1500  # the old pool is not restated at the new one
+    # §5.16 reason-history: the reopen's audit survives supersession, on the version.
+    assert retired["suspendedByAccountId"] == AVERY
+    assert retired["suspendedAt"] == "2026-11-01T13:00:00+00:00"
+    assert retired["suspensionReason"] == "a box came back after the approval"
 
 
 def test_a_suspended_version_carries_its_reopen_audit_forever(world: Dict[str, Any]) -> None:
@@ -331,7 +344,21 @@ def test_child_pages_answer_the_frozen_rows_and_refuse_an_absent_version(world: 
     snapshots = _ok(_children(FINALIZATION_SALE_SNAPSHOTS_FIELD, FIN_ONE))
     assert len(snapshots["items"]) == 1
     sale = snapshots["items"][0]
+    assert set(sale) == {
+        "finalizationId",
+        "saleId",
+        "saleAt",
+        "enteredByAccountId",
+        "buyerName",
+        "buyerPhone",
+        "buyerEmail",
+        "lineItems",
+        "totalCents",
+        "paymentMethodSnapshot",
+        "revision",
+    }, "the payload is exactly the SDL's FinalizationSaleSnapshot field set"
     assert sale["finalizationId"] == FIN_ONE
+    assert sale["enteredByAccountId"] == AVERY
     assert sale["totalCents"] == 1500
     assert sale["paymentMethodSnapshot"]["methodCode"] == "CASH"
     assert sale["lineItems"][0]["productNameSnapshot"] == "Caramel 1"

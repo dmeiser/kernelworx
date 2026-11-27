@@ -100,7 +100,7 @@ def _sale_row(**overrides: Any) -> Dict[str, Any]:
             }
         ],
         "totalCents": 2500,
-        "paymentMethodSnapshot": {"methodCode": "CASH", "displayNameSnapshot": "Cash", "paymentMethodId": "pm-1"},
+        "paymentMethodSnapshot": {"methodCode": "CASH", "displayName": "Cash", "paymentMethodId": "pm-1"},
         "revision": 1,
         "status": "ACTIVE",
     }
@@ -350,9 +350,9 @@ def test_sale_snapshot_is_the_complete_sale_deep_copied() -> None:
     # PAY-06 one level up: a later rename of the source sale — or of the catalog behind
     # it — cannot reach a version that already happened.
     sale["lineItems"][0]["productNameSnapshot"] = "Renamed Caramels"
-    sale["paymentMethodSnapshot"]["displayNameSnapshot"] = "Renamed Cash"
+    sale["paymentMethodSnapshot"]["displayName"] = "Renamed Cash"
     assert snapshot[fm.LINE_ITEMS_ATTRIBUTE][0]["productNameSnapshot"] == "Caramel Cremes"
-    assert snapshot[fm.PAYMENT_SNAPSHOT_ATTRIBUTE]["displayNameSnapshot"] == "Cash"
+    assert snapshot[fm.PAYMENT_SNAPSHOT_ATTRIBUTE]["displayName"] == "Cash"
 
 
 def test_sale_snapshot_refuses_incomplete_projection_or_voided_source() -> None:
@@ -376,6 +376,26 @@ def test_sale_snapshot_refuses_incomplete_projection_or_voided_source() -> None:
     with pytest.raises(AppError) as exc:
         fm.build_sale_snapshot_row(FID, lying, show_and_sell_id=EVENT)
     assert exc.value.details is not None and exc.value.details["subtotalSum"] == 2500
+
+
+def test_sale_snapshot_requires_the_enterer_and_a_complete_payment_snapshot() -> None:
+    """§5.16's completeness is also who entered the sale and the PAY-06 payment facts."""
+    sale = _sale_row()
+    del sale["enteredByAccountId"]
+    with pytest.raises(AppError) as exc:
+        fm.build_sale_snapshot_row(FID, sale, show_and_sell_id=EVENT)
+    assert _subcode(exc.value) == fm.SNAPSHOT_INPUT_INCOMPLETE
+    assert exc.value.details is not None and "enteredByAccountId" in exc.value.details["missing"]
+
+    for snapshot in (
+        {"methodCode": "CASH"},  # no displayName
+        {"displayName": "Cash"},  # no methodCode
+        {"methodCode": "", "displayName": "Cash"},  # a blank code is no code
+        "not-a-mapping",
+    ):
+        with pytest.raises(AppError) as exc:
+            fm.build_sale_snapshot_row(FID, _sale_row(paymentMethodSnapshot=snapshot), show_and_sell_id=EVENT)
+        assert _subcode(exc.value) == fm.SNAPSHOT_INPUT_INCOMPLETE, snapshot
 
 
 # --- immutable work-input snapshot (§5.16) -------------------------------------------
@@ -453,9 +473,24 @@ def test_suspend_transform_requires_approval_and_a_reason() -> None:
         )
 
 
-def test_supersede_transform_retires_only_an_approved_version() -> None:
-    superseded = fm.mark_finalization_superseded(_finalization_row())
+def test_supersede_retires_only_a_suspended_version_and_keeps_the_reopen_audit() -> None:
+    """§8.7/§9.1: the road to SUPERSEDED runs through SUSPENDED — a FINALIZED event is
+    reopened (which suspends the standing version with its actor, time and reason)
+    before a re-finalization retires it. Superseding an APPROVED or an already
+    SUPERSEDED version is the state-machine violation, and the retired row keeps the
+    reopen's audit forever.
+    """
+    suspended = fm.mark_finalization_suspended(
+        _finalization_row(), suspended_by_account_id=ACCOUNT, suspended_at=NOW, suspension_reason="cash count was wrong"
+    )
+    superseded = fm.mark_finalization_superseded(suspended)
     assert superseded[fm.STATUS_ATTRIBUTE] == "SUPERSEDED"
+    assert superseded[fm.SUSPENDED_BY_ATTRIBUTE] == ACCOUNT
+    assert superseded[fm.SUSPENDED_AT_ATTRIBUTE] == NOW
+    assert superseded[fm.SUSPENSION_REASON_ATTRIBUTE] == "cash count was wrong"
+    with pytest.raises(AppError) as exc:
+        fm.mark_finalization_superseded(_finalization_row())
+    assert _subcode(exc.value) == fm.FINALIZATION_STATE_INVALID
     with pytest.raises(AppError) as exc:
         fm.mark_finalization_superseded(superseded)
     assert _subcode(exc.value) == fm.FINALIZATION_STATE_INVALID

@@ -794,8 +794,8 @@ export type GqlFinalizationSaleSnapshot = {
   buyerName?: Maybe<Scalars['String']['output']>;
   /** Buyer phone as recorded. */
   buyerPhone?: Maybe<Scalars['String']['output']>;
-  /** Who entered it. */
-  enteredBy: Scalars['String']['output'];
+  /** The account that entered the sale. */
+  enteredByAccountId: Scalars['ID']['output'];
   /** The finalization version holding this snapshot. */
   finalizationId: Scalars['ID']['output'];
   /** The line items with their price and product snapshots. */
@@ -805,7 +805,7 @@ export type GqlFinalizationSaleSnapshot = {
   /** The sale revision copied. */
   revision: Scalars['Int']['output'];
   /** When the sale happened. */
-  saleAt: Scalars['String']['output'];
+  saleAt: Scalars['AWSDateTime']['output'];
   /** The sale's id — the live sale it was copied from, as it stood at approval. */
   saleId: Scalars['ID']['output'];
   /** The sale total in the pool. */
@@ -2836,7 +2836,7 @@ export type GqlScoutSalesAllocation = {
   /** The Scout Campaign credited. */
   campaignId: Scalars['ID']['output'];
   /** When the credit was approved. */
-  createdAt: Scalars['String']['output'];
+  createdAt: Scalars['AWSDateTime']['output'];
   /** The finalization version that approved this credit. */
   finalizationId: Scalars['ID']['output'];
   /** The Scout credited. */
@@ -2850,7 +2850,7 @@ export type GqlScoutSalesAllocation = {
   /** The Unit Campaign the credit belongs to. */
   unitCampaignId: Scalars['ID']['output'];
   /** When the credit last moved with its version. */
-  updatedAt: Scalars['String']['output'];
+  updatedAt: Scalars['AWSDateTime']['output'];
 };
 
 /** Paginated ScoutSalesAllocation collection. */
@@ -3146,9 +3146,9 @@ export type GqlShowAndSellCorrectionLineInput = {
 export type GqlShowAndSellFinalization = {
   __typename?: 'ShowAndSellFinalization';
   /** When it was approved. */
-  approvedAt: Scalars['String']['output'];
+  approvedAt: Scalars['AWSDateTime']['output'];
   /** The Kernel who approved it. */
-  approvedByAccountId: Scalars['String']['output'];
+  approvedByAccountId: Scalars['ID']['output'];
   /** The cash reconciliation as approved. */
   cash: GqlShowAndSellCashReconciliation;
   /** Stable id of this finalization version. */
@@ -3164,9 +3164,9 @@ export type GqlShowAndSellFinalization = {
   /** APPROVED, SUSPENDED or SUPERSEDED. */
   status: Scalars['String']['output'];
   /** When this version was suspended; null until then. */
-  suspendedAt?: Maybe<Scalars['String']['output']>;
+  suspendedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   /** Who reopened the event and suspended this version; null until then. */
-  suspendedByAccountId?: Maybe<Scalars['String']['output']>;
+  suspendedByAccountId?: Maybe<Scalars['ID']['output']>;
   /** The reopen's reason, kept on the version forever; null until then. */
   suspensionReason?: Maybe<Scalars['String']['output']>;
   /** The Unit Campaign that owns the event. */
@@ -3181,7 +3181,7 @@ export type GqlShowAndSellFinalization = {
 export type GqlShowAndSellFinalizationSummary = {
   __typename?: 'ShowAndSellFinalizationSummary';
   /** When it was approved. */
-  approvedAt: Scalars['String']['output'];
+  approvedAt: Scalars['AWSDateTime']['output'];
   /** Stable id of this finalization version. */
   finalizationId: Scalars['ID']['output'];
   /** The version this one replaced; null on a first approval. */

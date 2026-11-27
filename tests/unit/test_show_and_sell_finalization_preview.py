@@ -279,7 +279,14 @@ def test_repeated_previews_persist_no_finalization_credit_or_movement(world: Dic
     assert not [
         row
         for row in world["unit_campaigns"].scan()["Items"]
-        if str(row.get("sk", "")).startswith("SHOW_AND_SELL_TOTAL#")
+        if str(row.get("entityType", "")) == fm.TOTAL_ENTITY_TYPE or str(row.get("sk", "")) == fm.SHOW_AND_SELL_TOTAL_SK
+    ]
+    assert not [
+        row
+        for row in world["show_and_sells"].scan()["Items"]
+        if str(row.get("entityType", "")) in (fm.CREDIT_ENTITY_TYPE, fm.FINALIZATION_ENTITY_TYPE)
+        or str(row.get("sk", "")).startswith(f"{fm.CREDIT_SK_PREFIX}#")
+        or str(row.get("sk", "")).startswith("FINALIZATION#")
     ]
 
 

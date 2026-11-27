@@ -22,6 +22,7 @@ from typing import Any, Dict, List
 import pytest
 
 from src.handlers.unit_operations import UPDATE_ROUNDING_DRAFT_FIELD
+from src.utils import show_and_sell_finalization_models as fm
 from src.utils import show_and_sell_models as ssm
 from tests.unit.show_sell_fixtures import (
     assert_is_error,
@@ -137,12 +138,14 @@ def test_a_valid_draft_assigns_the_leftover_cent_and_answers_the_updated_preview
     assert not [
         row
         for row in world["show_and_sells"].scan()["Items"]
-        if "#CREDIT#" in str(row.get("sk", "")) or str(row.get("entityType", "")) == "ShowAndSellCredit"
+        if str(row.get("entityType", "")) in (fm.CREDIT_ENTITY_TYPE, fm.FINALIZATION_ENTITY_TYPE, fm.TOTAL_ENTITY_TYPE)
+        or str(row.get("sk", "")).startswith(f"{fm.CREDIT_SK_PREFIX}#")
+        or str(row.get("sk", "")).startswith("FINALIZATION#")
     ]
     assert not [
         row
         for row in world["unit_campaigns"].scan()["Items"]
-        if str(row.get("sk", "")).startswith("SHOW_AND_SELL_TOTAL#")
+        if str(row.get("entityType", "")) == fm.TOTAL_ENTITY_TYPE or str(row.get("sk", "")) == fm.SHOW_AND_SELL_TOTAL_SK
     ]
 
     # The preview repeats exactly what the mutation answered.
@@ -274,6 +277,16 @@ def test_an_idempotent_retry_answers_the_same_preview_and_writes_one_draft(world
     assert first["eventVersion"] == version + 1
     assert _version_of(world["show_and_sells"]) == version + 1
     assert _stored_draft(world["show_and_sells"]) == {C_SCOUT: 1}
+
+    # The same key with different assignments is a different request wearing a used
+    # name: refused on the fingerprint, and the stored draft does not move.
+    mismatched = assert_is_error(
+        _draft(assignments=[{"profileId": B_SCOUT, "cents": 1}], version=version, key="draft-retry"),
+        "INVALID_INPUT",
+    )
+    assert mismatched is not None
+    assert _stored_draft(world["show_and_sells"]) == {C_SCOUT: 1}
+    assert _version_of(world["show_and_sells"]) == version + 1
 
 
 # --- State matrix (pre-approval and REOPENED only) --------------------------------

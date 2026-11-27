@@ -2603,9 +2603,9 @@ type ScoutSalesAllocation {
   """APPROVED, SUSPENDED or SUPERSEDED — moves exactly as the version moves."""
   status: String!
   """When the credit was approved."""
-  createdAt: String!
+  createdAt: AWSDateTime!
   """When the credit last moved with its version."""
-  updatedAt: String!
+  updatedAt: AWSDateTime!
 }
 
 """Paginated ScoutSalesAllocation collection."""
@@ -2653,13 +2653,13 @@ type ShowAndSellFinalization {
   """The version this one replaced; null on a first approval."""
   previousFinalizationId: ID
   """The Kernel who approved it."""
-  approvedByAccountId: String!
+  approvedByAccountId: ID!
   """When it was approved."""
-  approvedAt: String!
+  approvedAt: AWSDateTime!
   """Who reopened the event and suspended this version; null until then."""
-  suspendedByAccountId: String
+  suspendedByAccountId: ID
   """When this version was suspended; null until then."""
-  suspendedAt: String
+  suspendedAt: AWSDateTime
   """The reopen's reason, kept on the version forever; null until then."""
   suspensionReason: String
   """The event version the approval conditioned on."""
@@ -2675,7 +2675,7 @@ type ShowAndSellFinalizationSummary {
   """APPROVED, SUSPENDED or SUPERSEDED."""
   status: String!
   """When it was approved."""
-  approvedAt: String!
+  approvedAt: AWSDateTime!
   """The version this one replaced; null on a first approval."""
   previousFinalizationId: ID
 }
@@ -2693,9 +2693,9 @@ type FinalizationSaleSnapshot {
   """The sale's id — the live sale it was copied from, as it stood at approval."""
   saleId: ID!
   """When the sale happened."""
-  saleAt: String!
-  """Who entered it."""
-  enteredBy: String!
+  saleAt: AWSDateTime!
+  """The account that entered the sale."""
+  enteredByAccountId: ID!
   """Buyer name as recorded."""
   buyerName: String
   """Buyer phone as recorded."""
