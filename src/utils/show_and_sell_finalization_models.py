@@ -673,19 +673,19 @@ def build_return_line_row(
 # --- Immutable sale-input snapshot (§5.16, §6.4) -------------------------------------
 
 
-def build_sale_snapshot_row(finalization_id: str, sale: Mapping[str, Any], *, show_and_sell_id: str) -> Dict[str, Any]:
-    """Copy one active sale in full as ``FINALIZATION#<id>#SALE#<saleId>``.
+_LINE_SNAPSHOT_FIELDS: Tuple[str, ...] = (
+    "lineItemId",
+    "productId",
+    "productNameSnapshot",
+    "unitPriceCentsSnapshot",
+    "immediateQty",
+    "weOweQty",
+    "subtotalCents",
+)
 
-    "Complete immutable inputs" (§5.16) is a refusal, not a comment: every line must
-    carry its stable id, product, name snapshot, price snapshot, quantities, and
-    subtotal; the sale must carry its buyer fields (null included), one payment
-    snapshot, its revision, and an ACTIVE status; and the line subtotals must add to
-    the stored total, because a snapshot whose parts do not sum to its whole is a
-    second, disagreeing answer about the pool. The copy is deep, so a later catalog
-    rename or sale correction rewrites nothing that this version used (PAY-06's rule
-    one level up).
-    """
-    fid = normalize_finalization_id(finalization_id)
+
+def _require_snapshot_sale_shape(sale: Mapping[str, Any]) -> None:
+    """The sale itself must be the complete stored ACTIVE row, not a projection."""
     missing = [
         name
         for name in (
@@ -712,6 +712,14 @@ def build_sale_snapshot_row(finalization_id: str, sale: Mapping[str, Any], *, sh
             saleId=sale[SALE_ID_ATTRIBUTE],
             status=sale[STATUS_ATTRIBUTE],
         )
+
+
+def _validated_snapshot_line_items(sale: Mapping[str, Any]) -> List[Any]:
+    """Every line complete, and the line subtotals adding to the stored total.
+
+    A snapshot whose parts do not sum to its whole is a second, disagreeing answer
+    about the pool, so the equation is a refusal, not a correction.
+    """
     line_items = sale[LINE_ITEMS_ATTRIBUTE]
     if not isinstance(line_items, list):
         _refuse(
@@ -720,19 +728,7 @@ def build_sale_snapshot_row(finalization_id: str, sale: Mapping[str, Any], *, sh
             saleId=sale[SALE_ID_ATTRIBUTE],
         )
     for index, line in enumerate(line_items):
-        line_missing = [
-            name
-            for name in (
-                "lineItemId",
-                "productId",
-                "productNameSnapshot",
-                "unitPriceCentsSnapshot",
-                "immediateQty",
-                "weOweQty",
-                "subtotalCents",
-            )
-            if name not in line
-        ]
+        line_missing = [name for name in _LINE_SNAPSHOT_FIELDS if name not in line]
         if line_missing:
             _refuse(
                 SNAPSHOT_INPUT_INCOMPLETE,
@@ -748,8 +744,26 @@ def build_sale_snapshot_row(finalization_id: str, sale: Mapping[str, Any], *, sh
             "the snapshot's line subtotals do not sum to its sale total",
             saleId=sale[SALE_ID_ATTRIBUTE],
             subtotalSum=subtotal_sum,
-            totalCents=sale["totalCents"],
+            totalCents=sale[TOTAL_CENTS_ATTRIBUTE],
         )
+    return line_items
+
+
+def build_sale_snapshot_row(finalization_id: str, sale: Mapping[str, Any], *, show_and_sell_id: str) -> Dict[str, Any]:
+    """Copy one active sale in full as ``FINALIZATION#<id>#SALE#<saleId>``.
+
+    "Complete immutable inputs" (§5.16) is a refusal, not a comment: every line must
+    carry its stable id, product, name snapshot, price snapshot, quantities, and
+    subtotal; the sale must carry its buyer fields (null included), one payment
+    snapshot, its revision, and an ACTIVE status; and the line subtotals must add to
+    the stored total, because a snapshot whose parts do not sum to its whole is a
+    second, disagreeing answer about the pool. The copy is deep, so a later catalog
+    rename or sale correction rewrites nothing that this version used (PAY-06's rule
+    one level up).
+    """
+    fid = normalize_finalization_id(finalization_id)
+    _require_snapshot_sale_shape(sale)
+    line_items = _validated_snapshot_line_items(sale)
     row: Dict[str, Any] = {
         "pk": show_and_sell_pk(show_and_sell_id),
         "sk": sale_snapshot_sk(fid, str(sale[SALE_ID_ATTRIBUTE])),

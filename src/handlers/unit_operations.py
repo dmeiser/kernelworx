@@ -6678,19 +6678,7 @@ def _finalization_preview_for_row(event_row: Dict[str, Any]) -> Dict[str, Any]:
     approval that will then be refused.
     """
     event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
-    state = show_and_sell_models.derive_event_status(event_row)
-    if state == show_and_sell_models.STATUS_FINALIZED:
-        raise AppError(
-            ErrorCode.CONFLICT,
-            "this event's credit is approved and final; read the finalization itself, or reopen the event to revise it",
-            details={"subcode": "FINALIZATION_APPROVED"},
-        )
-    if state == show_and_sell_models.STATUS_CANCELLED:
-        raise AppError(
-            ErrorCode.CONFLICT,
-            "a cancelled event is never finalized; it has no pool to split",
-            details={"subcode": "EVENT_CANCELLED"},
-        )
+    state = _preview_state_guard(event_row)
     active_sales = [
         row
         for row in show_and_sell_sale_models.event_sale_rows(event_id)
@@ -6705,20 +6693,9 @@ def _finalization_preview_for_row(event_row: Dict[str, Any]) -> Dict[str, Any]:
         for row in active_sales
     )
 
-    # One entry per Scout, minutes summed across slots: SPLIT-03's equal share is per
-    # Scout regardless of which slots they worked, and a cancelled signup or an
-    # un-confirmed row (zero minutes) is not eligible work.
-    minutes_by_profile: Dict[str, int] = {}
-    campaign_by_profile: Dict[str, str] = {}
-    for row in show_and_sell_models.event_signup_rows(event_id):
-        if str(row.get(show_and_sell_models.STATUS_ATTRIBUTE)) != show_and_sell_models.SIGNUP_ACTIVE:
-            continue
-        minutes = int(row.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0)
-        if minutes < 1:
-            continue
-        profile = str(row[show_and_sell_models.PROFILE_ID_ATTRIBUTE])
-        minutes_by_profile[profile] = minutes_by_profile.get(profile, 0) + minutes
-        campaign_by_profile.setdefault(profile, str(row[show_and_sell_models.CAMPAIGN_ID_ATTRIBUTE]))
+    # One entry per Scout, minutes summed across slots (SPLIT-03), and the residue
+    # stays visible as unassigned cents (SPLIT-10).
+    minutes_by_profile, campaign_by_profile = _preview_eligible_work(event_id)
     shares = show_and_sell_finalization_models.base_shares(
         whole_pool_cents=whole_pool,
         split_method=str(event_row[show_and_sell_models.SPLIT_METHOD_ATTRIBUTE]),
@@ -6730,9 +6707,66 @@ def _finalization_preview_for_row(event_row: Dict[str, Any]) -> Dict[str, Any]:
         str(key): int(value)
         for key, value in dict(event_row.get(show_and_sell_models.ROUNDING_DRAFT_ATTRIBUTE) or {}).items()
     }
-    applied_draft = 0
-    issues: List[Dict[str, Any]] = []
+    base_allocations, applied_draft = _preview_base_allocations(shares, campaign_by_profile, minutes_by_profile, draft)
+    issues = _preview_issues(state, whole_pool, shares, draft, applied_draft, unassigned)
+    return_lines = _preview_return_lines(event_row)
+    return {
+        "wholePoolCents": whole_pool,
+        "baseAllocations": base_allocations,
+        "unassignedCents": unassigned,
+        "returnLines": return_lines,
+        "cashPreview": {"calculatedExpectedCents": calculated_cash},
+        "issues": issues,
+        "eventVersion": int(event_row[show_and_sell_models.VERSION_ATTRIBUTE]),
+    }
+
+
+def _preview_state_guard(event_row: Dict[str, Any]) -> str:
+    """Refuse the two states a computed answer must not contradict; return the rest."""
+    state = str(show_and_sell_models.derive_event_status(event_row))
+    if state == show_and_sell_models.STATUS_FINALIZED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "this event's credit is approved and final; read the finalization itself, or reopen the event to revise it",
+            details={"subcode": "FINALIZATION_APPROVED"},
+        )
+    if state == show_and_sell_models.STATUS_CANCELLED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "a cancelled event is never finalized; it has no pool to split",
+            details={"subcode": "EVENT_CANCELLED"},
+        )
+    return state
+
+
+def _preview_eligible_work(event_id: str) -> Tuple[Dict[str, int], Dict[str, str]]:
+    """One entry per Scout, minutes summed across slots: SPLIT-03's equal share is per
+    Scout regardless of which slots they worked, and a cancelled signup or an
+    un-confirmed row (zero minutes) is not eligible work.
+    """
+    minutes_by_profile: Dict[str, int] = {}
+    campaign_by_profile: Dict[str, str] = {}
+    for row in show_and_sell_models.event_signup_rows(event_id):
+        if str(row.get(show_and_sell_models.STATUS_ATTRIBUTE)) != show_and_sell_models.SIGNUP_ACTIVE:
+            continue
+        minutes = int(row.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0)
+        if minutes < 1:
+            continue
+        profile = str(row[show_and_sell_models.PROFILE_ID_ATTRIBUTE])
+        minutes_by_profile[profile] = minutes_by_profile.get(profile, 0) + minutes
+        campaign_by_profile.setdefault(profile, str(row[show_and_sell_models.CAMPAIGN_ID_ATTRIBUTE]))
+    return minutes_by_profile, campaign_by_profile
+
+
+def _preview_base_allocations(
+    shares: Dict[str, int],
+    campaign_by_profile: Dict[str, str],
+    minutes_by_profile: Dict[str, int],
+    draft: Dict[str, int],
+) -> Tuple[List[Dict[str, Any]], int]:
+    """The per-Scout answer rows plus the cents a stored draft already assigns."""
     base_allocations: List[Dict[str, Any]] = []
+    applied_draft = 0
     for profile in sorted(shares):
         rounding = int(draft.get(profile, 0))
         applied_draft += rounding
@@ -6746,6 +6780,19 @@ def _finalization_preview_for_row(event_row: Dict[str, Any]) -> Dict[str, Any]:
                 "amountCents": shares[profile] + rounding,
             }
         )
+    return base_allocations, applied_draft
+
+
+def _preview_issues(
+    state: str,
+    whole_pool: int,
+    shares: Dict[str, int],
+    draft: Dict[str, int],
+    applied_draft: int,
+    unassigned: int,
+) -> List[Dict[str, Any]]:
+    """The named blockers to approval, ordered — reported, never silently trimmed."""
+    issues: List[Dict[str, Any]] = []
     if state not in (show_and_sell_models.STATUS_ENDED, show_and_sell_models.STATUS_REOPENED):
         issues.append(
             {
@@ -6788,7 +6835,12 @@ def _finalization_preview_for_row(event_row: Dict[str, Any]) -> Dict[str, Any]:
                 "message": "every leftover cent must be assigned before approval (SPLIT-10)",
             }
         )
+    issues.sort(key=lambda issue: (issue["code"], str(issue.get("profileId") or "")))
+    return issues
 
+
+def _preview_return_lines(event_row: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Expected returns from the event's own OPEN allocations, ordered by product."""
     return_lines: List[Dict[str, Any]] = []
     for row in show_and_sell_models.event_allocations(event_row):
         if str(row.get(inventory_models.STATUS_ATTRIBUTE)) != inventory_models.ALLOCATION_OPEN:
@@ -6804,16 +6856,7 @@ def _finalization_preview_for_row(event_row: Dict[str, Any]) -> Dict[str, Any]:
             }
         )
     return_lines.sort(key=lambda line: line["productId"])
-    issues.sort(key=lambda issue: (issue["code"], str(issue.get("profileId") or "")))
-    return {
-        "wholePoolCents": whole_pool,
-        "baseAllocations": base_allocations,
-        "unassignedCents": unassigned,
-        "returnLines": return_lines,
-        "cashPreview": {"calculatedExpectedCents": calculated_cash},
-        "issues": issues,
-        "eventVersion": int(event_row[show_and_sell_models.VERSION_ATTRIBUTE]),
-    }
+    return return_lines
 
 
 def _update_rounding_draft(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
