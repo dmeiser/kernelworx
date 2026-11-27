@@ -2122,3 +2122,108 @@ describe("Show & Sell Wave 5.5 raw sale SDL (schema.graphql)", () => {
     expect(definition("ShowAndSellSaleConnection").directives, "must carry no auth directive").toEqual([]);
   });
 });
+
+// --- Wave 6.1 (checklist §5.1.2): the finalization preview ───────────────────
+
+describe("Show & Sell Wave 6.1 finalization preview SDL (schema.graphql)", () => {
+  const SS61_TYPES = [
+    "FinalizationPreview",
+    "FinalizationBaseAllocation",
+    "FinalizationReturnPreviewLine",
+    "FinalizationCashPreview",
+    "ValidationIssue",
+  ];
+
+  test("the preview query takes only showAndSellId and returns FinalizationPreview non-null", () => {
+    const preview = rootFieldByName("Query", "showAndSellFinalizationPreview");
+    expect(preview, "Query.showAndSellFinalizationPreview is missing").toBeDefined();
+    expect(preview!.text).toMatch(/showAndSellId\s*:\s*ID!/);
+    expect(returnTypeName(preview!.text)).toBe("FinalizationPreview");
+    expect(preview!.text).toMatch(/\):\s*FinalizationPreview!/);
+    expect(preview!.directives, "showAndSellFinalizationPreview must be directive-free (Cognito-only)").toEqual([]);
+    expect(preview!.text, "the preview addresses exactly one event — no page, no filter").not.toMatch(/\bpage\s*:/);
+    expect(preview!.text).not.toMatch(/\bstatus\s*:/);
+  });
+
+  test("the preview answers pool, shares, residue, returns, cash, issues and version", () => {
+    expect(definition("FinalizationPreview").kind, "FinalizationPreview must be an object type").toBe("type");
+    expect([...fieldNameSet(definition("FinalizationPreview"))]).toEqual([
+      "wholePoolCents",
+      "baseAllocations",
+      "unassignedCents",
+      "returnLines",
+      "cashPreview",
+      "issues",
+      "eventVersion",
+    ]);
+    const preview = fieldsOf(definition("FinalizationPreview"));
+    expect(preview.find((f) => f.name === "wholePoolCents")!.text).toMatch(/wholePoolCents\s*:\s*Int!/);
+    expect(preview.find((f) => f.name === "unassignedCents")!.text).toMatch(/unassignedCents\s*:\s*Int!/);
+    expect(preview.find((f) => f.name === "eventVersion")!.text).toMatch(/eventVersion\s*:\s*Int!/);
+    expect(preview.find((f) => f.name === "baseAllocations")!.text).toMatch(/baseAllocations\s*:\s*\[FinalizationBaseAllocation!\]!/);
+    expect(preview.find((f) => f.name === "returnLines")!.text).toMatch(/returnLines\s*:\s*\[FinalizationReturnPreviewLine!\]!/);
+    expect(preview.find((f) => f.name === "cashPreview")!.text).toMatch(/cashPreview\s*:\s*FinalizationCashPreview!/);
+    expect(preview.find((f) => f.name === "issues")!.text).toMatch(/issues\s*:\s*\[ValidationIssue!\]!/);
+  });
+
+  test("a base allocation carries minutes, base, draft rounding and their sum — never an approved flag", () => {
+    expect([...fieldNameSet(definition("FinalizationBaseAllocation"))]).toEqual([
+      "profileId",
+      "campaignId",
+      "actualMinutes",
+      "baseAmountCents",
+      "roundingCreditCents",
+      "amountCents",
+    ]);
+    for (const numeric of ["actualMinutes", "baseAmountCents", "roundingCreditCents", "amountCents"]) {
+      expect(fieldsOf(definition("FinalizationBaseAllocation")).find((f) => f.name === numeric)!.text).toMatch(
+        new RegExp(`${numeric}:\\s*Int!`),
+      );
+    }
+  });
+
+  test("a return line is the allocated/sold/expected triple; cash preview is the snapshot total alone", () => {
+    expect([...fieldNameSet(definition("FinalizationReturnPreviewLine"))]).toEqual([
+      "productId",
+      "allocatedQty",
+      "soldQty",
+      "expectedQty",
+    ]);
+    expect([...fieldNameSet(definition("FinalizationCashPreview"))]).toEqual(["calculatedExpectedCents"]);
+    expect(fieldsOf(definition("FinalizationCashPreview"))[0].text).toMatch(/calculatedExpectedCents\s*:\s*Int!/);
+  });
+
+  test("a ValidationIssue names code, field and message, and optionally one product or participant", () => {
+    expect([...fieldNameSet(definition("ValidationIssue"))]).toEqual(["code", "field", "message", "productId", "profileId"]);
+    const issue = fieldsOf(definition("ValidationIssue"));
+    for (const required of ["code", "field", "message"]) {
+      expect(issue.find((f) => f.name === required)!.text).toMatch(new RegExp(`${required}:\\s*String!`));
+    }
+    expect(issue.find((f) => f.name === "productId")!.text).toMatch(/productId\s*:\s*ID(?!\s*!)/);
+    expect(issue.find((f) => f.name === "profileId")!.text).toMatch(/profileId\s*:\s*ID(?!\s*!)/);
+  });
+
+  test("the preview stores nothing: no finalization id, no approval flag, no artifact, no draft map", () => {
+    for (const name of SS61_TYPES) {
+      const names = fieldNameSet(definition(name));
+      for (const forbidden of [
+        "finalizationId",
+        "approvedAt",
+        "approved",
+        "finalizedAt",
+        "fileUrl",
+        "downloadUrl",
+        "url",
+        "roundingDraftByProfileId",
+      ]) {
+        expect(names.has(forbidden), `${name}.${forbidden} would put an approved answer or a stored draft on the preview`).toBe(false);
+      }
+    }
+  });
+
+  test("AUTH: no preview type carries an auth directive", () => {
+    for (const name of SS61_TYPES) {
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+    }
+  });
+});

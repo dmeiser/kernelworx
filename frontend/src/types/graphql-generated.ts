@@ -729,6 +729,62 @@ export type GqlEventInventoryAllocationConnection = {
   pageInfo: GqlPageInfo;
 };
 
+/** One eligible participant's computed share of the whole-event pool: the confirmed minutes used for this calculation, the round-down base share, the Kernel's draft rounding cents, and their sum. Computed — never approved credit (SPLIT-06). */
+export type GqlFinalizationBaseAllocation = {
+  __typename?: 'FinalizationBaseAllocation';
+  /** Confirmed minutes across every slot of this event, summed per Scout. */
+  actualMinutes: Scalars['Int']['output'];
+  /** Base plus draft rounding — the pending amount, approved only by finalization. */
+  amountCents: Scalars['Int']['output'];
+  /** The round-down base share of the whole-event pool (SPLIT-10). */
+  baseAmountCents: Scalars['Int']['output'];
+  /** The Scout Campaign this credit belongs to. */
+  campaignId: Scalars['ID']['output'];
+  /** The Scout holding this share. */
+  profileId: Scalars['ID']['output'];
+  /** Cents the Kernel's rounding draft has assigned to this participant; zero until a draft says otherwise. */
+  roundingCreditCents: Scalars['Int']['output'];
+};
+
+/** Expected cash from the payment snapshots alone: only a snapshot whose methodCode is CASH counts, and no display name or Other note is parsed for cash content (CASH-01). The manual adjustment and the counted amount belong to approval (CASH-02, CASH-03). */
+export type GqlFinalizationCashPreview = {
+  __typename?: 'FinalizationCashPreview';
+  /** Sum of active sales whose snapshotted payment method is Cash. */
+  calculatedExpectedCents: Scalars['Int']['output'];
+};
+
+/** The whole pending finalization picture for one event — pool, computed shares, unassigned cents, expected returns, expected cash, and the blockers to approval — computed on read and approved by nothing. Pending credit is never stored anywhere; approved answers live in the finalization, credit, and scoped-total records. */
+export type GqlFinalizationPreview = {
+  __typename?: 'FinalizationPreview';
+  /** One row per eligible confirmed participant, ordered by profileId. */
+  baseAllocations: Array<GqlFinalizationBaseAllocation>;
+  /** Expected cash from the payment snapshots alone (CASH-01). */
+  cashPreview: GqlFinalizationCashPreview;
+  /** The event version this picture was computed against; what an approval will condition on. */
+  eventVersion: Scalars['Int']['output'];
+  /** Why approval would currently be refused, empty when it would not. */
+  issues: Array<GqlValidationIssue>;
+  /** Expected return per product with an open allocation on this event. */
+  returnLines: Array<GqlFinalizationReturnPreviewLine>;
+  /** The cents the round-down left unassigned — before any draft, and the ceiling a rounding draft is bounded by (SPLIT-10, §7.2). */
+  unassignedCents: Scalars['Int']['output'];
+  /** One whole-event sales pool from active sales, We Owe totals included (SPLIT-02, SPLIT-05). */
+  wholePoolCents: Scalars['Int']['output'];
+};
+
+/** One product's expected return before approval (FIN-02): what the event holds, what it sold, and what should come back. The Kernel confirms or corrects the actual count at approval; a variance never touches sales, cash, or credit on its own (FIN-04). */
+export type GqlFinalizationReturnPreviewLine = {
+  __typename?: 'FinalizationReturnPreviewLine';
+  /** Quantity the event holds assigned. */
+  allocatedQty: Scalars['Int']['output'];
+  /** allocatedQty minus soldQty: the count expected back. */
+  expectedQty: Scalars['Int']['output'];
+  /** The product being returned. */
+  productId: Scalars['ID']['output'];
+  /** Recorded immediate-handoff sales against this allocation. */
+  soldQty: Scalars['Int']['output'];
+};
+
 /** Input for fulfillIndividualOrderLine. Fills part or all of one individual Order line from a Kernel-chosen source. */
 export type GqlFulfillIndividualOrderLineInput = {
   /** The Order.fulfillmentVersion this caller read. A stale value conflicts instead of double-fulfilling one line. */
@@ -2053,6 +2109,8 @@ export type GqlQuery = {
   scoutCustodyBalances: GqlScoutCustodyBalanceConnection;
   /** One event as its Unit Admin manages it: identity, immutable times, split and We Owe settings, allocations, slots, status, and the version the next write conditions on. Unit Admin for the event's Unit. */
   showAndSell: GqlShowAndSellAdmin;
+  /** The whole pending finalization picture for one event, computed on every call and approved by none of them: one whole-event pool from active sales (a We Owe sale's total is already inside it), EQUAL or TIME_WORKED base shares from eligible confirmed work with the round-down residue reported as unassigned cents, the Kernel's rounding draft riding onto the participant rows, expected returns from the event's open allocations, expected cash classified by the snapshotted method code alone, and the named blockers that would stop approval. Nothing is persisted: no finalization, credit, total, or movement row, and the event version does not move (SPLIT-06, EVT-Q-06-02). A FINALIZED event refuses — its credit is approved and final, and that answer is read from the finalization rows, not recomputed beside them; a cancelled event has no pool to split. Unit Admin for the event's Unit. */
+  showAndSellFinalizationPreview: GqlFinalizationPreview;
   /** One event's participant view for one Scout: the slots and that Scout's commitments. Profile Owner/WRITE or READ for that Scout, or a Unit Admin for the event's Unit. An unjoined Scout, another Unit's event, or a Scout the caller cannot read returns `NOT_FOUND`, and no administrative field is present. */
   showAndSellOpportunity: GqlShowAndSellOpportunity;
   /** An event's sales, raw and paginated: every buyer, line and payment detail an administrative screen needs, with the sale revision an optimistic-concurrency write conditions on. Unit Admin for the event's Unit; contains buyer/payment snapshots, never a participant projection. */
@@ -2290,6 +2348,11 @@ export type GqlQuery_ScoutCustodyBalancesArgs = {
 
 /** The root query object for the KernelWorx API. */
 export type GqlQuery_ShowAndSellArgs = {
+  showAndSellId: Scalars['ID']['input'];
+};
+
+/** The root query object for the KernelWorx API. */
+export type GqlQuery_ShowAndSellFinalizationPreviewArgs = {
   showAndSellId: Scalars['ID']['input'];
 };
 
@@ -3714,6 +3777,21 @@ export type GqlUpsertShowAndSellSlotInput = {
   startAt: Scalars['AWSDateTime']['input'];
   /** The event version the caller last read (optimistic concurrency). */
   version: GqlVersionedInput;
+};
+
+/** One blocker to approval, naming the field it belongs to and, when it is about one product or one participant, that id. Used by previews to explain why finalization would currently be refused. */
+export type GqlValidationIssue = {
+  __typename?: 'ValidationIssue';
+  /** Stable machine-readable code: EVENT_NOT_ENDED, NO_CONFIRMED_WORK, ROUNDING_CENTS_UNASSIGNED, ROUNDING_PARTICIPANT_INELIGIBLE, ROUNDING_OVERSUM. */
+  code: Scalars['String']['output'];
+  /** The field or input area the blocker belongs to. */
+  field: Scalars['String']['output'];
+  /** The same answer in one sentence, for a screen with no code table. */
+  message: Scalars['String']['output'];
+  /** Set when the blocker is about one product. */
+  productId?: Maybe<Scalars['ID']['output']>;
+  /** Set when the blocker is about one participant. */
+  profileId?: Maybe<Scalars['ID']['output']>;
 };
 
 /** Optimistic-concurrency version carried by a version-changing operation. */

@@ -50,6 +50,7 @@ try:  # pragma: no cover
         order_fulfillment_models,
         qr_objects,
         sale_payment_models,
+        show_and_sell_finalization_models,
         show_and_sell_models,
         show_and_sell_sale_models,
         unit_auth,
@@ -65,6 +66,7 @@ except ModuleNotFoundError:  # pragma: no cover
         order_fulfillment_models,
         qr_objects,
         sale_payment_models,
+        show_and_sell_finalization_models,
         show_and_sell_models,
         show_and_sell_sale_models,
         unit_auth,
@@ -174,6 +176,7 @@ SIGNUP_SCOUT_FIELD = "signupScoutForShowAndSellSlot"
 CANCEL_SIGNUP_FIELD = "cancelShowAndSellSignup"
 CONFIRM_WORK_FIELD = "confirmShowAndSellWork"
 SHOW_AND_SELL_SALES_FIELD = "showAndSellSales"
+SHOW_AND_SELL_FINALIZATION_PREVIEW_FIELD = "showAndSellFinalizationPreview"
 SHOW_AND_SELL_SIGNUPS_FIELD = "showAndSellSignups"
 MY_COMMITMENTS_FIELD = "myScoutCommitments"
 SIGNUP_CALENDAR_FIELD = "showAndSellSignupCalendarData"
@@ -6629,6 +6632,178 @@ def _show_and_sell_sales(event: Dict[str, Any], caller_id: str) -> Dict[str, Any
     return page
 
 
+def _show_and_sell_finalization_preview(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The whole pending finalization picture — computed, never approved (§5.1.2).
+
+    One answer over the whole event (SPLIT-02): the pool is every ACTIVE sale's total,
+    which already contains each We Owe line — SPLIT-05 counts those sales exactly once,
+    so obligations are never added to the pool a second time. Base shares are the
+    round-down floor of exact integer arithmetic and the residue stays visible as
+    unassigned cents (SPLIT-10); the event's rounding draft rides onto the participant
+    rows and shrinks the *assigned* remainder, but never the reported unassigned
+    cents, because §5.1.3 bounds a draft against the split's residue, not against what
+    an earlier draft already took. Expected returns come from the event's own OPEN
+    allocations read through ``productIds`` (SEC-06: the index is display, not truth),
+    and expected cash is decided by the snapshotted ``methodCode`` alone (CASH-01) —
+    never by parsing an Other note for the word "cash".
+
+    The preview writes nothing (EVT-Q-06-02): no finalization row, no credit, no
+    total, no inventory movement, and the event version does not move — approving any
+    of it is ``finalizeShowAndSell`` (§5.2), whose transaction the preview exists to
+    describe. A FINALIZED event refuses rather than answers: its credit is approved,
+    and a second, computed answer beside the approved one is exactly the disagreement
+    SPLIT-06 forbids; an approved picture is read from the finalization rows
+    themselves. A CANCELLED event has no pool to split and refuses too.
+
+    ``issues`` are the named blockers to approval, not an error: an in-progress event
+    may be previewed, but finalization waits for the clock (``EVENT_NOT_ENDED``); a
+    pool with nobody confirmed cannot be split (``NO_CONFIRMED_WORK``); leftover cents
+    must all be assigned before approval (``ROUNDING_CENTS_UNASSIGNED``, SPLIT-10);
+    and a stored draft that went stale — an ineligible name (``ROUNDING_PARTICIPANT_
+    INELIGIBLE``) or an over-sum (``ROUNDING_OVERSUM``) — is reported rather than
+    silently trimmed, because a preview that hides a broken draft promises an
+    approval that will then be refused.
+    """
+    event_row = _event_admin_guard(event, caller_id)
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    state = show_and_sell_models.derive_event_status(event_row)
+    if state == show_and_sell_models.STATUS_FINALIZED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "this event's credit is approved and final; read the finalization itself, or reopen the event to revise it",
+            details={"subcode": "FINALIZATION_APPROVED"},
+        )
+    if state == show_and_sell_models.STATUS_CANCELLED:
+        raise AppError(
+            ErrorCode.CONFLICT,
+            "a cancelled event is never finalized; it has no pool to split",
+            details={"subcode": "EVENT_CANCELLED"},
+        )
+    active_sales = [
+        row
+        for row in show_and_sell_sale_models.event_sale_rows(event_id)
+        if str(row.get(show_and_sell_sale_models.STATUS_ATTRIBUTE)) == show_and_sell_sale_models.SALE_STATUS_ACTIVE
+    ]
+    whole_pool = show_and_sell_finalization_models.whole_pool_cents(active_sales)
+    calculated_cash = sum(
+        sale_payment_models.expected_cash_cents(
+            row[show_and_sell_sale_models.PAYMENT_SNAPSHOT_ATTRIBUTE],
+            row[show_and_sell_sale_models.TOTAL_CENTS_ATTRIBUTE],
+        )
+        for row in active_sales
+    )
+
+    # One entry per Scout, minutes summed across slots: SPLIT-03's equal share is per
+    # Scout regardless of which slots they worked, and a cancelled signup or an
+    # un-confirmed row (zero minutes) is not eligible work.
+    minutes_by_profile: Dict[str, int] = {}
+    campaign_by_profile: Dict[str, str] = {}
+    for row in show_and_sell_models.event_signup_rows(event_id):
+        if str(row.get(show_and_sell_models.STATUS_ATTRIBUTE)) != show_and_sell_models.SIGNUP_ACTIVE:
+            continue
+        minutes = int(row.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0)
+        if minutes < 1:
+            continue
+        profile = str(row[show_and_sell_models.PROFILE_ID_ATTRIBUTE])
+        minutes_by_profile[profile] = minutes_by_profile.get(profile, 0) + minutes
+        campaign_by_profile.setdefault(profile, str(row[show_and_sell_models.CAMPAIGN_ID_ATTRIBUTE]))
+    shares = show_and_sell_finalization_models.base_shares(
+        whole_pool_cents=whole_pool,
+        split_method=str(event_row[show_and_sell_models.SPLIT_METHOD_ATTRIBUTE]),
+        eligible_work=list(minutes_by_profile.items()),
+    )
+    unassigned = show_and_sell_finalization_models.unassigned_cents(whole_pool, shares)
+
+    draft: Dict[str, int] = {
+        str(key): int(value)
+        for key, value in dict(event_row.get(show_and_sell_models.ROUNDING_DRAFT_ATTRIBUTE) or {}).items()
+    }
+    applied_draft = 0
+    issues: List[Dict[str, Any]] = []
+    base_allocations: List[Dict[str, Any]] = []
+    for profile in sorted(shares):
+        rounding = int(draft.get(profile, 0))
+        applied_draft += rounding
+        base_allocations.append(
+            {
+                "profileId": profile,
+                "campaignId": campaign_by_profile[profile],
+                "actualMinutes": minutes_by_profile[profile],
+                "baseAmountCents": shares[profile],
+                "roundingCreditCents": rounding,
+                "amountCents": shares[profile] + rounding,
+            }
+        )
+    if state not in (show_and_sell_models.STATUS_ENDED, show_and_sell_models.STATUS_REOPENED):
+        issues.append(
+            {
+                "code": "EVENT_NOT_ENDED",
+                "field": "status",
+                "message": "the event has not reached its endAt yet; finalization waits for the clock",
+            }
+        )
+    if whole_pool > 0 and not shares:
+        issues.append(
+            {
+                "code": "NO_CONFIRMED_WORK",
+                "field": "work",
+                "message": "the pool has cents but no confirmed participant to award them to (SPLIT-03)",
+            }
+        )
+    for profile in sorted(draft):
+        if profile not in shares:
+            issues.append(
+                {
+                    "code": "ROUNDING_PARTICIPANT_INELIGIBLE",
+                    "field": "roundingDraft",
+                    "message": "the rounding draft names a profile that holds no confirmed share of this pool",
+                    "profileId": profile,
+                }
+            )
+    if applied_draft > unassigned:
+        issues.append(
+            {
+                "code": "ROUNDING_OVERSUM",
+                "field": "roundingDraft",
+                "message": "the rounding draft assigns more cents than the split left unassigned",
+            }
+        )
+    elif shares and unassigned - applied_draft > 0:
+        issues.append(
+            {
+                "code": "ROUNDING_CENTS_UNASSIGNED",
+                "field": "roundingDraft",
+                "message": "every leftover cent must be assigned before approval (SPLIT-10)",
+            }
+        )
+
+    return_lines: List[Dict[str, Any]] = []
+    for row in show_and_sell_models.event_allocations(event_row):
+        if str(row.get(inventory_models.STATUS_ATTRIBUTE)) != inventory_models.ALLOCATION_OPEN:
+            continue
+        allocated = int(row[inventory_models.ALLOCATED_QTY])
+        sold = int(row[inventory_models.SOLD_QTY])
+        return_lines.append(
+            {
+                "productId": str(row[inventory_models.PRODUCT_ID_ATTRIBUTE]),
+                "allocatedQty": allocated,
+                "soldQty": sold,
+                "expectedQty": show_and_sell_finalization_models.expected_return_qty(allocated, sold),
+            }
+        )
+    return_lines.sort(key=lambda line: line["productId"])
+    issues.sort(key=lambda issue: (issue["code"], str(issue.get("profileId") or "")))
+    return {
+        "wholePoolCents": whole_pool,
+        "baseAllocations": base_allocations,
+        "unassignedCents": unassigned,
+        "returnLines": return_lines,
+        "cashPreview": {"calculatedExpectedCents": calculated_cash},
+        "issues": issues,
+        "eventVersion": int(event_row[show_and_sell_models.VERSION_ATTRIBUTE]),
+    }
+
+
 def _commitment_read_scope(caller_id: str, profile_id: str, unit_id: Any) -> Optional[set[str]]:
     """Which Unit Campaigns this caller may read this Scout's commitments in (INV-Q-06-02).
 
@@ -9386,6 +9561,7 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     CANCEL_SIGNUP_FIELD: _cancel_show_and_sell_signup,
     CONFIRM_WORK_FIELD: _confirm_show_and_sell_work,
     SHOW_AND_SELL_SALES_FIELD: _show_and_sell_sales,
+    SHOW_AND_SELL_FINALIZATION_PREVIEW_FIELD: _show_and_sell_finalization_preview,
     SHOW_AND_SELL_SIGNUPS_FIELD: _show_and_sell_signups,
     MY_COMMITMENTS_FIELD: _my_scout_commitments,
     SIGNUP_CALENDAR_FIELD: _show_and_sell_signup_calendar_data,

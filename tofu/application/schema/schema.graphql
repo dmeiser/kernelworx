@@ -2492,6 +2492,72 @@ type ShowAndSellSaleConnection {
   pageInfo: PageInfo!
 }
 
+"""One blocker to approval, naming the field it belongs to and, when it is about one product or one participant, that id. Used by previews to explain why finalization would currently be refused."""
+type ValidationIssue {
+  """Stable machine-readable code: EVENT_NOT_ENDED, NO_CONFIRMED_WORK, ROUNDING_CENTS_UNASSIGNED, ROUNDING_PARTICIPANT_INELIGIBLE, ROUNDING_OVERSUM."""
+  code: String!
+  """The field or input area the blocker belongs to."""
+  field: String!
+  """The same answer in one sentence, for a screen with no code table."""
+  message: String!
+  """Set when the blocker is about one product."""
+  productId: ID
+  """Set when the blocker is about one participant."""
+  profileId: ID
+}
+
+"""One eligible participant's computed share of the whole-event pool: the confirmed minutes used for this calculation, the round-down base share, the Kernel's draft rounding cents, and their sum. Computed — never approved credit (SPLIT-06)."""
+type FinalizationBaseAllocation {
+  """The Scout holding this share."""
+  profileId: ID!
+  """The Scout Campaign this credit belongs to."""
+  campaignId: ID!
+  """Confirmed minutes across every slot of this event, summed per Scout."""
+  actualMinutes: Int!
+  """The round-down base share of the whole-event pool (SPLIT-10)."""
+  baseAmountCents: Int!
+  """Cents the Kernel's rounding draft has assigned to this participant; zero until a draft says otherwise."""
+  roundingCreditCents: Int!
+  """Base plus draft rounding — the pending amount, approved only by finalization."""
+  amountCents: Int!
+}
+
+"""One product's expected return before approval (FIN-02): what the event holds, what it sold, and what should come back. The Kernel confirms or corrects the actual count at approval; a variance never touches sales, cash, or credit on its own (FIN-04)."""
+type FinalizationReturnPreviewLine {
+  """The product being returned."""
+  productId: ID!
+  """Quantity the event holds assigned."""
+  allocatedQty: Int!
+  """Recorded immediate-handoff sales against this allocation."""
+  soldQty: Int!
+  """allocatedQty minus soldQty: the count expected back."""
+  expectedQty: Int!
+}
+
+"""Expected cash from the payment snapshots alone: only a snapshot whose methodCode is CASH counts, and no display name or Other note is parsed for cash content (CASH-01). The manual adjustment and the counted amount belong to approval (CASH-02, CASH-03)."""
+type FinalizationCashPreview {
+  """Sum of active sales whose snapshotted payment method is Cash."""
+  calculatedExpectedCents: Int!
+}
+
+"""The whole pending finalization picture for one event — pool, computed shares, unassigned cents, expected returns, expected cash, and the blockers to approval — computed on read and approved by nothing. Pending credit is never stored anywhere; approved answers live in the finalization, credit, and scoped-total records."""
+type FinalizationPreview {
+  """One whole-event sales pool from active sales, We Owe totals included (SPLIT-02, SPLIT-05)."""
+  wholePoolCents: Int!
+  """One row per eligible confirmed participant, ordered by profileId."""
+  baseAllocations: [FinalizationBaseAllocation!]!
+  """The cents the round-down left unassigned — before any draft, and the ceiling a rounding draft is bounded by (SPLIT-10, §7.2)."""
+  unassignedCents: Int!
+  """Expected return per product with an open allocation on this event."""
+  returnLines: [FinalizationReturnPreviewLine!]!
+  """Expected cash from the payment snapshots alone (CASH-01)."""
+  cashPreview: FinalizationCashPreview!
+  """Why approval would currently be refused, empty when it would not."""
+  issues: [ValidationIssue!]!
+  """The event version this picture was computed against; what an approval will condition on."""
+  eventVersion: Int!
+}
+
 """The pending work picture after a confirmation batch, computed and never approved: the minutes Kernels have confirmed and the minimum finalization write set that picture implies (§8.10). Approving credit is finalization's job, not this read's."""
 type ShowAndSellWorkPreview {
   """The event version this preview was computed against, moved by this batch."""
@@ -2772,6 +2838,13 @@ type Query {
     """Pagination parameters."""
     page: PageInput
   ): ShowAndSellSaleConnection!
+
+  # Show & Sell — finalization preview read (checklist §5.1.2)
+  """The whole pending finalization picture for one event, computed on every call and approved by none of them: one whole-event pool from active sales (a We Owe sale's total is already inside it), EQUAL or TIME_WORKED base shares from eligible confirmed work with the round-down residue reported as unassigned cents, the Kernel's rounding draft riding onto the participant rows, expected returns from the event's open allocations, expected cash classified by the snapshotted method code alone, and the named blockers that would stop approval. Nothing is persisted: no finalization, credit, total, or movement row, and the event version does not move (SPLIT-06, EVT-Q-06-02). A FINALIZED event refuses — its credit is approved and final, and that answer is read from the finalization rows, not recomputed beside them; a cancelled event has no pool to split. Unit Admin for the event's Unit."""
+  showAndSellFinalizationPreview(
+    """The event whose pending finalization picture is being computed."""
+    showAndSellId: ID!
+  ): FinalizationPreview!
 
   # Show & Sell — signup and commitment reads (checklist §3.4.4-§3.4.5)
   """An event's signups with the full actor and confirmation audit: who placed each, who confirmed the work, and the version each cancellation or confirmation conditions on. Unit Admin for the event's Unit."""
