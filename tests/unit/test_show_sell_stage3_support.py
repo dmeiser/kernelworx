@@ -1311,11 +1311,12 @@ def test_every_census_read_resolves_in_the_merged_document_map() -> None:
     cannot run proves nothing — which means a document name missing from the transport's map would
     answer ``""`` for its table instead of raising, and a ``KeyError('showAndSells')`` once did exactly
     that on the real lane. The lookup is pinned directly so it can never pass unseen again: every
-    name in :data:`STAGE_THREE_RESIDUE_READS` resolves in the merged Stage 2 + Stage 3 map the lane
-    transport builds, the query text actually selects that field, and a census run against a transport
-    that enforces that lookup answers the Show & Sell table rather than shrugging at it.
+    name in :data:`STAGE_THREE_RESIDUE_READS` resolves in :data:`STAGE_THREE_CENSUS_DOCUMENTS`, the one
+    merged map the lane transport uses, the query text actually selects that field, and a census run
+    against a transport that enforces that lookup answers the Show & Sell table rather than shrugging
+    at it.
     """
-    documents = {**stage2.STAGE_TWO_DOCUMENTS, **stage3.STAGE_THREE_DOCUMENTS}
+    documents = stage3.STAGE_THREE_CENSUS_DOCUMENTS
     for reads in stage3.STAGE_THREE_RESIDUE_READS.values():
         for document in reads:
             query = documents[document]

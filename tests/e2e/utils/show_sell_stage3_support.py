@@ -150,6 +150,7 @@ __all__ = [
     "STAGE_THREE_RESIDUE_READS",
     "STAGE_THREE_RESIDUE_SCOPES",
     "STAGE_THREE_RESIDUE_TABLES",
+    "STAGE_THREE_CENSUS_DOCUMENTS",
     "derived_marker_address",
     "plan_row_address",
     "is_census_statement",
@@ -2809,6 +2810,14 @@ STAGE_THREE_RESIDUE_READS: dict[str, tuple[str, ...]] = {
     "show-and-sells": ("showAndSells",),
 }
 
+#: The single lookup a census transport resolves read names against.  Every swept table's census read
+#: is a Stage 2 document except ``showAndSells``, which only the Stage 3 documents mint; a name that
+#: resolves in neither half raises at the transport instead of answering ``""`` through the probe's
+#: exception guard — a ``KeyError('showAndSells')`` once did exactly that, silently, on the real lane.
+#: The lane and its pins share this one map so a transport reverting to either half alone is a named
+#: test failure, not a silent regression.
+STAGE_THREE_CENSUS_DOCUMENTS: Mapping[str, str] = {**stage_two.STAGE_TWO_DOCUMENTS, **STAGE_THREE_DOCUMENTS}
+
 #: The physical name the sweeper reports for each key, and the ids each read needs.  ``pairs`` means the
 #: read is keyed on a Unit Campaign *and* the Scout Campaign whose orders it answers; ``orders`` means an
 #: ``Order`` id is the only key the row can have, so those ids come from the Order read first.
@@ -2875,7 +2884,6 @@ def stage_three_residue_probe(
     scout_campaign_ids: Sequence[str] = (),
     order_ids: Sequence[str] = (),
     *,
-    documents: Mapping[str, str] | None = None,
     reads: Mapping[str, tuple[str, ...]] | None = None,
     error_summaries: Callable[[Mapping[str, Any]], Sequence[Any]] | None = None,
 ) -> Callable[[str], str]:
@@ -2894,10 +2902,6 @@ def stage_three_residue_probe(
     units = [str(item) for item in unit_campaign_ids if item]
     scouts = [str(item) for item in scout_campaign_ids if item]
     named_orders = sorted({str(item) for item in order_ids if item})
-    # Both shipped document halves merged: every swept table's census read is a Stage 2 document
-    # except ``showAndSells``, which only the Stage 3 documents mint. A census read that resolves in
-    # neither map would answer nothing and leave its table unproven, so the default carries both.
-    documents = dict({**stage_two.STAGE_TWO_DOCUMENTS, **STAGE_THREE_DOCUMENTS} if documents is None else documents)
     reads = dict(STAGE_THREE_RESIDUE_READS if reads is None else reads)
     summarize = error_summaries or show_sell_graphql.error_summaries
 
@@ -2971,7 +2975,6 @@ def stage_three_residue_census(
     scout_campaign_ids: Sequence[str] = (),
     order_ids: Sequence[str] = (),
     *,
-    documents: Mapping[str, str] | None = None,
     reads: Mapping[str, tuple[str, ...]] | None = None,
     error_summaries: Callable[[Mapping[str, Any]], Sequence[Any]] | None = None,
 ) -> dict[str, str]:
@@ -2990,7 +2993,6 @@ def stage_three_residue_census(
         unit_campaign_ids,
         scout_campaign_ids,
         order_ids,
-        documents=documents,
         reads=reads,
         error_summaries=error_summaries,
     )

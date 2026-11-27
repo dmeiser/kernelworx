@@ -794,6 +794,11 @@ describe('§3.5.2-§3.5.4: the boards under the header belong to this event', ()
     await screen.findByTestId('sale-entry-form');
     expect(await screen.findByTestId('sale-list-empty')).toHaveTextContent('No sales');
     expect(sent.sales[0]).toEqual(DESK_SALES_VARIABLES);
+    // The method picker and the owed-lines read go out a beat after the desk form itself
+    // mounts — in CI they raced the list empty-state onto the screen — so wait for the sends
+    // rather than assuming they already went, then pin what they carried.
+    await waitFor(() => expect(sent.methods.length).toBeGreaterThan(0));
+    await waitFor(() => expect(sent.obligations.length).toBeGreaterThan(0));
     expect(sent.methods[0]).toEqual(METHODS_VARIABLES);
     expect(sent.obligations[0]).toEqual(OBLIGATIONS_VARIABLES);
 
