@@ -178,6 +178,13 @@ CANCEL_SIGNUP_FIELD = "cancelShowAndSellSignup"
 CONFIRM_WORK_FIELD = "confirmShowAndSellWork"
 SHOW_AND_SELL_SALES_FIELD = "showAndSellSales"
 SHOW_AND_SELL_FINALIZATION_PREVIEW_FIELD = "showAndSellFinalizationPreview"
+SHOW_AND_SELL_FINALIZATIONS_FIELD = "showAndSellFinalizations"
+SHOW_AND_SELL_FINALIZATION_FIELD = "showAndSellFinalization"
+FINALIZATION_ID_ARGUMENT = "finalizationId"
+FINALIZATION_SALE_SNAPSHOTS_FIELD = "showAndSellFinalizationSaleSnapshots"
+FINALIZATION_WORK_SNAPSHOTS_FIELD = "showAndSellFinalizationWorkSnapshots"
+FINALIZATION_RETURN_LINES_FIELD = "showAndSellFinalizationReturnLines"
+FINALIZATION_CREDITS_FIELD = "showAndSellFinalizationCredits"
 SHOW_AND_SELL_SIGNUPS_FIELD = "showAndSellSignups"
 MY_COMMITMENTS_FIELD = "myScoutCommitments"
 SIGNUP_CALENDAR_FIELD = "showAndSellSignupCalendarData"
@@ -6920,6 +6927,142 @@ def _rounding_draft_answer(event_id: str) -> Dict[str, Any]:
     return _finalization_preview_for_row(dict(show_and_sell_models.load_show_and_sell_or_not_found(event_id)))
 
 
+def _show_and_sell_finalizations(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """One event's finalization history, paginated (§5.1.4).
+
+    Discovery, in version order: the browser walks APPROVED, SUSPENDED and SUPERSEDED
+    versions oldest-first, and each summary names its ``previousFinalizationId`` so the
+    chain is readable from the list itself without a read per version. A version's
+    record is never replaced by the next one — ``finalizeShowAndSell`` appends — so a
+    list read after a re-finalization shows both answers, which is what
+    current-versus-history reporting reads here to know what to pull detail for.
+    An event that has never been finalized answers an empty page rather than an
+    error: "has this event been finalized?" is a question a screen asks before it
+    knows the answer.
+    """
+    event_row = _event_admin_guard(event, caller_id)
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    rows = show_and_sell_finalization_models.finalization_rows(event_id)
+    rows.sort(key=lambda row: int(row[show_and_sell_finalization_models.VERSION_NUMBER_ATTRIBUTE]))
+    page = dict(
+        paginate_page(
+            rows,
+            f"{SHOW_AND_SELL_FINALIZATIONS_FIELD}#{event_id}",
+            _page_argument(event),
+        )
+    )
+    page["items"] = [show_and_sell_finalization_models.finalization_summary_payload(row) for row in page["items"]]
+    return page
+
+
+def _finalization_address(event: Dict[str, Any], caller_id: str) -> Tuple[str, str]:
+    """Shared entry for the version-scoped reads: admin of the event, one named version."""
+    event_row = _event_admin_guard(event, caller_id)
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    finalization_id = show_and_sell_finalization_models.normalize_finalization_id(
+        _query_argument(event, FINALIZATION_ID_ARGUMENT)
+    )
+    return event_id, finalization_id
+
+
+def _show_and_sell_finalization(event: Dict[str, Any], caller_id: str) -> Optional[Dict[str, Any]]:
+    """One finalization version's full record, or ``null`` when it does not exist (§5.1.4).
+
+    ``null`` rather than ``NOT_FOUND`` for the absent case because this is the
+    detail read behind a screen that first asks whether the event has been
+    finalized at all — the empty history from ``showAndSellFinalizations`` and a
+    null detail are the same answer, "not yet", delivered without an error path
+    the browser would have to special-case. The id itself is validated, so a
+    malformed id is still ``INVALID_INPUT`` — only absence is quiet.
+    """
+    event_id, finalization_id = _finalization_address(event, caller_id)
+    row = show_and_sell_finalization_models.read_finalization(event_id, finalization_id)
+    return None if row is None else show_and_sell_finalization_models.finalization_detail_payload(row)
+
+
+def _finalization_child_page(
+    event: Dict[str, Any],
+    caller_id: str,
+    *,
+    field: str,
+    load_rows: Any,
+    payload: Any,
+    sort_key: Any,
+) -> Dict[str, Any]:
+    """One version's immutable child collection, paginated (PAGE-01, §5.1.4).
+
+    The version row is read first so a child page cannot be answered for an id that
+    names nothing: an empty page must mean "this approved version held no such row",
+    never "you mistyped the finalization id". The cursor is scoped to event and
+    version, so a page token cannot cross from one version's rows to another's.
+    """
+    event_id, finalization_id = _finalization_address(event, caller_id)
+    if show_and_sell_finalization_models.read_finalization(event_id, finalization_id) is None:
+        raise AppError(ErrorCode.NOT_FOUND, "Show & Sell finalization not found")
+    rows = load_rows(event_id, finalization_id)
+    rows.sort(key=sort_key)
+    page = dict(
+        paginate_page(
+            rows,
+            f"{field}#{event_id}#{finalization_id}",
+            _page_argument(event),
+        )
+    )
+    page["items"] = [payload(row) for row in page["items"]]
+    return page
+
+
+def _show_and_sell_finalization_sale_snapshots(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The version's frozen sales (§5.16) — the report reproduces the sale as approved, not as amended."""
+    return _finalization_child_page(
+        event,
+        caller_id,
+        field=FINALIZATION_SALE_SNAPSHOTS_FIELD,
+        load_rows=show_and_sell_finalization_models.finalization_sale_snapshot_rows,
+        payload=show_and_sell_finalization_models.finalization_sale_snapshot_payload,
+        sort_key=lambda row: str(row[show_and_sell_finalization_models.SALE_ID_ATTRIBUTE]),
+    )
+
+
+def _show_and_sell_finalization_work_snapshots(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The version's frozen per-slot work (§5.16) — minutes as the approval saw them."""
+    return _finalization_child_page(
+        event,
+        caller_id,
+        field=FINALIZATION_WORK_SNAPSHOTS_FIELD,
+        load_rows=show_and_sell_finalization_models.finalization_work_snapshot_rows,
+        payload=show_and_sell_finalization_models.finalization_work_snapshot_payload,
+        sort_key=lambda row: (
+            str(row[show_and_sell_finalization_models.SLOT_ID_ATTRIBUTE]),
+            str(row[show_and_sell_finalization_models.PROFILE_ID_ATTRIBUTE]),
+        ),
+    )
+
+
+def _show_and_sell_finalization_return_lines(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The version's return reconciliation (§5.16) — expected, actual, variance, and the linked adjustment."""
+    return _finalization_child_page(
+        event,
+        caller_id,
+        field=FINALIZATION_RETURN_LINES_FIELD,
+        load_rows=show_and_sell_finalization_models.finalization_return_line_rows,
+        payload=show_and_sell_finalization_models.finalization_return_line_payload,
+        sort_key=lambda row: str(row[show_and_sell_finalization_models.PRODUCT_ID_ATTRIBUTE]),
+    )
+
+
+def _show_and_sell_finalization_credits(event: Dict[str, Any], caller_id: str) -> Dict[str, Any]:
+    """The version's credit rows (§5.17) — amounts with the version's own status, never a live re-derivation."""
+    return _finalization_child_page(
+        event,
+        caller_id,
+        field=FINALIZATION_CREDITS_FIELD,
+        load_rows=show_and_sell_finalization_models.finalization_credit_rows,
+        payload=show_and_sell_finalization_models.finalization_credit_payload,
+        sort_key=lambda row: str(row[show_and_sell_finalization_models.PROFILE_ID_ATTRIBUTE]),
+    )
+
+
 def _commitment_read_scope(caller_id: str, profile_id: str, unit_id: Any) -> Optional[set[str]]:
     """Which Unit Campaigns this caller may read this Scout's commitments in (INV-Q-06-02).
 
@@ -9679,6 +9822,12 @@ _RESOLVERS: Dict[str, Callable[[Dict[str, Any], str], Any]] = {
     CONFIRM_WORK_FIELD: _confirm_show_and_sell_work,
     SHOW_AND_SELL_SALES_FIELD: _show_and_sell_sales,
     SHOW_AND_SELL_FINALIZATION_PREVIEW_FIELD: _show_and_sell_finalization_preview,
+    SHOW_AND_SELL_FINALIZATIONS_FIELD: _show_and_sell_finalizations,
+    SHOW_AND_SELL_FINALIZATION_FIELD: _show_and_sell_finalization,
+    FINALIZATION_SALE_SNAPSHOTS_FIELD: _show_and_sell_finalization_sale_snapshots,
+    FINALIZATION_WORK_SNAPSHOTS_FIELD: _show_and_sell_finalization_work_snapshots,
+    FINALIZATION_RETURN_LINES_FIELD: _show_and_sell_finalization_return_lines,
+    FINALIZATION_CREDITS_FIELD: _show_and_sell_finalization_credits,
     SHOW_AND_SELL_SIGNUPS_FIELD: _show_and_sell_signups,
     MY_COMMITMENTS_FIELD: _my_scout_commitments,
     SIGNUP_CALENDAR_FIELD: _show_and_sell_signup_calendar_data,

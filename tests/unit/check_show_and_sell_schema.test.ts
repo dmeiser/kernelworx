@@ -2265,3 +2265,153 @@ describe("Show & Sell Wave 6.1 rounding draft SDL (schema.graphql)", () => {
     }
   });
 });
+
+// --- Wave 6.1 (checklist §5.1.4): finalization discovery, detail, and child reads ──
+
+describe("Show & Sell Wave 6.1 finalization history SDL (schema.graphql)", () => {
+  test("the six reads exist with the right arguments and return shapes", () => {
+    const list = rootFieldByName("Query", "showAndSellFinalizations");
+    expect(list, "Query.showAndSellFinalizations is missing").toBeDefined();
+    expect(list!.text).toMatch(/showAndSellId\s*:\s*ID!/);
+    expect(list!.text).toMatch(/page\s*:\s*PageInput/);
+    expect(list!.text).toMatch(/\):\s*ShowAndSellFinalizationSummaryConnection!/);
+
+    const detail = rootFieldByName("Query", "showAndSellFinalization");
+    expect(detail, "Query.showAndSellFinalization is missing").toBeDefined();
+    expect(detail!.text).toMatch(/finalizationId\s*:\s*ID!/);
+    expect(returnTypeName(detail!.text)).toBe("ShowAndSellFinalization");
+    expect(detail!.text).toMatch(/\):\s*ShowAndSellFinalization(?!!)/, "an absent version answers null, not an error");
+
+    for (const [field, connection] of [
+      ["showAndSellFinalizationSaleSnapshots", "FinalizationSaleSnapshotConnection"],
+      ["showAndSellFinalizationWorkSnapshots", "FinalizationWorkSnapshotConnection"],
+      ["showAndSellFinalizationReturnLines", "ReturnReconciliationLineConnection"],
+      ["showAndSellFinalizationCredits", "ScoutSalesAllocationConnection"],
+    ] as const) {
+      const read = rootFieldByName("Query", field);
+      expect(read, `Query.${field} is missing`).toBeDefined();
+      expect(read!.text).toMatch(/showAndSellId\s*:\s*ID!/);
+      expect(read!.text).toMatch(/finalizationId\s*:\s*ID!/);
+      expect(read!.text).toMatch(/page\s*:\s*PageInput/);
+      expect(read!.text).toMatch(new RegExp(`\\):\\s*${connection}!`));
+      expect(read!.directives, `${field} must be directive-free (Cognito-only)`).toEqual([]);
+    }
+    expect(list!.directives).toEqual([]);
+    expect(detail!.directives).toEqual([]);
+  });
+
+  test("each connection carries exactly items and pageInfo", () => {
+    for (const [connection, element] of [
+      ["ShowAndSellFinalizationSummaryConnection", "ShowAndSellFinalizationSummary"],
+      ["FinalizationSaleSnapshotConnection", "FinalizationSaleSnapshot"],
+      ["FinalizationWorkSnapshotConnection", "FinalizationWorkSnapshot"],
+      ["ReturnReconciliationLineConnection", "ReturnReconciliationLine"],
+      ["ScoutSalesAllocationConnection", "ScoutSalesAllocation"],
+    ] as const) {
+      expect([...fieldNameSet(definition(connection))]).toEqual(["items", "pageInfo"]);
+      const items = fieldsOf(definition(connection)).find((f) => f.name === "items")!;
+      expect(items.text, `${connection}.items element`).toContain(`[${element}!]!`);
+    }
+  });
+
+  test("the version record, summary, and child rows carry their declared fields and nothing else", () => {
+    expect([...fieldNameSet(definition("ShowAndSellFinalizationSummary"))]).toEqual([
+      "finalizationId",
+      "versionNumber",
+      "status",
+      "approvedAt",
+      "previousFinalizationId",
+    ]);
+    expect([...fieldNameSet(definition("ShowAndSellFinalization"))]).toEqual([
+      "finalizationId",
+      "showAndSellId",
+      "unitCampaignId",
+      "versionNumber",
+      "status",
+      "wholePoolCents",
+      "splitMethod",
+      "cash",
+      "previousFinalizationId",
+      "approvedByAccountId",
+      "approvedAt",
+      "suspendedByAccountId",
+      "suspendedAt",
+      "suspensionReason",
+      "sourceEventVersion",
+    ]);
+    expect([...fieldNameSet(definition("ShowAndSellCashReconciliation"))]).toEqual([
+      "calculatedExpectedCents",
+      "manualAdjustmentCents",
+      "manualAdjustmentReason",
+      "adjustedExpectedCents",
+      "actualCashCents",
+      "discrepancyCents",
+      "discrepancyExplanation",
+    ]);
+    expect([...fieldNameSet(definition("FinalizationSaleSnapshot"))]).toEqual([
+      "finalizationId",
+      "saleId",
+      "saleAt",
+      "enteredBy",
+      "buyerName",
+      "buyerPhone",
+      "buyerEmail",
+      "lineItems",
+      "totalCents",
+      "paymentMethodSnapshot",
+      "revision",
+    ]);
+    expect([...fieldNameSet(definition("FinalizationWorkSnapshot"))]).toEqual([
+      "finalizationId",
+      "slotId",
+      "profileId",
+      "campaignId",
+      "actualMinutes",
+      "sourceSignupVersion",
+    ]);
+    expect([...fieldNameSet(definition("ReturnReconciliationLine"))]).toEqual([
+      "finalizationId",
+      "productId",
+      "allocatedQty",
+      "expectedQty",
+      "actualQty",
+      "varianceQty",
+      "netStockEffectQty",
+      "reconciliationMovementId",
+      "reason",
+    ]);
+    expect([...fieldNameSet(definition("ScoutSalesAllocation"))]).toEqual([
+      "allocationId",
+      "finalizationId",
+      "showAndSellId",
+      "unitCampaignId",
+      "campaignId",
+      "profileId",
+      "actualMinutes",
+      "baseAmountCents",
+      "roundingCreditCents",
+      "amountCents",
+      "status",
+      "createdAt",
+      "updatedAt",
+    ]);
+  });
+
+  test("history is data, never an artifact, and no type carries an auth directive", () => {
+    for (const name of [
+      "ShowAndSellFinalization",
+      "ShowAndSellFinalizationSummary",
+      "FinalizationSaleSnapshot",
+      "FinalizationWorkSnapshot",
+      "ReturnReconciliationLine",
+      "ScoutSalesAllocation",
+      "ShowAndSellCashReconciliation",
+    ]) {
+      expect(definition(name).directives, `${name} must carry no auth directive`).toEqual([]);
+      const names = fieldNameSet(definition(name));
+      for (const forbidden of ["fileUrl", "downloadUrl", "url", "report", "sheet"]) {
+        expect(names.has(forbidden), `${name}.${forbidden} would be a server-generated artifact`).toBe(false);
+      }
+    }
+  });
+});

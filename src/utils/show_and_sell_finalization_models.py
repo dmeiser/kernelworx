@@ -73,6 +73,7 @@ from .show_and_sell_sale_models import (
     SALE_STATUS_ACTIVE,
     normalize_money_cents,
     normalize_sale_key_id,
+    sale_line_payload,
 )
 from .unit_campaign_models import SCOUT_CAMPAIGN_PK_PREFIX, UNIT_CAMPAIGN_PK_PREFIX
 from .unit_models import MAX_ID_LENGTH, normalize_optional_text, normalize_required_text
@@ -1347,3 +1348,155 @@ def finalization_credit_rows(show_and_sell_id: str, finalization_id: str) -> Lis
         },
     )
     return [dict(row) for row in rows if row.get("entityType") == CREDIT_ENTITY_TYPE]
+
+
+# --- The §5.1.4 read payloads -------------------------------------------------------
+
+
+def _whole(value: Any) -> int:
+    """A stored number out of DynamoDB as the plain ``int`` the SDL's ``Int`` is.
+
+    Same reason :func:`src.utils.show_and_sell_sale_models.sale_line_payload` converts
+    on the way out: a ``Decimal`` in a payload cannot be replayed through the
+    idempotency marker, and every number these rows carry is whole by construction.
+    """
+    return int(value)
+
+
+def _text(value: Any) -> Optional[str]:
+    return None if value is None else str(value)
+
+
+def cash_reconciliation_payload(cash: Mapping[str, Any]) -> Dict[str, Any]:
+    """The embedded CASH-03 record as the SDL's ``ShowAndSellCashReconciliation``."""
+    return {
+        CALCULATED_EXPECTED_CENTS_ATTRIBUTE: _whole(cash[CALCULATED_EXPECTED_CENTS_ATTRIBUTE]),
+        MANUAL_ADJUSTMENT_CENTS_ATTRIBUTE: _whole(cash[MANUAL_ADJUSTMENT_CENTS_ATTRIBUTE]),
+        MANUAL_ADJUSTMENT_REASON_ATTRIBUTE: _text(cash.get(MANUAL_ADJUSTMENT_REASON_ATTRIBUTE)),
+        ADJUSTED_EXPECTED_CENTS_ATTRIBUTE: _whole(cash[ADJUSTED_EXPECTED_CENTS_ATTRIBUTE]),
+        ACTUAL_CASH_CENTS_ATTRIBUTE: _whole(cash[ACTUAL_CASH_CENTS_ATTRIBUTE]),
+        DISCREPANCY_CENTS_ATTRIBUTE: _whole(cash[DISCREPANCY_CENTS_ATTRIBUTE]),
+        DISCREPANCY_EXPLANATION_ATTRIBUTE: _text(cash.get(DISCREPANCY_EXPLANATION_ATTRIBUTE)),
+    }
+
+
+def finalization_summary_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One version as the discovery list's row (§5.1.4).
+
+    The five fields the chain needs — which version, which state, when it was
+    approved, and which version it replaced — and nothing heavier: the discovery
+    list exists so a browser can pick a version to pull detail for, and a summary
+    that already carried the whole record would make the detail reads a second,
+    drift-prone copy of the same answer.
+    """
+    return {
+        FINALIZATION_ID_ATTRIBUTE: str(row[FINALIZATION_ID_ATTRIBUTE]),
+        VERSION_NUMBER_ATTRIBUTE: _whole(row[VERSION_NUMBER_ATTRIBUTE]),
+        STATUS_ATTRIBUTE: str(row[STATUS_ATTRIBUTE]),
+        APPROVED_AT_ATTRIBUTE: str(row[APPROVED_AT_ATTRIBUTE]),
+        PREVIOUS_FINALIZATION_ID_ATTRIBUTE: _text(row.get(PREVIOUS_FINALIZATION_ID_ATTRIBUTE)),
+    }
+
+
+def finalization_detail_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One version as the SDL's ``ShowAndSellFinalization`` (§5.16's full record).
+
+    The audit fields answer their questions only when the version reached that
+    state, so they stay ``null`` until then rather than being invented; the cash
+    record travels whole because an approval's cash answer is one equation, not a
+    set of numbers to re-add in the browser.
+    """
+    return {
+        FINALIZATION_ID_ATTRIBUTE: str(row[FINALIZATION_ID_ATTRIBUTE]),
+        SHOW_AND_SELL_ID_ATTRIBUTE: str(row[SHOW_AND_SELL_ID_ATTRIBUTE]),
+        UNIT_CAMPAIGN_ID_ATTRIBUTE: str(row[UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+        VERSION_NUMBER_ATTRIBUTE: _whole(row[VERSION_NUMBER_ATTRIBUTE]),
+        STATUS_ATTRIBUTE: str(row[STATUS_ATTRIBUTE]),
+        WHOLE_POOL_CENTS_ATTRIBUTE: _whole(row[WHOLE_POOL_CENTS_ATTRIBUTE]),
+        SPLIT_METHOD_ATTRIBUTE: str(row[SPLIT_METHOD_ATTRIBUTE]),
+        CASH_ATTRIBUTE: cash_reconciliation_payload(row[CASH_ATTRIBUTE]),
+        PREVIOUS_FINALIZATION_ID_ATTRIBUTE: _text(row.get(PREVIOUS_FINALIZATION_ID_ATTRIBUTE)),
+        APPROVED_BY_ATTRIBUTE: _text(row.get(APPROVED_BY_ATTRIBUTE)),
+        APPROVED_AT_ATTRIBUTE: _text(row.get(APPROVED_AT_ATTRIBUTE)),
+        SUSPENDED_BY_ATTRIBUTE: _text(row.get(SUSPENDED_BY_ATTRIBUTE)),
+        SUSPENDED_AT_ATTRIBUTE: _text(row.get(SUSPENDED_AT_ATTRIBUTE)),
+        SUSPENSION_REASON_ATTRIBUTE: _text(row.get(SUSPENSION_REASON_ATTRIBUTE)),
+        SOURCE_EVENT_VERSION_ATTRIBUTE: _whole(row[SOURCE_EVENT_VERSION_ATTRIBUTE]),
+    }
+
+
+def finalization_return_line_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One immutable return line as the SDL's ``ReturnReconciliationLine`` (§5.16)."""
+    return {
+        FINALIZATION_ID_ATTRIBUTE: str(row[FINALIZATION_ID_ATTRIBUTE]),
+        PRODUCT_ID_ATTRIBUTE: str(row[PRODUCT_ID_ATTRIBUTE]),
+        ALLOCATED_QTY_ATTRIBUTE: _whole(row[ALLOCATED_QTY_ATTRIBUTE]),
+        EXPECTED_QTY_ATTRIBUTE: _whole(row[EXPECTED_QTY_ATTRIBUTE]),
+        ACTUAL_QTY_ATTRIBUTE: _whole(row[ACTUAL_QTY_ATTRIBUTE]),
+        VARIANCE_QTY_ATTRIBUTE: _whole(row[VARIANCE_QTY_ATTRIBUTE]),
+        NET_STOCK_EFFECT_QTY_ATTRIBUTE: _whole(row[NET_STOCK_EFFECT_QTY_ATTRIBUTE]),
+        RECONCILIATION_MOVEMENT_ID_ATTRIBUTE: _text(row.get(RECONCILIATION_MOVEMENT_ID_ATTRIBUTE)),
+        REASON_ATTRIBUTE: _text(row.get(REASON_ATTRIBUTE)),
+    }
+
+
+def finalization_sale_snapshot_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One frozen sale as the SDL's ``FinalizationSaleSnapshot`` (§5.16).
+
+    The snapshot's own fields, not a join back to the live sale: the whole point of
+    §5.17's immutability is that a report over version two reproduces the sale as
+    version two approved it, after corrections and voids moved the live row.
+    """
+    return {
+        FINALIZATION_ID_ATTRIBUTE: str(row[FINALIZATION_ID_ATTRIBUTE]),
+        SALE_ID_ATTRIBUTE: str(row[SALE_ID_ATTRIBUTE]),
+        SALE_AT_ATTRIBUTE: str(row[SALE_AT_ATTRIBUTE]),
+        ENTERED_BY_ATTRIBUTE: str(row[ENTERED_BY_ATTRIBUTE]),
+        BUYER_NAME_ATTRIBUTE: _text(row.get(BUYER_NAME_ATTRIBUTE)),
+        BUYER_PHONE_ATTRIBUTE: _text(row.get(BUYER_PHONE_ATTRIBUTE)),
+        BUYER_EMAIL_ATTRIBUTE: _text(row.get(BUYER_EMAIL_ATTRIBUTE)),
+        LINE_ITEMS_ATTRIBUTE: [sale_line_payload(line) for line in row[LINE_ITEMS_ATTRIBUTE]],
+        TOTAL_CENTS_ATTRIBUTE: _whole(row[TOTAL_CENTS_ATTRIBUTE]),
+        PAYMENT_SNAPSHOT_ATTRIBUTE: {
+            "methodCode": str(dict(row[PAYMENT_SNAPSHOT_ATTRIBUTE])["methodCode"]),
+            "displayName": _text(dict(row[PAYMENT_SNAPSHOT_ATTRIBUTE]).get("displayName")),
+            "otherDetails": _text(dict(row[PAYMENT_SNAPSHOT_ATTRIBUTE]).get("otherDetails")),
+        },
+        REVISION_ATTRIBUTE: _whole(row[REVISION_ATTRIBUTE]),
+    }
+
+
+def finalization_work_snapshot_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One frozen participant/slot as the SDL's ``FinalizationWorkSnapshot`` (§5.16)."""
+    return {
+        FINALIZATION_ID_ATTRIBUTE: str(row[FINALIZATION_ID_ATTRIBUTE]),
+        SLOT_ID_ATTRIBUTE: str(row[SLOT_ID_ATTRIBUTE]),
+        PROFILE_ID_ATTRIBUTE: str(row[PROFILE_ID_ATTRIBUTE]),
+        CAMPAIGN_ID_ATTRIBUTE: str(row[CAMPAIGN_ID_ATTRIBUTE]),
+        ACTUAL_MINUTES_ATTRIBUTE: _whole(row[ACTUAL_MINUTES_ATTRIBUTE]),
+        SOURCE_SIGNUP_VERSION_ATTRIBUTE: _whole(row[SOURCE_SIGNUP_VERSION_ATTRIBUTE]),
+    }
+
+
+def finalization_credit_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
+    """One credit as the SDL's ``ScoutSalesAllocation`` (§5.17).
+
+    ``amountCents`` is read, never recomputed here — the row's own invariant is that
+    base plus rounding equals total, and a read that re-added it would quietly agree
+    with a torn row instead of exposing one.
+    """
+    return {
+        ALLOCATION_ID_ATTRIBUTE: str(row[ALLOCATION_ID_ATTRIBUTE]),
+        FINALIZATION_ID_ATTRIBUTE: str(row[FINALIZATION_ID_ATTRIBUTE]),
+        SHOW_AND_SELL_ID_ATTRIBUTE: str(row[SHOW_AND_SELL_ID_ATTRIBUTE]),
+        UNIT_CAMPAIGN_ID_ATTRIBUTE: str(row[UNIT_CAMPAIGN_ID_ATTRIBUTE]),
+        CAMPAIGN_ID_ATTRIBUTE: str(row[CAMPAIGN_ID_ATTRIBUTE]),
+        PROFILE_ID_ATTRIBUTE: str(row[PROFILE_ID_ATTRIBUTE]),
+        ACTUAL_MINUTES_ATTRIBUTE: _whole(row[ACTUAL_MINUTES_ATTRIBUTE]),
+        BASE_AMOUNT_CENTS_ATTRIBUTE: _whole(row[BASE_AMOUNT_CENTS_ATTRIBUTE]),
+        ROUNDING_CREDIT_CENTS_ATTRIBUTE: _whole(row[ROUNDING_CREDIT_CENTS_ATTRIBUTE]),
+        AMOUNT_CENTS_ATTRIBUTE: _whole(row[AMOUNT_CENTS_ATTRIBUTE]),
+        STATUS_ATTRIBUTE: str(row[STATUS_ATTRIBUTE]),
+        CREATED_AT_ATTRIBUTE: str(row[CREATED_AT_ATTRIBUTE]),
+        UPDATED_AT_ATTRIBUTE: str(row[UPDATED_AT_ATTRIBUTE]),
+    }
