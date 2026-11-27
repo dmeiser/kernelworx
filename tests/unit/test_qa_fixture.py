@@ -1541,9 +1541,10 @@ def test_a_named_show_and_sell_partition_is_swept_whole_and_its_foreigners_survi
     The Stage 4 lane's cleanup (:func:`tests.unit.show_sell_stage4_fixtures.clean_sales_lane`) already
     removes this partition as the lane's own step; the sweep is the residue check behind it, so every
     lane row here — event, slot, signup, sale, sale revision, obligation, fulfillment record — is a
-    ``delete``, the same decision the cleanup makes. The two guards are the standing shape: a signup
-    for a profile no token named and a sale written by an account outside the fixture pool survive as
-    kept, and an event no token names is not mentioned at all.
+    ``delete``, the same decision the cleanup makes. The guards are the standing shape: a signup for a
+    profile no token named, a sale written by an account outside the fixture pool, a fulfillment an
+    outsider acted, and a sale an outsider voided all survive as kept — every authorship field present
+    on the row is tested, not just the first — and an event no token names is not mentioned at all.
     """
     rows = {
         "kernelworx-show-and-sells-ue1-dev": [
@@ -1587,7 +1588,29 @@ def test_a_named_show_and_sell_partition_is_swept_whole_and_its_foreigners_survi
                 enteredByAccountId="ACCOUNT#someone-else",
             ),
             _item(pk=f"SHOW_AND_SELL#{_LANE_SS}", sk="WE_OWE#owe-1", entityType="WeOweObligation", saleId="sale-1"),
-            _item(pk=f"SHOW_AND_SELL#{_LANE_SS}", sk="WE_OWE#owe-1#FULFILLMENT#f1", entityType="WeOweFulfillment"),
+            _item(
+                pk=f"SHOW_AND_SELL#{_LANE_SS}",
+                sk="WE_OWE#owe-1#FULFILLMENT#f1",
+                entityType="WeOweFulfillment",
+                actorAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+            ),
+            # A fulfillment acted by an account outside the fixture pool: its author rides on
+            # ``actorAccountId``, a field the earlier guard never read, and it must still survive.
+            _item(
+                pk=f"SHOW_AND_SELL#{_LANE_SS}",
+                sk="WE_OWE#owe-1#FULFILLMENT#f2",
+                entityType="WeOweFulfillment",
+                actorAccountId="ACCOUNT#someone-else",
+            ),
+            # Entered by the lane but voided by an outsider: the first authorship field matching is
+            # not enough — every present author names a fixture identity or the row is kept.
+            _item(
+                pk=f"SHOW_AND_SELL#{_LANE_SS}",
+                sk="SALE#sale-3",
+                entityType="ShowAndSellSale",
+                enteredByAccountId=f"ACCOUNT#{_ADMIN_SUB}",
+                voidedByAccountId="ACCOUNT#someone-else",
+            ),
             _item(
                 pk=f"IDEM#{_ADMIN_SUB}#createShowAndSellSale#{_LANE_SS}",
                 sk=f"IDEM#{_LANE}-sale-quinn",
@@ -1639,6 +1662,12 @@ def test_a_named_show_and_sell_partition_is_swept_whole_and_its_foreigners_survi
     assert (
         f"kernelworx-show-and-sells-ue1-dev/SHOW_AND_SELL#{_LANE_SS}/SIGNUP#slot-1#PROFILE#{_OTHER_PROFILE}"
         in survivors
+    )
+    assert f"kernelworx-show-and-sells-ue1-dev/SHOW_AND_SELL#{_LANE_SS}/SALE#sale-3" in survivors, (
+        "a sale the lane entered but an outsider voided is not the lane's to delete"
+    )
+    assert f"kernelworx-show-and-sells-ue1-dev/SHOW_AND_SELL#{_LANE_SS}/WE_OWE#owe-1#FULFILLMENT#f2" in survivors, (
+        "a fulfillment acted by an outsider names its author only in actorAccountId"
     )
     assert f"kernelworx-show-and-sells-ue1-dev/SHOW_AND_SELL#{_OTHER_SS}/METADATA" in survivors
     assert "that profile is not this lane's" in text

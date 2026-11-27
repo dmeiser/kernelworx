@@ -26,10 +26,13 @@ original obligation is caught at the turn where it happened:
   its own id, its own line identity, and the original obligation's ``originalQty`` and
   version untouched;
 - and after two corrections the archived revisions are numbered 1 and 2, each carrying the
-  whole line/total/payment/buyer content the sale held at that moment.
+  whole line/total/payment/buyer content the sale held at that moment;
+- and ``voidShowAndSellSale`` on the same lane reverses the whole sale — mirrored ledger pair,
+  obligation cancelled, allocation reopened — with the pre-void revision archived intact.
 
 **Why no reopened leg here.** §4.6.5's "reopened correction deltas" half needs
-``reopenShowAndSell``, which is checklist §6.2.1 — Stage 6, card WORK-178. Every state
+``reopenShowAndSell``, which is checklist §5.3.1 — Wave 6, proven at §5.5.3 by card WORK-178.
+Every state
 this module drives is pre-first-finalization, so every correction is live and no write
 reports ``draftOnly``; the deferred leg is documented rather than faked by hand-painting a
 ``REOPENED`` row, which would evidence a state no Stage 4 mutation can produce.
@@ -44,6 +47,7 @@ import pytest
 from src.handlers.unit_operations import (
     CORRECT_SALE_FIELD,
     RECORD_RECEIPT_FIELD,
+    VOID_SALE_FIELD,
     handle_unit_operation,
 )
 from src.utils import inventory_models as inv
@@ -603,3 +607,83 @@ def test_two_corrections_leave_a_chain_of_whole_previous_revisions(
     assert [int(row[sm.REVISION_ATTRIBUTE]) for row in _revision_rows(lane)] == [1, 2], (
         "the stale write archived nothing"
     )
+
+
+# --- Voiding the whole sale --------------------------------------------------------
+
+
+def _void(
+    world: Dict[str, Any], *, key: str, revision: int, reason: str = "the buyer left", version: int | None = None
+) -> Any:
+    return handle_unit_operation(
+        unit_operation_event(
+            VOID_SALE_FIELD,
+            ADMIN,
+            input={
+                "showAndSellId": str(world["eventId"]),
+                "saleId": str(world["saleId"]),
+                "reason": reason,
+                "version": {
+                    "expectedVersion": version if version is not None else event_version(str(world["eventId"]))
+                },
+                "saleVersion": {"expectedVersion": revision},
+                "idempotency": {"idempotencyKey": DEFAULT_LANE.key(key)},
+            },
+        ),
+        None,
+    )
+
+
+def test_voiding_the_sale_returns_its_box_reopens_its_allocation_and_cancels_the_owed_quantity(
+    lane: Dict[str, Any],
+) -> None:
+    """``voidShowAndSellSale`` on the same lane: the whole sale reverses, the obligation closes cancelled.
+
+    The lane stops at Quinn — one immediate box, two owed, nothing reserved or fulfilled — the
+    cleanest base a void can have. The immediate leg reverses as a mirrored pair in the ledger, the
+    owed two never spent stock so they cancel on the obligation alone, and revision 1 is archived
+    whole, so the chain from the VOIDED row back to what the desk first entered stays walkable.
+    """
+    held_event = event_version(str(lane["eventId"]))
+    answer = _ok(_void(lane, key="void-quinn", revision=1, version=held_event))
+    assert answer["draftOnly"] is False, "nothing has been finalized: this void is live, not a draft"
+
+    row = _sale_row(lane)
+    assert row["status"] == sm.SALE_STATUS_VOIDED
+    assert row[sm.VOIDED_BY_ATTRIBUTE] == account_id(ADMIN) and row[sm.VOIDED_AT_ATTRIBUTE]
+
+    obligation = _obligation(lane)
+    assert (obligation["status"], obligation["closeReason"]) == (
+        sm.WE_OWE_STATUS_CLOSED,
+        sm.WE_OWE_CLOSE_CANCELLED,
+    )
+    assert (obligation["originalQty"], obligation["cancelledQty"], obligation["remainingQty"]) == (2, 2, 0), (
+        "the owed two cancel on the obligation — they never left a shelf to reverse"
+    )
+
+    chocolate = _picture(lane, CHOCOLATE)
+    assert (chocolate["kernelPhysicalQty"], chocolate["soldInPossessionQty"], chocolate["assignedOpenQty"]) == (
+        3,
+        0,
+        2,
+    ), "the box comes back to Kernel stock and the assignment that funded it reopens"
+    assert _ledger(lane, CHOCOLATE) == {
+        "RECEIPT": {"kernelPhysicalDelta": 3},
+        "EVENT_ASSIGN": {"assignedDelta": 2},
+        "EVENT_IMMEDIATE_SALE": {"kernelPhysicalDelta": 0, "assignedDelta": 0},
+    }, "the sale and its void sit in the ledger as a mirrored pair that nets to zero, never deleted"
+
+    revisions = _revision_rows(lane)
+    assert len(revisions) == 1 and int(revisions[0][sm.REVISION_ATTRIBUTE]) == 1
+    archived = revisions[0]
+    assert archived["buyerName"] == "Quinn WeOwe" and archived[sm.TOTAL_CENTS_ATTRIBUTE] == 7500
+    assert [
+        (line[sm.IMMEDIATE_QTY_ATTRIBUTE], line[sm.WE_OWE_QTY_ATTRIBUTE]) for line in archived[sm.LINE_ITEMS_ATTRIBUTE]
+    ] == [(1, 2)], "the archived revision holds the sale as entered, void included"
+
+    assert _ok(_void(lane, key="void-quinn", revision=1, version=held_event)) == answer, (
+        "the same key with the same content replays the same answer"
+    )
+    again = assert_is_error(_void(lane, key="void-quinn-fresh", revision=1, version=held_event), "CONFLICT")
+    assert "already voided" in again["message"]
+    assert _picture(lane, CHOCOLATE)["kernelPhysicalQty"] == 3, "the refused second void moved nothing again"

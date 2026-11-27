@@ -544,7 +544,10 @@ def _rule_units(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str
     if sk == "PAYMENT-CAPACITY":
         # ``payment_capacity_key``: the 50-method ceiling counter. It carries no author and the
         # collection query can never return its sort key, so the Unit token is the whole ownership
-        # fact; the lane's own teardown deletes it with the methods it counted.
+        # fact; the lane's own teardown deletes it with the methods it counted. Note the ordering
+        # assumption: a Unit token names the lane's own Unit, whose method rows can only be kept
+        # by author guard when a foreign tenant's method was somehow written under this Unit — a
+        # mixed-tenant Unit would need the counter kept alongside such a survivor.
         return "delete", f"payment-method ceiling counter of lane Unit {unit}"
     if sk.startswith("PAYMENT#"):
         # ``build_payment_method_item`` always writes ``createdByAccountId``; a method row that names
@@ -695,9 +698,11 @@ def _rule_show_and_sells(item: dict[str, Any], tokens: dict[str, set[str]], subs
     product's builders mint (:data:`SHOW_AND_SELL_ROW_SHAPES`); a shape that is not one of them is
     reported unresolved and left, because deleting a row this rule cannot name is exactly the
     false-clean the four verdicts exist to prevent.
-    The two principal guards are the standing shape: a signup whose Scout no profile token named
-    belongs to that Scout, and a sale written by an account outside the fixture pool belongs to that
-    account; both survive as kept. Rows of an event no token names are not reported.
+    The guards are the standing shape: a signup whose Scout no profile token named belongs to that
+    Scout, and any row one of whose authorship fields — signup, confirmation, entry, correction,
+    void, creation, or a fulfillment's acting account — names an account outside the fixture pool
+    belongs to that account; every present actor field is tested, not just the first, and each such
+    row survives as kept. Rows of an event no token names are not reported.
     """
     flat = _strings(item)
     pk, sk = flat.get("pk", ""), flat.get("sk", "")
@@ -716,14 +721,25 @@ def _rule_show_and_sells(item: dict[str, Any], tokens: dict[str, set[str]], subs
             "keep",
             f"row {sk!r} in lane Show & Sell {event} for profile {profile}: that profile is not this lane's",
         )
-    actor = (
-        flat.get("signedUpByAccountId")
-        or flat.get("enteredByAccountId")
-        or flat.get("createdByAccountId")
-        or flat.get("correctedByAccountId")
-    )
-    if actor and not (_owner_ids(actor) & subs):
-        return "keep", f"event row in lane Show & Sell {event} written by {actor}, not a fixture identity"
+    actors = [
+        flat[key]
+        for key in (
+            "signedUpByAccountId",
+            "confirmedByAccountId",
+            "enteredByAccountId",
+            "correctedByAccountId",
+            "voidedByAccountId",
+            "createdByAccountId",
+            "actorAccountId",
+        )
+        if flat.get(key)
+    ]
+    outsiders = sorted({actor for actor in actors if not (_owner_ids(actor) & subs)})
+    if outsiders:
+        return (
+            "keep",
+            f"event row in lane Show & Sell {event} written by {', '.join(outsiders)}, not a fixture identity",
+        )
     what = flat.get("entityType")
     if what not in SHOW_AND_SELL_ROW_SHAPES:
         return (

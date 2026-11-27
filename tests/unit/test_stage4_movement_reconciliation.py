@@ -22,7 +22,10 @@ stored row against every other row that has to agree with it:
   ``assignedDelta`` column included, which only Stage 4's lane can demand).
 
 A row that reconciles everywhere it is looked at twice (sale → obligation → movement →
-balance) is what "zero unexplained" means at lane scale rather than per turn.
+balance) is what "zero unexplained" means at lane scale rather than per turn — and the
+last two tests prove the reconciliation is falsifiable rather than decorative: forging one
+movement's delta and deleting one movement row both make the same check refuse, naming the
+exact column whose history stopped explaining the balance.
 """
 
 from __future__ import annotations
@@ -97,7 +100,7 @@ def test_every_movement_row_in_the_finished_lane_passes_the_production_row_rules
             checked += 1
     assert checked == 9, (
         "2 receipts + 2 assigns + the three sales + the reservation + the Kernel fulfillment — "
-        "and nothing else: the count itself proves no ninth movement snuck in"
+        "and nothing else: the count itself proves no tenth movement snuck in"
     )
 
 
@@ -215,3 +218,50 @@ def test_the_shelf_the_lane_ends_on_equals_what_the_movements_say_it_is(
         "the allocation picture has nothing left to hold"
     )
     assert chocolate["assignedOpenQty"] == 0 and butter["assignedOpenQty"] == 0
+
+
+# --- Negative controls: the reconciliation is falsifiable -----------------------------------
+
+
+def _movement_row(full_lane: Dict[str, Any], product_id: str, movement_type: str) -> Dict[str, Any]:
+    """One movement row of the finished lane, addressed by its real stored key."""
+    for row in product_rows(full_lane["inventory"], DEFAULT_LANE.sales_campaign, product_id):
+        if row.get("entityType") == inv.MOVEMENT_ENTITY_TYPE and row.get(inv.MOVEMENT_TYPE_ATTRIBUTE) == movement_type:
+            return row
+    raise AssertionError(f"no {movement_type} movement for {product_id}")
+
+
+def test_a_forged_movement_delta_breaks_the_trail_and_names_the_column(full_lane: Dict[str, Any]) -> None:
+    """Rewrite one movement's delta and the same reconciliation that passes clean must refuse.
+
+    A reconciliation nobody can break is decoration. The finished lane passes every check above; one
+    ``WE_OWE_FULFILL`` row with its ``kernelPhysicalDelta`` zeroed out is the smallest lie that leaves
+    every row locally valid and the ledger wrong, and the trail check must name the exact column.
+    """
+    forged = dict(_movement_row(full_lane, DEFAULT_LANE.chocolate, inv.WE_OWE_FULFILL))
+    assert forged[inv.KERNEL_PHYSICAL_DELTA] == -1
+    forged[inv.KERNEL_PHYSICAL_DELTA] = 0
+    full_lane["inventory"].put_item(Item=forged)
+
+    violations = movement_trail_violations(full_lane["inventory"], DEFAULT_LANE.sales_campaign, DEFAULT_LANE.chocolate)
+    assert any("sum(kernelPhysicalDelta)" in text for text in violations), violations
+    assert not any("sum(soldPossessionDelta)" in text for text in violations), (
+        "the lie is confined to the column that was forged"
+    )
+
+
+def test_a_mutation_that_skipped_its_movement_is_caught_by_the_missing_trail(full_lane: Dict[str, Any]) -> None:
+    """Delete one movement and the balance it explains becomes unexplained.
+
+    A mutation that wrote a balance without its ledger row leaves exactly this hole: the quantity
+    moved and no movement says why. Removing the Butter receipt is the surgical way to produce it on
+    an otherwise clean lane, and the trail check must refuse the product whose history went missing.
+    """
+    missing = _movement_row(full_lane, DEFAULT_LANE.butter, "RECEIPT")
+    full_lane["inventory"].delete_item(Key={"pk": missing["pk"], "sk": missing["sk"]})
+
+    violations = movement_trail_violations(full_lane["inventory"], DEFAULT_LANE.sales_campaign, DEFAULT_LANE.butter)
+    assert any("sum(kernelPhysicalDelta)" in text for text in violations), violations
+    assert (
+        movement_trail_violations(full_lane["inventory"], DEFAULT_LANE.sales_campaign, DEFAULT_LANE.chocolate) == []
+    ), "the hole is in one product's history, not every product's"

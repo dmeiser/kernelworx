@@ -2059,9 +2059,7 @@ def verify_guard_residue(
     identities = _fixture_allowlist(tool)
     named = sorted({_bare(value) for value in campaign_ids if _bare(value)})
     keys = sorted({*_guard_population(client, tool, table), *named})
-    facts = [
-        guard_facts(client, tool, table, campaigns_table, profiles_table, key, identities, labels) for key in keys
-    ]
+    facts = [guard_facts(client, tool, table, campaigns_table, profiles_table, key, identities, labels) for key in keys]
     dispositions = {str(fact["campaignId"]): guard_disposition(fact) for fact in facts}
     states = {key: state for key, (state, _reason) in dispositions.items()}
     answered = sum(1 for fact in facts if fact["guardPresent"])
@@ -2118,7 +2116,11 @@ def verify_guard_residue(
     acceptance = "§3.7.7 verify by key that every membership guard this card named is gone"
     for key in named:
         state, reason = dispositions.get(key, ("missing-key", "no read answered this key at all"))
-        result = stage2.CLEANUP_FAILED if state in GUARD_NAMED_FAILURES or state == "missing-key" else stage2.CLEANUP_OBSERVED
+        result = (
+            stage2.CLEANUP_FAILED
+            if state in GUARD_NAMED_FAILURES or state == "missing-key"
+            else stage2.CLEANUP_OBSERVED
+        )
         rows.append(stage3.cleanup_row(acceptance, f"{GUARD_SORT_KEY} {key}: {state} — {reason}", result))
 
     def count_of(state: str) -> int:
@@ -2251,8 +2253,15 @@ def run(out_dir: Path, data_id: str = "", prior: Sequence[str] = ()) -> dict[str
     recovery_steps: list[str] = []
 
     def transport(document: str, variables: Mapping[str, Any]) -> Mapping[str, Any]:
-        """One census read, sent as the product answers it, with the whole body returned."""
-        return api.gql_raw(admin, stage2.STAGE_TWO_DOCUMENTS[document], dict(variables))
+        """One census read, sent as the product answers it, with the whole body returned.
+
+        The document map is the two shipped halves merged: the census reads the swept tables answer
+        are Stage 2 documents except ``showAndSells``, which the Show & Sell table joined to the sweep
+        needs and only the Stage 3 documents mint. A name that resolves in neither is a lookup bug,
+        so it raises here rather than being swallowed into an unproven table.
+        """
+        census_documents = {**stage2.STAGE_TWO_DOCUMENTS, **stage3.STAGE_THREE_DOCUMENTS}
+        return api.gql_raw(admin, census_documents[document], dict(variables))
 
     # The canary is built and snapshotted before anything is given back, so the recovery pass below sits
     # inside the window the canary exists to watch: a cancellation that reached a row it should not have
@@ -2689,9 +2698,7 @@ def lane_failures(record: Mapping[str, Any]) -> list[str]:
                 f"the guard census examined {residue['guards']} key(s) but only {len(entries)} carry a "
                 "disposition, so a guard key is unaccounted for"
             )
-        unexplained = sorted(
-            set(residue.get("namedKeys") or []) - {str(entry.get("campaignId")) for entry in entries}
-        )
+        unexplained = sorted(set(residue.get("namedKeys") or []) - {str(entry.get("campaignId")) for entry in entries})
         if unexplained:
             failures.append(
                 f"the guard key(s) {', '.join(unexplained)} were named on the command line and no read of them "

@@ -2894,7 +2894,10 @@ def stage_three_residue_probe(
     units = [str(item) for item in unit_campaign_ids if item]
     scouts = [str(item) for item in scout_campaign_ids if item]
     named_orders = sorted({str(item) for item in order_ids if item})
-    documents = dict(stage_two.STAGE_TWO_DOCUMENTS if documents is None else documents)
+    # Both shipped document halves merged: every swept table's census read is a Stage 2 document
+    # except ``showAndSells``, which only the Stage 3 documents mint. A census read that resolves in
+    # neither map would answer nothing and leave its table unproven, so the default carries both.
+    documents = dict({**stage_two.STAGE_TWO_DOCUMENTS, **STAGE_THREE_DOCUMENTS} if documents is None else documents)
     reads = dict(STAGE_THREE_RESIDUE_READS if reads is None else reads)
     summarize = error_summaries or show_sell_graphql.error_summaries
 
