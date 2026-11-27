@@ -1170,7 +1170,12 @@ class FakeDdb:
         self, *, TableName: str, Key: Mapping[str, Any], ConsistentRead: Any = False, **_: Any
     ) -> Dict[str, Any]:
         self.reads.append(
-            ("get_item", TableName, tuple(sorted(f"{name}={value['S']}" for name, value in Key.items())), ConsistentRead)
+            (
+                "get_item",
+                TableName,
+                tuple(sorted(f"{name}={value['S']}" for name, value in Key.items())),
+                ConsistentRead,
+            )
         )
         if TableName == UNIT_CAMPAIGN_TABLE:
             pk, sk = Key["pk"]["S"], Key["sk"]["S"]
@@ -1337,9 +1342,7 @@ def _guard_world(
         f"SCOUT_CAMPAIGN#CAMPAIGN#{LIVE_GUARD}": [_guard(LIVE_GUARD, LIVE_PROFILE, LIVE_UNIT_CAMPAIGN)],
         f"SCOUT_CAMPAIGN#CAMPAIGN#{TENANT_GUARD}": [_guard(TENANT_GUARD, TENANT_PROFILE)],
         f"SCOUT_CAMPAIGN#CAMPAIGN#{ORPHAN_GUARD}": [_guard(ORPHAN_GUARD, ORPHAN_PROFILE)],
-        f"SCOUT_CAMPAIGN#CAMPAIGN#{STALE_PROJECTION_GUARD}": [
-            _guard(STALE_PROJECTION_GUARD, STALE_PROJECTION_PROFILE)
-        ],
+        f"SCOUT_CAMPAIGN#CAMPAIGN#{STALE_PROJECTION_GUARD}": [_guard(STALE_PROJECTION_GUARD, STALE_PROJECTION_PROFILE)],
         f"SCOUT_CAMPAIGN#CAMPAIGN#{DENIED_PROFILE_GUARD}": [_guard(DENIED_PROFILE_GUARD, DENIED_PROFILE_ID)],
         f"SCOUT_CAMPAIGN#CAMPAIGN#{LIVE_SCOUT_GUARD}": [_guard(LIVE_SCOUT_GUARD, LIVE_SCOUT_PROFILE)],
         f"SCOUT_CAMPAIGN#CAMPAIGN#{UNPROVEN_GUARD}": [_guard(UNPROVEN_GUARD, UNPROVEN_PROFILE)],
@@ -1381,7 +1384,9 @@ def _guard_world(
         lane,
         "_fixture_tool",
         lambda: FakeTool(
-            ddb, {FIXTURE_SUB: FIXTURE_MAIL, POOL_ONLY_SUB: POOL_ONLY_MAIL}, {"scout": FIXTURE_MAIL, "admin": ADMIN_MAIL}
+            ddb,
+            {FIXTURE_SUB: FIXTURE_MAIL, POOL_ONLY_SUB: POOL_ONLY_MAIL},
+            {"scout": FIXTURE_MAIL, "admin": ADMIN_MAIL},
         ),
     )
 
@@ -1450,8 +1455,11 @@ def test_the_fixture_allowlist_is_the_sweeper_s_own_set_and_not_every_user_on_th
             everyone.update(dict(self.pool))
             return {mail: {"Attributes": [{"Name": "sub", "Value": sub}]} for sub, mail in everyone.items()}
 
-    tool = PoolTool(FakeDdb({}, [], {}, [], []), {FIXTURE_SUB: FIXTURE_MAIL, POOL_ONLY_SUB: POOL_ONLY_MAIL},
-                    {"scout": FIXTURE_MAIL, "admin": ADMIN_MAIL})
+    tool = PoolTool(
+        FakeDdb({}, [], {}, [], []),
+        {FIXTURE_SUB: FIXTURE_MAIL, POOL_ONLY_SUB: POOL_ONLY_MAIL},
+        {"scout": FIXTURE_MAIL, "admin": ADMIN_MAIL},
+    )
     identities = lane._fixture_allowlist(tool)
 
     assert len(tool.pool_users(tool.cip())) == 24, "the pool no longer outnumbers the allowlist this test proves"
@@ -1538,7 +1546,9 @@ def test_a_scout_campaign_read_that_is_denied_is_reported_unproven_and_never_dea
     assert UNPROVEN_GUARD in detail["byState"][lane.GUARD_UNPROVEN]
     blocked = [row for row in rows if row["acceptance"].endswith("the way the product reads it")]
     assert blocked and blocked[0]["result"] == stage2.CLEANUP_BLOCKED, blocked
-    assert f"{CAMPAIGNS_TABLE}: GetItem is not granted to this identity (dynamodb:GetItem denied)" in blocked[0]["summary"]
+    assert (
+        f"{CAMPAIGNS_TABLE}: GetItem is not granted to this identity (dynamodb:GetItem denied)" in blocked[0]["summary"]
+    )
     assert _named_row(rows, UNPROVEN_GUARD)["result"] == stage2.CLEANUP_FAILED, "an unprovable named key must fail"
     assert lane.lane_failures({"cleanup": rows, "guardResidue": detail}) != []
 

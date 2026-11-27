@@ -125,6 +125,7 @@ def census_transport(admin: str) -> Callable[[str, Mapping[str, Any]], Mapping[s
 
     return transport
 
+
 #: Products the lane prefers when the Unit Campaign's catalog carries them.  Never invented: the id comes
 #: from that catalog, and these names only decide which product the lane picks, so two runs of the record
 #: read the same way.
