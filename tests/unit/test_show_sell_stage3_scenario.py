@@ -1132,10 +1132,10 @@ def test_blocked_residue_needs_a_measured_census_not_a_name_on_a_list() -> None:
 
 
 def test_a_report_naming_every_denied_swept_table_is_proven_table_by_table() -> None:
-    """The sweeper scans three lane tables and all three deny ``Scan``: a real report names all of them.
+    """The sweeper scans every lane table and all of them deny ``Scan``: a real report names each one.
 
     A census that answers only some of them is not a clean sweep — each blocked table stands or falls on its
-    **own** measured answer, in its own words, and the record says which ones failed.  The three names here
+    **own** measured answer, in its own words, and the record says which ones failed.  The names here
     are the sweeper's own (``LANE_TABLES`` in ``scripts/qa_fixture.py``), because a census keyed on a table
     it never prints would leave every real report line unprovable.
     """
@@ -1149,7 +1149,7 @@ def test_a_report_naming_every_denied_swept_table_is_proven_table_by_table() -> 
         for tables in stage3.STAGE_THREE_RESIDUE_TABLES.values()
         for table in tables
     )
-    assert len(report) == 3, report
+    assert len(report) == 4, report
 
     def sweep(census: Mapping[str, str]) -> dict[str, str]:
         return scenario.run_stage_three_cleanup(
@@ -1168,6 +1168,7 @@ def test_a_report_naming_every_denied_swept_table_is_proven_table_by_table() -> 
             "inventory": "inventoryMovements for UC#1 answered 7 row(s)",
             "orders": "unitScoutCampaignOrders for UC#1/SC#1 answered 2 row(s)",
             "order-fulfillments": stage3.NO_ORDER_NOTE,
+            "show-and-sells": "showAndSells for UC#1 answered 1 row(s)",
         }
     )
     clean = sweep(measured)

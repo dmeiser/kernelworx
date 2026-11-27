@@ -22,6 +22,7 @@ spec from the unit suite would fail on its ``slow`` marker under the root pytest
 from __future__ import annotations
 
 import importlib.util
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -1288,7 +1289,11 @@ def test_the_census_covers_every_table_the_sanctioned_sweeper_scans_for_a_lane()
     assert set(stage3.STAGE_THREE_RESIDUE_SCOPES) == set(stage3.STAGE_THREE_RESIDUE_TABLES)
     for documents in stage3.STAGE_THREE_RESIDUE_READS.values():
         for document in documents:
-            assert document in stage2.STAGE_TWO_DOCUMENTS, f"{document} is not a document the lane can send"
+            # The census documents are the two shipped halves merged: ``showAndSells`` — the read the
+            # Show & Sell table joined to the sweep needs — is minted only by the Stage 3 module.
+            assert document in stage2.STAGE_TWO_DOCUMENTS or document in stage3.STAGE_THREE_DOCUMENTS, (
+                f"{document} is not a document the lane can send"
+            )
     # The movements the amendment keeps are read through the inventory table's own query.
     assert "inventoryMovements" in stage3.STAGE_THREE_RESIDUE_READS["inventory"]
     # Longest key first, so a fulfillment line cannot be answered by the Order read.
@@ -1297,6 +1302,35 @@ def test_the_census_covers_every_table_the_sanctioned_sweeper_scans_for_a_lane()
     assert stage3._swept_table_key("kernelworx-inventory-ue1-dev") == "inventory"
     assert stage3._swept_table_key("kernelworx-units-ue1-dev") == "", "a readable table is not residue"
     assert stage3._swept_table_key("") == ""
+
+
+def test_every_census_read_resolves_in_the_merged_document_map() -> None:
+    """The census transport looks each read up by name, so every read name must resolve there.
+
+    ``stage_three_residue_probe`` swallows a transport exception — correctly, because a read that
+    cannot run proves nothing — which means a document name missing from the transport's map would
+    answer ``""`` for its table instead of raising, and a ``KeyError('showAndSells')`` once did exactly
+    that on the real lane. The lookup is pinned directly so it can never pass unseen again: every
+    name in :data:`STAGE_THREE_RESIDUE_READS` resolves in the merged Stage 2 + Stage 3 map the lane
+    transport builds, the query text actually selects that field, and a census run against a transport
+    that enforces that lookup answers the Show & Sell table rather than shrugging at it.
+    """
+    documents = {**stage2.STAGE_TWO_DOCUMENTS, **stage3.STAGE_THREE_DOCUMENTS}
+    for reads in stage3.STAGE_THREE_RESIDUE_READS.values():
+        for document in reads:
+            query = documents[document]
+            assert document in query, f"{document} is not selected by its own query text"
+
+    resolved: list[str] = []
+
+    def transport(document: str, variables: Mapping[str, Any]) -> Mapping[str, Any]:
+        resolved.append(document)
+        assert document in documents, f"the lane transport would raise {document!r}"
+        return {"data": {document: {"items": []}}}
+
+    census = stage3.stage_three_residue_census(transport, ["UC#1"], [], [])
+    assert "showAndSells for UC#1 answered 0 row(s)" in census["kernelworx-show-and-sells-ue1-dev"]
+    assert "showAndSells" in resolved
 
 
 def test_the_residue_census_answers_only_reads_that_ran() -> None:
@@ -1313,6 +1347,7 @@ def test_the_residue_census_answers_only_reads_that_ran() -> None:
         "inventoryMovements": 5,
         "unitScoutCampaignOrders": 1,
         "orderFulfillments": 3,
+        "showAndSells": 2,
     }
     seen: list[tuple[str, dict[str, str]]] = []
 
@@ -1327,6 +1362,7 @@ def test_the_residue_census_answers_only_reads_that_ran() -> None:
         "kernelworx-inventory-ue1-dev",
         "kernelworx-orders-ue1-dev",
         "kernelworx-order-fulfillments-ue1-dev",
+        "kernelworx-show-and-sells-ue1-dev",
     }
     assert census["kernelworx-inventory-ue1-dev"] == (
         "inventoryPositions for UC#1 answered 2 row(s); scoutCustodyBalances for UC#1 answered 1 row(s); "
@@ -1337,6 +1373,7 @@ def test_the_residue_census_answers_only_reads_that_ran() -> None:
         "orderFulfillments for Order ORDER#answered answered 3 row(s); "
         "orderFulfillments for Order ORDER#sold answered 3 row(s)"
     ), "a fulfillment row is partitioned by its Order, so the ids come from the Order read as well as the lane's own"
+    assert census["kernelworx-show-and-sells-ue1-dev"] == "showAndSells for UC#1 answered 2 row(s)"
     assert all(stage3.is_census_statement(answer) for answer in census.values())
     assert ("unitScoutCampaignOrders", {"unitCampaignId": "UC#1", "campaignId": "SC#1"}) in seen, (
         "the Order census is scoped to this lane's Unit and Scout Campaigns, never to the stack"

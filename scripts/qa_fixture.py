@@ -169,6 +169,7 @@ LANE_TABLES: dict[str, tuple[str, tuple[str, ...], str]] = {
     "inventory": ("kernelworx-inventory-ue1-dev", ("pk", "sk"), "actorAccountId"),
     "orders": ("kernelworx-orders-ue1-dev", ("campaignId", "orderId"), "createdByAccountId"),
     "order-fulfillments": ("kernelworx-order-fulfillments-ue1-dev", ("pk", "sk"), "createdByAccountId"),
+    "show-and-sells": ("kernelworx-show-and-sells-ue1-dev", ("pk", "sk"), "createdByAccountId"),
 }
 
 # Everything a lane sweep may consider, in one place.
@@ -435,6 +436,10 @@ TOKEN_SHAPES: dict[str, tuple[str, int]] = {
     "order": (r"ORDER#" + _UUID + r"#[A-Za-z0-9_-]{4,64}", 12),
     "join-code": (r"[A-Z0-9]{16}", 16),
     "idem": (r"[A-Za-z][A-Za-z0-9_-]{7,127}", 8),
+    # ``new_show_and_sell_id()`` answers a UUID, and it is the only handle that selects one event's
+    # partition; nothing an event row stores narrows it short of the event itself, which is why the
+    # shape is the full UUID rather than a prefix.
+    "show-and-sell": (_UUID, 36),
 }
 
 #: What a lane rule may answer, and what each answer does to the exit code.  The distinction between
@@ -536,6 +541,24 @@ def _rule_units(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str
             return "delete", f"Unit Admin grant held by a fixture identity on lane Unit {unit}"
         who = ", ".join(foreign) or _mask_secret(sk)
         return "keep", f"grant on lane Unit {unit} names {who}: not a fixture identity"
+    if sk == "PAYMENT-CAPACITY":
+        # ``payment_capacity_key``: the 50-method ceiling counter. It carries no author and the
+        # collection query can never return its sort key, so the Unit token is the whole ownership
+        # fact; the lane's own teardown deletes it with the methods it counted. Note the ordering
+        # assumption: a Unit token names the lane's own Unit, whose method rows can only be kept
+        # by author guard when a foreign tenant's method was somehow written under this Unit — a
+        # mixed-tenant Unit would need the counter kept alongside such a survivor.
+        return "delete", f"payment-method ceiling counter of lane Unit {unit}"
+    if sk.startswith("PAYMENT#"):
+        # ``build_payment_method_item`` always writes ``createdByAccountId``; a method row that names
+        # no fixture identity as its author belongs to another tenant and stays.
+        created = flat.get("createdByAccountId", "")
+        if _owner_ids(created) & subs:
+            return "delete", f"custom payment method {sk} of lane Unit {unit}, created by a fixture identity"
+        return (
+            "keep",
+            f"payment method row {sk} on lane Unit {unit} carries no createdByAccountId naming a fixture identity",
+        )
     return "unknown", f"row shape {sk!r} on lane Unit {unit} is not described by any rule"
 
 
@@ -567,7 +590,14 @@ def _rule_marker(pk: str, sk: str, tokens: dict[str, set[str]], subs: set[str]) 
     key = sk[len("IDEM#") :]
     segments = _owner_ids(pk.replace("%23", "#"))
     authored = bool(segments & subs)
-    scopes = tokens["unit"] | tokens["unit-campaign"] | tokens["campaign"] | tokens["join-code"] | tokens["order"]
+    scopes = (
+        tokens["unit"]
+        | tokens["unit-campaign"]
+        | tokens["campaign"]
+        | tokens["join-code"]
+        | tokens["order"]
+        | tokens["show-and-sell"]
+    )
     scoped = bool(segments & scopes)
     if not authored:
         if scoped or key in tokens["idem"]:
@@ -637,6 +667,87 @@ def _rule_unit_campaigns(item: dict[str, Any], tokens: dict[str, set[str]], subs
     if pk.startswith("IDEM#"):
         return _rule_marker(pk, sk, tokens, subs)
     return None
+
+
+#: The seven ``entityType`` values the Show & Sell builders mint inside one event partition
+#: (``show_and_sell_models`` and ``show_and_sell_sale_models``). A row inside a named event whose
+#: entityType is not one of these is a shape nobody reviewed, and it is left standing and reported.
+SHOW_AND_SELL_ROW_SHAPES: frozenset[str] = frozenset(
+    {
+        "ShowAndSell",
+        "ShowAndSellSlot",
+        "ShowAndSellSignup",
+        "ShowAndSellSale",
+        "ShowAndSellSaleRevision",
+        "WeOweObligation",
+        "WeOweFulfillment",
+    }
+)
+
+
+def _rule_show_and_sells(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
+    """``SHOW_AND_SELL#<id>``: the event, its slots, signups, sales, revisions, obligations and fulfillment records.
+
+    The Stage 4 lane's whole aggregate lives in one partition and, like the inventory partition, most
+    rows in it name no owner at all — the partition key is the ownership fact — so the rule fires only
+    when a ``show-and-sell`` token names the event exactly. ``clean_sales_lane`` in the unit fixtures
+    takes this whole partition down as the lane's own cleanup, sale revisions included: the immutable
+    history of one lane's transaction is cleaned with the transaction, unlike the inventory movement
+    trail, which stands on its own as accounting evidence. So every row of a known shape a guard
+    clears is a ``delete`` — but only a row whose ``entityType`` is one of the seven shapes the
+    product's builders mint (:data:`SHOW_AND_SELL_ROW_SHAPES`); a shape that is not one of them is
+    reported unresolved and left, because deleting a row this rule cannot name is exactly the
+    false-clean the four verdicts exist to prevent.
+    The guards are the standing shape: a signup whose Scout no profile token named belongs to that
+    Scout, and any row one of whose authorship fields — signup, confirmation, entry, correction,
+    void, creation, or a fulfillment's acting account — names an account outside the fixture pool
+    belongs to that account; every present actor field is tested, not just the first, and each such
+    row survives as kept. Rows of an event no token names are not reported.
+    """
+    flat = _strings(item)
+    pk, sk = flat.get("pk", ""), flat.get("sk", "")
+    if pk.startswith("IDEM#"):
+        # The payment, sale and We Owe mutations scope their markers to the event id, so a Stage 4
+        # lane's markers land in this table and take the same authorship test as everywhere else.
+        return _rule_marker(pk, sk, tokens, subs)
+    if not pk.startswith("SHOW_AND_SELL#"):
+        return None
+    event = pk[len("SHOW_AND_SELL#") :]
+    if event not in tokens["show-and-sell"]:
+        return None
+    profile = _bare(flat.get("profileId", ""), "PROFILE")
+    if profile and profile not in tokens["profile"]:
+        return (
+            "keep",
+            f"row {sk!r} in lane Show & Sell {event} for profile {profile}: that profile is not this lane's",
+        )
+    actors = [
+        flat[key]
+        for key in (
+            "signedUpByAccountId",
+            "confirmedByAccountId",
+            "enteredByAccountId",
+            "correctedByAccountId",
+            "voidedByAccountId",
+            "createdByAccountId",
+            "actorAccountId",
+        )
+        if flat.get(key)
+    ]
+    outsiders = sorted({actor for actor in actors if not (_owner_ids(actor) & subs)})
+    if outsiders:
+        return (
+            "keep",
+            f"event row in lane Show & Sell {event} written by {', '.join(outsiders)}, not a fixture identity",
+        )
+    what = flat.get("entityType")
+    if what not in SHOW_AND_SELL_ROW_SHAPES:
+        return (
+            "unknown",
+            f"row shape {sk!r} (entityType {what!r}) in lane Show & Sell {event} is not one of the seven "
+            "shapes the Show & Sell builders mint",
+        )
+    return "delete", f"{what} row in lane Show & Sell event {event}"
 
 
 def _rule_inventory(item: dict[str, Any], tokens: dict[str, set[str]], subs: set[str]) -> tuple[str, str] | None:
@@ -729,6 +840,11 @@ def _lane_rule(label: str, item: dict[str, Any], tokens: dict[str, set[str]], su
     if label == "accounts":
         return None  # identities outlive a lane sweep: the next run needs them
     if label == "units":
+        # A Stage 4 lane's payment-create and QR markers are scoped to the Unit id, so they live in
+        # this table and take the marker rule rather than reporting as an unruled ``UNIT#`` shape.
+        unit_flat = _strings(item)
+        if unit_flat.get("pk", "").startswith("IDEM#"):
+            return _rule_marker(unit_flat.get("pk", ""), unit_flat.get("sk", ""), tokens, subs)
         return _rule_units(item, tokens, subs)
     if label == "unit-campaigns":
         return _rule_unit_campaigns(item, tokens, subs)
@@ -738,6 +854,8 @@ def _lane_rule(label: str, item: dict[str, Any], tokens: dict[str, set[str]], su
         return _rule_orders(item, tokens)
     if label == "order-fulfillments":
         return _rule_fulfillments(item, tokens)
+    if label == "show-and-sells":
+        return _rule_show_and_sells(item, tokens, subs)
     return None
 
 
