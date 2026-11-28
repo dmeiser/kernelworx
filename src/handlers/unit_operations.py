@@ -7475,7 +7475,7 @@ def _answer_reduction_rows(
 def _finalization_answer(
     event_id: str, finalization_id: str, *, committed: Optional[Mapping[str, Any]] = None
 ) -> Dict[str, Any]:
-    """The committed result, from this approval's plan or a consistent readback.
+    """The committed result, from this approval's plan or a consistent read.
 
     The first caller has the exact rows it wrote and the warnings it computed, so
     an eventually consistent replica can never cost it its own credits or

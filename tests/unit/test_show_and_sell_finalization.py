@@ -356,7 +356,7 @@ def test_a_replay_returns_the_committed_warnings_even_without_a_marker_payload(w
     )
     world["show_and_sells"].update_item(Key={"pk": marker.pk, "sk": marker.sk}, UpdateExpression="REMOVE resultPayload")
     # Another finalization's auto-reduction lives in the same campaign: the
-    # readback must never fold its warning into this answer.
+    # read must never fold its warning into this answer.
     unrelated = dict(_movements(world, inv.EVENT_AUTO_REDUCE)[0])
     unrelated["sk"] = unrelated["sk"].rsplit("#", 1)[0] + "#unrelated"
     unrelated[inv.MOVEMENT_ID_ATTRIBUTE] = "unrelated"
