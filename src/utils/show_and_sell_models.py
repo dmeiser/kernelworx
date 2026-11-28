@@ -54,6 +54,7 @@ from .inventory_models import (
     ALLOCATION_CANCELLED,
     ALLOCATION_ENTITY_TYPE,
     ALLOCATION_OPEN,
+    ALLOCATION_RELEASED,
     PRODUCT_ID_ATTRIBUTE,
     RELEASED_QTY,
     REMAINING_QTY,
@@ -1476,6 +1477,36 @@ def cancel_allocation_action(
         # `RELEASED` belongs to finalization — and an allocation another path already
         # closed must not be re-released here.
         extra_conditions=((":closedCondition", "#status <> :closedCondition", ALLOCATION_CANCELLED),),
+    )
+
+
+def release_allocation_action(
+    *,
+    allocation: Mapping[str, Any],
+    released_total: int,
+    updated_at: str,
+) -> Tuple[str, Dict[str, Any]]:
+    """Release an open allocation at finalization, keeping ``RELEASED`` distinct from ``CANCELLED``.
+
+    The remainder goes back to the campaign, but the row stays readable as the approved
+    version's source: its ``releasedQty`` and ``remainingQty`` are the numbers §5.2 names,
+    and the movement beside it carries this request's delta. ``RELEASED`` is the terminal
+    state only finalization may write (§9.2), so a second approval of the same event
+    cannot find an OPEN row to release again.
+    """
+    require_allocation_transition(allocation.get(STATUS_ATTRIBUTE), ALLOCATION_RELEASED)
+    return _conditioned_update(
+        {"pk": str(allocation["pk"]), "sk": str(allocation["sk"])},
+        tables.inventory.table_name,
+        expected_version=normalize_required_version(allocation.get(VERSION_ATTRIBUTE, 1)),
+        sets={
+            VERSION_ATTRIBUTE: normalize_required_version(allocation.get(VERSION_ATTRIBUTE, 1)) + 1,
+            RELEASED_QTY: released_total,
+            REMAINING_QTY: 0,
+            STATUS_ATTRIBUTE: ALLOCATION_RELEASED,
+            UPDATED_AT_ATTRIBUTE: updated_at,
+        },
+        extra_conditions=((":openCondition", "#status = :openCondition", ALLOCATION_OPEN),),
     )
 
 

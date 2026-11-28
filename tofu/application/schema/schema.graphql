@@ -2279,6 +2279,44 @@ input UpdateShowAndSellRoundingDraftInput {
   idempotency: IdempotencyInput!
 }
 
+"""One product's confirmed physical return at first finalization (FIN-02..04). Every OPEN allocation of the event must be answered; a variance needs a reason because it is a stock-only adjustment."""
+input ProductReturnInput {
+  """The allocated product being counted."""
+  productId: ID!
+  """The quantity actually handed back (0-1,000,000)."""
+  actualQty: Int!
+  """Why expected and actual differ; required exactly when they do."""
+  reason: String
+}
+
+"""The Kernel's counted cash and the explanations behind it (CASH-01..04)."""
+input FinalizationCashInput {
+  """Signed adjustment to calculated expected cash."""
+  manualAdjustmentCents: Int
+  """Required exactly when the adjustment is nonzero."""
+  manualAdjustmentReason: String
+  """Cash physically counted."""
+  actualCashCents: Int!
+  """Required exactly when actual differs from adjusted expected."""
+  discrepancyExplanation: String
+}
+
+"""Input for finalizeShowAndSell. One complete approval: every return, every leftover cent, the counted cash, and the event version they were read against."""
+input FinalizeShowAndSellInput {
+  """The ended event being approved."""
+  showAndSellId: ID!
+  """One actual count for every allocated product."""
+  returns: [ProductReturnInput!]!
+  """The counted cash and its required explanations."""
+  cash: FinalizationCashInput!
+  """The complete assignment of every unassigned cent; unique eligible participants only."""
+  roundingAssignments: [RoundingDraftAssignmentInput!]!
+  """The event version the caller last read (optimistic concurrency)."""
+  version: VersionedInput!
+  """Idempotency for the mutation."""
+  idempotency: IdempotencyInput!
+}
+
 """Input for cancelShowAndSell. Legal only before startAt, and the reason is required: a state change that releases stock and cancels Scouts has to say why."""
 input CancelShowAndSellInput {
   """The event to cancel."""
@@ -2319,6 +2357,20 @@ input AssignShowAndSellInventoryInput {
   version: VersionedInput!
   """Idempotency for the mutation."""
   idempotency: IdempotencyInput!
+}
+
+"""One approved finalization and everything it changed, read back from the committed rows. The warnings carry earlier-event-priority reductions, including products a later event lost entirely."""
+type FinalizationResult {
+  """The event as it now stands: FINALIZED with approved and latest pointers."""
+  event: ShowAndSellAdmin!
+  """The approved finalization version."""
+  finalization: ShowAndSellFinalization!
+  """The approved Scout allocations of this version."""
+  scoutAllocations: [ScoutSalesAllocation!]!
+  """Positions for the products this finalization touched."""
+  inventoryPositions: [InventoryPosition!]!
+  """Automatic reductions applied to later events, in start-time order."""
+  warnings: [AllocationWarning!]!
 }
 
 """A save that was allowed and said: the campaign holds less than its open allocations promise. Reported, never clamped, and never a refusal — a campaign may hold a morning and an afternoon event against the same four Kernels (spec ALLOC-03)."""
@@ -3810,6 +3862,11 @@ type Mutation {
     """The complete draft."""
     input: UpdateShowAndSellRoundingDraftInput!
   ): FinalizationPreview!
+  """Approve an ended event in one atomic write: freeze the sale/work/return inputs, publish Scout credit and scoped totals, release this event's remaining allocation, reconcile returned stock, reduce later open allocations by earlier-event priority, and move the event to FINALIZED with approved/latest pointers. Every return, every leftover cent, the counted cash and its explanations, and the read event version are required; a stale source fails the whole plan. Unit Admin for the event's Unit."""
+  finalizeShowAndSell(
+    """The approval."""
+    input: FinalizeShowAndSellInput!
+  ): FinalizationResult!
   """Cancel an event before it starts, in one atomic workflow: the event goes CANCELLED with its reason and actor, every open allocation is cancelled with its remainder released, signups and their commitment projections are cancelled, slot counters go to zero, and each Scout's commitment guard moves. An event that has started is finished by finalizing it, not by cancelling it. Unit Admin for the event's Unit."""
   cancelShowAndSell(
     """The cancellation."""

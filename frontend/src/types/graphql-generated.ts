@@ -746,6 +746,18 @@ export type GqlFinalizationBaseAllocation = {
   roundingCreditCents: Scalars['Int']['output'];
 };
 
+/** The Kernel's counted cash and the explanations behind it (CASH-01..04). */
+export type GqlFinalizationCashInput = {
+  /** Cash physically counted. */
+  actualCashCents: Scalars['Int']['input'];
+  /** Required exactly when actual differs from adjusted expected. */
+  discrepancyExplanation?: InputMaybe<Scalars['String']['input']>;
+  /** Signed adjustment to calculated expected cash. */
+  manualAdjustmentCents?: InputMaybe<Scalars['Int']['input']>;
+  /** Required exactly when the adjustment is nonzero. */
+  manualAdjustmentReason?: InputMaybe<Scalars['String']['input']>;
+};
+
 /** Expected cash from the payment snapshots alone: only a snapshot whose methodCode is CASH counts, and no display name or Other note is parsed for cash content (CASH-01). The manual adjustment and the counted amount belong to approval (CASH-02, CASH-03). */
 export type GqlFinalizationCashPreview = {
   __typename?: 'FinalizationCashPreview';
@@ -770,6 +782,21 @@ export type GqlFinalizationPreview = {
   unassignedCents: Scalars['Int']['output'];
   /** One whole-event sales pool from active sales, We Owe totals included (SPLIT-02, SPLIT-05). */
   wholePoolCents: Scalars['Int']['output'];
+};
+
+/** One approved finalization and everything it changed, read back from the committed rows. The warnings carry earlier-event-priority reductions, including products a later event lost entirely. */
+export type GqlFinalizationResult = {
+  __typename?: 'FinalizationResult';
+  /** The event as it now stands: FINALIZED with approved and latest pointers. */
+  event: GqlShowAndSellAdmin;
+  /** The approved finalization version. */
+  finalization: GqlShowAndSellFinalization;
+  /** Positions for the products this finalization touched. */
+  inventoryPositions: Array<GqlInventoryPosition>;
+  /** The approved Scout allocations of this version. */
+  scoutAllocations: Array<GqlScoutSalesAllocation>;
+  /** Automatic reductions applied to later events, in start-time order. */
+  warnings: Array<GqlAllocationWarning>;
 };
 
 /** One product's expected return before approval (FIN-02): what the event holds, what it sold, and what should come back. The Kernel confirms or corrects the actual count at approval; a variance never touches sales, cash, or credit on its own (FIN-04). */
@@ -841,6 +868,22 @@ export type GqlFinalizationWorkSnapshotConnection = {
   __typename?: 'FinalizationWorkSnapshotConnection';
   items: Array<GqlFinalizationWorkSnapshot>;
   pageInfo: GqlPageInfo;
+};
+
+/** Input for finalizeShowAndSell. One complete approval: every return, every leftover cent, the counted cash, and the event version they were read against. */
+export type GqlFinalizeShowAndSellInput = {
+  /** The counted cash and its required explanations. */
+  cash: GqlFinalizationCashInput;
+  /** Idempotency for the mutation. */
+  idempotency: GqlIdempotencyInput;
+  /** One actual count for every allocated product. */
+  returns: Array<GqlProductReturnInput>;
+  /** The complete assignment of every unassigned cent; unique eligible participants only. */
+  roundingAssignments: Array<GqlRoundingDraftAssignmentInput>;
+  /** The ended event being approved. */
+  showAndSellId: Scalars['ID']['input'];
+  /** The event version the caller last read (optimistic concurrency). */
+  version: GqlVersionedInput;
 };
 
 /** Input for fulfillIndividualOrderLine. Fills part or all of one individual Order line from a Kernel-chosen source. */
@@ -1200,6 +1243,8 @@ export type GqlMutation = {
   deleteShowAndSellSlot: Scalars['Boolean']['output'];
   /** Remove a Unit payment method's QR image and reference. Unit Admin; sale history is unchanged. */
   deleteUnitPaymentMethodQrCode: GqlUnitPaymentMethod;
+  /** Approve an ended event in one atomic write: freeze the sale/work/return inputs, publish Scout credit and scoped totals, release this event's remaining allocation, reconcile returned stock, reduce later open allocations by earlier-event priority, and move the event to FINALIZED with approved/latest pointers. Every return, every leftover cent, the counted cash and its explanations, and the read event version are required; a stale source fails the whole plan. Unit Admin for the event's Unit. */
+  finalizeShowAndSell: GqlFinalizationResult;
   /** Fulfill part or all of one individual Order line from Kernel stock or an external Council supply. Unit Admin for the Order's immutable originating Unit. Kernel stock is taken only for KERNEL_STOCK, and never more than the line still owes (§5.19). */
   fulfillIndividualOrderLine: GqlFulfillIndividualOrderLinePayload;
   /** Record that part of a We Owe obligation was delivered, from one stock source. `KERNEL_STOCK` may only reach the reserved quantity and moves Kernel physical on hand and sold product in our possession together; `EXTERNAL_COUNCIL` may only reach the uncovered quantity and moves no Unit stock (`OWE-07`). Partial fulfillment is allowed, and the obligation closes only when nothing is owed and nothing is held (`OWE-09`). Unit Admin only. */
@@ -1487,6 +1532,11 @@ export type GqlMutation_DeleteShowAndSellSlotArgs = {
 /** The root mutation object for the KernelWorx API. */
 export type GqlMutation_DeleteUnitPaymentMethodQrCodeArgs = {
   input: GqlDeleteUnitPaymentMethodQrCodeInput;
+};
+
+/** The root mutation object for the KernelWorx API. */
+export type GqlMutation_FinalizeShowAndSellArgs = {
+  input: GqlFinalizeShowAndSellInput;
 };
 
 /** The root mutation object for the KernelWorx API. */
@@ -1949,6 +1999,16 @@ export type GqlProductQuantityInput = {
   productId: Scalars['ID']['input'];
   /** Positive number of Kernels. */
   quantity: Scalars['Int']['input'];
+};
+
+/** One product's confirmed physical return at first finalization (FIN-02..04). Every OPEN allocation of the event must be answered; a variance needs a reason because it is a stock-only adjustment. */
+export type GqlProductReturnInput = {
+  /** The quantity actually handed back (0-1,000,000). */
+  actualQty: Scalars['Int']['input'];
+  /** The allocated product being counted. */
+  productId: Scalars['ID']['input'];
+  /** Why expected and actual differ; required exactly when they do. */
+  reason?: InputMaybe<Scalars['String']['input']>;
 };
 
 /** An invitation for another account to join a seller profile, redeemable by its invite code. */
