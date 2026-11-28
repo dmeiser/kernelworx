@@ -135,14 +135,21 @@ def test_account_deletion_happy_path(
         expect(confirm_action_btn).to_be_enabled()
         confirm_action_btn.click()
 
-        # 7. Verify stepped deletion progresses to completion
-        expect(confirm_dialog.get_by_text("Account Deleted")).to_be_visible(timeout=30_000)
+        # 7. Verify stepped deletion progresses to completion. The success banner lives
+        # only until the hook signs out, so when it unmounts before Playwright polls,
+        # the sign-out redirect is the completion signal instead.
+        try:
+            expect(confirm_dialog.get_by_text("Account Deleted")).to_be_visible(timeout=5_000)
+        except AssertionError:
+            pass
 
-        # 8. Verify sign-out and redirect to root or login
-        page.wait_for_url(re.compile(r"(https?://[^/]+/?$|/login)"), timeout=15_000)
+        # 8. Verify sign-out and redirect to root or login. One wait with the full
+        # deletion budget covers both the banner and banner-unmounted paths.
+        page.wait_for_url(re.compile(r"(https?://[^/]+/?$|/login)"), timeout=30_000)
 
-        # 9. Verify Cognito user was deleted
-        with pytest.raises(Exception):
+        # 9. Verify Cognito user was deleted. Only UserNotFoundException proves it;
+        # throttling, permissions and other lookup faults must fail the smoke test.
+        with pytest.raises(cognito.exceptions.UserNotFoundException):
             cognito.admin_get_user(UserPoolId=user_pool_id, Username=email)
 
     finally:
