@@ -141,13 +141,15 @@ def test_account_deletion_happy_path(
         try:
             expect(confirm_dialog.get_by_text("Account Deleted")).to_be_visible(timeout=5_000)
         except AssertionError:
-            page.wait_for_url(re.compile(r"(https?://[^/]+/?$|/login)"), timeout=15_000)
+            pass
 
-        # 8. Verify sign-out and redirect to root or login
-        page.wait_for_url(re.compile(r"(https?://[^/]+/?$|/login)"), timeout=15_000)
+        # 8. Verify sign-out and redirect to root or login. One wait with the full
+        # deletion budget covers both the banner and banner-unmounted paths.
+        page.wait_for_url(re.compile(r"(https?://[^/]+/?$|/login)"), timeout=30_000)
 
-        # 9. Verify Cognito user was deleted
-        with pytest.raises(Exception):
+        # 9. Verify Cognito user was deleted. Only UserNotFoundException proves it;
+        # throttling, permissions and other lookup faults must fail the smoke test.
+        with pytest.raises(cognito.exceptions.UserNotFoundException):
             cognito.admin_get_user(UserPoolId=user_pool_id, Username=email)
 
     finally:
