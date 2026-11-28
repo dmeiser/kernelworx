@@ -22,6 +22,7 @@ from src.utils import show_and_sell_finalization_models as fm
 from src.utils import show_and_sell_models as ssm
 from src.utils import show_and_sell_sale_models as sm
 from tests.unit.show_sell_fixtures import (
+    account_id,
     assert_is_error,
     seed_show_sell_fixtures,
     unit_operation_event,
@@ -154,9 +155,7 @@ def _finalize(
         "idempotency": {"idempotencyKey": key},
         **extra,
     }
-    return handle_unit_operation(
-        unit_operation_event(FINALIZE_SHOW_AND_SELL_FIELD, caller, input=payload), None
-    )
+    return handle_unit_operation(unit_operation_event(FINALIZE_SHOW_AND_SELL_FIELD, caller, input=payload), None)
 
 
 def _ok(payload: Any) -> Dict[str, Any]:
@@ -228,7 +227,14 @@ def test_a_sixty_dollar_time_worked_pool_approves_exact_credit_once(world: Dict[
     assert credits[A_SCOUT]["amountCents"] == 4000
     assert credits[B_SCOUT]["amountCents"] == 2000
     assert [row["status"] for row in credits.values()] == [fm.ALLOCATION_STATUS_APPROVED] * 2
-    assert sum(int(row["approvedAmountCents"]) for row in world["unit_campaigns"].scan()["Items"] if row.get("entityType") == fm.TOTAL_ENTITY_TYPE) == 6000
+    assert (
+        sum(
+            int(row["approvedAmountCents"])
+            for row in world["unit_campaigns"].scan()["Items"]
+            if row.get("entityType") == fm.TOTAL_ENTITY_TYPE
+        )
+        == 6000
+    )
     assert _finalize(world, cash=_cash(6000), version=version, key="approve-1") == answer  # idem: one version
     assert len(_rows(world["show_and_sells"], fm.FINALIZATION_ENTITY_TYPE)) == 1
     assert len(_rows(world["show_and_sells"], fm.CREDIT_ENTITY_TYPE)) == 2
@@ -243,7 +249,9 @@ def test_open_we_owe_counts_once_and_its_obligation_stays_open(world: Dict[str, 
     answer = _ok(_finalize(world, returns=[_return(actual=2)], cash=_cash(total)))
     assert answer["finalization"]["wholePoolCents"] == total
     assert sum(row["amountCents"] for row in answer["scoutAllocations"]) == 1500
-    obligations = [row for row in world["show_and_sells"].scan()["Items"] if row.get("entityType") == sm.WE_OWE_ENTITY_TYPE]
+    obligations = [
+        row for row in world["show_and_sells"].scan()["Items"] if row.get("entityType") == sm.WE_OWE_ENTITY_TYPE
+    ]
     assert len(obligations) == 1
     assert obligations[0]["status"] == sm.WE_OWE_STATUS_OPEN
 
@@ -253,7 +261,9 @@ def test_missing_inputs_and_stale_versions_write_nothing(world: Dict[str, Any]) 
     _ended(world, boxes=2)
     _seed_signup(world["show_and_sells"], ENDED_EVENT, minutes=60, profile_id=A_SCOUT)
     assert_is_error(_finalize(world, returns=[], cash=_cash()), "INVALID_INPUT")  # missing return
-    assert_is_error(_finalize(world, returns=[_return(actual=5)], cash=_cash()), "INVALID_INPUT")  # unexplained variance
+    assert_is_error(
+        _finalize(world, returns=[_return(actual=5)], cash=_cash()), "INVALID_INPUT"
+    )  # unexplained variance
     assert_is_error(_finalize(world, rounding=[_assign(A_SCOUT, 1)]), "CONFLICT")  # an unassigned cent
     assert_is_error(_finalize(world, version=99), "CONFLICT")  # stale event version
     assert_is_error(_finalize(world, caller="Taylor"), "NOT_FOUND")  # AUTH-U
@@ -317,17 +327,63 @@ def test_the_four_box_morning_afternoon_oracle_reduces_three_to_two(world: Dict[
     assert _allocation(world, ENDED_EVENT)["status"] == inv.ALLOCATION_RELEASED
     assert int(_allocation(world, LATER_EVENT)["allocatedQty"]) == 2
     assert int(_allocation(world, LATER_EVENT)["remainingQty"]) == 2
-    reductions = {str(row["showAndSellId"]): int(row[inv.ASSIGNED_DELTA]) for row in _movements(world, inv.EVENT_AUTO_REDUCE)}
+    reductions = {
+        str(row["showAndSellId"]): int(row[inv.ASSIGNED_DELTA]) for row in _movements(world, inv.EVENT_AUTO_REDUCE)
+    }
     assert reductions == {LATER_EVENT: -1, LAST_EVENT: -3}
     warnings = [row for row in answer["warnings"] if row["code"] == "AUTOMATIC_ALLOCATION_REDUCTION"]
     assert [(row["productId"], row["assignedQty"], row["overageQty"]) for row in warnings] == [
         (PRODUCT, 2, 1),
         (PRODUCT, 0, 3),
     ]
-    # The later events are guarded by a version condition, not rewritten by another
-    # resolver's pointer: only their allocations and the audit movements change.
-    assert int(_stored_event(world["show_and_sells"], LATER_EVENT)[ssm.VERSION_ATTRIBUTE]) == 1
-    assert int(_stored_event(world["show_and_sells"], LAST_EVENT)[ssm.VERSION_ATTRIBUTE]) == 1
+    # A reduced event's metadata version moves with its allocation, so an edit
+    # made against the version the caller read before this approval conflicts.
+    assert int(_stored_event(world["show_and_sells"], LATER_EVENT)[ssm.VERSION_ATTRIBUTE]) == 2
+    assert int(_stored_event(world["show_and_sells"], LAST_EVENT)[ssm.VERSION_ATTRIBUTE]) == 2
+
+
+def test_a_replay_returns_the_committed_warnings_even_without_a_marker_payload(world: Dict[str, Any]) -> None:
+    """The immediate answer and both replay paths carry the same immutable facts."""
+    _four_boxes_with_two_later_events(world)
+    read_version = int(_stored_event(world["show_and_sells"], ENDED_EVENT)[ssm.VERSION_ATTRIBUTE])
+    answer = _ok(_finalize(world, returns=[_return(actual=1)], cash=_cash(1000), version=read_version))
+    assert _finalize(world, returns=[_return(actual=1)], cash=_cash(1000), version=read_version) == answer
+    marker = uo._show_and_sell_marker(
+        caller_id=account_id("Avery"),
+        operation=FINALIZE_SHOW_AND_SELL_FIELD,
+        scope=ENDED_EVENT,
+        idempotency_key="approve-1",
+    )
+    world["show_and_sells"].update_item(Key={"pk": marker.pk, "sk": marker.sk}, UpdateExpression="REMOVE resultPayload")
+    # Another finalization's auto-reduction lives in the same campaign: the
+    # readback must never fold its warning into this answer.
+    unrelated = dict(_movements(world, inv.EVENT_AUTO_REDUCE)[0])
+    unrelated["sk"] = unrelated["sk"].rsplit("#", 1)[0] + "#unrelated"
+    unrelated[inv.MOVEMENT_ID_ATTRIBUTE] = "unrelated"
+    unrelated[inv.FINALIZATION_ID_ATTRIBUTE] = "FIN#unrelated"
+    world["inventory"].put_item(Item=unrelated)
+    assert _finalize(world, returns=[_return(actual=1)], cash=_cash(1000), version=read_version) == answer
+
+
+def test_an_edit_using_a_later_events_old_version_conflicts_with_its_reduction(world: Dict[str, Any]) -> None:
+    """A reduced event cannot be edited with the version the Kernel read before approval."""
+    _four_boxes_with_two_later_events(world)
+    _ok(_finalize(world, returns=[_return(actual=1)], cash=_cash(1000)))
+    stale = handle_unit_operation(
+        unit_operation_event(
+            "updateShowAndSell",
+            "Avery",
+            input={
+                "showAndSellId": LATER_EVENT,
+                "locationName": "A place that no longer exists",
+                "version": {"expectedVersion": 1},
+                "idempotency": {"idempotencyKey": "stale-later-edit"},
+            },
+        ),
+        None,
+    )
+    assert_is_error(stale, "CONFLICT")
+    assert _stored_event(world["show_and_sells"], LATER_EVENT)["locationName"] != "A place that no longer exists"
 
 
 def test_a_later_events_version_cancels_the_whole_reduction(world: Dict[str, Any], monkeypatch: Any) -> None:
@@ -346,6 +402,34 @@ def test_a_later_events_version_cancels_the_whole_reduction(world: Dict[str, Any
     assert _rows(world["show_and_sells"], fm.FINALIZATION_ENTITY_TYPE) == []
     assert _movements(world, inv.EVENT_AUTO_REDUCE) == []
     assert int(_allocation(world, LATER_EVENT)["allocatedQty"]) == 3
+
+
+def test_a_return_shortage_cuts_later_allocations_from_post_reconciliation_stock(world: Dict[str, Any]) -> None:
+    """A missing box is gone before the afternoon claims the remaining stock."""
+    _four_boxes_with_two_later_events(world)
+    answer = _ok(_finalize(world, returns=[_return(actual=0, reason="one box was damaged")], cash=_cash(1000)))
+    assert int(_balance(world)["kernelPhysicalQty"]) == 1
+    assert int(_allocation(world, LATER_EVENT)["allocatedQty"]) == 1
+    assert int(_allocation(world, LAST_EVENT)["allocatedQty"]) == 0
+    warnings = [row for row in answer["warnings"] if row["code"] == "AUTOMATIC_ALLOCATION_REDUCTION"]
+    assert [(row["assignedQty"], row["overageQty"]) for row in warnings] == [(1, 2), (0, 3)]
+
+
+def test_a_return_overage_lets_later_events_keep_post_reconciliation_stock(world: Dict[str, Any]) -> None:
+    """A found box is sellable before the afternoon is cut, not after."""
+    _four_boxes_with_two_later_events(world)
+    answer = _ok(
+        _finalize(
+            world,
+            returns=[_return(actual=3, reason="two boxes found in the car")],
+            cash=_cash(1000),
+        )
+    )
+    assert int(_balance(world)["kernelPhysicalQty"]) == 4
+    assert int(_allocation(world, LATER_EVENT)["allocatedQty"]) == 3
+    assert int(_allocation(world, LAST_EVENT)["allocatedQty"]) == 1
+    warnings = [row for row in answer["warnings"] if row["code"] == "AUTOMATIC_ALLOCATION_REDUCTION"]
+    assert [(row["assignedQty"], row["overageQty"]) for row in warnings] == [(1, 2)]
 
 
 # --- 5.2.3: returns and cash ----------------------------------------------------
@@ -379,7 +463,14 @@ def test_an_actual_above_expected_return_raises_stock_without_touching_credit(wo
     _ok(_finalize(world, returns=[_return(actual=4, reason="found a box in the car")], cash=_cash(500)))
     assert int(_balance(world)["kernelPhysicalQty"]) == 4  # 3 after the sale, +1 overage
     assert int(_movements(world, inv.EVENT_RETURN_RECONCILE)[0]["kernelPhysicalDelta"]) == 1
-    assert sum(int(row["approvedAmountCents"]) for row in world["unit_campaigns"].scan()["Items"] if row.get("entityType") == fm.TOTAL_ENTITY_TYPE) == 500
+    assert (
+        sum(
+            int(row["approvedAmountCents"])
+            for row in world["unit_campaigns"].scan()["Items"]
+            if row.get("entityType") == fm.TOTAL_ENTITY_TYPE
+        )
+        == 500
+    )
 
 
 def test_cash_adjustment_and_discrepancy_are_explained_exactly(world: Dict[str, Any]) -> None:
@@ -431,9 +522,10 @@ def test_a_cash_only_call_writes_no_sale_or_credit_side_effect(world: Dict[str, 
     )
     assert answer["finalization"]["cash"]["adjustedExpectedCents"] == 600
     assert len(_rows(world["show_and_sells"], sm.SALE_ENTITY_TYPE)) == before
-    assert [row["movementType"] for row in _movements(world)] == [inv.EVENT_IMMEDIATE_SALE]
-
-
+    assert sorted(row["movementType"] for row in _movements(world)) == [
+        inv.EVENT_IMMEDIATE_SALE,
+        inv.EVENT_RELEASE,
+    ]
 
 
 # --- 5.2 guard rails not exercised by the happy paths above ----------------------
@@ -443,9 +535,7 @@ def test_malformed_answer_shapes_are_refused_before_any_read(world: Dict[str, An
     """The three answer fields have one dialect; malformed values never reach a write."""
     _ended(world, boxes=1)
     assert_is_error(_finalize(world, returns="not-a-list"), "INVALID_INPUT")  # type: ignore[arg-type]
-    assert_is_error(
-        _finalize(world, returns=[_return(), _return()]), "INVALID_INPUT"
-    )  # the same product twice
+    assert_is_error(_finalize(world, returns=[_return(), _return()]), "INVALID_INPUT")  # the same product twice
     assert_is_error(_finalize(world, cash={}), "INVALID_INPUT")
     assert_is_error(_finalize(world, rounding="not-a-list"), "INVALID_INPUT")  # type: ignore[arg-type]
     assert _rows(world["show_and_sells"], fm.FINALIZATION_ENTITY_TYPE) == []
@@ -494,10 +584,127 @@ def test_an_unassigned_cent_must_be_routed_before_approval(world: Dict[str, Any]
             key="odd-cent",
         )
     )
-    error = assert_is_error(
-        _finalize(world, returns=[_return(odd_product)], cash=_cash(501)), "INVALID_INPUT"
-    )
+    error = assert_is_error(_finalize(world, returns=[_return(odd_product)], cash=_cash(501)), "INVALID_INPUT")
     assert error["message"].startswith("every unassigned cent")
+    assert _rows(world["show_and_sells"], fm.FINALIZATION_ENTITY_TYPE) == []
+
+
+def test_a_matched_return_releases_assigned_stock_without_moving_physical(world: Dict[str, Any]) -> None:
+    """A matched return still writes one ledger movement for the release it performs."""
+    _ended(world, boxes=2)
+    _seed_signup(world["show_and_sells"], ENDED_EVENT, minutes=60, profile_id=A_SCOUT)
+    _sell(world, boxes=1, key="matched-sale")
+    before = int(_balance(world)["kernelPhysicalQty"])
+    answer = _ok(_finalize(world, returns=[_return(actual=1)], cash=_cash(500)))
+    allocation = _allocation(world, ENDED_EVENT)
+    assert allocation["status"] == inv.ALLOCATION_RELEASED
+    assert (int(allocation["releasedQty"]), int(allocation["remainingQty"])) == (1, 0)
+    release = _movements(world, inv.EVENT_RELEASE)
+    assert len(release) == 1
+    assert int(release[0][inv.ASSIGNED_DELTA]) == -1
+    assert int(release[0][inv.KERNEL_PHYSICAL_DELTA]) == 0
+    assert int(_balance(world)["kernelPhysicalQty"]) == before
+    line = _rows(world["show_and_sells"], fm.RETURN_LINE_ENTITY_TYPE)[0]
+    assert int(line["varianceQty"]) == 0
+    assert line.get("reconciliationMovementId") is None
+    assert answer["inventoryPositions"][0]["assignedOpenQty"] == 0
+
+
+def test_a_scoped_total_change_between_read_and_write_cannot_lose_a_credit(
+    world: Dict[str, Any], monkeypatch: Any
+) -> None:
+    """The amount and the condition come from one total read, never two."""
+    from tests.unit.test_show_and_sell_sales import CAMPAIGN
+
+    _ended(world, boxes=2)
+    _seed_signup(world["show_and_sells"], ENDED_EVENT, minutes=60, profile_id=A_SCOUT)
+    world["unit_campaigns"].put_item(
+        Item=fm.build_total_row(
+            campaign_id="SC#sale-budget",
+            profile_id=A_SCOUT,
+            unit_campaign_id=CAMPAIGN,
+            approved_amount_cents=125,
+            version=7,
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+    )
+    _sell(world, boxes=2, key="total-race-sale")
+    real_load = fm.load_campaign_total
+    reads: List[int] = []
+
+    def reread(unit_campaign_id: str, campaign_id: str) -> Any:
+        row = real_load(unit_campaign_id, campaign_id)
+        reads.append(len(reads) + 1)
+        if len(reads) > 1 and row is not None:
+            return {**row, fm.APPROVED_AMOUNT_CENTS_ATTRIBUTE: 275, "version": 8}
+        return row
+
+    monkeypatch.setattr(fm, "load_campaign_total", reread)
+    _ok(_finalize(world, returns=[_return()], cash=_cash(1000)))
+    assert reads == [1]
+    totals = _rows(world["unit_campaigns"], fm.TOTAL_ENTITY_TYPE)
+    assert (int(totals[0][fm.APPROVED_AMOUNT_CENTS_ATTRIBUTE]), int(totals[0]["version"])) == (1125, 8)
+
+
+def test_the_preflight_prices_a_sale_at_its_snapshot_and_version_guard() -> None:
+    """A sale admitted by the assignment preflight must fit what approval stages."""
+    from src.utils import allocation_models as am
+
+    assert am.minimum_finalization_action_count(0) == 3
+    assert am.minimum_finalization_action_count(0, sale_count=1) == 5
+
+
+def test_a_ninety_action_approval_commits_and_a_ninety_first_refuses(world: Dict[str, Any], monkeypatch: Any) -> None:
+    """The ceiling is measured against real staged actions, not a parallel estimate."""
+    from tests.unit.test_show_and_sell_sales import FUTURE_END, FUTURE_START
+
+    _ended(world, boxes=100, allocated=100)
+    _seed_signup(world["show_and_sells"], ENDED_EVENT, minutes=60, profile_id=A_SCOUT)
+    for index in range(39):
+        _sell(world, boxes=1, key=f"boundary-{index}")
+    # An unaffected later event contributes exactly one more guard: 39 sales +
+    # one Scout + one product + this check stage 90 actions in total.
+    _seed_event(
+        world["show_and_sells"],
+        LATER_EVENT,
+        start_at=FUTURE_START,
+        end_at=FUTURE_END,
+        product_ids=[PRODUCT],
+        version=1,
+    )
+    _seed_allocation(world["inventory"], LATER_EVENT, PRODUCT, allocated=1, start_at=FUTURE_START, end_at=FUTURE_END)
+    real_plan = uo.WritePlan
+    plans: List[Any] = []
+
+    class RecordingPlan(real_plan):  # type: ignore[misc, valid-type]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            plans.append(self)
+
+    monkeypatch.setattr(uo, "WritePlan", RecordingPlan)
+    answer = _ok(_finalize(world, returns=[_return(actual=61)], cash=_cash(39 * 500)))
+    assert plans[0].action_count == 90
+    assert answer["warnings"] == []
+    assert int(_stored_event(world["show_and_sells"], ENDED_EVENT)[ssm.VERSION_ATTRIBUTE]) == 41
+
+
+def test_a_ninety_first_action_approval_is_refused_before_any_write(world: Dict[str, Any], monkeypatch: Any) -> None:
+    """40 sales, one Scout and one product stage 91 actions and commit nothing."""
+    seen: List[int] = []
+    real_error = uo.WritePlan.too_large_error
+
+    def record_size(planned_actions: int) -> Any:
+        seen.append(planned_actions)
+        return real_error(planned_actions)
+
+    monkeypatch.setattr(uo.WritePlan, "too_large_error", staticmethod(record_size))
+    _ended(world, boxes=100, allocated=100)
+    _seed_signup(world["show_and_sells"], ENDED_EVENT, minutes=60, profile_id=A_SCOUT)
+    for index in range(40):
+        _sell(world, boxes=1, key=f"boundary-{index}")
+    error = assert_is_error(_finalize(world, returns=[_return(actual=60)], cash=_cash(40 * 500)), "CONFLICT")
+    assert "too large" in error["message"]
+    assert seen == [91]
     assert _rows(world["show_and_sells"], fm.FINALIZATION_ENTITY_TYPE) == []
 
 
@@ -617,7 +824,9 @@ def test_an_allocation_without_a_balance_row_is_not_invented(world: Dict[str, An
     _seed_allocation(world["inventory"], ENDED_EVENT, PRODUCT, allocated=2)
     _ok(_finalize(world, returns=[_return(actual=2)], cash=_cash()))
     assert _rows(world["inventory"], inv.BALANCE_ENTITY_TYPE) == []
-    assert _movements(world) == []
+    release = _movements(world, inv.EVENT_RELEASE)
+    assert len(release) == 1
+    assert int(release[0][inv.ASSIGNED_DELTA]) == -2
 
 
 def test_a_prior_events_reduction_movement_is_not_reported_again(world: Dict[str, Any]) -> None:

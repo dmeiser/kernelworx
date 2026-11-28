@@ -108,8 +108,11 @@ FINALIZATION_ACTIONS_PER_ALLOCATED_PRODUCT = 4
 #: formula rather than two that happen to agree today.
 FINALIZATION_ACTIONS_PER_CONFIRMED_SIGNUP = 1
 FINALIZATION_ACTIONS_PER_PARTICIPATING_SCOUT = 2
-#: §9's ``S`` term: one sale snapshot write per ACTIVE sale the finalization walks.
-FINALIZATION_ACTIONS_PER_SALE = 1
+#: §9's ``S`` term: each ACTIVE sale costs two actions at approval, not one — an
+#: immutable sale snapshot and the version condition that pins the sale it copied.
+#: Pricing a sale at one action lets the assignment preflight admit a batch that
+#: finalization then refuses at the 90-action ceiling.
+FINALIZATION_ACTIONS_PER_SALE = 2
 
 #: The movement type a target change of this sign is audited as (§5.8): an increase is an
 #: assignment, a decrease is a manual reduction. A zero delta writes nothing, so it has
@@ -636,7 +639,8 @@ def minimum_finalization_action_count(
     whose work a Kernel confirmed (each becomes one per-slot work snapshot) and
     ``participating_scouts`` is the distinct Scouts the event counts (each becomes a credit
     record and a Scout-total projection), and ``sale_count`` is the active sales the
-    finalization must snapshot (each is one sale snapshot write — §9's ``S``). All default
+    finalization must snapshot (each costs a snapshot and its version condition — §9's
+    ``S``). All default
     to zero, which is exactly what the §3.2 assignment mutation may assume — an assignment
     adds stock, not participants or sales — and
     what keeps its call byte-identical to the estimate it was written against.

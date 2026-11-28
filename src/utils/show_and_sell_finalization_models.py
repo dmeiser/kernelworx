@@ -1317,7 +1317,7 @@ def finalization_rows(show_and_sell_id: str) -> List[Dict[str, Any]]:
 
 def read_finalization(show_and_sell_id: str, finalization_id: str) -> Optional[Dict[str, Any]]:
     """One version by its exact key, consistently."""
-    item = tables.show_and_sells.get_item(Key=finalization_key(show_and_sell_id, finalization_id))
+    item = tables.show_and_sells.get_item(Key=finalization_key(show_and_sell_id, finalization_id), ConsistentRead=True)
     row = item.get("Item")
     return dict(row) if row else None
 

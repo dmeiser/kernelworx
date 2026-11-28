@@ -714,7 +714,7 @@ def test_sale_m_01_02_a_sale_outside_the_event_and_a_stale_event_version_write_n
 def test_sale_m_01_02_the_largest_transaction_safe_batch_lands_and_a_bigger_one_is_refused(
     world: Dict[str, Any],
 ) -> None:
-    """AC-42's ceiling: 21 products finalize in 88 actions; a 22nd asks 93 of the second sale."""
+    """AC-42's ceiling: 21 products finalize in 89 actions; a 22nd asks 95 of the second sale."""
     products = _offer_products(world["catalogs"], 22)
     _seed_event(world["show_and_sells"], ACTIVE_EVENT)
     for product_id in products:
@@ -731,7 +731,9 @@ def test_sale_m_01_02_the_largest_transaction_safe_batch_lands_and_a_bigger_one_
 
     error = assert_is_error(refused, "CONFLICT")
     assert "finalize" in error["message"], error["message"]
-    assert f"{22 * PER_PRODUCT + OVERHEAD + 2} actions" in error["message"], error["message"]
+    assert f"{22 * PER_PRODUCT + OVERHEAD + 2 * am.FINALIZATION_ACTIONS_PER_SALE} actions" in error["message"], error[
+        "message"
+    ]
     assert len(_sale_rows(world["show_and_sells"])) == 1, "the refusal adds no second sale"
     assert sorted(_stored_event(world["show_and_sells"])[ssm.PRODUCT_IDS_ATTRIBUTE]) == sorted(products[:21])
 
@@ -759,7 +761,7 @@ def test_sale_m_01_02_confirmed_work_shrinks_the_finalization_budget_a_sale_may_
     error = assert_is_error(refused, "CONFLICT")
     assert "finalize" in error["message"], error["message"]
     assert (
-        f"{OVERHEAD + 21 * PER_PRODUCT + am.FINALIZATION_ACTIONS_PER_CONFIRMED_SIGNUP + am.FINALIZATION_ACTIONS_PER_PARTICIPATING_SCOUT + 2} actions"
+        f"{OVERHEAD + 21 * PER_PRODUCT + am.FINALIZATION_ACTIONS_PER_CONFIRMED_SIGNUP + am.FINALIZATION_ACTIONS_PER_PARTICIPATING_SCOUT + 2 * am.FINALIZATION_ACTIONS_PER_SALE} actions"
         in error["message"]
     ), error["message"]
     assert len(_sale_rows(world["show_and_sells"])) == 1, "the refusal adds no second sale"
@@ -769,13 +771,13 @@ def test_sale_m_01_02_confirmed_work_shrinks_the_finalization_budget_a_sale_may_
 def test_sale_m_01_02_a_line_batch_over_the_action_budget_is_refused_and_splits_into_two_sales(
     world: Dict[str, Any],
 ) -> None:
-    """§8.10: a plan of 91 actions fails before one write, and two smaller sales fit."""
-    products = _offer_products(world["catalogs"], 21)
+    """§8.10: an oversized line batch fails before one write, and two smaller sales fit."""
+    products = _offer_products(world["catalogs"], 20)
     _seed_event(world["show_and_sells"], ACTIVE_EVENT)
     for product_id in products:
         _seed_stock(world, product_id=product_id)
     oversized = [_line(product_id) for product_id in products] + [
-        _line(products[index % len(products)], immediate=0, we_owe=1) for index in range(25)
+        _line(products[index % len(products)], immediate=0, we_owe=1) for index in range(35)
     ]
 
     refused = _create(lines=oversized, buyerName="Buyer Bee", key="sale-big")
@@ -789,7 +791,7 @@ def test_sale_m_01_02_a_line_batch_over_the_action_budget_is_refused_and_splits_
     immediate_sale = _ok(_create(lines=[_line(product_id) for product_id in products], key="sale-part-1"))
     owed_sale = _ok(
         _create(
-            lines=[_line(products[index % len(products)], immediate=0, we_owe=1) for index in range(25)],
+            lines=[_line(products[index % 10], immediate=0, we_owe=1) for index in range(35)],
             buyerName="Buyer Bee",
             version=2,
             key="sale-part-2",
@@ -797,9 +799,9 @@ def test_sale_m_01_02_a_line_batch_over_the_action_budget_is_refused_and_splits_
     )
 
     assert len(immediate_sale["obligations"]) == 0
-    assert len(owed_sale["obligations"]) == 25
+    assert len(owed_sale["obligations"]) == 35
     assert len(_sale_rows(world["show_and_sells"])) == 2
-    assert len(_movements(world["inventory"])) == 21, "the owed-only sale consumed no stock"
+    assert len(_movements(world["inventory"])) == 20, "the owed-only sale consumed no stock"
 
 
 # --- SALE-M-01-03: the event's We Owe setting and mixed lines --------------------

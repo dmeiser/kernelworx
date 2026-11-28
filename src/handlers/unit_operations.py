@@ -7108,6 +7108,20 @@ def _finalization_event_action(
     )
 
 
+def _finalized_event_row(
+    event_row: Mapping[str, Any], expected_version: int, finalization_id: str, caller_id: str, now_iso: str
+) -> Dict[str, Any]:
+    """The event as the committed plan leaves it, for the answer and marker payload."""
+    row = dict(event_row)
+    row[show_and_sell_models.STATUS_ATTRIBUTE] = show_and_sell_models.STATUS_FINALIZED
+    row[show_and_sell_models.APPROVED_FINALIZATION_ID_ATTRIBUTE] = finalization_id
+    row[show_and_sell_models.LATEST_FINALIZATION_ID_ATTRIBUTE] = finalization_id
+    row[show_and_sell_models.VERSION_ATTRIBUTE] = expected_version + 1
+    row[show_and_sell_models.UPDATED_BY_ATTRIBUTE] = caller_id
+    row[show_and_sell_models.UPDATED_AT_ATTRIBUTE] = now_iso
+    return row
+
+
 def _finalization_credit_rows(
     finalization: Mapping[str, Any],
     shares: Mapping[str, int],
@@ -7135,6 +7149,42 @@ def _finalization_credit_rows(
     return rows
 
 
+def _return_movement(
+    *,
+    event_id: str,
+    campaign_id: str,
+    product_id: str,
+    movement_id: str,
+    variance: int,
+    expected: int,
+    reason: Optional[str],
+    balance_version: Optional[int],
+    finalization_id: str,
+    caller_id: str,
+    idempotency_key: str,
+    now_iso: str,
+) -> Dict[str, Any]:
+    """One ledger record for a returned remainder: release alone, or release plus variance."""
+    return cast(
+        Dict[str, Any],
+        inventory_models.build_inventory_movement_item(
+            movement_id=movement_id,
+            unit_campaign_id=campaign_id,
+            product_id=product_id,
+            movement_type=(inventory_models.EVENT_RETURN_RECONCILE if variance else inventory_models.EVENT_RELEASE),
+            actor_account_id=caller_id,
+            occurred_at=now_iso,
+            idempotency_key=idempotency_key,
+            kernel_physical_delta=variance,
+            assigned_delta=-expected,
+            show_and_sell_id=event_id,
+            finalization_id=finalization_id,
+            reason=reason if variance else None,
+            inventory_version=balance_version,
+        ),
+    )
+
+
 def _return_plans(
     event_row: Mapping[str, Any],
     returns: Mapping[str, Tuple[int, Optional[str]]],
@@ -7147,9 +7197,11 @@ def _return_plans(
 
     The allocation's remaining quantity becomes RELEASED on approval and the physical
     variance is the only stock effect (FIN-03/04): a missing box lowers stock, an extra
-    one raises it, and neither a sale nor a Scout cent moves with it. A variance must
-    carry a reason, which the immutable return-line builder enforces together with its
-    linked movement id.
+    one raises it, and neither a sale nor a Scout cent moves with it. Every release
+    writes one ledger movement: a matched return uses EVENT_RELEASE for the assigned
+    delta alone, while a variance uses EVENT_RETURN_RECONCILE for both deltas. A
+    variance must carry a reason, which the immutable return-line builder enforces
+    together with its linked movement id.
     """
     fm = show_and_sell_finalization_models
     event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
@@ -7177,7 +7229,7 @@ def _return_plans(
         balance = _section_balance(section)
         balance_version = int(balance["version"]) + 1 if balance is not None else 1
         balances[product_id] = (balance, balance_version)
-        movement_id = inventory_models.new_inventory_movement_id() if variance else None
+        movement_id = inventory_models.new_inventory_movement_id()
         line = fm.build_return_line_row(
             show_and_sell_id=event_id,
             finalization_id=finalization_id,
@@ -7185,26 +7237,25 @@ def _return_plans(
             allocated_qty=allocated,
             expected_qty=expected,
             actual_qty=actual,
-            reconciliation_movement_id=movement_id,
-            reason=reason,
+            # A matched return has no stock adjustment to link; its release is
+            # still audited, as an EVENT_RELEASE movement instead of a reconcile.
+            reconciliation_movement_id=movement_id if variance else None,
+            reason=reason if variance else None,
         )
-        movement = None
-        if variance:
-            movement = inventory_models.build_inventory_movement_item(
-                movement_id=movement_id,
-                unit_campaign_id=campaign_id,
-                product_id=product_id,
-                movement_type=inventory_models.EVENT_RETURN_RECONCILE,
-                actor_account_id=caller_id,
-                occurred_at=now_iso,
-                idempotency_key=idempotency_key,
-                kernel_physical_delta=variance,
-                assigned_delta=-expected,
-                show_and_sell_id=event_id,
-                finalization_id=finalization_id,
-                reason=reason,
-                inventory_version=balance_version if balance is not None else None,
-            )
+        movement = _return_movement(
+            event_id=event_id,
+            campaign_id=campaign_id,
+            product_id=product_id,
+            movement_id=movement_id,
+            variance=variance,
+            expected=expected,
+            reason=reason,
+            balance_version=balance_version if balance is not None else None,
+            finalization_id=finalization_id,
+            caller_id=caller_id,
+            idempotency_key=idempotency_key,
+            now_iso=now_iso,
+        )
         plans.append(
             {
                 "productId": product_id,
@@ -7261,6 +7312,7 @@ def _competing_allocations(
 def _reduction_rows(
     later: Sequence[Mapping[str, Any]],
     remaining: Dict[str, int],
+    stock_after_return: Mapping[str, int],
     sections: Mapping[str, Mapping[str, Any]],
     campaign_id: str,
     finalization_id: str,
@@ -7299,6 +7351,10 @@ def _reduction_rows(
                 "productId": product_id,
                 "reduction": reduction,
                 "assignedQty": int(allocation[inventory_models.ALLOCATED_QTY]) - reduction,
+                # The warning is a fact of this approval, not a live position
+                # that a later edit could rewrite before the response is built.
+                "currentStockQty": stock_after_return[product_id],
+                "eventRow": entry["eventRow"],
             }
         )
     return reductions
@@ -7307,6 +7363,7 @@ def _reduction_rows(
 def _later_reduction_plans(
     event_row: Mapping[str, Any],
     balances: Mapping[str, Tuple[Optional[Dict[str, Any]], int]],
+    return_plans: Sequence[Mapping[str, Any]],
     finalization_id: str,
     caller_id: str,
     idempotency_key: str,
@@ -7314,15 +7371,26 @@ def _later_reduction_plans(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """Later open allocations, reduced by earlier-event priority in start-time order.
 
-    The reads cover every open allocation of the touched products, so a concurrent
-    change to any competing event's version cancels the whole approval instead of
-    letting one Kernel reduce a stock picture another Kernel just changed.
+    The sellable stock is the POST-reconciliation one: actual returns are counted
+    before any later claim is served, so a shortage cuts a later allocation further
+    and an overage lets it keep more. The reads cover every open allocation of the
+    touched products, so a concurrent change to any competing event's version
+    cancels the whole approval instead of letting one Kernel reduce a stock picture
+    another Kernel just changed.
     """
     campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
     sections = inventory_models.campaign_product_sections(campaign_id, list(balances))
     later, event_rows, earlier = _competing_allocations(event_row, balances, sections)
+    returned_delta = {
+        str(plan["productId"]): int(plan["movement"][inventory_models.KERNEL_PHYSICAL_DELTA]) for plan in return_plans
+    }
     remaining = {
-        product_id: max(0, inventory_models.sellable_kernel_qty(balance) - earlier.get(product_id, 0))
+        product_id: max(
+            0,
+            inventory_models.sellable_kernel_qty(balance)
+            + returned_delta.get(product_id, 0)
+            - earlier.get(product_id, 0),
+        )
         for product_id, (balance, _) in balances.items()
     }
     later.sort(
@@ -7333,26 +7401,33 @@ def _later_reduction_plans(
         )
     )
     return (
-        _reduction_rows(later, remaining, sections, campaign_id, finalization_id, caller_id, idempotency_key, now_iso),
+        _reduction_rows(
+            later,
+            remaining,
+            dict(remaining),
+            sections,
+            campaign_id,
+            finalization_id,
+            caller_id,
+            idempotency_key,
+            now_iso,
+        ),
         event_rows,
     )
 
 
-def _finalization_warnings(
-    event_row: Mapping[str, Any], reductions: Sequence[Mapping[str, Any]]
-) -> List[Dict[str, Any]]:
-    """The earlier-event-priority warnings, in the order the reductions were applied."""
-    campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
-    sections = inventory_models.campaign_product_sections(
-        campaign_id, [str(entry["productId"]) for entry in reductions]
-    )
+def _finalization_warnings(reductions: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """The earlier-event-priority warnings, in the order the reductions were applied.
+
+    Every number comes from the reduction this approval committed, not from a
+    position read afterwards: a later edit to the reduced event must not rewrite
+    what this finalization told its caller.
+    """
     return [
         {
             "code": "AUTOMATIC_ALLOCATION_REDUCTION",
             "productId": str(entry["productId"]),
-            "currentStockQty": inventory_models.sellable_kernel_qty(
-                _section_balance(sections[str(entry["productId"])])
-            ),
+            "currentStockQty": int(entry["currentStockQty"]),
             "assignedQty": int(entry["assignedQty"]),
             "overageQty": int(entry["reduction"]),
             "message": (
@@ -7368,7 +7443,9 @@ def _answer_reduction_rows(
     campaign_id: str, finalization_id: str, sections: Mapping[str, Mapping[str, Any]]
 ) -> List[Dict[str, Any]]:
     """Rebuild each automatic reduction from its movement and the allocation left behind."""
-    movements = inventory_models.list_inventory_movements(campaign_id, movement_type=inventory_models.EVENT_AUTO_REDUCE)
+    movements = inventory_models.list_inventory_movements(
+        campaign_id, movement_type=inventory_models.EVENT_AUTO_REDUCE, consistent=True
+    )
     rows: List[Dict[str, Any]] = []
     for movement in movements:
         if str(movement.get("finalizationId")) != finalization_id:
@@ -7388,50 +7465,73 @@ def _answer_reduction_rows(
                         and str(allocation.get(show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE)) == event_id
                     ),
                 ),
+                "currentStockQty": inventory_models.sellable_kernel_qty(_section_balance(sections[product_id])),
                 "reduction": -int(movement[inventory_models.ASSIGNED_DELTA]),
             }
         )
     return rows
 
 
-def _finalization_answer(event_id: str, finalization_id: str) -> Dict[str, Any]:
-    """The committed result, read back from stored rows for the caller and the marker."""
+def _finalization_answer(
+    event_id: str, finalization_id: str, *, committed: Optional[Mapping[str, Any]] = None
+) -> Dict[str, Any]:
+    """The committed result, from this approval's plan or a consistent readback.
+
+    The first caller has the exact rows it wrote and the warnings it computed, so
+    an eventually consistent replica can never cost it its own credits or
+    reductions. The marker back-fill stores that same answer, and a replay returns
+    it verbatim. Only a marker whose payload back-fill never happened falls back to
+    the immutable committed rows, read strongly consistently.
+    """
     fm = show_and_sell_finalization_models
-    event_row = dict(show_and_sell_models.load_show_and_sell_or_not_found(event_id))
-    row = fm.read_finalization(event_id, finalization_id)
-    if row is None:  # pragma: no cover - the marker only exists after the row committed
-        raise AppError(ErrorCode.INTERNAL_ERROR, "the approved finalization is missing after its commit")
-    campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
-    product_ids = show_and_sell_models.normalize_product_ids(event_row.get(show_and_sell_models.PRODUCT_IDS_ATTRIBUTE))
-    sections = inventory_models.campaign_product_sections(campaign_id, product_ids)
-    reductions = _answer_reduction_rows(campaign_id, finalization_id, sections)
-    # DynamoDB scan order is not start-time order: rebuild the earlier-event priority
-    # sequence from each reduced event's own row so the warnings stay deterministic.
-    starts = {
-        str(entry["showAndSellId"]): str(
-            show_and_sell_models.load_show_and_sell_or_not_found(str(entry["showAndSellId"]))[
-                show_and_sell_models.START_AT_ATTRIBUTE
-            ]
+    if committed is None:
+        event_row = dict(show_and_sell_models.load_show_and_sell_or_not_found(event_id))
+        row = fm.read_finalization(event_id, finalization_id)
+        if row is None:  # pragma: no cover - the marker only exists after the row committed
+            raise AppError(ErrorCode.INTERNAL_ERROR, "the approved finalization is missing after its commit")
+        credits = fm.finalization_credit_rows(event_id, finalization_id)
+        campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+        sections = inventory_models.campaign_product_sections(
+            campaign_id, list(event_row.get(show_and_sell_models.PRODUCT_IDS_ATTRIBUTE) or [])
         )
-        for entry in reductions
-    }
-    reductions.sort(
-        key=lambda entry: (
-            starts[str(entry["showAndSellId"])],
-            str(entry["showAndSellId"]),
-            str(entry["productId"]),
+        reductions = _answer_reduction_rows(campaign_id, finalization_id, sections)
+        # DynamoDB query order is not start-time order: rebuild the earlier-event
+        # priority sequence from each reduced event's own row so the warnings stay
+        # deterministic even on this fallback path.
+        starts = {
+            str(entry["showAndSellId"]): str(
+                show_and_sell_models.load_show_and_sell_or_not_found(str(entry["showAndSellId"]))[
+                    show_and_sell_models.START_AT_ATTRIBUTE
+                ]
+            )
+            for entry in reductions
+        }
+        reductions.sort(
+            key=lambda entry: (
+                starts[str(entry["showAndSellId"])],
+                str(entry["showAndSellId"]),
+                str(entry["productId"]),
+            )
         )
-    )
+    else:
+        event_row = dict(committed["eventRow"])
+        row = dict(committed["finalization"])
+        credits = list(committed["credits"])
+        reductions = list(committed["reductions"])
+        campaign_id = str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE])
+        sections = inventory_models.campaign_product_sections(
+            campaign_id,
+            show_and_sell_models.normalize_product_ids(event_row.get(show_and_sell_models.PRODUCT_IDS_ATTRIBUTE)),
+        )
     return {
         "event": show_and_sell_models.event_admin_payload(event_row),
         "finalization": fm.finalization_detail_payload(row),
-        "scoutAllocations": [
-            fm.finalization_credit_payload(credit) for credit in fm.finalization_credit_rows(event_id, finalization_id)
-        ],
+        "scoutAllocations": [fm.finalization_credit_payload(credit) for credit in credits],
         "inventoryPositions": [
-            _position_payload(campaign_id, product_id, sections[product_id]) for product_id in product_ids
+            _position_payload(campaign_id, str(product_id), sections[str(product_id)])
+            for product_id in event_row.get(show_and_sell_models.PRODUCT_IDS_ATTRIBUTE) or []
         ],
-        "warnings": _finalization_warnings(event_row, reductions),
+        "warnings": _finalization_warnings(reductions),
     }
 
 
@@ -7559,47 +7659,24 @@ def _finalization_rows(
 
 
 def _scoped_totals(credits: Sequence[Dict[str, Any]], now_iso: str) -> List[Dict[str, Any]]:
-    """One running total per Scout Campaign in this Unit Campaign, never shared."""
+    """One running total per Scout Campaign, paired with the version it was read at.
+
+    The arithmetic and the write condition must come from ONE read. Re-reading the
+    total while staging would compute this approval's amount from an older row and
+    protect it with a newer version, letting a concurrent approval's cents vanish.
+    """
     fm = show_and_sell_finalization_models
     by_campaign: Dict[str, List[Dict[str, Any]]] = {}
     for credit in credits:
         by_campaign.setdefault(str(credit[fm.CAMPAIGN_ID_ATTRIBUTE]), []).append(credit)
     totals: List[Dict[str, Any]] = []
     for campaign, group in by_campaign.items():
-        total = fm.load_campaign_total(str(group[0][fm.UNIT_CAMPAIGN_ID_ATTRIBUTE]), campaign)
+        existing = fm.load_campaign_total(str(group[0][fm.UNIT_CAMPAIGN_ID_ATTRIBUTE]), campaign)
+        total: Optional[Dict[str, Any]] = existing
         for credit in group:
             total = fm.apply_approved_credit(total, credit=credit, updated_at=now_iso)
-        totals.append(total)
+        totals.append({"existing": existing, "total": total})
     return totals
-
-
-def _finalization_action_count(
-    *,
-    sale_snapshots: Sequence[Any],
-    work_snapshots: Sequence[Any],
-    return_plans: Sequence[Mapping[str, Any]],
-    credits: Sequence[Any],
-    totals: Sequence[Any],
-    reductions: Sequence[Any],
-    balances: Mapping[str, Any],
-    later_events: Mapping[str, Any],
-    source_checks: int,
-) -> int:
-    """Count the transaction before staging it, including the marker and event write."""
-    return (
-        2  # marker and finalization row
-        + len(sale_snapshots)
-        + len(work_snapshots)
-        + len(return_plans) * 3  # release, return line, balance version
-        + sum(1 for plan in return_plans if plan["movement"] is not None)
-        + len(credits)
-        + len(totals)
-        + len(reductions) * 2  # allocation and movement
-        + len(balances)
-        + len(later_events)
-        + source_checks
-        + 1  # event row
-    )
 
 
 def _stage_documents(
@@ -7672,14 +7749,11 @@ def _stage_returns(
             )
         )
         plan.add(*_put_new_row(tables.show_and_sells.table_name, plan_line["line"]))
-        if plan_line["movement"] is not None:
-            plan.add(*inventory_models.put_inventory_movement_action(plan_line["movement"]))
+        plan.add(*inventory_models.put_inventory_movement_action(plan_line["movement"]))
     physical_delta: Dict[str, int] = {product_id: 0 for product_id in balances}
     for plan_line in return_plans:
-        movement = plan_line["movement"]
-        if movement is not None:
-            product_id = str(plan_line["productId"])
-            physical_delta[product_id] += int(movement[inventory_models.KERNEL_PHYSICAL_DELTA])
+        product_id = str(plan_line["productId"])
+        physical_delta[product_id] += int(plan_line["movement"][inventory_models.KERNEL_PHYSICAL_DELTA])
     for product_id, (balance, version) in balances.items():
         if balance is not None:
             plan.add(
@@ -7698,9 +7772,16 @@ def _stage_reductions(
     plan: Any,
     reductions: Sequence[Mapping[str, Any]],
     later_events: Mapping[str, Mapping[str, Any]],
+    caller_id: str,
     now_iso: str,
 ) -> None:
-    """Cut later allocations in the planned order and guard their event versions."""
+    """Cut later allocations and bump every affected event's version in one write.
+
+    An automatic reduction changed the event's allocation, so its metadata version
+    has to move with it: an admin editing with the version they read before this
+    approval must conflict, not overwrite the reduction. Unaffected competitors stay
+    condition-checked because their stock picture was part of this decision.
+    """
     for reduction in reductions:
         allocation = reduction["allocation"]
         plan.add(
@@ -7712,14 +7793,26 @@ def _stage_reductions(
             )
         )
         plan.add(*inventory_models.put_inventory_movement_action(reduction["movement"]))
-    for other in later_events.values():
-        plan.add(
-            *_version_check(
-                tables.show_and_sells.table_name,
-                show_and_sell_models.event_metadata_key(str(other[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])),
-                int(other[show_and_sell_models.VERSION_ATTRIBUTE]),
+    affected = {str(reduction["eventRow"][show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE]) for reduction in reductions}
+    for other_id, other in later_events.items():
+        if other_id in affected:
+            plan.add(
+                *show_and_sell_models.update_event_settings_action(
+                    show_and_sell_id=other_id,
+                    expected_version=int(other[show_and_sell_models.VERSION_ATTRIBUTE]),
+                    changes={},
+                    updated_by_account_id=caller_id,
+                    updated_at=now_iso,
+                )
             )
-        )
+        else:
+            plan.add(
+                *_version_check(
+                    tables.show_and_sells.table_name,
+                    show_and_sell_models.event_metadata_key(other_id),
+                    int(other[show_and_sell_models.VERSION_ATTRIBUTE]),
+                )
+            )
 
 
 def _total_update_action(
@@ -7756,13 +7849,11 @@ def _stage_credits_and_totals(
     plan: Any, credits: Sequence[Mapping[str, Any]], totals: Sequence[Mapping[str, Any]], now_iso: str
 ) -> None:
     """Publish each Scout's immutable credit and its Unit-Campaign-scoped running total."""
-    fm = show_and_sell_finalization_models
     for credit in credits:
         plan.add(*_put_new_row(tables.show_and_sells.table_name, credit))
-    for total in totals:
-        existing = fm.load_campaign_total(
-            str(total[fm.UNIT_CAMPAIGN_ID_ATTRIBUTE]), str(total[fm.CAMPAIGN_ID_ATTRIBUTE])
-        )
+    for entry in totals:
+        existing = entry["existing"]
+        total = entry["total"]
         if existing is None:
             plan.add(*_put_new_row(tables.unit_campaigns.table_name, total))
         else:
@@ -7793,7 +7884,6 @@ def _finalize_show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, 
         caller_id=caller_id, operation=FINALIZE_SHOW_AND_SELL_FIELD, scope=event_id, idempotency_key=key
     )
     result_id = f"{event_id}:{show_and_sell_finalization_models.new_finalization_id()}"
-    build_result = _once(lambda: _load_finalization_answer(result_id))
     replayed = _replay(runner, keys, fingerprint, FINALIZE_SHOW_AND_SELL_FIELD, _load_finalization_answer)
     if replayed is not None:
         return replayed
@@ -7826,38 +7916,36 @@ def _finalize_show_and_sell(event: Dict[str, Any], caller_id: str) -> Dict[str, 
         active_sales=active_sales,
     )
     return_plans, balances = _return_plans(event_row, returns, finalization_id, caller_id, key, now_iso)
-    reductions, later_events = _later_reduction_plans(event_row, balances, finalization_id, caller_id, key, now_iso)
+    reductions, later_events = _later_reduction_plans(
+        event_row, balances, return_plans, finalization_id, caller_id, key, now_iso
+    )
     obligations = [
         row
         for row in show_and_sell_models.event_we_owe_rows(event_id)
         if str(row.get("entityType")) == show_and_sell_sale_models.WE_OWE_ENTITY_TYPE
     ]
     totals = _scoped_totals(credits, now_iso)
-    source_checks = len(active_sales) + len(work_snapshots) + len(obligations)
-    planned_actions = _finalization_action_count(
-        sale_snapshots=sale_snapshots,
-        work_snapshots=work_snapshots,
-        return_plans=return_plans,
-        credits=credits,
-        totals=totals,
-        reductions=reductions,
-        balances=balances,
-        later_events=later_events,
-        source_checks=source_checks,
-    )
-    if planned_actions > MAX_TRANSACTION_ACTIONS:
-        raise WritePlan.too_large_error(planned_actions)
 
-    plan = WritePlan()
+    # The budget is checked against the actions the transaction will really send,
+    # not against a parallel estimate that can drift whenever a write is added.
+    plan = WritePlan(max_actions=MAX_TRANSACTION_ACTIONS)
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=result_id)
     _stage_documents(plan, finalization, sale_snapshots, work_snapshots)
     _stage_source_checks(plan, event_id, active_sales, obligations)
     _stage_returns(
         plan, str(event_row[show_and_sell_models.UNIT_CAMPAIGN_ID_ATTRIBUTE]), return_plans, balances, now_iso
     )
-    _stage_reductions(plan, reductions, later_events, now_iso)
+    _stage_reductions(plan, reductions, later_events, caller_id, now_iso)
     _stage_credits_and_totals(plan, credits, totals, now_iso)
     plan.add(*_finalization_event_action(event_id, expected_version, finalization_id, caller_id, now_iso))
+    planned_actions = plan.action_count
+    committed = {
+        "eventRow": _finalized_event_row(event_row, expected_version, finalization_id, caller_id, now_iso),
+        "finalization": finalization,
+        "credits": credits,
+        "reductions": reductions,
+    }
+    build_result = _once(lambda: _finalization_answer(event_id, finalization_id, committed=committed))
 
     runner.execute(
         keys,
