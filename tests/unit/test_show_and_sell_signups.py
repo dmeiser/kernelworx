@@ -895,15 +895,15 @@ def test_a_roster_row_from_another_scout_campaign_is_refused(world: Dict[str, An
 
 
 def test_a_signup_the_finalization_budget_can_still_carry_is_allowed(world: Dict[str, Any]) -> None:
-    """The §8.10 preflight runs, and the answer is still yes: 28 rows, 29 Scouts, 89 actions."""
-    _crowd(world, 28)
+    """The §8.10 preflight runs, and the answer is still yes: 21 rows, 22 Scouts, 89 actions."""
+    _crowd(world, 21)
     _ok(_signup("Avery", slot_id="slot-9", key="signup-fits"))
     assert _stored_signup(world["show_and_sells"], slot_id="slot-9") is not None
 
 
 def test_the_finalization_budget_gets_its_preflight_before_anything_is_staged(world: Dict[str, Any]) -> None:
     """SIGN-M-01 budget (§8.10): an event that can no longer finalize in one transaction refuses."""
-    _crowd(world, 29)
+    _crowd(world, 22)
     message = _refusal(_signup("Avery", slot_id="slot-9", key="signup-over"), "CONFLICT")
     assert "actions to finalize" in message
     assert _stored_signup(world["show_and_sells"], slot_id="slot-9") is None
@@ -1131,7 +1131,7 @@ def test_a_batch_confirms_two_signups_and_totals_the_event(world: Dict[str, Any]
         "totalConfirmedMinutes": 190,
         "confirmedWorkRows": 2,
         "confirmedParticipants": 2,
-        "minimumFinalizationActions": 3 + 2 + 4,
+        "minimumFinalizationActions": 3 + 2 * 2 + 4,
     }
     assert _stored_signup(world["show_and_sells"])["actualMinutes"] == 75
     assert _stored_signup(world["show_and_sells"], slot_id="slot-2", persona="Emery")[
@@ -1240,13 +1240,13 @@ def test_the_work_batch_is_bounded_by_the_finalization_budget_it_frees(
     row = crowd[0]
     keep = [{"slotId": row[ssm.SLOT_ID_ATTRIBUTE], "profileId": row[ssm.PROFILE_ID_ATTRIBUTE], "actualMinutes": 10}]
     assert "actions to finalize" in _refusal(_confirm("Avery", work=keep), "CONFLICT")
-    two = [
+    cleared = [
         {"slotId": item[ssm.SLOT_ID_ATTRIBUTE], "profileId": item[ssm.PROFILE_ID_ATTRIBUTE], "actualMinutes": 0}
-        for item in crowd[:2]
+        for item in crowd[:10]
     ]
-    answer = _ok(_confirm("Avery", work=two, key="work-freed"))
-    assert answer["preview"]["confirmedWorkRows"] == 28
-    assert answer["preview"]["minimumFinalizationActions"] == 3 + 28 + 2 * 28 <= 90
+    answer = _ok(_confirm("Avery", work=cleared, key="work-freed"))
+    assert answer["preview"]["confirmedWorkRows"] == 20
+    assert answer["preview"]["minimumFinalizationActions"] == 3 + 2 * 20 + 2 * 20 <= 90
 
 
 def test_a_confirmation_racing_a_cancellation_loses_on_the_row_itself(world: Dict[str, Any]) -> None:

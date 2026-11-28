@@ -432,6 +432,44 @@ def test_the_ceiling_that_binds_is_the_finalization_budget_not_the_transaction_c
     assert overhead + 22 * per_product + am.FINALIZATION_ACTIONS_PER_SALE > MAX_TRANSACTION_ACTIONS
 
 
+def test_a_sale_whose_new_we_owe_rows_cross_the_budget_is_refused_before_any_write(
+    world: Dict[str, Any], plan: PlanRecorder
+) -> None:
+    """§8.10: the pending write's obligations are part of the estimate it must fit."""
+    products = _offer_products(world["catalogs"], 19)
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT, product_ids=products)
+    _shelf(world, products)
+
+    for index in range(3):
+        plan.reset()
+        _ok(
+            _create(
+                lines=_lines(products[:1], immediate=0, we_owe=1),
+                buyerName="Buyer Bee",
+                version=index + 1,
+                key=f"owe-fitting-{index}",
+            )
+        )
+
+    # 19 products + 3 sales + 3 obligations = 88; the fourth sale adds one of
+    # each, taking the same estimate to 91. The filter is the obligation term.
+    plan.reset()
+    refused = assert_is_error(
+        _create(
+            lines=_lines(products[:1], immediate=0, we_owe=1),
+            buyerName="Buyer Bee",
+            version=4,
+            key="owe-over-budget",
+        ),
+        "CONFLICT",
+    )
+    assert "91 actions" in refused["message"], refused["message"]
+    assert plan.transactions == []
+    assert plan.solo == []
+    assert len(_sale_rows(world["show_and_sells"])) == 3
+    assert len(_obligation_rows(world["show_and_sells"])) == 3
+
+
 # --- Splitting an order that is too large for one request ------------------------
 
 
@@ -444,12 +482,17 @@ def test_a_large_order_splits_into_two_sales_that_are_each_atomic(world: Dict[st
     first = _ok(_create(lines=_lines(products), key="split-part-1"))
     plan.reset()
     second = _ok(
-        _create(lines=_lines(products, immediate=0, we_owe=1), buyerName="Buyer Bee", version=2, key="split-part-2")
+        _create(
+            lines=_lines(products[:3], immediate=0, we_owe=1),
+            buyerName="Buyer Bee",
+            version=2,
+            key="split-part-2",
+        )
     )
 
     assert len(plan.transactions) == 1, "the second sale is its own transaction"
-    assert len(second["obligations"]) == 20
-    assert len(_obligation_rows(world["show_and_sells"])) == 20
+    assert len(second["obligations"]) == 3
+    assert len(_obligation_rows(world["show_and_sells"])) == 3
     assert len(_movement_rows(world["inventory"])) == 20, "the obligation sale moved no extra stock"
 
     # A third attempt that fails on its own terms leaves both committed sales exactly as they are.

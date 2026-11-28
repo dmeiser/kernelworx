@@ -777,7 +777,7 @@ def test_sale_m_01_02_a_line_batch_over_the_action_budget_is_refused_and_splits_
     for product_id in products:
         _seed_stock(world, product_id=product_id)
     oversized = [_line(product_id) for product_id in products] + [
-        _line(products[index % len(products)], immediate=0, we_owe=1) for index in range(35)
+        _line(products[index % len(products)], immediate=0, we_owe=1) for index in range(40)
     ]
 
     refused = _create(lines=oversized, buyerName="Buyer Bee", key="sale-big")
@@ -791,7 +791,7 @@ def test_sale_m_01_02_a_line_batch_over_the_action_budget_is_refused_and_splits_
     immediate_sale = _ok(_create(lines=[_line(product_id) for product_id in products], key="sale-part-1"))
     owed_sale = _ok(
         _create(
-            lines=[_line(products[index % 10], immediate=0, we_owe=1) for index in range(35)],
+            lines=[_line(products[index % len(products)], immediate=0, we_owe=1) for index in range(3)],
             buyerName="Buyer Bee",
             version=2,
             key="sale-part-2",
@@ -799,7 +799,7 @@ def test_sale_m_01_02_a_line_batch_over_the_action_budget_is_refused_and_splits_
     )
 
     assert len(immediate_sale["obligations"]) == 0
-    assert len(owed_sale["obligations"]) == 35
+    assert len(owed_sale["obligations"]) == 3
     assert len(_sale_rows(world["show_and_sells"])) == 2
     assert len(_movements(world["inventory"])) == 20, "the owed-only sale consumed no stock"
 

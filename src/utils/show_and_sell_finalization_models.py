@@ -135,6 +135,10 @@ SUSPENDED_BY_ATTRIBUTE = "suspendedByAccountId"
 SUSPENDED_AT_ATTRIBUTE = "suspendedAt"
 SUSPENSION_REASON_ATTRIBUTE = "suspensionReason"
 SOURCE_EVENT_VERSION_ATTRIBUTE = "sourceEventVersion"
+#: The approval-time automatic-reduction facts, frozen with the version they
+#: produced. Recovery of a committed answer must never recompute them from a
+#: later allocation or sale that has since moved.
+WARNINGS_ATTRIBUTE = "warnings"
 
 PRODUCT_ID_ATTRIBUTE = "productId"
 ALLOCATED_QTY_ATTRIBUTE = "allocatedQty"
@@ -195,6 +199,7 @@ FINALIZATION_ROW_ATTRIBUTES: frozenset[str] = frozenset(
         SUSPENDED_AT_ATTRIBUTE,
         SUSPENSION_REASON_ATTRIBUTE,
         SOURCE_EVENT_VERSION_ATTRIBUTE,
+        WARNINGS_ATTRIBUTE,
     }
 )
 
@@ -850,6 +855,7 @@ def build_finalization_row(
     approved_by_account_id: Any,
     approved_at: Any,
     source_event_version: Any,
+    warnings: Sequence[Mapping[str, Any]] = (),
 ) -> Dict[str, Any]:
     """One approved finalization version as a row (§5.16).
 
@@ -884,6 +890,7 @@ def build_finalization_row(
         SOURCE_EVENT_VERSION_ATTRIBUTE: inventory_models.normalize_quantity(
             source_event_version, SOURCE_EVENT_VERSION_ATTRIBUTE, minimum=1
         ),
+        WARNINGS_ATTRIBUTE: [dict(warning) for warning in warnings],
     }
     _require_row_shape(row, FINALIZATION_ROW_ATTRIBUTES)
     return row

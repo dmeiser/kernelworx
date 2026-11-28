@@ -213,6 +213,28 @@ def test_a_no_sale_event_publishes_an_empty_credit_set_and_a_finalized_event(wor
     assert int(event[ssm.VERSION_ATTRIBUTE]) == 2
 
 
+def test_an_identical_retry_that_wins_the_marker_race_returns_the_committed_id(
+    world: Dict[str, Any], monkeypatch: Any
+) -> None:
+    """The runner's second replay check decides the answer, not this request's pending id."""
+    _ended(world, boxes=2)
+    before = dict(_stored_event(world["show_and_sells"], ENDED_EVENT))
+    first = _ok(_finalize(world, returns=[_return(actual=2)], cash=_cash(), key="race-key"))
+
+    # The second attempt passed the handler's first replay check before the
+    # winner committed: skip only that check, leaving the runner's own replay.
+    monkeypatch.setattr(uo, "_replay", lambda *args, **kwargs: None)
+    real_load = ssm.load_show_and_sell_or_not_found
+
+    def stale(event_id: str) -> Dict[str, Any]:
+        return before if event_id == ENDED_EVENT else real_load(event_id)
+
+    monkeypatch.setattr(ssm, "load_show_and_sell_or_not_found", stale)
+    second = _finalize(world, returns=[_return(actual=2)], cash=_cash(), version=1, key="race-key")
+    assert second == first
+    assert second["finalization"]["finalizationId"] == first["finalization"]["finalizationId"]
+
+
 def test_a_sixty_dollar_time_worked_pool_approves_exact_credit_once(world: Dict[str, Any]) -> None:
     """$60 with 240/120 confirmed minutes: $40/$20, no cent left, no second credit."""
     _ended(world, boxes=12, split="TIME_WORKED")
@@ -363,6 +385,21 @@ def test_a_replay_returns_the_committed_warnings_even_without_a_marker_payload(w
     unrelated[inv.FINALIZATION_ID_ATTRIBUTE] = "FIN#unrelated"
     world["inventory"].put_item(Item=unrelated)
     assert _finalize(world, returns=[_return(actual=1)], cash=_cash(1000), version=read_version) == answer
+    # A later edit to the reduced event cannot rewrite this approval's warning.
+    reduced = _allocation(world, LATER_EVENT)
+    world["inventory"].update_item(
+        Key={"pk": reduced["pk"], "sk": reduced["sk"]},
+        UpdateExpression="SET #allocated = :allocated, #remaining = :remaining, #version = :version",
+        ExpressionAttributeNames={
+            "#allocated": inv.ALLOCATED_QTY,
+            "#remaining": inv.REMAINING_QTY,
+            "#version": "version",
+        },
+        ExpressionAttributeValues={":allocated": 9, ":remaining": 9, ":version": 9},
+    )
+    replayed = _finalize(world, returns=[_return(actual=1)], cash=_cash(1000), version=read_version)
+    for key in ("finalization", "scoutAllocations", "warnings"):
+        assert replayed[key] == answer[key]
 
 
 def test_an_edit_using_a_later_events_old_version_conflicts_with_its_reduction(world: Dict[str, Any]) -> None:
@@ -646,12 +683,53 @@ def test_a_scoped_total_change_between_read_and_write_cannot_lose_a_credit(
     assert (int(totals[0][fm.APPROVED_AMOUNT_CENTS_ATTRIBUTE]), int(totals[0]["version"])) == (1125, 8)
 
 
+def test_a_total_edited_between_read_and_commit_rolls_back_the_whole_approval(
+    world: Dict[str, Any], monkeypatch: Any
+) -> None:
+    """The version guard is a real guard: a stale total leaves no partial approval."""
+    from tests.unit.test_show_and_sell_sales import CAMPAIGN
+
+    _ended(world, boxes=2)
+    _seed_signup(world["show_and_sells"], ENDED_EVENT, minutes=60, profile_id=A_SCOUT)
+    world["unit_campaigns"].put_item(
+        Item=fm.build_total_row(
+            campaign_id="SC#sale-budget",
+            profile_id=A_SCOUT,
+            unit_campaign_id=CAMPAIGN,
+            approved_amount_cents=125,
+            version=7,
+            updated_at="2026-01-01T00:00:00+00:00",
+        )
+    )
+    _sell(world, boxes=2, key="total-race-sale-2")
+    real_execute = uo.IdempotentMutationRunner.execute
+
+    def change_total(runner: Any, keys: Any, plan: Any, **kwargs: Any) -> Any:
+        total = _rows(world["unit_campaigns"], fm.TOTAL_ENTITY_TYPE)[0]
+        world["unit_campaigns"].update_item(
+            Key={"pk": total["pk"], "sk": total["sk"]},
+            UpdateExpression="SET #amount = :amount, #version = :version",
+            ExpressionAttributeNames={"#amount": fm.APPROVED_AMOUNT_CENTS_ATTRIBUTE, "#version": "version"},
+            ExpressionAttributeValues={":amount": 275, ":version": 8},
+        )
+        return real_execute(runner, keys, plan, **kwargs)
+
+    monkeypatch.setattr(uo.IdempotentMutationRunner, "execute", change_total)
+    assert_is_error(_finalize(world, returns=[_return()], cash=_cash(1000)), "CONFLICT")
+    assert _rows(world["show_and_sells"], fm.FINALIZATION_ENTITY_TYPE) == []
+    assert _rows(world["show_and_sells"], fm.CREDIT_ENTITY_TYPE) == []
+    total = _rows(world["unit_campaigns"], fm.TOTAL_ENTITY_TYPE)[0]
+    assert (int(total[fm.APPROVED_AMOUNT_CENTS_ATTRIBUTE]), int(total["version"])) == (275, 8)
+
+
 def test_the_preflight_prices_a_sale_at_its_snapshot_and_version_guard() -> None:
     """A sale admitted by the assignment preflight must fit what approval stages."""
     from src.utils import allocation_models as am
 
     assert am.minimum_finalization_action_count(0) == 3
     assert am.minimum_finalization_action_count(0, sale_count=1) == 5
+    assert am.minimum_finalization_action_count(0, confirmed_work_rows=1) == 5
+    assert am.minimum_finalization_action_count(0, we_owe_count=1) == 4
 
 
 def test_a_ninety_action_approval_commits_and_a_ninety_first_refuses(world: Dict[str, Any], monkeypatch: Any) -> None:
@@ -662,8 +740,9 @@ def test_a_ninety_action_approval_commits_and_a_ninety_first_refuses(world: Dict
     _seed_signup(world["show_and_sells"], ENDED_EVENT, minutes=60, profile_id=A_SCOUT)
     for index in range(39):
         _sell(world, boxes=1, key=f"boundary-{index}")
-    # An unaffected later event contributes exactly one more guard: 39 sales +
-    # one Scout + one product + this check stage 90 actions in total.
+    # An unaffected later event contributes the last guard: 39 sales ×2, one
+    # confirmed work row ×2, one Scout ×2, one product ×4 and three baseline
+    # writes stage exactly 90 actions.
     _seed_event(
         world["show_and_sells"],
         LATER_EVENT,
@@ -689,7 +768,7 @@ def test_a_ninety_action_approval_commits_and_a_ninety_first_refuses(world: Dict
 
 
 def test_a_ninety_first_action_approval_is_refused_before_any_write(world: Dict[str, Any], monkeypatch: Any) -> None:
-    """40 sales, one Scout and one product stage 91 actions and commit nothing."""
+    """39 sales, one Scout, one product and two later guards stage 91 actions."""
     seen: List[int] = []
     real_error = uo.WritePlan.too_large_error
 
@@ -698,11 +777,23 @@ def test_a_ninety_first_action_approval_is_refused_before_any_write(world: Dict[
         return real_error(planned_actions)
 
     monkeypatch.setattr(uo.WritePlan, "too_large_error", staticmethod(record_size))
+    from tests.unit.test_show_and_sell_sales import FUTURE_END, FUTURE_START
+
     _ended(world, boxes=100, allocated=100)
     _seed_signup(world["show_and_sells"], ENDED_EVENT, minutes=60, profile_id=A_SCOUT)
-    for index in range(40):
+    for index in range(39):
         _sell(world, boxes=1, key=f"boundary-{index}")
-    error = assert_is_error(_finalize(world, returns=[_return(actual=60)], cash=_cash(40 * 500)), "CONFLICT")
+    for later_id in (LATER_EVENT, LAST_EVENT):
+        _seed_event(
+            world["show_and_sells"],
+            later_id,
+            start_at=FUTURE_START,
+            end_at=FUTURE_END,
+            product_ids=[PRODUCT],
+            version=1,
+        )
+        _seed_allocation(world["inventory"], later_id, PRODUCT, allocated=1, start_at=FUTURE_START, end_at=FUTURE_END)
+    error = assert_is_error(_finalize(world, returns=[_return(actual=61)], cash=_cash(39 * 500)), "CONFLICT")
     assert "too large" in error["message"]
     assert seen == [91]
     assert _rows(world["show_and_sells"], fm.FINALIZATION_ENTITY_TYPE) == []

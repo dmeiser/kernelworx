@@ -447,6 +447,9 @@ def test_finalization_row_is_born_approved_and_shaped() -> None:
     assert row[fm.STATUS_ATTRIBUTE] == "APPROVED"
     assert row[fm.PREVIOUS_FINALIZATION_ID_ATTRIBUTE] is None
     assert row[fm.SUSPENSION_REASON_ATTRIBUTE] is None
+    assert row[fm.WARNINGS_ATTRIBUTE] == []
+    warning = {"code": "AUTOMATIC_ALLOCATION_REDUCTION", "productId": "PRODUCT#x"}
+    assert _finalization_row(warnings=[warning])[fm.WARNINGS_ATTRIBUTE] == [warning]
     chained = _finalization_row(version_number=2, previous_finalization_id=FID)
     assert chained[fm.PREVIOUS_FINALIZATION_ID_ATTRIBUTE] == FID
     with pytest.raises(AppError):
