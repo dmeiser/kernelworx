@@ -6008,9 +6008,11 @@ def _require_event_finalization_feasible(
     Every source of finalization inputs has to answer the same §8.10 question: after this
     mutation lands, can approval still publish inside one transaction? The event supplies
     the sale, work, participant and obligation counts; the caller supplies only the product
-    count it is changing (or the work counts its pending batch will change). That keeps
-    the guard invariant under mutation order — sales before work and work before sales are
-    priced by the same arithmetic.
+    count it is changing (or the work counts its pending batch will change). Signup
+    confirmation, work confirmation, stock assignment and sale entry/correction all call
+    this guard, so an event admitted by preflight can still be approved in one transaction.
+    That keeps the guard invariant under mutation order — sales before work and work before
+    sales are priced by the same arithmetic.
     """
     event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
     default_work_rows, default_scouts = _event_work_counts(event_id)
