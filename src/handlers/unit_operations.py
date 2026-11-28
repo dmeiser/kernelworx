@@ -5121,7 +5121,7 @@ def _assign_show_and_sell_inventory(event: Dict[str, Any], caller_id: str) -> Di
     runner.stage_marker(plan, keys, fingerprint=fingerprint, result_id=event_id)
     if reopened:
         product_ids = allocation_models.draft_product_ids(event_row, targets)
-        allocation_models.require_finalization_feasible(len(product_ids), MAX_TRANSACTION_ACTIONS)
+        _require_event_finalization_feasible(event_row, len(product_ids))
         plan.add(
             *show_and_sell_models.assignment_draft_action(
                 show_and_sell_id=event_id,
@@ -5136,7 +5136,7 @@ def _assign_show_and_sell_inventory(event: Dict[str, Any], caller_id: str) -> Di
     else:
         changes = _plan_live_assignments(event_row, targets, sections, event_id)
         product_ids = allocation_models.planned_product_ids(event_row, changes)
-        allocation_models.require_finalization_feasible(len(product_ids), MAX_TRANSACTION_ACTIONS)
+        _require_event_finalization_feasible(event_row, len(product_ids))
         _stage_assignment_writes(
             plan,
             event_row,
@@ -5973,6 +5973,57 @@ def _event_obligation_count(event_id: str) -> int:
     )
 
 
+def _event_sale_count(event_id: str) -> int:
+    """Every active sale finalization will snapshot and condition-check."""
+    return sum(
+        1
+        for row in show_and_sell_sale_models.event_sale_rows(event_id)
+        if str(row.get(show_and_sell_sale_models.STATUS_ATTRIBUTE) or "")
+        == show_and_sell_sale_models.SALE_STATUS_ACTIVE
+    )
+
+
+def _event_work_counts(event_id: str) -> Tuple[int, int]:
+    """The confirmed work rows and distinct Scouts an event currently carries."""
+    confirmed = 0
+    scouts: set[str] = set()
+    for signup in show_and_sell_models.active_signups(event_id):
+        if int(signup.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0) > 0:
+            confirmed += 1
+            scouts.add(str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE]))
+    return confirmed, len(scouts)
+
+
+def _require_event_finalization_feasible(
+    event_row: Mapping[str, Any],
+    product_count: int,
+    *,
+    sale_delta: int = 0,
+    obligation_delta: int = 0,
+    confirmed_work_rows: Optional[int] = None,
+    participating_scouts: Optional[int] = None,
+) -> None:
+    """Price the finalization a source mutation would leave behind, before it writes.
+
+    Every source of finalization inputs has to answer the same §8.10 question: after this
+    mutation lands, can approval still publish inside one transaction? The event supplies
+    the sale, work, participant and obligation counts; the caller supplies only the product
+    count it is changing (or the work counts its pending batch will change). That keeps
+    the guard invariant under mutation order — sales before work and work before sales are
+    priced by the same arithmetic.
+    """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
+    default_work_rows, default_scouts = _event_work_counts(event_id)
+    allocation_models.require_finalization_feasible(
+        product_count,
+        MAX_TRANSACTION_ACTIONS,
+        confirmed_work_rows=default_work_rows if confirmed_work_rows is None else confirmed_work_rows,
+        participating_scouts=default_scouts if participating_scouts is None else participating_scouts,
+        sale_count=_event_sale_count(event_id) + sale_delta,
+        we_owe_count=_event_obligation_count(event_id) + obligation_delta,
+    )
+
+
 def _refuse_signup_budget(event_row: Mapping[str, Any], signups: Sequence[Mapping[str, Any]], profile_id: str) -> None:
     """Refuse a signup this event could no longer finalize inside one transaction (§8.10).
 
@@ -5985,13 +6036,11 @@ def _refuse_signup_budget(event_row: Mapping[str, Any], signups: Sequence[Mappin
     profiles = {str(row.get(show_and_sell_models.PROFILE_ID_ATTRIBUTE) or "") for row in signups}
     profiles.add(profile_id)
     confirmed = sum(1 for row in signups if int(row.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0) > 0)
-    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
-    allocation_models.require_finalization_feasible(
+    _require_event_finalization_feasible(
+        event_row,
         len(show_and_sell_models.event_allocations(event_row)),
-        MAX_TRANSACTION_ACTIONS,
         confirmed_work_rows=confirmed,
         participating_scouts=len(profiles),
-        we_owe_count=_event_obligation_count(event_id),
     )
 
 
@@ -6412,11 +6461,12 @@ def _work_preview(event_row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]
     lower bound, and the answer says nothing about credit — approving credit is
     finalization's decision, not this read's.
     """
+    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
     batch = {(str(row["slotId"]), str(row["profileId"])): int(row["actualMinutes"]) for row in rows}
     total_minutes = 0
     confirmed_rows = 0
     scouts: set[str] = set()
-    for signup in show_and_sell_models.active_signups(str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])):
+    for signup in show_and_sell_models.active_signups(event_id):
         key_pair = (
             str(signup[show_and_sell_models.SLOT_ID_ATTRIBUTE]),
             str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE]),
@@ -6439,7 +6489,8 @@ def _work_preview(event_row: Mapping[str, Any], rows: Sequence[Mapping[str, Any]
             len(show_and_sell_models.event_allocations(event_row)),
             confirmed_work_rows=confirmed_rows,
             participating_scouts=len(scouts),
-            we_owe_count=_event_obligation_count(str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])),
+            sale_count=_event_sale_count(event_id),
+            we_owe_count=_event_obligation_count(event_id),
         ),
     }
 
@@ -6454,12 +6505,11 @@ def _refuse_work_budget(event_row: Mapping[str, Any], rows: Sequence[Mapping[str
     reason has to know which number moved.
     """
     preview = _work_preview(event_row, rows)
-    allocation_models.require_finalization_feasible(
+    _require_event_finalization_feasible(
+        event_row,
         len(show_and_sell_models.event_allocations(event_row)),
-        MAX_TRANSACTION_ACTIONS,
         confirmed_work_rows=int(preview["confirmedWorkRows"]),
         participating_scouts=int(preview["confirmedParticipants"]),
-        we_owe_count=_event_obligation_count(str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])),
     )
 
 
@@ -9797,26 +9847,11 @@ def _sale_feasible(
     creates We Owe lines also adds one condition per new obligation, which is why the
     caller supplies ``obligation_delta`` instead of letting this estimate go stale.
     """
-    event_id = str(event_row[show_and_sell_models.SHOW_AND_SELL_ID_ATTRIBUTE])
-    active_sales = [
-        row
-        for row in show_and_sell_sale_models.event_sale_rows(event_id)
-        if str(row.get(show_and_sell_sale_models.STATUS_ATTRIBUTE) or "")
-        == show_and_sell_sale_models.SALE_STATUS_ACTIVE
-    ]
-    confirmed_work_rows = 0
-    participating_scouts: set[str] = set()
-    for signup in show_and_sell_models.active_signups(event_id):
-        if int(signup.get(show_and_sell_models.ACTUAL_MINUTES_ATTRIBUTE) or 0) > 0:
-            confirmed_work_rows += 1
-            participating_scouts.add(str(signup[show_and_sell_models.PROFILE_ID_ATTRIBUTE]))
-    allocation_models.require_finalization_feasible(
+    _require_event_finalization_feasible(
+        event_row,
         len(product_ids),
-        MAX_TRANSACTION_ACTIONS,
-        confirmed_work_rows=confirmed_work_rows,
-        participating_scouts=len(participating_scouts),
-        sale_count=len(active_sales) + sale_delta,
-        we_owe_count=_event_obligation_count(event_id) + obligation_delta,
+        sale_delta=sale_delta,
+        obligation_delta=obligation_delta,
     )
 
 

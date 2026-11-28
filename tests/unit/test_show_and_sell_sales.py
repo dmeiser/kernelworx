@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import pytest
 
 from src.handlers.unit_operations import (
+    CONFIRM_WORK_FIELD,
     CORRECT_SALE_FIELD,
     CREATE_SALE_FIELD,
     VOID_SALE_FIELD,
@@ -766,6 +767,49 @@ def test_sale_m_01_02_confirmed_work_shrinks_the_finalization_budget_a_sale_may_
     ), error["message"]
     assert len(_sale_rows(world["show_and_sells"])) == 1, "the refusal adds no second sale"
     assert _stored_event(world["show_and_sells"])[ssm.VERSION_ATTRIBUTE] == 2, "the refusal wrote nothing"
+
+
+def test_work_confirmation_after_sales_is_budget_checked(world: Dict[str, Any]) -> None:
+    """§8.10: sales recorded first cannot let a later work confirmation strand the event."""
+    from tests.unit.test_show_and_sell_signups import _seed_slot
+
+    _offer_products(world["catalogs"], 1)
+    _seed_event(world["show_and_sells"], ACTIVE_EVENT)
+    _seed_stock(world, physical=40, allocated=40)
+    _seed_slot(
+        world["show_and_sells"],
+        event_id=ACTIVE_EVENT,
+        slot_id="slot-budget",
+        start_at=ACTIVE_START,
+        end_at=ACTIVE_END,
+        capacity=8,
+        active=1,
+    )
+    signup = _seed_signup(world["show_and_sells"], ACTIVE_EVENT, minutes=0)
+    profile_id = str(signup[ssm.PROFILE_ID_ATTRIBUTE])
+
+    # Forty sales of one product fit the sale preflight at 87 actions. Confirming the
+    # signed-up Scout afterwards must see those sales, not just the product count.
+    for index in range(40):
+        _ok(_create(lines=[_line(PRODUCT)], version=index + 1, key=f"sale-before-work-{index}"))
+    stored_event = _stored_event(world["show_and_sells"])
+    event_version = int(stored_event[ssm.VERSION_ATTRIBUTE])
+
+    refused = _call(
+        CONFIRM_WORK_FIELD,
+        "Avery",
+        mutation={
+            "showAndSellId": ACTIVE_EVENT,
+            "work": [{"slotId": "slot-budget", "profileId": profile_id, "actualMinutes": 75}],
+            **_version(event_version),
+            **_idem("work-after-sales"),
+        },
+    )
+    error = assert_is_error(refused, "CONFLICT")
+    assert "91 actions" in error["message"], error["message"]
+    assert ssm.read_signup(ACTIVE_EVENT, "slot-budget", profile_id) == signup, "the signup was untouched"
+    assert _stored_event(world["show_and_sells"]) == stored_event, "the event version was untouched"
+    assert len(_sale_rows(world["show_and_sells"])) == 40, "the refusal added no work write"
 
 
 def test_sale_m_01_02_a_line_batch_over_the_action_budget_is_refused_and_splits_into_two_sales(
